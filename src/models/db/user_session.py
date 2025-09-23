@@ -1,0 +1,412 @@
+"""
+User session database model.
+
+Tracks active user sessions with device information for security
+monitoring and session management.
+"""
+
+import secrets
+from datetime import datetime, timedelta
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+)
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+
+from src.models.db.base import BaseModel
+
+
+class UserSession(BaseModel):
+    """
+    User session model.
+
+    Tracks active sessions including device information,
+    location, and activity for security monitoring.
+    """
+
+    __tablename__ = "user_sessions"
+
+    # Foreign key to user
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Session identifier
+    session_token = Column(
+        String(255),
+        nullable=False,
+        unique=True,
+        index=True,
+        comment="Unique session token",
+    )
+
+    refresh_token = Column(
+        String(255),
+        nullable=True,
+        unique=True,
+        index=True,
+        comment="Refresh token for session renewal",
+    )
+
+    # Session metadata
+    session_type = Column(
+        String(50),
+        nullable=False,
+        default="web",
+        comment="Session type (web, api, mobile, cli)",
+    )
+
+    # Device information
+    device_id = Column(String(255), nullable=True, comment="Unique device identifier")
+
+    device_name = Column(
+        String(255), nullable=True, comment="Device name (e.g., 'iPhone 12')"
+    )
+
+    device_type = Column(
+        String(50), nullable=True, comment="Device type (desktop, mobile, tablet)"
+    )
+
+    os_name = Column(String(100), nullable=True, comment="Operating system name")
+
+    os_version = Column(String(50), nullable=True, comment="Operating system version")
+
+    browser_name = Column(String(100), nullable=True, comment="Browser name")
+
+    browser_version = Column(String(50), nullable=True, comment="Browser version")
+
+    user_agent = Column(String(500), nullable=True, comment="Full user agent string")
+
+    # Location information
+    ip_address = Column(String(45), nullable=False, comment="Client IP address")
+
+    country = Column(String(100), nullable=True, comment="Country from IP geolocation")
+
+    region = Column(
+        String(100), nullable=True, comment="Region/state from IP geolocation"
+    )
+
+    city = Column(String(100), nullable=True, comment="City from IP geolocation")
+
+    latitude = Column(String(20), nullable=True, comment="Latitude from IP geolocation")
+
+    longitude = Column(
+        String(20), nullable=True, comment="Longitude from IP geolocation"
+    )
+
+    # Activity tracking
+    last_activity = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default="now()",
+        comment="Last activity timestamp",
+    )
+
+    last_ip_address = Column(String(45), nullable=True, comment="Last known IP address")
+
+    request_count = Column(
+        Integer, nullable=False, default=0, comment="Total requests in this session"
+    )
+
+    # Session security
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        comment="Whether session is active",
+    )
+
+    is_suspicious = Column(
+        Boolean, nullable=False, default=False, comment="Flag for suspicious activity"
+    )
+
+    mfa_verified = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Whether MFA was verified for this session",
+    )
+
+    # Session lifecycle
+    expires_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+        comment="Session expiration time",
+    )
+
+    revoked_at = Column(
+        DateTime(timezone=True), nullable=True, comment="When session was revoked"
+    )
+
+    revoke_reason = Column(
+        String(255), nullable=True, comment="Reason for session revocation"
+    )
+
+    # Additional metadata
+    metadata = Column(JSON, nullable=True, comment="Additional session metadata")
+
+    # Relationships
+    user = relationship("User", back_populates="sessions")
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_user_session_active", "user_id", "is_active", "expires_at"),
+        Index("idx_user_session_activity", "last_activity", "is_active"),
+        Index("idx_user_session_device", "device_id", "user_id"),
+    )
+
+    @classmethod
+    def create_session(
+        cls,
+        user_id: str,
+        ip_address: str,
+        session_type: str = "web",
+        duration_hours: int = 24,
+        device_info: dict | None = None,
+        location_info: dict | None = None,
+        mfa_verified: bool = False,
+    ) -> "UserSession":
+        """
+        Create a new user session.
+
+        Args:
+            user_id: User ID
+            ip_address: Client IP address
+            session_type: Type of session (web, api, mobile, cli)
+            duration_hours: Session duration in hours
+            device_info: Device information dictionary
+            location_info: Location information dictionary
+            mfa_verified: Whether MFA was verified
+
+        Returns:
+            UserSession instance
+        """
+        session_token = secrets.token_urlsafe(32)
+        refresh_token = secrets.token_urlsafe(32)
+        expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
+
+        session = cls(
+            user_id=user_id,
+            session_token=session_token,
+            refresh_token=refresh_token,
+            session_type=session_type,
+            ip_address=ip_address,
+            last_ip_address=ip_address,
+            expires_at=expires_at,
+            mfa_verified=mfa_verified,
+        )
+
+        # Add device information
+        if device_info:
+            session.device_id = device_info.get("device_id")
+            session.device_name = device_info.get("device_name")
+            session.device_type = device_info.get("device_type")
+            session.os_name = device_info.get("os_name")
+            session.os_version = device_info.get("os_version")
+            session.browser_name = device_info.get("browser_name")
+            session.browser_version = device_info.get("browser_version")
+            session.user_agent = device_info.get("user_agent")
+
+        # Add location information
+        if location_info:
+            session.country = location_info.get("country")
+            session.region = location_info.get("region")
+            session.city = location_info.get("city")
+            session.latitude = location_info.get("latitude")
+            session.longitude = location_info.get("longitude")
+
+        return session
+
+    def update_activity(
+        self, ip_address: str | None = None, extend_duration: bool = True
+    ) -> None:
+        """
+        Update session activity.
+
+        Args:
+            ip_address: Current IP address
+            extend_duration: Whether to extend session duration
+        """
+        self.last_activity = datetime.utcnow()
+        self.request_count += 1
+
+        if ip_address:
+            self.last_ip_address = ip_address
+
+            # Check for IP address change
+            if ip_address != self.ip_address:
+                self.is_suspicious = True
+
+        # Extend session if requested and not expired
+        if extend_duration and not self.is_expired:
+            # Extend by original duration
+            self.expires_at = datetime.utcnow() + timedelta(hours=24)
+
+    def revoke(self, reason: str | None = None) -> None:
+        """
+        Revoke the session.
+
+        Args:
+            reason: Reason for revocation
+        """
+        self.is_active = False
+        self.revoked_at = datetime.utcnow()
+        self.revoke_reason = reason
+
+    def refresh(self, duration_hours: int = 24) -> str:
+        """
+        Refresh the session with a new token.
+
+        Args:
+            duration_hours: New session duration in hours
+
+        Returns:
+            New session token
+        """
+        self.session_token = secrets.token_urlsafe(32)
+        self.refresh_token = secrets.token_urlsafe(32)
+        self.expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
+        self.last_activity = datetime.utcnow()
+
+        return self.session_token
+
+    def mark_suspicious(self, reason: str | None = None) -> None:
+        """
+        Mark session as suspicious.
+
+        Args:
+            reason: Reason for marking suspicious
+        """
+        self.is_suspicious = True
+        if reason and self.metadata:
+            self.metadata["suspicious_reason"] = reason
+        elif reason:
+            self.metadata = {"suspicious_reason": reason}
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if session has expired."""
+        return datetime.utcnow() > self.expires_at
+
+    @property
+    def is_valid(self) -> bool:
+        """Check if session is valid (active and not expired)."""
+        return self.is_active and not self.is_expired and not self.revoked_at
+
+    @property
+    def duration(self) -> timedelta:
+        """Get session duration."""
+        return self.last_activity - self.created_at
+
+    @property
+    def idle_time(self) -> timedelta:
+        """Get time since last activity."""
+        return datetime.utcnow() - self.last_activity
+
+    @classmethod
+    def get_active_sessions(cls, user_id: str, session=None) -> list["UserSession"]:
+        """
+        Get all active sessions for a user.
+
+        Args:
+            user_id: User ID
+            session: Database session
+
+        Returns:
+            List of active UserSession instances
+        """
+        if not session:
+            return []
+
+        return (
+            session.query(cls)
+            .filter(
+                cls.user_id == user_id,
+                cls.is_active == True,
+                cls.expires_at > datetime.utcnow(),
+                cls.revoked_at.is_(None),
+            )
+            .all()
+        )
+
+    @classmethod
+    def revoke_all_sessions(
+        cls, user_id: str, reason: str = "Manual revocation", session=None
+    ) -> int:
+        """
+        Revoke all sessions for a user.
+
+        Args:
+            user_id: User ID
+            reason: Revocation reason
+            session: Database session
+
+        Returns:
+            Number of sessions revoked
+        """
+        if not session:
+            return 0
+
+        active_sessions = cls.get_active_sessions(user_id, session)
+
+        for user_session in active_sessions:
+            user_session.revoke(reason)
+
+        session.commit()
+        return len(active_sessions)
+
+    def to_dict(self, include_tokens: bool = False) -> dict:
+        """
+        Convert to dictionary.
+
+        Args:
+            include_tokens: Include session tokens
+
+        Returns:
+            Dictionary representation
+        """
+        data = {
+            "id": str(self.id),
+            "user_id": str(self.user_id),
+            "session_type": self.session_type,
+            "device_name": self.device_name,
+            "device_type": self.device_type,
+            "os_name": self.os_name,
+            "browser_name": self.browser_name,
+            "ip_address": self.ip_address,
+            "country": self.country,
+            "city": self.city,
+            "last_activity": self.last_activity.isoformat(),
+            "request_count": self.request_count,
+            "is_active": self.is_active,
+            "is_suspicious": self.is_suspicious,
+            "mfa_verified": self.mfa_verified,
+            "expires_at": self.expires_at.isoformat(),
+            "created_at": self.created_at.isoformat(),
+            "is_valid": self.is_valid,
+            "duration_minutes": int(self.duration.total_seconds() / 60),
+            "idle_minutes": int(self.idle_time.total_seconds() / 60),
+        }
+
+        if include_tokens:
+            data["session_token"] = self.session_token
+            data["refresh_token"] = self.refresh_token
+
+        return data
+
+    def __repr__(self) -> str:
+        """String representation."""
+        return f"<UserSession(id={self.id}, user_id={self.user_id}, type={self.session_type}, active={self.is_active})>"

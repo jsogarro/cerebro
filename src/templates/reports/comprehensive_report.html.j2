@@ -1,0 +1,301 @@
+{% extends "base.html.j2" %}
+
+{% block title %}{{ report.title }} - Comprehensive Research Report{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Comprehensive report specific styles */
+    .research-question {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2rem;
+        margin: 2rem 0;
+        border-radius: 10px;
+        text-align: center;
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    .research-question h2 {
+        color: white;
+        margin: 0 0 1rem 0;
+        border: none;
+        padding: 0;
+    }
+    
+    .research-question .question {
+        font-size: 1.2em;
+        font-style: italic;
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1rem;
+        border-radius: 5px;
+        backdrop-filter: blur(10px);
+    }
+    
+    .methodology-overview {
+        background: #f8f9fa;
+        border-left: 5px solid #28a745;
+        padding: 1.5rem;
+        margin: 2rem 0;
+        border-radius: 0 5px 5px 0;
+    }
+    
+    .findings-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 1.5rem;
+        margin: 2rem 0;
+    }
+    
+    .finding-category {
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        transition: transform 0.2s ease;
+    }
+    
+    .finding-category:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .finding-category h4 {
+        color: #495057;
+        margin-top: 0;
+        border-bottom: 2px solid #e9ecef;
+        padding-bottom: 0.5rem;
+    }
+    
+    .confidence-indicator {
+        display: inline-block;
+        padding: 0.2rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.8em;
+        font-weight: bold;
+        margin-left: 0.5rem;
+    }
+    
+    .confidence-high {
+        background: #d4edda;
+        color: #155724;
+    }
+    
+    .confidence-medium {
+        background: #fff3cd;
+        color: #856404;
+    }
+    
+    .confidence-low {
+        background: #f8d7da;
+        color: #721c24;
+    }
+    
+    .key-insight {
+        background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        border-left: 4px solid #ff6b6b;
+    }
+    
+    .recommendations-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1rem;
+        margin: 1.5rem 0;
+    }
+    
+    .recommendation-item {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 1rem;
+        position: relative;
+    }
+    
+    .recommendation-item::before {
+        content: "💡";
+        position: absolute;
+        top: -5px;
+        left: -5px;
+        background: white;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
+    .quality-metrics {
+        background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin: 2rem 0;
+    }
+    
+    .quality-metrics h3 {
+        color: #2c3e50;
+        margin-top: 0;
+    }
+    
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    
+    .metric {
+        text-align: center;
+        background: rgba(255, 255, 255, 0.7);
+        padding: 1rem;
+        border-radius: 6px;
+    }
+    
+    .metric-value {
+        font-size: 1.5em;
+        font-weight: bold;
+        color: #2c3e50;
+    }
+    
+    .metric-label {
+        font-size: 0.9em;
+        color: #6c757d;
+        margin-top: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block header %}
+{{ super() }}
+
+<div class="research-question">
+    <h2>Research Question</h2>
+    <div class="question">"{{ report.query }}"</div>
+    {% if report.domains %}
+    <div style="margin-top: 1rem; font-size: 0.9em;">
+        <strong>Research Domains:</strong> {{ report.domains | join(' • ') }}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Quality Metrics Dashboard -->
+<div class="quality-metrics">
+    <h3>Research Quality Metrics</h3>
+    <div class="metrics-grid">
+        <div class="metric">
+            <div class="metric-value">{{ "%.1f" | format(report.metadata.quality_score * 100) }}%</div>
+            <div class="metric-label">Quality Score</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">{{ "%.1f" | format(report.metadata.confidence_score * 100) }}%</div>
+            <div class="metric-label">Confidence</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">{{ report.metadata.total_sources }}</div>
+            <div class="metric-label">Sources</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">{{ report.metadata.total_citations }}</div>
+            <div class="metric-label">Citations</div>
+        </div>
+        {% if report.metadata.agents_used %}
+        <div class="metric">
+            <div class="metric-value">{{ report.metadata.agents_used | length }}</div>
+            <div class="metric-label">AI Agents</div>
+        </div>
+        {% endif %}
+        {% if report.metadata.generation_time_seconds %}
+        <div class="metric">
+            <div class="metric-value">{{ "%.1f" | format(report.metadata.generation_time_seconds) }}s</div>
+            <div class="metric-label">Generation Time</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Methodology Overview -->
+{% for section in report.sections %}
+    {% if section.title == "Methodology" %}
+    <div class="methodology-overview">
+        <h3>📋 Methodology Overview</h3>
+        {{ section.content | markdown | safe }}
+    </div>
+    {% endif %}
+{% endfor %}
+
+<!-- Enhanced section rendering -->
+{% for section in report.sections %}
+<div id="section-{{ loop.index }}" class="section">
+    <h{{ section.level + 1 }}>{{ section.title }}</h{{ section.level + 1 }}>
+    
+    {% if section.title == "Key Findings" %}
+    <!-- Special rendering for findings -->
+    <div class="findings-summary">
+        {% for subsection in section.subsections %}
+        <div class="finding-category">
+            <h4>{{ subsection.title }}</h4>
+            {{ subsection.content | markdown | safe }}
+        </div>
+        {% endfor %}
+    </div>
+    {% elif section.title == "Recommendations" %}
+    <!-- Special rendering for recommendations -->
+    <div class="section-content">
+        {{ section.content | markdown | safe }}
+    </div>
+    <div class="recommendations-grid">
+        {% set recommendations = section.content.split('\n') %}
+        {% for rec in recommendations %}
+            {% if rec.strip() and rec.strip().startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')) %}
+            <div class="recommendation-item">
+                {{ rec.strip()[2:] }}
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <!-- Standard section rendering -->
+    <div class="section-content">
+        {{ section.content | markdown | safe }}
+    </div>
+    {% endif %}
+    
+    <!-- Render subsections -->
+    {% for subsection in section.subsections %}
+        {% if section.title != "Key Findings" %}
+        <div id="subsection-{{ loop.index0 }}-{{ loop.index }}" class="subsection">
+            <h{{ section.level + 2 }}>{{ subsection.title }}</h{{ section.level + 2 }}>
+            <div class="subsection-content">
+                {{ subsection.content | markdown | safe }}
+            </div>
+        </div>
+        {% endif %}
+    {% endfor %}
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block footer %}
+<footer class="report-footer">
+    <div style="text-align: center; margin-bottom: 1rem;">
+        <strong>Comprehensive Research Report</strong>
+    </div>
+    <p>Generated by Multi-Agent Research Platform on {{ report.metadata.generated_at.strftime('%B %d, %Y at %H:%M UTC') }}</p>
+    {% if report.metadata.workflow_id %}
+    <p>Workflow ID: {{ report.metadata.workflow_id }}</p>
+    {% endif %}
+    {% if report.metadata.agents_used %}
+    <p>AI Agents Used: {{ report.metadata.agents_used | join(', ') }}</p>
+    {% endif %}
+    <p style="font-size: 0.9em; color: #6c757d; margin-top: 1rem;">
+        This report represents a comprehensive analysis using state-of-the-art AI research methodologies.
+        Quality score reflects the reliability and completeness of the research findings.
+    </p>
+</footer>
+{% endblock %}

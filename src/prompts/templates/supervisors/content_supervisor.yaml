@@ -1,0 +1,187 @@
+# Content Supervisor Agent Template
+# New domain supervisor for content creation and optimization
+
+metadata:
+  name: "content_supervisor"
+  version: "1.0.0"  
+  description: "Content creation team supervisor coordinating strategy, writing, editing, and optimization"
+  type: "supervisor"
+  role: "content_supervisor"
+  domain: "content"
+  author: "Cerebro AI Brain Team"
+  complexity_score: 0.85
+  estimated_tokens: 1800
+
+variables:
+  - name: "content_brief"
+    type: "dict"
+    description: "Content creation brief with requirements"
+    required: true
+    
+  - name: "target_audience"
+    type: "string"
+    description: "Primary target audience"
+    required: true
+    
+  - name: "content_type"
+    type: "string"
+    description: "Type of content (article, blog, documentation, etc.)"
+    required: true
+    
+  - name: "brand_guidelines"
+    type: "dict"
+    description: "Brand voice and style guidelines"
+    required: false
+    default: {}
+    
+  - name: "worker_results"
+    type: "list"
+    description: "Results from content worker agents"
+    required: false
+    default: []
+    
+  - name: "refinement_round"
+    type: "integer"
+    description: "Current refinement round"
+    required: false
+    default: 1
+
+system_prompt: |
+  You are a Content Supervisor Agent coordinating a specialized content creation team.
+  
+  Your team consists of:
+  - Content Strategist: Audience analysis, messaging strategy, and content planning
+  - Technical Writer: Content creation with domain expertise and clear communication
+  - Content Editor: Quality assurance, style consistency, and narrative flow
+  - SEO Optimizer: Search optimization, keywords, and discoverability
+  - Brand Validator: Brand voice consistency and compliance verification
+  
+  Your responsibilities:
+  1. Coordinate content creation workflow from strategy through publication
+  2. Ensure quality, consistency, and brand alignment
+  3. Manage iterative refinement until quality standards are met
+  4. Balance creativity with strategic objectives and constraints
+  5. Synthesize team expertise into compelling, effective content
+  
+  Content Creation Phases:
+  - Strategy: Audience analysis, messaging, and approach definition
+  - Creation: Content development with brand and SEO considerations  
+  - Refinement: Quality assurance, editing, and optimization
+  - Validation: Final checks for brand alignment and effectiveness
+
+user_prompt: |
+  Content Creation Coordination:
+  
+  Content Brief: {{content_brief.title}} - {{content_brief.description}}
+  Target Audience: {{target_audience}}
+  Content Type: {{content_type}}
+  
+  Requirements:
+  {{#each content_brief.requirements}}
+  - {{this}}
+  {{/each}}
+  
+  {{#if brand_guidelines}}
+  Brand Guidelines:
+  - Voice: {{brand_guidelines.voice}}
+  - Tone: {{brand_guidelines.tone}}  
+  - Style: {{brand_guidelines.style}}
+  {{/if}}
+  
+  {{#if worker_results}}
+  Current Worker Results (Round {{refinement_round}}):
+  {{#each worker_results}}
+  
+  Worker: {{worker_type}}
+  Deliverable: {{deliverable_type}}
+  Status: {{status}}
+  Content: {{content_preview}}
+  Quality Score: {{quality_score}}
+  Feedback: {{feedback}}
+  
+  {{/each}}
+  
+  Please coordinate the next phase of content development based on current progress.
+  {{else}}
+  Please coordinate initial content creation strategy and worker assignments.
+  {{/if}}
+
+expected_output_schema:
+  content_coordination:
+    current_phase: "string"  # strategy, creation, refinement, validation
+    
+    worker_assignments:
+      - worker_type: "string"
+        task_description: "string"
+        deliverables: ["string"]
+        priority: "integer"
+        dependencies: ["string"]
+        quality_criteria: ["string"]
+    
+    content_strategy:
+      messaging_framework: "string"
+      content_structure: ["string"]
+      key_points: ["string"]
+      success_metrics: ["string"]
+    
+    quality_standards:
+      readability_target: "string"
+      brand_compliance: ["string"]
+      seo_requirements: ["string"] 
+      technical_accuracy: "string"
+    
+    coordination_plan:
+      execution_timeline: "string"
+      review_checkpoints: ["string"]
+      refinement_criteria: ["string"]
+      approval_gates: ["string"]
+    
+    refinement_guidance:
+      content_improvements: ["string"]
+      style_adjustments: ["string"]
+      technical_corrections: ["string"]
+      brand_alignment_issues: ["string"]
+      next_iteration_focus: "string"
+
+examples:
+  - input_variables:
+      content_brief:
+        title: "AI Ethics Best Practices Guide"
+        description: "Comprehensive guide for implementing AI ethics in organizations"
+        requirements: ["Technical accuracy", "Practical examples", "Implementation framework"]
+      target_audience: "Technical leaders and AI practitioners"
+      content_type: "technical_documentation"
+      brand_guidelines:
+        voice: "authoritative"
+        tone: "professional"
+        style: "technical_but_accessible"
+    expected_output: |
+      {
+        "content_coordination": {
+          "current_phase": "strategy",
+          "worker_assignments": [
+            {
+              "worker_type": "content_strategist",
+              "task_description": "Analyze AI practitioner needs and create messaging framework",
+              "deliverables": ["audience_analysis", "content_outline", "key_messages"],
+              "priority": 1
+            }
+          ],
+          "content_strategy": {
+            "messaging_framework": "Problem-solution-implementation approach for AI ethics",
+            "key_points": ["Why ethics matters", "Practical implementation steps", "Common pitfalls"]
+          }
+        }
+      }
+
+output_format: "json"
+max_tokens: 2500
+temperature: 0.5  # Balanced creativity and consistency for content
+
+requires_refinement: true
+consensus_threshold: 0.88
+
+quality_checks:
+  - "content_strategy_clarity"
+  - "brand_alignment"
+  - "audience_appropriateness"

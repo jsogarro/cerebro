@@ -1,0 +1,169 @@
+# TalkHier Refinement Round 1 Template
+# Initial multi-agent response gathering and preliminary consensus evaluation
+
+metadata:
+  name: "talkhier_refinement_round_1"
+  version: "1.0.0"
+  description: "First round of TalkHier multi-agent refinement protocol"
+  type: "refinement"
+  role: "evaluation_supervisor"
+  domain: "general"
+  author: "TalkHier Protocol Team"
+  complexity_score: 0.7
+  estimated_tokens: 1200
+
+variables:
+  - name: "initial_query"
+    type: "string"
+    description: "Original query or task"
+    required: true
+    
+  - name: "agent_responses"
+    type: "list"
+    description: "Initial responses from all agents"
+    required: true
+    
+  - name: "consensus_target"
+    type: "float" 
+    description: "Target consensus threshold"
+    required: false
+    default: 0.95
+    
+  - name: "domain_context"
+    type: "string"
+    description: "Domain-specific context"
+    required: false
+    default: "general"
+    
+  - name: "quality_criteria"
+    type: "list"
+    description: "Quality evaluation criteria"
+    required: false
+    default: ["accuracy", "completeness", "coherence"]
+
+system_prompt: |
+  You are an Evaluation Supervisor implementing the TalkHier protocol for multi-agent refinement.
+  
+  TalkHier Protocol - Round 1 Objectives:
+  1. Evaluate initial agent responses for quality and consistency
+  2. Identify areas of consensus and disagreement
+  3. Assess confidence levels across different aspects
+  4. Determine if additional refinement rounds are needed
+  5. Provide specific guidance for Round 2 improvements
+  
+  Evaluation Framework:
+  - Content Quality: Accuracy, completeness, relevance
+  - Coherence: Logical consistency and flow
+  - Evidence: Supporting evidence and citations
+  - Coverage: Comprehensive coverage of the topic
+  - Consensus: Agreement level between agents
+  
+  TalkHier Message Structure:
+  - Content: Direct response to the query
+  - Background: Context and reasoning
+  - Intermediate Outputs: Working thoughts and analysis
+
+user_prompt: |
+  Round 1 Evaluation - Initial Agent Responses
+  
+  Original Query: {{initial_query}}
+  Domain Context: {{domain_context}}
+  Target Consensus: {{consensus_target}}
+  
+  Agent Responses to Evaluate:
+  {{#each agent_responses}}
+  
+  === Agent {{agent_type}} Response ===
+  Content: {{content}}
+  Background: {{background}}
+  Intermediate Outputs: {{intermediate_outputs}}
+  Confidence: {{confidence}}
+  
+  {{/each}}
+  
+  Please evaluate these responses using the TalkHier protocol:
+  
+  1. CONTENT ANALYSIS:
+     - Assess each response for {{#each quality_criteria}}{{item}}{{#unless @last}}, {{/unless}}{{/each}}
+     - Identify strongest and weakest aspects
+     - Rate confidence levels
+  
+  2. CONSENSUS EVALUATION:
+     - Calculate consensus scores between agents
+     - Identify areas of agreement and disagreement
+     - Assess overall response coherence
+  
+  3. REFINEMENT GUIDANCE:
+     - Determine if consensus meets {{consensus_target}} threshold
+     - Provide specific improvement instructions for Round 2
+     - Identify missing information or analysis gaps
+
+expected_output_schema:
+  round_1_evaluation:
+    consensus_analysis:
+      overall_consensus_score: "float"
+      consensus_by_aspect:
+        accuracy: "float"
+        completeness: "float"
+        coherence: "float"
+        evidence_quality: "float"
+      agreement_areas: ["string"]
+      disagreement_areas: ["string"]
+    
+    quality_assessment:
+      - agent_type: "string"
+        content_quality: "float"
+        confidence_level: "float"
+        strengths: ["string"]
+        weaknesses: ["string"]
+        improvement_suggestions: ["string"]
+    
+    refinement_decision:
+      needs_refinement: "boolean"
+      target_consensus_met: "boolean"
+      refinement_focus_areas: ["string"]
+      specific_improvements_needed: ["string"]
+    
+    round_2_guidance:
+      priority_improvements: ["string"]
+      additional_analysis_needed: ["string"] 
+      collaboration_suggestions: ["string"]
+      quality_targets: "dict"
+
+examples:
+  - input_variables:
+      initial_query: "What are the best practices for AI ethics?"
+      agent_responses:
+        - agent_type: "research_analyst"
+          content: "AI ethics involves fairness, transparency, and accountability"
+          confidence: 0.8
+        - agent_type: "policy_analyst"  
+          content: "Regulatory frameworks essential for AI governance"
+          confidence: 0.7
+      consensus_target: 0.90
+    expected_output: |
+      {
+        "round_1_evaluation": {
+          "consensus_analysis": {
+            "overall_consensus_score": 0.75,
+            "agreement_areas": ["Need for ethical frameworks"],
+            "disagreement_areas": ["Implementation approaches"]
+          },
+          "refinement_decision": {
+            "needs_refinement": true,
+            "refinement_focus_areas": ["Implementation specifics", "Measurement methods"]
+          }
+        }
+      }
+
+output_format: "json"
+max_tokens: 2500
+temperature: 0.2  # Low temperature for consistent evaluation
+
+requires_refinement: false  # This IS the refinement process
+consensus_threshold: 0.95
+
+quality_checks:
+  - "evaluation_objectivity"
+  - "consensus_accuracy"
+  - "improvement_specificity"

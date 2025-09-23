@@ -1,0 +1,63 @@
+# Cerebro AI Brain - Development Environment Model Configuration
+# This file overrides base.yaml settings for development environment
+
+version: "2.0.0"
+environment: "development"
+extends: "base.yaml"
+
+# Development-specific global settings
+global_settings:
+  enable_debug_logging: true
+  enable_mock_providers: false
+
+# Model overrides for development
+models:
+  # Only override models that exist in base.yaml
+  deepseek-v3:
+    cost_per_1k_tokens: 0.0001  # Reduced cost for dev
+    enabled: false  # Keep disabled until API key configured
+    
+  llama-3.3-70b:
+    cost_per_1k_tokens: 0.0001  # Reduced cost for dev
+    enabled: false  # Keep disabled until Ollama available
+    
+  gemini-pro:
+    enabled: true  # Keep enabled as default
+
+# Provider overrides for development
+providers:  
+  deepseek:
+    enabled: false  # Disabled by default in dev
+    
+  llama:
+    enabled: false  # Disabled until Ollama available
+    
+  gemini:
+    enabled: true  # Keep existing Gemini service
+
+# Development routing preferences
+routing_config:
+  default_strategy: "cost_efficient"  # Prefer cost efficiency in dev
+  
+  cost_optimization:
+    daily_budget_limit: 10.0  # Lower budget for dev
+    cost_alert_threshold: 0.5
+  
+  performance_optimization:
+    target_latency_ms: 2000  # More relaxed latency in dev
+    enable_caching: true
+    cache_ttl_seconds: 1800  # Shorter cache for dev
+
+# Simplified development configuration
+testing_config:
+  enable_test_models: false
+  mock_responses: false
+
+# Development-specific metadata
+metadata:
+  config_name: "development"
+  description: "Development environment with cost optimization and limited providers"
+  notes:
+    - "Costs are reduced for development usage"
+    - "Only Gemini enabled by default"
+    - "DeepSeek and Llama disabled until configured"

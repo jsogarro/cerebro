@@ -1,0 +1,180 @@
+# Research Supervisor Agent Template
+# Coordinates research team using LangGraph + TalkHier hybrid approach
+
+metadata:
+  name: "research_supervisor"
+  version: "1.0.0"
+  description: "Research team supervisor coordinating literature, methodology, and synthesis agents"
+  type: "supervisor"
+  role: "research_supervisor"
+  domain: "research"
+  author: "Cerebro AI Brain Team"
+  complexity_score: 0.9
+  estimated_tokens: 2000
+
+variables:
+  - name: "research_query"
+    type: "string"
+    description: "Main research question or topic"
+    required: true
+    
+  - name: "research_domains"
+    type: "list"
+    description: "Research domains and disciplines"
+    required: true
+    
+  - name: "worker_results"
+    type: "list" 
+    description: "Results from worker agents"
+    required: false
+    default: []
+    
+  - name: "refinement_round"
+    type: "integer"
+    description: "Current refinement round (1-3)"
+    required: false
+    default: 1
+    
+  - name: "quality_threshold"
+    type: "float"
+    description: "Required quality threshold for completion"
+    required: false
+    default: 0.90
+    
+  - name: "current_consensus"
+    type: "float"
+    description: "Current consensus score across workers"
+    required: false
+    default: 0.0
+
+system_prompt: |
+  You are a Research Supervisor Agent coordinating a team of specialized research workers.
+  
+  Your team consists of:
+  - Literature Analyst: Systematic literature reviews and source analysis
+  - Methodology Specialist: Research design and validation approaches
+  - Data Synthesizer: Cross-source integration and synthesis
+  - Citation Validator: Source verification and proper formatting
+  
+  Your responsibilities:
+  1. Coordinate parallel research execution across your team
+  2. Resolve conflicts between different agent findings
+  3. Ensure research quality and academic rigor
+  4. Guide multi-round refinement until consensus is achieved
+  5. Synthesize team outputs into coherent research narrative
+  
+  LangGraph Integration:
+  - Use conditional routing based on research complexity
+  - Manage state across worker agents
+  - Handle parallel execution and result aggregation
+  
+  TalkHier Protocol:
+  - Structure messages with Content, Background, and Intermediate outputs
+  - Facilitate consensus building through iterative refinement
+  - Ensure quality thresholds are met before completion
+
+user_prompt: |
+  Research Coordination Task:
+  
+  Research Query: {{research_query}}
+  Research Domains: {{#each research_domains}}{{item}}{{#unless @last}}, {{/unless}}{{/each}}
+  
+  {{#if worker_results}}
+  Current Worker Results (Round {{refinement_round}}):
+  {{#each worker_results}}
+  
+  Worker: {{worker_type}}
+  Status: {{status}}
+  Findings: {{findings}}
+  Confidence: {{confidence}}
+  {{/each}}
+  
+  Current Consensus Score: {{current_consensus}} (Target: {{quality_threshold}})
+  
+  {{#if needs_refinement}}
+  REFINEMENT REQUIRED: Consensus below threshold. Please:
+  1. Identify conflicts between worker findings
+  2. Provide guidance for resolution
+  3. Specify additional research needed
+  4. Coordinate next refinement round
+  {{else}}
+  SYNTHESIS PHASE: Consensus achieved. Please:
+  1. Synthesize all worker findings
+  2. Create coherent research narrative
+  3. Identify final conclusions and recommendations
+  {{/if}}
+  
+  {{else}}
+  INITIAL COORDINATION: Please:
+  1. Analyze the research query complexity
+  2. Decompose into specific tasks for each worker type
+  3. Define coordination strategy and timeline
+  4. Set quality expectations and success criteria
+  {{/if}}
+
+expected_output_schema:
+  supervision_result:
+    phase: "string"  # planning, coordination, refinement, synthesis
+    worker_assignments:
+      - worker_type: "string"
+        task_description: "string"
+        priority: "integer"
+        expected_deliverables: ["string"]
+        dependencies: ["string"]
+    coordination_strategy:
+      execution_mode: "string"  # parallel, sequential, hybrid
+      quality_gates: ["string"]
+      refinement_criteria: ["string"]
+    refinement_guidance:
+      conflicts_identified: ["string"]
+      resolution_strategy: "string"
+      additional_research_needed: ["string"]
+      next_round_focus: ["string"]
+    synthesis:
+      integrated_findings: ["string"]
+      cross_worker_validation: "string"
+      final_recommendations: ["string"]
+      confidence_assessment: "float"
+      quality_score: "float"
+
+# Examples for different phases
+examples:
+  - input_variables:
+      research_query: "How does AI impact employment in healthcare?"
+      research_domains: ["AI", "healthcare", "employment", "labor economics"]
+      refinement_round: 1
+    expected_output: |
+      {
+        "supervision_result": {
+          "phase": "planning",
+          "worker_assignments": [
+            {
+              "worker_type": "literature_analyst",
+              "task_description": "Systematic review of AI adoption in healthcare and employment effects",
+              "priority": 1,
+              "expected_deliverables": ["literature_synthesis", "key_studies", "research_gaps"]
+            }
+          ],
+          "coordination_strategy": {
+            "execution_mode": "parallel",
+            "quality_gates": ["source_verification", "methodology_validation"],
+            "refinement_criteria": ["consensus_above_90%", "no_major_conflicts"]
+          }
+        }
+      }
+
+output_format: "json"
+max_tokens: 3000
+temperature: 0.4  # Balanced for coordination tasks
+
+requires_refinement: true
+consensus_threshold: 0.90
+
+quality_checks:
+  - "coordination_clarity"
+  - "task_specificity"
+  - "quality_standards"
+
+safety_checks:
+  - "no_worker_overload"
+  - "realistic_expectations"

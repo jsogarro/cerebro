@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: research-platform-config
+  namespace: research-platform
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  API_HOST: "0.0.0.0"
+  API_PORT: "8000"
+  API_WORKERS: "4"
+  TEMPORAL_NAMESPACE: "default"
+  WORKER_CONCURRENCY: "10"
+  TASK_TIMEOUT_SECONDS: "300"
+  MCP_PORT: "9000"
+  MCP_TOOLS_ENABLED: "true"
+  ENABLE_METRICS: "true"
+  ENABLE_TRACING: "true"
+  ENABLE_CACHE: "true"
+  ENABLE_RATE_LIMITING: "true"
+  MAX_REQUESTS_PER_MINUTE: "100"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"

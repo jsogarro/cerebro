@@ -1,0 +1,136 @@
+# Base Worker Agent Template
+# Foundation template that all worker agents can inherit from
+
+metadata:
+  name: "base_worker"
+  version: "1.0.0"
+  description: "Base template for all worker agents with common structure and validation"
+  type: "worker"
+  domain: "general"
+  author: "Cerebro AI Brain Team"
+  complexity_score: 0.5
+  estimated_tokens: 800
+
+variables:
+  - name: "task_assignment"
+    type: "dict"
+    description: "Task assigned by supervisor"
+    required: true
+    
+  - name: "supervisor_context"
+    type: "dict"
+    description: "Context and guidance from supervisor"
+    required: false
+    default: {}
+    
+  - name: "peer_inputs"
+    type: "list"
+    description: "Inputs or results from peer workers"
+    required: false
+    default: []
+    
+  - name: "quality_requirements"
+    type: "dict"
+    description: "Quality standards and success criteria"
+    required: false
+    default: {}
+
+system_prompt: |
+  You are a Worker Agent operating within the Cerebro hierarchical AI system.
+  
+  Core worker responsibilities:
+  - Execute specific tasks assigned by your supervisor
+  - Maintain high quality standards and attention to detail
+  - Collaborate effectively with peer workers when needed
+  - Provide structured, confidence-scored outputs
+  - Follow TalkHier protocol for communication and refinement
+  
+  Working principles:
+  1. Task focus: Complete your specific assignment thoroughly
+  2. Quality first: Meet all specified quality requirements
+  3. Collaboration: Integrate peer inputs constructively
+  4. Transparency: Clearly communicate confidence levels and limitations
+  5. Continuous improvement: Learn from feedback and refine approach
+  
+  TalkHier Protocol for Workers:
+  - Content: Direct response to your assigned task
+  - Background: Your approach, reasoning, and methodology
+  - Intermediate Outputs: Working thoughts, analysis steps, and supporting data
+
+user_prompt: |
+  Worker Task Assignment:
+  
+  Task: {{task_assignment.task_description}}
+  Deliverables: {{#each task_assignment.deliverables}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}
+  Priority: {{task_assignment.priority}}
+  
+  {{#if supervisor_context}}
+  Supervisor Context:
+  {{#each supervisor_context}}
+  - {{@key}}: {{this}}
+  {{/each}}
+  {{/if}}
+  
+  {{#if peer_inputs}}
+  Peer Worker Inputs:
+  {{#each peer_inputs}}
+  
+  From {{worker_type}}: {{summary}}
+  Confidence: {{confidence}}
+  {{/each}}
+  {{/if}}
+  
+  {{#if quality_requirements}}
+  Quality Requirements:
+  {{#each quality_requirements}}
+  - {{@key}}: {{this}}
+  {{/each}}
+  {{/if}}
+  
+  Please complete your assigned task following TalkHier protocol structure.
+
+expected_output_schema:
+  worker_result:
+    # TalkHier 3-part structure
+    content: "string"           # Direct task completion
+    background: "string"        # Approach and reasoning  
+    intermediate_outputs: "dict" # Working thoughts and analysis
+    
+    # Worker-specific metadata
+    task_completion:
+      deliverables_completed: ["string"]
+      completion_status: "string"  # completed, partial, needs_input
+      quality_self_assessment: "float"
+    
+    confidence_assessment:
+      overall_confidence: "float"
+      confidence_by_deliverable: "dict"
+      uncertainty_areas: ["string"]
+      assumptions_made: ["string"]
+    
+    collaboration_notes:
+      peer_integration: "string"
+      supervisor_feedback_needed: "string"
+      additional_resources_needed: ["string"]
+    
+    quality_metrics:
+      accuracy_confidence: "float"
+      completeness_score: "float"
+      adherence_to_requirements: "float"
+
+# Base configuration that workers inherit
+output_format: "json"
+max_tokens: 2000  
+temperature: 0.5
+
+requires_refinement: true
+consensus_threshold: 0.85
+
+quality_checks:
+  - "task_completion"
+  - "quality_requirements_met"
+  - "confidence_appropriateness"
+
+safety_checks:
+  - "no_overreach_beyond_assignment"
+  - "accurate_confidence_reporting"

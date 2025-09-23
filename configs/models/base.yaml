@@ -1,0 +1,169 @@
+# Cerebro AI Brain - Base Model Configuration
+# Simplified version for initial testing
+
+version: "2.0.0"
+last_updated: "2025-09-07"
+
+# Global model configuration settings
+global_settings:
+  default_timeout_ms: 30000
+  default_retry_attempts: 3
+  enable_streaming: true
+  enable_fallback: true
+  quality_threshold: 0.7
+  cost_threshold: 0.10
+  latency_threshold_ms: 5000
+
+# Foundation model specifications
+models:
+  # DeepSeek Models
+  deepseek-v3:
+    provider: "deepseek"
+    tier: "premium"
+    enabled: false  # Disabled by default, enable with API key
+    
+    # Cost and performance
+    cost_per_1k_tokens: 0.002
+    avg_latency_ms: 50
+    context_window: 200000
+    max_output_tokens: 8000
+    
+    # Quality and reliability
+    quality_score: 0.92
+    availability: 0.95
+    rate_limit: 1000
+    supports_streaming: true
+    
+    # Capabilities - only valid enum values
+    capabilities:
+      - "reasoning"
+      - "analysis"
+      - "code_generation"
+      - "text_generation"
+      - "chat"
+    
+    strengths:
+      - "Complex reasoning tasks"
+      - "Mathematical computations"
+      - "Code analysis and generation"
+    
+    weaknesses:
+      - "Creative writing"
+    
+    # Use cases as dictionary
+    optimal_for:
+      complexity_score_min: 0.7
+      domains: ["analytics", "research", "technical"]
+      reasoning_types: ["analytical", "logical"]
+
+  # Llama Models
+  llama-3.3-70b:
+    provider: "llama"
+    tier: "standard"
+    enabled: false  # Disabled by default, enable when Ollama available
+    
+    cost_per_1k_tokens: 0.0008
+    avg_latency_ms: 30
+    context_window: 128000
+    max_output_tokens: 4000
+    quality_score: 0.75
+    availability: 0.99
+    rate_limit: 10000
+    supports_streaming: true
+    
+    capabilities:
+      - "text_generation"
+      - "chat"
+    
+    strengths:
+      - "General conversation"
+      - "Cost effectiveness"
+      - "Fast response times"
+    
+    optimal_for:
+      complexity_score_max: 0.5
+      domains: ["general", "content"]
+
+  # Gemini Models
+  gemini-pro:
+    provider: "gemini"
+    tier: "standard"
+    enabled: true  # Default enabled for existing integration
+    
+    cost_per_1k_tokens: 0.001
+    avg_latency_ms: 100
+    context_window: 100000
+    max_output_tokens: 8000
+    quality_score: 0.85
+    availability: 0.99
+    rate_limit: 5000
+    supports_streaming: false
+    
+    capabilities:
+      - "text_generation"
+      - "chat"
+      - "reasoning"
+      - "analysis"
+    
+    strengths:
+      - "Reliable performance"
+      - "Balanced cost/quality"
+    
+    optimal_for:
+      complexity_score_min: 0.3
+      complexity_score_max: 0.8
+      domains: ["general", "research"]
+
+# Provider configurations
+providers:
+  deepseek:
+    name: "DeepSeek"
+    enabled: false  # Disabled by default
+    api_endpoint: "https://api.deepseek.com/v1"
+    api_key_env: "DEEPSEEK_API_KEY"
+    health_check_endpoint: "/health"
+    timeout_ms: 60000
+    max_retries: 3
+    
+  llama:
+    name: "Llama (Ollama)"
+    enabled: false  # Disabled by default
+    api_endpoint: "http://localhost:11434"
+    api_key_env: null
+    health_check_endpoint: "/api/tags"
+    timeout_ms: 120000
+    max_retries: 2
+    
+  gemini:
+    name: "Google Gemini"
+    enabled: true  # Default enabled
+    api_endpoint: "https://generativelanguage.googleapis.com/v1"
+    api_key_env: "GEMINI_API_KEY"
+    health_check_endpoint: null
+    timeout_ms: 30000
+    max_retries: 3
+
+# Routing configuration
+routing_config:
+  default_strategy: "balanced"
+  
+  cost_optimization:
+    enabled: true
+    max_cost_per_request: 0.05
+    daily_budget_limit: 100.0
+    cost_alert_threshold: 0.8
+  
+  performance_optimization:
+    target_latency_ms: 1000
+    quality_threshold: 0.8
+    enable_caching: true
+    cache_ttl_seconds: 3600
+
+# Configuration metadata
+metadata:
+  schema_version: "1.0"
+  config_name: "base"
+  description: "Base model configuration for Cerebro AI Brain"
+  maintainer: "Cerebro Development Team"
+  last_validated: "2025-09-07T00:00:00Z"
+  validation_required: true

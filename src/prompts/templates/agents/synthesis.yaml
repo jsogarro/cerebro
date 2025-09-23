@@ -1,0 +1,133 @@
+# Synthesis Agent Prompt Template  
+# Converts existing synthesis agent prompt to YAML format
+
+metadata:
+  name: "synthesis_agent"
+  version: "1.0.0"
+  description: "Research synthesis and integration across multiple agent outputs"
+  type: "agent"
+  role: "data_synthesizer"  
+  domain: "research"
+  author: "Cerebro Research Team"
+  complexity_score: 0.9
+  estimated_tokens: 2000
+
+variables:
+  - name: "agent_outputs"
+    type: "dict"
+    description: "Outputs from different research agents"
+    required: true
+    
+  - name: "synthesis_focus"
+    type: "string" 
+    description: "Focus area for synthesis"
+    required: false
+    default: "comprehensive"
+    
+  - name: "conflict_resolution_mode"
+    type: "string"
+    description: "How to handle conflicts (integrate, prioritize, flag)"
+    required: false
+    default: "integrate"
+
+system_prompt: |
+  You are a Research Synthesis Agent specialized in integrating outputs from multiple research agents into coherent insights.
+  
+  Your core capabilities:
+  - Integrate findings from all contributing agents
+  - Resolve conflicts between different analyses using evidence
+  - Build coherent narratives from diverse inputs
+  - Maintain objectivity and evidence-based reasoning
+  - Identify meta-patterns and higher-order insights
+  - Preserve nuance while creating clarity
+  
+  Synthesis principles:
+  1. Honor the evidence and methodology from all agents
+  2. Explicitly address conflicts rather than ignoring them
+  3. Build coherent narratives that acknowledge complexity
+  4. Identify patterns across different types of analysis
+  5. Maintain transparency about confidence levels and limitations
+
+user_prompt: |
+  Synthesize the following outputs from different research agents:
+  
+  {{#each agent_outputs}}
+  === {{@key}} AGENT OUTPUT ===
+  {{#if findings}}Findings: {{findings}}{{/if}}
+  {{#if methodology}}Methodology: {{methodology}}{{/if}}
+  {{#if confidence}}Confidence: {{confidence}}{{/if}}
+  {{#if limitations}}Limitations: {{limitations}}{{/if}}
+  
+  {{/each}}
+  
+  Synthesis Requirements:
+  - Create a comprehensive synthesis that integrates all findings
+  - Identify and resolve conflicts using {{conflict_resolution_mode}} approach
+  - Focus on {{synthesis_focus}} integration
+  - Build coherent research narrative with proper evidence attribution
+  - Assess overall confidence and identify remaining uncertainty
+
+expected_output_schema:
+  synthesis:
+    integrated_findings: ["string"]
+    cross_agent_patterns: 
+      - pattern_type: "string"
+        pattern_description: "string" 
+        supporting_agents: ["string"]
+        confidence_level: "float"
+    conflict_resolutions:
+      - conflict_description: "string"
+        conflicting_agents: ["string"] 
+        resolution_approach: "string"
+        resolution_rationale: "string"
+    meta_insights:
+      - insight: "string"
+        evidence_level: "string"
+        implications: ["string"]
+    comprehensive_narrative: "string"
+    confidence_assessment:
+      overall_confidence: "float"
+      confidence_by_domain: "dict"
+      uncertainty_areas: ["string"]
+      evidence_strength: "string"
+    synthesis_quality:
+      completeness_score: "float"
+      coherence_score: "float"
+      evidence_integration_score: "float"
+
+examples:
+  - input_variables:
+      agent_outputs:
+        literature_review:
+          findings: ["AI improves diagnostic accuracy by 15%", "Limited studies on implementation barriers"]
+        methodology:
+          findings: ["Randomized controlled trials show best evidence", "Need for longitudinal studies"]
+      synthesis_focus: "comprehensive"
+    expected_output: |
+      {
+        "synthesis": {
+          "integrated_findings": [
+            "AI demonstrates 15% diagnostic accuracy improvement with strong RCT evidence",
+            "Implementation barriers remain understudied, requiring longitudinal research"
+          ],
+          "meta_insights": [
+            {
+              "insight": "Technical efficacy proven but implementation gap exists",
+              "evidence_level": "strong",
+              "implications": ["Need for implementation science research", "Focus on real-world deployment studies"]
+            }
+          ]
+        }
+      }
+
+output_format: "json"
+max_tokens: 3000
+temperature: 0.4
+
+requires_refinement: true
+consensus_threshold: 0.92
+
+quality_checks:
+  - "integration_completeness"
+  - "conflict_resolution"
+  - "narrative_coherence"

@@ -1,0 +1,436 @@
+{% extends "base.html.j2" %}
+
+{% block title %}{{ report.title }} - Executive Summary{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Executive Summary specific styles */
+    body {
+        font-size: 13pt;
+        line-height: 1.5;
+    }
+    
+    .executive-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2.5rem;
+        margin: 0 -2rem 2rem -2rem;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .executive-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="20" cy="20" r="2" fill="white" opacity="0.1"/><circle cx="80" cy="40" r="1" fill="white" opacity="0.1"/><circle cx="40" cy="80" r="1.5" fill="white" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+        opacity: 0.3;
+    }
+    
+    .executive-header * {
+        position: relative;
+        z-index: 1;
+    }
+    
+    .executive-header h1 {
+        color: white;
+        border: none;
+        margin: 0 0 1rem 0;
+        font-size: 2.2em;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    .exec-subtitle {
+        font-size: 1.1em;
+        opacity: 0.9;
+        font-weight: 300;
+    }
+    
+    .key-highlights {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.5rem;
+        margin: 2rem 0;
+    }
+    
+    .highlight-card {
+        background: white;
+        border-radius: 10px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        border-top: 4px solid #3498db;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    
+    .highlight-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    .highlight-card h3 {
+        color: #2c3e50;
+        margin-top: 0;
+        font-size: 1.2em;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .highlight-icon {
+        width: 24px;
+        height: 24px;
+        background: #3498db;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 0.8em;
+        font-weight: bold;
+    }
+    
+    .metric-box {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+        text-align: center;
+    }
+    
+    .metric-number {
+        font-size: 2em;
+        font-weight: bold;
+        display: block;
+    }
+    
+    .metric-label {
+        font-size: 0.9em;
+        opacity: 0.9;
+    }
+    
+    .insights-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        margin: 1.5rem 0;
+    }
+    
+    .insight-item {
+        background: #f8f9fa;
+        border-left: 4px solid #28a745;
+        padding: 1rem 1.5rem;
+        border-radius: 0 6px 6px 0;
+        position: relative;
+    }
+    
+    .insight-item::before {
+        content: "💡";
+        position: absolute;
+        left: -12px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: white;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
+    .recommendation-priority {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1rem;
+        margin: 1.5rem 0;
+    }
+    
+    .priority-high {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+    
+    .priority-medium {
+        background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+        color: #2c3e50;
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .priority-label {
+        font-size: 0.8em;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 0.5rem;
+        opacity: 0.8;
+    }
+    
+    .confidence-bar {
+        width: 100%;
+        height: 8px;
+        background: #e9ecef;
+        border-radius: 4px;
+        overflow: hidden;
+        margin: 0.5rem 0;
+    }
+    
+    .confidence-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #28a745 0%, #20c997 100%);
+        transition: width 0.3s ease;
+    }
+    
+    .next-steps {
+        background: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin: 2rem 0;
+    }
+    
+    .next-steps h3 {
+        color: #856404;
+        margin-top: 0;
+    }
+    
+    .timeline-item {
+        border-left: 3px solid #3498db;
+        padding-left: 1rem;
+        margin: 1rem 0;
+        position: relative;
+    }
+    
+    .timeline-item::before {
+        content: '';
+        position: absolute;
+        left: -6px;
+        top: 0;
+        width: 10px;
+        height: 10px;
+        background: #3498db;
+        border-radius: 50%;
+    }
+    
+    .compact-section {
+        margin: 1rem 0;
+    }
+    
+    .compact-section h2 {
+        font-size: 1.4em;
+        margin-bottom: 0.8rem;
+        margin-top: 1.5rem;
+    }
+    
+    /* Print optimizations for executive summary */
+    @media print {
+        .executive-header {
+            margin: 0;
+            break-inside: avoid;
+        }
+        
+        .highlight-card {
+            break-inside: avoid;
+            margin-bottom: 1rem;
+        }
+        
+        .key-highlights {
+            break-inside: avoid;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header %}
+<div class="executive-header">
+    <h1>{{ report.title }}</h1>
+    <div class="exec-subtitle">Executive Summary</div>
+    <div style="margin-top: 1rem; font-size: 0.9em;">
+        Generated {{ report.metadata.generated_at.strftime('%B %d, %Y') }}
+    </div>
+</div>
+{% endblock %}
+
+{% block metadata %}
+<!-- Compact metadata for executive summary -->
+<div class="key-highlights">
+    <div class="highlight-card">
+        <h3><span class="highlight-icon">📊</span> Research Scope</h3>
+        <div class="metric-box">
+            <span class="metric-number">{{ report.metadata.total_sources }}</span>
+            <span class="metric-label">Sources Analyzed</span>
+        </div>
+        <p>Comprehensive analysis across {{ report.domains | length }} domain{{ 's' if report.domains | length != 1 else '' }}</p>
+    </div>
+    
+    <div class="highlight-card">
+        <h3><span class="highlight-icon">✅</span> Quality Assessment</h3>
+        <div style="margin: 1rem 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Quality Score</span>
+                <span style="font-weight: bold;">{{ "%.1f" | format(report.metadata.quality_score * 100) }}%</span>
+            </div>
+            <div class="confidence-bar">
+                <div class="confidence-fill" style="width: {{ report.metadata.quality_score * 100 }}%"></div>
+            </div>
+        </div>
+        <p>{{ "High" if report.metadata.quality_score > 0.8 else "Good" if report.metadata.quality_score > 0.6 else "Acceptable" }} confidence in findings</p>
+    </div>
+    
+    <div class="highlight-card">
+        <h3><span class="highlight-icon">🎯</span> Key Results</h3>
+        <div class="metric-box">
+            <span class="metric-number">{{ sum(section.subsections | length for section in report.sections if section.title == "Key Findings") or "Multiple" }}</span>
+            <span class="metric-label">Key Findings</span>
+        </div>
+        <p>Strategic insights with actionable recommendations</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block table_of_contents %}
+<!-- Simplified TOC for executive summary -->
+<div class="toc" style="background: #f8f9fa; padding: 1rem; border-radius: 6px;">
+    <h3 style="margin: 0 0 1rem 0; color: #495057;">Contents</h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem;">
+        {% if report.executive_summary %}
+        <div><a href="#executive-summary">Executive Overview</a></div>
+        {% endif %}
+        {% for section in report.sections %}
+        <div><a href="#section-{{ loop.index }}">{{ section.title }}</a></div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Compact content rendering for executive summary -->
+{% for section in report.sections %}
+<div id="section-{{ loop.index }}" class="compact-section">
+    <h2>{{ section.title }}</h2>
+    
+    {% if section.title == "Key Findings" %}
+    <!-- Enhanced key findings display -->
+    <div class="insights-grid">
+        {% for subsection in section.subsections %}
+        <div class="insight-item">
+            <strong>{{ subsection.title }}:</strong>
+            {{ subsection.content | truncate(150) | markdown | safe }}
+        </div>
+        {% endfor %}
+        {% if not section.subsections %}
+        <div class="insight-item">
+            {{ section.content | markdown | safe }}
+        </div>
+        {% endif %}
+    </div>
+    
+    {% elif section.title == "Strategic Insights" or section.title == "Insights" %}
+    <!-- Strategic insights highlighting -->
+    <div class="insights-grid">
+        {% set insights = section.content.split('•') %}
+        {% for insight in insights %}
+            {% if insight.strip() %}
+            <div class="insight-item">
+                {{ insight.strip() }}
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+    
+    {% elif section.title == "Recommendations" %}
+    <!-- Priority-based recommendations -->
+    <div class="recommendation-priority">
+        {% set recommendations = section.content.split('\n') %}
+        {% for rec in recommendations %}
+            {% if rec.strip() and rec.strip().startswith(('1.', '2.', '3.')) %}
+            <div class="priority-high">
+                <div class="priority-label">High Priority</div>
+                {{ rec.strip()[2:] }}
+            </div>
+            {% elif rec.strip() and rec.strip().startswith(('4.', '5.', '6.')) %}
+            <div class="priority-medium">
+                <div class="priority-label">Medium Priority</div>
+                {{ rec.strip()[2:] }}
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+    
+    {% else %}
+    <!-- Standard compact rendering -->
+    <div class="section-content">
+        {{ section.content | truncate(300) | markdown | safe }}
+        {% if section.content | length > 300 %}
+        <p><em>... (see full report for complete details)</em></p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+<!-- Next Steps Section -->
+<div class="next-steps">
+    <h3>🎯 Next Steps</h3>
+    <div style="display: grid; gap: 0.5rem;">
+        <div class="timeline-item">
+            <strong>Immediate (0-30 days):</strong> Implement high-priority recommendations
+        </div>
+        <div class="timeline-item">
+            <strong>Short-term (1-3 months):</strong> Execute medium-priority initiatives
+        </div>
+        <div class="timeline-item">
+            <strong>Long-term (3+ months):</strong> Monitor outcomes and iterate
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block references %}
+{% if report.citations %}
+<div class="citations" style="background: #f8f9fa; padding: 1rem; border-radius: 6px;">
+    <h3 style="margin: 0 0 1rem 0;">Key References ({{ report.citations | length }} total)</h3>
+    {% for citation in report.citations[:5] %}
+    <div class="citation" style="font-size: 0.9em; margin-bottom: 0.5rem;">
+        {{ citation.format_citation(report.configuration.citation_style) }}
+    </div>
+    {% endfor %}
+    {% if report.citations | length > 5 %}
+    <p style="font-style: italic; margin-top: 1rem; color: #6c757d;">
+        ... and {{ report.citations | length - 5 }} additional references (see full report)
+    </p>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block footer %}
+<footer class="report-footer">
+    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-top: 2rem;">
+        <div style="text-align: center; margin-bottom: 1rem;">
+            <strong>Executive Summary</strong> • {{ report.title }}
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; text-align: center; font-size: 0.9em; color: #6c757d;">
+            <div>Generated: {{ report.metadata.generated_at.strftime('%B %d, %Y') }}</div>
+            {% if report.metadata.workflow_id %}
+            <div>Workflow: {{ report.metadata.workflow_id[:8] }}...</div>
+            {% endif %}
+            <div>Quality: {{ "%.1f" | format(report.metadata.quality_score * 100) }}%</div>
+            <div>Sources: {{ report.metadata.total_sources }}</div>
+        </div>
+        <p style="text-align: center; margin-top: 1rem; font-size: 0.85em; color: #6c757d;">
+            This executive summary provides key highlights. Refer to the comprehensive report for detailed analysis and complete methodology.
+        </p>
+    </div>
+</footer>
+{% endblock %}

@@ -1,0 +1,195 @@
+version: '3.9'
+
+services:
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: research-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      # MASR Integration
+      - MASR_SERVICE_URL=http://masr-router:9100
+      - ENABLE_DIRECT_EXECUTION=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      masr-router:
+        condition: service_healthy
+    networks:
+      - research-network
+    restart: unless-stopped
+
+  # MCP Server
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: mcp-server
+    command: ["python", "-m", "src.mcp.server"]
+    volumes:
+      - ./src:/app/src
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - MCP_PORT=9000
+    ports:
+      - "9000:9000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - research-network
+    restart: unless-stopped
+
+  # MASR Router Service (AI Brain Intelligence)
+  masr-router:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.masr
+    container_name: masr-router
+    volumes:
+      - ./src:/app/src
+    environment:
+      - REDIS_URL=redis://redis:6379/1
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - MASR_PORT=9100
+      - MASR_DEFAULT_STRATEGY=balanced
+      - MASR_ENABLE_ADAPTIVE=true
+      - MASR_ENABLE_CACHING=true
+      - MASR_ENABLE_LEARNING=true
+      - MASR_QUALITY_THRESHOLD=0.85
+      - MASR_MAX_AGENTS=8
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    ports:
+      - "9100:9100"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - research-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: research-postgres
+    environment:
+      - POSTGRES_USER=research
+      - POSTGRES_PASSWORD=research123
+      - POSTGRES_DB=research_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research -d research_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - research-network
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: research-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - research-network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: research-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - api
+    networks:
+      - research-network
+    restart: unless-stopped
+
+  # pgAdmin for Database Management (Development only)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: research-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@research.local
+      - PGADMIN_DEFAULT_PASSWORD=admin123
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - research-network
+    restart: unless-stopped
+    profiles:
+      - dev-tools
+
+  # Redis Commander (Development only)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: research-redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - research-network
+    restart: unless-stopped
+    profiles:
+      - dev-tools
+
+networks:
+  research-network:
+    driver: bridge
+    name: research-network
+
+volumes:
+  postgres_data:
+    name: research-postgres-data
+  redis_data:
+    name: research-redis-data

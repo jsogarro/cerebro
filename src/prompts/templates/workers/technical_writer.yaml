@@ -1,0 +1,179 @@
+# Technical Writer Worker Agent Template
+# Specialized worker for technical content creation
+
+metadata:
+  name: "technical_writer_worker"
+  version: "1.0.0"
+  description: "Technical writing specialist for complex topics with clarity and accuracy"
+  type: "worker" 
+  role: "technical_writer"
+  domain: "content"
+  author: "Cerebro Content Team"
+  complexity_score: 0.8
+  estimated_tokens: 1500
+
+variables:
+  - name: "content_assignment"
+    type: "dict"
+    description: "Specific writing assignment from supervisor"
+    required: true
+    
+  - name: "content_strategy"
+    type: "dict"
+    description: "Content strategy and messaging framework"
+    required: true
+    
+  - name: "technical_requirements"
+    type: "dict" 
+    description: "Technical accuracy and depth requirements"
+    required: false
+    default: {}
+    
+  - name: "style_guidelines"
+    type: "dict"
+    description: "Style and formatting guidelines"
+    required: false
+    default: {}
+    
+  - name: "research_context"
+    type: "string"
+    description: "Research findings and context to incorporate"
+    required: false
+    default: ""
+
+system_prompt: |
+  You are a Technical Writer specialized in creating clear, accurate, and engaging content for technical audiences.
+  
+  Your expertise includes:
+  - Translating complex technical concepts into accessible language
+  - Creating structured, well-organized content
+  - Maintaining technical accuracy while ensuring readability
+  - Incorporating examples, case studies, and practical applications
+  - Following established style guides and brand requirements
+  
+  Writing principles:
+  1. Clarity: Complex ideas explained simply and clearly
+  2. Accuracy: Technical precision without sacrificing understanding
+  3. Structure: Logical flow with clear headers and organization
+  4. Examples: Concrete examples and practical applications
+  5. Audience Focus: Content tailored to reader knowledge level and needs
+  
+  Content creation process:
+  1. Analyze requirements and audience needs
+  2. Create content outline and structure
+  3. Write initial draft with focus on clarity and accuracy
+  4. Incorporate feedback and refine content
+  5. Ensure brand and style consistency
+
+user_prompt: |
+  Technical Writing Assignment:
+  
+  Content Title: {{content_assignment.title}}
+  Content Type: {{content_assignment.type}}
+  Target Length: {{content_assignment.target_length}}
+  
+  Content Strategy:
+  - Messaging Framework: {{content_strategy.messaging_framework}}
+  - Key Points: {{#each content_strategy.key_points}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}
+  - Target Audience: {{content_strategy.target_audience}}
+  
+  {{#if technical_requirements}}
+  Technical Requirements:
+  - Accuracy Level: {{technical_requirements.accuracy_level}}
+  - Technical Depth: {{technical_requirements.depth_level}}
+  - Required Topics: {{#each technical_requirements.required_topics}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}
+  {{/if}}
+  
+  {{#if style_guidelines}}
+  Style Guidelines:
+  - Voice: {{style_guidelines.voice}}
+  - Tone: {{style_guidelines.tone}}
+  - Format: {{style_guidelines.format}}
+  {{/if}}
+  
+  {{#if research_context}}
+  Research Context to Incorporate:
+  {{research_context}}
+  {{/if}}
+  
+  Please create high-quality technical content that meets all requirements while maintaining clarity and engagement for the target audience.
+
+expected_output_schema:
+  technical_content:
+    title: "string"
+    content_sections:
+      - section_title: "string"
+        section_content: "string"
+        section_type: "string"  # introduction, main_content, examples, conclusion
+        technical_depth: "string"
+        key_concepts: ["string"]
+    
+    writing_analysis:
+      readability_score: "string"
+      technical_accuracy_level: "string"
+      audience_appropriateness: "string"
+      key_takeaways: ["string"]
+    
+    content_metadata:
+      word_count: "integer"
+      estimated_reading_time: "string"
+      technical_level: "string"  # beginner, intermediate, advanced, expert
+      primary_concepts: ["string"]
+    
+    quality_assessment:
+      clarity_score: "float"
+      accuracy_confidence: "float"
+      completeness_score: "float"
+      engagement_potential: "float"
+    
+    improvement_suggestions: ["string"]
+
+examples:
+  - input_variables:
+      content_assignment:
+        title: "Introduction to Machine Learning for Healthcare"
+        type: "technical_guide"
+        target_length: "2000 words"
+      content_strategy:
+        messaging_framework: "Problem-solution with practical examples"
+        key_points: ["Healthcare challenges", "ML solutions", "Implementation steps"]
+        target_audience: "Healthcare IT professionals"
+    expected_output: |
+      {
+        "technical_content": {
+          "title": "Introduction to Machine Learning for Healthcare",
+          "content_sections": [
+            {
+              "section_title": "Healthcare Data Challenges", 
+              "section_content": "Healthcare organizations face increasing data complexity...",
+              "section_type": "introduction",
+              "technical_depth": "intermediate"
+            }
+          ],
+          "writing_analysis": {
+            "readability_score": "college_level",
+            "technical_accuracy_level": "high",
+            "audience_appropriateness": "well_matched"
+          }
+        }
+      }
+
+# Inheritance and specialization
+inherits_from: "base_worker"
+
+output_format: "json"
+max_tokens: 3500
+temperature: 0.6  # Balanced for creativity and consistency
+
+requires_refinement: true
+consensus_threshold: 0.85
+
+quality_checks:
+  - "technical_accuracy"
+  - "readability"
+  - "audience_alignment"
+  - "brand_consistency"
+
+safety_checks:
+  - "no_misleading_claims"
+  - "accurate_technical_information"

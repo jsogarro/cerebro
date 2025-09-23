@@ -1,0 +1,178 @@
+# Cerebro AI Brain - Production Environment Model Configuration
+# This file overrides base.yaml settings for production environment
+
+version: "2.0.0"
+environment: "production"
+extends: "base.yaml"
+
+# Production-specific global settings
+global_settings:
+  enable_debug_logging: false
+  enable_mock_providers: false
+  strict_validation: true
+  cost_alerts_enabled: true
+  performance_monitoring: true
+
+# Production model configuration
+models:
+  # All premium models enabled for production
+  deepseek-v3:
+    enabled: true
+    
+  gemini-pro:
+    enabled: true
+    
+  gemini-pro-vision:
+    enabled: true  # Enable multimodal capabilities in production
+    
+  llama-3.3-70b:
+    enabled: true
+    
+  # Disable basic models in production unless specifically needed
+  llama-3.3-8b:
+    enabled: false  # Too basic for production workloads
+    
+  # Remove test/mock models
+  mock-model:
+    enabled: false
+
+# Production provider configuration
+providers:
+  deepseek:
+    enabled: true
+    # Production endpoint with high availability
+    api_endpoint: "https://api.deepseek.com/v1"
+    timeout_ms: 45000  # Slightly longer timeout for reliability
+    max_retries: 3
+    connection_pool_size: 20  # Larger pool for production
+    
+  llama:
+    enabled: true
+    # Production Ollama deployment
+    api_endpoint: "${LLAMA_ENDPOINT:-http://ollama.cerebro.internal:11434}"
+    timeout_ms: 90000
+    auto_pull_models: false  # Don't auto-pull in production
+    connection_pool_size: 15
+    
+  gemini:
+    enabled: true
+    timeout_ms: 25000
+    max_retries: 3
+    use_existing_service: true
+
+# Production routing configuration
+routing_config:
+  default_strategy: "balanced"  # Balanced approach for production
+  
+  cost_optimization:
+    enabled: true
+    max_cost_per_request: 0.08  # Higher limit for production quality
+    daily_budget_limit: 500.0  # Production budget
+    cost_alert_threshold: 0.9
+    enable_budget_alerts: true
+  
+  performance_optimization:
+    target_latency_ms: 800  # Stricter latency requirements
+    quality_threshold: 0.85  # Higher quality requirements
+    enable_caching: true
+    cache_ttl_seconds: 7200  # Longer cache for production
+
+# Production selection rules - optimized for quality and reliability
+selection_rules:
+  simple_queries:
+    preferred_models: ["llama-3.3-70b", "gemini-pro"]
+    avoid_models: ["llama-3.3-8b"]  # Avoid basic models
+    max_cost: 0.02
+    target_latency_ms: 500
+    require_fallback: true
+  
+  moderate_queries:
+    preferred_models: ["gemini-pro", "deepseek-v3", "llama-3.3-70b"]
+    max_cost: 0.05
+    target_latency_ms: 1500
+    require_fallback: true
+  
+  complex_queries:
+    preferred_models: ["deepseek-v3", "gemini-pro"]
+    max_cost: 0.08
+    target_latency_ms: 3000
+    require_fallback: true
+    minimum_quality: 0.9
+  
+  # Production domain preferences - quality focused
+  domain_preferences:
+    research:
+      preferred_models: ["deepseek-v3", "gemini-pro"]
+      quality_threshold: 0.90
+      require_validation: true
+    
+    content:
+      preferred_models: ["llama-3.3-70b", "gemini-pro"]
+      quality_threshold: 0.85
+    
+    analytics:
+      preferred_models: ["deepseek-v3"]
+      quality_threshold: 0.95
+      cost_threshold: 0.08
+    
+    service:
+      preferred_models: ["gemini-pro", "llama-3.3-70b"]
+      max_latency_ms: 1000
+      quality_threshold: 0.80
+    
+    multimodal:
+      preferred_models: ["gemini-pro-vision"]
+      required_capabilities: ["multimodal", "vision"]
+      quality_threshold: 0.85
+
+# Production monitoring and alerting
+monitoring:
+  enable_detailed_metrics: true
+  enable_cost_tracking: true
+  enable_performance_alerts: true
+  
+  alert_thresholds:
+    error_rate: 0.01  # 1% error rate
+    avg_latency_ms: 2000
+    cost_per_hour: 50.0
+    quality_score: 0.8
+  
+  metrics_retention_days: 90
+  detailed_logging: false  # Disable detailed logging for performance
+
+# Production security settings
+security:
+  validate_api_keys: true
+  encrypt_config_at_rest: false  # Would implement if needed
+  audit_model_usage: true
+  rate_limiting:
+    requests_per_minute: 1000
+    burst_limit: 1500
+
+# Disaster recovery and fallback
+disaster_recovery:
+  enable_cross_provider_fallback: true
+  fallback_order:
+    - "gemini-pro"      # Most reliable
+    - "llama-3.3-70b"   # Local/self-hosted
+    - "deepseek-v3"     # Premium but external
+  
+  degraded_mode:
+    enabled: true
+    fallback_to_basic: true
+    quality_threshold: 0.6  # Lower quality acceptable in degraded mode
+
+# Production metadata
+metadata:
+  config_name: "production"
+  description: "Production environment with optimized quality, reliability, and monitoring"
+  deployment_notes:
+    - "All providers should be production-ready with proper monitoring"
+    - "API keys must be configured via environment variables"
+    - "Cost monitoring and alerting enabled"
+    - "Fallback strategies configured for high availability"
+  
+  sla_requirements:
+    availability: 0.999  # 99.9% uptime
+    max_response_time_ms: 2000
+    error_rate: 0.01  # 1% maximum error rate

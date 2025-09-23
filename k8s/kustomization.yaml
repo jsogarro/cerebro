@@ -1,0 +1,44 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: research-platform
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - deployment-api.yaml
+  - deployment-worker.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - networkpolicy.yaml
+
+images:
+  - name: gcr.io/PROJECT_ID/research-platform-api
+    newTag: latest
+  - name: gcr.io/PROJECT_ID/research-platform-worker
+    newTag: latest
+
+configMapGenerator:
+  - name: research-platform-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=production
+
+secretGenerator:
+  - name: research-platform-secrets
+    behavior: merge
+    envs:
+      - secrets.env
+
+replicas:
+  - name: research-api
+    count: 3
+  - name: research-worker
+    count: 5
+
+commonLabels:
+  app.kubernetes.io/name: research-platform
+  app.kubernetes.io/managed-by: kustomize

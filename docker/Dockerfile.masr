@@ -1,0 +1,65 @@
+# Dockerfile for MASR (Multi-Agent System Router) Service
+# Specialized container optimized for routing and coordination
+
+FROM python:3.11-slim as base
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_SYSTEM_PYTHON=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONPATH=/app
+
+# Install system dependencies for MASR
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    curl \
+    git \
+    # Math and statistics libraries for cost optimization
+    libopenblas-dev \
+    liblapack-dev \
+    # Network tools for service discovery
+    netcat-traditional \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Create app directory
+WORKDIR /app
+
+# Copy dependency files
+COPY pyproject.toml .
+COPY README.md .
+
+# Install dependencies (optimized for MASR components)
+RUN uv pip install -e . && \
+    uv pip install numpy scipy scikit-learn && \
+    uv pip install redis aioredis
+
+# Copy source code
+COPY src/ ./src/
+
+# Create non-root user for security
+RUN groupadd -r masr && useradd -r -g masr masr && \
+    chown -R masr:masr /app
+
+# Create directories for MASR data and logs
+RUN mkdir -p /app/data/masr /app/logs && \
+    chown -R masr:masr /app/data /app/logs
+
+# Switch to non-root user
+USER masr
+
+# Expose MASR service port
+EXPOSE 9100
+
+# Health check for MASR service
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:9100/health || \
+        python -c "import sys; from src.ai_brain.router.masr import MASRouter; sys.exit(0)" || exit 1
+
+# MASR service startup script
+CMD ["python", "-m", "src.ai_brain.router.masr_service"]

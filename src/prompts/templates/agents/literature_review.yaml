@@ -1,0 +1,159 @@
+# Literature Review Agent Prompt Template
+# Converts existing hard-coded literature review prompt to YAML format
+
+metadata:
+  name: "literature_review_agent"
+  version: "1.0.0"
+  description: "Systematic literature review and academic source analysis"
+  type: "agent"
+  role: "literature_analyst"
+  domain: "research"
+  author: "Cerebro Research Team"
+  complexity_score: 0.8
+  estimated_tokens: 1500
+
+# Template variables
+variables:
+  - name: "query"
+    type: "string"
+    description: "Research query or question"
+    required: true
+    
+  - name: "domains"
+    type: "list"
+    description: "Research domains to focus on"
+    required: true
+    default: ["general"]
+    
+  - name: "max_sources"
+    type: "integer" 
+    description: "Maximum number of sources to analyze"
+    required: false
+    default: 50
+    
+  - name: "found_sources"
+    type: "string"
+    description: "Academic sources found by search tools"
+    required: false
+    default: "No sources provided"
+    
+  - name: "source_count"
+    type: "integer"
+    description: "Number of sources found"
+    required: false
+    default: 0
+    
+  - name: "depth_level"
+    type: "string"
+    description: "Research depth level (survey, comprehensive, exhaustive)"
+    required: false
+    default: "comprehensive"
+
+# System prompt
+system_prompt: |
+  You are a Literature Review Agent specialized in conducting comprehensive literature reviews across academic databases.
+  
+  Your role and responsibilities:
+  - Search systematically across multiple databases
+  - Apply rigorous inclusion/exclusion criteria
+  - Assess source quality and credibility
+  - Extract key findings and methodologies
+  - Identify research gaps and opportunities
+  - Follow systematic review protocols
+  
+  Guidelines for high-quality literature reviews:
+  1. Use multiple search strategies and databases
+  2. Apply clear inclusion/exclusion criteria
+  3. Assess study quality and risk of bias
+  4. Extract data systematically
+  5. Synthesize findings objectively
+  6. Identify gaps for future research
+
+# User prompt  
+user_prompt: |
+  Conduct a systematic literature review on: {{query}}
+  
+  Research parameters:
+  - Research domains: {{#each domains}}{{item}}{{#unless @last}}, {{/unless}}{{/each}}
+  - Target number of sources: {{max_sources}}
+  - Research depth: {{depth_level}}
+  
+  {{#if found_sources}}
+  Sources available for analysis:
+  {{found_sources}}
+  
+  Please analyze these {{source_count}} sources and provide a comprehensive literature analysis.
+  {{else}}
+  Please provide a literature review strategy and methodology for finding relevant sources.
+  {{/if}}
+  
+  Follow systematic review protocols and provide comprehensive analysis with proper academic rigor.
+
+# Expected output schema
+expected_output_schema:
+  literature_analysis:
+    search_strategy: "string"
+    inclusion_criteria: ["string"]
+    exclusion_criteria: ["string"]
+    sources_analyzed:
+      - title: "string"
+        authors: ["string"]
+        year: "integer"
+        journal: "string"
+        relevance_score: "float"
+        quality_rating: "string"
+        key_findings: ["string"]
+        methodology: "string"
+        limitations: ["string"]
+    key_findings: ["string"] 
+    methodologies_identified: ["string"]
+    research_gaps: ["string"]
+    theoretical_frameworks: ["string"]
+    quality_assessment:
+      overall_quality: "string"
+      bias_assessment: "string"
+      strength_of_evidence: "string"
+    synthesis:
+      main_conclusions: ["string"]
+      consensus_areas: ["string"]
+      conflicting_findings: ["string"]
+      future_research_directions: ["string"]
+    confidence_score: "float"
+
+# Few-shot examples
+examples:
+  - input_variables:
+      query: "Impact of machine learning on healthcare diagnostics"
+      domains: ["healthcare", "AI", "diagnostics"]
+      max_sources: 25
+    expected_output: |
+      {
+        "literature_analysis": {
+          "search_strategy": "Systematic search across PubMed, IEEE, and ACM databases using keywords: machine learning, healthcare, diagnostics, AI diagnosis",
+          "key_findings": [
+            "ML models show 15-20% improvement in diagnostic accuracy over traditional methods",
+            "Deep learning particularly effective for medical imaging analysis"
+          ],
+          "research_gaps": [
+            "Limited studies on ML model interpretability in clinical settings",
+            "Insufficient research on bias in healthcare ML algorithms"
+          ]
+        }
+      }
+
+# Template configuration
+output_format: "json"
+max_tokens: 4000
+temperature: 0.3  # Lower temperature for more consistent academic analysis
+
+# Advanced features
+requires_refinement: true
+consensus_threshold: 0.90
+quality_checks:
+  - "academic_rigor"
+  - "source_quality"
+  - "methodology_soundness"
+
+safety_checks:
+  - "no_fabricated_sources"
+  - "no_biased_conclusions"

@@ -1,0 +1,750 @@
+"""
+MASR (Multi-Agent System Router) - Core Intelligence Engine
+
+The Multi-Agent System Router is the central intelligence component that:
+1. Analyzes incoming queries for complexity and requirements
+2. Optimizes model selection for cost and performance
+3. Determines optimal agent allocation and coordination strategy
+4. Routes requests to appropriate supervisors and workers
+5. Manages fallback strategies and error recovery
+6. Tracks performance metrics for continuous improvement
+
+This is the brain of Cerebro's AI orchestration system, making intelligent
+decisions about how to handle each query most effectively.
+"""
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Dict, List, Optional, Any
+import uuid
+
+from .query_analyzer import QueryComplexityAnalyzer, ComplexityAnalysis, ComplexityLevel
+from .cost_optimizer import CostOptimizer, OptimizationResult, OptimizationStrategy
+
+logger = logging.getLogger(__name__)
+
+
+class CollaborationMode(Enum):
+    """Agent collaboration modes for different query types."""
+
+    DIRECT = "direct"  # Single agent handles everything
+    PARALLEL = "parallel"  # Multiple agents work simultaneously
+    HIERARCHICAL = "hierarchical"  # Supervisor coordinates workers
+    DEBATE = "debate"  # Agents discuss and refine responses
+    ENSEMBLE = "ensemble"  # Multiple models/agents vote on result
+
+
+class RoutingStrategy(Enum):
+    """High-level routing strategies."""
+
+    SPEED_FIRST = "speed_first"  # Minimize latency
+    COST_EFFICIENT = "cost_efficient"  # Minimize cost
+    QUALITY_FOCUSED = "quality_focused"  # Maximize quality
+    BALANCED = "balanced"  # Balance all factors
+    ADAPTIVE = "adaptive"  # Learn from usage patterns
+
+
+@dataclass
+class AgentAllocation:
+    """Specification for agent allocation."""
+
+    supervisor_type: str
+    worker_count: int = 1
+    worker_types: List[str] = field(default_factory=list)
+    max_parallel: int = 5
+    timeout_seconds: int = 300
+    retry_attempts: int = 2
+
+
+@dataclass
+class RoutingDecision:
+    """Complete routing decision with all specifications."""
+
+    # Query identification
+    query_id: str
+    timestamp: datetime
+
+    # Analysis results
+    complexity_analysis: ComplexityAnalysis
+    optimization_result: OptimizationResult
+
+    # Routing specifications
+    collaboration_mode: CollaborationMode
+    agent_allocation: AgentAllocation
+
+    # Performance predictions
+    estimated_cost: float
+    estimated_latency_ms: int
+    estimated_quality: float
+    confidence_score: float
+
+    # Execution details
+    fallback_strategy: str = "graceful_degradation"
+    monitoring_level: str = "standard"  # minimal, standard, detailed
+
+    # Context preservation
+    context_requirements: Dict[str, Any] = field(default_factory=dict)
+    memory_allocation: Dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class RoutingMetrics:
+    """Metrics for tracking routing performance."""
+
+    total_requests: int = 0
+    successful_requests: int = 0
+    failed_requests: int = 0
+    avg_response_time_ms: float = 0.0
+    avg_cost_per_request: float = 0.0
+    avg_quality_score: float = 0.0
+    fallback_usage_rate: float = 0.0
+
+    # Strategy effectiveness
+    strategy_performance: Dict[str, float] = field(default_factory=dict)
+    model_performance: Dict[str, float] = field(default_factory=dict)
+
+    # Time-based metrics
+    last_updated: datetime = field(default_factory=datetime.now)
+
+
+class MASRouter:
+    """
+    Multi-Agent System Router - The central intelligence of Cerebro.
+
+    Combines complexity analysis with cost optimization to make intelligent
+    routing decisions that balance performance, cost, and quality based on
+    query requirements and system constraints.
+
+    Now supports dynamic model configuration for flexible routing.
+    """
+
+    def __init__(
+        self,
+        config: Optional[Dict] = None,
+        model_config_manager: Optional["ModelConfigManager"] = None,
+    ):
+        """Initialize MASR with configuration."""
+        self.config = config or {}
+        self.model_config_manager = model_config_manager
+
+        # Initialize components
+        self.complexity_analyzer = QueryComplexityAnalyzer(
+            config.get("complexity_analyzer", {})
+        )
+        self.cost_optimizer = CostOptimizer(
+            config.get("cost_optimizer", {}), model_config_manager
+        )
+
+        # Routing configuration
+        self.default_strategy = RoutingStrategy(
+            self.config.get("default_strategy", "balanced")
+        )
+        self.enable_adaptive_routing = self.config.get("enable_adaptive", True)
+        self.enable_caching = self.config.get("enable_caching", True)
+
+        # Performance thresholds
+        self.quality_threshold = self.config.get("min_quality", 0.8)
+        self.cost_threshold = self.config.get("max_cost", 0.05)
+        self.latency_threshold_ms = self.config.get("max_latency_ms", 5000)
+
+        # Agent allocation limits
+        self.max_agents_per_query = self.config.get("max_agents", 10)
+        self.max_parallel_workers = self.config.get("max_parallel", 5)
+
+        # Performance tracking
+        self.metrics = RoutingMetrics()
+        self.routing_history: List[RoutingDecision] = []
+        self.decision_cache: Dict[str, RoutingDecision] = {}
+
+        # Learning parameters for adaptive routing
+        self.learning_enabled = self.config.get("enable_learning", True)
+        self.adaptation_window = self.config.get("adaptation_window_hours", 24)
+
+    async def route(
+        self,
+        query: str,
+        context: Optional[Dict] = None,
+        strategy: Optional[RoutingStrategy] = None,
+        constraints: Optional[Dict] = None,
+    ) -> RoutingDecision:
+        """
+        Route a query through intelligent analysis and optimization.
+
+        Args:
+            query: The input query to route
+            context: Additional context (user info, session, etc.)
+            strategy: Routing strategy override
+            constraints: Custom constraints for this request
+
+        Returns:
+            RoutingDecision with complete routing specifications
+        """
+        start_time = datetime.now()
+        query_id = str(uuid.uuid4())
+
+        logger.info(f"Routing query {query_id}: {query[:100]}...")
+
+        try:
+            # Check cache first if enabled
+            if self.enable_caching:
+                cached_decision = self._check_cache(query, context)
+                if cached_decision:
+                    logger.info(f"Using cached routing for {query_id}")
+                    return cached_decision
+
+            # Step 1: Analyze query complexity
+            complexity_analysis = await self.complexity_analyzer.analyze(query, context)
+
+            # Step 2: Optimize model selection
+            routing_strategy = strategy or self._select_routing_strategy(
+                complexity_analysis, context
+            )
+            optimization_strategy = self._map_to_optimization_strategy(routing_strategy)
+
+            optimization_result = await self.cost_optimizer.optimize(
+                complexity_analysis, optimization_strategy, constraints
+            )
+
+            # Step 3: Determine collaboration mode
+            collaboration_mode = self._determine_collaboration_mode(
+                complexity_analysis, optimization_result
+            )
+
+            # Step 4: Allocate agents
+            agent_allocation = self._allocate_agents(
+                complexity_analysis, collaboration_mode
+            )
+
+            # Step 5: Calculate performance predictions
+            predictions = self._predict_performance(
+                complexity_analysis, optimization_result, agent_allocation
+            )
+
+            # Step 6: Create routing decision
+            decision = RoutingDecision(
+                query_id=query_id,
+                timestamp=start_time,
+                complexity_analysis=complexity_analysis,
+                optimization_result=optimization_result,
+                collaboration_mode=collaboration_mode,
+                agent_allocation=agent_allocation,
+                estimated_cost=predictions["cost"],
+                estimated_latency_ms=predictions["latency"],
+                estimated_quality=predictions["quality"],
+                confidence_score=predictions["confidence"],
+                fallback_strategy=self._select_fallback_strategy(complexity_analysis),
+                monitoring_level=self._select_monitoring_level(complexity_analysis),
+                context_requirements=self._determine_context_requirements(
+                    complexity_analysis, context
+                ),
+                memory_allocation=self._allocate_memory(complexity_analysis),
+            )
+
+            # Cache decision if caching is enabled
+            if self.enable_caching:
+                self._cache_decision(query, context, decision)
+
+            # Update metrics
+            self._update_metrics(decision)
+
+            # Store in history for learning
+            self.routing_history.append(decision)
+
+            # Trigger adaptive learning if enabled
+            if self.learning_enabled:
+                asyncio.create_task(self._adapt_from_decision(decision))
+
+            processing_time = (datetime.now() - start_time).total_seconds() * 1000
+            logger.info(
+                f"Routing complete for {query_id}: {decision.collaboration_mode.value} "
+                f"mode with {decision.agent_allocation.worker_count} agents "
+                f"(processing: {processing_time:.1f}ms)"
+            )
+
+            return decision
+
+        except Exception as e:
+            logger.error(f"Routing failed for {query_id}: {e}")
+            # Return fallback routing decision
+            return self._create_fallback_decision(query_id, query, e)
+
+    def _select_routing_strategy(
+        self, complexity_analysis: ComplexityAnalysis, context: Optional[Dict]
+    ) -> RoutingStrategy:
+        """Select the optimal routing strategy based on analysis and context."""
+
+        # Check for explicit strategy in context
+        if context and context.get("routing_strategy"):
+            return RoutingStrategy(context["routing_strategy"])
+
+        # Use adaptive strategy if enabled and we have enough history
+        if self.enable_adaptive_routing and len(self.routing_history) > 100:
+            return self._get_adaptive_strategy(complexity_analysis)
+
+        # Strategy selection based on query characteristics
+        if complexity_analysis.priority_level == "critical":
+            return RoutingStrategy.SPEED_FIRST
+
+        elif complexity_analysis.level == ComplexityLevel.SIMPLE:
+            return RoutingStrategy.COST_EFFICIENT
+
+        elif complexity_analysis.level == ComplexityLevel.COMPLEX:
+            return RoutingStrategy.QUALITY_FOCUSED
+
+        else:
+            return self.default_strategy
+
+    def _map_to_optimization_strategy(
+        self, routing_strategy: RoutingStrategy
+    ) -> OptimizationStrategy:
+        """Map routing strategy to cost optimization strategy."""
+        mapping = {
+            RoutingStrategy.SPEED_FIRST: OptimizationStrategy.LATENCY_OPTIMIZED,
+            RoutingStrategy.COST_EFFICIENT: OptimizationStrategy.COST_MINIMIZED,
+            RoutingStrategy.QUALITY_FOCUSED: OptimizationStrategy.PERFORMANCE_OPTIMIZED,
+            RoutingStrategy.BALANCED: OptimizationStrategy.BALANCED,
+            RoutingStrategy.ADAPTIVE: OptimizationStrategy.BALANCED,
+        }
+
+        return mapping.get(routing_strategy, OptimizationStrategy.BALANCED)
+
+    def _determine_collaboration_mode(
+        self,
+        complexity_analysis: ComplexityAnalysis,
+        optimization_result: OptimizationResult,
+    ) -> CollaborationMode:
+        """Determine optimal agent collaboration mode."""
+
+        # Simple queries can use direct mode
+        if complexity_analysis.level == ComplexityLevel.SIMPLE:
+            return CollaborationMode.DIRECT
+
+        # Multi-domain queries benefit from parallel processing
+        if len(complexity_analysis.domains) > 2:
+            return CollaborationMode.PARALLEL
+
+        # High uncertainty benefits from debate/validation
+        if complexity_analysis.uncertainty > 0.7:
+            return CollaborationMode.DEBATE
+
+        # Complex single-domain queries use hierarchical
+        if complexity_analysis.level == ComplexityLevel.COMPLEX:
+            return CollaborationMode.HIERARCHICAL
+
+        # Default to parallel for moderate complexity
+        return CollaborationMode.PARALLEL
+
+    def _allocate_agents(
+        self,
+        complexity_analysis: ComplexityAnalysis,
+        collaboration_mode: CollaborationMode,
+    ) -> AgentAllocation:
+        """Determine optimal agent allocation with supervisor-based hierarchical routing."""
+
+        # Get supervisor types based on domains
+        supervisor_types = self._get_domain_supervisor_types(complexity_analysis.domains)
+        primary_supervisor = supervisor_types[0] if supervisor_types else "research"
+
+        # Base allocation by collaboration mode
+        if collaboration_mode == CollaborationMode.DIRECT:
+            return AgentAllocation(
+                supervisor_type=primary_supervisor,
+                worker_count=1,
+                worker_types=self._get_domain_worker_types(complexity_analysis.domains),
+                max_parallel=1,
+                timeout_seconds=60,
+                retry_attempts=1,
+            )
+
+        elif collaboration_mode == CollaborationMode.PARALLEL:
+            worker_count = min(
+                len(complexity_analysis.domains) + 1, self.max_parallel_workers
+            )
+            return AgentAllocation(
+                supervisor_type=primary_supervisor,
+                worker_count=worker_count,
+                worker_types=self._get_domain_worker_types(complexity_analysis.domains),
+                max_parallel=worker_count,
+                timeout_seconds=180,
+                retry_attempts=2,
+            )
+
+        elif collaboration_mode == CollaborationMode.HIERARCHICAL:
+            worker_count = min(
+                complexity_analysis.subtask_count, self.max_agents_per_query
+            )
+            return AgentAllocation(
+                supervisor_type=primary_supervisor,
+                worker_count=worker_count,
+                worker_types=self._get_specialized_worker_types(complexity_analysis),
+                max_parallel=min(worker_count, 3),
+                timeout_seconds=300,
+                retry_attempts=3,
+            )
+
+        elif collaboration_mode == CollaborationMode.DEBATE:
+            return AgentAllocation(
+                supervisor_type=primary_supervisor,
+                worker_count=3,  # Typical debate size
+                worker_types=["analyst", "critic", "synthesizer"],
+                max_parallel=3,
+                timeout_seconds=240,
+                retry_attempts=2,
+            )
+
+        else:  # ENSEMBLE
+            return AgentAllocation(
+                supervisor_type=primary_supervisor,
+                worker_count=5,
+                worker_types=self._get_domain_worker_types(complexity_analysis.domains),
+                max_parallel=5,
+                timeout_seconds=180,
+                retry_attempts=1,
+            )
+
+    def _get_domain_supervisor_types(self, domains) -> List[str]:
+        """Get supervisor types based on identified domains (enhanced for hierarchical routing)."""
+        supervisor_types = []
+
+        domain_supervisors = {
+            "research": "research",
+            "content": "content",
+            "analytics": "analytics",
+            "service": "service",
+            "multimodal": "content",  # Fallback to content supervisor for multimodal
+        }
+
+        for domain in domains:
+            domain_name = domain.value if hasattr(domain, "value") else str(domain)
+            supervisor_type = domain_supervisors.get(domain_name, "research")  # Default to research
+            if supervisor_type not in supervisor_types:
+                supervisor_types.append(supervisor_type)
+
+        # Ensure we have at least one supervisor
+        if not supervisor_types:
+            supervisor_types = ["research"]
+
+        return supervisor_types
+
+    def _get_domain_worker_types(self, domains) -> List[str]:
+        """Get worker types based on identified domains (legacy method for backward compatibility)."""
+        worker_types = []
+
+        domain_workers = {
+            "research": "research_specialist",
+            "content": "content_specialist",
+            "analytics": "analytics_specialist",
+            "service": "service_specialist",
+            "multimodal": "multimodal_specialist",
+        }
+
+        for domain in domains:
+            domain_name = domain.value if hasattr(domain, "value") else str(domain)
+            worker_type = domain_workers.get(domain_name, "general_specialist")
+            if worker_type not in worker_types:
+                worker_types.append(worker_type)
+
+        # Ensure we have at least one worker
+        if not worker_types:
+            worker_types = ["general_specialist"]
+
+        return worker_types
+
+    def _get_specialized_worker_types(self, complexity_analysis) -> List[str]:
+        """Get specialized worker types for hierarchical mode."""
+        worker_types = []
+
+        # Add based on reasoning types needed
+        reasoning_workers = {
+            "analytical": "analysis_specialist",
+            "logical": "logic_specialist",
+            "comparative": "comparison_specialist",
+            "synthetic": "synthesis_specialist",
+            "evaluative": "evaluation_specialist",
+        }
+
+        for reasoning_type in complexity_analysis.reasoning_types:
+            if reasoning_type in reasoning_workers:
+                worker_types.append(reasoning_workers[reasoning_type])
+
+        # Add domain specialists
+        worker_types.extend(self._get_domain_worker_types(complexity_analysis.domains))
+
+        # Always include a validator for complex queries
+        worker_types.append("validation_specialist")
+
+        return worker_types[: self.max_agents_per_query]
+
+    def _predict_performance(
+        self,
+        complexity_analysis: ComplexityAnalysis,
+        optimization_result: OptimizationResult,
+        agent_allocation: AgentAllocation,
+    ) -> Dict[str, float]:
+        """Predict performance metrics for the routing decision."""
+
+        # Base predictions from optimization
+        base_cost = optimization_result.estimated_cost.cost_per_request
+        base_latency = optimization_result.estimated_cost.latency_estimate_ms
+        base_quality = optimization_result.estimated_cost.quality_score
+
+        # Adjust for agent overhead
+        agent_overhead_factor = 1 + (agent_allocation.worker_count - 1) * 0.1
+        coordination_overhead = 50 * agent_allocation.worker_count  # ms per agent
+
+        predicted_cost = base_cost * agent_overhead_factor
+        predicted_latency = base_latency + coordination_overhead
+        predicted_quality = min(
+            base_quality + (agent_allocation.worker_count * 0.05), 1.0
+        )
+
+        # Confidence based on analysis uncertainty
+        confidence = 1.0 - complexity_analysis.uncertainty
+
+        return {
+            "cost": predicted_cost,
+            "latency": predicted_latency,
+            "quality": predicted_quality,
+            "confidence": confidence,
+        }
+
+    def _select_fallback_strategy(self, complexity_analysis) -> str:
+        """Select appropriate fallback strategy."""
+        if complexity_analysis.priority_level == "critical":
+            return "immediate_fallback"
+        elif complexity_analysis.level == ComplexityLevel.SIMPLE:
+            return "retry_with_simpler_model"
+        else:
+            return "graceful_degradation"
+
+    def _select_monitoring_level(self, complexity_analysis) -> str:
+        """Select monitoring level based on complexity."""
+        if complexity_analysis.level == ComplexityLevel.COMPLEX:
+            return "detailed"
+        elif complexity_analysis.uncertainty > 0.7:
+            return "detailed"
+        else:
+            return "standard"
+
+    def _determine_context_requirements(
+        self, complexity_analysis, context: Optional[Dict]
+    ) -> Dict[str, Any]:
+        """Determine context preservation requirements."""
+        requirements = {}
+
+        # Memory requirements based on complexity
+        if complexity_analysis.level != ComplexityLevel.SIMPLE:
+            requirements["preserve_conversation"] = True
+            requirements["max_context_tokens"] = (
+                complexity_analysis.estimated_tokens * 2
+            )
+
+        # Session requirements
+        if context and context.get("session_id"):
+            requirements["session_continuity"] = True
+            requirements["session_id"] = context["session_id"]
+
+        return requirements
+
+    def _allocate_memory(self, complexity_analysis) -> Dict[str, int]:
+        """Allocate memory resources based on complexity."""
+        allocation = {}
+
+        # Working memory allocation
+        allocation["working_memory_mb"] = 100 + (complexity_analysis.subtask_count * 50)
+
+        # Context window allocation
+        allocation["context_tokens"] = complexity_analysis.estimated_tokens * 3
+
+        # Cache allocation
+        allocation["cache_mb"] = 50 + (len(complexity_analysis.domains) * 25)
+
+        return allocation
+
+    def _check_cache(
+        self, query: str, context: Optional[Dict]
+    ) -> Optional[RoutingDecision]:
+        """Check if we have a cached routing decision."""
+        cache_key = self._generate_cache_key(query, context)
+        return self.decision_cache.get(cache_key)
+
+    def _cache_decision(
+        self, query: str, context: Optional[Dict], decision: RoutingDecision
+    ):
+        """Cache a routing decision."""
+        cache_key = self._generate_cache_key(query, context)
+        self.decision_cache[cache_key] = decision
+
+        # Limit cache size
+        if len(self.decision_cache) > 1000:
+            # Remove oldest entries
+            oldest_keys = sorted(
+                self.decision_cache.keys(),
+                key=lambda k: self.decision_cache[k].timestamp,
+            )[:100]
+            for key in oldest_keys:
+                del self.decision_cache[key]
+
+    def _generate_cache_key(self, query: str, context: Optional[Dict]) -> str:
+        """Generate a cache key for query and context."""
+        import hashlib
+
+        # Create hash from query and relevant context
+        cache_data = {
+            "query": query.lower().strip(),
+            "user_id": context.get("user_id") if context else None,
+            "domain": context.get("domain") if context else None,
+        }
+
+        cache_string = str(sorted(cache_data.items()))
+        return hashlib.md5(cache_string.encode()).hexdigest()
+
+    def _create_fallback_decision(
+        self, query_id: str, query: str, error: Exception
+    ) -> RoutingDecision:
+        """Create a safe fallback routing decision when routing fails."""
+        logger.warning(f"Creating fallback decision for {query_id} due to: {error}")
+
+        # Simple fallback analysis
+        from .query_analyzer import (
+            ComplexityAnalysis,
+            ComplexityLevel,
+            ComplexityFactors,
+        )
+
+        fallback_analysis = ComplexityAnalysis(
+            score=0.5,
+            level=ComplexityLevel.MODERATE,
+            factors=ComplexityFactors(),
+            domains=[],
+            subtask_count=1,
+            uncertainty=0.8,
+            reasoning_types=[],
+            recommended_agents={"general": 1},
+            estimated_tokens=1000,
+        )
+
+        # Simple fallback optimization
+        from .cost_optimizer import (
+            OptimizationResult,
+            ModelSpec,
+            CostEstimate,
+            ModelTier,
+        )
+
+        fallback_model = ModelSpec(
+            name="llama-3.3-70b",
+            provider="ollama",
+            tier=ModelTier.STANDARD,
+            cost_per_1k_tokens=0.0008,
+            avg_latency_ms=30,
+            context_window=128000,
+            quality_score=0.75,
+        )
+
+        fallback_estimate = CostEstimate(
+            model_name="llama-3.3-70b",
+            estimated_tokens=1000,
+            cost_per_request=0.0008,
+            total_monthly_cost=80.0,
+            latency_estimate_ms=30,
+            quality_score=0.75,
+            confidence=0.5,
+        )
+
+        fallback_optimization = OptimizationResult(
+            primary_model=fallback_model,
+            estimated_cost=fallback_estimate,
+            reasoning="Fallback routing due to analysis failure",
+        )
+
+        return RoutingDecision(
+            query_id=query_id,
+            timestamp=datetime.now(),
+            complexity_analysis=fallback_analysis,
+            optimization_result=fallback_optimization,
+            collaboration_mode=CollaborationMode.DIRECT,
+            agent_allocation=AgentAllocation(
+                supervisor_type="general", worker_count=1, worker_types=["general"]
+            ),
+            estimated_cost=0.0008,
+            estimated_latency_ms=100,
+            estimated_quality=0.7,
+            confidence_score=0.3,
+            fallback_strategy="error_recovery",
+            monitoring_level="detailed",
+        )
+
+    def _update_metrics(self, decision: RoutingDecision):
+        """Update routing metrics with new decision."""
+        self.metrics.total_requests += 1
+        self.metrics.last_updated = datetime.now()
+        # Additional metrics would be updated after execution feedback
+
+    def _get_adaptive_strategy(self, complexity_analysis) -> RoutingStrategy:
+        """Get adaptive routing strategy based on historical performance."""
+        # Analyze recent performance by strategy
+        recent_cutoff = datetime.now() - timedelta(hours=self.adaptation_window)
+        recent_decisions = [
+            d for d in self.routing_history if d.timestamp > recent_cutoff
+        ]
+
+        if not recent_decisions:
+            return self.default_strategy
+
+        # Simple strategy selection based on average confidence
+        strategy_performance = {}
+        for decision in recent_decisions:
+            strategy = "balanced"  # Simplified for now
+            if strategy not in strategy_performance:
+                strategy_performance[strategy] = []
+            strategy_performance[strategy].append(decision.confidence_score)
+
+        # Select strategy with highest average confidence
+        best_strategy = max(
+            strategy_performance.items(), key=lambda x: sum(x[1]) / len(x[1])
+        )[0]
+
+        return RoutingStrategy(best_strategy)
+
+    async def _adapt_from_decision(self, decision: RoutingDecision):
+        """Adapt routing parameters based on decision outcomes."""
+        # This would implement learning from execution feedback
+        # For now, it's a placeholder for future ML-based adaptation
+        pass
+
+    async def get_metrics(self) -> RoutingMetrics:
+        """Get current routing metrics."""
+        return self.metrics
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on MASR components."""
+        health = {
+            "status": "healthy",
+            "components": {
+                "complexity_analyzer": "healthy",
+                "cost_optimizer": "healthy",
+                "decision_cache": f"{len(self.decision_cache)} entries",
+                "routing_history": f"{len(self.routing_history)} decisions",
+            },
+            "metrics": {
+                "total_requests": self.metrics.total_requests,
+                "cache_hit_rate": "N/A",  # Would calculate from actual usage
+                "avg_routing_time_ms": "N/A",  # Would track routing performance
+            },
+        }
+
+        return health
+
+
+__all__ = [
+    "MASRouter",
+    "RoutingDecision",
+    "CollaborationMode",
+    "RoutingStrategy",
+    "AgentAllocation",
+    "RoutingMetrics",
+]

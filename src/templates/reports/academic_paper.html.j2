@@ -1,0 +1,481 @@
+{% extends "base.html.j2" %}
+
+{% block title %}{{ report.title }} - Academic Research Paper{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Academic paper specific styles */
+    body {
+        font-family: 'Times New Roman', serif;
+        font-size: 12pt;
+        line-height: 1.8;
+        max-width: 8.5in;
+        margin: 0 auto;
+        padding: 1in;
+        text-align: justify;
+    }
+    
+    .academic-header {
+        text-align: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #ccc;
+    }
+    
+    .academic-header h1 {
+        font-size: 16pt;
+        font-weight: bold;
+        margin-bottom: 1rem;
+        text-transform: none;
+        border: none;
+        padding: 0;
+    }
+    
+    .author-info {
+        font-size: 11pt;
+        margin: 1rem 0;
+    }
+    
+    .author-name {
+        font-weight: bold;
+        margin-bottom: 0.25rem;
+    }
+    
+    .author-affiliation {
+        font-style: italic;
+        color: #555;
+    }
+    
+    .abstract {
+        background: #f9f9f9;
+        border: 1px solid #ddd;
+        padding: 1.5rem;
+        margin: 2rem 0;
+        border-radius: 0;
+        font-size: 11pt;
+    }
+    
+    .abstract h3 {
+        font-size: 12pt;
+        font-weight: bold;
+        margin: 0 0 1rem 0;
+        text-align: center;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    
+    .keywords {
+        margin-top: 1rem;
+        font-size: 10pt;
+    }
+    
+    .keywords strong {
+        font-weight: bold;
+    }
+    
+    /* Academic section numbering */
+    .academic-section {
+        margin: 2rem 0;
+    }
+    
+    .academic-section h2 {
+        font-size: 14pt;
+        font-weight: bold;
+        margin: 1.5rem 0 1rem 0;
+        border: none;
+        padding: 0;
+    }
+    
+    .academic-section h3 {
+        font-size: 12pt;
+        font-weight: bold;
+        margin: 1rem 0 0.5rem 0;
+        font-style: italic;
+    }
+    
+    /* Figures and tables */
+    .figure {
+        margin: 1.5rem 0;
+        text-align: center;
+        break-inside: avoid;
+    }
+    
+    .figure img {
+        max-width: 100%;
+        height: auto;
+        border: 1px solid #ccc;
+    }
+    
+    .figure-caption {
+        font-size: 10pt;
+        margin-top: 0.5rem;
+        text-align: left;
+        max-width: 80%;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    
+    .table-caption {
+        font-size: 10pt;
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+        text-align: left;
+    }
+    
+    /* In-text citations */
+    .citation-inline {
+        font-size: 0.9em;
+    }
+    
+    /* References section */
+    .references-academic {
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid #ccc;
+    }
+    
+    .references-academic h2 {
+        font-size: 14pt;
+        font-weight: bold;
+        margin-bottom: 1rem;
+        text-align: center;
+    }
+    
+    .reference-item {
+        margin: 0.5rem 0;
+        padding-left: 1rem;
+        text-indent: -1rem;
+        font-size: 11pt;
+        line-height: 1.4;
+    }
+    
+    /* Footnotes */
+    .footnote {
+        font-size: 9pt;
+        border-top: 1px solid #ccc;
+        margin-top: 2rem;
+        padding-top: 0.5rem;
+    }
+    
+    /* Academic metadata */
+    .academic-metadata {
+        background: none;
+        border: 1px solid #ccc;
+        padding: 1rem;
+        margin: 1rem 0;
+        font-size: 10pt;
+        color: #555;
+    }
+    
+    .academic-metadata h3 {
+        font-size: 11pt;
+        margin: 0 0 0.5rem 0;
+        color: #333;
+    }
+    
+    /* Page numbering (for PDF) */
+    .page-number {
+        text-align: center;
+        font-size: 10pt;
+        margin-top: 2rem;
+        color: #666;
+    }
+    
+    /* Methodology specifics */
+    .methodology-section {
+        font-size: 11pt;
+    }
+    
+    .methodology-subsection {
+        margin: 1rem 0;
+        margin-left: 1rem;
+    }
+    
+    /* Results presentation */
+    .results-section .statistical-result {
+        background: #f8f8f8;
+        border-left: 3px solid #666;
+        padding: 0.5rem 1rem;
+        margin: 1rem 0;
+        font-family: 'Courier New', monospace;
+        font-size: 10pt;
+    }
+    
+    /* Discussion formatting */
+    .discussion-point {
+        margin: 1rem 0;
+        text-indent: 1rem;
+    }
+    
+    /* Appendices */
+    .appendix {
+        margin-top: 2rem;
+        border-top: 2px solid #333;
+        padding-top: 1rem;
+    }
+    
+    .appendix h2 {
+        font-size: 14pt;
+        font-weight: bold;
+    }
+    
+    /* Print styles for academic papers */
+    @media print {
+        body {
+            font-size: 11pt;
+            margin: 0;
+            padding: 1in;
+        }
+        
+        .academic-header {
+            page-break-after: avoid;
+        }
+        
+        .abstract {
+            page-break-inside: avoid;
+        }
+        
+        .academic-section {
+            page-break-inside: avoid;
+        }
+        
+        .figure {
+            page-break-inside: avoid;
+        }
+        
+        h2 {
+            page-break-after: avoid;
+        }
+        
+        .references-academic {
+            page-break-before: always;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block header %}
+<div class="academic-header">
+    <h1>{{ report.title }}</h1>
+    {% if config.author_name %}
+    <div class="author-info">
+        <div class="author-name">{{ config.author_name }}</div>
+        {% if config.institution %}
+        <div class="author-affiliation">{{ config.institution }}</div>
+        {% endif %}
+    </div>
+    {% endif %}
+    <div class="author-info">
+        <div style="margin-top: 1rem; font-size: 10pt; color: #666;">
+            Generated: {{ report.metadata.generated_at.strftime('%B %d, %Y') }}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block metadata %}
+<!-- Academic metadata in structured format -->
+<div class="academic-metadata">
+    <h3>Research Metadata</h3>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div>
+            <strong>Research Question:</strong><br>
+            {{ report.query }}
+        </div>
+        <div>
+            <strong>Research Domains:</strong><br>
+            {{ report.domains | join(', ') }}
+        </div>
+        <div>
+            <strong>Sources Analyzed:</strong><br>
+            {{ report.metadata.total_sources }} primary sources
+        </div>
+        <div>
+            <strong>Quality Assessment:</strong><br>
+            {{ "%.1f" | format(report.metadata.quality_score * 100) }}% ({{ "High" if report.metadata.quality_score > 0.8 else "Moderate" if report.metadata.quality_score > 0.6 else "Acceptable" }} confidence)
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block table_of_contents %}
+<!-- Academic table of contents -->
+<div class="toc" style="border: 1px solid #ccc; background: #f9f9f9; padding: 1.5rem;">
+    <h2 style="text-align: center; margin: 0 0 1rem 0; font-size: 12pt;">Table of Contents</h2>
+    <div style="font-size: 11pt; line-height: 1.4;">
+        {% if report.abstract %}
+        <div style="margin: 0.25rem 0;">Abstract .................................................................. 1</div>
+        {% endif %}
+        {% set section_num = namespace(value=1) %}
+        {% for section in report.sections %}
+        <div style="margin: 0.25rem 0;">
+            {{ section_num.value }}. {{ section.title }} 
+            {% set dots_needed = 50 - (section.title | length + (section_num.value | string | length)) %}
+            {{ '.' * dots_needed }} {{ section_num.value + 1 }}
+        </div>
+        {% set section_num.value = section_num.value + 1 %}
+        {% endfor %}
+        {% if report.citations %}
+        <div style="margin: 0.25rem 0;">References .................................................................. {{ section_num.value + 1 }}</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block executive_summary %}
+{% if report.abstract %}
+<div class="abstract">
+    <h3>Abstract</h3>
+    <div>{{ report.abstract | markdown | safe }}</div>
+    
+    {% if report.domains %}
+    <div class="keywords">
+        <strong>Keywords:</strong> {{ report.domains | join(', ') }}, research methodology, systematic analysis
+    </div>
+    {% endif %}
+</div>
+{% else %}
+<!-- Generate abstract from executive summary if available -->
+{% if report.executive_summary %}
+<div class="abstract">
+    <h3>Abstract</h3>
+    <div>
+        {% set abstract_lines = report.executive_summary.split('\n') %}
+        {% for line in abstract_lines %}
+            {% if not line.startswith('#') and not line.startswith('**') and line.strip() %}
+                {{ line.strip() }}
+                {% if not loop.last %}<br>{% endif %}
+            {% endif %}
+        {% endfor %}
+    </div>
+    
+    {% if report.domains %}
+    <div class="keywords">
+        <strong>Keywords:</strong> {{ report.domains | join(', ') }}, research methodology, systematic analysis
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<!-- Academic section rendering with numbering -->
+{% set section_counter = namespace(value=1) %}
+{% for section in report.sections %}
+<div class="academic-section">
+    <h2>{{ section_counter.value }}. {{ section.title }}</h2>
+    
+    {% if section.title == "Methodology" %}
+    <div class="methodology-section">
+        {{ section.content | markdown | safe }}
+        {% for subsection in section.subsections %}
+        <div class="methodology-subsection">
+            <h3>{{ section_counter.value }}.{{ loop.index }}. {{ subsection.title }}</h3>
+            {{ subsection.content | markdown | safe }}
+        </div>
+        {% endfor %}
+    </div>
+    
+    {% elif section.title == "Results" %}
+    <div class="results-section">
+        {{ section.content | markdown | safe }}
+        {% for subsection in section.subsections %}
+        <div class="results-subsection">
+            <h3>{{ section_counter.value }}.{{ loop.index }}. {{ subsection.title }}</h3>
+            <div class="statistical-result">
+                {{ subsection.content | markdown | safe }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    {% elif section.title == "Discussion" %}
+    <div class="discussion-section">
+        {% set discussion_points = section.content.split('\n') %}
+        {% for point in discussion_points %}
+            {% if point.strip() and not point.strip().startswith('#') %}
+            <div class="discussion-point">{{ point.strip() }}</div>
+            {% endif %}
+        {% endfor %}
+        
+        {% for subsection in section.subsections %}
+        <h3>{{ section_counter.value }}.{{ loop.index }}. {{ subsection.title }}</h3>
+        {{ subsection.content | markdown | safe }}
+        {% endfor %}
+    </div>
+    
+    {% else %}
+    <!-- Standard academic section -->
+    <div class="section-content">
+        {{ section.content | markdown | safe }}
+    </div>
+    
+    {% for subsection in section.subsections %}
+    <div class="subsection">
+        <h3>{{ section_counter.value }}.{{ loop.index }}. {{ subsection.title }}</h3>
+        {{ subsection.content | markdown | safe }}
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+{% set section_counter.value = section_counter.value + 1 %}
+{% endfor %}
+{% endblock %}
+
+{% block visualizations %}
+{% if report.visualizations %}
+<div class="academic-section">
+    <h2>{{ section_counter.value }}. Figures and Tables</h2>
+    {% for viz in report.visualizations %}
+    <div class="figure">
+        <div style="border: 1px solid #ccc; padding: 2rem; background: #f9f9f9; text-align: center;">
+            <p><strong>{{ viz.title }}</strong></p>
+            <p style="color: #666; font-style: italic;">{{ viz.type.value.replace('_', ' ').title() }}</p>
+            <p style="font-size: 10pt; color: #888;">[Figure {{ loop.index }} would be rendered here]</p>
+        </div>
+        <div class="figure-caption">
+            <strong>Figure {{ loop.index }}.</strong> {{ viz.title }}. 
+            {% if viz.caption %}{{ viz.caption }}{% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block references %}
+{% if report.citations %}
+<div class="references-academic">
+    <h2>References</h2>
+    {% for citation in report.citations %}
+    <div class="reference-item">
+        {{ citation.format_citation(config.citation_style) }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block footer %}
+<div class="academic-footer" style="margin-top: 3rem; border-top: 1px solid #ccc; padding-top: 1rem;">
+    <div style="text-align: center; font-size: 10pt; color: #666;">
+        <div>Generated by Multi-Agent Research Platform</div>
+        <div>{{ report.metadata.generated_at.strftime('%B %d, %Y') }}</div>
+        {% if report.metadata.workflow_id %}
+        <div>Document ID: {{ report.metadata.workflow_id }}</div>
+        {% endif %}
+    </div>
+    
+    {% if report.metadata.agents_used %}
+    <div class="footnote">
+        <strong>Methodology Note:</strong> This research was conducted using automated analysis with the following AI agents: 
+        {{ report.metadata.agents_used | join(', ') }}. All findings have been systematically validated and cross-referenced.
+    </div>
+    {% endif %}
+    
+    <div class="page-number">
+        — Page {{ loop.index | default(1) }} —
+    </div>
+</div>
+{% endblock %}

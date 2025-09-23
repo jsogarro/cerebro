@@ -1,0 +1,408 @@
+version: '3.9'
+
+services:
+  # FastAPI Application (Production)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: cerebro-api-prod
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Direct execution via MASR
+      - MASR_SERVICE_URL=http://masr-router:9100
+      - ENABLE_DIRECT_EXECUTION=true
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      
+      # MASR Configuration
+      - MASR_ENABLE_ROUTING=true
+      - MASR_DEFAULT_STRATEGY=balanced
+      - MASR_ENABLE_LEARNING=true
+      - MASR_MAX_AGENTS=10
+      - MASR_QUALITY_THRESHOLD=0.85
+      
+      # Performance settings
+      - GUNICORN_WORKERS=4
+      - GUNICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker
+      - GUNICORN_MAX_REQUESTS=1000
+      - GUNICORN_MAX_REQUESTS_JITTER=50
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      masr-router:
+        condition: service_healthy
+    networks:
+      - cerebro-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1.0"
+        reservations:
+          memory: 1G
+          cpus: "0.5"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+
+  # Temporal Worker (Production)
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Direct execution via MASR
+      - MASR_SERVICE_URL=http://masr-router:9100
+      - ENABLE_DIRECT_EXECUTION=true
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - WORKER_CONCURRENCY=20
+      - WORKER_TASK_QUEUE=research-queue-prod
+      
+      # MASR Worker Configuration
+      - MASR_WORKER_MODE=true
+      - MASR_SUPERVISOR_POOL_SIZE=10
+      - MASR_MAX_CONCURRENT_SUPERVISORS=5
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      masr-router:
+        condition: service_healthy
+    networks:
+      - cerebro-prod
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: "0.8"
+        reservations:
+          memory: 512M
+          cpus: "0.3"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # MASR Router Service (Production)
+  masr-router:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.masr
+    container_name: cerebro-masr-prod
+    restart: always
+    ports:
+      - "9100:9100"
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - MASR_PORT=9100
+      
+      # MASR Configuration
+      - MASR_DEFAULT_STRATEGY=balanced
+      - MASR_ENABLE_ADAPTIVE=true
+      - MASR_ENABLE_CACHING=true
+      - MASR_LEARNING_INTERVAL_HOURS=6
+      - MASR_MAX_AGENTS=15
+      - MASR_QUALITY_THRESHOLD=0.85
+      
+      # Model configuration
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MODEL_CONFIG_MANAGER_ENABLED=true
+      
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cerebro-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9100/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.5"
+        reservations:
+          memory: 256M
+          cpus: "0.2"
+    security_opt:
+      - no-new-privileges:true
+
+  # MCP Server (Production)
+  mcp-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: cerebro-mcp-prod
+    command: ["python", "-m", "src.mcp.server"]
+    restart: always
+    ports:
+      - "9000:9000"
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/2
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - MCP_PORT=9000
+      - MCP_MAX_CONNECTIONS=100
+      - MCP_TIMEOUT_SECONDS=30
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cerebro-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.3"
+        reservations:
+          memory: 128M
+          cpus: "0.1"
+    security_opt:
+      - no-new-privileges:true
+
+  # PostgreSQL Database (Production)
+  postgres:
+    image: postgres:16-alpine
+    container_name: cerebro-postgres-prod
+    restart: always
+    environment:
+      - POSTGRES_USER=research
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=research_db
+      - POSTGRES_INITDB_ARGS=--auth-host=md5
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./docker/postgresql.conf:/etc/postgresql/postgresql.conf
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c log_statement=all
+      -c log_min_duration_statement=1000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research -d research_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cerebro-prod
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+    security_opt:
+      - no-new-privileges:true
+
+  # Redis Cache (Production)
+  redis:
+    image: redis:7-alpine
+    container_name: cerebro-redis-prod
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_prod:/data
+      - ./docker/redis.conf:/etc/redis/redis.conf
+    command: redis-server /etc/redis/redis.conf --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cerebro-prod
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.5"
+        reservations:
+          memory: 256M
+          cpus: "0.2"
+    security_opt:
+      - no-new-privileges:true
+
+  # Nginx Reverse Proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: cerebro-nginx-prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./docker/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - api
+      - masr-router
+      - mcp-server
+    networks:
+      - cerebro-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.2"
+        reservations:
+          memory: 64M
+          cpus: "0.1"
+    security_opt:
+      - no-new-privileges:true
+
+  # Prometheus Monitoring (Production)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: cerebro-prometheus-prod
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=90d'
+      - '--web.enable-lifecycle'
+    networks:
+      - cerebro-prod
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "0.5"
+        reservations:
+          memory: 256M
+          cpus: "0.2"
+    security_opt:
+      - no-new-privileges:true
+
+  # Grafana Dashboard (Production)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cerebro-grafana-prod
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    depends_on:
+      - prometheus
+    networks:
+      - cerebro-prod
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.3"
+        reservations:
+          memory: 128M
+          cpus: "0.1"
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  cerebro-prod:
+    driver: bridge
+    name: cerebro-production
+    driver_opts:
+      com.docker.network.enable_ipv6: "true"
+    ipam:
+      driver: default
+      config:
+        - subnet: "172.20.0.0/16"
+
+volumes:
+  postgres_data_prod:
+    name: cerebro-postgres-data-prod
+    driver: local
+  redis_data_prod:
+    name: cerebro-redis-data-prod
+    driver: local
+  prometheus_data:
+    name: cerebro-prometheus-data
+    driver: local
+  grafana_data:
+    name: cerebro-grafana-data
+    driver: local
+  nginx_logs:
+    name: cerebro-nginx-logs
+    driver: local
+
+# Production secrets (should be managed externally)
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  redis_password:
+    file: ./secrets/redis_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  gemini_api_key:
+    file: ./secrets/gemini_api_key.txt

@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="{{ config.language }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ report.title }}{% endblock %}</title>
+    
+    <!-- Base Styles -->
+    <style>
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: {{ config.pdf_settings.font_family or 'Georgia, serif' }};
+            font-size: {{ config.pdf_settings.font_size or '11pt' }};
+            line-height: 1.6;
+            color: #333;
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: {{ config.pdf_settings.margin_top or '2cm' }} {{ config.pdf_settings.margin_left or '2cm' }};
+            background: white;
+        }
+        
+        /* Typography */
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Arial', sans-serif;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            margin-top: 1.5rem;
+            color: #2c3e50;
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            color: #1a1a1a;
+            text-align: center;
+            margin-bottom: 2rem;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 1rem;
+        }
+        
+        h2 {
+            font-size: 1.8em;
+            margin-top: 2rem;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 0.5rem;
+        }
+        
+        h3 {
+            font-size: 1.4em;
+            color: #34495e;
+        }
+        
+        h4 {
+            font-size: 1.2em;
+            color: #7f8c8d;
+        }
+        
+        p {
+            margin-bottom: 1rem;
+            text-align: justify;
+        }
+        
+        /* Lists */
+        ul, ol {
+            margin: 1rem 0;
+            padding-left: 2rem;
+        }
+        
+        li {
+            margin-bottom: 0.5rem;
+        }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+            font-size: 0.9em;
+        }
+        
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        
+        /* Metadata box */
+        .metadata {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .metadata h3 {
+            color: white;
+            margin-top: 0;
+            margin-bottom: 1rem;
+        }
+        
+        .metadata-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .metadata-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .metadata-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-bottom: 0.25rem;
+        }
+        
+        .metadata-value {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        
+        /* Executive summary */
+        .executive-summary {
+            background: #f8f9fa;
+            border-left: 5px solid #3498db;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            border-radius: 0 5px 5px 0;
+        }
+        
+        /* Sections */
+        .section {
+            margin: 2rem 0;
+            break-inside: avoid;
+        }
+        
+        .subsection {
+            margin: 1.5rem 0 1.5rem 1rem;
+            border-left: 2px solid #ecf0f1;
+            padding-left: 1rem;
+        }
+        
+        /* Citations */
+        .citations {
+            background: #fdfdfd;
+            border: 1px solid #e9ecef;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            border-radius: 5px;
+        }
+        
+        .citations h2 {
+            color: #495057;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .citation {
+            margin-bottom: 1rem;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #f8f9fa;
+            font-size: 0.95em;
+        }
+        
+        .citation:last-child {
+            border-bottom: none;
+        }
+        
+        /* Visualizations */
+        .visualization {
+            margin: 2rem 0;
+            text-align: center;
+            break-inside: avoid;
+        }
+        
+        .visualization img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .visualization-caption {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-top: 0.5rem;
+            font-style: italic;
+        }
+        
+        /* Table of contents */
+        .toc {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            border-radius: 5px;
+            break-inside: avoid;
+        }
+        
+        .toc h2 {
+            margin-top: 0;
+            color: #495057;
+        }
+        
+        .toc ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .toc li {
+            margin: 0.5rem 0;
+        }
+        
+        .toc a {
+            text-decoration: none;
+            color: #007bff;
+            border-bottom: 1px dotted #007bff;
+        }
+        
+        .toc a:hover {
+            color: #0056b3;
+            border-bottom-style: solid;
+        }
+        
+        .toc-level-1 {
+            font-weight: bold;
+        }
+        
+        .toc-level-2 {
+            margin-left: 1rem;
+        }
+        
+        .toc-level-3 {
+            margin-left: 2rem;
+            font-size: 0.9em;
+        }
+        
+        /* Footer */
+        .report-footer {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 2px solid #ecf0f1;
+            text-align: center;
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+        
+        /* Print styles */
+        @media print {
+            body {
+                font-size: 12pt;
+                line-height: 1.4;
+            }
+            
+            h1 {
+                page-break-before: always;
+            }
+            
+            h1:first-of-type {
+                page-break-before: auto;
+            }
+            
+            h2, h3 {
+                page-break-after: avoid;
+            }
+            
+            .section {
+                page-break-inside: avoid;
+            }
+            
+            .metadata, .executive-summary, .toc {
+                page-break-inside: avoid;
+            }
+        }
+        
+        /* Custom CSS injection point */
+        {% if config.custom_css %}
+        {{ config.custom_css | safe }}
+        {% endif %}
+    </style>
+    
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    {% block header %}
+    <header class="report-header">
+        <h1>{{ report.title }}</h1>
+        {% if config.author_name or config.institution %}
+        <div class="author-info">
+            {% if config.author_name %}
+            <p><strong>Author:</strong> {{ config.author_name }}</p>
+            {% endif %}
+            {% if config.institution %}
+            <p><strong>Institution:</strong> {{ config.institution }}</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </header>
+    {% endblock %}
+    
+    {% block metadata %}
+    <div class="metadata">
+        <h3>Report Metadata</h3>
+        <div class="metadata-grid">
+            <div class="metadata-item">
+                <div class="metadata-label">Generated</div>
+                <div class="metadata-value">{{ report.metadata.generated_at.strftime('%B %d, %Y at %H:%M UTC') }}</div>
+            </div>
+            <div class="metadata-item">
+                <div class="metadata-label">Quality Score</div>
+                <div class="metadata-value">{{ "%.1f" | format(report.metadata.quality_score * 100) }}%</div>
+            </div>
+            <div class="metadata-item">
+                <div class="metadata-label">Word Count</div>
+                <div class="metadata-value">{{ "{:,}".format(report.metadata.word_count) }}</div>
+            </div>
+            <div class="metadata-item">
+                <div class="metadata-label">Sources</div>
+                <div class="metadata-value">{{ report.metadata.total_sources }}</div>
+            </div>
+            {% if report.metadata.total_citations > 0 %}
+            <div class="metadata-item">
+                <div class="metadata-label">Citations</div>
+                <div class="metadata-value">{{ report.metadata.total_citations }}</div>
+            </div>
+            {% endif %}
+            {% if report.domains %}
+            <div class="metadata-item">
+                <div class="metadata-label">Domains</div>
+                <div class="metadata-value">{{ report.domains | join(', ') }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endblock %}
+    
+    {% if config.include_toc %}
+    {% block table_of_contents %}
+    <div class="toc">
+        <h2>Table of Contents</h2>
+        <ul>
+            {% if report.executive_summary and config.include_executive_summary %}
+            <li class="toc-level-1"><a href="#executive-summary">Executive Summary</a></li>
+            {% endif %}
+            {% for section in report.sections %}
+            <li class="toc-level-{{ section.level }}">
+                <a href="#section-{{ loop.index }}">{{ section.title }}</a>
+            </li>
+            {% for subsection in section.subsections %}
+            <li class="toc-level-{{ section.level + 1 }}">
+                <a href="#subsection-{{ loop.index0 }}-{{ loop.index }}">{{ subsection.title }}</a>
+            </li>
+            {% endfor %}
+            {% endfor %}
+            {% if report.citations and config.include_citations %}
+            <li class="toc-level-1"><a href="#references">References</a></li>
+            {% endif %}
+        </ul>
+    </div>
+    {% endblock %}
+    {% endif %}
+    
+    {% if report.executive_summary and config.include_executive_summary %}
+    {% block executive_summary %}
+    <div id="executive-summary" class="executive-summary">
+        {{ report.executive_summary | markdown | safe }}
+    </div>
+    {% endblock %}
+    {% endif %}
+    
+    {% block content %}
+    <main class="report-content">
+        {% for section in report.sections %}
+        <div id="section-{{ loop.index }}" class="section">
+            <h{{ section.level + 1 }}>{{ section.title }}</h{{ section.level + 1 }}>
+            <div class="section-content">
+                {{ section.content | markdown | safe }}
+            </div>
+            
+            {% for subsection in section.subsections %}
+            <div id="subsection-{{ loop.index0 }}-{{ loop.index }}" class="subsection">
+                <h{{ section.level + 2 }}>{{ subsection.title }}</h{{ section.level + 2 }}>
+                <div class="subsection-content">
+                    {{ subsection.content | markdown | safe }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </main>
+    {% endblock %}
+    
+    {% if report.visualizations and config.include_visualizations %}
+    {% block visualizations %}
+    <div class="visualizations-section">
+        <h2>Visualizations</h2>
+        {% for viz in report.visualizations %}
+        <div id="viz-{{ viz.id }}" class="visualization">
+            <div class="visualization-placeholder">
+                <p><strong>{{ viz.title }}</strong></p>
+                <p>Type: {{ viz.type.value }}</p>
+                <p><em>Visualization would be rendered here</em></p>
+            </div>
+            {% if viz.caption %}
+            <div class="visualization-caption">{{ viz.caption }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endblock %}
+    {% endif %}
+    
+    {% if report.citations and config.include_citations %}
+    {% block references %}
+    <div id="references" class="citations">
+        <h2>References</h2>
+        {% for citation in report.citations %}
+        <div class="citation">
+            {{ citation.format_citation(config.citation_style) }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endblock %}
+    {% endif %}
+    
+    {% block footer %}
+    <footer class="report-footer">
+        <p>Generated by Research Platform on {{ report.metadata.generated_at.strftime('%B %d, %Y') }}</p>
+        {% if report.metadata.workflow_id %}
+        <p>Workflow ID: {{ report.metadata.workflow_id }}</p>
+        {% endif %}
+    </footer>
+    {% endblock %}
+    
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>
