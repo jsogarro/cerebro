@@ -9,5 +9,44 @@ wheels/
 # Virtual environments
 .venv
 
-
+# Environment files
 .env
+.env.local
+.env.production
+
+# Node
+node_modules/
+
+# IDE / AI tooling
+.claude/
+.clinerules
+ai/
+CLAUDE.md
+PRD.md
+TODO.md
+IMPLEMENTATION_SUMMARY.md
+GITHUB_ACTIONS_SETUP.md
+project_code_review_*.md
+cerebro_research_paper_*.md
+
+# AI-generated docs (plans, achievements, summaries)
+docs/agent-framework-apis-achievement.md
+docs/cerebro_academic_positioning.md
+docs/ci-cd-security-configuration.md
+docs/cicd-completion-summary.md
+docs/cicd-quick-reference.md
+docs/production_improvements_recommendations.md
+docs/strategic-plan-*.md
+docs/week-*-achievement.md
+docs/research/
+
+# Build artifacts
+cerebro/web/dist/
+*.xcresult
+
+# Coverage / caching
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
