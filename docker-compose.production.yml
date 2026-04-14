@@ -273,6 +273,30 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # React Web Frontend (Production)
+  web:
+    build:
+      context: ./cerebro/web
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=/api/v1
+    container_name: cerebro-web-prod
+    restart: always
+    depends_on:
+      - api
+    networks:
+      - cerebro-prod
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+        reservations:
+          memory: 128M
+          cpus: "0.1"
+    security_opt:
+      - no-new-privileges:true
+
   # Nginx Reverse Proxy (Production)
   nginx:
     image: nginx:alpine
@@ -288,6 +312,7 @@ services:
       - nginx_logs:/var/log/nginx
     depends_on:
       - api
+      - web
       - masr-router
       - mcp-server
     networks:
