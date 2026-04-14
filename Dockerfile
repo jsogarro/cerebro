@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for Research Platform
 
 # Stage 1: Base dependencies
-FROM python:3.11-slim as base
+FROM python:3.14-slim as base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -58,7 +58,7 @@ RUN uv pip install -e .
 COPY src/ ./src/
 
 # Stage 4: Production runtime
-FROM python:3.11-slim as production
+FROM python:3.14-slim as production
 
 # Create non-root user
 RUN groupadd -r app && useradd -r -g app app
