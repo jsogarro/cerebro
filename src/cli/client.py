@@ -228,3 +228,15 @@ class ResearchAPIClient:
             f"/api/v1/research/projects/{project_id}/results",
         )
         return response.json()
+
+    # Generic HTTP methods for agent framework
+
+    async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Generic GET request."""
+        response = await self._request("GET", path, params=params)
+        return response.json()
+
+    async def post(self, path: str, json_data: dict[str, Any]) -> dict[str, Any]:
+        """Generic POST request."""
+        response = await self._request("POST", path, json_data=json_data)
+        return response.json()
