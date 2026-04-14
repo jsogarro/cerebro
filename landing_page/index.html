@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cerebro | AI Research Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            200: '#bae6fd',
+                            300: '#7dd3fc',
+                            400: '#38bdf8',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                            950: '#082f49',
+                        },
+                        dark: {
+                            bg: '#0B0F19',
+                            card: '#111827',
+                            border: '#1F2937'
+                        }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'float': 'float 6s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-20px)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .dark .glass-panel {
+            background: rgba(17, 24, 39, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .grid-bg {
+            background-size: 40px 40px;
+            background-image: linear-gradient(to right, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+        }
+        .dark .grid-bg {
+            background-image: linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+        }
+        
+        /* Terminal typing effect */
+        .typing-cursor::after {
+            content: '▋';
+            animation: blink 1s step-start infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+    </style>
+</head>
+<body class="bg-white dark:bg-dark-bg text-slate-900 dark:text-slate-100 transition-colors duration-300">
+
+    <!-- Navigation -->
+    <nav class="fixed w-full z-50 glass-panel border-b border-slate-200 dark:border-dark-border transition-all duration-300" id="navbar">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 bg-gradient-to-br from-brand-500 to-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">C</div>
+                    <span class="font-bold text-xl tracking-tight">Cerebro</span>
+                </div>
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#features" class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors">Features</a>
+                    <a href="#how-it-works" class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors">How it Works</a>
+                    <a href="#testimonials" class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors">Testimonials</a>
+                    <a href="https://github.com/ogarro/cerebro" target="_blank" class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors">GitHub</a>
+                </div>
+                <div class="flex items-center gap-4">
+                    <button id="theme-toggle" class="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-500 dark:text-slate-400">
+                        <!-- Sun icon -->
+                        <svg class="w-5 h-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                        <!-- Moon icon -->
+                        <svg class="w-5 h-5 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 24.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                    </button>
+                    <a href="#get-started" class="hidden md:inline-flex items-center justify-center px-5 py-2 border border-transparent text-sm font-medium rounded-full text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-all shadow-lg hover:shadow-xl">
+                        Get Started
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="relative pt-32 pb-20 lg:pt-48 lg:pb-32 overflow-hidden">
+        <div class="absolute inset-0 grid-bg opacity-40 pointer-events-none"></div>
+        <!-- Background Glow -->
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-brand-500/20 dark:bg-brand-500/10 blur-[120px] rounded-full pointer-events-none"></div>
+
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div class="text-center max-w-4xl mx-auto">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 dark:bg-brand-900/30 border border-brand-100 dark:border-brand-800 mb-8 animate-fade-in-up">
+                    <span class="flex h-2 w-2 relative">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-brand-500"></span>
+                    </span>
+                    <span class="text-xs font-semibold text-brand-700 dark:text-brand-300 uppercase tracking-wide">v2.0 Now Available</span>
+                </div>
+                
+                <h1 class="text-5xl md:text-7xl font-extrabold tracking-tight mb-8 leading-tight">
+                    Orchestrate Intelligence. <br>
+                    <span class="gradient-text">Accelerate Discovery.</span>
+                </h1>
+                
+                <p class="text-xl md:text-2xl text-slate-600 dark:text-slate-400 mb-10 max-w-2xl mx-auto leading-relaxed">
+                    The multi-agent research platform that thinks, remembers, and evolves with your work. Automate complex research workflows with precision.
+                </p>
+                
+                <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+                    <a href="#demo" class="w-full sm:w-auto px-8 py-4 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-semibold text-lg shadow-lg shadow-brand-500/30 transition-all transform hover:-translate-y-1">
+                        Start Researching
+                    </a>
+                    <a href="https://github.com/ogarro/cerebro" target="_blank" class="w-full sm:w-auto px-8 py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-brand-300 dark:hover:border-brand-700 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 group">
+                        <svg class="w-5 h-5 text-slate-400 group-hover:text-brand-500 transition-colors" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                        View on GitHub
+                    </a>
+                </div>
+            </div>
+
+            <!-- Interactive Terminal Demo -->
+            <div class="mt-20 max-w-5xl mx-auto relative group" id="demo">
+                <div class="absolute -inset-1 bg-gradient-to-r from-brand-500 to-indigo-600 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-1000 group-hover:duration-200"></div>
+                <div class="relative rounded-xl bg-[#0F172A] border border-slate-700 shadow-2xl overflow-hidden">
+                    <!-- Terminal Header -->
+                    <div class="flex items-center justify-between px-4 py-3 bg-[#1E293B] border-b border-slate-700">
+                        <div class="flex items-center gap-2">
+                            <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                            <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                            <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                        </div>
+                        <div class="text-xs font-mono text-slate-400">cerebro-cli — research-session-042</div>
+                        <div class="w-10"></div> <!-- Spacer -->
+                    </div>
+                    <!-- Terminal Body -->
+                    <div class="p-6 font-mono text-sm md:text-base h-[400px] overflow-y-auto scrollbar-hide" id="terminal-content">
+                        <!-- Content injected by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Grid -->
+    <section id="features" class="py-24 bg-slate-50 dark:bg-[#0F172A]/50 relative">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-3xl md:text-4xl font-bold mb-4">Built for Deep Work</h2>
+                <p class="text-lg text-slate-600 dark:text-slate-400">Cerebro isn't just a chatbot. It's a comprehensive research system designed to handle complex, multi-step workflows.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Feature 1 -->
+                <div class="p-8 rounded-2xl bg-white dark:bg-dark-card border border-slate-200 dark:border-dark-border hover:border-brand-500 dark:hover:border-brand-500 transition-all hover:shadow-lg group">
+                    <div class="w-12 h-12 rounded-lg bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center mb-6 text-brand-600 dark:text-brand-400 group-hover:scale-110 transition-transform">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Multi-Agent System</h3>
+                    <p class="text-slate-600 dark:text-slate-400 leading-relaxed">Specialized agents for literature review, data analysis, and synthesis working in concert to solve complex problems.</p>
+                </div>
+
+                <!-- Feature 2 -->
+                <div class="p-8 rounded-2xl bg-white dark:bg-dark-card border border-slate-200 dark:border-dark-border hover:border-brand-500 dark:hover:border-brand-500 transition-all hover:shadow-lg group">
+                    <div class="w-12 h-12 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center mb-6 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Real-Time Orchestration</h3>
+                    <p class="text-slate-600 dark:text-slate-400 leading-relaxed">Watch your research unfold live. Dynamic task routing ensures the right agent handles the right job at the right time.</p>
+                </div>
+
+                <!-- Feature 3 -->
+                <div class="p-8 rounded-2xl bg-white dark:bg-dark-card border border-slate-200 dark:border-dark-border hover:border-brand-500 dark:hover:border-brand-500 transition-all hover:shadow-lg group">
+                    <div class="w-12 h-12 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mb-6 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Quality Assurance</h3>
+                    <p class="text-slate-600 dark:text-slate-400 leading-relaxed">Built-in critic agents verify sources, check for hallucinations, and ensure rigorous academic standards.</p>
+                </div>
+
+                <!-- Feature 4 -->
+                <div class="p-8 rounded-2xl bg-white dark:bg-dark-card border border-slate-200 dark:border-dark-border hover:border-brand-500 dark:hover:border-brand-500 transition-all hover:shadow-lg group">
+                    <div class="w-12 h-12 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-6 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Memory & Context</h3>
+                    <p class="text-slate-600 dark:text-slate-400 leading-relaxed">Cerebro remembers past research, user preferences, and project context, reducing redundancy and improving relevance.</p>
+                </div>
+
+                <!-- Feature 5 -->
+                <div class="p-8 rounded-2xl bg-white dark:bg-dark-card border border-slate-200 dark:border-dark-border hover:border-brand-500 dark:hover:border-brand-500 transition-all hover:shadow-lg group">
+                    <div class="w-12 h-12 rounded-lg bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center mb-6 text-rose-600 dark:text-rose-400 group-hover:scale-110 transition-transform">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Cost Optimization</h3>
+                    <p class="text-slate-600 dark:text-slate-400 leading-relaxed">Intelligent model routing selects the most cost-effective LLM for each sub-task without compromising quality.</p>
+                </div>
+
+                <!-- Feature 6 -->
+                <div class="p-8 rounded-2xl bg-white dark:bg-dark-card border border-slate-200 dark:border-dark-border hover:border-brand-500 dark:hover:border-brand-500 transition-all hover:shadow-lg group">
+                    <div class="w-12 h-12 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mb-6 text-purple-600 dark:text-purple-400 group-hover:scale-110 transition-transform">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Research Tools</h3>
+                    <p class="text-slate-600 dark:text-slate-400 leading-relaxed">Integrated with academic databases, PDF parsers, and data visualization tools for end-to-end research.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials -->
+    <section id="testimonials" class="py-24 relative overflow-hidden">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16">
+                <h2 class="text-3xl md:text-4xl font-bold mb-4">Trusted by Researchers</h2>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Testimonial 1 -->
+                <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xl">👩‍🔬</div>
+                        <div>
+                            <div class="font-bold">Dr. Sarah Chen</div>
+                            <div class="text-sm text-slate-500 dark:text-slate-400">AI Ethics Researcher</div>
+                        </div>
+                    </div>
+                    <p class="text-slate-600 dark:text-slate-300 italic">"Cerebro cut my literature review time by 70%. The multi-agent system finds connections I would have missed."</p>
+                </div>
+
+                <!-- Testimonial 2 -->
+                <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xl">👨‍💻</div>
+                        <div>
+                            <div class="font-bold">James Miller</div>
+                            <div class="text-sm text-slate-500 dark:text-slate-400">Data Scientist</div>
+                        </div>
+                    </div>
+                    <p class="text-slate-600 dark:text-slate-300 italic">"The cost optimization is a game changer. I can run complex queries without worrying about API bills."</p>
+                </div>
+
+                <!-- Testimonial 3 -->
+                <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xl">🎓</div>
+                        <div>
+                            <div class="font-bold">Elena Rodriguez</div>
+                            <div class="text-sm text-slate-500 dark:text-slate-400">PhD Candidate</div>
+                        </div>
+                    </div>
+                    <p class="text-slate-600 dark:text-slate-300 italic">"Finally, an AI tool that understands context and remembers previous sessions. It's like having a brilliant research assistant."</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="py-20">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="relative rounded-3xl overflow-hidden bg-brand-600 px-6 py-16 md:px-16 md:py-20 text-center shadow-2xl">
+                <!-- Background Pattern -->
+                <div class="absolute inset-0 opacity-10 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiNmZmYiLz48L3N2Zz4=')]"></div>
+                
+                <h2 class="text-3xl md:text-4xl font-bold text-white mb-6 relative z-10">Ready to accelerate your research?</h2>
+                <p class="text-brand-100 text-lg mb-10 max-w-2xl mx-auto relative z-10">Join thousands of researchers using Cerebro to discover insights faster.</p>
+                
+                <div class="flex flex-col sm:flex-row gap-4 justify-center relative z-10">
+                    <a href="#" class="px-8 py-4 bg-white text-brand-600 rounded-xl font-bold text-lg hover:bg-brand-50 transition-colors shadow-lg">Get Started Free</a>
+                    <a href="#" class="px-8 py-4 bg-brand-700 text-white rounded-xl font-bold text-lg hover:bg-brand-800 transition-colors border border-brand-500">Schedule Demo</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-slate-50 dark:bg-[#0B0F19] border-t border-slate-200 dark:border-slate-800 pt-16 pb-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
+                <div class="col-span-2 md:col-span-1">
+                    <div class="flex items-center gap-2 mb-4">
+                        <div class="w-6 h-6 bg-brand-600 rounded flex items-center justify-center text-white font-bold text-xs">C</div>
+                        <span class="font-bold text-lg">Cerebro</span>
+                    </div>
+                    <p class="text-sm text-slate-500 dark:text-slate-400">Empowering the next generation of discovery with multi-agent intelligence.</p>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Product</h4>
+                    <ul class="space-y-2 text-sm text-slate-500 dark:text-slate-400">
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Features</a></li>
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Integrations</a></li>
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Pricing</a></li>
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Changelog</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Resources</h4>
+                    <ul class="space-y-2 text-sm text-slate-500 dark:text-slate-400">
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Documentation</a></li>
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">API Reference</a></li>
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Community</a></li>
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Blog</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Company</h4>
+                    <ul class="space-y-2 text-sm text-slate-500 dark:text-slate-400">
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">About</a></li>
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Careers</a></li>
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Legal</a></li>
+                        <li><a href="#" class="hover:text-brand-600 dark:hover:text-brand-400">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-slate-200 dark:border-slate-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
+                <p class="text-sm text-slate-500 dark:text-slate-400">© 2025 Cerebro AI. All rights reserved.</p>
+                <div class="flex gap-4">
+                    <a href="#" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                        <span class="sr-only">Twitter</span>
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8.29 20.251c7.547 0 11.675-6.253 11.675-11.675 0-.178 0-.355-.012-.53A8.348 8.348 0 0022 5.92a8.19 8.19 0 01-2.357.646 4.118 4.118 0 001.804-2.27 8.224 8.224 0 01-2.605.996 4.107 4.107 0 00-6.993 3.743 11.65 11.65 0 01-8.457-4.287 4.106 4.106 0 001.27 5.477A4.072 4.072 0 012.8 9.713v.052a4.105 4.105 0 003.292 4.022 4.095 4.095 0 01-1.853.07 4.108 4.108 0 003.834 2.85A8.233 8.233 0 012 18.407a11.616 11.616 0 006.29 1.84"></path></svg>
+                    </a>
+                    <a href="#" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                        <span class="sr-only">GitHub</span>
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd"></path></svg>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Theme Toggle Logic
+        const themeToggle = document.getElementById('theme-toggle');
+        const html = document.documentElement;
+        
+        // Check local storage or system preference
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            html.classList.add('dark');
+        } else {
+            html.classList.remove('dark');
+        }
+
+        themeToggle.addEventListener('click', () => {
+            html.classList.toggle('dark');
+            if (html.classList.contains('dark')) {
+                localStorage.theme = 'dark';
+            } else {
+                localStorage.theme = 'light';
+            }
+        });
+
+        // Terminal Demo Simulation
+        const terminalContent = document.getElementById('terminal-content');
+        const steps = [
+            { text: "> cerebro research --topic 'Impact of AI on Healthcare' --depth deep", type: 'input', delay: 1000 },
+            { text: "[Orchestrator] Initializing research session...", type: 'info', delay: 500 },
+            { text: "[Orchestrator] Routing to Research Domain...", type: 'info', delay: 300 },
+            { text: "[Literature Agent] Searching academic databases (PubMed, IEEE, arXiv)...", type: 'process', delay: 800 },
+            { text: "[Literature Agent] Found 142 relevant papers. Filtering by citation count > 50...", type: 'success', delay: 1200 },
+            { text: "[Analysis Agent] Analyzing methodology across top 20 papers...", type: 'process', delay: 1500 },
+            { text: "[Memory] Retrieving context from previous session 'Medical AI Ethics'...", type: 'info', delay: 600 },
+            { text: "[Critic] Verifying statistical significance claims in Paper #4...", type: 'warning', delay: 1000 },
+            { text: "[Synthesis Agent] Drafting comprehensive report...", type: 'process', delay: 1200 },
+            { text: "[Orchestrator] Research complete. Report generated: 'AI_Healthcare_Impact_v1.pdf'", type: 'success', delay: 500 },
+            { text: "> ", type: 'input', delay: 0 }
+        ];
+
+        let currentStep = 0;
+
+        function addLine(step) {
+            const line = document.createElement('div');
+            line.className = 'mb-2 font-mono';
+            
+            if (step.type === 'input') {
+                line.className += ' text-slate-100';
+                if (step.text === '> ') {
+                    line.className += ' typing-cursor';
+                }
+            } else if (step.type === 'info') {
+                line.className += ' text-blue-400';
+            } else if (step.type === 'process') {
+                line.className += ' text-slate-400';
+            } else if (step.type === 'success') {
+                line.className += ' text-green-400';
+            } else if (step.type === 'warning') {
+                line.className += ' text-yellow-400';
+            }
+
+            terminalContent.appendChild(line);
+            
+            if (step.type === 'input' && step.text !== '> ') {
+                // Typewriter effect for input
+                let i = 0;
+                line.textContent = '> ';
+                const interval = setInterval(() => {
+                    line.textContent += step.text.charAt(i + 2); // +2 to skip '> '
+                    i++;
+                    if (i >= step.text.length - 2) {
+                        clearInterval(interval);
+                        terminalContent.scrollTop = terminalContent.scrollHeight;
+                    }
+                }, 30);
+            } else {
+                line.textContent = step.text;
+                terminalContent.scrollTop = terminalContent.scrollHeight;
+            }
+        }
+
+        function runDemo() {
+            if (currentStep >= steps.length) {
+                setTimeout(() => {
+                    terminalContent.innerHTML = '';
+                    currentStep = 0;
+                    runDemo();
+                }, 5000); // Restart after 5 seconds
+                return;
+            }
+
+            const step = steps[currentStep];
+            setTimeout(() => {
+                addLine(step);
+                currentStep++;
+                runDemo();
+            }, step.delay);
+        }
+
+        // Start demo when visible
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && currentStep === 0) {
+                    runDemo();
+                }
+            });
+        });
+        observer.observe(document.getElementById('demo'));
+
+    </script>
+</body>
+</html>
