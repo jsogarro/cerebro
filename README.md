@@ -35,8 +35,8 @@ A sophisticated AI-powered research platform that orchestrates multiple speciali
 
 1. **Clone the repository:**
 ```bash
-git clone <repository-url>
-cd research-platform
+git clone https://github.com/jsogarro/cerebro.git
+cd cerebro
 ```
 
 2. **Install dependencies:**
@@ -290,44 +290,177 @@ Key configuration variables:
 
 ## 🏗️ Architecture
 
-### System Components
+### System Overview
 
-1. **API Layer** (FastAPI)
-   - RESTful endpoints
-   - WebSocket support
-   - Authentication & authorization
-   - Request validation
+```mermaid
+graph TB
+    subgraph Clients
+        CLI[research-cli]
+        Web[Web Dashboard]
+        WS[WebSocket Clients]
+    end
 
-2. **Agent System**
-   - Literature Review Agent
-   - Comparative Analysis Agent
-   - Methodology Agent
-   - Synthesis Agent
-   - Citation & Verification Agent
-   - **Self-Improving System**: Feedback collection, reward models, and prompt optimization
+    subgraph API["API Layer (FastAPI)"]
+        REST[REST Endpoints]
+        WSS[WebSocket Server]
+        QueryAPI[Query API]
+        AgentAPI[Agent API]
+        MASRAPI[MASR API]
+        TalkHierAPI[TalkHier API]
+    end
 
-3. **Orchestration** (LangGraph + Temporal)
-   - Workflow management
-   - Task distribution
-   - State management
-   - Error recovery
+    subgraph Routing["Intelligence Routing"]
+        MASR[MASR Router]
+        CostOpt[Cost Optimization Engine]
+    end
 
-4. **Data & Context Layer**
-   - PostgreSQL for structured data
-   - Redis for caching
-   - Vector DB for embeddings
-   - S3/GCS for document storage
-   - **Advanced Memory**: Working, episodic, semantic, and procedural memory
+    subgraph Orchestration["Orchestration (LangGraph)"]
+        Graph[Graph Builder]
+        State[State Management]
+        Supervisors[Hierarchical Supervisors]
+        TalkHier[TalkHier Protocol]
+    end
 
-5. **Quality & Cost Management**
-   - **QA Suite**: Fact extraction, citation verification, plagiarism detection
-   - **Benchmarks**: Research replication and evaluation engine
-   - **Cost Management**: Real-time tracking, forecasting, and budgeting
+    subgraph Agents["Specialized Agents"]
+        LitReview[Literature Review]
+        CompAnalysis[Comparative Analysis]
+        Methodology[Methodology]
+        Synthesis[Synthesis]
+        Citation[Citation & Verification]
+    end
 
-6. **Integration Layer** (MCP)
-   - Academic database connectors
-   - Tool servers
-   - External API integrations
+    subgraph Services["Support Services"]
+        Memory[Memory System]
+        QA[QA & Evaluation]
+        Benchmarks[Benchmarks]
+        Improvement[Self-Improvement]
+        Costs[Cost Management]
+    end
+
+    subgraph Data["Data Layer"]
+        PG[(PostgreSQL)]
+        Redis[(Redis)]
+        VectorDB[(Vector DB)]
+    end
+
+    subgraph External["External Integrations"]
+        Gemini[Google Gemini]
+        MCP[MCP Tool Servers]
+        AcademicDB[Academic Databases]
+    end
+
+    CLI --> REST
+    Web --> REST
+    WS --> WSS
+
+    REST --> QueryAPI
+    REST --> AgentAPI
+    REST --> MASRAPI
+    REST --> TalkHierAPI
+
+    QueryAPI --> MASR
+    MASR --> CostOpt
+    MASR --> Supervisors
+
+    Supervisors --> TalkHier
+    Supervisors --> Graph
+    Graph --> State
+
+    Supervisors --> LitReview
+    Supervisors --> CompAnalysis
+    Supervisors --> Methodology
+    Supervisors --> Synthesis
+    Supervisors --> Citation
+
+    LitReview --> Gemini
+    CompAnalysis --> Gemini
+    Methodology --> Gemini
+    Synthesis --> Gemini
+    Citation --> Gemini
+
+    LitReview --> MCP
+    Citation --> AcademicDB
+
+    Agents --> Memory
+    Agents --> QA
+    Agents --> Costs
+
+    Memory --> PG
+    Memory --> Redis
+    QA --> PG
+    Costs --> PG
+    LitReview --> VectorDB
+```
+
+### Agent Framework
+
+```mermaid
+graph LR
+    subgraph Input
+        Query[User Query]
+    end
+
+    subgraph MASR["MASR Router"]
+        Classify[Classify Query]
+        Strategy[Select Strategy]
+        CostEst[Estimate Cost]
+    end
+
+    subgraph Strategies
+        QF[Quality Focused]
+        CE[Cost Efficient]
+        BAL[Balanced]
+    end
+
+    subgraph Supervisor["Hierarchical Supervisor"]
+        Plan[Plan Execution]
+        Assign[Assign Workers]
+        Refine[TalkHier Refinement]
+        Consensus[Build Consensus]
+    end
+
+    subgraph Workers["Agent Workers"]
+        direction TB
+        W1[Literature Review]
+        W2[Comparative Analysis]
+        W3[Methodology]
+        W4[Synthesis]
+        W5[Citation Verification]
+    end
+
+    subgraph QA["Quality Gate"]
+        FactCheck[Fact Extraction]
+        CitVerify[Citation Verification]
+        Plagiarism[Plagiarism Detection]
+        Score[Quality Score]
+    end
+
+    subgraph Output
+        Result[Research Result]
+        Feedback[Feedback Loop]
+    end
+
+    Query --> Classify
+    Classify --> Strategy
+    Strategy --> CostEst
+    CostEst --> QF & CE & BAL
+
+    QF & CE & BAL --> Plan
+    Plan --> Assign
+    Assign --> W1 & W2 & W3 & W4 & W5
+    W1 & W2 & W3 & W4 & W5 --> Refine
+    Refine --> Consensus
+
+    Consensus --> FactCheck
+    FactCheck --> CitVerify
+    CitVerify --> Plagiarism
+    Plagiarism --> Score
+
+    Score -->|Pass| Result
+    Score -->|Fail| Refine
+    Result --> Feedback
+    Feedback --> MASR
+```
 
 ### Technology Stack
 
@@ -335,10 +468,10 @@ Key configuration variables:
 - **API Framework**: FastAPI
 - **CLI Framework**: Click + Rich
 - **LLM**: Google Gemini
-- **Workflow**: Temporal + LangGraph
+- **Orchestration**: LangGraph
 - **Database**: PostgreSQL + Redis
 - **Container**: Docker
-- **Orchestration**: Kubernetes (GKE)
+- **Deployment**: Kubernetes (GKE)
 - **Package Management**: uv
 
 ## 🤝 Contributing
@@ -429,5 +562,3 @@ Closes #123
 - 📅 Collaborative research features
 - 📅 Agent Marketplace & Plugin System
 - 📅 Visual Workflow Builder
-
-See [TODO.md](TODO.md) for detailed development tasks.
