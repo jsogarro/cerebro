@@ -265,7 +265,7 @@ class SecurityAlert(BaseModel):
     )
 
     # Alert metadata
-    metadata = Column(JSON, nullable=True, comment="Additional alert metadata")
+    alert_metadata = Column(JSON, nullable=True, comment="Additional alert metadata")
 
     # Relationships
     user = relationship("User", back_populates="security_alerts")
