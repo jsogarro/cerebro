@@ -1,0 +1,318 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  validate-version:
+    name: Validate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${{ github.ref_name }}"
+          fi
+          
+          # Validate version format
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            echo "Invalid version format: $VERSION"
+            exit 1
+          fi
+          
+          # Check if prerelease
+          if [[ "$VERSION" =~ -[a-zA-Z0-9]+$ ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  generate-changelog:
+    name: Generate Changelog
+    needs: validate-version
+    runs-on: ubuntu-latest
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [[ -z "$PREV_TAG" ]]; then
+            echo "First release"
+            CHANGELOG="Initial release of Research Platform"
+          else
+            # Generate changelog from commits
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          
+          # Group changes by type
+          {
+            echo "## What's Changed"
+            echo ""
+            echo "### Features"
+            echo "$CHANGELOG" | grep -E "^- feat" || echo "No new features"
+            echo ""
+            echo "### Bug Fixes"
+            echo "$CHANGELOG" | grep -E "^- fix" || echo "No bug fixes"
+            echo ""
+            echo "### Improvements"
+            echo "$CHANGELOG" | grep -E "^- (chore|refactor|perf)" || echo "No improvements"
+            echo ""
+            echo "### Documentation"
+            echo "$CHANGELOG" | grep -E "^- docs" || echo "No documentation changes"
+            echo ""
+            echo "### Testing"
+            echo "$CHANGELOG" | grep -E "^- test" || echo "No test changes"
+          } > changelog.md
+          
+          # Save to output
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat changelog.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Upload changelog
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: changelog.md
+
+  build-release-artifacts:
+    name: Build Release Artifacts
+    needs: validate-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11"]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: '0.4.18'
+      
+      - name: Build wheel and sdist
+        run: |
+          uv pip install build
+          python -m build
+      
+      - name: Build CLI binary
+        run: |
+          uv pip install pyinstaller
+          uv pip install -e .
+          
+          # Build standalone CLI binary
+          pyinstaller \
+            --onefile \
+            --name research-cli-${{ runner.os }} \
+            --add-data "src:src" \
+            --hidden-import click \
+            --hidden-import rich \
+            --hidden-import httpx \
+            --hidden-import pydantic \
+            src/cli/main.py
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ runner.os }}
+          path: |
+            dist/
+            research-cli-${{ runner.os }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: [validate-version, generate-changelog, build-release-artifacts]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      
+      - name: Create release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Read changelog
+            const changelogPath = path.join('artifacts', 'changelog', 'changelog.md');
+            const changelog = fs.readFileSync(changelogPath, 'utf8');
+            
+            // Create release
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: '${{ needs.validate-version.outputs.version }}',
+              name: 'Release ${{ needs.validate-version.outputs.version }}',
+              body: changelog,
+              draft: false,
+              prerelease: ${{ needs.validate-version.outputs.is_prerelease }},
+              generate_release_notes: true
+            });
+            
+            console.log(`Created release: ${release.data.html_url}`);
+            
+            // Upload release assets
+            const artifactDirs = fs.readdirSync('artifacts').filter(d => d.startsWith('release-artifacts-'));
+            
+            for (const dir of artifactDirs) {
+              const dirPath = path.join('artifacts', dir);
+              const files = fs.readdirSync(dirPath);
+              
+              for (const file of files) {
+                const filePath = path.join(dirPath, file);
+                const data = fs.readFileSync(filePath);
+                
+                console.log(`Uploading ${file}...`);
+                
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.data.id,
+                  name: file,
+                  data: data
+                });
+              }
+            }
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [validate-version, create-release]
+    runs-on: ubuntu-latest
+    if: needs.validate-version.outputs.is_prerelease == 'false'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: '0.4.18'
+      
+      - name: Build package
+        run: |
+          uv pip install build
+          python -m build
+      
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+
+  notify-release:
+    name: Notify Release
+    needs: [validate-version, create-release]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Send Slack notification
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              text: "New Research Platform Release",
+              attachments: [{
+                color: "good",
+                title: "Version ${{ needs.validate-version.outputs.version }} Released",
+                text: "Research Platform ${{ needs.validate-version.outputs.version }} has been successfully released.",
+                fields: [
+                  {
+                    title: "Release Type",
+                    value: "${{ needs.validate-version.outputs.is_prerelease == 'true' && 'Pre-release' || 'Production' }}",
+                    short: true
+                  },
+                  {
+                    title: "GitHub Release",
+                    value: "<https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-version.outputs.version }}|View Release>",
+                    short: true
+                  }
+                ]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      
+      - name: Send failure notification
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              text: "Release Failed",
+              attachments: [{
+                color: "danger",
+                title: "Failed to Release ${{ needs.validate-version.outputs.version }}",
+                text: "The release process for version ${{ needs.validate-version.outputs.version }} has failed.",
+                fields: [
+                  {
+                    title: "Action",
+                    value: "<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Workflow>",
+                    short: false
+                  }
+                ]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

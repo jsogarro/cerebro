@@ -1,0 +1,167 @@
+name: Reusable Test Workflow
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version to use'
+        required: false
+        default: '3.11'
+        type: string
+      test-suite:
+        description: 'Test suite to run'
+        required: false
+        default: 'all'
+        type: string
+      coverage-threshold:
+        description: 'Minimum coverage percentage'
+        required: false
+        default: 80
+        type: number
+    secrets:
+      codecov-token:
+        description: 'Codecov token for coverage upload'
+        required: false
+
+env:
+  UV_VERSION: "0.4.18"
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: research_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      temporal:
+        image: temporalio/auto-setup:latest
+        ports:
+          - 7233:7233
+        env:
+          - TEMPORAL_ADDRESS=localhost:7233
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            ~/.cache/pip
+          key: ${{ runner.os }}-python-${{ inputs.python-version }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-python-${{ inputs.python-version }}-
+      
+      - name: Install dependencies
+        run: |
+          uv pip install -e ".[dev]"
+      
+      - name: Wait for services
+        run: |
+          # Wait for Temporal
+          for i in {1..30}; do
+            if curl -f http://localhost:7233/health; then
+              echo "Temporal is ready"
+              break
+            fi
+            echo "Waiting for Temporal..."
+            sleep 2
+          done
+          
+          # Check PostgreSQL
+          PGPASSWORD=test psql -h localhost -U test -d research_test -c "SELECT 1" || exit 1
+          
+          # Check Redis
+          redis-cli -h localhost ping || exit 1
+      
+      - name: Run all tests
+        if: inputs.test-suite == 'all'
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/research_test
+          REDIS_URL: redis://localhost:6379
+          TEMPORAL_HOST: localhost:7233
+        run: |
+          pytest --cov=src --cov-report=xml --cov-report=html --cov-report=term -v
+      
+      - name: Run unit tests only
+        if: inputs.test-suite == 'unit'
+        run: |
+          pytest tests/test_models.py tests/test_utils.py \
+            --cov=src --cov-report=xml --cov-report=html --cov-report=term -v
+      
+      - name: Run integration tests only
+        if: inputs.test-suite == 'integration'
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/research_test
+          REDIS_URL: redis://localhost:6379
+          TEMPORAL_HOST: localhost:7233
+        run: |
+          pytest tests/test_api.py tests/test_temporal_workflows.py tests/test_cli.py \
+            --cov=src --cov-report=xml --cov-report=html --cov-report=term -v
+      
+      - name: Check coverage threshold
+        run: |
+          coverage report --fail-under=${{ inputs.coverage-threshold }}
+      
+      - name: Upload coverage to Codecov
+        if: secrets.codecov-token != ''
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: ${{ inputs.test-suite }}
+          name: coverage-${{ inputs.python-version }}-${{ inputs.test-suite }}
+          fail_ci_if_error: false
+          token: ${{ secrets.codecov-token }}
+      
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ inputs.python-version }}-${{ inputs.test-suite }}
+          path: |
+            coverage.xml
+            htmlcov/
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.python-version }}-${{ inputs.test-suite }}
+          path: |
+            .pytest_cache/
+            test-results/

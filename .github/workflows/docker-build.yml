@@ -1,0 +1,274 @@
+name: Docker Build & Push
+
+on:
+  push:
+    branches: [main, develop]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      push_images:
+        description: 'Push images to registry'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: gcr.io
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  IMAGE_NAME_API: research-platform-api
+  IMAGE_NAME_WORKER: research-platform-worker
+
+jobs:
+  build-and-push:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    
+    outputs:
+      api-image: ${{ steps.meta-api.outputs.tags }}
+      worker-image: ${{ steps.meta-worker.outputs.tags }}
+      api-digest: ${{ steps.build-api.outputs.digest }}
+      worker-digest: ${{ steps.build-worker.outputs.digest }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+      
+      - name: Log in to Google Container Registry
+        if: github.event_name != 'pull_request' || github.event.inputs.push_images == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: _json_key
+          password: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Extract metadata for API
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME_API }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Extract metadata for Worker
+        id: meta-worker
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME_WORKER }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and push API image
+        id: build-api
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' || github.event.inputs.push_images == 'true' }}
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          target: production
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.meta-api.outputs.version }}
+      
+      - name: Build and push Worker image
+        id: build-worker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.worker
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' || github.event.inputs.push_images == 'true' }}
+          tags: ${{ steps.meta-worker.outputs.tags }}
+          labels: ${{ steps.meta-worker.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.meta-worker.outputs.version }}
+
+  scan-images:
+    name: Scan Docker Images
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    
+    strategy:
+      matrix:
+        image: 
+          - name: api
+            tags: ${{ needs.build-and-push.outputs.api-image }}
+          - name: worker
+            tags: ${{ needs.build-and-push.outputs.worker-image }}
+    
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.image.tags }}
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.image.name }}.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results-${{ matrix.image.name }}.sarif'
+          category: 'trivy-${{ matrix.image.name }}'
+      
+      - name: Create issue for critical vulnerabilities
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Critical vulnerabilities found in ${{ matrix.image.name }} image`;
+            const body = `Trivy scan found critical vulnerabilities in the ${{ matrix.image.name }} Docker image.
+            
+            Image: ${{ matrix.image.tags }}
+            Commit: ${{ github.sha }}
+            
+            Please review the security scan results and address the vulnerabilities.`;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['security', 'docker', 'critical']
+            });
+
+  test-images:
+    name: Test Docker Images
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: research_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      temporal:
+        image: temporalio/auto-setup:latest
+        env:
+          - TEMPORAL_ADDRESS=temporal:7233
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Load API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: research-platform-api:test
+          target: production
+          cache-from: type=gha
+      
+      - name: Test API image
+        run: |
+          docker run --rm \
+            --network ${{ job.services.postgres.network }} \
+            -e DATABASE_URL=postgresql://test:test@postgres:5432/research_test \
+            -e REDIS_URL=redis://redis:6379 \
+            -e TEMPORAL_HOST=temporal:7233 \
+            research-platform-api:test \
+            python -m pytest tests/test_api.py
+      
+      - name: Load Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.worker
+          load: true
+          tags: research-platform-worker:test
+          cache-from: type=gha
+      
+      - name: Test Worker image startup
+        run: |
+          docker run --rm \
+            --network ${{ job.services.temporal.network }} \
+            -e TEMPORAL_HOST=temporal:7233 \
+            research-platform-worker:test \
+            python -c "from src.temporal.worker import ResearchWorker; print('Worker imports successfully')"
+
+  sign-images:
+    name: Sign Docker Images
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+      
+      - name: Log in to Google Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: _json_key
+          password: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Sign API image
+        env:
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          cosign sign --yes ${{ needs.build-and-push.outputs.api-image }}@${{ needs.build-and-push.outputs.api-digest }}
+      
+      - name: Sign Worker image
+        env:
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          cosign sign --yes ${{ needs.build-and-push.outputs.worker-image }}@${{ needs.build-and-push.outputs.worker-digest }}

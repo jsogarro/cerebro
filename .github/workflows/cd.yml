@@ -1,0 +1,352 @@
+name: CD Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip pre-deployment tests'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GKE_CLUSTER_NAME: ${{ secrets.GKE_CLUSTER_NAME }}
+  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  REGISTRY: gcr.io
+
+jobs:
+  determine-environment:
+    name: Determine Deployment Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.determine.outputs.environment }}
+      namespace: ${{ steps.determine.outputs.namespace }}
+    
+    steps:
+      - name: Determine environment
+        id: determine
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "namespace=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "namespace=staging" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "namespace=production" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "namespace=staging" >> $GITHUB_OUTPUT
+          fi
+
+  pre-deployment-checks:
+    name: Pre-deployment Checks
+    needs: determine-environment
+    runs-on: ubuntu-latest
+    if: github.event.inputs.skip_tests != 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: '0.4.18'
+          enable-cache: true
+      
+      - name: Install dependencies
+        run: |
+          uv pip install -e ".[dev]"
+      
+      - name: Run smoke tests
+        run: |
+          pytest tests/test_api.py::TestHealthEndpoints -v
+      
+      - name: Validate Kubernetes manifests
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+          kustomize build k8s/ > /tmp/rendered.yaml
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [determine-environment, pre-deployment-checks]
+    if: needs.determine-environment.outputs.environment == 'staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER_NAME }} \
+            --zone ${{ env.GKE_ZONE }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+      
+      - name: Get image tags
+        id: image-tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="${{ github.sha }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+      
+      - name: Update Kubernetes manifests
+        run: |
+          cd k8s
+          kustomize edit set image \
+            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ steps.image-tags.outputs.tag }} \
+            gcr.io/PROJECT_ID/research-platform-worker=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-worker:${{ steps.image-tags.outputs.tag }} \
+            gcr.io/PROJECT_ID/research-platform-web=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-web:${{ steps.image-tags.outputs.tag }}
+          kustomize edit set namespace staging
+      
+      - name: Deploy to staging
+        run: |
+          kustomize build k8s/ | kubectl apply -f -
+          kubectl rollout status deployment/research-api -n staging --timeout=5m
+          kubectl rollout status deployment/research-worker -n staging --timeout=5m
+      
+      - name: Run smoke tests
+        run: |
+          STAGING_URL=$(kubectl get ingress research-platform-ingress -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          
+          # Wait for service to be ready
+          for i in {1..30}; do
+            if curl -f "http://$STAGING_URL/health"; then
+              echo "Service is ready"
+              break
+            fi
+            echo "Waiting for service..."
+            sleep 10
+          done
+          
+          # Run smoke tests against staging
+          curl -f "http://$STAGING_URL/health" || exit 1
+          curl -f "http://$STAGING_URL/ready" || exit 1
+      
+      - name: Notify deployment success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment.id,
+              state: 'success',
+              environment_url: `http://staging.research-platform.io`,
+              description: 'Deployment to staging successful'
+            });
+
+  deploy-production:
+    name: Deploy to Production
+    needs: [determine-environment, pre-deployment-checks]
+    if: needs.determine-environment.outputs.environment == 'production' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER_NAME }} \
+            --zone ${{ env.GKE_ZONE }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+      
+      - name: Create production namespace if not exists
+        run: |
+          kubectl create namespace production --dry-run=client -o yaml | kubectl apply -f -
+      
+      - name: Blue-Green Deployment Preparation
+        id: blue-green
+        run: |
+          # Check current deployment
+          CURRENT_COLOR=$(kubectl get service research-platform-active -n production -o jsonpath='{.spec.selector.color}' 2>/dev/null || echo "blue")
+          
+          if [[ "$CURRENT_COLOR" == "blue" ]]; then
+            NEW_COLOR="green"
+          else
+            NEW_COLOR="blue"
+          fi
+          
+          echo "current_color=$CURRENT_COLOR" >> $GITHUB_OUTPUT
+          echo "new_color=$NEW_COLOR" >> $GITHUB_OUTPUT
+      
+      - name: Deploy new version (Blue-Green)
+        run: |
+          cd k8s
+          
+          # Update image tags
+          kustomize edit set image \
+            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ github.ref_name }} \
+            gcr.io/PROJECT_ID/research-platform-worker=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-worker:${{ github.ref_name }} \
+            gcr.io/PROJECT_ID/research-platform-web=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-web:${{ github.ref_name }}
+          
+          # Set namespace
+          kustomize edit set namespace production
+          
+          # Apply with color label
+          kustomize build . | \
+            sed "s/app: research-api/app: research-api\n        color: ${{ steps.blue-green.outputs.new_color }}/" | \
+            kubectl apply -f -
+          
+          # Wait for rollout
+          kubectl rollout status deployment/research-api -n production --timeout=10m
+          kubectl rollout status deployment/research-worker -n production --timeout=10m
+      
+      - name: Run production smoke tests
+        run: |
+          # Test the new deployment directly
+          NEW_POD=$(kubectl get pods -n production -l app=research-api,color=${{ steps.blue-green.outputs.new_color }} -o jsonpath='{.items[0].metadata.name}')
+          
+          kubectl exec -n production $NEW_POD -- curl -f http://localhost:8000/health || exit 1
+          kubectl exec -n production $NEW_POD -- curl -f http://localhost:8000/ready || exit 1
+      
+      - name: Switch traffic to new version
+        run: |
+          # Update the active service to point to new color
+          kubectl patch service research-platform-active -n production \
+            -p '{"spec":{"selector":{"color":"${{ steps.blue-green.outputs.new_color }}"}}}'
+          
+          echo "Traffic switched to ${{ steps.blue-green.outputs.new_color }} deployment"
+      
+      - name: Verify production deployment
+        run: |
+          PROD_URL=$(kubectl get ingress research-platform-ingress -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          
+          # Run comprehensive health checks
+          curl -f "http://$PROD_URL/health" || exit 1
+          curl -f "http://$PROD_URL/ready" || exit 1
+          curl -f "http://$PROD_URL/metrics" || exit 1
+      
+      - name: Keep old version for rollback
+        run: |
+          echo "Keeping ${{ steps.blue-green.outputs.current_color }} deployment for potential rollback"
+          kubectl annotate deployment/research-api -n production \
+            last-stable-version=${{ steps.blue-green.outputs.current_color }} \
+            --overwrite
+      
+      - name: Create GitHub Release
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: '${{ github.ref_name }}',
+              name: 'Release ${{ github.ref_name }}',
+              body: 'Production deployment of Research Platform ${{ github.ref_name }}',
+              draft: false,
+              prerelease: false
+            });
+            
+            console.log(`Created release: ${release.data.html_url}`);
+
+  rollback:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    environment: production
+    if: failure() && needs.deploy-production.result == 'failure'
+    needs: deploy-production
+    
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER_NAME }} \
+            --zone ${{ env.GKE_ZONE }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+      
+      - name: Perform rollback
+        run: |
+          # Get the previous stable color
+          STABLE_COLOR=$(kubectl get deployment/research-api -n production \
+            -o jsonpath='{.metadata.annotations.last-stable-version}')
+          
+          if [[ -n "$STABLE_COLOR" ]]; then
+            # Switch traffic back to stable version
+            kubectl patch service research-platform-active -n production \
+              -p '{"spec":{"selector":{"color":"'$STABLE_COLOR'"}}}'
+            
+            echo "Rolled back to $STABLE_COLOR deployment"
+          else
+            echo "No stable version found for rollback"
+            exit 1
+          fi
+      
+      - name: Notify rollback
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Production deployment failed - Rollback executed',
+              body: `The production deployment for ${context.ref} failed and was automatically rolled back.
+              
+              Please investigate the failure before attempting another deployment.
+              
+              Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              labels: ['deployment', 'production', 'incident']
+            });
