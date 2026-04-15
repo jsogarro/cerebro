@@ -7,6 +7,7 @@ foundation model providers, and hierarchical agent management.
 """
 
 from typing import Dict, List, Optional, Any
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,7 +29,7 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     API_WORKERS: int = 4
-    SECRET_KEY: str = "change-me-in-production"
+    SECRET_KEY: str = "MUST_SET_IN_ENV"  # Must be set via environment variable
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000"]
@@ -242,6 +243,45 @@ class Settings(BaseSettings):
     DEV_ENABLE_ROUTING_DEBUG: bool = False
     DEV_MOCK_PROVIDERS: bool = False
     DEV_MOCK_MEMORY: bool = False
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def validate_secret_key(cls, v: str, info) -> str:
+        """Ensure SECRET_KEY is set properly in production."""
+        # Get environment from raw values
+        env = info.data.get("ENVIRONMENT", "development")
+
+        if env == "production" and v == "MUST_SET_IN_ENV":
+            raise ValueError(
+                "SECRET_KEY must be set via environment variable in production. "
+                "Generate a secure key with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+
+        if len(v) < 32:
+            raise ValueError(
+                "SECRET_KEY must be at least 32 characters for security. "
+                f"Current length: {len(v)}"
+            )
+
+        return v
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def validate_database_url(cls, v: str, info) -> str:
+        """Ensure database credentials are not defaults in production."""
+        env = info.data.get("ENVIRONMENT", "development")
+
+        if env == "production":
+            # Check for common default credentials
+            dangerous_patterns = ["research:research123", "postgres:postgres", ":password@"]
+            for pattern in dangerous_patterns:
+                if pattern in v:
+                    raise ValueError(
+                        f"DATABASE_URL contains default credentials ('{pattern}') in production. "
+                        "Set secure credentials via environment variable."
+                    )
+
+        return v
 
     def get_ai_brain_config(self) -> Dict[str, Any]:
         """Get complete AI Brain configuration as a dictionary."""

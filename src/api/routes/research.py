@@ -4,10 +4,13 @@ Research API endpoints for Research Platform.
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
 from src.api.services.direct_execution_service import get_direct_execution_service
+from src.models.db.session import get_session
+from src.repositories.research_repository import ResearchRepository
 from src.models.research_project import (
     ResearchProgress,
     ResearchProject,
@@ -15,12 +18,18 @@ from src.models.research_project import (
     ResearchScope,
     ResearchStatus,
 )
+from src.models.db.research_project import ProjectStatus
+from src.models.db import research_project as db_models
 
 logger = get_logger()
 router = APIRouter(prefix="/research")
 
-# In-memory storage for demo (replace with database)
-projects_db: dict[UUID, ResearchProject] = {}
+
+async def get_research_repo(
+    session: AsyncSession = Depends(get_session),
+) -> ResearchRepository:
+    """Get research repository dependency."""
+    return ResearchRepository(session)
 
 
 from pydantic import BaseModel
@@ -40,24 +49,36 @@ class CreateResearchProjectRequest(BaseModel):
 )
 async def create_research_project(
     request: CreateResearchProjectRequest,
+    repo: ResearchRepository = Depends(get_research_repo),
 ) -> ResearchProject:
     """Create a new research project."""
     try:
-        # Create research project
-        project = ResearchProject(
+        # Create research project in database
+        db_project = await repo.create(
             title=request.title,
-            query=request.query,
+            query=request.query.dict(),
             user_id=request.user_id,
-            scope=request.scope,
+            domains=request.scope.domains if request.scope else [],
+            status=ProjectStatus.PENDING,
         )
 
-        # Store in memory (replace with database)
-        projects_db[project.id] = project
+        # Convert to API model
+        project = ResearchProject(
+            id=db_project.id,
+            title=db_project.title,
+            query=ResearchQuery(**db_project.query),
+            user_id=db_project.user_id,
+            scope=request.scope,
+            status=ResearchStatus.PENDING,
+            created_at=db_project.created_at,
+            updated_at=db_project.updated_at,
+        )
 
         # Start direct execution via MASR
         try:
             execution_service = get_direct_execution_service()
             execution_id = await execution_service.start_research_execution(project)
+            await repo.update_status(db_project.id, ProjectStatus.IN_PROGRESS)
             project.status = ResearchStatus.IN_PROGRESS
             logger.info(
                 "Started direct execution for research project",
@@ -88,16 +109,30 @@ async def create_research_project(
 
 
 @router.get("/projects/{project_id}", response_model=ResearchProject)
-async def get_research_project(project_id: UUID) -> ResearchProject:
+async def get_research_project(
+    project_id: UUID,
+    repo: ResearchRepository = Depends(get_research_repo),
+) -> ResearchProject:
     """Get a research project by ID."""
-    # Fetch from in-memory storage (replace with database)
-    project = projects_db.get(project_id)
+    # Fetch from database
+    db_project = await repo.get(project_id)
 
-    if not project:
+    if not db_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Research project {project_id} not found",
         )
+
+    # Convert to API model
+    project = ResearchProject(
+        id=db_project.id,
+        title=db_project.title,
+        query=ResearchQuery(**db_project.query),
+        user_id=db_project.user_id,
+        status=ResearchStatus(db_project.status.value),
+        created_at=db_project.created_at,
+        updated_at=db_project.updated_at,
+    )
 
     # Update status from direct execution
     try:
@@ -107,8 +142,10 @@ async def get_research_project(project_id: UUID) -> ResearchProject:
             if execution.project_id == str(project_id):
                 if execution.status == "completed":
                     project.status = ResearchStatus.COMPLETED
+                    await repo.update_status(project_id, ProjectStatus.COMPLETED)
                 elif execution.status == "failed":
                     project.status = ResearchStatus.FAILED
+                    await repo.update_status(project_id, ProjectStatus.FAILED)
                 elif execution.status in ["running", "pending"]:
                     project.status = ResearchStatus.IN_PROGRESS
                 break
@@ -124,29 +161,54 @@ async def list_research_projects(
     status: str | None = Query(None),
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    repo: ResearchRepository = Depends(get_research_repo),
 ) -> list[ResearchProject]:
     """List research projects with filtering."""
-    # Filter from in-memory storage (replace with database query)
-    projects = list(projects_db.values())
-
+    # Fetch from database with filters
     if user_id:
-        projects = [p for p in projects if p.user_id == user_id]
+        db_projects = await repo.get_by_user(
+            UUID(user_id),
+            status=ProjectStatus(status) if status else None,
+            limit=limit,
+            offset=offset,
+        )
+    elif status:
+        filters = {"status": ProjectStatus(status)}
+        db_projects = await repo.get_many(
+            filters=filters,
+            limit=limit,
+            offset=offset,
+        )
+    else:
+        db_projects = await repo.get_many(
+            limit=limit,
+            offset=offset,
+        )
 
-    if status:
-        projects = [p for p in projects if p.status.value == status]
-
-    # Apply pagination
-    start = offset
-    end = offset + limit
-
-    return projects[start:end]
+    # Convert to API models
+    return [
+        ResearchProject(
+            id=p.id,
+            title=p.title,
+            query=ResearchQuery(**p.query),
+            user_id=p.user_id,
+            status=ResearchStatus(p.status.value),
+            created_at=p.created_at,
+            updated_at=p.updated_at,
+        )
+        for p in db_projects
+    ]
 
 
 @router.get("/projects/{project_id}/progress", response_model=ResearchProgress)
-async def get_research_progress(project_id: UUID) -> ResearchProgress:
+async def get_research_progress(
+    project_id: UUID,
+    repo: ResearchRepository = Depends(get_research_repo),
+) -> ResearchProgress:
     """Get real-time progress of a research project."""
     # Check project exists
-    if project_id not in projects_db:
+    db_project = await repo.get(project_id)
+    if not db_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Research project {project_id} not found",
@@ -180,15 +242,16 @@ async def get_research_progress(project_id: UUID) -> ResearchProgress:
                 current_agent=execution_status.current_phase,
             )
         else:
-            # No active execution found
+            # No active execution found - use DB status
+            is_completed = db_project.status == ProjectStatus.COMPLETED
             progress = ResearchProgress(
                 project_id=project_id,
                 total_tasks=1,
-                completed_tasks=1 if projects_db.get(project_id, ResearchProject()).status == ResearchStatus.COMPLETED else 0,
+                completed_tasks=1 if is_completed else 0,
                 in_progress_tasks=0,
                 pending_tasks=0,
-                progress_percentage=100.0 if projects_db.get(project_id, ResearchProject()).status == ResearchStatus.COMPLETED else 0.0,
-                current_agent="completed" if projects_db.get(project_id, ResearchProject()).status == ResearchStatus.COMPLETED else "pending",
+                progress_percentage=100.0 if is_completed else 0.0,
+                current_agent="completed" if is_completed else "pending",
             )
         
         return progress
@@ -207,11 +270,14 @@ async def get_research_progress(project_id: UUID) -> ResearchProgress:
 
 
 @router.post("/projects/{project_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
-async def cancel_research_project(project_id: UUID) -> None:
+async def cancel_research_project(
+    project_id: UUID,
+    repo: ResearchRepository = Depends(get_research_repo),
+) -> None:
     """Cancel a research project."""
     # Check project exists
-    project = projects_db.get(project_id)
-    if not project:
+    db_project = await repo.get(project_id)
+    if not db_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Research project {project_id} not found",
@@ -219,7 +285,7 @@ async def cancel_research_project(project_id: UUID) -> None:
 
     # Cancel direct execution
     execution_service = get_direct_execution_service()
-    
+
     # Find and cancel execution for this project
     success = False
     for execution in execution_service.active_executions.values():
@@ -228,8 +294,8 @@ async def cancel_research_project(project_id: UUID) -> None:
             break
 
     if success:
-        # Update project status
-        project.status = ResearchStatus.CANCELLED
+        # Update project status in database
+        await repo.update_status(project_id, ProjectStatus.CANCELLED)
         logger.info("Cancelled research project", project_id=str(project_id))
     else:
         raise HTTPException(
@@ -254,23 +320,24 @@ async def refine_research_scope(
 
 
 @router.get("/projects/{project_id}/results")
-async def get_research_results(project_id: UUID):
+async def get_research_results(
+    project_id: UUID,
+    repo: ResearchRepository = Depends(get_research_repo),
+):
     """Get the results of a completed research project."""
     # Check project exists
-    project = projects_db.get(project_id)
-    if not project:
+    db_project = await repo.get_with_results(project_id)
+    if not db_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Research project {project_id} not found",
         )
 
-    # Fetch results from Temporal
-    results = await workflow_service.get_results(project_id)
-
-    if not results:
+    # Return results from database
+    if not db_project.results:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Results for project {project_id} not available yet",
         )
 
-    return results
+    return {"project_id": project_id, "results": db_project.results}

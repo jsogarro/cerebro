@@ -10,15 +10,18 @@ from typing import Dict, List, Optional, Set, Any, Callable
 from datetime import datetime, timedelta
 import asyncio
 import json
+import logging
 from enum import Enum
 from collections import defaultdict
 
 from .unified_experiment_manager import (
-    SystemExperiment, 
+    SystemExperiment,
     ExperimentStatus,
     SystemComponent,
     ExperimentVariant
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -426,7 +429,12 @@ class SystemExperimentRegistry:
                     await handler(event)
                 except Exception as e:
                     # Log but don't fail on handler errors
-                    print(f"Event handler error: {e}")
+                    logger.error(
+                        "event_handler_error",
+                        error=str(e),
+                        event_type=event.event_type if hasattr(event, 'event_type') else 'unknown',
+                        exc_info=True
+                    )
     
     async def _rollback_experiment_start(self,
                                        experiment_id: str,

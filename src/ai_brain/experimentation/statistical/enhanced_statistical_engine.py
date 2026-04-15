@@ -235,8 +235,13 @@ class FrequentistAnalyzer:
                     effect_size, len(treatment_data), self.default_alpha,
                     alternative=alternative
                 )
-            except:
-                power = 0.8  # Default assumption
+            except (ImportError, ValueError, AttributeError) as e:
+                logger.warning(
+                    "statistical_power_calculation_failed",
+                    error_type=type(e).__name__,
+                    error=str(e)
+                )
+                power = 0.8  # Default assumption when statsmodels unavailable
         else:
             power = 0.8  # Default assumption
         
@@ -277,7 +282,11 @@ class FrequentistAnalyzer:
                     [treatment_total, control_total],
                     alternative=alternative
                 )
-            except:
+            except (ImportError, ValueError, AttributeError) as e:
+                logger.info(
+                    "falling_back_to_manual_proportion_test",
+                    reason=type(e).__name__
+                )
                 # Fallback to manual calculation
                 p_value, z_stat = self._manual_proportion_test(
                     control_successes, control_total,
@@ -364,9 +373,14 @@ class FrequentistAnalyzer:
                         effect_size, power_target, significance_level, alternative='two-sided'
                     )
                     required_n = int(np.ceil(sample_size))
-                except:
-                    # Fallback calculation
-                    required_n = int(np.ceil(16 * (1/effect_size)**2))  # Rough approximation
+                except (ImportError, ValueError, ZeroDivisionError) as e:
+                    logger.warning(
+                        "sample_size_calculation_fallback",
+                        error=type(e).__name__,
+                        effect_size=effect_size
+                    )
+                    # Fallback to Cohen's approximation for two-sample t-test
+                    required_n = int(np.ceil(16 * (1/effect_size)**2))
             else:
                 # Rough approximation: n ≈ 16/d² for two-sample t-test
                 required_n = int(np.ceil(16 * (1/effect_size)**2))

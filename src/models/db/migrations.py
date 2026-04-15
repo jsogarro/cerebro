@@ -279,10 +279,10 @@ def run_migration_command(args: list[str]) -> int:
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.stdout:
-        print(result.stdout)
+        logger.info("migration_output", output=result.stdout)
 
     if result.stderr and result.returncode != 0:
-        logger.error(result.stderr)
+        logger.error("migration_error", error=result.stderr)
 
     return result.returncode
 

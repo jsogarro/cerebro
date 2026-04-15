@@ -1204,8 +1204,14 @@ class TalkHierSessionService:
                     if last_timestamp and timestamp < last_timestamp:
                         errors.append(f"Message {i}: timestamp out of order")
                     last_timestamp = timestamp
-                except:
-                    errors.append(f"Message {i}: invalid timestamp format")
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        "invalid_timestamp_format",
+                        message_index=i,
+                        timestamp=msg["timestamp"],
+                        error=str(e)
+                    )
+                    errors.append(f"Message {i}: invalid timestamp format: {type(e).__name__}")
         
         return errors
     
