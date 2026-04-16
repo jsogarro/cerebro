@@ -7,7 +7,7 @@ and authorization events in the system.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import ENUM, UUID
@@ -375,8 +375,8 @@ class AuditLog(BaseModel):
         if event_types:
             query = query.filter(cls.event_type.in_(event_types))
 
-        results = query.order_by(cls.created_at.desc()).limit(limit).all()
-        return cast(list["AuditLog"], results)
+        results: list[AuditLog] = query.order_by(cls.created_at.desc()).limit(limit).all()
+        return results
 
     @classmethod
     def get_suspicious_events(
@@ -401,8 +401,8 @@ class AuditLog(BaseModel):
         if unreviewed_only:
             query = query.filter(cls.reviewed_at.is_(None))
 
-        results = query.order_by(cls.created_at.desc()).limit(limit).all()
-        return cast(list["AuditLog"], results)
+        results: list[AuditLog] = query.order_by(cls.created_at.desc()).limit(limit).all()
+        return results
 
     def mark_reviewed(self, reviewer: str) -> None:
         """

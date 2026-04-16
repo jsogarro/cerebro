@@ -323,17 +323,17 @@ async def update_experiment(
         raise HTTPException(status_code=404, detail="Experiment not found")
     
     if update.description is not None:
-        object.__setattr__(experiment, "description", update.description)
+        experiment.description = update.description
     if update.status is not None:
-        object.__setattr__(experiment, "status", update.status)
+        experiment.status = update.status
     if update.traffic_percentage is not None:
-        object.__setattr__(experiment, "traffic_percentage", update.traffic_percentage)
+        experiment.traffic_percentage = update.traffic_percentage
     if update.end_date is not None:
-        object.__setattr__(experiment, "end_date", update.end_date)
+        experiment.end_date = update.end_date
     if update.success_criteria is not None:
-        object.__setattr__(experiment, "success_criteria", update.success_criteria)
+        experiment.success_criteria = update.success_criteria
 
-    object.__setattr__(experiment, "updated_at", datetime.utcnow())
+    experiment.updated_at = datetime.utcnow()
     
     await db.commit()
     await db.refresh(experiment)

@@ -560,10 +560,15 @@ async def verify_report_integrity(report_id: UUID) -> dict[str, Any]:
                 detail="Report storage service not available",
             )
 
-        from typing import cast
         integrity_result = await storage_service.verify_report_integrity(report_id)
 
-        return cast(dict[str, Any], integrity_result)
+        if not isinstance(integrity_result, dict):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Invalid response from storage service",
+            )
+
+        return integrity_result
 
     except Exception as e:
         logger.error(f"Failed to verify report integrity {report_id}", exc_info=e)

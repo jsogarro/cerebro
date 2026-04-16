@@ -7,7 +7,7 @@ Provides operations for workflow checkpoint storage and recovery.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import and_, delete, func, select
@@ -118,7 +118,10 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         result = await self.session.execute(delete_stmt)
         await self.session.flush()
 
-        return cast(int, getattr(result, "rowcount", 0))
+        rowcount = getattr(result, "rowcount", None)
+        if rowcount is None:
+            raise RuntimeError("SQLAlchemy Result missing rowcount attribute")
+        return int(rowcount)
 
     async def get_recovery_point(
         self, project_id: UUID
@@ -401,7 +404,10 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             )
 
             result = await self.session.execute(delete_stmt)
-            deleted_count += cast(int, getattr(result, "rowcount", 0))
+            rowcount = getattr(result, "rowcount", None)
+            if rowcount is None:
+                raise RuntimeError("SQLAlchemy Result missing rowcount attribute")
+            deleted_count += int(rowcount)
 
         await self.session.flush()
         return deleted_count

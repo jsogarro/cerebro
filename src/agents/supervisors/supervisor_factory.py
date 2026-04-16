@@ -543,8 +543,8 @@ class SupervisorFactory:
         complexity_analysis = context.get("complexity_analysis", {})
         
         complexity_level = complexity_analysis.get("level", "moderate")
-        if hasattr(complexity_level, 'lower'):
-            return str(complexity_level).lower()
+        if isinstance(complexity_level, str):
+            return complexity_level.lower()
 
         return "moderate"
     

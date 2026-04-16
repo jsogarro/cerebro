@@ -18,7 +18,7 @@ import logging
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -219,10 +219,9 @@ class DirectExecutionService:
             
             # Get supervisor registry
             from ...agents.supervisors.base_supervisor import BaseSupervisor
-            supervisor_registry: dict[str, type[BaseSupervisor]] = cast(
-                dict[str, type[BaseSupervisor]],
-                {"research": ResearchSupervisor}
-            )
+            supervisor_registry: dict[str, type[BaseSupervisor]] = {
+                "research": ResearchSupervisor
+            }
 
             execution_status.current_phase = "hierarchical_coordination"
             execution_status.progress_percentage = 40.0

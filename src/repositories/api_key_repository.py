@@ -5,7 +5,7 @@ Manages API keys for service accounts and programmatic access.
 """
 
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, update
@@ -227,7 +227,10 @@ class APIKeyRepository(BaseRepository[APIKey]):
         result = await self.session.execute(stmt)
         await self.session.flush()
 
-        return cast(int, getattr(result, "rowcount", 0))
+        rowcount = getattr(result, "rowcount", None)
+        if rowcount is None:
+            raise RuntimeError("SQLAlchemy Result missing rowcount attribute")
+        return int(rowcount)
 
     async def get_usage_statistics(
         self, key_id: UUID, days: int = 30

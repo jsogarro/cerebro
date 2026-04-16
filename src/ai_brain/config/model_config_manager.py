@@ -23,7 +23,7 @@ import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
@@ -359,7 +359,12 @@ class ModelConfigManager:
         if not config_data:
             raise ValueError(f"Empty or invalid YAML configuration: {path}")
 
-        return cast(dict[str, Any], config_data)
+        if not isinstance(config_data, dict):
+            raise ValueError(
+                f"YAML configuration must be a dictionary, got {type(config_data).__name__}: {path}"
+            )
+
+        return config_data
 
     def _merge_configurations(
         self, base_config: dict[str, Any], override_config: dict[str, Any]

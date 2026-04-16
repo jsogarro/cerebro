@@ -7,7 +7,7 @@ Manages OAuth provider connections for social authentication
 
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -384,8 +384,8 @@ class OAuthAccount(BaseModel):
         if active_only:
             query = query.filter(cls.is_active == True)
 
-        result = query.first()
-        return cast("OAuthAccount | None", result)
+        result: OAuthAccount | None = query.first()
+        return result
 
     @classmethod
     def find_by_provider_id(
@@ -405,12 +405,12 @@ class OAuthAccount(BaseModel):
         if not session:
             return None
 
-        result = (
+        result: OAuthAccount | None = (
             session.query(cls)
             .filter(cls.provider == provider, cls.provider_user_id == provider_user_id)
             .first()
         )
-        return cast("OAuthAccount | None", result)
+        return result
 
     def to_dict(self, include_tokens: bool = False) -> dict[str, Any]:
         """

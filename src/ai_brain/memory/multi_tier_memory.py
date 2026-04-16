@@ -230,9 +230,8 @@ class MultiTierMemorySystem:
                     procedural_results,
                 ]
             ):
-                if isinstance(result, Exception):
+                if isinstance(result, BaseException):
                     logger.error(f"Memory tier {i} retrieval failed: {result}")
-                    # Set to empty results
                     if i == 0:
                         working_results = []
                     elif i == 1:
@@ -244,10 +243,10 @@ class MultiTierMemorySystem:
 
             # Combine and rank results
             recall = self._combine_and_rank_results(
-                working_results if not isinstance(working_results, BaseException) else [],
-                episodic_results if not isinstance(episodic_results, BaseException) else [],
-                semantic_results if not isinstance(semantic_results, BaseException) else [],
-                procedural_results if not isinstance(procedural_results, BaseException) else [],
+                working_results if isinstance(working_results, list) else [],
+                episodic_results if isinstance(episodic_results, list) else [],
+                semantic_results if isinstance(semantic_results, list) else [],
+                procedural_results if isinstance(procedural_results, list) else [],
                 query,
                 max_results,
             )
