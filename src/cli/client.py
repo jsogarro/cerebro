@@ -58,11 +58,11 @@ class ResearchAPIClient:
         elif config.api_key:
             self.client.headers["X-API-Key"] = config.api_key
 
-    async def __aenter__(self) -> "APIClient":
+    async def __aenter__(self) -> "ResearchAPIClient":
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self.close()
 
@@ -70,7 +70,7 @@ class ResearchAPIClient:
         """Close HTTP client."""
         await self.client.aclose()
 
-    def _log(self, message: str):
+    def _log(self, message: str) -> None:
         """Log message if verbose mode is enabled."""
         if self.verbose:
             console.print(f"[dim]{message}[/dim]")
@@ -117,12 +117,14 @@ class ResearchAPIClient:
     async def health_check(self) -> dict[str, Any]:
         """Check API health."""
         response = await self._request("GET", "/health")
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     async def readiness_check(self) -> dict[str, Any]:
         """Check API readiness."""
         response = await self._request("GET", "/ready")
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     # Research project endpoints
 
@@ -173,7 +175,7 @@ class ResearchAPIClient:
         offset: int = 0,
     ) -> list[ResearchProject]:
         """List research projects."""
-        params = {
+        params: dict[str, Any] = {
             "limit": limit,
             "offset": offset,
         }
@@ -227,16 +229,19 @@ class ResearchAPIClient:
             "GET",
             f"/api/v1/research/projects/{project_id}/results",
         )
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     # Generic HTTP methods for agent framework
 
     async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Generic GET request."""
         response = await self._request("GET", path, params=params)
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     async def post(self, path: str, json_data: dict[str, Any]) -> dict[str, Any]:
         """Generic POST request."""
         response = await self._request("POST", path, json_data=json_data)
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result

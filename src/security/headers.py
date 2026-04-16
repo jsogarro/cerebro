@@ -7,6 +7,7 @@ web vulnerabilities (XSS, clickjacking, MIME sniffing, etc.).
 
 import base64
 import secrets
+from typing import Any
 
 from fastapi import Request
 from fastapi.responses import Response
@@ -206,7 +207,7 @@ class SecurityHeadersMiddleware:
 
         return json.dumps(report_to)
 
-    async def __call__(self, request: Request, call_next) -> Response:
+    async def __call__(self, request: Request, call_next: Any) -> Response:
         """Apply security headers to response."""
         # Generate CSP nonce if enabled
         nonce = None
@@ -216,7 +217,7 @@ class SecurityHeadersMiddleware:
             request.state.csp_nonce = nonce
 
         # Process request
-        response = await call_next(request)
+        response: Response = await call_next(request)
 
         # Add security headers
 
@@ -286,13 +287,13 @@ class CORSSecurityMiddleware:
 
     def __init__(
         self,
-        allowed_origins: list[str] = None,
-        allowed_methods: list[str] = None,
-        allowed_headers: list[str] = None,
-        exposed_headers: list[str] = None,
+        allowed_origins: list[str] | None = None,
+        allowed_methods: list[str] | None = None,
+        allowed_headers: list[str] | None = None,
+        exposed_headers: list[str] | None = None,
         allow_credentials: bool = False,
         max_age: int = 3600,
-        origin_validator: callable | None = None,
+        origin_validator: Any | None = None,
     ):
         """
         Initialize CORS middleware.
@@ -342,7 +343,7 @@ class CORSSecurityMiddleware:
         """
         # Custom validator takes precedence
         if self.origin_validator:
-            return self.origin_validator(origin)
+            return bool(self.origin_validator(origin))
 
         # Check against allowed origins list
         if "*" in self.allowed_origins:
@@ -361,7 +362,7 @@ class CORSSecurityMiddleware:
 
         return False
 
-    async def __call__(self, request: Request, call_next) -> Response:
+    async def __call__(self, request: Request, call_next: Any) -> Response:
         """Process CORS headers."""
         origin = request.headers.get("Origin")
 
@@ -385,7 +386,7 @@ class CORSSecurityMiddleware:
             return response
 
         # Process actual request
-        response = await call_next(request)
+        response: Response = await call_next(request)
 
         # Add CORS headers if origin is allowed
         if origin and self._is_origin_allowed(origin):

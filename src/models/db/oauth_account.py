@@ -7,12 +7,11 @@ Manages OAuth provider connections for social authentication
 
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Optional
+from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
-    Column,
     DateTime,
     ForeignKey,
     Index,
@@ -21,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import ENUM, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -52,87 +51,82 @@ class OAuthAccount(BaseModel):
 
     __tablename__ = "oauth_accounts"
 
-    # Foreign key to user
-    user_id = Column(
+    user_id: Mapped[Any] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
-    # OAuth provider information
-    provider = Column(
+    provider: Mapped[OAuthProvider] = mapped_column(
         ENUM(OAuthProvider, name="oauth_provider"),
         nullable=False,
         index=True,
         comment="OAuth provider name",
     )
 
-    provider_user_id = Column(
+    provider_user_id: Mapped[str] = mapped_column(
         String(255), nullable=False, comment="User ID from OAuth provider"
     )
 
-    provider_username = Column(
+    provider_username: Mapped[str | None] = mapped_column(
         String(255), nullable=True, comment="Username from OAuth provider"
     )
 
-    provider_email = Column(
+    provider_email: Mapped[str | None] = mapped_column(
         String(255), nullable=True, comment="Email from OAuth provider"
     )
 
-    # OAuth tokens
-    access_token = Column(
+    access_token: Mapped[str] = mapped_column(
         String(2048), nullable=False, comment="OAuth access token (encrypted)"
     )
 
-    refresh_token = Column(
+    refresh_token: Mapped[str | None] = mapped_column(
         String(2048), nullable=True, comment="OAuth refresh token (encrypted)"
     )
 
-    id_token = Column(
+    id_token: Mapped[str | None] = mapped_column(
         String(2048),
         nullable=True,
         comment="OAuth ID token for OIDC providers (encrypted)",
     )
 
-    token_type = Column(
+    token_type: Mapped[str | None] = mapped_column(
         String(50),
         nullable=True,
         default="Bearer",
         comment="Token type (usually Bearer)",
     )
 
-    # Token expiration
-    access_token_expires_at = Column(
+    access_token_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Access token expiration time"
     )
 
-    refresh_token_expires_at = Column(
+    refresh_token_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Refresh token expiration time"
     )
 
-    # Provider profile data
-    provider_data = Column(
+    provider_data: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, nullable=True, comment="Full profile data from provider"
     )
 
-    profile_picture_url = Column(
+    profile_picture_url: Mapped[str | None] = mapped_column(
         String(500), nullable=True, comment="Profile picture URL from provider"
     )
 
-    display_name = Column(
+    display_name: Mapped[str | None] = mapped_column(
         String(255), nullable=True, comment="Display name from provider"
     )
 
-    # Scopes and permissions
-    scopes = Column(JSON, nullable=True, comment="List of granted OAuth scopes")
+    scopes: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True, comment="List of granted OAuth scopes"
+    )
 
-    # Connection status
-    is_primary = Column(
+    is_primary: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, comment="Primary OAuth account for user"
     )
 
-    is_active = Column(
+    is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=True,
@@ -140,43 +134,43 @@ class OAuthAccount(BaseModel):
         comment="Whether connection is active",
     )
 
-    is_verified = Column(
+    is_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
         comment="Whether provider account is verified",
     )
 
-    # Connection metadata
-    first_connected_at = Column(
+    first_connected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default="now()",
         comment="When first connected",
     )
 
-    last_used_at = Column(
+    last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         comment="Last time used for authentication",
     )
 
-    last_refreshed_at = Column(
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Last token refresh time"
     )
 
-    connection_count = Column(
+    connection_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, comment="Number of times connected"
     )
 
-    # Error tracking
-    last_error = Column(String(500), nullable=True, comment="Last error message")
+    last_error: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="Last error message"
+    )
 
-    last_error_at = Column(
+    last_error_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Last error timestamp"
     )
 
-    error_count = Column(
+    error_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, comment="Total error count"
     )
 
@@ -201,7 +195,7 @@ class OAuthAccount(BaseModel):
         refresh_token: str | None = None,
         id_token: str | None = None,
         expires_in: int | None = None,
-        provider_data: dict | None = None,
+        provider_data: dict[str, Any] | None = None,
         scopes: list[str] | None = None,
     ) -> "OAuthAccount":
         """
@@ -321,7 +315,7 @@ class OAuthAccount(BaseModel):
         self.refresh_token = None
         self.id_token = None
 
-    def set_as_primary(self, session=None) -> None:
+    def set_as_primary(self, session: Any = None) -> None:
         """
         Set this as the primary OAuth account for the user.
 
@@ -341,7 +335,7 @@ class OAuthAccount(BaseModel):
         """Check if access token is expired."""
         if not self.access_token_expires_at:
             return False
-        return datetime.utcnow() > self.access_token_expires_at
+        return bool(datetime.utcnow() > self.access_token_expires_at)
 
     @property
     def needs_refresh(self) -> bool:
@@ -349,9 +343,8 @@ class OAuthAccount(BaseModel):
         if not self.access_token_expires_at:
             return False
 
-        # Refresh if expires in less than 5 minutes
         buffer_time = datetime.utcnow() + timedelta(minutes=5)
-        return buffer_time > self.access_token_expires_at
+        return bool(buffer_time > self.access_token_expires_at)
 
     @property
     def days_since_last_use(self) -> int | None:
@@ -367,8 +360,8 @@ class OAuthAccount(BaseModel):
         user_id: str,
         provider: OAuthProvider,
         active_only: bool = True,
-        session=None,
-    ) -> Optional["OAuthAccount"]:
+        session: Any = None,
+    ) -> "OAuthAccount | None":
         """
         Get OAuth account by provider.
 
@@ -395,8 +388,8 @@ class OAuthAccount(BaseModel):
 
     @classmethod
     def find_by_provider_id(
-        cls, provider: OAuthProvider, provider_user_id: str, session=None
-    ) -> Optional["OAuthAccount"]:
+        cls, provider: OAuthProvider, provider_user_id: str, session: Any = None
+    ) -> "OAuthAccount | None":
         """
         Find OAuth account by provider and provider user ID.
 
@@ -417,7 +410,7 @@ class OAuthAccount(BaseModel):
             .first()
         )
 
-    def to_dict(self, include_tokens: bool = False) -> dict:
+    def to_dict(self, include_tokens: bool = False) -> dict[str, Any]:
         """
         Convert to dictionary.
 

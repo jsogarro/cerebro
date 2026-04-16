@@ -10,12 +10,11 @@ and optimal routing strategy based on multiple factors including:
 - Expected output format and quality requirements
 """
 
-import re
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Set
-import asyncio
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +58,11 @@ class ComplexityAnalysis:
     score: float  # Overall complexity (0.0 - 1.0)
     level: ComplexityLevel  # Categorized complexity level
     factors: ComplexityFactors  # Detailed factor breakdown
-    domains: List[QueryDomain]  # Identified domains
+    domains: list[QueryDomain]  # Identified domains
     subtask_count: int = 1  # Estimated subtasks needed
     uncertainty: float = 0.0  # Confidence in analysis
-    reasoning_types: List[str] = field(default_factory=list)
-    recommended_agents: Dict[str, int] = field(default_factory=dict)
+    reasoning_types: list[str] = field(default_factory=list)
+    recommended_agents: dict[str, int] = field(default_factory=dict)
     estimated_tokens: int = 1000  # Estimated token usage
     priority_level: str = "normal"  # Priority: low, normal, high, critical
 
@@ -76,7 +75,7 @@ class QueryComplexityAnalyzer:
     and provide routing recommendations for the MASR system.
     """
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize analyzer with configuration."""
         self.config = config or {}
 
@@ -141,7 +140,7 @@ class QueryComplexityAnalyzer:
         }
 
     async def analyze(
-        self, query: str, context: Optional[Dict] = None
+        self, query: str, context: dict[str, Any] | None = None
     ) -> ComplexityAnalysis:
         """
         Analyze query complexity and provide routing recommendations.
@@ -219,7 +218,7 @@ class QueryComplexityAnalyzer:
         return cleaned
 
     async def _analyze_factors(
-        self, query: str, context: Optional[Dict] = None
+        self, query: str, context: dict[str, Any] | None = None
     ) -> ComplexityFactors:
         """Analyze individual complexity factors."""
 
@@ -334,7 +333,7 @@ class QueryComplexityAnalyzer:
         return min(domain_complexity, 1.0)
 
     def _analyze_data_requirements(
-        self, query: str, context: Optional[Dict] = None
+        self, query: str, context: dict[str, Any] | None = None
     ) -> float:
         """Analyze external data requirements."""
         data_complexity = 0.0
@@ -374,7 +373,7 @@ class QueryComplexityAnalyzer:
         return min(output_complexity, 1.0)
 
     def _analyze_time_sensitivity(
-        self, query: str, context: Optional[Dict] = None
+        self, query: str, context: dict[str, Any] | None = None
     ) -> float:
         """Analyze time sensitivity requirements."""
         time_sensitivity = 0.0
@@ -398,7 +397,7 @@ class QueryComplexityAnalyzer:
         return time_sensitivity
 
     def _analyze_quality_requirements(
-        self, query: str, context: Optional[Dict] = None
+        self, query: str, context: dict[str, Any] | None = None
     ) -> float:
         """Analyze quality and validation requirements."""
         quality = 0.0
@@ -429,7 +428,7 @@ class QueryComplexityAnalyzer:
             + factors.quality_requirements * self.weights["quality"]
         )
 
-        return min(score, 1.0)
+        return float(min(score, 1.0))
 
     def _determine_complexity_level(self, score: float) -> ComplexityLevel:
         """Determine complexity level from score."""
@@ -440,7 +439,7 @@ class QueryComplexityAnalyzer:
         else:
             return ComplexityLevel.COMPLEX
 
-    def _identify_domains(self, query: str) -> List[QueryDomain]:
+    def _identify_domains(self, query: str) -> list[QueryDomain]:
         """Identify relevant domains for the query."""
         domains = []
 
@@ -457,7 +456,7 @@ class QueryComplexityAnalyzer:
 
         return domains
 
-    def _identify_reasoning_types(self, query: str) -> List[str]:
+    def _identify_reasoning_types(self, query: str) -> list[str]:
         """Identify types of reasoning required."""
         reasoning_types = []
 
@@ -467,7 +466,7 @@ class QueryComplexityAnalyzer:
 
         return reasoning_types
 
-    def _estimate_subtasks(self, query: str, domains: List[QueryDomain]) -> int:
+    def _estimate_subtasks(self, query: str, domains: list[QueryDomain]) -> int:
         """Estimate number of subtasks required."""
         # Base subtasks
         subtask_count = 1
@@ -487,9 +486,9 @@ class QueryComplexityAnalyzer:
     def _recommend_agents(
         self,
         level: ComplexityLevel,
-        domains: List[QueryDomain],
-        reasoning_types: List[str],
-    ) -> Dict[str, int]:
+        domains: list[QueryDomain],
+        reasoning_types: list[str],
+    ) -> dict[str, int]:
         """Recommend agent allocation based on analysis."""
         agents = {}
 
@@ -540,7 +539,7 @@ class QueryComplexityAnalyzer:
 
         return estimated_tokens
 
-    def _determine_priority(self, query: str, context: Optional[Dict] = None) -> str:
+    def _determine_priority(self, query: str, context: dict[str, Any] | None = None) -> str:
         """Determine query priority level."""
         for priority, pattern in self.priority_patterns.items():
             if re.search(pattern, query):
@@ -548,12 +547,12 @@ class QueryComplexityAnalyzer:
 
         # Check context for priority
         if context and context.get("priority"):
-            return context["priority"]
+            return str(context["priority"])
 
         return "normal"
 
     def _calculate_uncertainty(
-        self, factors: ComplexityFactors, domains: List[QueryDomain]
+        self, factors: ComplexityFactors, domains: list[QueryDomain]
     ) -> float:
         """Calculate uncertainty in the analysis."""
         uncertainty = 0.0
@@ -572,9 +571,9 @@ class QueryComplexityAnalyzer:
 
 
 __all__ = [
-    "QueryComplexityAnalyzer",
     "ComplexityAnalysis",
-    "ComplexityLevel",
-    "QueryDomain",
     "ComplexityFactors",
+    "ComplexityLevel",
+    "QueryComplexityAnalyzer",
+    "QueryDomain",
 ]

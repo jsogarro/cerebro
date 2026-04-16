@@ -66,12 +66,12 @@ class ProductionSettings:
     # Maintenance
     maintenance_mode: bool = False
     maintenance_message: str = "System is under maintenance. Please try again later."
-    maintenance_allowed_ips: list = []
+    maintenance_allowed_ips: list[str] = []
 
     # Feature rollout
-    feature_rollout_percentage: dict[str, int] = None
+    feature_rollout_percentage: dict[str, int] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize feature rollout percentages."""
         if self.feature_rollout_percentage is None:
             self.feature_rollout_percentage = {

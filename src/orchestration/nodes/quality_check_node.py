@@ -40,51 +40,67 @@ async def quality_check_node(state: ResearchState) -> ResearchState:
         aggregated_results = state.context.get("aggregated_results", {})
 
         # Initialize quality report
-        quality_report = {
+        checks_performed: list[dict[str, Any]] = []
+        issues_found: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        quality_report: dict[str, Any] = {
             "timestamp": datetime.utcnow().isoformat(),
-            "checks_performed": [],
-            "issues_found": [],
-            "warnings": [],
+            "checks_performed": checks_performed,
+            "issues_found": issues_found,
+            "warnings": warnings,
             "score": 0.0,
             "passed": False,
         }
 
         # Perform completeness check
         completeness_result = check_completeness(state, quality_criteria)
-        quality_report["checks_performed"].append(completeness_result)
+        checks_performed.append(completeness_result)
         if not completeness_result["passed"]:
-            quality_report["issues_found"].extend(completeness_result["issues"])
+            comp_issues = completeness_result.get("issues", [])
+            if isinstance(comp_issues, list):
+                issues_found.extend(comp_issues)
 
         # Perform accuracy check
         accuracy_result = check_accuracy(aggregated_results, quality_criteria)
-        quality_report["checks_performed"].append(accuracy_result)
+        checks_performed.append(accuracy_result)
         if not accuracy_result["passed"]:
-            quality_report["issues_found"].extend(accuracy_result["issues"])
+            acc_issues = accuracy_result.get("issues", [])
+            if isinstance(acc_issues, list):
+                issues_found.extend(acc_issues)
 
         # Perform depth check
         depth_result = check_depth(aggregated_results, quality_criteria)
-        quality_report["checks_performed"].append(depth_result)
+        checks_performed.append(depth_result)
         if not depth_result["passed"]:
-            quality_report["issues_found"].extend(depth_result["issues"])
+            depth_issues = depth_result.get("issues", [])
+            if isinstance(depth_issues, list):
+                issues_found.extend(depth_issues)
 
         # Perform coherence check
         coherence_result = check_coherence(aggregated_results, quality_criteria)
-        quality_report["checks_performed"].append(coherence_result)
+        checks_performed.append(coherence_result)
         if not coherence_result["passed"]:
-            quality_report["issues_found"].extend(coherence_result["issues"])
+            coh_issues = coherence_result.get("issues", [])
+            if isinstance(coh_issues, list):
+                issues_found.extend(coh_issues)
 
         # Validate against rules
         validation_result = validate_against_rules(state, validation_rules)
-        quality_report["checks_performed"].append(validation_result)
-        quality_report["issues_found"].extend(validation_result.get("errors", []))
-        quality_report["warnings"].extend(validation_result.get("warnings", []))
+        checks_performed.append(validation_result)
+        val_errors = validation_result.get("errors", [])
+        val_warnings = validation_result.get("warnings", [])
+        if isinstance(val_errors, list):
+            issues_found.extend(val_errors)
+        if isinstance(val_warnings, list):
+            warnings.extend(val_warnings)
 
         # Check for plagiarism if required
         if quality_criteria.get("accuracy", {}).get("plagiarism_check", False):
             plagiarism_result = await check_plagiarism(aggregated_results)
-            quality_report["checks_performed"].append(plagiarism_result)
-            if plagiarism_result["plagiarism_detected"]:
-                quality_report["issues_found"].append(
+            checks_performed.append(plagiarism_result)
+            if plagiarism_result.get("plagiarism_detected"):
+                issues_found.append(
                     {
                         "type": "plagiarism",
                         "severity": "error",
@@ -98,17 +114,8 @@ async def quality_check_node(state: ResearchState) -> ResearchState:
 
         # Determine if quality standards are met
         min_quality_score = quality_criteria.get("minimum_quality_score", 0.7)
-        quality_report["passed"] = (
-            quality_score >= min_quality_score
-            and len(
-                [
-                    i
-                    for i in quality_report["issues_found"]
-                    if i.get("severity") == "error"
-                ]
-            )
-            == 0
-        )
+        error_issues = [i for i in issues_found if i.get("severity") == "error"]
+        quality_report["passed"] = quality_score >= min_quality_score and len(error_issues) == 0
 
         # Update state
         state.quality_score = quality_score
@@ -116,9 +123,11 @@ async def quality_check_node(state: ResearchState) -> ResearchState:
 
         # Add validation errors if quality check failed
         if not quality_report["passed"]:
-            for issue in quality_report["issues_found"]:
+            for issue in issues_found:
                 if issue.get("severity") == "error":
-                    state.validation_errors.append(issue["message"])
+                    msg = issue.get("message")
+                    if isinstance(msg, str):
+                        state.validation_errors.append(msg)
 
         logger.info(
             f"Quality check complete. Score: {quality_score:.2f}, Passed: {quality_report['passed']}"
@@ -145,19 +154,21 @@ def check_completeness(
     Returns:
         Completeness check result
     """
-    result = {"check_name": "completeness", "passed": True, "issues": [], "metrics": {}}
+    issues: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {}
+    result: dict[str, Any] = {"check_name": "completeness", "passed": True, "issues": issues, "metrics": metrics}
 
     completeness_criteria = criteria.get("completeness", {})
 
     # Check if all required agents executed
-    if completeness_criteria.get("all_agents_executed"):
+    if completeness_criteria.get("all_agents_executed") and state.research_plan is not None:
         planned_agents = set(state.research_plan.get("agents", []))
         completed_agents = state.completed_agents
         missing_agents = planned_agents - completed_agents
 
         if missing_agents:
             result["passed"] = False
-            result["issues"].append(
+            issues.append(
                 {
                     "type": "incomplete_execution",
                     "severity": "error",
@@ -165,7 +176,7 @@ def check_completeness(
                 }
             )
 
-        result["metrics"]["agent_coverage"] = (
+        metrics["agent_coverage"] = (
             len(completed_agents) / len(planned_agents) if planned_agents else 0
         )
 
@@ -175,11 +186,11 @@ def check_completeness(
     successful_agents = len(state.completed_agents)
     success_rate = successful_agents / total_agents if total_agents > 0 else 0
 
-    result["metrics"]["success_rate"] = success_rate
+    metrics["success_rate"] = success_rate
 
     if success_rate < min_success_rate:
         result["passed"] = False
-        result["issues"].append(
+        issues.append(
             {
                 "type": "low_success_rate",
                 "severity": "warning",
@@ -201,7 +212,9 @@ def check_accuracy(results: dict[str, Any], criteria: dict[str, Any]) -> dict[st
     Returns:
         Accuracy check result
     """
-    result = {"check_name": "accuracy", "passed": True, "issues": [], "metrics": {}}
+    issues: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {}
+    result: dict[str, Any] = {"check_name": "accuracy", "passed": True, "issues": issues, "metrics": metrics}
 
     accuracy_criteria = criteria.get("accuracy", {})
 
@@ -211,11 +224,11 @@ def check_accuracy(results: dict[str, Any], criteria: dict[str, Any]) -> dict[st
         verified_citations = [c for c in citations if c.get("verified", False)]
         verification_rate = len(verified_citations) / len(citations) if citations else 0
 
-        result["metrics"]["citation_verification_rate"] = verification_rate
+        metrics["citation_verification_rate"] = verification_rate
 
         if verification_rate < 0.8:
             result["passed"] = False
-            result["issues"].append(
+            issues.append(
                 {
                     "type": "unverified_citations",
                     "severity": "warning",
@@ -227,11 +240,11 @@ def check_accuracy(results: dict[str, Any], criteria: dict[str, Any]) -> dict[st
     conflicts = results.get("conflicts", [])
     unresolved_conflicts = [c for c in conflicts if not c.get("resolved", False)]
 
-    result["metrics"]["unresolved_conflicts"] = len(unresolved_conflicts)
+    metrics["unresolved_conflicts"] = len(unresolved_conflicts)
 
     if unresolved_conflicts:
         result["passed"] = False
-        result["issues"].append(
+        issues.append(
             {
                 "type": "unresolved_conflicts",
                 "severity": "warning",
@@ -253,7 +266,9 @@ def check_depth(results: dict[str, Any], criteria: dict[str, Any]) -> dict[str, 
     Returns:
         Depth check result
     """
-    result = {"check_name": "depth", "passed": True, "issues": [], "metrics": {}}
+    issues: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {}
+    result: dict[str, Any] = {"check_name": "depth", "passed": True, "issues": issues, "metrics": metrics}
 
     depth_criteria = criteria.get("depth", {})
 
@@ -261,11 +276,11 @@ def check_depth(results: dict[str, Any], criteria: dict[str, Any]) -> dict[str, 
     min_sources = depth_criteria.get("minimum_sources", 10)
     actual_sources = len(results.get("sources", []))
 
-    result["metrics"]["source_count"] = actual_sources
+    metrics["source_count"] = actual_sources
 
     if actual_sources < min_sources:
         result["passed"] = False
-        result["issues"].append(
+        issues.append(
             {
                 "type": "insufficient_sources",
                 "severity": "error",
@@ -278,13 +293,13 @@ def check_depth(results: dict[str, Any], criteria: dict[str, Any]) -> dict[str, 
     findings = results.get("findings", {})
     total_findings = sum(len(f) for f in findings.values())
 
-    result["metrics"]["finding_count"] = total_findings
+    metrics["finding_count"] = total_findings
 
     min_findings = {"simple": 5, "moderate": 10, "complex": 20}.get(analysis_depth, 10)
 
     if total_findings < min_findings:
         result["passed"] = False
-        result["issues"].append(
+        issues.append(
             {
                 "type": "shallow_analysis",
                 "severity": "warning",
@@ -308,7 +323,9 @@ def check_coherence(
     Returns:
         Coherence check result
     """
-    result = {"check_name": "coherence", "passed": True, "issues": [], "metrics": {}}
+    issues: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {}
+    result: dict[str, Any] = {"check_name": "coherence", "passed": True, "issues": issues, "metrics": metrics}
 
     coherence_criteria = criteria.get("coherence", {})
 
@@ -320,11 +337,11 @@ def check_coherence(
         # Check if insights are supported by evidence
         unsupported_insights = [i for i in insights if not i.get("supporting_evidence")]
 
-        result["metrics"]["unsupported_insights"] = len(unsupported_insights)
+        metrics["unsupported_insights"] = len(unsupported_insights)
 
         if unsupported_insights:
             result["passed"] = False
-            result["issues"].append(
+            issues.append(
                 {
                     "type": "unsupported_claims",
                     "severity": "warning",
@@ -341,7 +358,7 @@ def check_coherence(
 
         if has_recommendations and not has_insights:
             result["passed"] = False
-            result["issues"].append(
+            issues.append(
                 {
                     "type": "logical_gap",
                     "severity": "warning",
@@ -351,7 +368,7 @@ def check_coherence(
 
         if has_insights and not has_findings:
             result["passed"] = False
-            result["issues"].append(
+            issues.append(
                 {
                     "type": "logical_gap",
                     "severity": "error",
@@ -375,12 +392,15 @@ def validate_against_rules(
     Returns:
         Validation result
     """
-    result = {
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {}
+    result: dict[str, Any] = {
         "check_name": "rule_validation",
         "passed": True,
-        "errors": [],
-        "warnings": [],
-        "metrics": {},
+        "errors": errors,
+        "warnings": warnings,
+        "metrics": metrics,
     }
 
     aggregated = state.context.get("aggregated_results", {})
@@ -414,12 +434,12 @@ def validate_against_rules(
                 message = f"Rule '{rule_name}' failed: {field} count is {actual_value}, expected {operator} {value}"
 
                 if severity == "error":
-                    result["errors"].append(
+                    errors.append(
                         {"rule": rule_name, "message": message, "severity": severity}
                     )
                     result["passed"] = False
                 else:
-                    result["warnings"].append(
+                    warnings.append(
                         {"rule": rule_name, "message": message, "severity": severity}
                     )
 
@@ -436,12 +456,12 @@ def validate_against_rules(
                 message = f"Rule '{rule_name}' failed: Only {success_rate:.2%} of required agents completed"
 
                 if severity == "error":
-                    result["errors"].append(
+                    errors.append(
                         {"rule": rule_name, "message": message, "severity": severity}
                     )
                     result["passed"] = False
                 else:
-                    result["warnings"].append(
+                    warnings.append(
                         {"rule": rule_name, "message": message, "severity": severity}
                     )
 
@@ -458,19 +478,17 @@ def validate_against_rules(
                 )
 
                 if severity == "error":
-                    result["errors"].append(
+                    errors.append(
                         {"rule": rule_name, "message": message, "severity": severity}
                     )
                     result["passed"] = False
                 else:
-                    result["warnings"].append(
+                    warnings.append(
                         {"rule": rule_name, "message": message, "severity": severity}
                     )
 
-    result["metrics"]["rules_passed"] = (
-        len(rules) - len(result["errors"]) - len(result["warnings"])
-    )
-    result["metrics"]["total_rules"] = len(rules)
+    metrics["rules_passed"] = len(rules) - len(errors) - len(warnings)
+    metrics["total_rules"] = len(rules)
 
     return result
 
@@ -485,14 +503,12 @@ async def check_plagiarism(results: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Plagiarism check result
     """
-    # Simplified plagiarism check
-    # In production, would use proper plagiarism detection service
-
-    result = {
+    flagged_sections: list[dict[str, Any]] = []
+    result: dict[str, Any] = {
         "check_name": "plagiarism",
         "plagiarism_detected": False,
         "similarity_score": 0.0,
-        "flagged_sections": [],
+        "flagged_sections": flagged_sections,
     }
 
     # Check for overly long direct quotes without attribution
@@ -504,7 +520,7 @@ async def check_plagiarism(results: dict[str, Any]) -> dict[str, Any]:
 
             # Check for suspiciously long unattributed text
             if len(text) > 200 and not finding.get("sources"):
-                result["flagged_sections"].append(
+                flagged_sections.append(
                     {
                         "category": category,
                         "text_snippet": text[:100] + "...",
@@ -512,9 +528,9 @@ async def check_plagiarism(results: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
 
-    if result["flagged_sections"]:
+    if flagged_sections:
         result["plagiarism_detected"] = True
-        result["similarity_score"] = min(len(result["flagged_sections"]) * 0.1, 1.0)
+        result["similarity_score"] = min(len(flagged_sections) * 0.1, 1.0)
 
     return result
 

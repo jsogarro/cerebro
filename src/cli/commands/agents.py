@@ -3,10 +3,11 @@ Agent Framework CLI commands.
 """
 
 import asyncio
-from typing import Optional
+from typing import Any
 
 import click
-from rich.console import Console
+from click.core import Context
+from click.exceptions import Exit
 from rich.table import Table
 
 from src.cli.client import APIError, ResearchAPIClient
@@ -14,7 +15,7 @@ from src.cli.formatters import print_error, print_success
 
 
 @click.group(name="agents")
-def agents_group():
+def agents_group() -> None:
     """Agent Framework API commands."""
     pass
 
@@ -30,29 +31,29 @@ def agents_group():
     help="Query type",
 )
 @click.pass_context
-def query_command(ctx, query_text: str, domains: tuple, type: str):
+def query_command(ctx: Context, query_text: str, domains: tuple[str, ...], type: str) -> None:
     """Execute intelligent MASR-routed query."""
-    client_verbose = ctx.obj["verbose"]
-    console = ctx.obj["console"]
+    client_verbose: bool = ctx.obj["verbose"]
+    console: Any = ctx.obj["console"]
 
     async def _query() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
                 endpoint = f"/api/v1/query/{type}"
-                payload = {"query": query_text}
+                payload: dict[str, Any] = {"query": query_text}
                 if domains:
                     payload["domains"] = list(domains)
 
                 with console.status(f"[bold green]Executing {type} query via MASR router..."):
                     result = await client.post(endpoint, payload)
 
-                print_success(f"Query completed successfully")
+                print_success("Query completed successfully")
                 console.print("\n[bold]Result:[/bold]")
                 console.print(result.get("output", result))
 
             except APIError as e:
                 print_error(f"Query failed: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_query())
 
@@ -67,10 +68,10 @@ def query_command(ctx, query_text: str, domains: tuple, type: str):
     help="Routing strategy",
 )
 @click.pass_context
-def route_command(ctx, query_text: str, strategy: str):
+def route_command(ctx: Context, query_text: str, strategy: str) -> None:
     """Get MASR routing decision with cost optimization."""
-    client_verbose = ctx.obj["verbose"]
-    console = ctx.obj["console"]
+    client_verbose: bool = ctx.obj["verbose"]
+    console: Any = ctx.obj["console"]
 
     async def _route() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
@@ -95,7 +96,7 @@ def route_command(ctx, query_text: str, strategy: str):
 
             except APIError as e:
                 print_error(f"Routing failed: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_route())
 
@@ -104,15 +105,15 @@ def route_command(ctx, query_text: str, strategy: str):
 @click.argument("query_text")
 @click.option("--domains", "-d", multiple=True, help="Research domains")
 @click.pass_context
-def estimate_command(ctx, query_text: str, domains: tuple):
+def estimate_command(ctx: Context, query_text: str, domains: tuple[str, ...]) -> None:
     """Estimate execution cost with detailed breakdown."""
-    client_verbose = ctx.obj["verbose"]
-    console = ctx.obj["console"]
+    client_verbose: bool = ctx.obj["verbose"]
+    console: Any = ctx.obj["console"]
 
     async def _estimate() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
-                payload = {"query": query_text}
+                payload: dict[str, Any] = {"query": query_text}
                 if domains:
                     payload["domains"] = list(domains)
 
@@ -133,7 +134,7 @@ def estimate_command(ctx, query_text: str, domains: tuple):
 
             except APIError as e:
                 print_error(f"Estimation failed: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_estimate())
 
@@ -143,16 +144,16 @@ def estimate_command(ctx, query_text: str, domains: tuple):
 @click.argument("query_text")
 @click.option("--max-sources", type=int, help="Maximum sources (for literature-review)")
 @click.pass_context
-def execute_command(ctx, agent_type: str, query_text: str, max_sources: Optional[int]):
+def execute_command(ctx: Context, agent_type: str, query_text: str, max_sources: int | None) -> None:
     """Direct agent execution (bypass MASR routing)."""
-    client_verbose = ctx.obj["verbose"]
-    console = ctx.obj["console"]
+    client_verbose: bool = ctx.obj["verbose"]
+    console: Any = ctx.obj["console"]
 
     async def _execute() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
                 endpoint = f"/api/v1/agents/{agent_type}/execute"
-                payload = {"query": query_text, "parameters": {}}
+                payload: dict[str, Any] = {"query": query_text, "parameters": {}}
                 if max_sources:
                     payload["parameters"]["max_sources"] = max_sources
 
@@ -165,7 +166,7 @@ def execute_command(ctx, agent_type: str, query_text: str, max_sources: Optional
 
             except APIError as e:
                 print_error(f"Agent execution failed: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_execute())
 
@@ -174,10 +175,10 @@ def execute_command(ctx, agent_type: str, query_text: str, max_sources: Optional
 @click.argument("query_text")
 @click.option("--agents", "-a", multiple=True, required=True, help="Agent chain (in order)")
 @click.pass_context
-def chain_command(ctx, query_text: str, agents: tuple):
+def chain_command(ctx: Context, query_text: str, agents: tuple[str, ...]) -> None:
     """Execute Chain-of-Agents workflow."""
-    client_verbose = ctx.obj["verbose"]
-    console = ctx.obj["console"]
+    client_verbose: bool = ctx.obj["verbose"]
+    console: Any = ctx.obj["console"]
 
     async def _chain() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
@@ -193,17 +194,17 @@ def chain_command(ctx, query_text: str, agents: tuple):
 
             except APIError as e:
                 print_error(f"Chain execution failed: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_chain())
 
 
 @agents_group.command(name="status")
 @click.pass_context
-def status_command(ctx):
+def status_command(ctx: Context) -> None:
     """Get MASR router health and performance metrics."""
-    client_verbose = ctx.obj["verbose"]
-    console = ctx.obj["console"]
+    client_verbose: bool = ctx.obj["verbose"]
+    console: Any = ctx.obj["console"]
 
     async def _status() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
@@ -225,6 +226,6 @@ def status_command(ctx):
 
             except APIError as e:
                 print_error(f"Status check failed: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_status())

@@ -7,9 +7,9 @@ Stores research findings, sources, and citations.
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, Column, Float, ForeignKey, Index, String
+from sqlalchemy import JSON, Float, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -39,48 +39,44 @@ class ResearchResult(BaseModel):
 
     __tablename__ = "research_results"
 
-    # Foreign key to research project
-    project_id = Column(
+    project_id: Mapped[Any] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("research_projects.id"),
         nullable=False,
         index=True,
     )
 
-    # Result details
-    result_type = Column(
+    result_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
         index=True,
         comment="Type of result (finding, source, citation, etc.)",
     )
 
-    content = Column(
+    content: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, comment="Result content (structure varies by type)"
     )
 
-    confidence_score = Column(
+    confidence_score: Mapped[float | None] = mapped_column(
         Float, nullable=True, comment="Confidence score for the result (0.0 to 1.0)"
     )
 
-    agent_type = Column(
+    agent_type: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
         index=True,
         comment="Agent that produced this result",
     )
 
-    # Metadata for additional information (renamed to avoid SQLAlchemy conflict)
-    result_metadata = Column(
-        "metadata",  # Use 'metadata' as the column name in the database
+    result_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
         JSON,
         nullable=False,
         default=dict,
         comment="Additional metadata",
     )
 
-    # Source tracking
-    source_id = Column(
+    source_id: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,
         index=True,
@@ -139,22 +135,22 @@ class ResearchResult(BaseModel):
     @property
     def is_high_confidence(self) -> bool:
         """Check if result has high confidence (>= 0.7)."""
-        return self.confidence_score is not None and self.confidence_score >= 0.7
+        return bool(self.confidence_score is not None and self.confidence_score >= 0.7)
 
     @property
     def is_finding(self) -> bool:
         """Check if result is a finding."""
-        return self.result_type == ResultType.FINDING.value
+        return bool(self.result_type == ResultType.FINDING.value)
 
     @property
     def is_source(self) -> bool:
         """Check if result is a source."""
-        return self.result_type == ResultType.SOURCE.value
+        return bool(self.result_type == ResultType.SOURCE.value)
 
     @property
     def is_citation(self) -> bool:
         """Check if result is a citation."""
-        return self.result_type == ResultType.CITATION.value
+        return bool(self.result_type == ResultType.CITATION.value)
 
     def get_content_field(self, field: str, default: Any = None) -> Any:
         """
@@ -194,7 +190,7 @@ class ResearchResult(BaseModel):
             self.content = {}
         self.content.update(additional_content)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with additional properties."""
         data = super().to_dict()
         data["is_high_confidence"] = self.is_high_confidence

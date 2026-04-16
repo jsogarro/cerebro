@@ -9,13 +9,21 @@ the overall research process.
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
-from langgraph.checkpoint import MemorySaver
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
+from src.agents.supervisors.supervisor_factory import SupervisorFactory
+from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
+from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
+from src.ai_brain.router.hierarchical_cost_model import HierarchicalCostOptimizer
+
+# MASR Integration imports
+from src.ai_brain.router.masr import MASRouter
 from src.orchestration.checkpointer import (
     FileCheckpointStorage,
     MemoryCheckpointStorage,
@@ -41,13 +49,6 @@ from src.orchestration.state import (
     WorkflowPhase,
 )
 
-# MASR Integration imports
-from src.ai_brain.router.masr import MASRouter
-from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
-from src.agents.supervisors.supervisor_factory import SupervisorFactory
-from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
-from src.ai_brain.router.hierarchical_cost_model import HierarchicalCostOptimizer
-
 logger = logging.getLogger(__name__)
 
 
@@ -69,9 +70,9 @@ class OrchestratorConfig:
     
     # MASR Integration configuration
     enable_masr_routing: bool = True
-    masr_config: dict[str, Any] = None
+    masr_config: dict[str, Any] | None = None
     enable_hierarchical_costs: bool = True
-    supervisor_bridge_config: dict[str, Any] = None
+    supervisor_bridge_config: dict[str, Any] | None = None
     enable_cost_feedback: bool = True
 
 
@@ -87,9 +88,9 @@ class WorkflowResult:
     outputs: dict[str, str] | None = None
     quality_score: float = 0.0
     execution_time: float = 0.0
-    errors: list[str] = None
+    errors: list[str] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.errors is None:
             self.errors = []
 
@@ -109,22 +110,22 @@ class ResearchOrchestrator:
             config: Orchestrator configuration
         """
         self.config = config or OrchestratorConfig()
-        self._graph = None
-        self._compiled_graph = None
-        self._checkpointer = None
-        self._router = None
-        
+        self._graph: StateGraph[ResearchState] | None = None
+        self._compiled_graph: CompiledStateGraph[ResearchState] | None = None
+        self._checkpointer: WorkflowCheckpointer | None = None
+        self._router: WorkflowRouter | None = None
+
         # MASR Integration components
-        self._masr_router = None
-        self._supervisor_bridge = None
-        self._supervisor_factory = None
-        self._configuration_manager = None
-        self._hierarchical_cost_optimizer = None
+        self._masr_router: MASRouter | None = None
+        self._supervisor_bridge: MASRSupervisorBridge | None = None
+        self._supervisor_factory: SupervisorFactory | None = None
+        self._configuration_manager: SupervisorConfigurationManager | None = None
+        self._hierarchical_cost_optimizer: HierarchicalCostOptimizer | None = None
 
         # Initialize components
         self._initialize_components()
 
-    def _initialize_components(self):
+    def _initialize_components(self) -> None:
         """Initialize orchestrator components."""
         # Initialize router
         router_config = RouterConfig(
@@ -139,12 +140,12 @@ class ResearchOrchestrator:
         if self.config.enable_checkpointing:
             storage = self._create_checkpoint_storage()
             self._checkpointer = WorkflowCheckpointer(storage)
-        
+
         # Initialize MASR integration components
         if self.config.enable_masr_routing:
             self._initialize_masr_components()
-    
-    def _initialize_masr_components(self):
+
+    def _initialize_masr_components(self) -> None:
         """Initialize MASR integration components."""
         logger.info("Initializing MASR integration components")
         
@@ -186,7 +187,9 @@ class ResearchOrchestrator:
         
         logger.info("MASR integration components initialized successfully")
 
-    def _create_checkpoint_storage(self):
+    def _create_checkpoint_storage(
+        self,
+    ) -> FileCheckpointStorage | MemoryCheckpointStorage:
         """Create checkpoint storage based on configuration."""
         if self.config.checkpoint_storage == "file":
             return FileCheckpointStorage(
@@ -198,7 +201,7 @@ class ResearchOrchestrator:
         else:
             return MemoryCheckpointStorage()
 
-    def build_graph(self) -> StateGraph:
+    def build_graph(self) -> StateGraph[ResearchState]:
         """
         Build the research workflow graph.
 
@@ -207,6 +210,7 @@ class ResearchOrchestrator:
         """
         logger.info("Building research workflow graph")
 
+        assert self._router is not None
         # Create graph builder
         graph_config = GraphConfig(
             name="research_workflow",
@@ -222,56 +226,56 @@ class ResearchOrchestrator:
         # Add workflow nodes
         builder.add_node(
             "initialization",
-            self._initialization_node,
+            cast(Callable[[ResearchState], ResearchState], self._initialization_node),
             WorkflowPhase.INITIALIZATION,
             description="Initialize workflow state",
         )
 
         builder.add_node(
             "query_analysis",
-            query_analysis_node,
+            cast(Callable[[ResearchState], ResearchState], query_analysis_node),
             WorkflowPhase.QUERY_ANALYSIS,
             description="Analyze research query",
         )
 
         builder.add_node(
             "plan_generation",
-            plan_generation_node,
+            cast(Callable[[ResearchState], ResearchState], plan_generation_node),
             WorkflowPhase.PLAN_GENERATION,
             description="Generate research plan",
         )
 
         builder.add_node(
             "agent_dispatch",
-            agent_dispatch_node,
+            cast(Callable[[ResearchState], ResearchState], agent_dispatch_node),
             WorkflowPhase.LITERATURE_REVIEW,  # Will change based on agents
             description="Dispatch tasks to agents",
         )
 
         builder.add_node(
             "result_aggregation",
-            result_aggregation_node,
+            cast(Callable[[ResearchState], ResearchState], result_aggregation_node),
             WorkflowPhase.SYNTHESIS,
             description="Aggregate agent results",
         )
 
         builder.add_node(
             "quality_check",
-            quality_check_node,
+            cast(Callable[[ResearchState], ResearchState], quality_check_node),
             WorkflowPhase.QUALITY_CHECK,
             description="Check research quality",
         )
 
         builder.add_node(
             "report_generation",
-            report_generation_node,
+            cast(Callable[[ResearchState], ResearchState], report_generation_node),
             WorkflowPhase.REPORT_GENERATION,
             description="Generate final report",
         )
 
         builder.add_node(
             "error_handler",
-            self._error_handler_node,
+            cast(Callable[[ResearchState], ResearchState], self._error_handler_node),
             WorkflowPhase.FAILED,
             description="Handle workflow errors",
         )
@@ -331,13 +335,16 @@ class ResearchOrchestrator:
 
         return self._graph
 
-    def compile_graph(self):
+    def compile_graph(self) -> CompiledStateGraph[ResearchState]:
         """Compile the workflow graph."""
         if not self._graph:
             self.build_graph()
 
+        assert self._graph is not None
         # Compile with checkpointing if enabled
         if self.config.enable_checkpointing:
+            from langgraph.checkpoint.memory import MemorySaver
+
             checkpointer = MemorySaver()
             self._compiled_graph = self._graph.compile(checkpointer=checkpointer)
         else:
@@ -466,11 +473,13 @@ class ResearchOrchestrator:
         Returns:
             Final workflow state
         """
+        assert self._compiled_graph is not None
         # Execute the graph
         async for output in self._compiled_graph.astream(initial_state):
             # The output is the state after each node execution
             if isinstance(output, dict):
-                for node_name, node_state in output.items():
+                for node_name, node_state_val in output.items():
+                    node_state = cast(ResearchState, node_state_val)
                     logger.info(f"Executed node: {node_name}")
 
                     # Check if we should create a checkpoint
@@ -553,11 +562,12 @@ class ResearchOrchestrator:
 
         if pending_ready:
             # Check dependencies
-            dependencies = state.research_plan.get("dependencies", {})
-            for task in pending_ready:
-                deps = dependencies.get(task.agent_type, [])
-                if all(dep in state.completed_agents for dep in deps):
-                    return "more_agents"
+            if state.research_plan is not None:
+                dependencies = state.research_plan.get("dependencies", {})
+                for task in pending_ready:
+                    deps = dependencies.get(task.agent_type, [])
+                    if all(dep in state.completed_agents for dep in deps):
+                        return "more_agents"
 
         # All agents executed or blocked
         if state.completed_agents:
@@ -653,72 +663,81 @@ class ResearchOrchestrator:
             "error_count": checkpoint.state_data.get("error_count", 0),
         }
     
-    async def _masr_enabled_agent_dispatch(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def _masr_enabled_agent_dispatch(
+        self, state: ResearchState
+    ) -> ResearchState:
         """
         MASR-enabled agent dispatch node that uses intelligent routing.
-        
+
         This method replaces the traditional agent dispatch with MASR routing
         decisions that automatically select optimal supervisors and coordinate
         hierarchical execution.
         """
         if not self.config.enable_masr_routing or not self._masr_router:
             # Fallback to traditional agent dispatch
-            logger.warning("MASR routing not available, falling back to traditional dispatch")
+            logger.warning(
+                "MASR routing not available, falling back to traditional dispatch"
+            )
             return await agent_dispatch_node(state)
-        
+
         try:
-            research_state = state["research_state"]
-            
             # Prepare context for MASR routing
             routing_context = {
-                "query": research_state.query,
-                "domains": research_state.domains,
-                "project_id": research_state.project_id,
-                "workflow_id": research_state.workflow_id,
-                "user_id": research_state.context.get("user_id"),
-                "session_id": research_state.context.get("session_id"),
+                "query": state.query,
+                "domains": state.domains,
+                "project_id": state.project_id,
+                "workflow_id": state.workflow_id,
+                "user_id": state.context.get("user_id"),
+                "session_id": state.context.get("session_id"),
             }
-            
+
             # Get MASR routing decision
-            logger.info(f"Getting MASR routing decision for query: {research_state.query[:100]}...")
-            routing_decision = await self._masr_router.route(
-                query=research_state.query,
-                context=routing_context
+            logger.info(
+                f"Getting MASR routing decision for query: {state.query[:100]}..."
             )
-            
+            routing_decision = await self._masr_router.route(
+                query=state.query, context=routing_context
+            )
+
             # Record routing decision in state
-            research_state.context["masr_routing_decision"] = routing_decision.to_dict()
-            
+            state.context["masr_routing_decision"] = asdict(routing_decision)
+
             # Create agent task for supervisor execution
             from src.agents.models import AgentTask
-            
+
             agent_task = AgentTask(
-                id=f"research-{research_state.workflow_id}",
+                id=f"research-{state.workflow_id}",
                 agent_type="research",
                 input_data={
-                    "query": research_state.query,
-                    "domains": research_state.domains,
-                    "context": research_state.context,
+                    "query": state.query,
+                    "domains": state.domains,
+                    "context": state.context,
                     "complexity_analysis": routing_decision.complexity_analysis.__dict__,
                     "routing_decision": routing_decision.__dict__,
-                }
+                },
             )
-            
+
+            assert self._supervisor_factory is not None
+            assert self._supervisor_bridge is not None
             # Get supervisor registry (in production, this would be injected)
             supervisor_registry = {
-                "research": self._supervisor_factory.supervisor_registry["research"].supervisor_class
+                "research": self._supervisor_factory.supervisor_registry[
+                    "research"
+                ].supervisor_class
             }
-            
+
             # Execute via MASR-Supervisor bridge
-            logger.info(f"Executing task via {routing_decision.agent_allocation.supervisor_type} supervisor")
+            logger.info(
+                f"Executing task via {routing_decision.agent_allocation.supervisor_type} supervisor"
+            )
             execution_result = await self._supervisor_bridge.execute_routing_decision(
                 routing_decision=routing_decision,
                 task=agent_task,
-                supervisor_registry=supervisor_registry
+                supervisor_registry=supervisor_registry,
             )
-            
+
             # Record execution result in state
-            research_state.context["supervisor_execution_result"] = {
+            state.context["supervisor_execution_result"] = {
                 "execution_id": execution_result.execution_id,
                 "supervisor_type": execution_result.supervisor_type,
                 "status": execution_result.status.value,
@@ -728,36 +747,51 @@ class ResearchOrchestrator:
                 "workers_used": execution_result.workers_used,
                 "refinement_rounds": execution_result.refinement_rounds,
             }
-            
+
             # Update research state with results
-            if execution_result.agent_result and execution_result.agent_result.output:
-                research_state.agent_results["supervisor_research"] = execution_result.agent_result.output
-                research_state.quality_scores["supervisor_research"] = execution_result.quality_score
-            
+            if execution_result.agent_result:
+                state.agent_results["supervisor_research"] = execution_result.agent_result
+                state.quality_score = max(
+                    state.quality_score, execution_result.quality_score
+                )
+
             # Record cost feedback if enabled
             if self.config.enable_cost_feedback and self._supervisor_factory:
                 self._supervisor_factory.record_execution_result(
                     execution_result.supervisor_type,
                     execution_result.status.value == "completed",
-                    int(execution_result.execution_time_seconds * 1000)
+                    int(execution_result.execution_time_seconds * 1000),
                 )
-            
+
             # Set next phase based on result
             if execution_result.status.value == "completed":
-                research_state.current_phase = WorkflowPhase.SYNTHESIS
+                state.current_phase = WorkflowPhase.SYNTHESIS
                 logger.info("MASR-supervised execution completed successfully")
             else:
-                research_state.error_count += 1
-                research_state.errors.append(f"Supervisor execution failed: {execution_result.errors}")
-                logger.error(f"MASR-supervised execution failed: {execution_result.errors}")
-            
+                state.error_count += 1
+                state.error_history.append(
+                    {
+                        "node": "agent_dispatch",
+                        "error": f"Supervisor execution failed: {execution_result.errors}",
+                        "phase": WorkflowPhase.LITERATURE_REVIEW.value,
+                    }
+                )
+                logger.error(
+                    f"MASR-supervised execution failed: {execution_result.errors}"
+                )
+
             return state
-            
+
         except Exception as e:
             logger.error(f"MASR-enabled agent dispatch failed: {e}")
-            research_state = state["research_state"]
-            research_state.error_count += 1
-            research_state.errors.append(f"MASR routing failed: {str(e)}")
+            state.error_count += 1
+            state.error_history.append(
+                {
+                    "node": "agent_dispatch",
+                    "error": f"MASR routing failed: {e!s}",
+                    "phase": WorkflowPhase.LITERATURE_REVIEW.value,
+                }
+            )
             
             # Fallback to traditional agent dispatch
             logger.info("Falling back to traditional agent dispatch")
@@ -767,48 +801,50 @@ class ResearchOrchestrator:
         """Get MASR integration statistics."""
         if not self.config.enable_masr_routing:
             return {"masr_enabled": False}
-        
-        stats = {"masr_enabled": True}
-        
+
+        stats: dict[str, Any] = {"masr_enabled": True}
+
         if self._masr_router:
             stats["masr_router"] = await self._masr_router.get_metrics()
-        
+
         if self._supervisor_bridge:
             stats["supervisor_bridge"] = await self._supervisor_bridge.get_bridge_stats()
-        
+
         if self._supervisor_factory:
             stats["supervisor_factory"] = await self._supervisor_factory.get_factory_stats()
-        
+
         if self._hierarchical_cost_optimizer:
-            stats["cost_optimizer"] = await self._hierarchical_cost_optimizer.get_cost_model_stats()
-        
+            stats[
+                "cost_optimizer"
+            ] = await self._hierarchical_cost_optimizer.get_cost_model_stats()
+
         return stats
     
     async def health_check(self) -> dict[str, Any]:
         """Perform comprehensive health check including MASR components."""
-        health = {
+        health: dict[str, Any] = {
             "status": "healthy",
             "components": {
                 "workflow_router": "healthy",
                 "graph_builder": "healthy",
-            }
+            },
         }
-        
+
         if self.config.enable_checkpointing and self._checkpointer:
             health["components"]["checkpointer"] = "healthy"
-        
+
         if self.config.enable_masr_routing:
-            masr_health = {
+            masr_health: dict[str, str] = {
                 "masr_router": "healthy" if self._masr_router else "unavailable",
-                "supervisor_bridge": "healthy" if self._supervisor_bridge else "unavailable", 
+                "supervisor_bridge": "healthy" if self._supervisor_bridge else "unavailable",
                 "supervisor_factory": "healthy" if self._supervisor_factory else "unavailable",
             }
-            
+
             if self._hierarchical_cost_optimizer:
                 masr_health["cost_optimizer"] = "healthy"
-            
+
             health["components"]["masr_integration"] = masr_health
-        
+
         return health
 
 

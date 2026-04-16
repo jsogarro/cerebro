@@ -15,31 +15,30 @@ Key Features:
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Dict, List, Optional, Any, Set, Tuple
 import uuid
-
-from src.core.types import HealthCheckDict
-
-from langgraph.graph import StateGraph, END
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 from src.core.constants import HIGH_ESTIMATED_TOKENS
-from .research_orchestrator import ResearchOrchestrator, OrchestratorConfig, WorkflowResult
-from .state import ResearchState, WorkflowPhase, WorkflowMetadata
-from .query_decomposer import QueryDecomposer
-from .inter_supervisor_communicator import InterSupervisorCommunicator
-from .cross_domain_synthesizer import CrossDomainSynthesizer
-from ..ai_brain.router.masr import MASRouter, RoutingDecision, CollaborationMode
-from ..ai_brain.integration.masr_supervisor_bridge import (
-    MASRSupervisorBridge, SupervisorExecutionResult
-)
-from ..agents.supervisors.supervisor_factory import SupervisorFactory
-from ..agents.models import AgentTask, AgentResult
+from src.core.types import HealthCheckDict
+
 from ..agents.communication.talkhier_message import (
-    TalkHierMessage, TalkHierContent, MessageType, HierarchyMetadata
+    TalkHierMessage,
 )
+from ..agents.models import AgentResult, AgentTask
+from ..ai_brain.integration.masr_supervisor_bridge import (
+    SupervisorExecutionResult,
+)
+from .cross_domain_synthesizer import CrossDomainSynthesizer
+from .inter_supervisor_communicator import InterSupervisorCommunicator
+from .query_decomposer import QueryDecomposer
+from .research_orchestrator import (
+    ResearchOrchestrator,
+    WorkflowResult,
+)
+from .state import ResearchState
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +58,7 @@ class SupervisorAllocation:
     """Allocation of supervisors for multi-domain query."""
     
     primary_supervisor: str
-    supporting_supervisors: List[str]
+    supporting_supervisors: list[str]
     coordination_mode: SupervisorCoordinationMode
     
     # Resource constraints
@@ -71,8 +70,8 @@ class SupervisorAllocation:
     min_quality_score: float = 0.85
     
     # Context and metadata
-    domain_assignments: Dict[str, List[str]] = field(default_factory=dict)
-    cross_domain_dependencies: List[Tuple[str, str]] = field(default_factory=list)
+    domain_assignments: dict[str, list[str]] = field(default_factory=dict)
+    cross_domain_dependencies: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -82,39 +81,39 @@ class MultiSupervisorState:
     # Query and context
     query_id: str = ""
     original_query: str = ""
-    query_domains: List[str] = field(default_factory=list)
+    query_domains: list[str] = field(default_factory=list)
     
     # Supervisor allocation
-    supervisor_allocation: Optional[SupervisorAllocation] = None
-    active_supervisors: Dict[str, str] = field(default_factory=dict)  # type -> execution_id
+    supervisor_allocation: SupervisorAllocation | None = None
+    active_supervisors: dict[str, str] = field(default_factory=dict)  # type -> execution_id
     
     # Execution tracking
-    supervisor_results: Dict[str, SupervisorExecutionResult] = field(default_factory=dict)
-    supervisor_outputs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    supervisor_results: dict[str, SupervisorExecutionResult] = field(default_factory=dict)
+    supervisor_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     
     # Cross-supervisor communication
-    inter_supervisor_messages: List[TalkHierMessage] = field(default_factory=list)
-    coordination_events: List[Dict[str, Any]] = field(default_factory=list)
+    inter_supervisor_messages: list[TalkHierMessage] = field(default_factory=list)
+    coordination_events: list[dict[str, Any]] = field(default_factory=list)
     
     # Quality and consensus
-    domain_quality_scores: Dict[str, float] = field(default_factory=dict)
+    domain_quality_scores: dict[str, float] = field(default_factory=dict)
     cross_domain_consensus_score: float = 0.0
     overall_quality_score: float = 0.0
     
     # Synthesis and final result
     synthesis_strategy: str = "comprehensive"
     conflict_resolution_applied: bool = False
-    final_synthesized_result: Optional[Dict[str, Any]] = None
+    final_synthesized_result: dict[str, Any] | None = None
     
     # Workflow management
     current_coordination_phase: str = "initialization"
-    completed_supervisors: Set[str] = field(default_factory=set)
-    failed_supervisors: Set[str] = field(default_factory=set)
+    completed_supervisors: set[str] = field(default_factory=set)
+    failed_supervisors: set[str] = field(default_factory=set)
     
     # Performance tracking
     started_at: datetime = field(default_factory=datetime.now)
     total_coordination_time: float = 0.0
-    resource_utilization: Dict[str, float] = field(default_factory=dict)
+    resource_utilization: dict[str, float] = field(default_factory=dict)
 
 
 class MultiSupervisorOrchestrator:
@@ -128,7 +127,7 @@ class MultiSupervisorOrchestrator:
     def __init__(
         self,
         base_orchestrator: ResearchOrchestrator,
-        config: Optional[Dict[str, Any]] = None
+        config: dict[str, Any] | None = None
     ):
         """Initialize multi-supervisor orchestrator."""
         
@@ -160,8 +159,8 @@ class MultiSupervisorOrchestrator:
     async def orchestrate_multi_supervisor_query(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
-        coordination_mode: Optional[SupervisorCoordinationMode] = None
+        context: dict[str, Any] | None = None,
+        coordination_mode: SupervisorCoordinationMode | None = None
     ) -> WorkflowResult:
         """
         Orchestrate a complex query requiring multiple supervisors.
@@ -231,16 +230,18 @@ class MultiSupervisorOrchestrator:
                 execution_time
             ) / self.multi_supervisor_stats["total_multi_supervisor_queries"]
             
+            context_dict = context or {}
+            project_id_val = context_dict.get("project_id", f"multi_super_{query_id}")
             return WorkflowResult(
                 success=success,
                 workflow_id=query_id,
-                project_id=context.get("project_id", f"multi_super_{query_id}"),
+                project_id=project_id_val,
                 final_state=ResearchState(  # Convert to base state for compatibility
-                    project_id=context.get("project_id", f"multi_super_{query_id}"),
+                    project_id=project_id_val,
                     workflow_id=query_id,
                     query=query,
                     domains=decomposition["detected_domains"],
-                    context=context or {},
+                    context=context_dict,
                 ),
                 outputs=multi_state.final_synthesized_result,
                 quality_score=multi_state.overall_quality_score,
@@ -251,17 +252,19 @@ class MultiSupervisorOrchestrator:
         except Exception as e:
             logger.error(f"Multi-supervisor orchestration failed: {e}")
             execution_time = (datetime.now() - start_time).total_seconds()
-            
+
+            context_dict = context or {}
+            project_id_val = context_dict.get("project_id", f"multi_super_{query_id}")
             return WorkflowResult(
                 success=False,
                 workflow_id=query_id,
-                project_id=context.get("project_id", f"multi_super_{query_id}"),
+                project_id=project_id_val,
                 final_state=ResearchState(
-                    project_id=context.get("project_id", f"multi_super_{query_id}"),
+                    project_id=project_id_val,
                     workflow_id=query_id,
                     query=query,
                     domains=[],
-                    context=context or {},
+                    context=context_dict,
                 ),
                 execution_time=execution_time,
                 errors=[str(e)],
@@ -269,9 +272,9 @@ class MultiSupervisorOrchestrator:
     
     async def _plan_supervisor_allocation(
         self,
-        decomposition: Dict[str, Any],
-        coordination_mode: Optional[SupervisorCoordinationMode],
-        context: Optional[Dict[str, Any]]
+        decomposition: dict[str, Any],
+        coordination_mode: SupervisorCoordinationMode | None,
+        context: dict[str, Any] | None
     ) -> SupervisorAllocation:
         """Plan allocation of supervisors for multi-domain query."""
         
@@ -303,18 +306,21 @@ class MultiSupervisorOrchestrator:
     async def _execute_coordinated_supervision(
         self,
         multi_state: MultiSupervisorState,
-        decomposition: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        decomposition: dict[str, Any],
+    ) -> dict[str, Any]:
         """Execute coordinated supervision across multiple supervisors."""
-        
+
         allocation = multi_state.supervisor_allocation
+        assert allocation is not None
         coordination_mode = allocation.coordination_mode
+
+        logger.info(
+            f"Executing {coordination_mode.value} coordination with "
+            f"{len(allocation.supporting_supervisors) + 1} supervisors"
+        )
         
-        logger.info(f"Executing {coordination_mode.value} coordination with "
-                   f"{len(allocation.supporting_supervisors) + 1} supervisors")
-        
-        supervisor_results = {}
-        execution_errors = []
+        supervisor_results: dict[str, SupervisorExecutionResult] = {}
+        execution_errors: list[str] = []
         
         try:
             if coordination_mode == SupervisorCoordinationMode.PARALLEL:
@@ -362,11 +368,12 @@ class MultiSupervisorOrchestrator:
     async def _execute_parallel_supervision(
         self,
         multi_state: MultiSupervisorState,
-        decomposition: Dict[str, Any]
-    ) -> Dict[str, SupervisorExecutionResult]:
+        decomposition: dict[str, Any],
+    ) -> dict[str, SupervisorExecutionResult]:
         """Execute supervisors in parallel."""
-        
+
         allocation = multi_state.supervisor_allocation
+        assert allocation is not None
         all_supervisors = [allocation.primary_supervisor] + allocation.supporting_supervisors
         
         # Create tasks for all supervisors
@@ -410,8 +417,8 @@ class MultiSupervisorOrchestrator:
     async def _execute_sequential_supervision(
         self,
         multi_state: MultiSupervisorState,
-        decomposition: Dict[str, Any]
-    ) -> Dict[str, SupervisorExecutionResult]:
+        decomposition: dict[str, Any]
+    ) -> dict[str, SupervisorExecutionResult]:
         """Execute supervisors sequentially."""
         
         allocation = multi_state.supervisor_allocation
@@ -450,8 +457,8 @@ class MultiSupervisorOrchestrator:
     async def _execute_pipeline_supervision(
         self,
         multi_state: MultiSupervisorState,
-        decomposition: Dict[str, Any]
-    ) -> Dict[str, SupervisorExecutionResult]:
+        decomposition: dict[str, Any]
+    ) -> dict[str, SupervisorExecutionResult]:
         """Execute supervisors in pipeline mode with dependency handling."""
         
         allocation = multi_state.supervisor_allocation
@@ -490,8 +497,8 @@ class MultiSupervisorOrchestrator:
     async def _execute_hierarchical_supervision(
         self,
         multi_state: MultiSupervisorState,
-        decomposition: Dict[str, Any]
-    ) -> Dict[str, SupervisorExecutionResult]:
+        decomposition: dict[str, Any]
+    ) -> dict[str, SupervisorExecutionResult]:
         """Execute supervisors in hierarchical mode with primary coordination."""
         
         allocation = multi_state.supervisor_allocation
@@ -544,7 +551,7 @@ class MultiSupervisorOrchestrator:
         supervisor_type: str,
         sub_query: str,
         multi_state: MultiSupervisorState,
-        decomposition: Dict[str, Any]
+        decomposition: dict[str, Any]
     ) -> AgentTask:
         """Create agent task for supervisor execution."""
         
@@ -574,8 +581,16 @@ class MultiSupervisorOrchestrator:
             self.base_orchestrator._supervisor_bridge):
             
             # Create mock routing decision for supervisor execution
-            from ..ai_brain.router.masr import RoutingDecision, AgentAllocation, CollaborationMode
-            from ..ai_brain.router.query_analyzer import ComplexityAnalysis, ComplexityLevel, ComplexityFactors
+            from ..ai_brain.router.masr import (
+                AgentAllocation,
+                CollaborationMode,
+                RoutingDecision,
+            )
+            from ..ai_brain.router.query_analyzer import (
+                ComplexityAnalysis,
+                ComplexityFactors,
+                ComplexityLevel,
+            )
             
             mock_routing_decision = RoutingDecision(
                 query_id=task.id,
@@ -643,12 +658,12 @@ class MultiSupervisorOrchestrator:
         )
     
     def _build_execution_order(
-        self, supervisors: List[str], dependencies: List[Tuple[str, str]]
-    ) -> List[str]:
+        self, supervisors: list[str], dependencies: list[tuple[str, str]]
+    ) -> list[str]:
         """Build execution order based on dependencies (topological sort)."""
         
         # Simple topological sort implementation
-        in_degree = {supervisor: 0 for supervisor in supervisors}
+        in_degree = dict.fromkeys(supervisors, 0)
         
         for dep_from, dep_to in dependencies:
             if dep_to in in_degree:
@@ -677,7 +692,7 @@ class MultiSupervisorOrchestrator:
         return execution_order
     
     async def _delegate_to_base_orchestrator(
-        self, query: str, context: Optional[Dict[str, Any]]
+        self, query: str, context: dict[str, Any] | None
     ) -> WorkflowResult:
         """Delegate to base orchestrator for single-domain queries."""
         
@@ -692,7 +707,7 @@ class MultiSupervisorOrchestrator:
             context=context,
         )
     
-    async def get_multi_supervisor_stats(self) -> Dict[str, Any]:
+    async def get_multi_supervisor_stats(self) -> dict[str, Any]:
         """Get multi-supervisor orchestration statistics."""
         
         base_stats = await self.base_orchestrator.get_masr_stats()
@@ -733,11 +748,11 @@ class MultiSupervisorOrchestrator:
 
 
 __all__ = [
+    "CrossDomainSynthesizer",
+    "InterSupervisorCommunicator",
     "MultiSupervisorOrchestrator",
-    "SupervisorCoordinationMode",
-    "SupervisorAllocation",
     "MultiSupervisorState",
     "QueryDecomposer",
-    "InterSupervisorCommunicator",
-    "CrossDomainSynthesizer",
+    "SupervisorAllocation",
+    "SupervisorCoordinationMode",
 ]

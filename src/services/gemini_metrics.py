@@ -62,8 +62,7 @@ class GeminiMetrics:
     Provides methods for tracking API usage, performance, and errors.
     """
 
-    def __init__(self):
-        """Initialize metrics collector."""
+    def __init__(self) -> None:
         self.start_times: dict[str, float] = {}
 
     def record_request_start(self, request_id: str, method: str) -> None:
@@ -166,18 +165,8 @@ class GeminiMetrics:
 metrics = GeminiMetrics()
 
 
-def track_gemini_call(method: str):
-    """
-    Decorator to track Gemini API calls.
-
-    Args:
-        method: Name of the API method
-
-    Returns:
-        Decorated function
-    """
-
-    def decorator(func: Callable) -> Callable:
+def track_gemini_call(method: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
             import uuid
@@ -204,7 +193,7 @@ def track_gemini_call(method: str):
                 raise
 
         @wraps(func)
-        def sync_wrapper(*args, **kwargs) -> Any:
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             import uuid
 
             request_id = str(uuid.uuid4())
@@ -251,7 +240,7 @@ class CircuitBreaker:
         self,
         failure_threshold: int = 5,
         recovery_timeout: int = 60,
-        expected_exception: type = Exception,
+        expected_exception: type[BaseException] = Exception,
     ):
         """
         Initialize circuit breaker.
@@ -269,7 +258,7 @@ class CircuitBreaker:
         self.last_failure_time: float | None = None
         self.state = "closed"  # closed, open, half-open
 
-    def call(self, func: Callable, *args, **kwargs) -> Any:
+    def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """
         Call function with circuit breaker protection.
 
@@ -298,7 +287,7 @@ class CircuitBreaker:
             self._on_failure()
             raise
 
-    async def async_call(self, func: Callable, *args, **kwargs) -> Any:
+    async def async_call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """
         Async version of call.
 
@@ -339,9 +328,8 @@ class CircuitBreaker:
             metrics.record_error("circuit_breaker_open")
 
     def _should_attempt_reset(self) -> bool:
-        """Check if we should attempt to reset the circuit."""
         return (
-            self.last_failure_time
+            self.last_failure_time is not None
             and time.time() - self.last_failure_time >= self.recovery_timeout
         )
 

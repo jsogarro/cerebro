@@ -6,13 +6,16 @@ Provides common fields and functionality for all SQLAlchemy models.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Column, DateTime, String, func
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 class BaseModel(Base):
@@ -29,16 +32,16 @@ class BaseModel(Base):
     __abstract__ = True
 
     # Primary key
-    id = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
     )
 
     # Timestamps
-    created_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
@@ -46,12 +49,12 @@ class BaseModel(Base):
     )
 
     # Soft delete
-    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
     # Audit fields
-    created_by = Column(String(255), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    updated_by = Column(String(255), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     @hybrid_property
     def is_deleted(self) -> bool:
@@ -80,7 +83,7 @@ class BaseModel(Base):
         if restored_by:
             self.updated_by = restored_by
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert model to dictionary.
 

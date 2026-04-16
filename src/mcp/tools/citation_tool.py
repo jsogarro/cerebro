@@ -64,7 +64,7 @@ class CitationTool(BaseMCPTool):
             tags=["citation", "formatting", "doi", "bibliography"],
         )
 
-    async def execute(self, **kwargs) -> dict[str, Any]:
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """
         Execute citation operation.
 
@@ -98,7 +98,7 @@ class CitationTool(BaseMCPTool):
             logger.error(f"Citation operation failed: {e!s}")
             return {"success": False, "error": str(e)}
 
-    def _format_citations(self, sources: list[dict], style: str) -> dict[str, Any]:
+    def _format_citations(self, sources: list[dict[str, Any]], style: str) -> dict[str, Any]:
         """Format citations in specified style."""
         citations = []
 
@@ -121,7 +121,7 @@ class CitationTool(BaseMCPTool):
             "count": len(citations),
         }
 
-    def _format_apa(self, source: dict) -> str:
+    def _format_apa(self, source: dict[str, Any]) -> str:
         """Format citation in APA style."""
         authors = source.get("authors", [])
         year = source.get("year", "n.d.")
@@ -153,7 +153,7 @@ class CitationTool(BaseMCPTool):
 
         return citation
 
-    def _format_mla(self, source: dict) -> str:
+    def _format_mla(self, source: dict[str, Any]) -> str:
         """Format citation in MLA style."""
         authors = source.get("authors", [])
         title = source.get("title", "Untitled")
@@ -176,7 +176,7 @@ class CitationTool(BaseMCPTool):
 
         return citation
 
-    def _format_chicago(self, source: dict) -> str:
+    def _format_chicago(self, source: dict[str, Any]) -> str:
         """Format citation in Chicago style."""
         authors = source.get("authors", [])
         title = source.get("title", "Untitled")
@@ -196,7 +196,7 @@ class CitationTool(BaseMCPTool):
 
         return citation
 
-    def _format_bibtex(self, sources: list[dict]) -> dict[str, Any]:
+    def _format_bibtex(self, sources: list[dict[str, Any]]) -> dict[str, Any]:
         """Format sources as BibTeX."""
         bibtex_entries = []
 
@@ -274,7 +274,7 @@ class CitationTool(BaseMCPTool):
             logger.error(f"DOI resolution failed: {e!s}")
             return {"success": False, "error": str(e)}
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup HTTP client."""
         # Note: We can't use async in __del__, so client cleanup
         # should be handled explicitly in production code

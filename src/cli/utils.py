@@ -8,11 +8,11 @@ from typing import Any
 from uuid import UUID
 
 import click
-import yaml
+import yaml  # type: ignore[import-untyped]
 from rich.prompt import Confirm, Prompt
 
 
-def validate_uuid(ctx, param, value):
+def validate_uuid(ctx: Any, param: Any, value: Any) -> UUID | None:
     """Validate UUID parameter."""
     if value is None:
         return None
@@ -67,7 +67,7 @@ def prompt_for_project_details() -> dict[str, Any]:
     # Optional scope configuration
     configure_scope = Confirm.ask("Configure research scope?", default=False)
 
-    scope = None
+    scope: dict[str, Any] | None = None
     if configure_scope:
         scope = {}
 
@@ -81,16 +81,18 @@ def prompt_for_project_details() -> dict[str, Any]:
             "Languages (comma-separated)",
             default="en",
         )
-        scope["languages"] = [l.strip() for l in languages_str.split(",")]
+        languages_list: list[str] = [l.strip() for l in languages_str.split(",")]
+        scope["languages"] = languages_list
 
         geographic_scope_str = Prompt.ask(
             "Geographic scope (comma-separated, optional)",
             default="",
         )
         if geographic_scope_str:
-            scope["geographic_scope"] = [
+            geographic_list: list[str] = [
                 g.strip() for g in geographic_scope_str.split(",")
             ]
+            scope["geographic_scope"] = geographic_list
 
     return {
         "title": title,
@@ -173,20 +175,23 @@ def parse_key_value_pairs(pairs: list[str]) -> dict[str, Any]:
         if "=" not in pair:
             raise click.BadParameter(f"Invalid key=value pair: {pair}")
 
-        key, value = pair.split("=", 1)
+        key, value_str = pair.split("=", 1)
         key = key.strip()
-        value = value.strip()
+        value_str = value_str.strip()
 
         # Try to parse value as different types
-        if value.lower() in ["true", "false"]:
-            value = value.lower() == "true"
-        elif value.isdigit():
-            value = int(value)
-        elif value.replace(".", "", 1).isdigit():
-            value = float(value)
-        elif value.startswith("[") and value.endswith("]"):
+        value: Any
+        if value_str.lower() in ["true", "false"]:
+            value = value_str.lower() == "true"
+        elif value_str.isdigit():
+            value = int(value_str)
+        elif value_str.replace(".", "", 1).isdigit():
+            value = float(value_str)
+        elif value_str.startswith("[") and value_str.endswith("]"):
             # Parse as list
-            value = [v.strip() for v in value[1:-1].split(",")]
+            value = [v.strip() for v in value_str[1:-1].split(",")]
+        else:
+            value = value_str
 
         result[key] = value
 

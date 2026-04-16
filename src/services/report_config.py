@@ -6,146 +6,141 @@ following functional programming principles with immutable configurations.
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 from src.models.report import CitationStyle, ReportFormat, ReportType
 
 
 class ReportSettings(BaseSettings):
     """Report generation settings loaded from environment variables."""
-    
-    # Storage settings
+
     report_storage_path: str = Field(
         default="./reports",
-        env="REPORT_STORAGE_PATH",
-        description="Base path for storing generated reports"
+        description="Base path for storing generated reports",
+        validation_alias="REPORT_STORAGE_PATH"
     )
-    
+
     max_report_size_mb: int = Field(
         default=100,
-        env="MAX_REPORT_SIZE_MB", 
-        description="Maximum report size in MB"
+        description="Maximum report size in MB",
+        validation_alias="MAX_REPORT_SIZE_MB"
     )
-    
-    # Generation settings
+
     default_format: ReportFormat = Field(
         default=ReportFormat.HTML,
-        env="DEFAULT_REPORT_FORMAT",
-        description="Default report format"
+        description="Default report format",
+        validation_alias="DEFAULT_REPORT_FORMAT"
     )
-    
+
     default_citation_style: CitationStyle = Field(
         default=CitationStyle.APA,
-        env="DEFAULT_CITATION_STYLE",
-        description="Default citation style"
+        description="Default citation style",
+        validation_alias="DEFAULT_CITATION_STYLE"
     )
-    
+
     enable_pdf_generation: bool = Field(
         default=True,
-        env="ENABLE_PDF_GENERATION",
-        description="Enable PDF generation"
+        description="Enable PDF generation",
+        validation_alias="ENABLE_PDF_GENERATION"
     )
-    
+
     enable_latex_generation: bool = Field(
         default=True,
-        env="ENABLE_LATEX_GENERATION", 
-        description="Enable LaTeX generation"
+        description="Enable LaTeX generation",
+        validation_alias="ENABLE_LATEX_GENERATION"
     )
-    
-    # Template settings
+
     template_path: str = Field(
         default="./src/templates/reports",
-        env="REPORT_TEMPLATE_PATH",
-        description="Path to report templates"
+        description="Path to report templates",
+        validation_alias="REPORT_TEMPLATE_PATH"
     )
-    
-    custom_css_path: Optional[str] = Field(
+
+    custom_css_path: str | None = Field(
         default=None,
-        env="CUSTOM_CSS_PATH",
-        description="Path to custom CSS files"
+        description="Path to custom CSS files",
+        validation_alias="CUSTOM_CSS_PATH"
     )
-    
-    # Performance settings
+
     generation_timeout_seconds: int = Field(
         default=300,
-        env="REPORT_GENERATION_TIMEOUT",
-        description="Timeout for report generation in seconds"
+        description="Timeout for report generation in seconds",
+        validation_alias="REPORT_GENERATION_TIMEOUT"
     )
-    
+
     parallel_generation: bool = Field(
         default=True,
-        env="PARALLEL_REPORT_GENERATION",
-        description="Enable parallel format generation"
+        description="Enable parallel format generation",
+        validation_alias="PARALLEL_REPORT_GENERATION"
     )
-    
+
     max_concurrent_generations: int = Field(
         default=3,
-        env="MAX_CONCURRENT_GENERATIONS",
-        description="Maximum concurrent report generations"
+        description="Maximum concurrent report generations",
+        validation_alias="MAX_CONCURRENT_GENERATIONS"
     )
-    
-    # Visualization settings
+
     enable_visualizations: bool = Field(
         default=True,
-        env="ENABLE_VISUALIZATIONS",
-        description="Enable visualization generation"
+        description="Enable visualization generation",
+        validation_alias="ENABLE_VISUALIZATIONS"
     )
-    
+
     max_visualizations_per_report: int = Field(
         default=20,
-        env="MAX_VISUALIZATIONS_PER_REPORT",
-        description="Maximum visualizations per report"
+        description="Maximum visualizations per report",
+        validation_alias="MAX_VISUALIZATIONS_PER_REPORT"
     )
-    
+
     default_chart_width: int = Field(
         default=800,
-        env="DEFAULT_CHART_WIDTH",
-        description="Default chart width in pixels"
+        description="Default chart width in pixels",
+        validation_alias="DEFAULT_CHART_WIDTH"
     )
-    
+
     default_chart_height: int = Field(
         default=600,
-        env="DEFAULT_CHART_HEIGHT",
-        description="Default chart height in pixels"
+        description="Default chart height in pixels",
+        validation_alias="DEFAULT_CHART_HEIGHT"
     )
-    
-    # Cache settings
+
     enable_template_cache: bool = Field(
         default=True,
-        env="ENABLE_TEMPLATE_CACHE",
-        description="Enable template caching"
+        description="Enable template caching",
+        validation_alias="ENABLE_TEMPLATE_CACHE"
     )
-    
+
     template_cache_ttl_seconds: int = Field(
         default=3600,
-        env="TEMPLATE_CACHE_TTL",
-        description="Template cache TTL in seconds"
+        description="Template cache TTL in seconds",
+        validation_alias="TEMPLATE_CACHE_TTL"
     )
-    
-    # Quality settings
+
     min_word_count: int = Field(
         default=100,
-        env="MIN_REPORT_WORD_COUNT",
-        description="Minimum word count for valid reports"
+        description="Minimum word count for valid reports",
+        validation_alias="MIN_REPORT_WORD_COUNT"
     )
-    
+
     min_sources: int = Field(
         default=1,
-        env="MIN_REPORT_SOURCES",
-        description="Minimum number of sources required"
+        description="Minimum number of sources required",
+        validation_alias="MIN_REPORT_SOURCES"
     )
-    
+
     require_citations: bool = Field(
         default=True,
-        env="REQUIRE_CITATIONS",
-        description="Require citations in reports"
+        description="Require citations in reports",
+        validation_alias="REQUIRE_CITATIONS"
     )
-    
-    class Config:
-        env_file = ".env"
-        env_prefix = "RESEARCH_"
+
+    model_config = {
+        "env_file": ".env",
+        "env_prefix": "RESEARCH_"
+    }
 
 
 class ReportTemplateConfig:
@@ -156,7 +151,7 @@ class ReportTemplateConfig:
         self._settings = settings
         self._template_configs = self._build_template_configs()
     
-    def _build_template_configs(self) -> Dict[ReportType, Dict[str, Any]]:
+    def _build_template_configs(self) -> dict[ReportType, dict[str, Any]]:
         """Build template configurations for each report type."""
         return {
             ReportType.COMPREHENSIVE: {
@@ -259,7 +254,7 @@ class ReportTemplateConfig:
             }
         }
     
-    def get_template_config(self, report_type: ReportType) -> Dict[str, Any]:
+    def get_template_config(self, report_type: ReportType) -> dict[str, Any]:
         """Get template configuration for a specific report type."""
         return self._template_configs.get(report_type, self._template_configs[ReportType.COMPREHENSIVE])
     
@@ -269,30 +264,30 @@ class ReportTemplateConfig:
         template_name = config["template_name"]
         return os.path.join(self._settings.template_path, template_name)
     
-    def get_required_sections(self, report_type: ReportType) -> List[str]:
-        """Get required sections for a report type."""
+    def get_required_sections(self, report_type: ReportType) -> list[str]:
         config = self.get_template_config(report_type)
-        return config.get("sections", [])
+        result: list[str] = config.get("sections", [])
+        return result
     
     def should_include_toc(self, report_type: ReportType) -> bool:
-        """Check if table of contents should be included."""
         config = self.get_template_config(report_type)
-        return config.get("include_toc", True)
-    
+        result: bool = config.get("include_toc", True)
+        return result
+
     def should_include_visualizations(self, report_type: ReportType) -> bool:
-        """Check if visualizations should be included."""
         config = self.get_template_config(report_type)
-        return config.get("include_visualizations", True)
-    
+        result: bool = config.get("include_visualizations", True)
+        return result
+
     def should_include_appendices(self, report_type: ReportType) -> bool:
-        """Check if appendices should be included."""
         config = self.get_template_config(report_type)
-        return config.get("include_appendices", False)
-    
+        result: bool = config.get("include_appendices", False)
+        return result
+
     def estimate_pages(self, report_type: ReportType) -> int:
-        """Estimate page count for a report type."""
         config = self.get_template_config(report_type)
-        return config.get("estimated_pages", 10)
+        result: int = config.get("estimated_pages", 10)
+        return result
 
 
 class ReportFormatConfig:
@@ -303,7 +298,7 @@ class ReportFormatConfig:
         self._settings = settings
         self._format_configs = self._build_format_configs()
     
-    def _build_format_configs(self) -> Dict[ReportFormat, Dict[str, Any]]:
+    def _build_format_configs(self) -> dict[ReportFormat, dict[str, Any]]:
         """Build format-specific configurations."""
         return {
             ReportFormat.HTML: {
@@ -358,39 +353,39 @@ class ReportFormatConfig:
             }
         }
     
-    def get_format_config(self, format: ReportFormat) -> Dict[str, Any]:
+    def get_format_config(self, format: ReportFormat) -> dict[str, Any]:
         """Get configuration for a specific format."""
         return self._format_configs.get(format, {})
     
     def get_mime_type(self, format: ReportFormat) -> str:
-        """Get MIME type for a format."""
         config = self.get_format_config(format)
-        return config.get("mime_type", "application/octet-stream")
-    
+        result: str = config.get("mime_type", "application/octet-stream")
+        return result
+
     def get_file_extension(self, format: ReportFormat) -> str:
-        """Get file extension for a format."""
         config = self.get_format_config(format)
-        return config.get("file_extension", ".txt")
-    
+        result: str = config.get("file_extension", ".txt")
+        return result
+
     def get_encoding(self, format: ReportFormat) -> str:
-        """Get encoding for a format."""
         config = self.get_format_config(format)
-        return config.get("encoding", "utf-8")
-    
+        result: str = config.get("encoding", "utf-8")
+        return result
+
     def supports_interactive_elements(self, format: ReportFormat) -> bool:
-        """Check if format supports interactive elements."""
         config = self.get_format_config(format)
-        return config.get("supports_interactive", False)
-    
+        result: bool = config.get("supports_interactive", False)
+        return result
+
     def supports_css_styling(self, format: ReportFormat) -> bool:
-        """Check if format supports CSS styling."""
         config = self.get_format_config(format)
-        return config.get("supports_css", False)
-    
+        result: bool = config.get("supports_css", False)
+        return result
+
     def supports_images(self, format: ReportFormat) -> bool:
-        """Check if format supports embedded images."""
         config = self.get_format_config(format)
-        return config.get("supports_images", True)
+        result: bool = config.get("supports_images", True)
+        return result
 
 
 class ReportQualityConfig:
@@ -428,7 +423,7 @@ class ReportQualityConfig:
         """Check if citations are required for a report type."""
         return self._settings.require_citations
     
-    def get_quality_thresholds(self, report_type: ReportType) -> Dict[str, float]:
+    def get_quality_thresholds(self, report_type: ReportType) -> dict[str, float]:
         """Get quality score thresholds for a report type."""
         return {
             "excellent": 0.9,
@@ -444,21 +439,21 @@ def create_report_settings() -> ReportSettings:
     return ReportSettings()
 
 
-def create_template_config(settings: Optional[ReportSettings] = None) -> ReportTemplateConfig:
+def create_template_config(settings: ReportSettings | None[ReportSettings] = None) -> ReportTemplateConfig:
     """Factory function to create template configuration."""
     if settings is None:
         settings = create_report_settings()
     return ReportTemplateConfig(settings)
 
 
-def create_format_config(settings: Optional[ReportSettings] = None) -> ReportFormatConfig:
+def create_format_config(settings: ReportSettings | None[ReportSettings] = None) -> ReportFormatConfig:
     """Factory function to create format configuration."""
     if settings is None:
         settings = create_report_settings()
     return ReportFormatConfig(settings)
 
 
-def create_quality_config(settings: Optional[ReportSettings] = None) -> ReportQualityConfig:
+def create_quality_config(settings: ReportSettings | None[ReportSettings] = None) -> ReportQualityConfig:
     """Factory function to create quality configuration."""
     if settings is None:
         settings = create_report_settings()
@@ -466,12 +461,12 @@ def create_quality_config(settings: Optional[ReportSettings] = None) -> ReportQu
 
 
 __all__ = [
+    "ReportFormatConfig",
+    "ReportQualityConfig",
     "ReportSettings",
     "ReportTemplateConfig",
-    "ReportFormatConfig", 
-    "ReportQualityConfig",
-    "create_report_settings",
-    "create_template_config",
     "create_format_config",
     "create_quality_config",
+    "create_report_settings",
+    "create_template_config",
 ]

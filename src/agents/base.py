@@ -57,7 +57,7 @@ class BaseAgent(ABC):
         self.config = config or {}
 
         # Initialize MCP integration if provided
-        self.mcp_integration = config.get("mcp_integration")
+        self.mcp_integration = config.get("mcp_integration") if config else None
 
         # Initialize metrics
         self._metrics = AgentMetrics(agent_type=self.get_agent_type())
@@ -115,19 +115,19 @@ class BaseAgent(ABC):
         """
         return self.__class__.__name__.lower().replace("agent", "")
 
-    def log_info(self, message: str, **kwargs):
+    def log_info(self, message: str, **kwargs: Any) -> None:
         """Log an info message with agent context."""
         self._logger.info(f"[{self.get_agent_type()}] {message}", extra=kwargs)
 
-    def log_error(self, message: str, **kwargs):
+    def log_error(self, message: str, **kwargs: Any) -> None:
         """Log an error message with agent context."""
         self._logger.error(f"[{self.get_agent_type()}] {message}", extra=kwargs)
 
-    def log_warning(self, message: str, **kwargs):
+    def log_warning(self, message: str, **kwargs: Any) -> None:
         """Log a warning message with agent context."""
         self._logger.warning(f"[{self.get_agent_type()}] {message}", extra=kwargs)
 
-    def record_metric(self, name: str, value: float):
+    def record_metric(self, name: str, value: float) -> None:
         """
         Record a metric for monitoring.
 
@@ -200,7 +200,7 @@ class BaseAgent(ABC):
         """
         return self._message_queue.copy()
 
-    def clear_messages(self):
+    def clear_messages(self) -> None:
         """Clear the message queue."""
         self._message_queue.clear()
 

@@ -5,12 +5,17 @@ This module defines the state schemas used throughout the orchestration
 system, following immutable patterns for functional programming.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
 from src.agents.models import AgentResult
+
+
+def _agent_result_to_dict(result: AgentResult) -> dict[str, Any]:
+    """Convert AgentResult to dictionary."""
+    return asdict(result)
 
 
 class WorkflowPhase(Enum):
@@ -134,7 +139,7 @@ class StateCheckpoint:
                     "agent_type": v.agent_type,
                     "status": v.status.value,
                     "input_data": v.input_data,
-                    "result": v.result.to_dict() if v.result else None,
+                    "result": _agent_result_to_dict(v.result) if v.result else None,
                     "error": v.error,
                     "retry_count": v.retry_count,
                     "started_at": v.started_at.isoformat() if v.started_at else None,
@@ -230,12 +235,12 @@ class ResearchState:
     error_history: list[dict[str, Any]] = field(default_factory=list)
 
     # Metadata
-    metadata: WorkflowMetadata = None
+    metadata: WorkflowMetadata | None = None
 
     # Additional context
     context: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize metadata if not provided."""
         if self.metadata is None:
             self.metadata = WorkflowMetadata(
@@ -248,7 +253,8 @@ class ResearchState:
         """Transition to a new workflow phase."""
         self.previous_phase = self.current_phase
         self.current_phase = new_phase
-        self.metadata = self.metadata.with_node_execution(new_phase.value)
+        if self.metadata is not None:
+            self.metadata = self.metadata.with_node_execution(new_phase.value)
 
     def add_agent_task(self, task: AgentTaskState) -> None:
         """Add an agent task to the state."""
@@ -337,7 +343,7 @@ class ResearchState:
 
         return (
             self.current_phase in major_phases
-            or self.metadata.total_nodes_executed % 5 == 0
+            or (self.metadata is not None and self.metadata.total_nodes_executed % 5 == 0)
             or self.error_count > 0
         )
 
@@ -361,7 +367,7 @@ class ResearchState:
                 self.previous_phase.value if self.previous_phase else None
             ),
             "agent_tasks": {k: v.__dict__ for k, v in self.agent_tasks.items()},
-            "agent_results": {k: v.to_dict() for k, v in self.agent_results.items()},
+            "agent_results": {k: _agent_result_to_dict(v) for k, v in self.agent_results.items()},
             "pending_agents": list(self.pending_agents),
             "completed_agents": list(self.completed_agents),
             "failed_agents": list(self.failed_agents),

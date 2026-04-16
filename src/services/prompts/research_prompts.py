@@ -55,12 +55,11 @@ def generate_query_decomposition_prompt(query: Any) -> str:
         ],
     )
 
-    # Create research context
     context = create_research_context(
         query=query_text,
         domains=domains,
         depth=depth,
-        scope=scope.model_dump() if hasattr(scope, "model_dump") else scope,
+        scope=scope.model_dump() if scope and hasattr(scope, "model_dump") else scope,
     )
 
     # Main task description
@@ -98,7 +97,7 @@ Your task is to create a comprehensive research plan that:
     return add_output_format(prompt, schema)
 
 
-def generate_literature_review_prompt(sources: list[str], focus: str = None) -> str:
+def generate_literature_review_prompt(sources: list[str], focus: str | None = None) -> str:
     """
     Generate prompt for literature review analysis.
 

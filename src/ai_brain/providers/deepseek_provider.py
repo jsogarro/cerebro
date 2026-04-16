@@ -6,17 +6,23 @@ mathematical computation, and analytical tasks. DeepSeek-V3 is particularly
 strong at complex reasoning and analysis tasks.
 """
 
-import asyncio
+import json
 import logging
-from typing import Dict, List, Optional, Any, AsyncGenerator
-import httpx
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..config.model_config_manager import ModelConfigManager
+from collections.abc import AsyncGenerator
 from datetime import datetime
+
+import httpx
 
 from .base_provider import (
     BaseProvider,
+    ModelCapability,
     ModelRequest,
     ModelResponse,
-    ModelCapability,
+    ProviderHealthStatus,
     ResponseFormat,
 )
 
@@ -37,9 +43,9 @@ class DeepSeekProvider(BaseProvider):
 
     def __init__(
         self,
-        config: Dict[str, Any],
-        model_config_manager: Optional["ModelConfigManager"] = None,
-    ):
+        config: dict[str, Any],
+        model_config_manager: "ModelConfigManager | None" = None,
+    ) -> None:
         """Initialize DeepSeek provider."""
         super().__init__(config, model_config_manager)
 
@@ -49,7 +55,7 @@ class DeepSeekProvider(BaseProvider):
         self.default_model = config.get("default_model", "deepseek-v3")
 
         # HTTP client will be configured after loading provider config
-        self.client = None
+        self.client: httpx.AsyncClient | None = None
 
         # Legacy model specifications (for backward compatibility)
         self._legacy_model_specs = {
@@ -76,7 +82,7 @@ class DeepSeekProvider(BaseProvider):
     def _get_provider_name(self) -> str:
         return "deepseek"
 
-    def _get_supported_capabilities_legacy(self) -> List[ModelCapability]:
+    def _get_supported_capabilities_legacy(self) -> list[ModelCapability]:
         """Legacy hard-coded capabilities for backward compatibility."""
         return [
             ModelCapability.TEXT_GENERATION,
@@ -87,7 +93,7 @@ class DeepSeekProvider(BaseProvider):
             ModelCapability.STREAMING,
         ]
 
-    def _get_supported_models_legacy(self) -> List[str]:
+    def _get_supported_models_legacy(self) -> list[str]:
         """Legacy hard-coded models for backward compatibility."""
         return list(self._legacy_model_specs.keys())
 
@@ -132,18 +138,18 @@ class DeepSeekProvider(BaseProvider):
 
     def _get_model_context_window_legacy(self, model_name: str) -> int:
         """Legacy method using hard-coded specifications."""
-        return self._legacy_model_specs.get(model_name, {}).get(
-            "context_window", 200000
-        )
+        spec = self._legacy_model_specs.get(model_name, {})
+        context_window: Any = spec.get("context_window", 200000)
+        return int(context_window)
 
     def _get_model_cost_legacy(self, model_name: str) -> float:
         """Legacy method using hard-coded specifications."""
-        return self._legacy_model_specs.get(model_name, {}).get(
-            "cost_per_1k_tokens", 0.002
-        )
+        spec = self._legacy_model_specs.get(model_name, {})
+        cost: Any = spec.get("cost_per_1k_tokens", 0.002)
+        return float(cost)
 
     async def generate(
-        self, request: ModelRequest, model_name: Optional[str] = None
+        self, request: ModelRequest, model_name: str | None = None
     ) -> ModelResponse:
         """Generate response using DeepSeek models."""
 
@@ -183,7 +189,7 @@ class DeepSeekProvider(BaseProvider):
             return self._create_error_response(request, e, "generation_error")
 
     async def stream(
-        self, request: ModelRequest, model_name: Optional[str] = None
+        self, request: ModelRequest, model_name: str | None = None
     ) -> AsyncGenerator[str, None]:
         """Stream response using DeepSeek models."""
 
@@ -228,9 +234,9 @@ class DeepSeekProvider(BaseProvider):
 
         except Exception as e:
             logger.error(f"DeepSeek streaming failed: {e}")
-            yield f"Error: {str(e)}"
+            yield f"Error: {e!s}"
 
-    def _build_request_payload(self, request: ModelRequest, model_name: str) -> Dict:
+    def _build_request_payload(self, request: ModelRequest, model_name: str) -> dict[str, Any]:
         """Build API request payload."""
 
         # Convert messages or prompt to chat format
@@ -271,7 +277,7 @@ class DeepSeekProvider(BaseProvider):
 
         return payload
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self) -> dict[str, str]:
         """Get HTTP headers for API requests."""
         return {
             "Authorization": f"Bearer {self.api_key}",
@@ -279,7 +285,7 @@ class DeepSeekProvider(BaseProvider):
             "User-Agent": "Cerebro-AI-Brain/2.0",
         }
 
-    async def _make_api_request(self, payload: Dict) -> httpx.Response:
+    async def _make_api_request(self, payload: dict[str, Any]) -> httpx.Response:
         """Make API request to DeepSeek."""
 
         response = await self.client.post(
@@ -366,7 +372,7 @@ class DeepSeekProvider(BaseProvider):
         content: str,
         finish_reason: str,
         request: ModelRequest,
-        response_data: Dict,
+        response_data: dict[str, Any],
     ) -> float:
         """Calculate confidence score for the response."""
 
@@ -449,7 +455,7 @@ class DeepSeekProvider(BaseProvider):
 
         return True
 
-    def get_model_info(self, model_name: str) -> Optional[Dict[str, Any]]:
+    def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get DeepSeek model information."""
 
         if not self.supports_model(model_name):

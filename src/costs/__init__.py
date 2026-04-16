@@ -1,9 +1,9 @@
 """Cost management and budgeting system."""
 
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -50,7 +50,7 @@ class CostTracker:
             total_cost_cents=total_cost
         )
     
-    async def get_current_spend(self, scope_type: str, scope_id: str) -> Dict:
+    async def get_current_spend(self, scope_type: str, scope_id: str) -> dict[str, Any]:
         """Get current spend."""
         return {
             'total_spend_usd': Decimal('0.00'),
@@ -66,13 +66,13 @@ class Budget:
     scope_id: str
     amount_cents: int
     period_type: str
-    alert_thresholds: List[int]
+    alert_thresholds: list[int]
 
 
 class BudgetManager:
     """Manage budgets."""
-    
-    async def create_budget(self, scope_type: str, scope_id: str, 
+
+    async def create_budget(self, scope_type: str, scope_id: str,
                            amount: Decimal, period: str) -> Budget:
         """Create budget."""
         import uuid
@@ -84,8 +84,8 @@ class BudgetManager:
             period_type=period,
             alert_thresholds=[50, 80, 95]
         )
-    
-    async def check_budget(self, scope_type: str, scope_id: str) -> Dict:
+
+    async def check_budget(self, scope_type: str, scope_id: str) -> dict[str, Any]:
         """Check budget status."""
         return {
             'has_budget': True,
@@ -96,18 +96,18 @@ class BudgetManager:
 
 class CostForecaster:
     """Forecast future costs."""
-    
-    async def forecast_costs(self, scope_type: str, scope_id: str, 
-                            horizon_days: int = 30) -> Dict:
+
+    async def forecast_costs(self, scope_type: str, scope_id: str,
+                            horizon_days: int = 30) -> dict[str, Any]:
         """Generate forecast."""
         return {
             'predicted': Decimal('100.00'),
             'confidence': 'medium',
             'trend': 'stable'
         }
-    
-    async def estimate_query_cost(self, query: str, domains: List[str], 
-                                 depth: str) -> Dict:
+
+    async def estimate_query_cost(self, query: str, domains: list[str],
+                                 depth: str) -> dict[str, Any]:
         """Estimate cost."""
         return {
             'estimated_cost': 0.5,
@@ -117,12 +117,12 @@ class CostForecaster:
 
 class CostOptimizer:
     """Optimize costs."""
-    
-    async def get_optimization_suggestions(self, organization_id: str) -> List[Dict]:
+
+    async def get_optimization_suggestions(self, organization_id: str) -> list[dict[str, Any]]:
         """Get suggestions."""
         return []
-    
-    async def auto_downgrade(self, scope_type: str, scope_id: str, 
-                            current_model: str) -> Dict:
+
+    async def auto_downgrade(self, scope_type: str, scope_id: str,
+                            current_model: str) -> dict[str, Any]:
         """Auto-downgrade model."""
         return {'success': False}

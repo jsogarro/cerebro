@@ -77,7 +77,7 @@ class AcademicSearchTool(BaseMCPTool):
             tags=["academic", "search", "research", "papers"],
         )
 
-    async def execute(self, **kwargs) -> dict[str, Any]:
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """
         Execute academic search.
 
@@ -167,7 +167,7 @@ class AcademicSearchTool(BaseMCPTool):
 
             # Search for IDs
             search_url = f"{self.pubmed_base}/esearch.fcgi"
-            search_params = {
+            search_params: dict[str, str | int] = {
                 "db": "pubmed",
                 "term": search_query,
                 "retmode": "json",
@@ -245,18 +245,20 @@ class AcademicSearchTool(BaseMCPTool):
         """
         try:
             # Build query parameters
-            params = {
-                "search_query": f"all:{query}",
+            search_query = f"all:{query}"
+
+            # Add category filter
+            if filters.get("categories"):
+                cat_query = " OR ".join([f"cat:{cat}" for cat in filters["categories"]])
+                search_query += f" AND ({cat_query})"
+
+            params: dict[str, str | int] = {
+                "search_query": search_query,
                 "start": 0,
                 "max_results": max_results,
                 "sortBy": "relevance",
                 "sortOrder": "descending",
             }
-
-            # Add category filter
-            if filters.get("categories"):
-                cat_query = " OR ".join([f"cat:{cat}" for cat in filters["categories"]])
-                params["search_query"] += f" AND ({cat_query})"
 
             response = await self.client.get(self.arxiv_base, params=params)
             if response.status_code != 200:
@@ -278,28 +280,46 @@ class AcademicSearchTool(BaseMCPTool):
 
                 # Extract ID
                 entry_id = entry.find("atom:id", ns)
-                arxiv_id = entry_id.text.split("/")[-1] if entry_id is not None else ""
+                arxiv_id = (
+                    entry_id.text.split("/")[-1]
+                    if entry_id is not None and entry_id.text is not None
+                    else ""
+                )
 
                 # Extract publication date
                 published = entry.find("atom:published", ns)
-                year = published.text[:4] if published is not None else ""
+                year = (
+                    published.text[:4]
+                    if published is not None and published.text is not None
+                    else ""
+                )
+
+                title_elem = entry.find("atom:title", ns)
+                title_text = (
+                    title_elem.text.strip()
+                    if title_elem is not None and title_elem.text is not None
+                    else ""
+                )
+
+                summary_elem = entry.find("atom:summary", ns)
+                abstract_text = (
+                    summary_elem.text.strip()
+                    if summary_elem is not None and summary_elem.text is not None
+                    else ""
+                )
+
+                url_text = (
+                    entry_id.text if entry_id is not None and entry_id.text is not None else ""
+                )
 
                 results.append(
                     {
                         "id": arxiv_id,
-                        "title": (
-                            entry.find("atom:title", ns).text.strip()
-                            if entry.find("atom:title", ns) is not None
-                            else ""
-                        ),
+                        "title": title_text,
                         "authors": authors,
-                        "abstract": (
-                            entry.find("atom:summary", ns).text.strip()
-                            if entry.find("atom:summary", ns) is not None
-                            else ""
-                        ),
+                        "abstract": abstract_text,
                         "year": year,
-                        "url": entry_id.text if entry_id is not None else "",
+                        "url": url_text,
                         "source": "arxiv",
                     }
                 )
@@ -327,7 +347,7 @@ class AcademicSearchTool(BaseMCPTool):
         try:
             # Search papers
             search_url = f"{self.semantic_scholar_base}/paper/search"
-            params = {
+            params: dict[str, str | int] = {
                 "query": query,
                 "limit": max_results,
                 "fields": "paperId,title,abstract,authors,year,venue,citationCount",
@@ -375,7 +395,7 @@ class AcademicSearchTool(BaseMCPTool):
             logger.error(f"Semantic Scholar search error: {e!s}")
             return []
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup HTTP client."""
         # Note: We can't use async in __del__, so client cleanup
         # should be handled explicitly in production code

@@ -7,7 +7,8 @@ type safety, and structured prompt management.
 
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, Union
+from typing import Any
+
 from pydantic import BaseModel, Field, validator
 
 
@@ -72,20 +73,20 @@ class PromptVariable(BaseModel):
     type: VariableType = Field(..., description="Variable type")
     description: str = Field("", description="Variable description")
     required: bool = Field(True, description="Whether variable is required")
-    default: Optional[Any] = Field(None, description="Default value if not provided")
-    validation_rules: List[str] = Field(
+    default: Any | None = Field(None, description="Default value if not provided")
+    validation_rules: list[str] = Field(
         default_factory=list, description="Validation rules"
     )
-    examples: List[Any] = Field(default_factory=list, description="Example values")
+    examples: list[Any] = Field(default_factory=list, description="Example values")
 
 
 class PromptExample(BaseModel):
     """Example input/output for few-shot learning."""
 
-    input_variables: Dict[str, Any] = Field(..., description="Example input variables")
+    input_variables: dict[str, Any] = Field(..., description="Example input variables")
     expected_output: str = Field(..., description="Expected output for this input")
     explanation: str = Field("", description="Why this is a good example")
-    tags: List[str] = Field(default_factory=list, description="Example tags")
+    tags: list[str] = Field(default_factory=list, description="Example tags")
 
 
 class PromptMetadata(BaseModel):
@@ -97,8 +98,8 @@ class PromptMetadata(BaseModel):
 
     # Categorization
     type: PromptType = Field(..., description="Prompt type")
-    role: Optional[PromptRole] = Field(None, description="Target agent role")
-    domain: Optional[str] = Field(None, description="Target domain")
+    role: PromptRole | None = Field(None, description="Target agent role")
+    domain: str | None = Field(None, description="Target domain")
 
     # Authorship and maintenance
     author: str = Field("Cerebro Team", description="Prompt author")
@@ -111,12 +112,12 @@ class PromptMetadata(BaseModel):
     avg_quality_score: float = Field(0.0, description="Average quality score")
 
     # Optimization
-    tags: List[str] = Field(default_factory=list, description="Prompt tags")
+    tags: list[str] = Field(default_factory=list, description="Prompt tags")
     complexity_score: float = Field(0.5, description="Prompt complexity (0-1)")
     estimated_tokens: int = Field(500, description="Estimated token usage")
 
     # A/B Testing
-    ab_test_group: Optional[str] = Field(None, description="A/B test group")
+    ab_test_group: str | None = Field(None, description="A/B test group")
     champion_version: bool = Field(True, description="Is this the champion version")
 
 
@@ -132,15 +133,15 @@ class PromptTemplate(BaseModel):
     assistant_prompt: str = Field("", description="Assistant prompt template")
 
     # Template configuration
-    variables: List[PromptVariable] = Field(
+    variables: list[PromptVariable] = Field(
         default_factory=list, description="Template variables"
     )
-    examples: List[PromptExample] = Field(
+    examples: list[PromptExample] = Field(
         default_factory=list, description="Few-shot examples"
     )
 
     # Output specification
-    expected_output_schema: Optional[Dict[str, Any]] = Field(
+    expected_output_schema: dict[str, Any] | None = Field(
         None, description="Expected JSON output schema"
     )
     output_format: str = Field(
@@ -152,7 +153,7 @@ class PromptTemplate(BaseModel):
     temperature: float = Field(0.7, description="Default temperature")
 
     # Advanced features
-    inherits_from: Optional[str] = Field(
+    inherits_from: str | None = Field(
         None, description="Base template to inherit from"
     )
     requires_refinement: bool = Field(
@@ -161,21 +162,21 @@ class PromptTemplate(BaseModel):
     consensus_threshold: float = Field(0.95, description="Required consensus level")
 
     # Safety and validation
-    safety_checks: List[str] = Field(
+    safety_checks: list[str] = Field(
         default_factory=list, description="Safety validation rules"
     )
-    quality_checks: List[str] = Field(
+    quality_checks: list[str] = Field(
         default_factory=list, description="Quality validation rules"
     )
 
     @validator("metadata")
-    def validate_metadata_consistency(cls, v, values):
+    def validate_metadata_consistency(cls, v: PromptMetadata, values: dict[str, Any]) -> PromptMetadata:
         """Ensure metadata is consistent with template content."""
         # Could add validation logic here
         return v
 
     @validator("temperature")
-    def validate_temperature_range(cls, v):
+    def validate_temperature_range(cls, v: float) -> float:
         """Validate temperature is in valid range."""
         if not 0.0 <= v <= 2.0:
             raise ValueError("Temperature must be between 0.0 and 2.0")
@@ -189,16 +190,16 @@ class PromptCollection(BaseModel):
     description: str = Field("", description="Collection description")
     version: str = Field("1.0.0", description="Collection version")
 
-    templates: Dict[str, PromptTemplate] = Field(
+    templates: dict[str, PromptTemplate] = Field(
         default_factory=dict, description="Template name to template mapping"
     )
 
     # Collection metadata
-    domain: Optional[str] = Field(None, description="Target domain")
-    agent_types: List[str] = Field(
+    domain: str | None = Field(None, description="Target domain")
+    agent_types: list[str] = Field(
         default_factory=list, description="Compatible agent types"
     )
-    dependencies: List[str] = Field(
+    dependencies: list[str] = Field(
         default_factory=list, description="Required dependencies"
     )
 
@@ -206,11 +207,11 @@ class PromptCollection(BaseModel):
     total_usage: int = Field(0, description="Total usage across all templates")
     avg_success_rate: float = Field(0.0, description="Average success rate")
 
-    def get_template(self, template_name: str) -> Optional[PromptTemplate]:
+    def get_template(self, template_name: str) -> PromptTemplate | None:
         """Get a specific template from the collection."""
         return self.templates.get(template_name)
 
-    def get_templates_by_role(self, role: PromptRole) -> Dict[str, PromptTemplate]:
+    def get_templates_by_role(self, role: PromptRole) -> dict[str, PromptTemplate]:
         """Get all templates for a specific role."""
         return {
             name: template
@@ -220,7 +221,7 @@ class PromptCollection(BaseModel):
 
     def get_templates_by_type(
         self, prompt_type: PromptType
-    ) -> Dict[str, PromptTemplate]:
+    ) -> dict[str, PromptTemplate]:
         """Get all templates of a specific type."""
         return {
             name: template
@@ -230,12 +231,12 @@ class PromptCollection(BaseModel):
 
 
 __all__ = [
-    "PromptTemplate",
-    "PromptMetadata",
-    "PromptVariable",
-    "PromptExample",
     "PromptCollection",
-    "PromptType",
+    "PromptExample",
+    "PromptMetadata",
     "PromptRole",
+    "PromptTemplate",
+    "PromptType",
+    "PromptVariable",
     "VariableType",
 ]

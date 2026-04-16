@@ -7,7 +7,8 @@ Specialized repository for user operations.
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db.user import User
 from src.repositories.base import BaseRepository
@@ -20,7 +21,7 @@ class UserRepository(BaseRepository[User]):
     Provides specialized queries for user management.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """Initialize user repository."""
         super().__init__(User, session)
 
@@ -110,7 +111,7 @@ class UserRepository(BaseRepository[User]):
         username: str,
         password: str,
         full_name: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> User:
         """
         Create user with hashed password.

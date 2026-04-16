@@ -7,11 +7,12 @@ following functional programming principles with pure transformation functions.
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 from uuid import uuid4
 
 from src.models.report import (
@@ -24,8 +25,8 @@ from src.models.report import (
     ReportMetadata,
     ReportOutput,
     ReportSection,
-    ReportType,
     Visualization,
+    VisualizationType,
 )
 from src.services.report_config import (
     ReportFormatConfig,
@@ -51,10 +52,10 @@ class ReportGenerator:
     
     def __init__(
         self,
-        settings: Optional[ReportSettings] = None,
-        template_config: Optional[ReportTemplateConfig] = None,
-        format_config: Optional[ReportFormatConfig] = None,
-        quality_config: Optional[ReportQualityConfig] = None,
+        settings: ReportSettings | None = None,
+        template_config: ReportTemplateConfig | None = None,
+        format_config: ReportFormatConfig | None = None,
+        quality_config: ReportQualityConfig | None = None,
     ):
         """Initialize the report generator."""
         self.settings = settings or create_report_settings()
@@ -66,7 +67,7 @@ class ReportGenerator:
         self._ensure_storage_directory()
         
         # Template cache for performance
-        self._template_cache: Dict[str, Any] = {}
+        self._template_cache: dict[str, Any] = {}
     
     def _ensure_storage_directory(self) -> None:
         """Ensure the report storage directory exists."""
@@ -153,7 +154,7 @@ class ReportGenerator:
     
     async def _extract_input_data(
         self, request: ReportGenerationRequest
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Extract and validate input data from the request.
         
@@ -162,14 +163,14 @@ class ReportGenerator:
         """
         if request.project_id:
             # Load data from project ID (would integrate with database)
-            return await self._load_project_data(request.project_id)
+            return await self._load_project_data(str(request.project_id))
         elif request.workflow_data:
             # Use direct workflow data
             return self._validate_workflow_data(request.workflow_data)
         else:
             raise ReportGenerationError("No data source provided (project_id or workflow_data)")
     
-    async def _load_project_data(self, project_id) -> Dict[str, Any]:
+    async def _load_project_data(self, project_id: str) -> dict[str, Any]:
         """Load project data from database (mock implementation)."""
         # In a real implementation, this would query the database
         # For now, return mock data structure
@@ -196,7 +197,7 @@ class ReportGenerator:
             }
         }
     
-    def _validate_workflow_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_workflow_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Validate and normalize workflow data."""
         required_fields = ["title", "query"]
         for field in required_fields:
@@ -215,7 +216,7 @@ class ReportGenerator:
     
     async def _build_report_structure(
         self,
-        input_data: Dict[str, Any],
+        input_data: dict[str, Any],
         config: ReportConfiguration,
         report_id: str
     ) -> Report:
@@ -236,6 +237,8 @@ class ReportGenerator:
             title=title,
             query=query,
             domains=domains,
+            abstract=None,
+            executive_summary=None,
             configuration=config
         )
         
@@ -261,7 +264,7 @@ class ReportGenerator:
         
         return report
     
-    async def _build_sections(self, report: Report, input_data: Dict[str, Any]) -> None:
+    async def _build_sections(self, report: Report, input_data: dict[str, Any]) -> None:
         """Build report sections based on configuration and input data."""
         report_type = report.configuration.type
         required_sections = self.template_config.get_required_sections(report_type)
@@ -290,8 +293,8 @@ class ReportGenerator:
                     report.sections.append(section)
     
     async def _build_introduction_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build introduction section."""
         content = f"""
         This research investigates the following question: "{report.query}"
@@ -309,8 +312,8 @@ class ReportGenerator:
         )
     
     async def _build_methodology_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build methodology section."""
         methodologies = results.get("methodologies", {})
         
@@ -334,8 +337,8 @@ class ReportGenerator:
         )
     
     async def _build_literature_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build literature review section."""
         sources = results.get("sources", [])
         
@@ -356,8 +359,8 @@ class ReportGenerator:
         )
     
     async def _build_findings_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build findings section."""
         findings = results.get("findings", {})
         
@@ -390,8 +393,8 @@ class ReportGenerator:
         return section
     
     async def _build_analysis_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build analysis section."""
         comparisons = results.get("comparisons", {})
         
@@ -415,8 +418,8 @@ class ReportGenerator:
         )
     
     async def _build_discussion_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build discussion section."""
         insights = results.get("insights", [])
         conflicts = results.get("conflict_resolutions", [])
@@ -445,8 +448,8 @@ class ReportGenerator:
         )
     
     async def _build_conclusions_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build conclusions section."""
         confidence_score = results.get("confidence_score", 0.7)
         metrics = results.get("metrics", {})
@@ -469,8 +472,8 @@ class ReportGenerator:
         )
     
     async def _build_recommendations_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build recommendations section."""
         recommendations = results.get("recommendations", [])
         
@@ -489,8 +492,8 @@ class ReportGenerator:
         )
     
     async def _build_limitations_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build limitations section."""
         limitations = results.get("limitations", [])
         quality_report = results.get("quality_report", {})
@@ -516,8 +519,8 @@ class ReportGenerator:
         )
     
     async def _build_abstract_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build abstract section for academic papers."""
         content = f"""
         This study investigates: {report.query}
@@ -537,8 +540,8 @@ class ReportGenerator:
         )
     
     async def _build_results_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build results section for academic papers."""
         metrics = results.get("metrics", {})
         
@@ -558,8 +561,8 @@ class ReportGenerator:
         )
     
     async def _build_key_findings_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build key findings section for executive summary."""
         findings = results.get("findings", {})
         
@@ -583,8 +586,8 @@ class ReportGenerator:
         )
     
     async def _build_insights_section(
-        self, report: Report, results: Dict[str, Any]
-    ) -> Optional[ReportSection]:
+        self, report: Report, results: dict[str, Any]
+    ) -> ReportSection | None:
         """Build insights section."""
         insights = results.get("insights", [])
         
@@ -606,7 +609,7 @@ class ReportGenerator:
             level=1
         )
     
-    async def _process_citations(self, report: Report, input_data: Dict[str, Any]) -> None:
+    async def _process_citations(self, report: Report, input_data: dict[str, Any]) -> None:
         """Process and format citations from input data."""
         aggregated_results = input_data.get("aggregated_results", {})
         citations_data = aggregated_results.get("citations", [])
@@ -619,19 +622,25 @@ class ReportGenerator:
                     title=citation_data.get("title", "Untitled"),
                     year=citation_data.get("year"),
                     journal=citation_data.get("journal"),
+                    volume=citation_data.get("volume"),
+                    issue=citation_data.get("issue"),
+                    pages=citation_data.get("pages"),
                     doi=citation_data.get("doi"),
                     url=citation_data.get("url"),
+                    publisher=citation_data.get("publisher"),
+                    location=citation_data.get("location"),
+                    isbn=citation_data.get("isbn"),
                 )
                 report.add_citation(citation)
     
-    async def _generate_visualizations(self, report: Report, input_data: Dict[str, Any]) -> None:
+    async def _generate_visualizations(self, report: Report, input_data: dict[str, Any]) -> None:
         """Generate visualization specifications (actual chart generation will be handled by exporters)."""
         aggregated_results = input_data.get("aggregated_results", {})
         
         # Source distribution visualization
         sources = aggregated_results.get("sources", [])
         if sources and len(sources) > 1:
-            year_dist = {}
+            year_dist: dict[str, int] = {}
             for source in sources:
                 year = source.get("year", "Unknown")
                 year_dist[str(year)] = year_dist.get(str(year), 0) + 1
@@ -639,10 +648,13 @@ class ReportGenerator:
             if len(year_dist) > 1:
                 viz = Visualization(
                     id="source_distribution",
-                    type="bar_chart",
+                    type=VisualizationType.BAR_CHART,
                     title="Source Distribution by Year",
                     data={"years": list(year_dist.keys()), "counts": list(year_dist.values())},
-                    config={"x_label": "Year", "y_label": "Number of Sources"}
+                    config={"x_label": "Year", "y_label": "Number of Sources"},
+                    caption=None,
+                    width=None,
+                    height=None
                 )
                 report.add_visualization(viz)
         
@@ -650,14 +662,17 @@ class ReportGenerator:
         if len(report.domains) > 1:
             viz = Visualization(
                 id="domain_distribution",
-                type="pie_chart",
+                type=VisualizationType.PIE_CHART,
                 title="Research Domains Coverage",
                 data={"labels": report.domains, "values": [1] * len(report.domains)},
-                config={}
+                config={},
+                caption=None,
+                width=None,
+                height=None
             )
             report.add_visualization(viz)
     
-    async def _build_metadata(self, report: Report, input_data: Dict[str, Any]) -> None:
+    async def _build_metadata(self, report: Report, input_data: dict[str, Any]) -> None:
         """Build report metadata from input data."""
         metadata_input = input_data.get("metadata", {})
         aggregated_results = input_data.get("aggregated_results", {})
@@ -665,14 +680,18 @@ class ReportGenerator:
         report.metadata = ReportMetadata(
             workflow_id=metadata_input.get("workflow_id"),
             project_id=input_data.get("project_id"),
+            user_id=None,
             total_sources=len(aggregated_results.get("sources", [])),
             total_citations=len(aggregated_results.get("citations", [])),
             agents_used=metadata_input.get("agents_used", []),
             quality_score=input_data.get("quality_report", {}).get("quality_score", 0.8),
             confidence_score=aggregated_results.get("confidence_score", 0.75),
+            generation_time_seconds=0.0,
+            word_count=0,
+            page_count=None,
         )
     
-    async def _generate_executive_summary(self, report: Report, input_data: Dict[str, Any]) -> None:
+    async def _generate_executive_summary(self, report: Report, input_data: dict[str, Any]) -> None:
         """Generate executive summary for the report."""
         aggregated_results = input_data.get("aggregated_results", {})
         insights = aggregated_results.get("insights", [])
@@ -728,8 +747,8 @@ class ReportGenerator:
             logger.warning("Report missing required citations")
     
     async def _generate_formats(
-        self, report: Report, formats: List[ReportFormat]
-    ) -> Dict[ReportFormat, ReportOutput]:
+        self, report: Report, formats: list[ReportFormat]
+    ) -> dict[ReportFormat, ReportOutput]:
         """Generate report outputs in the requested formats."""
         outputs = {}
         
@@ -737,11 +756,11 @@ class ReportGenerator:
             # Generate formats in parallel
             tasks = [self._generate_single_format(report, fmt) for fmt in formats]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             for fmt, result in zip(formats, results):
                 if isinstance(result, Exception):
                     logger.error(f"Failed to generate {fmt}: {result}")
-                else:
+                elif isinstance(result, ReportOutput):
                     outputs[fmt] = result
         else:
             # Generate formats sequentially
@@ -779,10 +798,12 @@ class ReportGenerator:
         """Generate HTML report output."""
         # This will be implemented with Jinja2 templates
         html_content = self._generate_basic_html(report)
-        
+
         return ReportOutput(
             format=ReportFormat.HTML,
             content=html_content,
+            file_path=None,
+            file_size=len(html_content.encode("utf-8")),
             mime_type=self.format_config.get_mime_type(ReportFormat.HTML),
             encoding="utf-8"
         )
@@ -818,6 +839,8 @@ class ReportGenerator:
         return ReportOutput(
             format=ReportFormat.MARKDOWN,
             content=markdown,
+            file_path=None,
+            file_size=len(markdown.encode("utf-8")),
             mime_type=self.format_config.get_mime_type(ReportFormat.MARKDOWN),
             encoding="utf-8"
         )
@@ -826,11 +849,13 @@ class ReportGenerator:
         """Generate JSON report output."""
         # Convert report to dictionary, handling datetime serialization
         report_dict = report.dict()
-        json_content = serialize_to_str(report_dict, indent=2, default=str)
-        
+        json_content = json.dumps(report_dict, indent=2, default=str)
+
         return ReportOutput(
             format=ReportFormat.JSON,
             content=json_content,
+            file_path=None,
+            file_size=len(json_content.encode("utf-8")),
             mime_type=self.format_config.get_mime_type(ReportFormat.JSON),
             encoding="utf-8"
         )
@@ -841,11 +866,13 @@ class ReportGenerator:
         html_output = await self._generate_html(report)
         
         # This will be replaced with actual PDF generation
-        pdf_content = f"PDF version of: {report.title}".encode('utf-8')
-        
+        pdf_content = f"PDF version of: {report.title}".encode()
+
         return ReportOutput(
             format=ReportFormat.PDF,
             content=pdf_content,
+            file_path=None,
+            file_size=len(pdf_content),
             mime_type=self.format_config.get_mime_type(ReportFormat.PDF),
             encoding="binary"
         )
@@ -869,6 +896,8 @@ class ReportGenerator:
         return ReportOutput(
             format=ReportFormat.LATEX,
             content=latex_content,
+            file_path=None,
+            file_size=len(latex_content.encode("utf-8")),
             mime_type=self.format_config.get_mime_type(ReportFormat.LATEX),
             encoding="utf-8"
         )
@@ -877,10 +906,12 @@ class ReportGenerator:
         """Generate DOCX report output (placeholder)."""
         # This will be implemented with python-docx
         docx_content = b"DOCX placeholder content"
-        
+
         return ReportOutput(
             format=ReportFormat.DOCX,
             content=docx_content,
+            file_path=None,
+            file_size=len(docx_content),
             mime_type=self.format_config.get_mime_type(ReportFormat.DOCX),
             encoding="binary"
         )
@@ -935,7 +966,7 @@ class ReportGenerator:
         return html
     
     async def _save_outputs(
-        self, report: Report, outputs: Dict[ReportFormat, ReportOutput]
+        self, report: Report, outputs: dict[ReportFormat, ReportOutput]
     ) -> None:
         """Save generated outputs to storage."""
         report_dir = os.path.join(self.settings.report_storage_path, report.id)
@@ -948,10 +979,12 @@ class ReportGenerator:
             try:
                 if output.is_binary:
                     with open(file_path, 'wb') as f:
-                        f.write(output.content)
+                        content_bytes = output.content if isinstance(output.content, bytes) else output.content.encode(output.encoding)
+                        f.write(content_bytes)
                 else:
                     with open(file_path, 'w', encoding=output.encoding) as f:
-                        f.write(output.content)
+                        content_str = output.content if isinstance(output.content, str) else output.content.decode(output.encoding)
+                        f.write(content_str)
                 
                 # Update output with file path and size
                 output.file_path = file_path
@@ -963,11 +996,11 @@ class ReportGenerator:
                 logger.error(f"Failed to save {format} report: {e}")
     
     def _build_download_urls(
-        self, report_id: str, outputs: Dict[ReportFormat, ReportOutput]
-    ) -> Dict[ReportFormat, str]:
+        self, report_id: str, outputs: dict[ReportFormat, ReportOutput]
+    ) -> dict[ReportFormat, str]:
         """Build download URLs for generated outputs."""
         urls = {}
-        for format in outputs.keys():
+        for format in outputs:
             extension = self.format_config.get_file_extension(format)
             urls[format] = f"/api/reports/{report_id}/download{extension}"
         return urls
@@ -993,6 +1026,6 @@ class ReportGenerator:
 
 
 __all__ = [
-    "ReportGenerator",
     "ReportGenerationError",
+    "ReportGenerator",
 ]

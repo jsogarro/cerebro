@@ -16,17 +16,18 @@ Features:
 import asyncio
 import logging
 import os
-import threading
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable
-import yaml
 import re
-from dataclasses import asdict
+import threading
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import yaml  # type: ignore[import-untyped]
 
 try:
-    from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
 
     WATCHDOG_AVAILABLE = True
 except ImportError:
@@ -35,12 +36,9 @@ except ImportError:
     WATCHDOG_AVAILABLE = False
 
 from .schemas import (
-    PromptTemplate,
     PromptCollection,
-    PromptMetadata,
-    PromptType,
     PromptRole,
-    PromptVariable,
+    PromptTemplate,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,8 +52,8 @@ class PromptChangeEvent:
         change_type: str,
         template_path: str,
         template_name: str,
-        old_template: Optional[PromptTemplate] = None,
-        new_template: Optional[PromptTemplate] = None,
+        old_template: PromptTemplate | None = None,
+        new_template: PromptTemplate | None = None,
     ):
         self.change_type = change_type  # created, modified, deleted
         self.template_path = template_path
@@ -72,22 +70,22 @@ class PromptFileWatcher:
         self.prompt_manager = prompt_manager
         self.debounce_delay = 1.0
         self.pending_changes: set[str] = set()
-        self._debounce_task = None
+        self._debounce_task: asyncio.Task[None] | None = None
 
         if WATCHDOG_AVAILABLE:
             self.__class__.__bases__ = (FileSystemEventHandler,)
 
-    def on_modified(self, event):
+    def on_modified(self, event: Any) -> None:
         if not event.is_directory and event.src_path.endswith((".yaml", ".yml")):
             self.pending_changes.add(event.src_path)
             self._schedule_reload()
 
-    def on_created(self, event):
+    def on_created(self, event: Any) -> None:
         if not event.is_directory and event.src_path.endswith((".yaml", ".yml")):
             self.pending_changes.add(event.src_path)
             self._schedule_reload()
 
-    def _schedule_reload(self):
+    def _schedule_reload(self) -> None:
         """Schedule debounced reload of templates."""
         if self._debounce_task:
             self._debounce_task.cancel()
@@ -109,11 +107,11 @@ class PromptCache:
 
     def __init__(self, ttl_seconds: int = 3600):
         self.ttl_seconds = ttl_seconds
-        self._cache: Dict[str, Any] = {}
-        self._timestamps: Dict[str, datetime] = {}
+        self._cache: dict[str, Any] = {}
+        self._timestamps: dict[str, datetime] = {}
         self._lock = threading.RLock()
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         """Get cached compiled prompt."""
         with self._lock:
             if key in self._cache:
@@ -122,20 +120,21 @@ class PromptCache:
                     timestamp
                     and (datetime.now() - timestamp).seconds < self.ttl_seconds
                 ):
-                    return self._cache[key]
+                    value = self._cache[key]
+                    return str(value)
                 else:
                     # Expired
                     del self._cache[key]
                     del self._timestamps[key]
         return None
 
-    def set(self, key: str, value: str):
+    def set(self, key: str, value: str) -> None:
         """Cache compiled prompt."""
         with self._lock:
             self._cache[key] = value
             self._timestamps[key] = datetime.now()
 
-    def invalidate(self, pattern: Optional[str] = None):
+    def invalidate(self, pattern: str | None = None) -> None:
         """Invalidate cache entries."""
         with self._lock:
             if pattern:
@@ -156,7 +155,7 @@ class PromptManager:
     and performance tracking for all Cerebro agents.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize prompt manager."""
         self.config = config
 
@@ -168,28 +167,29 @@ class PromptManager:
 
         # Template storage
         self._lock = threading.RLock()
-        self._templates: Dict[str, PromptTemplate] = {}
-        self._collections: Dict[str, PromptCollection] = {}
-        self._template_inheritance: Dict[str, str] = {}
+        self._templates: dict[str, PromptTemplate] = {}
+        self._collections: dict[str, PromptCollection] = {}
+        self._template_inheritance: dict[str, str] = {}
 
         # Performance tracking
-        self.usage_stats: Dict[str, Dict[str, Any]] = {}
+        self.usage_stats: dict[str, dict[str, Any]] = {}
         self.load_count = 0
         self.cache_hits = 0
         self.cache_misses = 0
 
         # Hot-reload components
-        self._observer = None
-        self._watcher = None
+        self._observer: Any | None = None
+        self._watcher: PromptFileWatcher | None = None
 
         # Caching
+        self._cache: PromptCache | None
         if self.enable_caching:
             self._cache = PromptCache(self.cache_ttl)
         else:
             self._cache = None
 
         # Change notifications
-        self._change_listeners: List[Callable[[PromptChangeEvent], None]] = []
+        self._change_listeners: list[Callable[[PromptChangeEvent], None]] = []
 
     async def initialize(self) -> None:
         """Initialize the prompt manager."""
@@ -207,9 +207,9 @@ class PromptManager:
     async def get_prompt(
         self,
         template_name: str,
-        variables: Optional[Dict[str, Any]] = None,
-        role: Optional[PromptRole] = None,
-        domain: Optional[str] = None,
+        variables: dict[str, Any] | None = None,
+        role: PromptRole | None = None,
+        domain: str | None = None,
     ) -> str:
         """
         Get a compiled prompt from template.
@@ -235,7 +235,7 @@ class PromptManager:
             if cached_prompt:
                 self.cache_hits += 1
                 await self._update_usage_stats(template_name, True)
-                return cached_prompt
+                return str(cached_prompt)
             self.cache_misses += 1
 
         try:
@@ -265,8 +265,8 @@ class PromptManager:
     async def get_prompt_for_agent(
         self,
         agent_type: str,
-        task_data: Dict[str, Any],
-        context: Optional[Dict[str, Any]] = None,
+        task_data: dict[str, Any],
+        context: dict[str, Any] | None = None,
     ) -> str:
         """
         Get prompt specifically for an agent type.
@@ -296,8 +296,8 @@ class PromptManager:
     async def get_supervisor_prompt(
         self,
         supervisor_type: str,
-        coordination_data: Dict[str, Any],
-        worker_results: Optional[List[Dict[str, Any]]] = None,
+        coordination_data: dict[str, Any],
+        worker_results: list[dict[str, Any]] | None = None,
     ) -> str:
         """Get prompt for supervisor agents."""
 
@@ -315,7 +315,7 @@ class PromptManager:
     async def get_refinement_prompt(
         self,
         refinement_round: int,
-        previous_outputs: List[Dict[str, Any]],
+        previous_outputs: list[dict[str, Any]],
         consensus_score: float,
         target_threshold: float = 0.95,
     ) -> str:
@@ -399,7 +399,7 @@ class PromptManager:
             logger.error(f"Failed to update template performance {template_name}: {e}")
             return False
 
-    async def get_template_stats(self) -> Dict[str, Any]:
+    async def get_template_stats(self) -> dict[str, Any]:
         """Get comprehensive prompt manager statistics."""
 
         return {
@@ -492,9 +492,9 @@ class PromptManager:
     async def _find_template(
         self,
         template_name: str,
-        role: Optional[PromptRole] = None,
-        domain: Optional[str] = None,
-    ) -> Optional[PromptTemplate]:
+        role: PromptRole | None = None,
+        domain: str | None = None,
+    ) -> PromptTemplate | None:
         """Find best matching template."""
 
         # Try exact name match first
@@ -516,7 +516,7 @@ class PromptManager:
         return None
 
     async def _compile_template(
-        self, template: PromptTemplate, variables: Dict[str, Any]
+        self, template: PromptTemplate, variables: dict[str, Any]
     ) -> str:
         """Compile template with variable substitution."""
 
@@ -590,12 +590,15 @@ class PromptManager:
             output_format=template.output_format or resolved_base.output_format,
             max_tokens=template.max_tokens or resolved_base.max_tokens,
             temperature=template.temperature or resolved_base.temperature,
+            inherits_from=template.inherits_from,
+            requires_refinement=template.requires_refinement,
+            consensus_threshold=template.consensus_threshold,
         )
 
         return merged_template
 
     def _substitute_variables(
-        self, template_text: str, variables: Dict[str, Any]
+        self, template_text: str, variables: dict[str, Any]
     ) -> str:
         """Substitute variables in template text."""
 
@@ -640,30 +643,31 @@ class PromptManager:
         else:
             return str(value)
 
-    def _process_conditional_blocks(self, text: str, variables: Dict[str, Any]) -> str:
+    def _process_conditional_blocks(self, text: str, variables: dict[str, Any]) -> str:
         """Process {{#if variable}}...{{/if}} conditional blocks."""
 
         # Simple conditional processing
         pattern = r"\{\{#if\s+(\w+)\}\}(.*?)\{\{/if\}\}"
 
-        def replace_conditional(match):
+        def replace_conditional(match: Any) -> str:
             var_name = match.group(1)
             block_content = match.group(2)
 
-            if var_name in variables and variables[var_name]:
-                return block_content
+            if variables.get(var_name):
+                return str(block_content)
             else:
                 return ""
 
-        return re.sub(pattern, replace_conditional, text, flags=re.DOTALL)
+        result = re.sub(pattern, replace_conditional, text, flags=re.DOTALL)
+        return str(result)
 
-    def _process_loop_blocks(self, text: str, variables: Dict[str, Any]) -> str:
+    def _process_loop_blocks(self, text: str, variables: dict[str, Any]) -> str:
         """Process {{#each items}}...{{/each}} loop blocks."""
 
         # Simple loop processing
         pattern = r"\{\{#each\s+(\w+)\}\}(.*?)\{\{/each\}\}"
 
-        def replace_loop(match):
+        def replace_loop(match: Any) -> str:
             var_name = match.group(1)
             block_template = match.group(2)
 
@@ -680,7 +684,7 @@ class PromptManager:
         return re.sub(pattern, replace_loop, text, flags=re.DOTALL)
 
     async def _validate_variables(
-        self, template: PromptTemplate, variables: Dict[str, Any]
+        self, template: PromptTemplate, variables: dict[str, Any]
     ) -> None:
         """Validate that required variables are provided."""
 
@@ -691,7 +695,7 @@ class PromptManager:
                 else:
                     raise ValueError(f"Required variable missing: {var_def.name}")
 
-    async def _compile_examples(self, examples: List, variables: Dict[str, Any]) -> str:
+    async def _compile_examples(self, examples: list[Any], variables: dict[str, Any]) -> str:
         """Compile few-shot examples."""
 
         example_parts = []
@@ -716,7 +720,7 @@ class PromptManager:
 
         return "\n".join(example_parts)
 
-    def _format_output_schema(self, schema: Dict[str, Any]) -> str:
+    def _format_output_schema(self, schema: dict[str, Any]) -> str:
         """Format output schema for prompt."""
 
         import json
@@ -726,9 +730,9 @@ class PromptManager:
     def _create_cache_key(
         self,
         template_name: str,
-        variables: Dict[str, Any],
-        role: Optional[PromptRole],
-        domain: Optional[str],
+        variables: dict[str, Any],
+        role: PromptRole | None,
+        domain: str | None,
     ) -> str:
         """Create cache key for prompt compilation."""
 
@@ -804,8 +808,8 @@ class PromptManager:
         change_type: str,
         template_path: str,
         template_name: str,
-        old_template: Optional[PromptTemplate],
-        new_template: Optional[PromptTemplate],
+        old_template: PromptTemplate | None,
+        new_template: PromptTemplate | None,
     ) -> None:
         """Notify change listeners."""
 
@@ -822,7 +826,7 @@ class PromptManager:
             except Exception as e:
                 logger.error(f"Prompt change listener failed: {e}")
 
-    def add_change_listener(self, listener: Callable[[PromptChangeEvent], None]):
+    def add_change_listener(self, listener: Callable[[PromptChangeEvent], None]) -> None:
         """Add listener for prompt changes."""
         self._change_listeners.append(listener)
 
@@ -837,10 +841,10 @@ class PromptManager:
 
 
 # Global prompt manager instance
-_prompt_manager: Optional[PromptManager] = None
+_prompt_manager: PromptManager | None = None
 
 
-async def get_prompt_manager(config: Optional[Dict[str, Any]] = None) -> PromptManager:
+async def get_prompt_manager(config: dict[str, Any] | None = None) -> PromptManager:
     """Get or create global prompt manager."""
 
     global _prompt_manager
@@ -857,9 +861,9 @@ async def get_prompt_manager(config: Optional[Dict[str, Any]] = None) -> PromptM
 
 async def get_prompt(
     template_name: str,
-    variables: Optional[Dict[str, Any]] = None,
-    role: Optional[PromptRole] = None,
-    domain: Optional[str] = None,
+    variables: dict[str, Any] | None = None,
+    role: PromptRole | None = None,
+    domain: str | None = None,
 ) -> str:
     """Get compiled prompt using global manager."""
 
@@ -868,10 +872,10 @@ async def get_prompt(
 
 
 __all__ = [
-    "PromptManager",
+    "PromptCache",
     "PromptChangeEvent",
     "PromptFileWatcher",
-    "PromptCache",
-    "get_prompt_manager",
+    "PromptManager",
     "get_prompt",
+    "get_prompt_manager",
 ]

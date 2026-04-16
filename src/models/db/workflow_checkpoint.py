@@ -4,11 +4,12 @@ Workflow Checkpoint database model.
 Stores workflow checkpoints for recovery and analysis.
 """
 
+import uuid
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, String
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -24,15 +25,14 @@ class WorkflowCheckpoint(BaseModel):
     __tablename__ = "workflow_checkpoints"
 
     # Workflow identification
-    workflow_id = Column(
+    workflow_id: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
         index=True,
-        comment="Temporal or LangGraph workflow ID",
     )
 
     # Foreign key to research project
-    project_id = Column(
+    project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("research_projects.id"),
         nullable=False,
@@ -40,40 +40,38 @@ class WorkflowCheckpoint(BaseModel):
     )
 
     # Checkpoint data
-    checkpoint_data = Column(JSON, nullable=False, comment="Serialized workflow state")
+    checkpoint_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
     # Phase/stage information
-    phase = Column(
-        String(100), nullable=False, index=True, comment="Workflow phase at checkpoint"
+    phase: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True
     )
 
     # Checkpoint metadata
-    checkpoint_type = Column(
+    checkpoint_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
         default="automatic",
-        comment="Type of checkpoint (automatic, manual, error)",
     )
 
-    checkpoint_version = Column(
-        String(50), nullable=True, comment="Version of checkpoint format"
+    checkpoint_version: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
     )
 
     # Recovery information
-    is_recoverable = Column(
+    is_recoverable: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=True,
-        comment="Whether this checkpoint can be used for recovery",
     )
 
-    recovery_metadata = Column(
-        JSON, nullable=True, comment="Additional data needed for recovery"
+    recovery_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
     )
 
     # Performance metrics at checkpoint
-    execution_metrics = Column(
-        JSON, nullable=True, comment="Performance metrics at checkpoint time"
+    execution_metrics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
     )
 
     # Relationships
@@ -168,29 +166,31 @@ class WorkflowCheckpoint(BaseModel):
     @property
     def is_automatic(self) -> bool:
         """Check if checkpoint was created automatically."""
-        return self.checkpoint_type == "automatic"
+        return bool(self.checkpoint_type == "automatic")
 
     @property
     def is_manual(self) -> bool:
         """Check if checkpoint was created manually."""
-        return self.checkpoint_type == "manual"
+        return bool(self.checkpoint_type == "manual")
 
     @property
     def is_error_checkpoint(self) -> bool:
         """Check if checkpoint was created due to error."""
-        return self.checkpoint_type == "error"
+        return bool(self.checkpoint_type == "error")
 
     @property
     def agent_states(self) -> dict[str, Any]:
         """Get agent states from checkpoint data."""
-        return self.get_state("agent_states", {})
+        result = self.get_state("agent_states", {})
+        return result if isinstance(result, dict) else {}
 
     @property
     def workflow_context(self) -> dict[str, Any]:
         """Get workflow context from checkpoint data."""
-        return self.get_state("context", {})
+        result = self.get_state("context", {})
+        return result if isinstance(result, dict) else {}
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with additional properties."""
         data = super().to_dict()
         data["is_automatic"] = self.is_automatic

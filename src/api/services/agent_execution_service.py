@@ -14,31 +14,26 @@ Based on academic research:
 
 import asyncio
 import logging
-import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
 import statistics
+import uuid
+from datetime import datetime
+from typing import Any
 
-from tenacity import retry, stop_after_attempt, wait_exponential
-
-from ...agents.factory import AgentFactory
 from ...agents.base import BaseAgent
-from ...agents.models import AgentTask, AgentResult
+from ...agents.factory import AgentFactory
+from ...agents.models import AgentTask
 from ...models.agent_api_models import (
-    AgentType, 
-    AgentExecutionRequest, 
+    AgentCapability,
+    AgentExecutionRequest,
     AgentExecutionResponse,
+    AgentHealthStatus,
+    AgentInfo,
+    AgentMetricsResponse,
+    AgentType,
     ChainOfAgentsRequest,
     ChainOfAgentsResponse,
-    MixtureOfAgentsRequest, 
+    MixtureOfAgentsRequest,
     MixtureOfAgentsResponse,
-    ExecutionMode,
-    ChainStep,
-    AgentContribution,
-    AgentInfo,
-    AgentCapability,
-    AgentMetricsResponse,
-    AgentHealthStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,18 +47,18 @@ class AgentExecutionService:
     with built-in performance tracking and quality assurance.
     """
     
-    def __init__(self, agent_factory: Optional[AgentFactory] = None):
+    def __init__(self, agent_factory: AgentFactory | None = None):
         """Initialize agent execution service."""
         
         # Agent management
         self.agent_factory = agent_factory or AgentFactory()
         
         # Execution tracking
-        self.active_executions: Dict[str, Dict[str, Any]] = {}
-        self.execution_history: Dict[str, AgentExecutionResponse] = {}
+        self.active_executions: dict[str, dict[str, Any]] = {}
+        self.execution_history: dict[str, AgentExecutionResponse] = {}
         
         # Performance tracking per agent type
-        self.agent_metrics: Dict[AgentType, Dict[str, Any]] = {
+        self.agent_metrics: dict[AgentType, dict[str, Any]] = {
             agent_type: {
                 "total_executions": 0,
                 "successful_executions": 0, 
@@ -178,7 +173,7 @@ class AgentExecutionService:
             
             return response
             
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(f"Agent execution timed out: {agent_type.value} after {request.timeout_seconds}s")
             
             response = AgentExecutionResponse(
@@ -394,7 +389,7 @@ class AgentExecutionService:
             # Execute agents in parallel (with concurrency limit)
             semaphore = asyncio.Semaphore(request.max_parallel)
             
-            async def execute_with_limit(agent_type, task) -> AgentExecutionResponse:
+            async def execute_with_limit(agent_type: Any, task: Any) -> AgentExecutionResponse:
                 async with semaphore:
                     return await task
             
@@ -462,11 +457,11 @@ class AgentExecutionService:
     
     async def _aggregate_mixture_results(
         self,
-        agent_results: Dict[str, AgentExecutionResponse],
+        agent_results: dict[str, AgentExecutionResponse],
         strategy: str,
         weight_by_confidence: bool,
         consensus_threshold: float
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Aggregate results from mixture of agents."""
         
         if not agent_results:
@@ -485,12 +480,12 @@ class AgentExecutionService:
                 for agent_type, result in agent_results.items()
             } if total_confidence > 0 else {
                 agent_type: 1.0 / len(agent_results)
-                for agent_type in agent_results.keys()
+                for agent_type in agent_results
             }
         else:
             weights = {
                 agent_type: 1.0 / len(agent_results)
-                for agent_type in agent_results.keys()
+                for agent_type in agent_results
             }
         
         # Aggregate based on strategy
@@ -517,14 +512,14 @@ class AgentExecutionService:
         }
     
     async def _consensus_aggregation(
-        self, 
-        agent_results: Dict[str, AgentExecutionResponse],
-        weights: Dict[str, float]
-    ) -> Dict[str, Any]:
+        self,
+        agent_results: dict[str, AgentExecutionResponse],
+        weights: dict[str, float]
+    ) -> dict[str, Any]:
         """Aggregate results using consensus method."""
-        
+
         # Simplified consensus: combine all outputs weighted by confidence
-        aggregated = {
+        aggregated: dict[str, Any] = {
             "consensus_method": "weighted_combination",
             "agent_contributions": {},
             "synthesized_findings": [],
@@ -551,12 +546,12 @@ class AgentExecutionService:
     
     async def _weighted_average_aggregation(
         self,
-        agent_results: Dict[str, AgentExecutionResponse], 
-        weights: Dict[str, float]
-    ) -> Dict[str, Any]:
+        agent_results: dict[str, AgentExecutionResponse],
+        weights: dict[str, float]
+    ) -> dict[str, Any]:
         """Aggregate results using weighted average method."""
-        
-        aggregated = {
+
+        aggregated: dict[str, Any] = {
             "aggregation_method": "weighted_average",
             "weighted_results": {},
             "overall_confidence": 0.0,
@@ -581,8 +576,8 @@ class AgentExecutionService:
         return aggregated
     
     async def _best_quality_aggregation(
-        self, agent_results: Dict[str, AgentExecutionResponse]
-    ) -> Dict[str, Any]:
+        self, agent_results: dict[str, AgentExecutionResponse]
+    ) -> dict[str, Any]:
         """Aggregate by selecting best quality result."""
         
         # Find agent with highest quality score
@@ -607,13 +602,13 @@ class AgentExecutionService:
         
         return aggregated
     
-    async def get_agent_list(self) -> List[AgentInfo]:
+    async def get_agent_list(self) -> list[AgentInfo]:
         """Get list of available agents with capabilities."""
         
         agents = []
         
         # Define agent information (would be populated from agent registry)
-        agent_info_map = {
+        agent_info_map: dict[AgentType, dict[str, Any]] = {
             AgentType.LITERATURE_REVIEW: {
                 "name": "Literature Review Agent",
                 "description": "Searches and analyzes academic literature from multiple databases",
@@ -681,17 +676,18 @@ class AgentExecutionService:
             },
         }
         
+        from typing import cast
         for agent_type, info in agent_info_map.items():
             agents.append(AgentInfo(
                 agent_type=agent_type,
-                name=info["name"],
-                description=info["description"],
-                capabilities=info["capabilities"],
-                average_execution_time_ms=info["average_execution_time_ms"],
-                reliability_score=info["reliability_score"],
-                quality_score=info["quality_score"],
-                complexity_handling=info["complexity_handling"],
-                optimal_domains=info["optimal_domains"],
+                name=cast(str, info["name"]),
+                description=cast(str, info["description"]),
+                capabilities=cast(list[AgentCapability], info["capabilities"]),
+                average_execution_time_ms=cast(int, info["average_execution_time_ms"]),
+                reliability_score=cast(float, info["reliability_score"]),
+                quality_score=cast(float, info["quality_score"]),
+                complexity_handling=cast(list[str], info["complexity_handling"]),
+                optimal_domains=cast(list[str], info["optimal_domains"]),
                 endpoints=[
                     f"/api/v1/agents/{agent_type.value}/execute",
                     f"/api/v1/agents/{agent_type.value}",
@@ -825,7 +821,7 @@ class AgentExecutionService:
         
         return agent
     
-    async def get_service_stats(self) -> Dict[str, Any]:
+    async def get_service_stats(self) -> dict[str, Any]:
         """Get comprehensive service statistics."""
         
         return {
@@ -863,7 +859,7 @@ class AgentExecutionService:
 
 
 # Global service instance
-_agent_execution_service: Optional[AgentExecutionService] = None
+_agent_execution_service: AgentExecutionService | None = None
 
 
 def get_agent_execution_service() -> AgentExecutionService:

@@ -1,7 +1,8 @@
 """API routes for cost management."""
 
+from typing import Any
+
 from fastapi import APIRouter
-from typing import List
 
 router = APIRouter(prefix="/api/v1/costs")
 
@@ -13,7 +14,7 @@ async def get_spend(scope_type: str, scope_id: str) -> dict[str, float | str]:
 
 
 @router.post("/budgets")
-async def create_budget(budget: dict) -> dict[str, str]:
+async def create_budget(budget: dict[str, Any]) -> dict[str, str]:
     """Create budget."""
     return {"budget_id": "uuid", "status": "created"}
 
@@ -31,7 +32,7 @@ async def get_forecast(scope_type: str, scope_id: str) -> dict[str, float | str]
 
 
 @router.get("/optimize")
-async def get_optimization_suggestions(organization_id: str) -> dict[str, list]:
+async def get_optimization_suggestions(organization_id: str) -> dict[str, list[Any]]:
     """Get optimization suggestions."""
     return {"suggestions": []}
 

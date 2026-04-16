@@ -48,12 +48,12 @@ class MCPServer:
         self.registry = ToolRegistry()
         self._setup_server()
 
-    def _setup_server(self):
+    def _setup_server(self) -> None:
         """Set up server metadata and configuration."""
         # FastMCP name is set during initialization, no need to modify it
         logger.info(f"MCP Server initialized: {self.config.name}")
 
-    def register_tool(self, tool: BaseMCPTool):
+    def register_tool(self, tool: BaseMCPTool) -> None:
         """
         Register a tool with the server.
 
@@ -76,13 +76,13 @@ class MCPServer:
 
         # Register tool with FastMCP
         @self.mcp.tool(name=metadata.name, description=metadata.description)
-        async def tool_wrapper(**kwargs) -> dict[str, Any]:
+        async def tool_wrapper(**kwargs: Any) -> dict[str, Any]:
             """Wrapper function for MCP tool execution."""
             return await tool.execute(**kwargs)
 
         logger.info(f"Registered tool: {metadata.name}")
 
-    def register_tools(self, tools: list[BaseMCPTool]):
+    def register_tools(self, tools: list[BaseMCPTool]) -> None:
         """
         Register multiple tools.
 
@@ -113,7 +113,7 @@ class MCPServer:
         """
         return self.registry.get_tool(name)
 
-    async def execute_tool(self, name: str, **kwargs) -> dict[str, Any]:
+    async def execute_tool(self, name: str, **kwargs: Any) -> dict[str, Any]:
         """
         Execute a tool by name.
 
@@ -167,7 +167,7 @@ class MCPServer:
             logger.error(f"Health check failed: {e!s}")
             return {"status": "unhealthy", "error": str(e)}
 
-    def run(self):
+    def run(self) -> None:
         """Run the MCP server."""
         logger.info(f"Starting MCP server on {self.config.host}:{self.config.port}")
 
@@ -175,7 +175,7 @@ class MCPServer:
         # In production, this would start the actual server
         logger.info("MCP server is ready to accept connections")
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         """Shutdown the server gracefully."""
         logger.info("Shutting down MCP server")
         # Cleanup resources if needed

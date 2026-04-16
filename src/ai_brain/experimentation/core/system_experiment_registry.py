@@ -5,19 +5,19 @@ Central registry for all active experiments across system components.
 Manages experiment lifecycle, coordination, and integration with existing systems.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Any, Callable
-from datetime import datetime, timedelta
 import asyncio
 import logging
-from enum import Enum
 from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 from .unified_experiment_manager import (
-    SystemExperiment,
-    ExperimentStatus,
+    ExperimentVariant,
     SystemComponent,
-    ExperimentVariant
+    SystemExperiment,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,10 +27,10 @@ logger = logging.getLogger(__name__)
 class ComponentRegistration:
     """Registration of a system component for experimentation."""
     component: SystemComponent
-    handler: Callable  # Async function to handle experiment updates
-    active_experiments: Set[str] = field(default_factory=set)
-    capabilities: Dict[str, Any] = field(default_factory=dict)
-    health_check: Optional[Callable] = None
+    handler: Callable[..., Any]  # Async function to handle experiment updates
+    active_experiments: set[str] = field(default_factory=set)
+    capabilities: dict[str, Any] = field(default_factory=dict)
+    health_check: Callable[..., Any] | None = None
 
 
 @dataclass
@@ -39,8 +39,8 @@ class ExperimentEvent:
     experiment_id: str
     event_type: str
     timestamp: datetime
-    data: Dict[str, Any]
-    component: Optional[SystemComponent] = None
+    data: dict[str, Any]
+    component: SystemComponent | None = None
 
 
 class ExperimentEventType(Enum):
@@ -62,19 +62,19 @@ class SystemExperimentRegistry:
     Coordinates between experiment manager and system components.
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the experiment registry."""
-        self.component_registrations: Dict[SystemComponent, ComponentRegistration] = {}
-        self.experiment_components: Dict[str, Set[SystemComponent]] = defaultdict(set)
-        self.event_history: List[ExperimentEvent] = []
-        self.event_handlers: Dict[ExperimentEventType, List[Callable]] = defaultdict(list)
-        self.experiment_locks: Dict[str, asyncio.Lock] = {}
+        self.component_registrations: dict[SystemComponent, ComponentRegistration] = {}
+        self.experiment_components: dict[str, set[SystemComponent]] = defaultdict(set)
+        self.event_history: list[ExperimentEvent] = []
+        self.event_handlers: dict[ExperimentEventType, list[Callable[..., Any]]] = defaultdict(list)
+        self.experiment_locks: dict[str, asyncio.Lock] = {}
         
     async def register_component(self,
                                 component: SystemComponent,
-                                handler: Callable,
-                                capabilities: Optional[Dict[str, Any]] = None,
-                                health_check: Optional[Callable] = None) -> None:
+                                handler: Callable[..., Any],
+                                capabilities: dict[str, Any] | None = None,
+                                health_check: Callable[..., Any] | None = None) -> None:
         """
         Register a system component for experimentation.
         
@@ -175,7 +175,7 @@ class SystemExperimentRegistry:
     
     async def update_experiment_allocation(self,
                                          experiment_id: str,
-                                         new_allocations: Dict[str, float]) -> None:
+                                         new_allocations: dict[str, float]) -> None:
         """
         Update variant allocations (for adaptive experiments).
         
@@ -275,7 +275,7 @@ class SystemExperimentRegistry:
             )
         )
     
-    async def check_component_health(self) -> Dict[SystemComponent, bool]:
+    async def check_component_health(self) -> dict[SystemComponent, bool]:
         """
         Check health of all registered components.
         
@@ -289,7 +289,7 @@ class SystemExperimentRegistry:
                 try:
                     is_healthy = await registration.health_check()
                     health_status[component] = is_healthy
-                except Exception as e:
+                except Exception:
                     health_status[component] = False
             else:
                 # Assume healthy if no health check provided
@@ -298,7 +298,7 @@ class SystemExperimentRegistry:
         return health_status
     
     async def get_active_experiments_for_component(self,
-                                                  component: SystemComponent) -> Set[str]:
+                                                  component: SystemComponent) -> set[str]:
         """
         Get all active experiments for a specific component.
         
@@ -315,7 +315,7 @@ class SystemExperimentRegistry:
     async def record_variant_assignment(self,
                                       experiment_id: str,
                                       variant_id: str,
-                                      context: Dict[str, Any]) -> None:
+                                      context: dict[str, Any]) -> None:
         """
         Record a variant assignment event.
         
@@ -340,8 +340,8 @@ class SystemExperimentRegistry:
                           experiment_id: str,
                           metric_name: str,
                           value: float,
-                          variant_id: Optional[str] = None,
-                          component: Optional[SystemComponent] = None) -> None:
+                          variant_id: str | None = None,
+                          component: SystemComponent | None = None) -> None:
         """
         Record a metric value for an experiment.
         
@@ -368,7 +368,7 @@ class SystemExperimentRegistry:
     
     def register_event_handler(self,
                               event_type: ExperimentEventType,
-                              handler: Callable):
+                              handler: Callable[..., Any]) -> None:
         """
         Register a handler for experiment events.
         
@@ -380,9 +380,9 @@ class SystemExperimentRegistry:
     
     async def get_experiment_events(self,
                                    experiment_id: str,
-                                   event_type: Optional[ExperimentEventType] = None,
-                                   start_time: Optional[datetime] = None,
-                                   end_time: Optional[datetime] = None) -> List[ExperimentEvent]:
+                                   event_type: ExperimentEventType | None = None,
+                                   start_time: datetime | None = None,
+                                   end_time: datetime | None = None) -> list[ExperimentEvent]:
         """
         Get events for an experiment.
         
@@ -429,15 +429,13 @@ class SystemExperimentRegistry:
                 except Exception as e:
                     # Log but don't fail on handler errors
                     logger.error(
-                        "event_handler_error",
-                        error=str(e),
-                        event_type=event.event_type if hasattr(event, 'event_type') else 'unknown',
+                        f"Event handler error: {e}, event_type={event.event_type if hasattr(event, 'event_type') else 'unknown'}",
                         exc_info=True
                     )
     
     async def _rollback_experiment_start(self,
                                        experiment_id: str,
-                                       errors: List[Exception]) -> None:
+                                       errors: list[Exception]) -> None:
         """Rollback a failed experiment start."""
         affected_components = self.experiment_components[experiment_id]
         
@@ -463,7 +461,7 @@ class SystemExperimentRegistry:
             )
         )
     
-    def _get_experiment_components(self, experiment_id: str) -> Set[SystemComponent]:
+    def _get_experiment_components(self, experiment_id: str) -> set[SystemComponent]:
         """Get components for an experiment (including stopped ones)."""
         # Check active experiments first
         if experiment_id in self.experiment_components:

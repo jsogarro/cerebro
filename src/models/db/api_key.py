@@ -7,11 +7,11 @@ Manages API keys for service accounts and programmatic access.
 import hashlib
 import secrets
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
-    Column,
     DateTime,
     ForeignKey,
     Index,
@@ -19,7 +19,7 @@ from sqlalchemy import (
     String,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -50,8 +50,7 @@ class APIKey(BaseModel):
 
     __tablename__ = "api_keys"
 
-    # Key identification
-    key_hash = Column(
+    key_hash: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
         unique=True,
@@ -59,58 +58,58 @@ class APIKey(BaseModel):
         comment="SHA256 hash of the API key",
     )
 
-    # Foreign key to user
-    user_id = Column(
+    user_id: Mapped[Any] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
 
-    # Key metadata
-    name = Column(String(255), nullable=False, comment="Descriptive name for the key")
+    name: Mapped[str] = mapped_column(
+        String(255), nullable=False, comment="Descriptive name for the key"
+    )
 
-    description = Column(
+    description: Mapped[str | None] = mapped_column(
         String(1000), nullable=True, comment="Detailed description of key purpose"
     )
 
-    # Permissions (list of allowed operations)
-    permissions = Column(
+    permissions: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list, comment="List of permission strings"
     )
 
-    # Rate limiting
-    rate_limit = Column(
+    rate_limit: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
         comment="Requests per hour limit (null = use user default)",
     )
 
-    # IP restrictions
-    allowed_ips = Column(
+    allowed_ips: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, nullable=True, comment="List of allowed IP addresses/ranges"
     )
 
-    # Usage tracking
-    last_used_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
-    last_used_ip = Column(String(45), nullable=True)  # Support IPv6
+    last_used_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
 
-    use_count = Column(Integer, nullable=False, default=0)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    # Expiration
-    expires_at = Column(
+    expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         index=True,
         comment="Key expiration time (null = never expires)",
     )
 
-    # Status
-    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, index=True
+    )
 
-    revoked_at = Column(
+    revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="When the key was revoked"
     )
 
-    revoked_reason = Column(String(500), nullable=True, comment="Reason for revocation")
+    revoked_reason: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="Reason for revocation"
+    )
 
     # Relationships
     user = relationship("User", back_populates="api_keys")

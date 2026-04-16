@@ -15,12 +15,11 @@ Features:
 import logging
 import statistics
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from datetime import datetime
 from enum import Enum
-import uuid
+from typing import Any
 
-from .schemas import PromptTemplate, PromptMetadata
+from .schemas import PromptTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +66,8 @@ class VersionPerformance:
     avg_cost_per_use: float = 0.0
 
     # Temporal data
-    first_used: Optional[datetime] = None
-    last_used: Optional[datetime] = None
+    first_used: datetime | None = None
+    last_used: datetime | None = None
 
     def update(
         self,
@@ -77,7 +76,7 @@ class VersionPerformance:
         response_time_ms: int,
         token_usage: int,
         cost: float,
-    ):
+    ) -> None:
         """Update performance metrics with new data point."""
 
         # Update usage counts
@@ -102,12 +101,14 @@ class VersionPerformance:
             self.max_quality = max(self.max_quality, quality_score)
 
         # Update performance metrics
-        self.avg_response_time_ms = (
-            self.avg_response_time_ms * (self.total_uses - 1) + response_time_ms
-        ) / self.total_uses
-        self.avg_token_usage = (
-            self.avg_token_usage * (self.total_uses - 1) + token_usage
-        ) / self.total_uses
+        self.avg_response_time_ms = int(
+            (self.avg_response_time_ms * (self.total_uses - 1) + response_time_ms)
+            / self.total_uses
+        )
+        self.avg_token_usage = int(
+            (self.avg_token_usage * (self.total_uses - 1) + token_usage)
+            / self.total_uses
+        )
         self.avg_cost_per_use = (
             self.avg_cost_per_use * (self.total_uses - 1) + cost
         ) / self.total_uses
@@ -139,7 +140,7 @@ class ABTestConfig:
 
     # Success metrics
     primary_metric: str = "success_rate"
-    secondary_metrics: List[str] = field(
+    secondary_metrics: list[str] = field(
         default_factory=lambda: ["quality_score", "response_time"]
     )
 
@@ -148,26 +149,26 @@ class ABTestConfig:
 class ABTestResult:
     """Result of A/B testing."""
 
-    test_config: ABTestConfig = None
+    test_config: ABTestConfig | None = None
     status: ABTestStatus = ABTestStatus.COMPLETED
 
     # Test results
-    champion_performance: VersionPerformance = None
-    challenger_performance: VersionPerformance = None
+    champion_performance: VersionPerformance | None = None
+    challenger_performance: VersionPerformance | None = None
 
     # Statistical analysis
     statistical_significance: bool = False
     p_value: float = 1.0
     effect_size: float = 0.0
-    confidence_interval: Tuple[float, float] = (0.0, 0.0)
+    confidence_interval: tuple[float, float] = (0.0, 0.0)
 
     # Decision
-    winner: Optional[str] = None  # champion, challenger, or None
+    winner: str | None = None  # champion, challenger, or None
     recommendation: str = ""
 
     # Test metadata
     started_at: datetime = field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     total_samples: int = 0
 
 
@@ -179,24 +180,24 @@ class PromptVersionManager:
     performance tracking, A/B testing, and automated champion selection.
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize version manager."""
         self.config = config or {}
 
         # Version storage
-        self.versions: Dict[str, Dict[str, PromptTemplate]] = (
+        self.versions: dict[str, dict[str, PromptTemplate]] = (
             {}
         )  # template_name -> {version -> template}
-        self.version_performance: Dict[str, VersionPerformance] = (
+        self.version_performance: dict[str, VersionPerformance] = (
             {}
         )  # template_name:version -> performance
-        self.version_status: Dict[str, VersionStatus] = (
+        self.version_status: dict[str, VersionStatus] = (
             {}
         )  # template_name:version -> status
 
         # A/B testing
-        self.active_ab_tests: Dict[str, ABTestConfig] = {}  # test_name -> config
-        self.ab_test_results: Dict[str, ABTestResult] = {}  # test_name -> result
+        self.active_ab_tests: dict[str, ABTestConfig] = {}  # test_name -> config
+        self.ab_test_results: dict[str, ABTestResult] = {}  # test_name -> result
 
         # Configuration
         self.default_ab_config = ABTestConfig(
@@ -240,7 +241,7 @@ class PromptVersionManager:
         template_name: str,
         champion_version: str,
         challenger_version: str,
-        test_config: Optional[ABTestConfig] = None,
+        test_config: ABTestConfig | None = None,
     ) -> str:
         """Start A/B test between two prompt versions."""
 
@@ -294,7 +295,7 @@ class PromptVersionManager:
 
         return True
 
-    async def get_champion_version(self, template_name: str) -> Optional[str]:
+    async def get_champion_version(self, template_name: str) -> str | None:
         """Get current champion version for template."""
 
         if template_name not in self.versions:
@@ -312,7 +313,7 @@ class PromptVersionManager:
 
     async def get_version_for_ab_test(
         self, template_name: str
-    ) -> Tuple[Optional[str], float]:
+    ) -> tuple[str | None, float]:
         """Get version to use based on A/B test configuration."""
 
         # Check if template is in active A/B test
@@ -468,7 +469,7 @@ class PromptVersionManager:
             f"Promoted {test_config.challenger_version} to champion for {template_name}"
         )
 
-    async def get_version_stats(self) -> Dict[str, Any]:
+    async def get_version_stats(self) -> dict[str, Any]:
         """Get version management statistics."""
 
         stats = {
@@ -506,10 +507,10 @@ class PromptVersionManager:
 
 
 __all__ = [
-    "PromptVersionManager",
-    "VersionPerformance",
     "ABTestConfig",
     "ABTestResult",
-    "VersionStatus",
     "ABTestStatus",
+    "PromptVersionManager",
+    "VersionPerformance",
+    "VersionStatus",
 ]

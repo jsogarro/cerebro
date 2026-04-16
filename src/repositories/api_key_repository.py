@@ -5,13 +5,17 @@ Manages API keys for service accounts and programmatic access.
 """
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db.api_key import APIKey, generate_api_key
 from src.repositories.base import BaseRepository
+
+if TYPE_CHECKING:
+    pass
 
 
 class APIKeyRepository(BaseRepository[APIKey]):
@@ -21,7 +25,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
     Manages API key creation, validation, and usage tracking.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """Initialize API key repository."""
         super().__init__(APIKey, session)
 
@@ -223,7 +227,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
         result = await self.session.execute(stmt)
         await self.session.flush()
 
-        return result.rowcount
+        return cast(int, result.rowcount)
 
     async def get_usage_statistics(
         self, key_id: UUID, days: int = 30
@@ -246,10 +250,10 @@ class APIKeyRepository(BaseRepository[APIKey]):
         since = datetime.utcnow() - timedelta(days=days)
 
         # Calculate usage rate
-        usage_rate = 0
+        usage_rate: float = 0.0
         if api_key.last_used_at and api_key.last_used_at >= since:
             days_active = (datetime.utcnow() - since).days or 1
-            usage_rate = api_key.use_count / days_active
+            usage_rate = float(api_key.use_count) / float(days_active)
 
         return {
             "key_id": str(key_id),
@@ -307,9 +311,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
         api_key = await self.get(key_id)
 
         if api_key:
-            api_key.permissions = permissions
-            api_key.updated_at = datetime.utcnow()
-            await self.session.flush()
+            await self.update(key_id, {"permissions": permissions})
             await self.session.refresh(api_key)
 
         return api_key
@@ -364,9 +366,9 @@ class APIKeyRepository(BaseRepository[APIKey]):
         )
 
         result = await self.session.execute(user_query)
-        keys_per_user = [row.count for row in result]
-        avg_keys_per_user = (
-            sum(keys_per_user) / len(keys_per_user) if keys_per_user else 0
+        keys_per_user = [int(row.count) for row in result]
+        avg_keys_per_user: float = (
+            float(sum(keys_per_user)) / float(len(keys_per_user)) if keys_per_user else 0.0
         )
 
         return {

@@ -16,11 +16,10 @@ Key Features:
 import logging
 import statistics
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
+from typing import Any
 
-from .talkhier_message import TalkHierMessage, TalkHierContent, MessageType
+from .talkhier_message import TalkHierContent, TalkHierMessage
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +42,7 @@ class ConflictType(Enum):
     INTERPRETIVE = "interpretive"  # Different interpretations
     CONFIDENCE = "confidence"  # Differing confidence levels
     SCOPE = "scope"  # Different scope of analysis
+    EVIDENCE = "evidence"  # Inconsistent evidence support
 
 
 @dataclass
@@ -51,8 +51,8 @@ class ConsensusScore:
 
     overall_score: float = 0.0  # Overall consensus (0-1)
     confidence_variance: float = 0.0  # Variance in confidence scores
-    agreement_areas: List[str] = field(default_factory=list)
-    disagreement_areas: List[str] = field(default_factory=list)
+    agreement_areas: list[str] = field(default_factory=list)
+    disagreement_areas: list[str] = field(default_factory=list)
 
     # Detailed scoring
     content_consensus: float = 0.0  # Agreement on main content
@@ -60,8 +60,8 @@ class ConsensusScore:
     evidence_consensus: float = 0.0  # Agreement on evidence
 
     # Conflict analysis
-    conflicts_detected: List[Dict[str, Any]] = field(default_factory=list)
-    resolution_suggestions: List[str] = field(default_factory=list)
+    conflicts_detected: list[dict[str, Any]] = field(default_factory=list)
+    resolution_suggestions: list[str] = field(default_factory=list)
 
     # Quality metrics
     evidence_quality: float = 0.0  # Overall evidence quality
@@ -75,8 +75,8 @@ class ValidationResult:
 
     is_valid: bool = True
     quality_score: float = 0.0
-    validation_errors: List[str] = field(default_factory=list)
-    improvement_suggestions: List[str] = field(default_factory=list)
+    validation_errors: list[str] = field(default_factory=list)
+    improvement_suggestions: list[str] = field(default_factory=list)
 
     # Specific validation checks
     factual_accuracy: float = 0.0
@@ -93,7 +93,7 @@ class ConsensusBuilder:
     conflict resolution, and multi-round refinement coordination.
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize consensus builder."""
         self.config = config or {}
 
@@ -119,7 +119,7 @@ class ConsensusBuilder:
         self.average_rounds_needed = 0.0
 
     async def evaluate_consensus(
-        self, messages: List[TalkHierMessage], threshold: Optional[float] = None
+        self, messages: list[TalkHierMessage], threshold: float | None = None
     ) -> ConsensusScore:
         """
         Evaluate consensus across multiple agent messages.
@@ -210,7 +210,7 @@ class ConsensusBuilder:
             return ConsensusScore()
 
     async def validate_response(
-        self, message: TalkHierMessage, validation_criteria: Optional[List[str]] = None
+        self, message: TalkHierMessage, validation_criteria: list[str] | None = None
     ) -> ValidationResult:
         """
         Validate individual agent response quality.
@@ -290,11 +290,11 @@ class ConsensusBuilder:
             return ValidationResult(
                 is_valid=False,
                 quality_score=0.0,
-                validation_errors=[f"Validation error: {str(e)}"],
+                validation_errors=[f"Validation error: {e!s}"],
             )
 
     async def _calculate_overall_consensus(
-        self, responses: List[TalkHierContent]
+        self, responses: list[TalkHierContent]
     ) -> float:
         """Calculate overall consensus score."""
 
@@ -338,8 +338,8 @@ class ConsensusBuilder:
             return high_confidence_count / len(responses)
 
     async def _identify_agreement_areas(
-        self, responses: List[TalkHierContent]
-    ) -> Tuple[List[str], List[str]]:
+        self, responses: list[TalkHierContent]
+    ) -> tuple[list[str], list[str]]:
         """Identify areas of agreement and disagreement."""
 
         if len(responses) < 2:
@@ -386,7 +386,7 @@ class ConsensusBuilder:
         return agreement_areas, disagreement_areas
 
     async def _calculate_content_consensus(
-        self, responses: List[TalkHierContent]
+        self, responses: list[TalkHierContent]
     ) -> float:
         """Calculate consensus on main content."""
         # Simplified content similarity calculation
@@ -410,7 +410,7 @@ class ConsensusBuilder:
         return statistics.mean(similarities) if similarities else 0.0
 
     async def _calculate_methodology_consensus(
-        self, responses: List[TalkHierContent]
+        self, responses: list[TalkHierContent]
     ) -> float:
         """Calculate consensus on methodology and approach."""
         # Look for methodological agreement in background/intermediate outputs
@@ -442,7 +442,7 @@ class ConsensusBuilder:
         return statistics.mean(method_scores) if method_scores else 0.5
 
     async def _calculate_evidence_consensus(
-        self, responses: List[TalkHierContent]
+        self, responses: list[TalkHierContent]
     ) -> float:
         """Calculate consensus on evidence and citations."""
         evidence_scores = []
@@ -470,11 +470,11 @@ class ConsensusBuilder:
         return consensus
 
     async def _detect_conflicts(
-        self, responses: List[TalkHierContent]
-    ) -> List[Dict[str, Any]]:
+        self, responses: list[TalkHierContent]
+    ) -> list[dict[str, Any]]:
         """Detect conflicts between agent responses."""
 
-        conflicts = []
+        conflicts: list[dict[str, Any]] = []
 
         if len(responses) < 2:
             return conflicts
@@ -518,8 +518,8 @@ class ConsensusBuilder:
         return conflicts
 
     async def _generate_resolution_suggestions(
-        self, conflicts: List[Dict[str, Any]]
-    ) -> List[str]:
+        self, conflicts: list[dict[str, Any]]
+    ) -> list[str]:
         """Generate suggestions for resolving identified conflicts."""
 
         suggestions = []
@@ -548,7 +548,7 @@ class ConsensusBuilder:
 
         return list(set(suggestions))  # Remove duplicates
 
-    async def _assess_evidence_quality(self, responses: List[TalkHierContent]) -> float:
+    async def _assess_evidence_quality(self, responses: list[TalkHierContent]) -> float:
         """Assess overall evidence quality."""
 
         if not responses:
@@ -575,7 +575,7 @@ class ConsensusBuilder:
         return statistics.mean(evidence_scores)
 
     async def _assess_response_completeness(
-        self, responses: List[TalkHierContent]
+        self, responses: list[TalkHierContent]
     ) -> float:
         """Assess response completeness."""
 
@@ -599,7 +599,7 @@ class ConsensusBuilder:
         return statistics.mean(completeness_scores) if completeness_scores else 0.0
 
     async def _assess_reasoning_soundness(
-        self, responses: List[TalkHierContent]
+        self, responses: list[TalkHierContent]
     ) -> float:
         """Assess logical reasoning quality."""
 
@@ -700,7 +700,7 @@ class ConsensusBuilder:
 
         return min(score, 1.0)
 
-    async def get_consensus_stats(self) -> Dict[str, Any]:
+    async def get_consensus_stats(self) -> dict[str, Any]:
         """Get consensus builder performance statistics."""
 
         success_rate = self.successful_consensus / max(self.consensus_attempts, 1)
@@ -716,9 +716,9 @@ class ConsensusBuilder:
 
 
 __all__ = [
+    "ConflictType",
     "ConsensusBuilder",
+    "ConsensusMethod",
     "ConsensusScore",
     "ValidationResult",
-    "ConsensusMethod",
-    "ConflictType",
 ]

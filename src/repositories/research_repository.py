@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.models.db.research_project import ProjectStatus, ResearchProject
@@ -22,7 +23,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
     Provides specialized queries for research projects.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """Initialize research repository."""
         super().__init__(ResearchProject, session)
 
@@ -45,7 +46,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         Returns:
             List of projects
         """
-        filters = {"user_id": user_id}
+        filters: dict[str, Any] = {"user_id": user_id}
         if status:
             filters["status"] = status
 
@@ -297,16 +298,12 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         )
 
         result = await self.session.execute(query)
-        stale_projects = result.scalars().all()
+        stale_projects = list(result.scalars().all())
 
         count = 0
         for project in stale_projects:
-            project.status = ProjectStatus.FAILED
-            project.updated_at = datetime.utcnow()
+            await self.update(project.id, {"status": ProjectStatus.FAILED})
             count += 1
-
-        if count > 0:
-            await self.session.flush()
 
         return count
 

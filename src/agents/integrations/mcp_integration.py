@@ -7,8 +7,9 @@ enabling agents to use real external services in production.
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
 
 from src.mcp.client import MCPClient
 from src.mcp.server import MCPServerConfig
@@ -42,13 +43,13 @@ class MCPIntegration:
         self.enable_fallback = enable_fallback
         self._client = mcp_client
         self._initialized = False
-        self._tool_cache = {}
+        self._tool_cache: dict[str, Any] = {}
 
         # Circuit breaker settings
         self._failure_count = 0
         self._max_failures = self.config.get("max_failures", 5)
         self._circuit_breaker_timeout = self.config.get("circuit_breaker_timeout", 60)
-        self._last_failure_time = 0
+        self._last_failure_time: float = 0
 
         logger.info("MCP Integration initialized")
 
@@ -98,7 +99,7 @@ class MCPIntegration:
             self._failure_count = 0
         except Exception as e:
             self._failure_count += 1
-            self._last_failure_time = current_time
+            self._last_failure_time = float(current_time)
             logger.warning(
                 f"Tool execution failed ({self._failure_count} failures): {e}"
             )
@@ -130,6 +131,8 @@ class MCPIntegration:
 
         try:
             async with self._circuit_breaker():
+                if self._client is None:
+                    raise Exception("MCP client not initialized")
                 result = await self._client.search_academic(
                     query=query, databases=databases, max_results=max_results
                 )
@@ -173,6 +176,8 @@ class MCPIntegration:
 
         try:
             async with self._circuit_breaker():
+                if self._client is None:
+                    raise Exception("MCP client not initialized")
                 result = await self._client.format_citations(
                     sources=sources, style=style
                 )
@@ -199,7 +204,7 @@ class MCPIntegration:
             raise
 
     async def analyze_statistics(
-        self, operation: str, data: list | None = None, **kwargs
+        self, operation: str, data: list[Any] | None = None, **kwargs: Any
     ) -> dict[str, Any]:
         """
         Perform statistical analysis using MCP statistics tool.
@@ -216,6 +221,8 @@ class MCPIntegration:
 
         try:
             async with self._circuit_breaker():
+                if self._client is None:
+                    raise Exception("MCP client not initialized")
                 result = await self._client.analyze_statistics(
                     operation=operation, data=data, **kwargs
                 )
@@ -242,8 +249,8 @@ class MCPIntegration:
     async def build_knowledge_graph(
         self,
         text: str | None = None,
-        entities: list | None = None,
-        relationships: list | None = None,
+        entities: list[Any] | None = None,
+        relationships: list[Any] | None = None,
     ) -> dict[str, Any]:
         """
         Build knowledge graph using MCP knowledge graph tool.
@@ -260,6 +267,8 @@ class MCPIntegration:
 
         try:
             async with self._circuit_breaker():
+                if self._client is None:
+                    raise Exception("MCP client not initialized")
                 result = await self._client.build_knowledge_graph(
                     text=text, entities=entities, relationships=relationships
                 )
@@ -293,6 +302,8 @@ class MCPIntegration:
         await self.initialize()
 
         try:
+            if self._client is None:
+                raise Exception("MCP client not initialized")
             health = await self._client.health_check()
             available_tools = self._client.get_available_tools()
 
@@ -373,7 +384,7 @@ class MCPIntegration:
         }
 
     def _fallback_statistical_analysis(
-        self, operation: str, data: list | None, **kwargs
+        self, operation: str, data: list[Any] | None, **kwargs: Any
     ) -> dict[str, Any]:
         """Fallback implementation for statistical analysis."""
         logger.info("Using fallback statistical analysis")
@@ -404,8 +415,8 @@ class MCPIntegration:
     def _fallback_knowledge_graph(
         self,
         text: str | None,
-        entities: list | None,
-        relationships: list | None,
+        entities: list[Any] | None,
+        relationships: list[Any] | None,
     ) -> dict[str, Any]:
         """Fallback implementation for knowledge graph building."""
         logger.info("Using fallback knowledge graph building")
@@ -429,7 +440,7 @@ class MCPIntegration:
         }
 
 
-def create_mcp_integrated_agent(agent_class, config: dict[str, Any] | None = None):
+def create_mcp_integrated_agent(agent_class: type, config: dict[str, Any] | None = None) -> Any:
     """
     Factory function to create an agent with MCP integration.
 

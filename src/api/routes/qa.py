@@ -1,25 +1,26 @@
 """API routes for QA system."""
 
+from typing import Any
+
 from fastapi import APIRouter
-from typing import List
 
 router = APIRouter(prefix="/api/v1/qa")
 
 
 @router.post("/fact-check")
-async def fact_check(text: str) -> dict[str, list | int]:
+async def fact_check(text: str) -> dict[str, list[Any] | int]:
     """Check facts in text."""
     return {"facts": [], "verified": 0, "failed": 0}
 
 
 @router.post("/citations/verify")
-async def verify_citations(citations: List[str]) -> dict[str, list]:
+async def verify_citations(citations: list[str]) -> dict[str, list[Any]]:
     """Verify citations."""
     return {"verified": [], "failed": []}
 
 
 @router.post("/plagiarism-check")
-async def check_plagiarism(text: str) -> dict[str, float | list]:
+async def check_plagiarism(text: str) -> dict[str, float | list[Any]]:
     """Check for plagiarism."""
     return {"originality_score": 1.0, "matches": []}
 

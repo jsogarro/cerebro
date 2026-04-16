@@ -6,19 +6,24 @@ general-purpose language generation. Optimized for high-volume workloads
 where cost efficiency is important.
 """
 
-import asyncio
+import json
 import logging
-from typing import Dict, List, Optional, Any, AsyncGenerator
-import httpx
+from collections.abc import AsyncGenerator
 from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+import httpx
 
 from .base_provider import (
     BaseProvider,
+    ModelCapability,
     ModelRequest,
     ModelResponse,
-    ModelCapability,
-    ResponseFormat,
+    ProviderHealthStatus,
 )
+
+if TYPE_CHECKING:
+    from ..config.model_config_manager import ModelConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +42,9 @@ class LlamaProvider(BaseProvider):
 
     def __init__(
         self,
-        config: Dict[str, Any],
-        model_config_manager: Optional["ModelConfigManager"] = None,
-    ):
+        config: dict[str, Any],
+        model_config_manager: "ModelConfigManager | None" = None,
+    ) -> None:
         """Initialize Llama provider."""
         super().__init__(config, model_config_manager)
 
@@ -48,7 +53,7 @@ class LlamaProvider(BaseProvider):
         self.default_model = config.get("default_model", "llama3.3:70b")
 
         # HTTP client will be configured after loading provider config
-        self.client = None
+        self.client: httpx.AsyncClient | None = None
 
         # Legacy model specifications (for backward compatibility)
         self._legacy_model_specs = {
@@ -79,7 +84,7 @@ class LlamaProvider(BaseProvider):
     def _get_provider_name(self) -> str:
         return "llama"
 
-    def _get_supported_capabilities_legacy(self) -> List[ModelCapability]:
+    def _get_supported_capabilities_legacy(self) -> list[ModelCapability]:
         """Legacy hard-coded capabilities for backward compatibility."""
         return [
             ModelCapability.TEXT_GENERATION,
@@ -88,7 +93,7 @@ class LlamaProvider(BaseProvider):
             ModelCapability.STREAMING,
         ]
 
-    def _get_supported_models_legacy(self) -> List[str]:
+    def _get_supported_models_legacy(self) -> list[str]:
         """Legacy hard-coded models for backward compatibility."""
         return list(self._legacy_model_specs.keys())
 
@@ -126,18 +131,18 @@ class LlamaProvider(BaseProvider):
 
     def _get_model_context_window_legacy(self, model_name: str) -> int:
         """Legacy method using hard-coded specifications."""
-        return self._legacy_model_specs.get(model_name, {}).get(
-            "context_window", 128000
-        )
+        spec = self._legacy_model_specs.get(model_name, {})
+        context_window: Any = spec.get("context_window", 128000)
+        return int(context_window)
 
     def _get_model_cost_legacy(self, model_name: str) -> float:
         """Legacy method using hard-coded specifications."""
-        return self._legacy_model_specs.get(model_name, {}).get(
-            "cost_per_1k_tokens", 0.0008
-        )
+        spec = self._legacy_model_specs.get(model_name, {})
+        cost: Any = spec.get("cost_per_1k_tokens", 0.0008)
+        return float(cost)
 
     async def generate(
-        self, request: ModelRequest, model_name: Optional[str] = None
+        self, request: ModelRequest, model_name: str | None = None
     ) -> ModelResponse:
         """Generate response using Llama models via Ollama."""
 
@@ -180,7 +185,7 @@ class LlamaProvider(BaseProvider):
             return self._create_error_response(request, e, "generation_error")
 
     async def stream(
-        self, request: ModelRequest, model_name: Optional[str] = None
+        self, request: ModelRequest, model_name: str | None = None
     ) -> AsyncGenerator[str, None]:
         """Stream response using Llama models via Ollama."""
 
@@ -197,6 +202,8 @@ class LlamaProvider(BaseProvider):
         payload["stream"] = True
 
         try:
+            if not self.client:
+                raise RuntimeError("HTTP client not initialized")
             async with self.client.stream(
                 "POST",
                 f"{self.ollama_endpoint}/api/generate",
@@ -206,14 +213,15 @@ class LlamaProvider(BaseProvider):
 
                 if response.status_code != 200:
                     error_text = await response.aread()
+                    error_str = error_text.decode('utf-8') if isinstance(error_text, bytes) else str(error_text)
                     raise Exception(
-                        f"Ollama error: {response.status_code} - {error_text}"
+                        f"Ollama error: {response.status_code} - {error_str}"
                     )
 
                 async for line in response.aiter_lines():
                     if line.strip():
                         try:
-                            chunk = deserialize(line)
+                            chunk = json.loads(line)
                             content = chunk.get("response", "")
 
                             if content:
@@ -228,9 +236,9 @@ class LlamaProvider(BaseProvider):
 
         except Exception as e:
             logger.error(f"Llama streaming failed: {e}")
-            yield f"Error: {str(e)}"
+            yield f"Error: {e!s}"
 
-    def _build_request_payload(self, request: ModelRequest, model_name: str) -> Dict:
+    def _build_request_payload(self, request: ModelRequest, model_name: str) -> dict[str, Any]:
         """Build Ollama API request payload."""
 
         # Ollama uses a different format than OpenAI-style APIs
@@ -258,14 +266,16 @@ class LlamaProvider(BaseProvider):
             prompt = f"System: {request.system_prompt}\n\nUser: {prompt}\n\nAssistant: "
 
         # Build payload for Ollama
+        max_output = 4000
+        if hasattr(self, 'model_specs'):
+            spec = getattr(self, 'model_specs', {}).get(model_name, {})
+            max_output = spec.get("max_output_tokens", 4000)
+
         payload = {
             "model": model_name,
             "prompt": prompt,
             "options": {
-                "num_predict": min(
-                    request.max_tokens,
-                    self.model_specs.get(model_name, {}).get("max_output_tokens", 4000),
-                ),
+                "num_predict": min(request.max_tokens, max_output),
                 "temperature": request.temperature,
                 "top_p": request.top_p,
             },
@@ -279,7 +289,7 @@ class LlamaProvider(BaseProvider):
 
         return payload
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self) -> dict[str, str]:
         """Get HTTP headers for Ollama requests."""
         return {
             "Content-Type": "application/json",
@@ -290,6 +300,8 @@ class LlamaProvider(BaseProvider):
         """Ensure the model is available in Ollama, pull if needed."""
 
         try:
+            if not self.client:
+                raise RuntimeError("HTTP client not initialized")
             # Check if model exists
             response = await self.client.get(f"{self.ollama_endpoint}/api/tags")
 
@@ -308,6 +320,9 @@ class LlamaProvider(BaseProvider):
     async def _pull_model(self, model_name: str) -> None:
         """Pull a model from Ollama registry."""
 
+        if not self.client:
+            raise RuntimeError("HTTP client not initialized")
+
         pull_payload = {"name": model_name}
 
         async with self.client.stream(
@@ -321,7 +336,7 @@ class LlamaProvider(BaseProvider):
             async for line in response.aiter_lines():
                 if line.strip():
                     try:
-                        progress = deserialize(line)
+                        progress = json.loads(line)
                         status = progress.get("status", "")
                         if "error" in progress:
                             raise Exception(f"Model pull error: {progress['error']}")
@@ -331,8 +346,11 @@ class LlamaProvider(BaseProvider):
                     except json.JSONDecodeError:
                         continue
 
-    async def _make_api_request(self, payload: Dict) -> httpx.Response:
+    async def _make_api_request(self, payload: dict[str, Any]) -> httpx.Response:
         """Make API request to Ollama."""
+
+        if not self.client:
+            raise RuntimeError("HTTP client not initialized")
 
         response = await self.client.post(
             f"{self.ollama_endpoint}/api/generate",
@@ -342,8 +360,9 @@ class LlamaProvider(BaseProvider):
 
         if response.status_code != 200:
             error_detail = await response.aread()
+            error_str = error_detail.decode('utf-8') if isinstance(error_detail, bytes) else str(error_detail)
             raise Exception(
-                f"Ollama API error: {response.status_code} - {error_detail}"
+                f"Ollama API error: {response.status_code} - {error_str}"
             )
 
         return response
@@ -428,7 +447,7 @@ class LlamaProvider(BaseProvider):
         )
 
     def _calculate_confidence_score(
-        self, content: str, done: bool, request: ModelRequest, response_data: Dict
+        self, content: str, done: bool, request: ModelRequest, response_data: dict[str, Any]
     ) -> float:
         """Calculate confidence score for Llama response."""
 
@@ -461,10 +480,12 @@ class LlamaProvider(BaseProvider):
 
         return min(max(base_confidence, 0.0), 1.0)
 
-    async def health_check(self) -> "ProviderHealthStatus":
+    async def health_check(self) -> ProviderHealthStatus:
         """Perform Llama/Ollama-specific health check."""
 
         try:
+            if not self.client:
+                raise RuntimeError("HTTP client not initialized")
             # Check if Ollama is running
             response = await self.client.get(f"{self.ollama_endpoint}/api/tags")
 
@@ -477,16 +498,16 @@ class LlamaProvider(BaseProvider):
             )
 
             start_time = datetime.now()
-            response = await self.generate(test_request)
+            model_response = await self.generate(test_request)
             latency = (datetime.now() - start_time).total_seconds() * 1000
 
             # Update health status
-            self.health_status.healthy = response.success
+            self.health_status.healthy = model_response.success
             self.health_status.last_check = datetime.now()
             self.health_status.avg_latency_ms = latency
 
             # Ollama-specific health indicators
-            if response.success and len(response.content) > 5:
+            if model_response.success and len(model_response.content) > 5:
                 self.health_status.api_status = "operational"
             else:
                 self.health_status.api_status = "degraded"
@@ -516,13 +537,13 @@ class LlamaProvider(BaseProvider):
 
         return True
 
-    def get_model_info(self, model_name: str) -> Optional[Dict[str, Any]]:
+    def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get Llama model information."""
 
         if not self.supports_model(model_name):
             return None
 
-        spec = self.model_specs.get(model_name, {})
+        spec = getattr(self, 'model_specs', {}).get(model_name, {})
 
         return {
             "name": model_name,
@@ -550,7 +571,8 @@ class LlamaProvider(BaseProvider):
 
     async def close(self) -> None:
         """Clean up resources."""
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
 
 
 __all__ = ["LlamaProvider"]

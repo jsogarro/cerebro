@@ -2,11 +2,15 @@
 Research project commands for CLI.
 """
 
+
 import asyncio
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import click
+from click.core import Context
+from click.exceptions import Exit
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -34,7 +38,7 @@ from src.models.research_project import ResearchProgress, ResearchProject
 
 @click.group(name="projects")
 @click.pass_context
-def projects_group(ctx):
+def projects_group(ctx: Context) -> None:
     """Manage research projects."""
     pass
 
@@ -55,21 +59,21 @@ def projects_group(ctx):
 @click.option("--file", "-f", type=click.Path(exists=True), help="Load from file")
 @click.pass_context
 def create_project(
-    ctx,
+    ctx: Context,
     title: str | None,
     query: str | None,
     domains: str | None,
     user_id: str,
     depth: str,
-    scope: tuple,
+    scope: tuple[str, ...],
     interactive: bool,
     file: str | None,
-):
+) -> None:
     """Create a new research project."""
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
 
-    async def _create_single_project(project_data) -> ResearchProject:
+    async def _create_single_project(project_data: dict[str, Any]) -> ResearchProject:
         """Create a single project."""
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
@@ -92,7 +96,7 @@ def create_project(
 
             except APIError as e:
                 print_error(f"Failed to create project: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     async def _create_projects() -> None:
         """Create projects based on input."""
@@ -137,7 +141,7 @@ def create_project(
                 print_error(
                     "Missing required arguments. Use --interactive or provide --title, --query, and --domains"
                 )
-                raise click.Exit(1)
+                raise Exit(1)
 
             project_data = {
                 "title": title,
@@ -145,7 +149,7 @@ def create_project(
                 "domains": validate_domains(domains),
                 "user_id": user_id,
                 "depth_level": depth,
-                "scope": parse_key_value_pairs(scope) if scope else None,
+                "scope": parse_key_value_pairs(list(scope)) if scope else None,
             }
 
             await _create_single_project(project_data)
@@ -156,7 +160,7 @@ def create_project(
 @projects_group.command(name="get")
 @click.argument("project_id", callback=validate_uuid)
 @click.pass_context
-def get_project(ctx, project_id: UUID):
+def get_project(ctx: Context, project_id: UUID) -> None:
     """Get project details."""
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
@@ -176,7 +180,7 @@ def get_project(ctx, project_id: UUID):
                     print_error(f"Project not found: {project_id}")
                 else:
                     print_error(f"Failed to fetch project: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_get_project())
 
@@ -188,12 +192,12 @@ def get_project(ctx, project_id: UUID):
 @click.option("--offset", "-o", default=0, help="Offset for pagination")
 @click.pass_context
 def list_projects(
-    ctx,
+    ctx: Context,
     user_id: str | None,
     status: str | None,
     limit: int,
     offset: int,
-):
+) -> None:
     """List research projects."""
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
@@ -222,7 +226,7 @@ def list_projects(
 
             except APIError as e:
                 print_error(f"Failed to list projects: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_list_projects())
 
@@ -239,7 +243,7 @@ def list_projects(
     "--interval", "-i", default=5, help="Update interval in seconds (polling mode only)"
 )
 @click.pass_context
-def get_progress(ctx, project_id: UUID, watch: bool, stream: bool, interval: int):
+def get_progress(ctx: Context, project_id: UUID, watch: bool, stream: bool, interval: int) -> None:
     """Get project progress."""
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
@@ -248,7 +252,7 @@ def get_progress(ctx, project_id: UUID, watch: bool, stream: bool, interval: int
     # Validate options
     if watch and stream:
         print_error("Cannot use both --watch and --stream options. Choose one.")
-        raise click.Exit(1)
+        raise Exit(1)
 
     async def _get_progress_once() -> ResearchProgress:
         """Get progress once."""
@@ -264,7 +268,7 @@ def get_progress(ctx, project_id: UUID, watch: bool, stream: bool, interval: int
                     print_error(f"Project not found: {project_id}")
                 else:
                     print_error(f"Failed to fetch progress: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     async def _stream_progress() -> None:
         """Stream progress via WebSocket."""
@@ -356,7 +360,7 @@ def get_progress(ctx, project_id: UUID, watch: bool, stream: bool, interval: int
 @click.argument("project_id", callback=validate_uuid)
 @click.option("--force", "-f", is_flag=True, help="Skip confirmation")
 @click.pass_context
-def cancel_project(ctx, project_id: UUID, force: bool):
+def cancel_project(ctx: Context, project_id: UUID, force: bool) -> None:
     """Cancel a research project."""
     verbose = ctx.obj["verbose"]
 
@@ -378,7 +382,7 @@ def cancel_project(ctx, project_id: UUID, force: bool):
                     print_error(f"Project not found: {project_id}")
                 else:
                     print_error(f"Failed to cancel project: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_cancel_project())
 
@@ -387,7 +391,7 @@ def cancel_project(ctx, project_id: UUID, force: bool):
 @click.argument("project_id", callback=validate_uuid)
 @click.option("--output", "-o", type=click.Path(), help="Save results to file")
 @click.pass_context
-def get_results(ctx, project_id: UUID, output: str | None):
+def get_results(ctx: Context, project_id: UUID, output: str | None) -> None:
     """Get project results."""
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
@@ -416,7 +420,7 @@ def get_results(ctx, project_id: UUID, output: str | None):
                     print_error(f"Results not found for project: {project_id}")
                 else:
                     print_error(f"Failed to fetch results: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_get_results())
 
@@ -428,18 +432,18 @@ def get_results(ctx, project_id: UUID, output: str | None):
 @click.option("--languages", help="Languages (comma-separated)")
 @click.pass_context
 def refine_scope(
-    ctx,
+    ctx: Context,
     project_id: UUID,
-    scope: tuple,
+    scope: tuple[str, ...],
     max_sources: int | None,
     languages: str | None,
-):
+) -> None:
     """Refine project scope."""
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
 
     # Build scope dict
-    scope_dict = parse_key_value_pairs(scope) if scope else {}
+    scope_dict = parse_key_value_pairs(list(scope)) if scope else {}
 
     if max_sources:
         scope_dict["max_sources"] = max_sources
@@ -449,7 +453,7 @@ def refine_scope(
 
     if not scope_dict:
         print_error("No scope parameters provided")
-        raise click.Exit(1)
+        raise Exit(1)
 
     async def _refine_scope() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:
@@ -464,6 +468,6 @@ def refine_scope(
 
             except APIError as e:
                 print_error(f"Failed to refine scope: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_refine_scope())

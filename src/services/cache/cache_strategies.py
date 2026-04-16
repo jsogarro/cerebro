@@ -5,18 +5,22 @@ This module provides various caching strategies including TTL, LRU,
 and dependency-based invalidation.
 """
 
+from __future__ import annotations
+
 import time
 from abc import ABC, abstractmethod
+from typing import Any
 
 from redis import asyncio as aioredis
-from src.utils.serialization import serialize_for_cache, deserialize_from_cache
+
+from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 
 class CacheStrategy(ABC):
     """Abstract base class for cache strategies."""
 
     @abstractmethod
-    async def on_get(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Called when a key is accessed."""
         pass
 
@@ -24,7 +28,7 @@ class CacheStrategy(ABC):
     async def on_set(
         self,
         key: str,
-        redis: aioredis.Redis,
+        redis: aioredis.Redis[Any],
         ttl: int | None = None,
         dependencies: list[str] | None = None,
     ) -> None:
@@ -32,11 +36,11 @@ class CacheStrategy(ABC):
         pass
 
     @abstractmethod
-    async def on_delete(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_delete(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Called when a key is deleted."""
         pass
 
-    async def invalidate_dependencies(self, key: str, redis: aioredis.Redis) -> int:
+    async def invalidate_dependencies(self, key: str, redis: aioredis.Redis[Any]) -> int:
         """Invalidate dependent keys."""
         return 0
 
@@ -57,14 +61,14 @@ class TTLStrategy(CacheStrategy):
         """
         self.default_ttl = ttl
 
-    async def on_get(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """No action needed on get for TTL strategy."""
         pass
 
     async def on_set(
         self,
         key: str,
-        redis: aioredis.Redis,
+        redis: aioredis.Redis[Any],
         ttl: int | None = None,
         dependencies: list[str] | None = None,
     ) -> None:
@@ -73,7 +77,7 @@ class TTLStrategy(CacheStrategy):
         await redis.expire(key, expiry)
         await redis.expire(f"{key}:meta", expiry)
 
-    async def on_delete(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_delete(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """No additional action needed on delete."""
         pass
 
@@ -97,7 +101,7 @@ class LRUStrategy(CacheStrategy):
         self.ttl = ttl
         self.access_key = "lru:access_times"
 
-    async def on_get(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Update access time for the key."""
         # Update access time in sorted set
         await redis.zadd(self.access_key, {key: time.time()})
@@ -105,7 +109,7 @@ class LRUStrategy(CacheStrategy):
     async def on_set(
         self,
         key: str,
-        redis: aioredis.Redis,
+        redis: aioredis.Redis[Any],
         ttl: int | None = None,
         dependencies: list[str] | None = None,
     ) -> None:
@@ -134,7 +138,7 @@ class LRUStrategy(CacheStrategy):
                     pipe.zrem(self.access_key, old_key)
                 await pipe.execute()
 
-    async def on_delete(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_delete(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Remove key from LRU tracking."""
         await redis.zrem(self.access_key, key)
 
@@ -156,14 +160,14 @@ class DependencyStrategy(CacheStrategy):
         self.ttl = ttl
         self.deps_prefix = "deps:"
 
-    async def on_get(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """No action needed on get."""
         pass
 
     async def on_set(
         self,
         key: str,
-        redis: aioredis.Redis,
+        redis: aioredis.Redis[Any],
         ttl: int | None = None,
         dependencies: list[str] | None = None,
     ) -> None:
@@ -188,7 +192,7 @@ class DependencyStrategy(CacheStrategy):
                 pipe.expire(reverse_key, expiry)
             await pipe.execute()
 
-    async def on_delete(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_delete(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Clean up dependency tracking."""
         # Get dependencies of this key
         deps_key = f"{self.deps_prefix}{key}"
@@ -205,7 +209,7 @@ class DependencyStrategy(CacheStrategy):
         # Delete dependency tracking
         await redis.delete(deps_key)
 
-    async def invalidate_dependencies(self, key: str, redis: aioredis.Redis) -> int:
+    async def invalidate_dependencies(self, key: str, redis: aioredis.Redis[Any]) -> int:
         """
         Invalidate all keys dependent on the given key.
 
@@ -252,7 +256,7 @@ class HybridStrategy(CacheStrategy):
         """
         self.strategies = strategies
 
-    async def on_get(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Apply all strategies on get."""
         for strategy in self.strategies:
             await strategy.on_get(key, redis)
@@ -260,7 +264,7 @@ class HybridStrategy(CacheStrategy):
     async def on_set(
         self,
         key: str,
-        redis: aioredis.Redis,
+        redis: aioredis.Redis[Any],
         ttl: int | None = None,
         dependencies: list[str] | None = None,
     ) -> None:
@@ -268,12 +272,12 @@ class HybridStrategy(CacheStrategy):
         for strategy in self.strategies:
             await strategy.on_set(key, redis, ttl, dependencies)
 
-    async def on_delete(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_delete(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Apply all strategies on delete."""
         for strategy in self.strategies:
             await strategy.on_delete(key, redis)
 
-    async def invalidate_dependencies(self, key: str, redis: aioredis.Redis) -> int:
+    async def invalidate_dependencies(self, key: str, redis: aioredis.Redis[Any]) -> int:
         """Invalidate dependencies using all strategies."""
         total = 0
         for strategy in self.strategies:
@@ -298,7 +302,7 @@ class VersionedCacheStrategy(CacheStrategy):
         self.ttl = ttl
         self.version_key = "cache:versions"
 
-    async def on_get(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Check version on get."""
         # Could implement version checking here if needed
         pass
@@ -306,7 +310,7 @@ class VersionedCacheStrategy(CacheStrategy):
     async def on_set(
         self,
         key: str,
-        redis: aioredis.Redis,
+        redis: aioredis.Redis[Any],
         ttl: int | None = None,
         dependencies: list[str] | None = None,
     ) -> None:
@@ -327,11 +331,11 @@ class VersionedCacheStrategy(CacheStrategy):
         await redis.expire(key, expiry)
         await redis.expire(meta_key, expiry)
 
-    async def on_delete(self, key: str, redis: aioredis.Redis) -> None:
+    async def on_delete(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Remove version tracking."""
         await redis.hdel(self.version_key, key)
 
-    async def increment_version(self, key: str, redis: aioredis.Redis) -> int:
+    async def increment_version(self, key: str, redis: aioredis.Redis[Any]) -> int:
         """
         Increment version to invalidate cache.
 

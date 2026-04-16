@@ -36,7 +36,7 @@ class MCPClient:
         self.server = MCPServer(server_config)
         self._register_default_tools()
 
-    def _register_default_tools(self):
+    def _register_default_tools(self) -> None:
         """Register default research tools."""
         tools = [
             AcademicSearchTool(),
@@ -67,7 +67,7 @@ class MCPClient:
         )
 
     async def format_citations(
-        self, sources: list[dict], style: str = "APA"
+        self, sources: list[dict[str, Any]], style: str = "APA"
     ) -> dict[str, Any]:
         """
         Format citations.
@@ -83,7 +83,7 @@ class MCPClient:
             "citation_formatter", sources=sources, style=style
         )
 
-    async def analyze_statistics(self, operation: str, **kwargs) -> dict[str, Any]:
+    async def analyze_statistics(self, operation: str, **kwargs: Any) -> dict[str, Any]:
         """
         Perform statistical analysis.
 
@@ -101,8 +101,8 @@ class MCPClient:
     async def build_knowledge_graph(
         self,
         text: str | None = None,
-        entities: list | None = None,
-        relationships: list | None = None,
+        entities: list[Any] | None = None,
+        relationships: list[Any] | None = None,
     ) -> dict[str, Any]:
         """
         Build knowledge graph.
@@ -147,7 +147,7 @@ class MCPClient:
         """
         return self.server.get_registered_tools()
 
-    async def execute_tool(self, tool_name: str, **kwargs) -> dict[str, Any]:
+    async def execute_tool(self, tool_name: str, **kwargs: Any) -> dict[str, Any]:
         """
         Execute a tool by name.
 

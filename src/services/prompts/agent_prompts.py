@@ -89,7 +89,7 @@ Provide a comprehensive comparative analysis with comparison matrix, strengths/w
     if context:
         task_description += f"\n\nContext: {context}"
 
-    schema = {
+    schema: dict[str, Any] = {
         "comparative_analysis": {
             "items_compared": [str],
             "comparison_criteria": [str],

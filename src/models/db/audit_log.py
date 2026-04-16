@@ -7,10 +7,11 @@ and authorization events in the system.
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import ENUM, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -72,6 +73,10 @@ class AuditEventType(str, Enum):
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
     INVALID_TOKEN = "invalid_token"
     UNAUTHORIZED_ACCESS = "unauthorized_access"
+    SYSTEM_BREACH = "system_breach"
+    DATA_EXFILTRATION = "data_exfiltration"
+    SQL_INJECTION_ATTEMPT = "sql_injection_attempt"
+    XSS_ATTEMPT = "xss_attempt"
 
     # Data access events
     DATA_ACCESSED = "data_accessed"
@@ -99,15 +104,14 @@ class AuditLog(BaseModel):
 
     __tablename__ = "audit_logs"
 
-    # Event information
-    event_type = Column(
+    event_type: Mapped[AuditEventType] = mapped_column(
         ENUM(AuditEventType, name="audit_event_type"),
         nullable=False,
         index=True,
         comment="Type of audit event",
     )
 
-    severity = Column(
+    severity: Mapped[AuditSeverity] = mapped_column(
         ENUM(AuditSeverity, name="audit_severity"),
         nullable=False,
         default=AuditSeverity.INFO,
@@ -115,86 +119,94 @@ class AuditLog(BaseModel):
         comment="Event severity level",
     )
 
-    event_category = Column(
+    event_category: Mapped[str | None] = mapped_column(
         String(50), nullable=True, index=True, comment="Event category for grouping"
     )
 
-    # User information (nullable for system events)
-    user_id = Column(
+    user_id: Mapped[Any | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
 
-    username = Column(
+    username: Mapped[str | None] = mapped_column(
         String(100), nullable=True, comment="Username at time of event (denormalized)"
     )
 
-    email = Column(
+    email: Mapped[str | None] = mapped_column(
         String(255), nullable=True, comment="Email at time of event (denormalized)"
     )
 
-    # Actor information (who performed the action if different from user)
-    actor_id = Column(
+    actor_id: Mapped[Any | None] = mapped_column(
         UUID(as_uuid=True),
         nullable=True,
         comment="ID of user who performed action (for admin actions)",
     )
 
-    actor_username = Column(String(100), nullable=True, comment="Username of actor")
+    actor_username: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="Username of actor"
+    )
 
-    # Target resource
-    resource_type = Column(
+    resource_type: Mapped[str | None] = mapped_column(
         String(50), nullable=True, index=True, comment="Type of resource affected"
     )
 
-    resource_id = Column(
+    resource_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True, index=True, comment="ID of resource affected"
     )
 
-    resource_name = Column(
+    resource_name: Mapped[str | None] = mapped_column(
         String(255), nullable=True, comment="Name/description of resource"
     )
 
-    # Event details
-    action = Column(String(100), nullable=False, comment="Action performed")
+    action: Mapped[str] = mapped_column(
+        String(100), nullable=False, comment="Action performed"
+    )
 
-    description = Column(Text, nullable=True, comment="Detailed event description")
+    description: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Detailed event description"
+    )
 
-    result = Column(
+    result: Mapped[str | None] = mapped_column(
         String(50),
         nullable=True,
         comment="Result of action (success, failure, partial)",
     )
 
-    error_message = Column(
+    error_message: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="Error message if action failed"
     )
 
-    # Request information
-    ip_address = Column(
+    ip_address: Mapped[str | None] = mapped_column(
         String(45), nullable=True, index=True, comment="Client IP address"
     )
 
-    user_agent = Column(String(500), nullable=True, comment="User agent string")
+    user_agent: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="User agent string"
+    )
 
-    request_id = Column(
+    request_id: Mapped[str | None] = mapped_column(
         String(100), nullable=True, index=True, comment="Request correlation ID"
     )
 
-    session_id = Column(String(255), nullable=True, comment="Session ID if applicable")
+    session_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Session ID if applicable"
+    )
 
-    # Location information
-    country = Column(String(100), nullable=True, comment="Country from IP geolocation")
+    country: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="Country from IP geolocation"
+    )
 
-    city = Column(String(100), nullable=True, comment="City from IP geolocation")
+    city: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="City from IP geolocation"
+    )
 
-    # Additional context
-    event_metadata = Column(JSON, nullable=True, comment="Additional event metadata")
+    event_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True, comment="Additional event metadata"
+    )
 
-    # Security flags
-    is_suspicious = Column(
+    is_suspicious: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
@@ -202,7 +214,7 @@ class AuditLog(BaseModel):
         comment="Flag for suspicious activity",
     )
 
-    requires_review = Column(
+    requires_review: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
@@ -210,11 +222,11 @@ class AuditLog(BaseModel):
         comment="Flag for manual review required",
     )
 
-    reviewed_at = Column(
+    reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="When event was reviewed"
     )
 
-    reviewed_by = Column(String(255), nullable=True, comment="Who reviewed the event")
+    reviewed_by: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Who reviewed the event")
 
     # Relationships
     user = relationship("User", back_populates="audit_logs", foreign_keys=[user_id])
@@ -239,8 +251,8 @@ class AuditLog(BaseModel):
         result: str = "success",
         severity: AuditSeverity = AuditSeverity.INFO,
         ip_address: str | None = None,
-        metadata: dict | None = None,
-        **kwargs,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> "AuditLog":
         """
         Create an audit log entry.
@@ -312,7 +324,7 @@ class AuditLog(BaseModel):
 
     @staticmethod
     def _is_suspicious_event(
-        event_type: AuditEventType, result: str, metadata: dict | None
+        event_type: AuditEventType, result: str, metadata: dict[str, Any] | None
     ) -> bool:
         """Determine if event is suspicious."""
         # Failed login attempts
@@ -341,7 +353,7 @@ class AuditLog(BaseModel):
         user_id: str,
         event_types: list[AuditEventType] | None = None,
         limit: int = 100,
-        session=None,
+        session: Any = None,
     ) -> list["AuditLog"]:
         """
         Get audit events for a user.
@@ -367,7 +379,7 @@ class AuditLog(BaseModel):
 
     @classmethod
     def get_suspicious_events(
-        cls, unreviewed_only: bool = True, limit: int = 100, session=None
+        cls, unreviewed_only: bool = True, limit: int = 100, session: Any = None
     ) -> list["AuditLog"]:
         """
         Get suspicious events requiring review.
@@ -401,7 +413,7 @@ class AuditLog(BaseModel):
         self.reviewed_by = reviewer
         self.requires_review = False
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert to dictionary.
 

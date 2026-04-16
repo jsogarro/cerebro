@@ -6,12 +6,13 @@ monitoring and session management.
 """
 
 import secrets
+import uuid
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
-    Column,
     DateTime,
     ForeignKey,
     Index,
@@ -19,7 +20,7 @@ from sqlalchemy import (
     String,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -35,7 +36,7 @@ class UserSession(BaseModel):
     __tablename__ = "user_sessions"
 
     # Foreign key to user
-    user_id = Column(
+    user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
@@ -43,120 +44,113 @@ class UserSession(BaseModel):
     )
 
     # Session identifier
-    session_token = Column(
+    session_token: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
         unique=True,
         index=True,
-        comment="Unique session token",
     )
 
-    refresh_token = Column(
+    refresh_token: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
         unique=True,
         index=True,
-        comment="Refresh token for session renewal",
     )
 
     # Session metadata
-    session_type = Column(
+    session_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
         default="web",
-        comment="Session type (web, api, mobile, cli)",
     )
 
     # Device information
-    device_id = Column(String(255), nullable=True, comment="Unique device identifier")
+    device_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    device_name = Column(
-        String(255), nullable=True, comment="Device name (e.g., 'iPhone 12')"
+    device_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
     )
 
-    device_type = Column(
-        String(50), nullable=True, comment="Device type (desktop, mobile, tablet)"
+    device_type: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
     )
 
-    os_name = Column(String(100), nullable=True, comment="Operating system name")
+    os_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    os_version = Column(String(50), nullable=True, comment="Operating system version")
+    os_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    browser_name = Column(String(100), nullable=True, comment="Browser name")
+    browser_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    browser_version = Column(String(50), nullable=True, comment="Browser version")
+    browser_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    user_agent = Column(String(500), nullable=True, comment="Full user agent string")
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Location information
-    ip_address = Column(String(45), nullable=False, comment="Client IP address")
+    ip_address: Mapped[str] = mapped_column(String(45), nullable=False)
 
-    country = Column(String(100), nullable=True, comment="Country from IP geolocation")
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    region = Column(
-        String(100), nullable=True, comment="Region/state from IP geolocation"
+    region: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
     )
 
-    city = Column(String(100), nullable=True, comment="City from IP geolocation")
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    latitude = Column(String(20), nullable=True, comment="Latitude from IP geolocation")
+    latitude: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    longitude = Column(
-        String(20), nullable=True, comment="Longitude from IP geolocation"
+    longitude: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
     )
 
     # Activity tracking
-    last_activity = Column(
+    last_activity: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default="now()",
-        comment="Last activity timestamp",
     )
 
-    last_ip_address = Column(String(45), nullable=True, comment="Last known IP address")
+    last_ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
 
-    request_count = Column(
-        Integer, nullable=False, default=0, comment="Total requests in this session"
+    request_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
     )
 
     # Session security
-    is_active = Column(
+    is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=True,
         index=True,
-        comment="Whether session is active",
     )
 
-    is_suspicious = Column(
-        Boolean, nullable=False, default=False, comment="Flag for suspicious activity"
+    is_suspicious: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
     )
 
-    mfa_verified = Column(
+    mfa_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
-        comment="Whether MFA was verified for this session",
     )
 
     # Session lifecycle
-    expires_at = Column(
+    expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         index=True,
-        comment="Session expiration time",
     )
 
-    revoked_at = Column(
-        DateTime(timezone=True), nullable=True, comment="When session was revoked"
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
-    revoke_reason = Column(
-        String(255), nullable=True, comment="Reason for session revocation"
+    revoke_reason: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
     )
 
     # Additional metadata
-    metadata = Column(JSON, nullable=True, comment="Additional session metadata")
+    session_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="sessions")
@@ -175,8 +169,8 @@ class UserSession(BaseModel):
         ip_address: str,
         session_type: str = "web",
         duration_hours: int = 24,
-        device_info: dict | None = None,
-        location_info: dict | None = None,
+        device_info: dict[str, Any] | None = None,
+        location_info: dict[str, Any] | None = None,
         mfa_verified: bool = False,
     ) -> "UserSession":
         """
@@ -276,12 +270,13 @@ class UserSession(BaseModel):
         Returns:
             New session token
         """
-        self.session_token = secrets.token_urlsafe(32)
+        new_token = secrets.token_urlsafe(32)
+        self.session_token = new_token
         self.refresh_token = secrets.token_urlsafe(32)
         self.expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
         self.last_activity = datetime.utcnow()
 
-        return self.session_token
+        return new_token
 
     def mark_suspicious(self, reason: str | None = None) -> None:
         """
@@ -291,33 +286,33 @@ class UserSession(BaseModel):
             reason: Reason for marking suspicious
         """
         self.is_suspicious = True
-        if reason and self.metadata:
-            self.metadata["suspicious_reason"] = reason
+        if reason and self.session_metadata:
+            self.session_metadata["suspicious_reason"] = reason
         elif reason:
-            self.metadata = {"suspicious_reason": reason}
+            self.session_metadata = {"suspicious_reason": reason}
 
     @property
     def is_expired(self) -> bool:
         """Check if session has expired."""
-        return datetime.utcnow() > self.expires_at
+        return bool(datetime.utcnow() > self.expires_at)
 
     @property
     def is_valid(self) -> bool:
         """Check if session is valid (active and not expired)."""
-        return self.is_active and not self.is_expired and not self.revoked_at
+        return bool(self.is_active and not self.is_expired and not self.revoked_at)
 
     @property
     def duration(self) -> timedelta:
         """Get session duration."""
-        return self.last_activity - self.created_at
+        return timedelta(seconds=(self.last_activity - self.created_at).total_seconds())
 
     @property
     def idle_time(self) -> timedelta:
         """Get time since last activity."""
-        return datetime.utcnow() - self.last_activity
+        return timedelta(seconds=(datetime.utcnow() - self.last_activity).total_seconds())
 
     @classmethod
-    def get_active_sessions(cls, user_id: str, session=None) -> list["UserSession"]:
+    def get_active_sessions(cls, user_id: str, session: Any = None) -> list["UserSession"]:
         """
         Get all active sessions for a user.
 
@@ -331,7 +326,7 @@ class UserSession(BaseModel):
         if not session:
             return []
 
-        return (
+        results: list[UserSession] = (
             session.query(cls)
             .filter(
                 cls.user_id == user_id,
@@ -341,10 +336,11 @@ class UserSession(BaseModel):
             )
             .all()
         )
+        return results
 
     @classmethod
     def revoke_all_sessions(
-        cls, user_id: str, reason: str = "Manual revocation", session=None
+        cls, user_id: str, reason: str = "Manual revocation", session: Any = None
     ) -> int:
         """
         Revoke all sessions for a user.
@@ -368,7 +364,7 @@ class UserSession(BaseModel):
         session.commit()
         return len(active_sessions)
 
-    def to_dict(self, include_tokens: bool = False) -> dict:
+    def to_dict(self, include_tokens: bool = False) -> dict[str, Any]:
         """
         Convert to dictionary.
 

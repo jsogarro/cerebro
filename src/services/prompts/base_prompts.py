@@ -147,7 +147,7 @@ def _format_schema(schema: dict[str, Any], indent: int = 0) -> str:
     return "\n".join(lines)
 
 
-def create_system_prompt(role: str, context: str, constraints: list[str] = None) -> str:
+def create_system_prompt(role: str, context: str, constraints: list[str] | None = None) -> str:
     """
     Create a system prompt with role and constraints.
 
@@ -207,7 +207,7 @@ def add_examples(prompt: str, examples: list[dict[str, str]]) -> str:
 
 
 def create_research_context(
-    query: str, domains: list[str], depth: str, scope: dict[str, Any] = None
+    query: str, domains: list[str], depth: str, scope: dict[str, Any] | None = None
 ) -> str:
     """
     Create research context from query parameters.

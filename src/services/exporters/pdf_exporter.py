@@ -9,11 +9,11 @@ import io
 import logging
 import os
 import tempfile
-from typing import Dict, Optional
+from typing import Any
 
 try:
     import weasyprint
-    from weasyprint import HTML, CSS
+    from weasyprint import CSS, HTML
     from weasyprint.text.fonts import FontConfiguration
     WEASYPRINT_AVAILABLE = True
 except ImportError:
@@ -23,7 +23,7 @@ except ImportError:
     CSS = None
     FontConfiguration = None
 
-from src.models.report import Report, ReportOutput, ReportFormat
+from src.models.report import Report, ReportFormat, ReportOutput
 from src.services.report_config import ReportSettings
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class PDFExportError(Exception):
 class PDFExporter:
     """Service for exporting reports to PDF format using WeasyPrint."""
     
-    def __init__(self, settings: Optional[ReportSettings] = None):
+    def __init__(self, settings: ReportSettings | None = None):
         """Initialize PDF exporter."""
         if not WEASYPRINT_AVAILABLE:
             raise PDFExportError(
@@ -46,9 +46,9 @@ class PDFExporter:
         
         self.settings = settings or ReportSettings()
         self.font_config = FontConfiguration()
-        
+
         # PDF-specific settings
-        self.pdf_settings = self.settings.pdf_settings
+        self.pdf_settings: dict[str, Any] = {}
         
         # Ensure required dependencies are available
         self._validate_dependencies()
@@ -66,7 +66,7 @@ class PDFExporter:
         self,
         html_content: str,
         report: Report,
-        custom_css: Optional[str] = None
+        custom_css: str | None = None
     ) -> ReportOutput:
         """
         Export HTML content to PDF.
@@ -102,6 +102,8 @@ class PDFExporter:
             output = ReportOutput(
                 format=ReportFormat.PDF,
                 content=pdf_bytes,
+                file_path=None,
+                file_size=len(pdf_bytes),
                 mime_type="application/pdf",
                 encoding="binary"
             )
@@ -116,7 +118,7 @@ class PDFExporter:
     def _build_css_styles(
         self,
         report: Report,
-        custom_css: Optional[str] = None
+        custom_css: str | None = None
     ) -> list[str]:
         """Build CSS styles for PDF generation."""
         css_styles = []
@@ -159,7 +161,7 @@ class PDFExporter:
             }}
             
             @bottom-center {{
-                content: "{pdf_config.get('footer_text', 'Page ' + counter(page))}";
+                content: "{pdf_config.get('footer_text', 'Page ') or 'Page '}" counter(page);
                 font-size: 10pt;
                 color: #666;
             }}
@@ -404,8 +406,8 @@ class PDFExporter:
     
     def _generate_pdf_bytes(
         self,
-        html_doc: 'HTML',
-        css_objects: list,
+        html_doc: Any,
+        css_objects: list[Any],
         report: Report
     ) -> bytes:
         """Generate PDF bytes from HTML document and CSS."""
@@ -443,7 +445,7 @@ class PDFExporter:
         self,
         html_content: str,
         report: Report,
-        custom_css: Optional[str] = None
+        custom_css: str | None = None
     ) -> io.BytesIO:
         """
         Export HTML content to PDF as a BytesIO stream.
@@ -505,7 +507,7 @@ class PDFExporter:
         
         return warnings
     
-    def get_pdf_info(self, pdf_bytes: bytes) -> Dict[str, any]:
+    def get_pdf_info(self, pdf_bytes: bytes) -> dict[str, Any]:
         """
         Extract information from generated PDF.
         
@@ -538,7 +540,7 @@ class PDFExporter:
             }
 
 
-def create_pdf_exporter(settings: Optional[ReportSettings] = None) -> PDFExporter:
+def create_pdf_exporter(settings: ReportSettings | None = None) -> PDFExporter:
     """Factory function to create a PDF exporter."""
     return PDFExporter(settings)
 
@@ -566,7 +568,7 @@ def optimize_html_for_pdf(html_content: str) -> str:
     return optimized_html
 
 
-def add_pdf_page_breaks(html_content: str, break_elements: list[str] = None) -> str:
+def add_pdf_page_breaks(html_content: str, break_elements: list[str] | None = None) -> str:
     """
     Add strategic page breaks to HTML content for better PDF layout.
     
@@ -592,9 +594,9 @@ def add_pdf_page_breaks(html_content: str, break_elements: list[str] = None) -> 
 
 
 __all__ = [
-    "PDFExporter",
     "PDFExportError",
+    "PDFExporter",
+    "add_pdf_page_breaks",
     "create_pdf_exporter",
     "optimize_html_for_pdf",
-    "add_pdf_page_breaks",
 ]

@@ -4,11 +4,12 @@ Agent Task database model.
 Represents agent tasks within research projects.
 """
 
+from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import (
     JSON,
-    Column,
     DateTime,
     ForeignKey,
     Index,
@@ -20,7 +21,7 @@ from sqlalchemy import (
     Enum as SQLEnum,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -47,56 +48,60 @@ class AgentTask(BaseModel):
 
     __tablename__ = "agent_tasks"
 
-    # Foreign key to research project
-    project_id = Column(
+    project_id: Mapped[Any] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("research_projects.id"),
         nullable=False,
         index=True,
     )
 
-    # Task details
-    agent_type = Column(
+    agent_type: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
         index=True,
         comment="Type of agent (e.g., literature_review, synthesis)",
     )
 
-    status = Column(
+    status: Mapped[TaskStatus] = mapped_column(
         SQLEnum(TaskStatus), nullable=False, default=TaskStatus.PENDING, index=True
     )
 
-    input_data = Column(
+    input_data: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, comment="Input data for the agent"
     )
 
-    output_data = Column(JSON, nullable=True, comment="Output data from the agent")
+    output_data: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True, comment="Output data from the agent"
+    )
 
-    error_message = Column(Text, nullable=True, comment="Error message if task failed")
+    error_message: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Error message if task failed"
+    )
 
-    retry_count = Column(
+    retry_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, comment="Number of retry attempts"
     )
 
-    # Timing information
-    started_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
-    execution_time_ms = Column(
+    execution_time_ms: Mapped[int | None] = mapped_column(
         Integer, nullable=True, comment="Execution time in milliseconds"
     )
 
-    # Priority and dependencies
-    priority = Column(
+    priority: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=0,
         comment="Task priority (higher = more important)",
     )
 
-    depends_on = Column(
+    depends_on: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, nullable=True, comment="List of task IDs this task depends on"
     )
 
@@ -113,19 +118,17 @@ class AgentTask(BaseModel):
 
     def start(self) -> None:
         """Mark task as started."""
-        from datetime import datetime
 
         self.status = TaskStatus.IN_PROGRESS
         self.started_at = datetime.utcnow()
 
-    def complete(self, output_data: dict) -> None:
+    def complete(self, output_data: dict[str, Any]) -> None:
         """
         Mark task as completed.
 
         Args:
             output_data: Output data from the agent
         """
-        from datetime import datetime
 
         self.status = TaskStatus.COMPLETED
         self.output_data = output_data
@@ -142,7 +145,6 @@ class AgentTask(BaseModel):
         Args:
             error_message: Error message
         """
-        from datetime import datetime
 
         self.status = TaskStatus.FAILED
         self.error_message = error_message
@@ -164,7 +166,6 @@ class AgentTask(BaseModel):
 
     def cancel(self) -> None:
         """Cancel the task."""
-        from datetime import datetime
 
         self.status = TaskStatus.CANCELLED
         if not self.completed_at:

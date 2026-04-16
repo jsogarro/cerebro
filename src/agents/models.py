@@ -24,7 +24,7 @@ class AgentTask:
     timeout: int = 300  # Default 5 minutes
     priority: int = 0  # Higher values = higher priority
 
-    def with_updated_context(self, **kwargs) -> "AgentTask":
+    def with_updated_context(self, **kwargs: Any) -> "AgentTask":
         """
         Create a new AgentTask with updated context.
 

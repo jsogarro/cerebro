@@ -1,7 +1,7 @@
 """Quality assurance and evaluation suite."""
 
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -10,14 +10,14 @@ class FactCheckResult:
     statement: str
     verified: bool
     confidence: float
-    evidence: List[Dict] = None
-    contradictions: List[Dict] = None
+    evidence: list[dict[str, Any]] | None = None
+    contradictions: list[dict[str, Any]] | None = None
 
 
 class FactExtractionService:
     """Extract factual claims from text."""
-    
-    async def extract_facts(self, text: str) -> List[Dict]:
+
+    async def extract_facts(self, text: str) -> list[dict[str, Any]]:
         """Extract factual statements."""
         return []
 
@@ -47,7 +47,7 @@ class CitationVerification:
     citation: str
     found: bool
     accessible: bool
-    impact_score: Optional[float] = None
+    impact_score: float | None = None
 
 
 class CitationVerifier:
@@ -64,8 +64,8 @@ class CitationVerifier:
 
 class PlagiarismDetector:
     """Detect potential plagiarism."""
-    
-    async def check_originality(self, text: str) -> Dict:
+
+    async def check_originality(self, text: str) -> dict[str, Any]:
         """Check text for plagiarism."""
         return {
             'originality_score': 1.0,
@@ -75,8 +75,8 @@ class PlagiarismDetector:
 
 class BenchmarkEvaluator:
     """Evaluate agents against benchmarks."""
-    
-    async def run_evaluation(self, agent_id: str, dataset_id: str) -> Dict:
+
+    async def run_evaluation(self, agent_id: str, dataset_id: str) -> dict[str, Any]:
         """Run benchmark evaluation."""
         return {
             'agent_id': agent_id,
@@ -87,11 +87,11 @@ class BenchmarkEvaluator:
 
 class PeerReviewSystem:
     """Manage peer review workflow."""
-    
-    async def initiate_review(self, project_id: str, num_reviewers: int = 2) -> Dict:
+
+    async def initiate_review(self, project_id: str, num_reviewers: int = 2) -> dict[str, Any]:
         """Initiate peer review."""
         return {'project_id': project_id, 'status': 'initiated'}
-    
-    async def submit_review(self, assignment_id: str, review_data: Dict) -> Dict:
+
+    async def submit_review(self, assignment_id: str, review_data: dict[str, Any]) -> dict[str, Any]:
         """Submit a review."""
         return {'assignment_id': assignment_id, 'status': 'submitted'}

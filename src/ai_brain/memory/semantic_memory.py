@@ -399,6 +399,9 @@ class SemanticMemoryManager:
     async def _ensure_collection_exists(self) -> None:
         """Ensure vector collection exists."""
 
+        assert self.vector_client is not None
+        assert models is not None
+
         try:
             # Check if collection exists
             collections = await self.vector_client.get_collections()
@@ -420,6 +423,9 @@ class SemanticMemoryManager:
 
     async def _store_vector_db(self, item: SemanticItem) -> None:
         """Store item in vector database."""
+
+        assert self.vector_client is not None
+        assert models is not None
 
         point = models.PointStruct(
             id=item.id,
@@ -443,6 +449,9 @@ class SemanticMemoryManager:
 
     async def _search_vector_db(self, query: SemanticQuery) -> list[SemanticResult]:
         """Search vector database."""
+
+        assert self.vector_client is not None
+        assert models is not None
 
         # Build filter conditions
         filter_conditions = []
@@ -514,7 +523,7 @@ class SemanticMemoryManager:
 
         return results
 
-    def _store_fallback(self, item: SemanticItem):
+    def _store_fallback(self, item: SemanticItem) -> None:
         """Store item in fallback storage."""
         self._fallback_storage.append(item)
 

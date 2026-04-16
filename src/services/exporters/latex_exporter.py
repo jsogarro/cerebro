@@ -10,9 +10,15 @@ import os
 import re
 import subprocess
 import tempfile
-from typing import Dict, List, Optional, Tuple
+from typing import Any
 
-from src.models.report import Citation, Report, ReportFormat, ReportOutput, ReportSection
+from src.models.report import (
+    Citation,
+    Report,
+    ReportFormat,
+    ReportOutput,
+    ReportSection,
+)
 from src.services.report_config import ReportSettings
 
 logger = logging.getLogger(__name__)
@@ -26,10 +32,10 @@ class LaTeXExportError(Exception):
 class LaTeXExporter:
     """Service for exporting reports to LaTeX format."""
     
-    def __init__(self, settings: Optional[ReportSettings] = None):
+    def __init__(self, settings: ReportSettings | None = None):
         """Initialize LaTeX exporter."""
         self.settings = settings or ReportSettings()
-        self.latex_settings = self.settings.latex_settings
+        self.latex_settings: dict[str, Any] = {}
         
         # LaTeX document configuration
         self.document_class = self.latex_settings.get('document_class', 'article')
@@ -85,6 +91,8 @@ class LaTeXExporter:
                 return ReportOutput(
                     format=ReportFormat.PDF,
                     content=pdf_bytes,
+                    file_path=None,
+                    file_size=len(pdf_bytes),
                     mime_type="application/pdf",
                     encoding="binary"
                 )
@@ -92,6 +100,8 @@ class LaTeXExporter:
                 return ReportOutput(
                     format=ReportFormat.LATEX,
                     content=latex_content,
+                    file_path=None,
+                    file_size=len(latex_content.encode("utf-8")),
                     mime_type="application/x-latex",
                     encoding="utf-8"
                 )
@@ -252,7 +262,7 @@ class LaTeXExporter:
             abstract_content = self._convert_markdown_to_latex(report.abstract)
         else:
             # Generate abstract from executive summary
-            abstract_content = self._extract_abstract_from_summary(report.executive_summary)
+            abstract_content = self._extract_abstract_from_summary(report.executive_summary or "")
         
         abstract_parts.append(abstract_content)
         
@@ -312,7 +322,7 @@ class LaTeXExporter:
         
         return "\n\n".join(subsection_parts)
     
-    def _generate_bibliography(self, citations: List[Citation]) -> str:
+    def _generate_bibliography(self, citations: list[Citation]) -> str:
         """Generate LaTeX bibliography."""
         bib_parts = []
         
@@ -543,7 +553,7 @@ class LaTeXExporter:
             with open(pdf_file, 'rb') as f:
                 return f.read()
     
-    def validate_latex_content(self, latex_content: str) -> List[str]:
+    def validate_latex_content(self, latex_content: str) -> list[str]:
         """Validate LaTeX content and return warnings."""
         warnings = []
         
@@ -568,13 +578,13 @@ class LaTeXExporter:
         return warnings
 
 
-def create_latex_exporter(settings: Optional[ReportSettings] = None) -> LaTeXExporter:
+def create_latex_exporter(settings: ReportSettings | None = None) -> LaTeXExporter:
     """Factory function to create a LaTeX exporter."""
     return LaTeXExporter(settings)
 
 
 __all__ = [
-    "LaTeXExporter",
     "LaTeXExportError",
+    "LaTeXExporter",
     "create_latex_exporter",
 ]

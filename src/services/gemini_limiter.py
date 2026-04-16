@@ -6,7 +6,7 @@ Implements token bucket algorithm for rate limiting following functional princip
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -63,7 +63,7 @@ class RateLimiter:
         current_time = time.time()
         tokens_to_add = self._calculate_tokens_to_add(current_time)
 
-        self._tokens = min(self.rate_limit, self._tokens + tokens_to_add)
+        self._tokens = min(float(self.rate_limit), self._tokens + tokens_to_add)
         self._last_refill = current_time
 
     async def _acquire_token(self) -> None:
@@ -146,7 +146,7 @@ class CircuitBreaker:
         self,
         failure_threshold: int = 5,
         recovery_timeout: int = 60,
-        expected_exception: type = Exception,
+        expected_exception: type[BaseException] = Exception,
     ):
         """
         Initialize circuit breaker.
@@ -180,7 +180,7 @@ class CircuitBreaker:
 
         return (time.time() - self._last_failure_time) >= self.recovery_timeout
 
-    async def call(self, func, *args, **kwargs) -> Any:
+    async def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """
         Call function with circuit breaker protection.
 

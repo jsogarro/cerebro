@@ -17,23 +17,21 @@ import asyncio
 import logging
 import statistics
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from src.core.types import ProtocolStatsDict
 
-from .talkhier_message import (
-    TalkHierMessage,
-    TalkHierContent,
-    MessageType,
-    ConsensusRequirement,
-    RefinementMetadata,
-    HierarchyMetadata,
-)
-from .consensus_builder import ConsensusBuilder, ConsensusScore, ValidationResult
-from ..models import AgentMessage
 from ..base import BaseAgent
+from .consensus_builder import ConsensusBuilder, ConsensusScore, ValidationResult
+from .talkhier_message import (
+    ConsensusRequirement,
+    MessageType,
+    RefinementMetadata,
+    TalkHierContent,
+    TalkHierMessage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,19 +62,19 @@ class RefinementRound:
 
     round_number: int
     phase: WorkflowPhase
-    participant_messages: List[TalkHierMessage] = field(default_factory=list)
-    consensus_score: ConsensusScore = None
-    validation_results: List[ValidationResult] = field(default_factory=list)
+    participant_messages: list[TalkHierMessage] = field(default_factory=list)
+    consensus_score: ConsensusScore | None = None
+    validation_results: list[ValidationResult] = field(default_factory=list)
 
     # Round metadata
     started_at: datetime = field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
-    duration_ms: Optional[int] = None
+    completed_at: datetime | None = None
+    duration_ms: int | None = None
 
     # Round outcomes
     consensus_achieved: bool = False
     quality_threshold_met: bool = False
-    improvements_needed: List[str] = field(default_factory=list)
+    improvements_needed: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -89,14 +87,14 @@ class RefinementResult:
     final_consensus_score: float = 0.0
 
     # Final outputs
-    synthesized_response: TalkHierContent = None
+    synthesized_response: TalkHierContent | None = None
     confidence_score: float = 0.0
     quality_score: float = 0.0
 
     # Process metadata
-    rounds: List[RefinementRound] = field(default_factory=list)
+    rounds: list[RefinementRound] = field(default_factory=list)
     total_duration_ms: int = 0
-    participating_agents: List[str] = field(default_factory=list)
+    participating_agents: list[str] = field(default_factory=list)
 
     # Improvement tracking
     initial_quality: float = 0.0
@@ -115,7 +113,7 @@ class CommunicationProtocol:
     - Message routing and delivery
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize communication protocol."""
         self.config = config or {}
 
@@ -133,8 +131,8 @@ class CommunicationProtocol:
         )
 
         # Message routing and storage
-        self.active_conversations: Dict[str, List[TalkHierMessage]] = {}
-        self.conversation_metadata: Dict[str, Dict[str, Any]] = {}
+        self.active_conversations: dict[str, list[TalkHierMessage]] = {}
+        self.conversation_metadata: dict[str, dict[str, Any]] = {}
 
         # Performance tracking
         self.total_conversations = 0
@@ -144,9 +142,9 @@ class CommunicationProtocol:
     async def initiate_refinement_workflow(
         self,
         initial_query: str,
-        participating_agents: List[BaseAgent],
-        context: Optional[Dict[str, Any]] = None,
-        consensus_threshold: Optional[float] = None,
+        participating_agents: list[BaseAgent],
+        context: dict[str, Any] | None = None,
+        consensus_threshold: float | None = None,
     ) -> RefinementResult:
         """
         Initiate TalkHier refinement workflow.
@@ -242,8 +240,8 @@ class CommunicationProtocol:
         self,
         conversation_id: str,
         initial_query: str,
-        agents: List[BaseAgent],
-        context: Optional[Dict[str, Any]],
+        agents: list[BaseAgent],
+        context: dict[str, Any] | None,
     ) -> RefinementRound:
         """Execute Round 1: Gather initial responses from all agents."""
 
@@ -286,7 +284,7 @@ class CommunicationProtocol:
                     logger.error(
                         f"Agent {agents[i].get_agent_type()} failed: {response}"
                     )
-                else:
+                elif isinstance(response, TalkHierMessage):
                     valid_responses.append(response)
                     round_1.participant_messages.append(response)
 
@@ -315,7 +313,7 @@ class CommunicationProtocol:
         return round_1
 
     async def _execute_round_2_cross_validation(
-        self, conversation_id: str, round_1: RefinementRound, agents: List[BaseAgent]
+        self, conversation_id: str, round_1: RefinementRound, agents: list[BaseAgent]
     ) -> RefinementRound:
         """Execute Round 2: Cross-validation and conflict resolution."""
 
@@ -372,7 +370,7 @@ class CommunicationProtocol:
                     logger.error(
                         f"Round 2 agent {agents[i].get_agent_type()} failed: {response}"
                     )
-                else:
+                elif isinstance(response, TalkHierMessage):
                     round_2.participant_messages.append(response)
 
             # Evaluate Round 2 consensus
@@ -401,8 +399,8 @@ class CommunicationProtocol:
     async def _execute_round_3_final_synthesis(
         self,
         conversation_id: str,
-        previous_rounds: List[RefinementRound],
-        agents: List[BaseAgent],
+        previous_rounds: list[RefinementRound],
+        agents: list[BaseAgent],
     ) -> RefinementRound:
         """Execute Round 3: Final synthesis and consensus."""
 
@@ -455,7 +453,7 @@ class CommunicationProtocol:
                     logger.error(
                         f"Round 3 agent {agents[i].get_agent_type()} failed: {response}"
                     )
-                else:
+                elif isinstance(response, TalkHierMessage):
                     round_3.participant_messages.append(response)
 
             # Final consensus evaluation
@@ -518,7 +516,7 @@ class CommunicationProtocol:
             logger.error(f"Failed to send message to {agent.get_agent_type()}: {e}")
             # Return error response
             error_content = TalkHierContent(
-                content=f"Error processing message: {str(e)}", confidence_score=0.0
+                content=f"Error processing message: {e!s}", confidence_score=0.0
             )
 
             return TalkHierMessage(
@@ -530,7 +528,7 @@ class CommunicationProtocol:
             )
 
     async def _finalize_refinement(
-        self, conversation_id: str, rounds: List[RefinementRound], start_time: datetime
+        self, conversation_id: str, rounds: list[RefinementRound], start_time: datetime
     ) -> RefinementResult:
         """Finalize refinement process and create result."""
 
@@ -586,8 +584,8 @@ class CommunicationProtocol:
         return result
 
     async def _synthesize_final_response(
-        self, rounds: List[RefinementRound]
-    ) -> Optional[TalkHierContent]:
+        self, rounds: list[RefinementRound]
+    ) -> TalkHierContent | None:
         """Synthesize final response from all refinement rounds."""
 
         if not rounds:
@@ -628,8 +626,8 @@ class CommunicationProtocol:
         return synthesized
 
     async def send_hierarchical_message(
-        self, message: TalkHierMessage, target_agents: List[BaseAgent]
-    ) -> List[TalkHierMessage]:
+        self, message: TalkHierMessage, target_agents: list[BaseAgent]
+    ) -> list[TalkHierMessage]:
         """Send message through hierarchical routing."""
 
         responses = []
@@ -681,9 +679,9 @@ class CommunicationProtocol:
 
 
 __all__ = [
+    "CommunicationMode",
     "CommunicationProtocol",
     "RefinementResult",
     "RefinementRound",
-    "CommunicationMode",
     "WorkflowPhase",
 ]

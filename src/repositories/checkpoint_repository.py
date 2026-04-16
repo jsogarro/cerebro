@@ -5,13 +5,17 @@ Provides operations for workflow checkpoint storage and recovery.
 """
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from sqlalchemy import and_, delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 from src.repositories.base import BaseRepository
+
+if TYPE_CHECKING:
+    pass
 
 
 class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
@@ -21,7 +25,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
     Manages checkpoint storage, retrieval, and cleanup for workflow recovery.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """Initialize checkpoint repository."""
         super().__init__(WorkflowCheckpoint, session)
 
@@ -112,7 +116,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         result = await self.session.execute(delete_stmt)
         await self.session.flush()
 
-        return result.rowcount
+        return cast(int, result.rowcount)
 
     async def get_recovery_point(
         self, project_id: UUID
@@ -395,7 +399,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             )
 
             result = await self.session.execute(delete_stmt)
-            deleted_count += result.rowcount
+            deleted_count += cast(int, result.rowcount)
 
         await self.session.flush()
         return deleted_count

@@ -21,8 +21,8 @@ def parse_markdown_sections(text: str) -> dict[str, str]:
         Dictionary mapping section headers to content
     """
     sections = {}
-    current_section = "Introduction"  # Default section for content before first header
-    current_content = []
+    current_section = "Introduction"
+    current_content: list[str] = []
 
     lines = text.strip().split("\n")
 
@@ -173,7 +173,7 @@ def extract_entities(text: str) -> dict[str, list[str]]:
     Returns:
         Dictionary categorizing found entities
     """
-    entities = {
+    entities: dict[str, list[str]] = {
         "people": [],
         "organizations": [],
         "locations": [],
@@ -297,9 +297,8 @@ def extract_code_blocks(text: str) -> dict[str, list[str]]:
     Returns:
         Dictionary mapping language to list of code blocks
     """
-    code_blocks = {}
+    code_blocks: dict[str, list[str]] = {}
 
-    # Pattern for fenced code blocks with optional language
     pattern = r"```(\w*)\n(.*?)```"
 
     for match in re.finditer(pattern, text, re.DOTALL):

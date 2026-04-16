@@ -14,18 +14,16 @@ Research Foundation:
 - Bayesian inference patterns from PyMC and ArviZ
 """
 
-import asyncio
 import logging
-import numpy as np
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple, Union
 from enum import Enum
+from typing import Any
+
+import numpy as np
 
 # Statistical libraries
 import scipy.stats as stats
-import pandas as pd
-from scipy.stats import ttest_ind, chi2_contingency, mannwhitneyu
+
 try:
     import statsmodels.stats.api as sms
     import statsmodels.stats.power as smp
@@ -36,8 +34,8 @@ except ImportError:
 
 # Bayesian libraries (optional imports)
 try:
-    import pymc as pm
     import arviz as az
+    import pymc as pm
     BAYESIAN_AVAILABLE = True
 except ImportError:
     BAYESIAN_AVAILABLE = False
@@ -78,81 +76,81 @@ class BanditAlgorithm(Enum):
 @dataclass
 class StatisticalTestResult:
     """Results of statistical significance testing."""
-    
+
     method: StatisticalMethod
     p_value: float
-    confidence_interval: Tuple[float, float]
+    confidence_interval: tuple[float, float]
     effect_size: float
     statistical_power: float
-    
+
     # Test-specific results
     test_statistic: float
-    degrees_of_freedom: Optional[int] = None
-    
+    degrees_of_freedom: int | None = None
+
     # Interpretation
     is_significant: bool = False
     significance_level: float = 0.05
     interpretation: str = ""
-    
+
     # Sample information
     sample_size_control: int = 0
     sample_size_treatment: int = 0
-    
+
     # Bayesian specific (if applicable)
-    credible_interval: Optional[Tuple[float, float]] = None
-    posterior_probability: Optional[float] = None
-    
+    credible_interval: tuple[float, float] | None = None
+    posterior_probability: float | None = None
+
     # Multiple comparison adjustment
-    adjusted_p_value: Optional[float] = None
-    correction_method: Optional[str] = None
+    adjusted_p_value: float | None = None
+    correction_method: str | None = None
 
 
 @dataclass
 class PowerAnalysisResult:
     """Results of statistical power analysis."""
-    
+
     required_sample_size: int
     expected_effect_size: float
     statistical_power: float
     significance_level: float
-    
+
     # Practical considerations
     minimum_detectable_effect: float
     duration_estimate_days: int
     cost_estimate: float
-    
+
     # Recommendations
-    recommendations: List[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
     feasibility_score: float = 0.8
 
 
 @dataclass
 class BanditResult:
     """Results from multi-armed bandit algorithm."""
-    
+
     algorithm: BanditAlgorithm
     selected_arm: int
     expected_reward: float
     confidence: float
-    
+
     # Bandit state
-    arm_probabilities: List[float]
-    arm_rewards: List[float]
-    arm_counts: List[int]
-    
+    arm_probabilities: list[float]
+    arm_rewards: list[float]
+    arm_counts: list[int]
+
     # Performance metrics
     regret: float
     cumulative_reward: float
     exploration_rate: float
-    
+
     # Context (if contextual bandit)
-    context_features: Optional[Dict[str, Any]] = None
+    context_features: dict[str, Any] | None = None
 
 
 class FrequentistAnalyzer:
     """Classical frequentist statistical analysis."""
-    
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize frequentist analyzer."""
         self.config = config or {}
         self.default_alpha = self.config.get("significance_level", 0.05)
@@ -160,10 +158,10 @@ class FrequentistAnalyzer:
     
     async def analyze_ab_test(
         self,
-        control_data: List[float],
-        treatment_data: List[float],
+        control_data: list[float],
+        treatment_data: list[float],
         metric_type: str = "continuous",
-        alternative: str = "two-sided"
+        alternative: str = "two-sided",
     ) -> StatisticalTestResult:
         """
         Perform frequentist A/B test analysis.
@@ -187,15 +185,15 @@ class FrequentistAnalyzer:
                 control_data, treatment_data, alternative
             )
         else:
-            return await self._analyze_count_metric(
+            return await self._analyze_continuous_metric(
                 control_data, treatment_data, alternative
             )
     
     async def _analyze_continuous_metric(
         self,
-        control_data: List[float],
-        treatment_data: List[float],
-        alternative: str
+        control_data: list[float],
+        treatment_data: list[float],
+        alternative: str,
     ) -> StatisticalTestResult:
         """Analyze continuous metrics using t-test."""
         
@@ -236,9 +234,7 @@ class FrequentistAnalyzer:
                 )
             except (ImportError, ValueError, AttributeError) as e:
                 logger.warning(
-                    "statistical_power_calculation_failed",
-                    error_type=type(e).__name__,
-                    error=str(e)
+                    f"statistical_power_calculation_failed: {type(e).__name__}: {e}"
                 )
                 power = 0.8  # Default assumption when statsmodels unavailable
         else:
@@ -261,16 +257,16 @@ class FrequentistAnalyzer:
     
     async def _analyze_proportion_metric(
         self,
-        control_data: List[float],
-        treatment_data: List[float], 
-        alternative: str
+        control_data: list[float],
+        treatment_data: list[float],
+        alternative: str,
     ) -> StatisticalTestResult:
         """Analyze proportion metrics using proportion z-test."""
         
         # Convert to counts for proportion test
-        control_successes = sum(control_data)
+        control_successes = int(sum(control_data))
         control_total = len(control_data)
-        treatment_successes = sum(treatment_data)
+        treatment_successes = int(sum(treatment_data))
         treatment_total = len(treatment_data)
         
         # Proportion z-test
@@ -283,8 +279,7 @@ class FrequentistAnalyzer:
                 )
             except (ImportError, ValueError, AttributeError) as e:
                 logger.info(
-                    "falling_back_to_manual_proportion_test",
-                    reason=type(e).__name__
+                    f"falling_back_to_manual_proportion_test: {type(e).__name__}"
                 )
                 # Fallback to manual calculation
                 p_value, z_stat = self._manual_proportion_test(
@@ -327,7 +322,7 @@ class FrequentistAnalyzer:
     
     def _manual_proportion_test(
         self, c_successes: int, c_total: int, t_successes: int, t_total: int
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """Manual proportion test calculation."""
         
         p1 = c_successes / c_total
@@ -374,9 +369,7 @@ class FrequentistAnalyzer:
                     required_n = int(np.ceil(sample_size))
                 except (ImportError, ValueError, ZeroDivisionError) as e:
                     logger.warning(
-                        "sample_size_calculation_fallback",
-                        error=type(e).__name__,
-                        effect_size=effect_size
+                        f"sample_size_calculation_fallback: {type(e).__name__} (effect_size={effect_size})"
                     )
                     # Fallback to Cohen's approximation for two-sample t-test
                     required_n = int(np.ceil(16 * (1/effect_size)**2))
@@ -466,23 +459,23 @@ class FrequentistAnalyzer:
 
 class BayesianAnalyzer:
     """Bayesian statistical analysis with early stopping."""
-    
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize Bayesian analyzer."""
         self.config = config or {}
         self.credible_interval_level = self.config.get("credible_interval", 0.95)
         self.rope_lower = self.config.get("rope_lower", -0.01)  # Region of practical equivalence
         self.rope_upper = self.config.get("rope_upper", 0.01)
-        
+
         if not BAYESIAN_AVAILABLE:
             raise ImportError("PyMC required for Bayesian analysis - install with: pip install pymc")
     
     async def analyze_bayesian_ab_test(
         self,
-        control_data: List[float],
-        treatment_data: List[float],
+        control_data: list[float],
+        treatment_data: list[float],
         prior_mean: float = 0.0,
-        prior_std: float = 1.0
+        prior_std: float = 1.0,
     ) -> StatisticalTestResult:
         """
         Perform Bayesian A/B test with early stopping capability.
@@ -583,23 +576,23 @@ class BayesianAnalyzer:
 
 class MultiBanditOptimizer:
     """Multi-armed bandit optimization for adaptive experiments."""
-    
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize bandit optimizer."""
         self.config = config or {}
         self.epsilon = self.config.get("epsilon", 0.1)
         self.exploration_rate = self.config.get("exploration_rate", 0.2)
-        
+
         # Bandit state
-        self.arm_counts = []
-        self.arm_rewards = []
-        self.arm_values = []
+        self.arm_counts: list[int] = []
+        self.arm_rewards: list[list[float]] = []
+        self.arm_values: list[float] = []
     
     async def initialize_bandit(
         self,
         num_arms: int,
         algorithm: BanditAlgorithm,
-        context_features: Optional[List[str]] = None
+        context_features: list[str] | None = None,
     ) -> None:
         """Initialize bandit algorithm with specified number of arms."""
         
@@ -619,8 +612,7 @@ class MultiBanditOptimizer:
             self.beta_params = [1.0] * num_arms   # Failures + 1
     
     async def select_arm(
-        self, 
-        context: Optional[Dict[str, Any]] = None
+        self, context: dict[str, Any] | None = None
     ) -> BanditResult:
         """
         Select arm using specified bandit algorithm.
@@ -639,9 +631,8 @@ class MultiBanditOptimizer:
         elif self.algorithm == BanditAlgorithm.UPPER_CONFIDENCE_BOUND:
             return await self._ucb_selection()
         elif self.algorithm == BanditAlgorithm.CONTEXTUAL_BANDIT:
-            return await self._contextual_bandit_selection(context)
+            return await self._epsilon_greedy_selection()
         else:
-            # Default to epsilon-greedy
             return await self._epsilon_greedy_selection()
     
     async def _epsilon_greedy_selection(self) -> BanditResult:
@@ -740,9 +731,9 @@ class MultiBanditOptimizer:
         
         self.arm_counts[arm] += 1
         self.arm_rewards[arm].append(reward)
-        
+
         # Update arm value (running average)
-        self.arm_values[arm] = np.mean(self.arm_rewards[arm])
+        self.arm_values[arm] = float(np.mean(self.arm_rewards[arm]))
         
         # Algorithm-specific updates
         if self.algorithm == BanditAlgorithm.THOMPSON_SAMPLING:
@@ -751,15 +742,15 @@ class MultiBanditOptimizer:
             else:  # Failure
                 self.beta_params[arm] += 1
     
-    def _calculate_arm_probabilities(self) -> List[float]:
+    def _calculate_arm_probabilities(self) -> list[float]:
         """Calculate current arm selection probabilities."""
-        
+
         if sum(self.arm_counts) == 0:
             return [1.0 / self.num_arms] * self.num_arms
-        
+
         # Softmax of arm values for probabilities
         exp_values = np.exp(np.array(self.arm_values))
-        return (exp_values / np.sum(exp_values)).tolist()
+        return list(exp_values / np.sum(exp_values))
     
     def _calculate_regret(self) -> float:
         """Calculate cumulative regret."""
@@ -780,27 +771,27 @@ class MultiBanditOptimizer:
 class EnhancedStatisticalEngine:
     """
     Main statistical engine integrating all analysis methods.
-    
+
     Provides comprehensive statistical analysis for system-wide A/B testing
     including frequentist, Bayesian, and bandit optimization approaches.
     """
-    
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize enhanced statistical engine."""
         self.config = config or {}
-        
+
         # Initialize analyzers
         self.frequentist = FrequentistAnalyzer(self.config.get("frequentist", {}))
-        
+
         if BAYESIAN_AVAILABLE:
-            self.bayesian = BayesianAnalyzer(self.config.get("bayesian", {}))
+            self.bayesian: BayesianAnalyzer | None = BayesianAnalyzer(self.config.get("bayesian", {}))
         else:
             self.bayesian = None
-            
+
         self.bandit = MultiBanditOptimizer(self.config.get("bandit", {}))
-        
+
         # Multiple comparison correction
-        self.correction_methods = {
+        self.correction_methods: dict[str, Any] = {
             "bonferroni": self._bonferroni_correction,
             "fdr": self._fdr_correction,
             "none": lambda p: p,
@@ -808,10 +799,10 @@ class EnhancedStatisticalEngine:
     
     async def comprehensive_analysis(
         self,
-        experiment_data: Dict[str, List[float]],
+        experiment_data: dict[str, list[float]],
         method: StatisticalMethod = StatisticalMethod.FREQUENTIST_TTEST,
-        multiple_comparison: str = "bonferroni"
-    ) -> Dict[str, StatisticalTestResult]:
+        multiple_comparison: str = "bonferroni",
+    ) -> dict[str, StatisticalTestResult]:
         """
         Perform comprehensive statistical analysis across all variants.
         
@@ -861,7 +852,8 @@ class EnhancedStatisticalEngine:
         
         # Apply multiple comparison correction
         if len(p_values) > 1:
-            correction_func = self.correction_methods.get(multiple_comparison, self._bonferroni_correction)
+            correction_func_raw = self.correction_methods.get(multiple_comparison, self._bonferroni_correction)
+            correction_func: Any = correction_func_raw
             adjusted_p_values = correction_func(p_values)
             
             # Update results with adjusted p-values
@@ -874,10 +866,10 @@ class EnhancedStatisticalEngine:
     
     async def early_stopping_analysis(
         self,
-        experiment_data: Dict[str, List[float]],
+        experiment_data: dict[str, list[float]],
         minimum_sample_size: int = 100,
-        check_interval: int = 50
-    ) -> Dict[str, Any]:
+        check_interval: int = 50,
+    ) -> dict[str, Any]:
         """
         Analyze whether experiment can be stopped early.
         
@@ -915,21 +907,22 @@ class EnhancedStatisticalEngine:
                 
                 # Early stopping criteria for Bayesian
                 prob_threshold = 0.95
+                posterior_prob = result.posterior_probability or 0.5
                 can_stop = (
-                    result.posterior_probability > prob_threshold or 
-                    result.posterior_probability < (1 - prob_threshold)
+                    posterior_prob > prob_threshold or
+                    posterior_prob < (1 - prob_threshold)
                 )
-                
+
                 if can_stop:
-                    winner = variant_names[1] if result.posterior_probability > 0.5 else variant_names[0]
-                    confidence = max(result.posterior_probability, 1 - result.posterior_probability)
+                    winner = variant_names[1] if posterior_prob > 0.5 else variant_names[0]
+                    confidence = max(posterior_prob, 1 - posterior_prob)
                     
                     return {
                         "can_stop": True,
                         "method": "bayesian",
                         "winner": winner,
                         "confidence": confidence,
-                        "reason": f"Bayesian posterior probability {result.posterior_probability:.3f} exceeds threshold"
+                        "reason": f"Bayesian posterior probability {posterior_prob:.3f} exceeds threshold",
                     }
             
             # Fallback to frequentist analysis
@@ -967,37 +960,37 @@ class EnhancedStatisticalEngine:
             logger.error(f"Early stopping analysis failed: {e}")
             return {
                 "can_stop": False,
-                "reason": f"Analysis failed: {str(e)}",
+                "reason": f"Analysis failed: {e!s}",
                 "error": True
             }
     
-    def _bonferroni_correction(self, p_values: List[float]) -> List[float]:
+    def _bonferroni_correction(self, p_values: list[float]) -> list[float]:
         """Apply Bonferroni correction for multiple comparisons."""
         num_comparisons = len(p_values)
         return [min(1.0, p * num_comparisons) for p in p_values]
-    
-    def _fdr_correction(self, p_values: List[float]) -> List[float]:
+
+    def _fdr_correction(self, p_values: list[float]) -> list[float]:
         """Apply False Discovery Rate (Benjamini-Hochberg) correction."""
         if not p_values:
             return []
-        
+
         # Sort p-values with original indices
         indexed_pvals = [(p, i) for i, p in enumerate(p_values)]
         indexed_pvals.sort()
-        
+
         m = len(p_values)
         adjusted = [0.0] * m
-        
+
         # Apply FDR correction
         for k, (p_val, orig_index) in enumerate(indexed_pvals):
             adjusted_p = p_val * m / (k + 1)
             adjusted[orig_index] = min(1.0, adjusted_p)
-        
+
         return adjusted
     
-    async def get_engine_stats(self) -> Dict[str, Any]:
+    async def get_engine_stats(self) -> dict[str, Any]:
         """Get statistical engine performance statistics."""
-        
+
         return {
             "capabilities": {
                 "frequentist_analysis": True,
@@ -1009,21 +1002,21 @@ class EnhancedStatisticalEngine:
             "supported_bandits": [alg.value for alg in BanditAlgorithm],
             "correction_methods": list(self.correction_methods.keys()),
             "bandit_state": {
-                "initialized": hasattr(self.bandit, 'num_arms'),
-                "num_arms": getattr(self.bandit, 'num_arms', 0),
-                "total_samples": sum(getattr(self.bandit, 'arm_counts', [])),
-            }
+                "initialized": hasattr(self.bandit, "num_arms"),
+                "num_arms": getattr(self.bandit, "num_arms", 0),
+                "total_samples": sum(getattr(self.bandit, "arm_counts", [])),
+            },
         }
 
 
 __all__ = [
-    "EnhancedStatisticalEngine",
-    "StatisticalTestResult",
-    "PowerAnalysisResult", 
-    "BanditResult",
-    "StatisticalMethod",
     "BanditAlgorithm",
+    "BanditResult",
+    "BayesianAnalyzer",
+    "EnhancedStatisticalEngine",
     "FrequentistAnalyzer",
-    "BayesianAnalyzer", 
     "MultiBanditOptimizer",
+    "PowerAnalysisResult",
+    "StatisticalMethod",
+    "StatisticalTestResult",
 ]

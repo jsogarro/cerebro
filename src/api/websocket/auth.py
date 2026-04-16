@@ -59,7 +59,7 @@ async def verify_websocket_token(token: str | None) -> str | None:
         )
 
         user_id = payload.get("sub")
-        if not user_id:
+        if not user_id or not isinstance(user_id, str):
             raise WebSocketAuthError("Invalid token: missing user ID")
 
         logger.info(

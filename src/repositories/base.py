@@ -40,7 +40,7 @@ class BaseRepository(Generic[ModelType]):
         self.model = model
         self.session = session
 
-    async def create(self, **kwargs) -> ModelType:
+    async def create(self, **kwargs: Any) -> ModelType:
         """
         Create new entity.
 
@@ -296,6 +296,7 @@ class BaseRepository(Generic[ModelType]):
 
         result = await self.session.execute(query)
         count = result.scalar()
+        assert count is not None
         return count > 0
 
     async def count(
@@ -458,7 +459,7 @@ class BaseRepository(Generic[ModelType]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    def build_query(self) -> Select:
+    def build_query(self) -> Select[tuple[ModelType]]:
         """
         Build base query for custom operations.
 

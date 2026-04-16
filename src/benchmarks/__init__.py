@@ -1,8 +1,8 @@
 """Research replication and benchmarking system."""
 
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -13,8 +13,8 @@ class BenchmarkDataset:
     description: str
     domain: str
     difficulty: str
-    evaluation_metrics: List[str]
-    human_baseline_score: Optional[float] = None
+    evaluation_metrics: list[str]
+    human_baseline_score: float | None = None
 
 
 class BenchmarkLibrary:
@@ -32,7 +32,7 @@ class BenchmarkLibrary:
         )
     }
     
-    def get_dataset(self, dataset_id: str) -> Optional[BenchmarkDataset]:
+    def get_dataset(self, dataset_id: str) -> BenchmarkDataset | None:
         """Get dataset by ID."""
         return self.BUILTIN_DATASETS.get(dataset_id)
 
@@ -42,8 +42,8 @@ class ReplicationPackage:
     """Package for research replication."""
     project_id: str
     query: str
-    scope: Dict
-    agents: List[str]
+    scope: dict[str, Any]
+    agents: list[str]
     created_at: datetime = datetime.now()
 
 
@@ -59,15 +59,15 @@ class ResearchReplicationToolkit:
             agents=[]
         )
     
-    async def replicate(self, config: Dict) -> Dict:
+    async def replicate(self, config: dict[str, Any]) -> dict[str, Any]:
         """Replicate a project."""
         return {'status': 'completed'}
 
 
 class BenchmarkEvaluator:
     """Evaluate agents against benchmarks."""
-    
-    async def run_evaluation(self, agent_id: str, dataset_id: str) -> Dict:
+
+    async def run_evaluation(self, agent_id: str, dataset_id: str) -> dict[str, Any]:
         """Run evaluation."""
         return {
             'agent_id': agent_id,
@@ -77,11 +77,11 @@ class BenchmarkEvaluator:
 
 class PeerReviewSystem:
     """Peer review workflow."""
-    
-    async def initiate_review(self, project_id: str, num_reviewers: int = 2) -> Dict:
+
+    async def initiate_review(self, project_id: str, num_reviewers: int = 2) -> dict[str, Any]:
         """Initiate review."""
         return {'project_id': project_id, 'reviewers': []}
-    
-    async def submit_review(self, assignment_id: str, review_data: Dict) -> Dict:
+
+    async def submit_review(self, assignment_id: str, review_data: dict[str, Any]) -> dict[str, Any]:
         """Submit review."""
         return {'status': 'submitted'}

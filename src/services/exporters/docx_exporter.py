@@ -7,19 +7,24 @@ following functional programming principles with pure transformation functions.
 
 import io
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from docx.document import Document as DocxDocument
+else:
+    DocxDocument = Any
 
 try:
     from docx import Document
-    from docx.shared import Inches, Pt
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.enum.style import WD_STYLE_TYPE
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches, Pt
     PYTHON_DOCX_AVAILABLE = True
 except ImportError:
     PYTHON_DOCX_AVAILABLE = False
-    Document = None
+    Document = None  # type: ignore[assignment]
 
-from src.models.report import Report, ReportFormat, ReportOutput
+from src.models.report import Report, ReportFormat, ReportOutput, ReportSection
 from src.services.report_config import ReportSettings
 
 logger = logging.getLogger(__name__)
@@ -32,14 +37,14 @@ class DOCXExportError(Exception):
 
 class DOCXExporter:
     """Service for exporting reports to DOCX format using python-docx."""
-    
-    def __init__(self, settings: Optional[ReportSettings] = None):
+
+    def __init__(self, settings: ReportSettings | None = None):
         """Initialize DOCX exporter."""
         if not PYTHON_DOCX_AVAILABLE:
             raise DOCXExportError(
                 "python-docx is not available. Install with: pip install python-docx"
             )
-        
+
         self.settings = settings or ReportSettings()
     
     def export_to_docx(self, report: Report) -> ReportOutput:
@@ -85,10 +90,12 @@ class DOCXExporter:
             
             # Save to bytes
             docx_bytes = self._document_to_bytes(doc)
-            
+
             return ReportOutput(
                 format=ReportFormat.DOCX,
                 content=docx_bytes,
+                file_path=None,
+                file_size=len(docx_bytes),
                 mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 encoding="binary"
             )
@@ -97,7 +104,7 @@ class DOCXExporter:
             logger.error(f"DOCX export failed: {e}")
             raise DOCXExportError(f"Failed to generate DOCX: {e}")
     
-    def _setup_document_styles(self, doc: Document) -> None:
+    def _setup_document_styles(self, doc: DocxDocument) -> None:
         """Set up custom document styles."""
         # Get default styles
         styles = doc.styles
@@ -133,7 +140,7 @@ class DOCXExporter:
         except Exception as e:
             logger.warning(f"Could not create custom styles: {e}")
     
-    def _add_title_page(self, doc: Document, report: Report) -> None:
+    def _add_title_page(self, doc: DocxDocument, report: Report) -> None:
         """Add title page to document."""
         # Title
         title_paragraph = doc.add_paragraph(report.title)
@@ -163,11 +170,11 @@ class DOCXExporter:
             
         date_paragraph = doc.add_paragraph(f"Generated: {report.metadata.generated_at.strftime('%B %d, %Y')}")
         date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+
         # Page break
-        doc.add_page_break()
+        doc.add_page_break()  # type: ignore[no-untyped-call]
     
-    def _add_metadata_section(self, doc: Document, report: Report) -> None:
+    def _add_metadata_section(self, doc: DocxDocument, report: Report) -> None:
         """Add metadata section to document."""
         # Metadata heading
         doc.add_heading('Report Metadata', level=1)
@@ -209,17 +216,17 @@ class DOCXExporter:
         
         doc.add_paragraph()  # Empty line
     
-    def _add_executive_summary(self, doc: Document, report: Report) -> None:
+    def _add_executive_summary(self, doc: DocxDocument, report: Report) -> None:
         """Add executive summary section."""
         doc.add_heading('Executive Summary', level=1)
-        
+
         # Convert markdown-like content to plain text
-        summary_text = self._convert_markdown_to_text(report.executive_summary)
+        summary_text = self._convert_markdown_to_text(report.executive_summary or "")
         doc.add_paragraph(summary_text)
         
         doc.add_paragraph()  # Empty line
     
-    def _add_toc_placeholder(self, doc: Document) -> None:
+    def _add_toc_placeholder(self, doc: DocxDocument) -> None:
         """Add table of contents placeholder."""
         doc.add_heading('Table of Contents', level=1)
         
@@ -231,7 +238,7 @@ class DOCXExporter:
         
         doc.add_paragraph()  # Empty line
     
-    def _add_section(self, doc: Document, section) -> None:
+    def _add_section(self, doc: DocxDocument, section: ReportSection) -> None:
         """Add a report section to the document."""
         # Section heading
         heading_level = min(section.level + 1, 6)  # Word supports up to 6 heading levels
@@ -248,7 +255,7 @@ class DOCXExporter:
         
         doc.add_paragraph()  # Empty line after section
     
-    def _add_subsection(self, doc: Document, subsection, level: int) -> None:
+    def _add_subsection(self, doc: DocxDocument, subsection: ReportSection, level: int) -> None:
         """Add a subsection to the document."""
         heading_level = min(level + 1, 6)
         doc.add_heading(subsection.title, level=heading_level)
@@ -257,7 +264,7 @@ class DOCXExporter:
         if content_text.strip():
             doc.add_paragraph(content_text)
     
-    def _add_citations(self, doc: Document, report: Report) -> None:
+    def _add_citations(self, doc: DocxDocument, report: Report) -> None:
         """Add citations section to document."""
         doc.add_heading('References', level=1)
         
@@ -295,23 +302,23 @@ class DOCXExporter:
         
         return '\n'.join(clean_lines)
     
-    def _document_to_bytes(self, doc: Document) -> bytes:
+    def _document_to_bytes(self, doc: DocxDocument) -> bytes:
         """Convert Document object to bytes."""
         # Save document to BytesIO
         doc_bytes = io.BytesIO()
         doc.save(doc_bytes)
         doc_bytes.seek(0)
-        
+
         return doc_bytes.getvalue()
 
 
-def create_docx_exporter(settings: Optional[ReportSettings] = None) -> DOCXExporter:
+def create_docx_exporter(settings: ReportSettings | None = None) -> DOCXExporter:
     """Factory function to create a DOCX exporter."""
     return DOCXExporter(settings)
 
 
 __all__ = [
+    "DOCXExportError",
     "DOCXExporter",
-    "DOCXExportError", 
     "create_docx_exporter",
 ]

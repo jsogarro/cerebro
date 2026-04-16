@@ -4,6 +4,8 @@ Password service for secure password handling.
 Provides password hashing, validation, and management features.
 """
 
+from __future__ import annotations
+
 import hashlib
 import secrets
 import string
@@ -32,7 +34,7 @@ class PasswordService:
 
     def __init__(
         self,
-        redis_client: redis.Redis | None = None,
+        redis_client: redis.Redis[Any] | None = None,
         bcrypt_rounds: int = 12,
         min_password_length: int = 12,
         password_history_limit: int = 5,
@@ -64,7 +66,7 @@ class PasswordService:
         self.reset_token_prefix = "password:reset:"
 
         # HTTP client for breach checking
-        self.http_client = None
+        self.http_client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "PasswordService":
         """Async context manager entry."""
@@ -72,7 +74,7 @@ class PasswordService:
             self.http_client = httpx.AsyncClient(timeout=5.0)
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         if self.http_client:
             await self.http_client.aclose()

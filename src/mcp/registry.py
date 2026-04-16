@@ -18,13 +18,13 @@ class ToolRegistry:
     Manages tool registration, discovery, and versioning.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize tool registry."""
         self._tools: dict[str, BaseMCPTool] = {}
         self._metadata: dict[str, ToolMetadata] = {}
         self._versions: dict[str, list[str]] = {}
 
-    def register(self, tool: BaseMCPTool):
+    def register(self, tool: BaseMCPTool) -> None:
         """
         Register a tool.
 
@@ -164,7 +164,7 @@ class ToolRegistry:
         """
         return self._versions.get(name, [])
 
-    def get_registry_info(self) -> dict[str, any]:
+    def get_registry_info(self) -> dict[str, object]:
         """
         Get registry information.
 
@@ -192,7 +192,7 @@ class ToolRegistry:
             tags.update(metadata.tags)
         return sorted(list(tags))
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all registered tools."""
         self._tools.clear()
         self._metadata.clear()

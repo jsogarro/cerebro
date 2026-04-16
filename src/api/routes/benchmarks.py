@@ -1,12 +1,14 @@
 """API routes for benchmarks."""
 
+from typing import Any
+
 from fastapi import APIRouter
 
 router = APIRouter(prefix="/api/v1/benchmarks")
 
 
 @router.get("/")
-async def list_benchmarks() -> dict[str, list]:
+async def list_benchmarks() -> dict[str, list[Any]]:
     """List available benchmarks."""
     return {"benchmarks": []}
 
@@ -24,6 +26,6 @@ async def replicate_project(project_id: str) -> dict[str, str]:
 
 
 @router.get("/results/{evaluation_id}")
-async def get_results(evaluation_id: str) -> dict[str, str | dict]:
+async def get_results(evaluation_id: str) -> dict[str, str | dict[str, Any]]:
     """Get evaluation results."""
     return {"evaluation_id": evaluation_id, "scores": {}}

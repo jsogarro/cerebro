@@ -6,13 +6,13 @@ This agent specializes in formatting citations and verifying sources.
 
 import hashlib
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from src.core.constants import LONG_TERM_CACHE_TTL
+import orjson
+
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
-from src.services.parsers.json_parser import parse_json_response
-from src.utils.serialization import serialize_to_str, serialize
+from src.core.constants import LONG_TERM_CACHE_TTL
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ class CitationAgent(BaseAgent):
             return result
             
         except Exception as e:
-            self.log_error(f"Citation formatting failed: {str(e)}")
+            self.log_error(f"Citation formatting failed: {e!s}")
             return self.handle_error(task, e)
     
     async def validate_result(self, result: AgentResult) -> bool:
@@ -139,8 +139,8 @@ class CitationAgent(BaseAgent):
     
     def _calculate_confidence(
         self,
-        citation_data: Dict[str, Any],
-        sources: List[Dict[str, Any]],
+        citation_data: dict[str, Any],
+        sources: list[dict[str, Any]],
         mcp_available: bool = False
     ) -> float:
         """Calculate confidence score based on citation completeness and MCP integration."""
@@ -170,9 +170,9 @@ class CitationAgent(BaseAgent):
         """Generate a cache key for the task."""
         sources = task.input_data.get("sources", [])
         style = task.input_data.get("style", "APA")
-        
+
         # Create a stable hash from sources
-        source_str = serialize_to_str(sources, sort_keys=True)
+        source_str = orjson.dumps(sources, option=orjson.OPT_SORT_KEYS).decode()
         key_parts = [
             self.get_agent_type(),
             style,
@@ -181,20 +181,20 @@ class CitationAgent(BaseAgent):
         key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
     
-    def _build_prompt(self, sources: List[Dict[str, Any]], style: str) -> str:
+    def _build_prompt(self, sources: list[dict[str, Any]], style: str) -> str:
         """Build prompt for Gemini."""
-        sources_text = serialize_to_str(sources, indent=2)
+        sources_text = orjson.dumps(sources, option=orjson.OPT_INDENT_2).decode()
         return f"""Format the following sources according to {style} citation style:
-        
+
         {sources_text}
-        
+
         Provide formatted citations and bibliography in JSON format."""
     
     def _generate_mock_citations(
         self,
-        sources: List[Dict[str, Any]],
+        sources: list[dict[str, Any]],
         style: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate mock citations for testing."""
         formatted_citations = []
         verification_status = []
@@ -231,9 +231,9 @@ class CitationAgent(BaseAgent):
     
     async def _format_citations_with_mcp(
         self,
-        sources: List[Dict[str, Any]],
+        sources: list[dict[str, Any]],
         style: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Format citations using MCP Citation Tool.
         
@@ -256,7 +256,7 @@ class CitationAgent(BaseAgent):
             
             if result.get("success"):
                 self.log_info(f"MCP citation formatting successful: {len(sources)} sources in {style} style")
-                return result
+                return dict(result)
             else:
                 raise Exception(f"MCP citation formatting failed: {result.get('error', 'Unknown error')}")
                 
@@ -264,7 +264,7 @@ class CitationAgent(BaseAgent):
             self.log_error(f"MCP citation formatting failed: {e}")
             return self._generate_mock_citations(sources, style)
     
-    async def _verify_sources_with_mcp(self, sources: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def _verify_sources_with_mcp(self, sources: list[dict[str, Any]]) -> dict[str, Any]:
         """
         Verify source credibility and resolve DOIs using MCP tools.
         
@@ -303,9 +303,9 @@ class CitationAgent(BaseAgent):
     
     async def _verify_single_source(
         self,
-        source: Dict[str, Any],
+        source: dict[str, Any],
         source_id: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Verify a single source using various criteria.
         
@@ -316,7 +316,7 @@ class CitationAgent(BaseAgent):
         Returns:
             Verification result for the source
         """
-        verification_result = {
+        verification_result: dict[str, Any] = {
             "source_id": source_id,
             "verified": False,
             "quality_score": 0.5,
@@ -324,14 +324,16 @@ class CitationAgent(BaseAgent):
             "doi_resolved": False,
             "doi_info": {}
         }
-        
+        quality_score: float = 0.5
+        issues: list[str] = []
+
         # Check required fields
         required_fields = ["title", "authors", "year"]
         missing_fields = [field for field in required_fields if not source.get(field)]
-        
+
         if missing_fields:
-            verification_result["issues"].append(f"Missing fields: {', '.join(missing_fields)}")
-            verification_result["quality_score"] -= 0.2
+            issues.append(f"Missing fields: {', '.join(missing_fields)}")
+            quality_score -= 0.2
         
         # Check DOI resolution if available
         if source.get("doi"):
@@ -339,9 +341,9 @@ class CitationAgent(BaseAgent):
             if doi_info.get("resolved"):
                 verification_result["doi_resolved"] = True
                 verification_result["doi_info"] = doi_info
-                verification_result["quality_score"] += 0.2
+                quality_score += 0.2
             else:
-                verification_result["issues"].append("DOI could not be resolved")
+                issues.append("DOI could not be resolved")
         
         # Check publication year
         year = source.get("year")
@@ -350,30 +352,32 @@ class CitationAgent(BaseAgent):
                 year_int = int(year)
                 current_year = 2024
                 if year_int > current_year:
-                    verification_result["issues"].append("Future publication year")
-                    verification_result["quality_score"] -= 0.1
+                    issues.append("Future publication year")
+                    quality_score -= 0.1
                 elif year_int < 1800:
-                    verification_result["issues"].append("Very old publication year")
-                    verification_result["quality_score"] -= 0.1
+                    issues.append("Very old publication year")
+                    quality_score -= 0.1
             except (ValueError, TypeError):
-                verification_result["issues"].append("Invalid year format")
-                verification_result["quality_score"] -= 0.1
+                issues.append("Invalid year format")
+                quality_score -= 0.1
         
         # Check journal credibility (simple heuristic)
         journal = source.get("journal", "").lower()
         reputable_indicators = ["nature", "science", "plos", "ieee", "acm", "springer", "elsevier"]
         if any(indicator in journal for indicator in reputable_indicators):
-            verification_result["quality_score"] += 0.1
-        
+            quality_score += 0.1
+
         # Overall verification status
+        verification_result["quality_score"] = quality_score
+        verification_result["issues"] = issues
         verification_result["verified"] = (
-            verification_result["quality_score"] >= 0.5 and
-            len(verification_result["issues"]) <= 1
+            quality_score >= 0.5 and
+            len(issues) <= 1
         )
-        
+
         return verification_result
     
-    async def _resolve_doi(self, doi: str) -> Dict[str, Any]:
+    async def _resolve_doi(self, doi: str) -> dict[str, Any]:
         """
         Resolve DOI information.
         
@@ -402,9 +406,9 @@ class CitationAgent(BaseAgent):
     
     async def _generate_bibliography_with_mcp(
         self,
-        sources: List[Dict[str, Any]],
+        sources: list[dict[str, Any]],
         style: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate bibliography using MCP Citation Tool.
         
@@ -462,9 +466,9 @@ class CitationAgent(BaseAgent):
     
     async def _export_citations(
         self,
-        citation_result: Dict[str, Any],
-        export_formats: List[str]
-    ) -> Dict[str, Any]:
+        citation_result: dict[str, Any],
+        export_formats: list[str]
+    ) -> dict[str, Any]:
         """
         Export citations to multiple formats.
         
@@ -492,7 +496,7 @@ class CitationAgent(BaseAgent):
         
         return exports
     
-    def _export_to_text(self, citations: List[Any]) -> str:
+    def _export_to_text(self, citations: list[Any]) -> str:
         """Export citations to plain text format."""
         if not citations:
             return ""
@@ -507,7 +511,7 @@ class CitationAgent(BaseAgent):
         
         return "\\n".join(text_lines)
     
-    async def _export_to_bibtex(self, citations: List[Any]) -> str:
+    async def _export_to_bibtex(self, citations: list[Any]) -> str:
         """Export citations to BibTeX format."""
         if not self.mcp_integration:
             return "% BibTeX export requires MCP integration"
@@ -520,12 +524,11 @@ class CitationAgent(BaseAgent):
             self.log_error(f"BibTeX export failed: {e}")
             return f"% BibTeX export failed: {e}"
     
-    def _export_to_json(self, citations: List[Any]) -> str:
+    def _export_to_json(self, citations: list[Any]) -> str:
         """Export citations to JSON format."""
-        import json
-        return serialize_to_str(citations, indent=2, ensure_ascii=False)
+        return orjson.dumps(citations, option=orjson.OPT_INDENT_2).decode()
     
-    def _export_to_csv(self, citations: List[Any]) -> str:
+    def _export_to_csv(self, citations: list[Any]) -> str:
         """Export citations to CSV format."""
         csv_lines = ["Citation"]
         
@@ -541,7 +544,7 @@ class CitationAgent(BaseAgent):
         
         return "\\n".join(csv_lines)
     
-    def _format_single_citation(self, source: Dict[str, Any], style: str) -> str:
+    def _format_single_citation(self, source: dict[str, Any], style: str) -> str:
         """
         Format a single citation in the specified style.
         
@@ -570,7 +573,7 @@ class CitationAgent(BaseAgent):
         
         return citation
     
-    def _get_mcp_status(self) -> Dict[str, Any]:
+    def _get_mcp_status(self) -> dict[str, Any]:
         """Get MCP integration status for citations."""
         if not self.mcp_integration:
             return {"enabled": False, "status": "not_configured"}

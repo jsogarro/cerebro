@@ -5,14 +5,23 @@ Main FastAPI application for Research Platform.
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 from structlog import get_logger
 
 from src.api.auth import router as auth_router
-from src.api.routes import health, reports, research, websocket, agent_api, query_api, masr_api, supervisor_api
+from src.api.routes import (
+    agent_api,
+    health,
+    masr_api,
+    query_api,
+    reports,
+    research,
+    supervisor_api,
+    websocket,
+)
 from src.api.services.event_publisher import event_publisher
 from src.api.websocket.connection_manager import websocket_manager
 from src.core.config import settings
@@ -22,7 +31,7 @@ logger = get_logger()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifecycle."""
     # Startup
     logger.info("Starting Research Platform API", environment=settings.ENVIRONMENT)
@@ -99,7 +108,7 @@ app.include_router(websocket.router, tags=["websocket"])
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc) -> JSONResponse:
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Global exception handler."""
     logger.error(
         "Unhandled exception",

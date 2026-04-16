@@ -5,12 +5,16 @@ Represents users of the research platform.
 """
 
 from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, DateTime, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
+
+if TYPE_CHECKING:
+    pass
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -27,41 +31,41 @@ class User(BaseModel):
     __tablename__ = "users"
 
     # Authentication fields
-    email = Column(String(255), nullable=False, unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
 
-    username = Column(String(100), nullable=False, unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
 
-    hashed_password = Column(String(255), nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Profile fields
-    full_name = Column(String(255), nullable=True)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    organization = Column(String(255), nullable=True)
+    organization: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    role = Column(
-        String(50), nullable=True, comment="User role (researcher, admin, etc.)"
+    role: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
     )
 
     # Account status
-    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
 
-    is_superuser = Column(Boolean, nullable=False, default=False)
+    is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    is_verified = Column(
-        Boolean, nullable=False, default=False, comment="Email verification status"
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
     )
 
     # Activity tracking
-    last_login = Column(DateTime(timezone=True), nullable=True)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    login_count = Column(Integer, nullable=False, default=0)
+    login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Account limits
-    max_projects = Column(
-        Integer, nullable=True, comment="Maximum number of concurrent projects"
+    max_projects: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
     )
 
-    api_rate_limit = Column(Integer, nullable=True, comment="API calls per hour limit")
+    api_rate_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Relationships
     research_projects = relationship(
@@ -127,7 +131,7 @@ class User(BaseModel):
         username: str,
         password: str,
         full_name: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> "User":
         """
         Create a new user with hashed password.
@@ -213,21 +217,23 @@ class User(BaseModel):
         if self.max_projects is None:
             return True
 
+        from src.models.db.research_project import ResearchProject
+
         # Check current project count
-        active_projects = (
+        active_projects: int = (
             self.research_projects.filter_by(deleted_at=None)
             .filter(ResearchProject.status.in_(["draft", "in_progress"]))
             .count()
         )
 
-        return active_projects < self.max_projects
+        return bool(active_projects < self.max_projects)
 
     @property
     def display_name(self) -> str:
         """Get display name for user."""
-        return self.full_name or self.username
+        return str(self.full_name or self.username)
 
-    def to_dict(self, include_sensitive: bool = False) -> dict:
+    def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:
         """
         Convert to dictionary.
 
@@ -237,7 +243,7 @@ class User(BaseModel):
         Returns:
             Dictionary representation
         """
-        data = {
+        data: dict[str, Any] = {
             "id": str(self.id),
             "email": self.email,
             "username": self.username,

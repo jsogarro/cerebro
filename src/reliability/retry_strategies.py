@@ -58,8 +58,8 @@ class RetryPolicy:
     max_delay: float = 60.0
     exponential_base: float = 2.0
     jitter: bool = True
-    retryable_exceptions: tuple = (Exception,)
-    non_retryable_exceptions: tuple = ()
+    retryable_exceptions: tuple[type[Exception], ...] = (Exception,)
+    non_retryable_exceptions: tuple[type[Exception], ...] = ()
     retry_budget: Optional["RetryBudget"] = None
 
     def should_retry(self, exception: Exception, attempt: int) -> bool:
@@ -119,7 +119,7 @@ class CircuitBreakerConfig:
     success_threshold: int = 2
     timeout: float = 60.0
     half_open_requests: int = 1
-    exclude_exceptions: tuple = ()
+    exclude_exceptions: tuple[type[Exception], ...] = ()
 
 
 @dataclass
@@ -130,7 +130,7 @@ class CircuitBreakerMetrics:
     successful_calls: int = 0
     failed_calls: int = 0
     rejected_calls: int = 0
-    state_transitions: list[tuple] = field(default_factory=list)
+    state_transitions: list[tuple[Any, Any, datetime]] = field(default_factory=list)
     last_failure_time: datetime | None = None
     consecutive_failures: int = 0
     consecutive_successes: int = 0
@@ -207,7 +207,7 @@ class CircuitBreaker:
             >= self.config.timeout
         )
 
-    async def call(self, func: Callable[..., T], *args, **kwargs) -> T:
+    async def call(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """
         Execute function through circuit breaker.
 
@@ -246,6 +246,7 @@ class CircuitBreaker:
 
         try:
             # Handle both sync and async functions
+            result: T
             if inspect.iscoroutinefunction(func):
                 result = await func(*args, **kwargs)
             else:
@@ -314,7 +315,7 @@ class ExponentialBackoff:
         """
         self.policy = policy or RetryPolicy()
 
-    async def execute(self, func: Callable[..., T], *args, **kwargs) -> T:
+    async def execute(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """
         Execute function with exponential backoff retry.
 
@@ -334,10 +335,12 @@ class ExponentialBackoff:
         for attempt in range(self.policy.max_attempts):
             try:
                 # Execute function
+                result: T
                 if inspect.iscoroutinefunction(func):
-                    return await func(*args, **kwargs)
+                    result = await func(*args, **kwargs)
                 else:
-                    return func(*args, **kwargs)
+                    result = func(*args, **kwargs)
+                return result
 
             except Exception as e:
                 last_exception = e
@@ -357,11 +360,13 @@ class ExponentialBackoff:
 
                     # Consume retry budget if configured
                     if self.policy.retry_budget:
-                        self.policy.retry_budget.consume()
+                        await self.policy.retry_budget.consume()
 
         # All retries exhausted
         logger.error(f"All {self.policy.max_attempts} attempts failed")
-        raise last_exception
+        if last_exception:
+            raise last_exception
+        raise Exception("All retry attempts failed")
 
 
 @dataclass
@@ -391,13 +396,13 @@ class BulkheadExecutor:
         self.name = name
         self.config = config or BulkheadConfig()
         self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=self.config.max_queue_size)
+        self._queue: asyncio.Queue[bool] = asyncio.Queue(maxsize=self.config.max_queue_size)
         self._active_tasks = 0
         self._total_executed = 0
         self._total_rejected = 0
         self._total_timeout = 0
 
-    async def execute(self, func: Callable[..., T], *args, **kwargs) -> T:
+    async def execute(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """
         Execute function with bulkhead isolation.
 
@@ -428,6 +433,7 @@ class BulkheadExecutor:
 
                 try:
                     # Execute with timeout
+                    result: T
                     if inspect.iscoroutinefunction(func):
                         result = await asyncio.wait_for(
                             func(*args, **kwargs), timeout=self.config.timeout
@@ -480,8 +486,8 @@ class RetryBudget:
         """
         self.budget_size = budget_size
         self.refill_rate = refill_rate
-        self._tokens = budget_size
-        self._last_refill = time.time()
+        self._tokens: float = float(budget_size)
+        self._last_refill: float = time.time()
         self._lock = asyncio.Lock()
 
     async def can_retry(self) -> bool:
@@ -523,7 +529,7 @@ class RetryBudget:
         return self._tokens
 
 
-def with_retry(policy: RetryPolicy | None = None):
+def with_retry(policy: RetryPolicy | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for adding retry logic to functions.
 
@@ -534,15 +540,15 @@ def with_retry(policy: RetryPolicy | None = None):
         Decorated function
     """
 
-    def decorator(func):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         backoff = ExponentialBackoff(policy)
 
         @wraps(func)
-        async def async_wrapper(*args, **kwargs) -> Any:
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             return await backoff.execute(func, *args, **kwargs)
 
         @wraps(func)
-        def sync_wrapper(*args, **kwargs):
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             loop = asyncio.get_event_loop()
             return loop.run_until_complete(backoff.execute(func, *args, **kwargs))
 
@@ -551,7 +557,7 @@ def with_retry(policy: RetryPolicy | None = None):
     return decorator
 
 
-def with_circuit_breaker(name: str, config: CircuitBreakerConfig | None = None):
+def with_circuit_breaker(name: str, config: CircuitBreakerConfig | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for adding circuit breaker to functions.
 
@@ -564,13 +570,13 @@ def with_circuit_breaker(name: str, config: CircuitBreakerConfig | None = None):
     """
     circuit_breaker = CircuitBreaker(name, config)
 
-    def decorator(func):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def async_wrapper(*args, **kwargs) -> Any:
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             return await circuit_breaker.call(func, *args, **kwargs)
 
         @wraps(func)
-        def sync_wrapper(*args, **kwargs):
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             loop = asyncio.get_event_loop()
             return loop.run_until_complete(circuit_breaker.call(func, *args, **kwargs))
 
@@ -579,7 +585,7 @@ def with_circuit_breaker(name: str, config: CircuitBreakerConfig | None = None):
     return decorator
 
 
-def with_bulkhead(name: str, config: BulkheadConfig | None = None):
+def with_bulkhead(name: str, config: BulkheadConfig | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for adding bulkhead isolation to functions.
 
@@ -592,13 +598,13 @@ def with_bulkhead(name: str, config: BulkheadConfig | None = None):
     """
     bulkhead = BulkheadExecutor(name, config)
 
-    def decorator(func):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def async_wrapper(*args, **kwargs) -> Any:
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             return await bulkhead.execute(func, *args, **kwargs)
 
         @wraps(func)
-        def sync_wrapper(*args, **kwargs):
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             loop = asyncio.get_event_loop()
             return loop.run_until_complete(bulkhead.execute(func, *args, **kwargs))
 

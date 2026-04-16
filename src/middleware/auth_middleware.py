@@ -5,6 +5,7 @@ Provides JWT validation, user context injection, and permission checking.
 """
 
 from collections.abc import Callable
+from typing import Any
 
 import redis.asyncio as redis
 import structlog
@@ -17,7 +18,7 @@ from starlette.responses import Response
 from src.auth.jwt_service import JWTService
 from src.auth.models import TokenPayload
 from src.core.config import settings
-from src.models.db.session import get_async_session
+from src.models.db.session import get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
 
@@ -34,7 +35,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     Validates JWT tokens and adds user context to requests.
     """
 
-    def __init__(self, app, exclude_paths: list[str] | None = None):
+    def __init__(self, app: Any, exclude_paths: list[str] | None = None) -> None:
         """
         Initialize authentication middleware.
 
@@ -55,7 +56,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/auth/verify-email",
         ]
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[..., Any]) -> Response:
         """
         Process request with authentication.
 
@@ -69,7 +70,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Skip authentication for excluded paths
         path = request.url.path
         if any(path.startswith(excluded) for excluded in self.exclude_paths):
-            return await call_next(request)
+            response: Response = await call_next(request)
+            return response
 
         # Extract token from Authorization header
         auth_header = request.headers.get("Authorization")
@@ -78,7 +80,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Endpoints can enforce authentication as needed
             request.state.user = None
             request.state.token_payload = None
-            return await call_next(request)
+            response = await call_next(request)
+            return response
 
         token = auth_header.replace("Bearer ", "")
 
@@ -112,7 +115,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.user = None
             request.state.token_payload = None
 
-        return await call_next(request)
+        response = await call_next(request)
+        return response
 
 
 async def get_current_token(
@@ -164,7 +168,7 @@ async def get_current_token(
 
 async def get_current_user(
     token_payload: TokenPayload = Depends(get_current_token),
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_session),
 ) -> User:
     """
     Get current authenticated user.
@@ -213,7 +217,7 @@ async def get_current_active_user(
     return current_user
 
 
-def require_roles(roles: list[str]):
+def require_roles(roles: list[str]) -> Callable[..., Any]:
     """
     Dependency to require specific roles.
 
@@ -251,7 +255,7 @@ def require_roles(roles: list[str]):
     return role_checker
 
 
-def require_permissions(permissions: list[str]):
+def require_permissions(permissions: list[str]) -> Callable[..., Any]:
     """
     Dependency to require specific permissions.
 
@@ -294,7 +298,7 @@ def require_permissions(permissions: list[str]):
     return permission_checker
 
 
-def require_superuser():
+def require_superuser() -> Callable[..., Any]:
     """
     Dependency to require superuser privileges.
 
@@ -320,7 +324,7 @@ def require_superuser():
     return superuser_checker
 
 
-def optional_user():
+def optional_user() -> Callable[..., Any]:
     """
     Dependency for optional authentication.
 
@@ -332,7 +336,7 @@ def optional_user():
 
     async def optional_user_getter(
         credentials: HTTPAuthorizationCredentials | None = Depends(security),
-        db: AsyncSession = Depends(get_async_session),
+        db: AsyncSession = Depends(get_session),
     ) -> User | None:
         """Get user if authenticated."""
         if not credentials:

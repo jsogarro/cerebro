@@ -7,36 +7,36 @@ through REST API endpoints.
 """
 
 import asyncio
-import time
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
-import uuid
 import random
+import time
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any
 
 from src.models.supervisor_api_models import (
-    SupervisorType,
-    WorkerStatus,
-    CoordinationMode,
-    SupervisionStrategy,
-    ConflictResolutionStrategy,
-    SupervisorInfo,
-    WorkerInfo,
-    SupervisorExecuteResponse,
-    WorkerCoordinationResponse,
-    MultiSupervisorOrchestrationResponse,
-    SupervisorStatsResponse,
-    SupervisorHealthResponse,
-    WorkerAllocationOptimizationResponse,
-    ConflictResolutionResponse,
-    SupervisorComparisonResponse,
-    ExperimentResponse,
-    SupervisorExecuteRequest,
-    WorkerCoordinationRequest,
-    MultiSupervisorOrchestrationRequest,
-    WorkerAllocationOptimizationRequest,
     ConflictResolutionRequest,
+    ConflictResolutionResponse,
+    ConflictResolutionStrategy,
+    CoordinationMode,
     ExperimentRequest,
+    ExperimentResponse,
+    MultiSupervisorOrchestrationRequest,
+    MultiSupervisorOrchestrationResponse,
+    SupervisionStrategy,
+    SupervisorComparisonResponse,
+    SupervisorExecuteRequest,
+    SupervisorExecuteResponse,
+    SupervisorHealthResponse,
+    SupervisorInfo,
+    SupervisorStatsResponse,
+    SupervisorType,
+    WorkerAllocationOptimizationRequest,
+    WorkerAllocationOptimizationResponse,
+    WorkerCoordinationRequest,
+    WorkerCoordinationResponse,
+    WorkerInfo,
+    WorkerStatus,
 )
 
 
@@ -48,8 +48,8 @@ class SupervisorMetrics:
     failed_executions: int = 0
     total_execution_time_ms: float = 0.0
     total_quality_score: float = 0.0
-    worker_utilization_samples: List[float] = field(default_factory=list)
-    last_execution_time: Optional[datetime] = None
+    worker_utilization_samples: list[float] = field(default_factory=list)
+    last_execution_time: datetime | None = None
 
 
 class SupervisorCoordinationService:
@@ -58,19 +58,19 @@ class SupervisorCoordinationService:
     Integrates with existing supervisor factory and MASR router.
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the supervisor coordination service"""
-        self.supervisors: Dict[str, SupervisorInfo] = {}
-        self.workers: Dict[str, List[WorkerInfo]] = {}
-        self.metrics: Dict[str, SupervisorMetrics] = {}
-        self.active_coordinations: Dict[str, Dict[str, Any]] = {}
-        self.conflict_resolutions: Dict[str, Dict[str, Any]] = {}
-        self.experiments: Dict[str, Dict[str, Any]] = {}
-        
+        self.supervisors: dict[str, SupervisorInfo] = {}
+        self.workers: dict[str, list[WorkerInfo]] = {}
+        self.metrics: dict[str, SupervisorMetrics] = {}
+        self.active_coordinations: dict[str, dict[str, Any]] = {}
+        self.conflict_resolutions: dict[str, dict[str, Any]] = {}
+        self.experiments: dict[str, dict[str, Any]] = {}
+
         # Initialize supervisor registry
         self._initialize_supervisors()
-    
-    def _initialize_supervisors(self):
+
+    def _initialize_supervisors(self) -> None:
         """Initialize available supervisors based on domains"""
         for supervisor_type in SupervisorType:
             supervisor_id = str(uuid.uuid4())
@@ -90,7 +90,7 @@ class SupervisorCoordinationService:
             # Initialize workers for this supervisor
             self.workers[supervisor_type.value] = self._create_workers_for_supervisor(supervisor_type)
     
-    def _get_supervisor_capabilities(self, supervisor_type: SupervisorType) -> List[str]:
+    def _get_supervisor_capabilities(self, supervisor_type: SupervisorType) -> list[str]:
         """Get capabilities for a supervisor type"""
         capabilities_map = {
             SupervisorType.RESEARCH: [
@@ -127,7 +127,7 @@ class SupervisorCoordinationService:
         }
         return worker_counts.get(supervisor_type, 2)
     
-    def _get_initial_metrics(self, supervisor_type: SupervisorType) -> Dict[str, float]:
+    def _get_initial_metrics(self, supervisor_type: SupervisorType) -> dict[str, float]:
         """Get initial performance metrics for supervisor"""
         return {
             "success_rate": 0.95,
@@ -137,7 +137,7 @@ class SupervisorCoordinationService:
             "worker_satisfaction": 0.90
         }
     
-    def _create_workers_for_supervisor(self, supervisor_type: SupervisorType) -> List[WorkerInfo]:
+    def _create_workers_for_supervisor(self, supervisor_type: SupervisorType) -> list[WorkerInfo]:
         """Create worker agents for a supervisor"""
         workers = []
         worker_types = self._get_worker_types_for_supervisor(supervisor_type)
@@ -155,7 +155,7 @@ class SupervisorCoordinationService:
         
         return workers
     
-    def _get_worker_types_for_supervisor(self, supervisor_type: SupervisorType) -> List[str]:
+    def _get_worker_types_for_supervisor(self, supervisor_type: SupervisorType) -> list[str]:
         """Get worker types for a supervisor"""
         worker_types_map = {
             SupervisorType.RESEARCH: [
@@ -177,7 +177,7 @@ class SupervisorCoordinationService:
         }
         return worker_types_map.get(supervisor_type, ["general_worker"])
     
-    def _get_worker_capabilities(self, worker_type: str) -> List[str]:
+    def _get_worker_capabilities(self, worker_type: str) -> list[str]:
         """Get capabilities for a worker type"""
         capabilities_map = {
             "literature_review": ["search", "extract", "summarize", "evaluate"],
@@ -213,24 +213,24 @@ class SupervisorCoordinationService:
         assigned_workers = await self._assign_workers_for_task(
             supervisor_type,
             request.query,
-            request.max_workers,
-            request.coordination_mode
+            request.max_workers or 5,
+            request.coordination_mode or CoordinationMode.HIERARCHICAL
         )
-        
+
         # Simulate task execution with workers
         result = await self._execute_with_workers(
             supervisor_type,
             request.query,
             assigned_workers,
-            request.supervision_strategy,
-            request.coordination_mode,
-            request.quality_threshold,
-            request.timeout_seconds
+            request.supervision_strategy or SupervisionStrategy.COLLABORATIVE,
+            request.coordination_mode or CoordinationMode.HIERARCHICAL,
+            request.quality_threshold or 0.8,
+            request.timeout_seconds or 120
         )
-        
+
         # Calculate execution metrics
         execution_time_ms = int((time.time() - start_time) * 1000)
-        quality_score = self._calculate_quality_score(result, request.quality_threshold)
+        quality_score = self._calculate_quality_score(result, request.quality_threshold or 0.8)
         
         # Update metrics
         self._update_supervisor_metrics(
@@ -254,14 +254,14 @@ class SupervisorCoordinationService:
             status="completed" if result else "failed",
             result=result,
             workers_used=[w.worker_id for w in assigned_workers],
-            coordination_mode=request.coordination_mode,
+            coordination_mode=request.coordination_mode or CoordinationMode.HIERARCHICAL,
             quality_score=quality_score,
             execution_time_ms=execution_time_ms,
             refinement_rounds=refinement_rounds,
             metadata={
-                "strategy": request.supervision_strategy.value,
-                "parameters": request.parameters,
-                "context": request.context
+                "strategy": (request.supervision_strategy or SupervisionStrategy.COLLABORATIVE).value,
+                "parameters": request.parameters or {},
+                "context": request.context or {}
             }
         )
     
@@ -271,7 +271,7 @@ class SupervisorCoordinationService:
         task: str,
         max_workers: int,
         coordination_mode: CoordinationMode
-    ) -> List[WorkerInfo]:
+    ) -> list[WorkerInfo]:
         """Assign workers for a task based on requirements"""
         available_workers = [
             w for w in self.workers[supervisor_type]
@@ -304,12 +304,12 @@ class SupervisorCoordinationService:
         self,
         supervisor_type: str,
         task: str,
-        workers: List[WorkerInfo],
+        workers: list[WorkerInfo],
         strategy: SupervisionStrategy,
         coordination_mode: CoordinationMode,
         quality_threshold: float,
         timeout_seconds: int
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Execute task with assigned workers"""
         # Simulate execution based on strategy and coordination mode
         await asyncio.sleep(0.5)  # Simulate processing time
@@ -361,7 +361,7 @@ class SupervisorCoordinationService:
         execution_time_ms: int,
         quality_score: float,
         success: bool
-    ):
+    ) -> None:
         """Update supervisor performance metrics"""
         metrics = self.metrics[supervisor_type]
         
@@ -388,7 +388,7 @@ class SupervisorCoordinationService:
             if len(metrics.worker_utilization_samples) > 100:
                 metrics.worker_utilization_samples = metrics.worker_utilization_samples[-100:]
     
-    async def get_all_supervisors(self) -> List[SupervisorInfo]:
+    async def get_all_supervisors(self) -> list[SupervisorInfo]:
         """Get information about all available supervisors"""
         return list(self.supervisors.values())
     
@@ -398,7 +398,7 @@ class SupervisorCoordinationService:
             raise ValueError(f"Supervisor type '{supervisor_type}' not found")
         return self.supervisors[supervisor_type]
     
-    async def get_supervisor_workers(self, supervisor_type: str) -> List[WorkerInfo]:
+    async def get_supervisor_workers(self, supervisor_type: str) -> list[WorkerInfo]:
         """Get all workers managed by a supervisor"""
         if supervisor_type not in self.workers:
             raise ValueError(f"Supervisor type '{supervisor_type}' not found")
@@ -424,10 +424,10 @@ class SupervisorCoordinationService:
             request.task,
             assigned_workers,
             request.coordination_mode,
-            request.refinement_rounds,
-            request.conflict_resolution
+            request.refinement_rounds or 1,
+            request.conflict_resolution or ConflictResolutionStrategy.SUPERVISOR_OVERRIDE
         )
-        
+
         # Store active coordination
         self.active_coordinations[coordination_id] = {
             "supervisor_type": supervisor_type,
@@ -436,12 +436,12 @@ class SupervisorCoordinationService:
             "plan": coordination_plan,
             "started_at": datetime.utcnow()
         }
-        
+
         # Estimate completion time
         estimated_time = self._estimate_completion_time(
             len(assigned_workers),
             request.coordination_mode,
-            request.refinement_rounds
+            request.refinement_rounds or 1
         )
         
         return WorkerCoordinationResponse(
@@ -455,9 +455,9 @@ class SupervisorCoordinationService:
     async def _assign_workers_for_coordination(
         self,
         supervisor_type: str,
-        worker_types: List[str],
+        worker_types: list[str],
         coordination_mode: CoordinationMode
-    ) -> List[WorkerInfo]:
+    ) -> list[WorkerInfo]:
         """Assign specific worker types for coordination"""
         assigned = []
         available_workers = self.workers.get(supervisor_type, [])
@@ -480,7 +480,8 @@ class SupervisorCoordinationService:
                     worker_type=worker_type,
                     status=WorkerStatus.ASSIGNED,
                     capabilities=self._get_worker_capabilities(worker_type),
-                    performance_score=0.85
+                    performance_score=0.85,
+                    current_task=None
                 )
                 assigned.append(worker)
         
@@ -489,24 +490,25 @@ class SupervisorCoordinationService:
     def _create_coordination_plan(
         self,
         task: str,
-        workers: List[WorkerInfo],
+        workers: list[WorkerInfo],
         mode: CoordinationMode,
         refinement_rounds: int,
         conflict_resolution: ConflictResolutionStrategy
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a coordination execution plan"""
-        plan = {
+        plan: dict[str, Any] = {
             "task": task,
             "mode": mode.value,
             "phases": [],
             "refinement_rounds": refinement_rounds,
             "conflict_resolution": conflict_resolution.value
         }
-        
+        phases: list[dict[str, Any]] = []
+
         if mode == CoordinationMode.SEQUENTIAL:
             # Sequential execution phases
             for i, worker in enumerate(workers):
-                plan["phases"].append({
+                phases.append({
                     "phase": i + 1,
                     "worker": worker.worker_id,
                     "action": f"Execute task component {i + 1}",
@@ -515,38 +517,39 @@ class SupervisorCoordinationService:
         
         elif mode == CoordinationMode.PARALLEL:
             # Parallel execution phase
-            plan["phases"].append({
+            phases.append({
                 "phase": 1,
                 "workers": [w.worker_id for w in workers],
                 "action": "Execute task components in parallel",
                 "dependencies": []
             })
             # Aggregation phase
-            plan["phases"].append({
+            phases.append({
                 "phase": 2,
                 "action": "Aggregate parallel results",
                 "dependencies": [1]
             })
-        
+
         elif mode == CoordinationMode.HIERARCHICAL:
             # Hierarchical execution with supervisor oversight
-            plan["phases"].append({
+            phases.append({
                 "phase": 1,
                 "action": "Supervisor task decomposition",
                 "dependencies": []
             })
-            plan["phases"].append({
+            phases.append({
                 "phase": 2,
                 "workers": [w.worker_id for w in workers],
                 "action": "Worker execution with supervisor guidance",
                 "dependencies": [1]
             })
-            plan["phases"].append({
+            phases.append({
                 "phase": 3,
                 "action": "Supervisor quality review and integration",
                 "dependencies": [2]
             })
-        
+
+        plan["phases"] = phases
         return plan
     
     def _estimate_completion_time(
@@ -592,7 +595,9 @@ class SupervisorCoordinationService:
                 query=request.query,
                 supervision_strategy=SupervisionStrategy.COLLABORATIVE,
                 coordination_mode=CoordinationMode.HIERARCHICAL,
-                timeout_seconds=request.timeout_seconds // len(request.supervisor_types)
+                max_workers=5,
+                quality_threshold=0.8,
+                timeout_seconds=request.timeout_seconds // len(request.supervisor_types) if request.timeout_seconds else 120
             )
             
             # Execute with supervisor
@@ -610,7 +615,7 @@ class SupervisorCoordinationService:
         if request.synthesis_required:
             synthesized_result, consensus_achieved = await self._synthesize_results(
                 individual_results,
-                request.priority_weights
+                request.priority_weights or {}
             )
         
         # Calculate quality metrics
@@ -636,9 +641,9 @@ class SupervisorCoordinationService:
     
     async def _synthesize_results(
         self,
-        results: Dict[str, Any],
-        priority_weights: Dict[str, float]
-    ) -> Tuple[Any, bool]:
+        results: dict[str, Any],
+        priority_weights: dict[str, float]
+    ) -> tuple[Any, bool]:
         """Synthesize results from multiple supervisors"""
         # Simulate synthesis process
         await asyncio.sleep(0.3)
@@ -657,7 +662,7 @@ class SupervisorCoordinationService:
         
         return synthesized, consensus
     
-    def _calculate_consistency(self, results: Dict[str, Any]) -> float:
+    def _calculate_consistency(self, results: dict[str, Any]) -> float:
         """Calculate consistency across supervisor results"""
         if len(results) < 2:
             return 1.0
@@ -699,7 +704,7 @@ class SupervisorCoordinationService:
         )
         
         # Get top worker types
-        worker_usage = {}
+        worker_usage: dict[str, int] = {}
         for worker in self.workers[supervisor_type]:
             worker_usage[worker.worker_type] = worker_usage.get(worker.worker_type, 0) + 1
         
@@ -788,13 +793,15 @@ class SupervisorCoordinationService:
             health_score = 1.0
         
         # Determine status
+        from typing import Literal
+        status: Literal["healthy", "degraded", "unhealthy"]
         if health_score >= 0.8:
             status = "healthy"
         elif health_score >= 0.5:
             status = "degraded"
         else:
             status = "unhealthy"
-        
+
         return SupervisorHealthResponse(
             supervisor_type=SupervisorType(supervisor_type),
             status=status,
@@ -867,7 +874,7 @@ class SupervisorCoordinationService:
     
     def _optimize_for_quality(
         self, available_workers: int, complexity: float, quality_target: float
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Optimize allocation for quality"""
         # Allocate more specialized workers for quality
         base_allocation = max(3, int(available_workers * 0.6))
@@ -877,7 +884,7 @@ class SupervisorCoordinationService:
             "synthesizer": min(1, available_workers // 4)
         }
     
-    def _optimize_for_speed(self, available_workers: int, complexity: float) -> Dict[str, int]:
+    def _optimize_for_speed(self, available_workers: int, complexity: float) -> dict[str, int]:
         """Optimize allocation for speed"""
         # Maximize parallelization
         return {
@@ -885,7 +892,7 @@ class SupervisorCoordinationService:
             "aggregator": 1
         }
     
-    def _optimize_for_cost(self, available_workers: int, complexity: float) -> Dict[str, int]:
+    def _optimize_for_cost(self, available_workers: int, complexity: float) -> dict[str, int]:
         """Optimize allocation for cost"""
         # Minimize worker count while meeting requirements
         min_workers = max(1, int(complexity * 3))
@@ -895,7 +902,7 @@ class SupervisorCoordinationService:
     
     def _optimize_balanced(
         self, available_workers: int, complexity: float, quality_target: float
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Balanced optimization"""
         base_count = max(2, int(available_workers * 0.4))
         return {
@@ -904,7 +911,7 @@ class SupervisorCoordinationService:
             "coordinator": 1
         }
     
-    def _get_alternative_allocation(self, primary: Dict[str, int]) -> Dict[str, int]:
+    def _get_alternative_allocation(self, primary: dict[str, int]) -> dict[str, int]:
         """Generate an alternative allocation"""
         alternative = primary.copy()
         # Modify allocation slightly
@@ -971,7 +978,7 @@ class SupervisorCoordinationService:
     
     async def compare_supervisor_performance(
         self,
-        supervisor_types: List[str]
+        supervisor_types: list[str]
     ) -> SupervisorComparisonResponse:
         """Compare performance across multiple supervisors"""
         comparison_id = str(uuid.uuid4())
@@ -1043,11 +1050,12 @@ class SupervisorCoordinationService:
         }
         
         # Run tests for each strategy
-        results = {}
+        strategy_results: dict[str, list[float]] = {}
+        results: dict[str, dict[str, float]] = {}
         for strategy in request.strategies_to_test:
             strategy_results = {}
-            
-            for _ in range(request.repetitions):
+
+            for _ in range(request.repetitions or 1):
                 # Simulate execution with strategy
                 start_time = time.time()
                 
@@ -1055,7 +1063,10 @@ class SupervisorCoordinationService:
                 test_request = SupervisorExecuteRequest(
                     query=request.query,
                     supervision_strategy=strategy,
-                    coordination_mode=CoordinationMode.HIERARCHICAL
+                    coordination_mode=CoordinationMode.HIERARCHICAL,
+                    max_workers=5,
+                    quality_threshold=0.8,
+                    timeout_seconds=120
                 )
                 
                 # Simulate execution (simplified)
@@ -1095,16 +1106,16 @@ class SupervisorCoordinationService:
                 results[strategy.value].values()
             ) / len(request.metrics_to_track)
         
-        best_strategy = max(scores, key=scores.get)
-        
+        best_strategy = max(scores, key=lambda k: scores[k])
+
         # Calculate statistical significance (simplified)
-        statistical_significance = 0.95 if request.repetitions > 1 else None
+        statistical_significance = 0.95 if (request.repetitions or 1) > 1 else None
         
         # Generate recommendations
         recommendations = [
             f"Best strategy for this query type: {best_strategy.value}",
             f"Consider {best_strategy.value} for similar tasks",
-            "Increase repetitions for more reliable results" if request.repetitions < 3 else ""
+            "Increase repetitions for more reliable results" if (request.repetitions or 1) < 3 else ""
         ]
         recommendations = [r for r in recommendations if r]  # Remove empty
         

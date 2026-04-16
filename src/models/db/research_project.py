@@ -5,10 +5,10 @@ Represents a research project in the system.
 """
 
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import (
     JSON,
-    Column,
     Float,
     ForeignKey,
     Index,
@@ -19,7 +19,7 @@ from sqlalchemy import (
     Enum as SQLEnum,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import backref, relationship
+from sqlalchemy.orm import Mapped, backref, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -44,39 +44,35 @@ class ResearchProject(BaseModel):
 
     __tablename__ = "research_projects"
 
-    # Basic fields
-    title = Column(String(500), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
 
-    query = Column(Text, nullable=False)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
 
-    domains = Column(
+    domains: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list, comment="List of research domains"
     )
 
-    status = Column(
+    status: Mapped[ProjectStatus] = mapped_column(
         SQLEnum(ProjectStatus), nullable=False, default=ProjectStatus.DRAFT, index=True
     )
 
-    quality_score = Column(
+    quality_score: Mapped[float | None] = mapped_column(
         Float, nullable=True, comment="Overall quality score (0.0 to 1.0)"
     )
 
-    # Foreign keys
-    user_id = Column(
+    user_id: Mapped[Any] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
 
-    # Optional workflow ID for Temporal/LangGraph
-    workflow_id = Column(
+    workflow_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
         index=True,
         comment="Temporal or LangGraph workflow ID",
     )
 
-    # Metadata for flexible data storage (renamed to avoid SQLAlchemy conflict)
-    project_metadata = Column(
-        "metadata",  # Use 'metadata' as the column name in the database
+    project_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
         JSON,
         nullable=False,
         default=dict,
@@ -134,7 +130,7 @@ class ResearchProject(BaseModel):
             raise ValueError("Quality score must be between 0.0 and 1.0")
         self.quality_score = score
 
-    def add_metadata(self, key: str, value: any) -> None:
+    def add_metadata(self, key: str, value: Any) -> None:
         """
         Add or update metadata.
 
@@ -146,7 +142,7 @@ class ResearchProject(BaseModel):
             self.project_metadata = {}
         self.project_metadata[key] = value
 
-    def get_metadata(self, key: str, default: any = None) -> any:
+    def get_metadata(self, key: str, default: Any = None) -> Any:
         """
         Get metadata value.
 
@@ -164,14 +160,14 @@ class ResearchProject(BaseModel):
     @property
     def is_active(self) -> bool:
         """Check if project is active."""
-        return self.status == ProjectStatus.IN_PROGRESS
+        return bool(self.status == ProjectStatus.IN_PROGRESS)
 
     @property
     def is_complete(self) -> bool:
         """Check if project is complete."""
         return self.status in [ProjectStatus.COMPLETED, ProjectStatus.FAILED]
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with relationships."""
         data = super().to_dict()
         data["is_active"] = self.is_active

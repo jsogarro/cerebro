@@ -5,12 +5,12 @@ Output formatting utilities for Research Platform CLI.
 import json
 from datetime import datetime
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
-from tabulate import tabulate
+from tabulate import tabulate  # type: ignore[import-untyped]
 
 from src.models.research_project import (
     ResearchProgress,
@@ -35,9 +35,10 @@ class OutputFormatter:
         if self.format_type == "json":
             return json.dumps(project.model_dump(), indent=2, default=str)
         elif self.format_type == "yaml":
-            return yaml.dump(
+            result: str = yaml.dump(
                 project.model_dump(), default_flow_style=False, default=str
             )
+            return result
         elif self.format_type == "csv":
             return self._project_to_csv(project)
         else:  # table
@@ -55,11 +56,12 @@ class OutputFormatter:
                 default=str,
             )
         elif self.format_type == "yaml":
-            return yaml.dump(
+            result: str = yaml.dump(
                 [p.model_dump() for p in projects],
                 default_flow_style=False,
                 default=str,
             )
+            return result
         elif self.format_type == "csv":
             return self._projects_to_csv(projects)
         else:  # table
@@ -70,9 +72,10 @@ class OutputFormatter:
         if self.format_type == "json":
             return json.dumps(progress.model_dump(), indent=2, default=str)
         elif self.format_type == "yaml":
-            return yaml.dump(
+            result: str = yaml.dump(
                 progress.model_dump(), default_flow_style=False, default=str
             )
+            return result
         else:  # table or csv
             return self._progress_to_display(progress)
 
@@ -199,7 +202,8 @@ class OutputFormatter:
             ";".join(project.query.domains),
         ]
 
-        return tabulate([values], headers=headers, tablefmt="csv")
+        result: str = tabulate([values], headers=headers, tablefmt="csv")
+        return result
 
     def _projects_to_csv(self, projects: list[ResearchProject]) -> str:
         """Convert projects list to CSV format."""
@@ -219,7 +223,8 @@ class OutputFormatter:
                 ]
             )
 
-        return tabulate(rows, headers=headers, tablefmt="csv")
+        result: str = tabulate(rows, headers=headers, tablefmt="csv")
+        return result
 
     def _format_status(self, status: ResearchStatus) -> str:
         """Format status with color."""
@@ -252,21 +257,21 @@ def create_spinner(message: str) -> Progress:
     )
 
 
-def print_success(message: str):
+def print_success(message: str) -> None:
     """Print success message."""
     console.print(f"[green]✓[/green] {message}")
 
 
-def print_error(message: str):
+def print_error(message: str) -> None:
     """Print error message."""
     console.print(f"[red]✗[/red] {message}")
 
 
-def print_warning(message: str):
+def print_warning(message: str) -> None:
     """Print warning message."""
     console.print(f"[yellow]⚠[/yellow] {message}")
 
 
-def print_info(message: str):
+def print_info(message: str) -> None:
     """Print info message."""
     console.print(f"[blue]ℹ[/blue] {message}")

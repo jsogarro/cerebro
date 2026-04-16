@@ -7,21 +7,18 @@ Pareto frontier analysis, interaction effects, constraint handling, and global
 optimization strategies.
 """
 
+import asyncio
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any
+
+import networkx as nx
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Any, Set, Callable
-from dataclasses import dataclass, field
-from datetime import datetime
-import logging
-from enum import Enum
-import asyncio
 from scipy import stats
-from scipy.optimize import minimize, differential_evolution
-from scipy.spatial.distance import cdist
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-import networkx as nx
+from scipy.optimize import differential_evolution
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +49,9 @@ class SystemMetric:
     name: str
     metric_type: MetricType
     weight: float = 1.0
-    target_value: Optional[float] = None
-    min_threshold: Optional[float] = None
-    max_threshold: Optional[float] = None
+    target_value: float | None = None
+    min_threshold: float | None = None
+    max_threshold: float | None = None
     unit: str = ""
     component: str = ""  # Which system component (MASR, Memory, etc.)
     
@@ -90,14 +87,14 @@ class InteractionEffect:
 class ParetoSolution:
     """A solution on the Pareto frontier."""
     
-    parameters: Dict[str, Any]
-    metrics: Dict[str, float]
+    parameters: dict[str, Any]
+    metrics: dict[str, float]
     is_dominated: bool = False
     crowding_distance: float = 0.0
     rank: int = 0
     
     def dominates(self, other: 'ParetoSolution', 
-                  metric_types: Dict[str, MetricType]) -> bool:
+                  metric_types: dict[str, MetricType]) -> bool:
         """Check if this solution dominates another."""
         better_in_at_least_one = False
         
@@ -126,13 +123,13 @@ class ParetoSolution:
 class MultiVariateResult:
     """Results from multi-variate analysis."""
     
-    pareto_frontier: List[ParetoSolution]
+    pareto_frontier: list[ParetoSolution]
     optimal_solution: ParetoSolution
-    interaction_effects: List[InteractionEffect]
+    interaction_effects: list[InteractionEffect]
     correlation_matrix: pd.DataFrame
-    component_importance: Dict[str, float]
-    convergence_history: List[float]
-    sensitivity_analysis: Dict[str, Dict[str, float]]
+    component_importance: dict[str, float]
+    convergence_history: list[float]
+    sensitivity_analysis: dict[str, dict[str, float]]
 
 
 class MultiVariateAnalyzer:
@@ -145,8 +142,8 @@ class MultiVariateAnalyzer:
     """
     
     def __init__(self,
-                 metrics: List[SystemMetric],
-                 constraints: Optional[List[Callable]] = None,
+                 metrics: list[SystemMetric],
+                 constraints: list[Callable[..., Any]] | None = None,
                  optimization_objective: OptimizationObjective = OptimizationObjective.PARETO_OPTIMAL):
         """
         Initialize multi-variate analyzer.
@@ -171,7 +168,7 @@ class MultiVariateAnalyzer:
     
     async def analyze_system(self,
                             evaluation_function: Callable,
-                            parameter_bounds: Dict[str, Tuple[float, float]],
+                            parameter_bounds: dict[str, tuple[float, float]],
                             n_iterations: int = 100,
                             population_size: int = 50) -> MultiVariateResult:
         """
@@ -236,9 +233,9 @@ class MultiVariateAnalyzer:
     
     async def _find_pareto_frontier(self,
                                    evaluation_function: Callable,
-                                   parameter_bounds: Dict[str, Tuple[float, float]],
+                                   parameter_bounds: dict[str, tuple[float, float]],
                                    n_iterations: int,
-                                   population_size: int) -> List[ParetoSolution]:
+                                   population_size: int) -> list[ParetoSolution]:
         """
         Find Pareto frontier using NSGA-II inspired algorithm.
         """
@@ -293,7 +290,7 @@ class MultiVariateAnalyzer:
         return fronts[0] if fronts else []
     
     def _non_dominated_sorting(self, 
-                               population: List[ParetoSolution]) -> List[List[ParetoSolution]]:
+                               population: list[ParetoSolution]) -> list[list[ParetoSolution]]:
         """Perform non-dominated sorting on population."""
         fronts = []
         current_front = []
@@ -333,7 +330,7 @@ class MultiVariateAnalyzer:
         
         return fronts
     
-    def _assign_crowding_distance(self, front: List[ParetoSolution]):
+    def _assign_crowding_distance(self, front: list[ParetoSolution]):
         """Assign crowding distance to solutions in a front."""
         n = len(front)
         if n == 0:
@@ -363,7 +360,7 @@ class MultiVariateAnalyzer:
                     front[i].crowding_distance += distance / metric_range
     
     async def _analyze_interactions(self,
-                                   solutions: List[ParetoSolution]) -> List[InteractionEffect]:
+                                   solutions: list[ParetoSolution]) -> list[InteractionEffect]:
         """Analyze interaction effects between system components."""
         interactions = []
         
@@ -419,7 +416,7 @@ class MultiVariateAnalyzer:
         return interactions
     
     def _compute_correlations(self, 
-                             solutions: List[ParetoSolution]) -> pd.DataFrame:
+                             solutions: list[ParetoSolution]) -> pd.DataFrame:
         """Compute correlation matrix between all metrics."""
         # Extract metrics data
         data = []
@@ -430,8 +427,8 @@ class MultiVariateAnalyzer:
         return df.corr(method='spearman')
     
     def _analyze_component_importance(self,
-                                     solutions: List[ParetoSolution],
-                                     interactions: List[InteractionEffect]) -> Dict[str, float]:
+                                     solutions: list[ParetoSolution],
+                                     interactions: list[InteractionEffect]) -> dict[str, float]:
         """Analyze relative importance of system components."""
         importance = {}
         
@@ -465,7 +462,7 @@ class MultiVariateAnalyzer:
         return importance
     
     def _select_optimal_solution(self, 
-                                pareto_frontier: List[ParetoSolution]) -> ParetoSolution:
+                                pareto_frontier: list[ParetoSolution]) -> ParetoSolution:
         """Select optimal solution from Pareto frontier."""
         if not pareto_frontier:
             return None
@@ -499,8 +496,8 @@ class MultiVariateAnalyzer:
     async def _sensitivity_analysis(self,
                                    solution: ParetoSolution,
                                    evaluation_function: Callable,
-                                   parameter_bounds: Dict[str, Tuple[float, float]],
-                                   n_samples: int = 100) -> Dict[str, Dict[str, float]]:
+                                   parameter_bounds: dict[str, tuple[float, float]],
+                                   n_samples: int = 100) -> dict[str, dict[str, float]]:
         """Perform sensitivity analysis around optimal solution."""
         sensitivity = {}
         
@@ -543,10 +540,10 @@ class MultiVariateAnalyzer:
     
     async def optimize_with_constraints(self,
                                        evaluation_function: Callable,
-                                       parameter_bounds: Dict[str, Tuple[float, float]],
-                                       hard_constraints: List[Callable],
-                                       soft_constraints: List[Callable],
-                                       penalty_weights: Optional[Dict[str, float]] = None) -> ParetoSolution:
+                                       parameter_bounds: dict[str, tuple[float, float]],
+                                       hard_constraints: list[Callable],
+                                       soft_constraints: list[Callable],
+                                       penalty_weights: dict[str, float] | None = None) -> ParetoSolution:
         """
         Optimize with both hard and soft constraints.
         
@@ -621,9 +618,9 @@ class MultiVariateAnalyzer:
         )
     
     def visualize_pareto_frontier(self, 
-                                 solutions: List[ParetoSolution],
+                                 solutions: list[ParetoSolution],
                                  metric_x: str,
-                                 metric_y: str) -> Dict[str, Any]:
+                                 metric_y: str) -> dict[str, Any]:
         """
         Create visualization data for Pareto frontier.
         
@@ -657,8 +654,8 @@ class MultiVariateAnalyzer:
     # Helper methods
     
     def _initialize_population(self, 
-                              bounds: Dict[str, Tuple[float, float]],
-                              size: int) -> List[Dict[str, float]]:
+                              bounds: dict[str, tuple[float, float]],
+                              size: int) -> list[dict[str, float]]:
         """Initialize random population."""
         population = []
         for _ in range(size):
@@ -669,8 +666,8 @@ class MultiVariateAnalyzer:
         return population
     
     async def _evaluate_individual(self,
-                                  params: Dict[str, float],
-                                  evaluation_function: Callable) -> Dict[str, float]:
+                                  params: dict[str, float],
+                                  evaluation_function: Callable) -> dict[str, float]:
         """Evaluate an individual configuration."""
         if asyncio.iscoroutinefunction(evaluation_function):
             return await evaluation_function(params)
@@ -679,9 +676,9 @@ class MultiVariateAnalyzer:
             return await loop.run_in_executor(None, evaluation_function, params)
     
     def _tournament_selection(self,
-                             population: List[ParetoSolution],
+                             population: list[ParetoSolution],
                              n_select: int,
-                             tournament_size: int = 2) -> List[Dict[str, float]]:
+                             tournament_size: int = 2) -> list[dict[str, float]]:
         """Tournament selection for genetic algorithm."""
         selected = []
         for _ in range(n_select):
@@ -691,8 +688,8 @@ class MultiVariateAnalyzer:
         return selected
     
     def _create_offspring(self,
-                         parents: List[Dict[str, float]],
-                         bounds: Dict[str, Tuple[float, float]]) -> List[ParetoSolution]:
+                         parents: list[dict[str, float]],
+                         bounds: dict[str, tuple[float, float]]) -> list[ParetoSolution]:
         """Create offspring through crossover and mutation."""
         offspring = []
         
@@ -713,16 +710,16 @@ class MultiVariateAnalyzer:
         return offspring
     
     def _crossover(self,
-                  parent1: Dict[str, float],
-                  parent2: Dict[str, float],
-                  crossover_rate: float = 0.9) -> Tuple[Dict[str, float], Dict[str, float]]:
+                  parent1: dict[str, float],
+                  parent2: dict[str, float],
+                  crossover_rate: float = 0.9) -> tuple[dict[str, float], dict[str, float]]:
         """Simulated binary crossover."""
         if np.random.random() > crossover_rate:
             return parent1.copy(), parent2.copy()
         
         child1, child2 = {}, {}
         
-        for param in parent1.keys():
+        for param in parent1:
             if np.random.random() < 0.5:
                 child1[param] = parent1[param]
                 child2[param] = parent2.get(param, parent1[param])
@@ -733,10 +730,10 @@ class MultiVariateAnalyzer:
         return child1, child2
     
     def _mutate(self,
-               individual: Dict[str, float],
-               bounds: Dict[str, Tuple[float, float]],
+               individual: dict[str, float],
+               bounds: dict[str, tuple[float, float]],
                mutation_rate: float = 0.1,
-               mutation_strength: float = 0.2) -> Dict[str, float]:
+               mutation_strength: float = 0.2) -> dict[str, float]:
         """Polynomial mutation."""
         mutated = individual.copy()
         
@@ -752,8 +749,8 @@ class MultiVariateAnalyzer:
         return mutated
     
     def _environmental_selection(self,
-                                combined: List[ParetoSolution],
-                                size: int) -> List[Dict[str, float]]:
+                                combined: list[ParetoSolution],
+                                size: int) -> list[dict[str, float]]:
         """Select next generation using NSGA-II environmental selection."""
         # Sort by rank and crowding distance
         combined.sort(key=lambda x: (x.rank, -x.crowding_distance))
@@ -762,7 +759,7 @@ class MultiVariateAnalyzer:
         selected = [sol.parameters for sol in combined[:size]]
         return selected
     
-    def _get_convergence_history(self) -> List[float]:
+    def _get_convergence_history(self) -> list[float]:
         """Get convergence history of optimization."""
         history = []
         for solutions in self.best_solutions:
@@ -776,8 +773,8 @@ class MultiVariateAnalyzer:
     
     async def _weighted_sum_optimization(self,
                                         evaluation_function: Callable,
-                                        parameter_bounds: Dict[str, Tuple[float, float]],
-                                        n_iterations: int) -> List[ParetoSolution]:
+                                        parameter_bounds: dict[str, tuple[float, float]],
+                                        n_iterations: int) -> list[ParetoSolution]:
         """Optimize using weighted sum method."""
         # Generate weight combinations
         n_weights = len(self.metrics)
@@ -808,8 +805,8 @@ class MultiVariateAnalyzer:
     
     async def _multi_objective_optimization(self,
                                           evaluation_function: Callable,
-                                          parameter_bounds: Dict[str, Tuple[float, float]],
-                                          n_iterations: int) -> List[ParetoSolution]:
+                                          parameter_bounds: dict[str, tuple[float, float]],
+                                          n_iterations: int) -> list[ParetoSolution]:
         """Generic multi-objective optimization."""
         # Use epsilon-constraint or goal programming
         solutions = []

@@ -12,7 +12,7 @@ import urllib.parse
 from typing import Any
 
 import email_validator
-from pydantic import BaseModel, EmailStr, Field, constr, validator
+from pydantic import BaseModel, EmailStr, Field, validator
 
 
 class SecurityValidator:
@@ -29,7 +29,7 @@ class SecurityValidator:
         r"(--|\||;|\/\*|\*\/|@@|@|xp_|sp_|0x)",
         r"(\bOR\b\s*\d+\s*=\s*\d+)",
         r"(\bAND\b\s*\d+\s*=\s*\d+)",
-        r"(\'|\"|`|´|'|'|" | ")",
+        r"(\'|\"|`|´|'|'|\"|\")",
         r"(\bWHERE\b.*=.*)",
     ]
 
@@ -379,47 +379,45 @@ class SecurityValidator:
 # Pydantic models for request validation
 
 
-class SecureStringField(constr):
-    """Secure string field with injection prevention."""
+from typing import Annotated
 
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+SecureStringField = Annotated[str, "SecureString"]
 
-    @classmethod
-    def validate(cls, v):
-        if not isinstance(v, str):
-            raise TypeError("string required")
 
-        # Check for injection attempts
-        if SecurityValidator.detect_sql_injection(v):
-            raise ValueError("Potential SQL injection detected")
+def validate_secure_string(v: str) -> str:
+    """Validate secure string field with injection prevention."""
+    if not isinstance(v, str):
+        raise TypeError("string required")
 
-        if SecurityValidator.detect_xss(v):
-            raise ValueError("Potential XSS detected")
+    # Check for injection attempts
+    if SecurityValidator.detect_sql_injection(v):
+        raise ValueError("Potential SQL injection detected")
 
-        if SecurityValidator.detect_command_injection(v):
-            raise ValueError("Potential command injection detected")
+    if SecurityValidator.detect_xss(v):
+        raise ValueError("Potential XSS detected")
 
-        return v
+    if SecurityValidator.detect_command_injection(v):
+        raise ValueError("Potential command injection detected")
+
+    return v
 
 
 class LoginRequest(BaseModel):
     """Secure login request model."""
 
     email: EmailStr = Field(..., description="User email address")
-    password: constr(min_length=8, max_length=128) = Field(
+    password: Annotated[str, Field(min_length=8, max_length=128)] = Field(
         ..., description="User password"
     )
-    mfa_code: constr(regex=r"^\d{6}$") | None = Field(None, description="MFA code")
+    mfa_code: Annotated[str, Field(pattern=r"^\d{6}$")] | None = Field(None, description="MFA code")
     remember_me: bool = Field(False, description="Remember session")
 
     @validator("email")
-    def validate_email(cls, v):
+    def validate_email(cls, v: str) -> str:
         return SecurityValidator.validate_email(v)
 
     @validator("password")
-    def validate_password(cls, v):
+    def validate_password(cls, v: str) -> str:
         # Basic password validation - expand as needed
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters")
@@ -436,16 +434,16 @@ class RegisterRequest(BaseModel):
     """Secure registration request model."""
 
     email: EmailStr = Field(..., description="Email address")
-    username: constr(regex=r"^[a-zA-Z0-9_-]{3,32}$") = Field(
+    username: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{3,32}$")] = Field(
         ..., description="Username"
     )
-    password: constr(min_length=8, max_length=128) = Field(..., description="Password")
+    password: Annotated[str, Field(min_length=8, max_length=128)] = Field(..., description="Password")
     full_name: SecureStringField | None = Field(None, max_length=255)
     organization: SecureStringField | None = Field(None, max_length=255)
     terms_accepted: bool = Field(..., description="Terms acceptance")
 
     @validator("username")
-    def validate_username(cls, v):
+    def validate_username(cls, v: str) -> str:
         # Check for reserved usernames
         reserved = ["admin", "root", "system", "api", "test"]
         if v.lower() in reserved:
@@ -459,10 +457,10 @@ class ResearchProjectRequest(BaseModel):
     title: SecureStringField = Field(..., max_length=500)
     description: SecureStringField | None = Field(None, max_length=5000)
     query: SecureStringField = Field(..., max_length=1000)
-    domains: list[SecureStringField] = Field(..., max_items=10)
+    domains: list[SecureStringField] = Field(..., max_length=10)
 
     @validator("domains")
-    def validate_domains(cls, v):
+    def validate_domains(cls, v: list[str]) -> list[str]:
         # Ensure unique domains
         if len(v) != len(set(v)):
             raise ValueError("Duplicate domains not allowed")

@@ -130,9 +130,11 @@ class RegisterRequest(BaseModel):
         return v
 
     @field_validator("confirm_password")
-    def validate_password_match(cls, v: str, values: dict[str, Any]) -> str:
+    @classmethod
+    def validate_password_match(cls, v: str, info: Any) -> str:
         """Validate password confirmation matches."""
-        if "password" in values and v != values["password"]:
+        password = info.data.get("password")
+        if password and v != password:
             raise ValueError("Passwords do not match")
         return v
 
@@ -207,9 +209,11 @@ class PasswordResetConfirm(BaseModel):
         return v
 
     @field_validator("confirm_password")
-    def validate_password_match(cls, v: str, values: dict[str, Any]) -> str:
+    @classmethod
+    def validate_password_match(cls, v: str, info: Any) -> str:
         """Validate password confirmation matches."""
-        if "new_password" in values and v != values["new_password"]:
+        new_password = info.data.get("new_password")
+        if new_password and v != new_password:
             raise ValueError("Passwords do not match")
         return v
 
@@ -249,16 +253,20 @@ class ChangePasswordRequest(BaseModel):
         return v
 
     @field_validator("confirm_password")
-    def validate_password_match(cls, v: str, values: dict[str, Any]) -> str:
+    @classmethod
+    def validate_password_match(cls, v: str, info: Any) -> str:
         """Validate password confirmation matches."""
-        if "new_password" in values and v != values["new_password"]:
+        new_password = info.data.get("new_password")
+        if new_password and v != new_password:
             raise ValueError("Passwords do not match")
         return v
 
     @field_validator("new_password")
-    def validate_different_password(cls, v: str, values: dict[str, Any]) -> str:
+    @classmethod
+    def validate_different_password(cls, v: str, info: Any) -> str:
         """Validate new password is different from current."""
-        if "current_password" in values and v == values["current_password"]:
+        current_password = info.data.get("current_password")
+        if current_password and v == current_password:
             raise ValueError("New password must be different from current password")
         return v
 

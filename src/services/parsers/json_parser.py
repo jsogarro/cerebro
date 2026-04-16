@@ -28,9 +28,9 @@ def parse_json_response(response: str) -> dict[str, Any]:
     Raises:
         ValueError: If no valid JSON can be extracted
     """
-    # Try direct JSON parse first
     try:
-        return json.loads(response.strip())
+        parsed: dict[str, Any] = json.loads(response.strip())
+        return parsed
     except json.JSONDecodeError:
         pass
 
@@ -40,7 +40,8 @@ def parse_json_response(response: str) -> dict[str, Any]:
 
     for match in matches:
         try:
-            return json.loads(match.strip())
+            match_parsed: dict[str, Any] = json.loads(match.strip())
+            return match_parsed
         except json.JSONDecodeError:
             continue
 
@@ -51,7 +52,8 @@ def parse_json_response(response: str) -> dict[str, Any]:
 
     for match in brace_matches:
         try:
-            return json.loads(match)
+            brace_parsed: dict[str, Any] = json.loads(match)
+            return brace_parsed
         except json.JSONDecodeError:
             continue
 
@@ -62,10 +64,10 @@ def parse_json_response(response: str) -> dict[str, Any]:
     for match in array_matches:
         try:
             result = json.loads(match)
-            # Wrap array in object if needed
             if isinstance(result, list):
                 return {"items": result}
-            return result
+            array_parsed: dict[str, Any] = result
+            return array_parsed
         except json.JSONDecodeError:
             continue
 
@@ -94,9 +96,8 @@ def validate_schema(data: dict[str, Any], schema: dict[str, type]) -> bool:
 
         value = data[key]
 
-        # Handle Union types
         if hasattr(expected_type, "__origin__") and expected_type.__origin__ is Union:
-            type_args = expected_type.__args__
+            type_args = getattr(expected_type, "__args__", ())
             if not any(isinstance(value, t) for t in type_args):
                 return False
         # Handle List types
@@ -238,7 +239,7 @@ def flatten_json(
     Returns:
         Flattened dictionary
     """
-    items: list[tuple] = []
+    items: list[tuple[str, Any]] = []
 
     for key, value in data.items():
         new_key = f"{parent_key}{separator}{key}" if parent_key else key

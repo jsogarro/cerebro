@@ -6,14 +6,13 @@ experimentation across all Cerebro intelligence components including MASR routin
 Agent APIs, Memory systems, and TalkHier protocols.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Union
-from enum import Enum
-from datetime import datetime, timedelta
-import uuid
-import asyncio
 import hashlib
+import uuid
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 # Import existing prompt version manager for extension
 from src.ai_brain.prompts.prompt_version_manager import PromptVersionManager
@@ -56,18 +55,18 @@ class ExperimentVariant:
     name: str
     description: str
     allocation: float  # Percentage of traffic (0.0 to 1.0)
-    configuration: Dict[str, Any]
+    configuration: dict[str, Any]
     is_control: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class ExperimentMetrics:
     """Metrics tracked for an experiment."""
-    primary_metrics: List[str]
-    secondary_metrics: List[str]
-    guardrail_metrics: List[str]  # Metrics that trigger safety stops
-    custom_metrics: Dict[str, Any] = field(default_factory=dict)
+    primary_metrics: list[str]
+    secondary_metrics: list[str]
+    guardrail_metrics: list[str]  # Metrics that trigger safety stops
+    custom_metrics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -98,16 +97,16 @@ class SystemExperiment:
     name: str
     description: str
     type: ExperimentType
-    components: List[SystemComponent]
-    variants: List[ExperimentVariant]
+    components: list[SystemComponent]
+    variants: list[ExperimentVariant]
     metrics: ExperimentMetrics
     statistical_config: StatisticalConfig
-    success_criteria: List[SuccessCriteria]
+    success_criteria: list[SuccessCriteria]
     status: ExperimentStatus
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    owner: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    owner: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class ExperimentAllocationStrategy(ABC):
@@ -116,14 +115,14 @@ class ExperimentAllocationStrategy(ABC):
     @abstractmethod
     async def get_variant(self, 
                           experiment: SystemExperiment,
-                          context: Dict[str, Any]) -> ExperimentVariant:
+                          context: dict[str, Any]) -> ExperimentVariant:
         """Determine which variant to assign based on context."""
         pass
     
     @abstractmethod
     async def update_allocation(self,
                                experiment: SystemExperiment,
-                               performance_data: Dict[str, Any]) -> None:
+                               performance_data: dict[str, Any]) -> None:
         """Update allocation based on performance (for adaptive strategies)."""
         pass
 
@@ -133,7 +132,7 @@ class RandomAllocationStrategy(ExperimentAllocationStrategy):
     
     async def get_variant(self,
                           experiment: SystemExperiment,
-                          context: Dict[str, Any]) -> ExperimentVariant:
+                          context: dict[str, Any]) -> ExperimentVariant:
         """Randomly assign variant based on allocation percentages."""
         import random
         
@@ -151,7 +150,7 @@ class RandomAllocationStrategy(ExperimentAllocationStrategy):
     
     async def update_allocation(self,
                                experiment: SystemExperiment,
-                               performance_data: Dict[str, Any]) -> None:
+                               performance_data: dict[str, Any]) -> None:
         """No updates for random allocation."""
         pass
 
@@ -159,18 +158,18 @@ class RandomAllocationStrategy(ExperimentAllocationStrategy):
 class DeterministicAllocationStrategy(ExperimentAllocationStrategy):
     """Deterministic allocation based on user/session hash."""
     
-    def _hash_context(self, context: Dict[str, Any], experiment_id: str) -> float:
+    def _hash_context(self, context: dict[str, Any], experiment_id: str) -> float:
         """Create deterministic hash from context."""
         # Use user_id or session_id for consistent assignment
         identifier = context.get('user_id') or context.get('session_id', '')
         hash_input = f"{experiment_id}:{identifier}"
         hash_value = hashlib.md5(hash_input.encode()).hexdigest()
         # Convert to float between 0 and 1
-        return int(hash_value, 16) / (16 ** len(hash_value))
+        return float(int(hash_value, 16) / (16 ** len(hash_value)))
     
     async def get_variant(self,
                           experiment: SystemExperiment,
-                          context: Dict[str, Any]) -> ExperimentVariant:
+                          context: dict[str, Any]) -> ExperimentVariant:
         """Deterministically assign variant based on context hash."""
         hash_value = self._hash_context(context, experiment.id)
         
@@ -184,7 +183,7 @@ class DeterministicAllocationStrategy(ExperimentAllocationStrategy):
     
     async def update_allocation(self,
                                experiment: SystemExperiment,
-                               performance_data: Dict[str, Any]) -> None:
+                               performance_data: dict[str, Any]) -> None:
         """No updates for deterministic allocation."""
         pass
 
@@ -196,8 +195,8 @@ class UnifiedExperimentManager:
     """
     
     def __init__(self, 
-                 prompt_manager: Optional[PromptVersionManager] = None,
-                 allocation_strategy: Optional[ExperimentAllocationStrategy] = None):
+                 prompt_manager: PromptVersionManager | None = None,
+                 allocation_strategy: ExperimentAllocationStrategy | None = None):
         """
         Initialize the unified experiment manager.
         
@@ -207,12 +206,12 @@ class UnifiedExperimentManager:
         """
         self.prompt_manager = prompt_manager
         self.allocation_strategy = allocation_strategy or DeterministicAllocationStrategy()
-        self.active_experiments: Dict[str, SystemExperiment] = {}
-        self.experiment_history: List[SystemExperiment] = []
-        self.assignment_cache: Dict[str, Dict[str, ExperimentVariant]] = {}
+        self.active_experiments: dict[str, SystemExperiment] = {}
+        self.experiment_history: list[SystemExperiment] = []
+        self.assignment_cache: dict[str, dict[str, ExperimentVariant]] = {}
         
     async def create_experiment(self, 
-                               experiment_config: Dict[str, Any]) -> SystemExperiment:
+                               experiment_config: dict[str, Any]) -> SystemExperiment:
         """
         Create a new system-wide experiment.
         
@@ -265,7 +264,7 @@ class UnifiedExperimentManager:
     
     async def get_variant_for_context(self,
                                      experiment_id: str,
-                                     context: Dict[str, Any]) -> Optional[ExperimentVariant]:
+                                     context: dict[str, Any]) -> ExperimentVariant | None:
         """
         Get the appropriate variant for a given context.
         
@@ -301,7 +300,7 @@ class UnifiedExperimentManager:
     
     async def track_assignment(self,
                               experiment_id: str,
-                              context: Dict[str, Any],
+                              context: dict[str, Any],
                               variant: ExperimentVariant) -> None:
         """Track that a user/session was assigned to a variant."""
         # This would integrate with the metrics collection system
@@ -319,7 +318,7 @@ class UnifiedExperimentManager:
                           variant_id: str,
                           metric_name: str,
                           value: float,
-                          context: Optional[Dict[str, Any]] = None) -> None:
+                          context: dict[str, Any] | None = None) -> None:
         """Track a metric value for an experiment variant."""
         metric_event = {
             'experiment_id': experiment_id,
@@ -405,7 +404,7 @@ class UnifiedExperimentManager:
     
     # Helper methods
     
-    def _parse_variant(self, variant_config: Dict[str, Any]) -> ExperimentVariant:
+    def _parse_variant(self, variant_config: dict[str, Any]) -> ExperimentVariant:
         """Parse variant configuration."""
         return ExperimentVariant(
             id=variant_config.get('id', str(uuid.uuid4())),
@@ -417,7 +416,7 @@ class UnifiedExperimentManager:
             metadata=variant_config.get('metadata', {})
         )
     
-    def _parse_metrics(self, metrics_config: Dict[str, Any]) -> ExperimentMetrics:
+    def _parse_metrics(self, metrics_config: dict[str, Any]) -> ExperimentMetrics:
         """Parse metrics configuration."""
         return ExperimentMetrics(
             primary_metrics=metrics_config.get('primary', []),
@@ -426,7 +425,7 @@ class UnifiedExperimentManager:
             custom_metrics=metrics_config.get('custom', {})
         )
     
-    def _parse_statistical_config(self, config: Dict[str, Any]) -> StatisticalConfig:
+    def _parse_statistical_config(self, config: dict[str, Any]) -> StatisticalConfig:
         """Parse statistical configuration."""
         return StatisticalConfig(
             confidence_level=config.get('confidence_level', 0.95),
@@ -438,7 +437,7 @@ class UnifiedExperimentManager:
             sequential_testing=config.get('sequential', False)
         )
     
-    def _parse_success_criteria(self, criteria_config: Dict[str, Any]) -> SuccessCriteria:
+    def _parse_success_criteria(self, criteria_config: dict[str, Any]) -> SuccessCriteria:
         """Parse success criteria configuration."""
         return SuccessCriteria(
             metric=criteria_config['metric'],
@@ -447,7 +446,7 @@ class UnifiedExperimentManager:
             practical_significance=criteria_config.get('practical_significance', 0.05)
         )
     
-    def _validate_experiment(self, experiment: SystemExperiment):
+    def _validate_experiment(self, experiment: SystemExperiment) -> None:
         """Validate experiment configuration."""
         # Check allocations sum to 1.0
         total_allocation = sum(v.allocation for v in experiment.variants)
@@ -464,7 +463,7 @@ class UnifiedExperimentManager:
         if not experiment.metrics.primary_metrics:
             raise ValueError("At least one primary metric is required")
     
-    def _get_cache_key(self, experiment_id: str, context: Dict[str, Any]) -> str:
+    def _get_cache_key(self, experiment_id: str, context: dict[str, Any]) -> str:
         """Generate cache key for assignment."""
         identifier = context.get('user_id') or context.get('session_id', 'unknown')
         return f"{experiment_id}:{identifier}"
@@ -501,10 +500,10 @@ class UnifiedExperimentManager:
                 pass
             # ... etc
     
-    async def get_active_experiments(self) -> List[SystemExperiment]:
+    async def get_active_experiments(self) -> list[SystemExperiment]:
         """Get all currently active experiments."""
         return list(self.active_experiments.values())
     
-    async def get_experiment(self, experiment_id: str) -> Optional[SystemExperiment]:
+    async def get_experiment(self, experiment_id: str) -> SystemExperiment | None:
         """Get a specific experiment by ID."""
         return self.active_experiments.get(experiment_id)

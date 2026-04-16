@@ -5,6 +5,8 @@ Provides flexible rate limiting for API endpoints with support for
 different strategies (sliding window, token bucket, fixed window).
 """
 
+from __future__ import annotations
+
 import hashlib
 import time
 from enum import Enum
@@ -47,7 +49,7 @@ class RateLimiter:
 
     def __init__(
         self,
-        redis_client: Redis,
+        redis_client: Redis[Any],
         default_limit: int = 100,
         default_window: int = 3600,
         default_strategy: RateLimitStrategy = RateLimitStrategy.SLIDING_WINDOW,
@@ -447,7 +449,7 @@ class RateLimiter:
         """
         # This would need to be implemented based on the specific
         # requirements and how you want to track/report status
-        status = {"identifier": identifier, "endpoint": endpoint, "limits": []}
+        status: dict[str, Any] = {"identifier": identifier, "endpoint": endpoint, "limits": []}
 
         # Find matching keys and get their status
         pattern = f"rate_limit:*{identifier}*"
@@ -537,7 +539,7 @@ class RateLimitMiddleware:
         redis_url: str,
         default_limit: int = 100,
         default_window: int = 3600,
-        exclude_paths: list | None = None,
+        exclude_paths: list[str] | None = None,
     ):
         """
         Initialize rate limit middleware.
@@ -552,10 +554,10 @@ class RateLimitMiddleware:
         self.default_limit = default_limit
         self.default_window = default_window
         self.exclude_paths = exclude_paths or ["/docs", "/redoc", "/openapi.json"]
-        self.redis_client = None
-        self.rate_limiter = None
+        self.redis_client: Redis[Any] | None = None
+        self.rate_limiter: RateLimiter | None = None
 
-    async def __call__(self, request: Request, call_next) -> Response:
+    async def __call__(self, request: Request, call_next: Any) -> Response:
         """Process request with rate limiting."""
         # Initialize Redis client if needed
         if not self.redis_client:
@@ -566,7 +568,8 @@ class RateLimitMiddleware:
 
         # Skip rate limiting for excluded paths
         if request.url.path in self.exclude_paths:
-            return await call_next(request)
+            response: Response = await call_next(request)
+            return response
 
         # Get user identifier from request
         identifier = None
@@ -576,6 +579,9 @@ class RateLimitMiddleware:
             identifier = request.state.api_key
 
         # Check rate limit
+        if not self.rate_limiter:
+            response2: Response = await call_next(request)
+            return response2
         allowed, metadata = await self.rate_limiter.check_rate_limit(
             request, identifier=identifier
         )
@@ -596,9 +602,9 @@ class RateLimitMiddleware:
             )
 
         # Add rate limit headers to response
-        response = await call_next(request)
-        response.headers["X-RateLimit-Limit"] = str(metadata.get("limit", 0))
-        response.headers["X-RateLimit-Remaining"] = str(metadata.get("remaining", 0))
-        response.headers["X-RateLimit-Reset"] = str(metadata.get("reset", 0))
+        response3: Response = await call_next(request)
+        response3.headers["X-RateLimit-Limit"] = str(metadata.get("limit", 0))
+        response3.headers["X-RateLimit-Remaining"] = str(metadata.get("remaining", 0))
+        response3.headers["X-RateLimit-Reset"] = str(metadata.get("reset", 0))
 
-        return response
+        return response3

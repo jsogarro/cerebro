@@ -4,6 +4,7 @@ Configuration management for Research Platform CLI.
 
 import os
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
@@ -77,7 +78,7 @@ class CLIConfig(BaseModel):
             load_dotenv(".env.cli")
 
         # Build config from environment variables
-        config_dict = {}
+        config_dict: dict[str, Any] = {}
 
         if api_url := os.getenv("RESEARCH_API_URL"):
             config_dict["api_url"] = api_url

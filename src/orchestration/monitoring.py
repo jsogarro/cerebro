@@ -325,7 +325,7 @@ class OrchestrationMonitor:
             parent_span = self._spans[workflow_id]
 
             with tracer.start_as_current_span(
-                f"node_{node_name}", parent=parent_span
+                f"node_{node_name}"
             ) as node_span:
                 node_span.set_attribute("node.name", node_name)
                 node_span.set_attribute("execution.duration", duration)
@@ -434,7 +434,7 @@ class OrchestrationMonitor:
 
     def get_workflow_metrics(
         self, workflow_id: str | None = None
-    ) -> Union[WorkflowMetrics, list[WorkflowMetrics], None]:
+    ) -> WorkflowMetrics | list[WorkflowMetrics] | None:
         """
         Get metrics for workflow(s).
 
@@ -468,10 +468,16 @@ class OrchestrationMonitor:
         Returns:
             Summary statistics
         """
-        all_workflows = self.get_workflow_metrics()
+        all_workflows_raw = self.get_workflow_metrics()
 
-        if not all_workflows:
+        if not all_workflows_raw:
             return {}
+
+        all_workflows: list[WorkflowMetrics]
+        if isinstance(all_workflows_raw, list):
+            all_workflows = all_workflows_raw
+        else:
+            all_workflows = [all_workflows_raw]
 
         completed = [w for w in all_workflows if w.completed_at]
         successful = [w for w in completed if w.success]
@@ -533,7 +539,7 @@ class OrchestrationMonitor:
         self, workflows: list[WorkflowMetrics]
     ) -> dict[str, Any]:
         """Calculate statistics per agent."""
-        agent_stats = {}
+        agent_stats: dict[str, Any] = {}
 
         for workflow in workflows:
             for agent_type, agent_data in workflow.agents_executed.items():
@@ -544,24 +550,32 @@ class OrchestrationMonitor:
                         "status_distribution": {},
                     }
 
-                stats = agent_stats[agent_type]
-                stats["total_executions"] += agent_data["executions"]
-                stats["total_duration"] += agent_data["total_duration"]
+                stats: dict[str, Any] = agent_stats[agent_type]
+                if isinstance(agent_data, dict):
+                    stats["total_executions"] += agent_data.get("executions", 0)
+                    stats["total_duration"] += agent_data.get("total_duration", 0.0)
 
-                # Merge status counts
-                for status, count in agent_data["status_counts"].items():
-                    stats["status_distribution"][status] = (
-                        stats["status_distribution"].get(status, 0) + count
-                    )
+                    # Merge status counts
+                    status_counts = agent_data.get("status_counts", {})
+                    if isinstance(status_counts, dict):
+                        for status, count in status_counts.items():
+                            status_dist: dict[str, int] = stats["status_distribution"]
+                            status_dist[status] = status_dist.get(status, 0) + count
 
         # Calculate success rates
         for agent_type, stats in agent_stats.items():
-            total = stats["total_executions"]
-            if total > 0:
-                stats["average_duration"] = stats["total_duration"] / total
+            if isinstance(stats, dict):
+                total = stats.get("total_executions", 0)
+                if isinstance(total, int) and total > 0:
+                    total_duration = stats.get("total_duration", 0.0)
+                    if isinstance(total_duration, (int, float)):
+                        stats["average_duration"] = total_duration / total
 
-                successful = stats["status_distribution"].get("completed", 0)
-                stats["success_rate"] = successful / total
+                    status_dist = stats.get("status_distribution", {})
+                    if isinstance(status_dist, dict):
+                        successful = status_dist.get("completed", 0)
+                        if isinstance(successful, int):
+                            stats["success_rate"] = successful / total
 
         return agent_stats
 
@@ -797,7 +811,7 @@ def get_monitor() -> OrchestrationMonitor:
     return _global_monitor
 
 
-def initialize_monitoring(enable_tracing: bool = True):
+def initialize_monitoring(enable_tracing: bool = True) -> None:
     """Initialize global monitoring."""
     global _global_monitor
 

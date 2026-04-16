@@ -4,6 +4,9 @@ JWT Token Service for authentication.
 Handles token generation, validation, and management using RS256 algorithm.
 """
 
+from __future__ import annotations
+
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,7 +21,7 @@ from jose import JWTError, jwt
 
 from src.auth.models import TokenPair, TokenPayload
 from src.core.config import settings
-from src.utils.serialization import serialize_for_cache, deserialize_from_cache
+from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 logger = structlog.get_logger(__name__)
 
@@ -37,7 +40,7 @@ class JWTService:
 
     def __init__(
         self,
-        redis_client: redis.Redis | None = None,
+        redis_client: redis.Redis[Any] | None = None,
         private_key_path: str | None = None,
         public_key_path: str | None = None,
     ):
@@ -132,8 +135,8 @@ class JWTService:
         self,
         user_id: str,
         email: str,
-        roles: list[str] = None,
-        permissions: list[str] = None,
+        roles: list[str] | None = None,
+        permissions: list[str] | None = None,
         device_id: str | None = None,
         additional_claims: dict[str, Any] | None = None,
     ) -> TokenPair:

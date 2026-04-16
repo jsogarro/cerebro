@@ -8,13 +8,13 @@ following functional programming principles with pure data transformation functi
 import base64
 import io
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 try:
-    import plotly.graph_objects as go
     import plotly.express as px
-    from plotly.subplots import make_subplots
+    import plotly.graph_objects as go
     import plotly.io as pio
+    from plotly.subplots import make_subplots
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
@@ -24,10 +24,10 @@ except ImportError:
     pio = None
 
 try:
-    import networkx as nx
-    import matplotlib.pyplot as plt
     import matplotlib
-    matplotlib.use('Agg')  # Use non-interactive backend
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    matplotlib.use('Agg')
     NETWORKX_AVAILABLE = True
 except ImportError:
     NETWORKX_AVAILABLE = False
@@ -41,8 +41,6 @@ except ImportError:
     WORDCLOUD_AVAILABLE = False
     WordCloud = None
 
-import numpy as np
-import pandas as pd
 
 from src.models.report import Report, Visualization, VisualizationType
 from src.services.report_config import ReportSettings
@@ -58,7 +56,7 @@ class VisualizationGenerationError(Exception):
 class VisualizationGenerator:
     """Service for generating visualizations for research reports."""
     
-    def __init__(self, settings: Optional[ReportSettings] = None):
+    def __init__(self, settings: ReportSettings | None = None):
         """Initialize visualization generator."""
         self.settings = settings or ReportSettings()
         
@@ -96,7 +94,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str = 'html',
         theme: str = 'plotly_white'
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate a visualization from specification.
         
@@ -144,7 +142,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate bar chart visualization."""
         if not PLOTLY_AVAILABLE:
             raise VisualizationGenerationError("Plotly not available for bar chart")
@@ -193,7 +191,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate line chart visualization."""
         if not PLOTLY_AVAILABLE:
             raise VisualizationGenerationError("Plotly not available for line chart")
@@ -242,7 +240,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate pie chart visualization."""
         if not PLOTLY_AVAILABLE:
             raise VisualizationGenerationError("Plotly not available for pie chart")
@@ -278,7 +276,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate scatter plot visualization."""
         if not PLOTLY_AVAILABLE:
             raise VisualizationGenerationError("Plotly not available for scatter plot")
@@ -318,7 +316,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate radar chart visualization."""
         if not PLOTLY_AVAILABLE:
             raise VisualizationGenerationError("Plotly not available for radar chart")
@@ -380,7 +378,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate heatmap visualization."""
         if not PLOTLY_AVAILABLE:
             raise VisualizationGenerationError("Plotly not available for heatmap")
@@ -420,7 +418,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate network graph visualization."""
         if not NETWORKX_AVAILABLE:
             raise VisualizationGenerationError("NetworkX not available for network graph")
@@ -466,12 +464,12 @@ class VisualizationGenerator:
     
     def _create_plotly_network(
         self,
-        G,
-        pos: Dict,
+        G: Any,
+        pos: dict[Any, Any],
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create interactive network using Plotly."""
         # Extract node and edge coordinates
         edge_x = []
@@ -562,11 +560,11 @@ class VisualizationGenerator:
     
     def _create_matplotlib_network(
         self,
-        G,
-        pos: Dict,
+        G: Any,
+        pos: dict[Any, Any],
         viz_spec: Visualization,
         format: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create network using matplotlib (fallback)."""
         plt.figure(figsize=(10, 8))
         
@@ -603,7 +601,7 @@ class VisualizationGenerator:
         self,
         viz_spec: Visualization,
         format: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate word cloud visualization."""
         if not WORDCLOUD_AVAILABLE:
             raise VisualizationGenerationError("WordCloud not available")
@@ -664,7 +662,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate histogram visualization."""
         if not PLOTLY_AVAILABLE:
             raise VisualizationGenerationError("Plotly not available for histogram")
@@ -700,7 +698,7 @@ class VisualizationGenerator:
         viz_spec: Visualization,
         format: str,
         theme: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate box plot visualization."""
         if not PLOTLY_AVAILABLE:
             raise VisualizationGenerationError("Plotly not available for box plot")
@@ -740,10 +738,10 @@ class VisualizationGenerator:
     
     def _finalize_plotly_figure(
         self,
-        fig,
+        fig: Any,
         format: str,
         viz_spec: Visualization
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Finalize Plotly figure and convert to requested format."""
         if format == 'html':
             html_str = pio.to_html(fig, include_plotlyjs='cdn', div_id=viz_spec.id)
@@ -783,7 +781,7 @@ class VisualizationGenerator:
         self,
         report: Report,
         format: str = 'html'
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         """
         Generate all visualizations for a report.
         
@@ -817,16 +815,15 @@ class VisualizationGenerator:
 
 
 def create_visualization_generator(
-    settings: Optional[ReportSettings] = None
+    settings: ReportSettings | None = None
 ) -> VisualizationGenerator:
     """Factory function to create a visualization generator."""
     return VisualizationGenerator(settings)
 
 
 # Utility functions for creating common visualization specifications
-def create_source_distribution_viz(sources: List[Dict], viz_id: str = "source_dist") -> Visualization:
-    """Create visualization specification for source distribution by year."""
-    year_counts = {}
+def create_source_distribution_viz(sources: list[dict[str, Any]], viz_id: str = "source_dist") -> Visualization:
+    year_counts: dict[str, int] = {}
     for source in sources:
         year = source.get('year', 'Unknown')
         year_counts[str(year)] = year_counts.get(str(year), 0) + 1
@@ -842,11 +839,14 @@ def create_source_distribution_viz(sources: List[Dict], viz_id: str = "source_di
         config={
             'x_label': 'Publication Year',
             'y_label': 'Number of Sources'
-        }
+        },
+        caption=None,
+        width=None,
+        height=None
     )
 
 
-def create_domain_coverage_viz(domains: List[str], viz_id: str = "domain_coverage") -> Visualization:
+def create_domain_coverage_viz(domains: list[str], viz_id: str = "domain_coverage") -> Visualization:
     """Create visualization specification for domain coverage."""
     return Visualization(
         id=viz_id,
@@ -854,15 +854,18 @@ def create_domain_coverage_viz(domains: List[str], viz_id: str = "domain_coverag
         title="Research Domain Coverage",
         data={
             'labels': domains,
-            'values': [1] * len(domains)  # Equal weight for each domain
+            'values': [1] * len(domains)
         },
-        config={'donut': True}
+        config={'donut': True},
+        caption=None,
+        width=None,
+        height=None
     )
 
 
 def create_confidence_radar_viz(
-    categories: List[str],
-    confidence_scores: List[float],
+    categories: list[str],
+    confidence_scores: list[float],
     viz_id: str = "confidence_radar"
 ) -> Visualization:
     """Create radar chart for confidence scores by category."""
@@ -874,15 +877,18 @@ def create_confidence_radar_viz(
             'categories': categories,
             'values': confidence_scores
         },
-        config={}
+        config={},
+        caption=None,
+        width=None,
+        height=None
     )
 
 
 __all__ = [
-    "VisualizationGenerator",
     "VisualizationGenerationError",
-    "create_visualization_generator",
-    "create_source_distribution_viz",
-    "create_domain_coverage_viz",
+    "VisualizationGenerator",
     "create_confidence_radar_viz",
+    "create_domain_coverage_viz",
+    "create_source_distribution_viz",
+    "create_visualization_generator",
 ]

@@ -11,22 +11,22 @@ Features:
 - Service discovery and load balancing support
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import signal
 from datetime import datetime
-from typing import Dict, Any, Optional
-from starlette.responses import Response
+from typing import Any
 
+import redis.asyncio as redis
 import uvicorn
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import redis.asyncio as redis
 
 from .masr import MASRouter, RoutingStrategy
-from .query_analyzer import QueryComplexityAnalyzer
 
 # Configure logging
 logging.basicConfig(
@@ -38,11 +38,11 @@ logger = logging.getLogger(__name__)
 
 class RoutingRequest(BaseModel):
     """Request model for MASR routing."""
-    
+
     query: str = Field(..., description="Query to route")
-    context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional context")
-    strategy: Optional[str] = Field(None, description="Routing strategy override")
-    constraints: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Routing constraints")
+    context: dict[str, Any] | None = Field(default_factory=dict, description="Additional context")
+    strategy: str | None = Field(None, description="Routing strategy override")
+    constraints: dict[str, Any] | None = Field(default_factory=dict, description="Routing constraints")
 
 
 class RoutingResponse(BaseModel):
@@ -59,7 +59,7 @@ class RoutingResponse(BaseModel):
     estimated_quality: float
     confidence_score: float
     routing_strategy: str
-    complexity_analysis: Dict[str, Any]
+    complexity_analysis: dict[str, Any]
 
 
 class HealthResponse(BaseModel):
@@ -68,14 +68,14 @@ class HealthResponse(BaseModel):
     status: str
     timestamp: str
     version: str = "1.0.0"
-    components: Dict[str, str]
-    metrics: Dict[str, Any]
+    components: dict[str, str]
+    metrics: dict[str, Any]
 
 
 class MASRService:
     """MASR microservice implementation."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize MASR service."""
         self.app = FastAPI(
             title="Cerebro MASR Service",
@@ -84,31 +84,25 @@ class MASRService:
             docs_url="/docs",
             redoc_url="/redoc",
         )
-        
-        # Service configuration
+
         self.host = os.getenv("MASR_HOST", "0.0.0.0")
         self.port = int(os.getenv("MASR_PORT", "9100"))
         self.environment = os.getenv("ENVIRONMENT", "development")
-        
-        # Initialize components
-        self.masr_router: Optional[MASRouter] = None
-        self.redis_client: Optional[redis.Redis] = None
-        
-        # Service metrics
-        self.service_stats = {
+        self.masr_router: MASRouter | None = None
+        self.redis_client: redis.Redis[bytes] | None = None
+        self.service_stats: dict[str, Any] = {
             "requests_total": 0,
             "requests_successful": 0,
             "requests_failed": 0,
             "average_response_time_ms": 0.0,
             "started_at": datetime.now().isoformat(),
         }
-        
-        # Setup FastAPI app
+
         self._setup_middleware()
         self._setup_routes()
         self._setup_shutdown_handlers()
-    
-    def _setup_middleware(self):
+
+    def _setup_middleware(self) -> None:
         """Setup FastAPI middleware."""
         
         # CORS middleware
@@ -120,22 +114,21 @@ class MASRService:
             allow_headers=["*"],
         )
         
-        # Request/response logging middleware
         @self.app.middleware("http")
-        async def logging_middleware(request, call_next) -> Response:
+        async def logging_middleware(request: Any, call_next: Any) -> Any:
             start_time = datetime.now()
             response = await call_next(request)
             process_time = (datetime.now() - start_time).total_seconds() * 1000
-            
+
             logger.info(
                 f"{request.method} {request.url.path} - "
                 f"Status: {response.status_code} - "
                 f"Time: {process_time:.2f}ms"
             )
-            
+
             return response
-    
-    def _setup_routes(self):
+
+    def _setup_routes(self) -> None:
         """Setup FastAPI routes."""
         
         @self.app.get("/health", response_model=HealthResponse)
@@ -182,7 +175,7 @@ class MASRService:
                 raise HTTPException(status_code=503, detail="MASR router not available")
             
             start_time = datetime.now()
-            self.service_stats["requests_total"] += 1
+            self.service_stats["requests_total"] = int(self.service_stats["requests_total"]) + 1
             
             try:
                 # Parse strategy if provided
@@ -204,9 +197,8 @@ class MASRService:
                     constraints=request.constraints,
                 )
                 
-                # Update metrics
                 process_time = (datetime.now() - start_time).total_seconds() * 1000
-                self.service_stats["requests_successful"] += 1
+                self.service_stats["requests_successful"] = int(self.service_stats["requests_successful"]) + 1
                 self._update_average_response_time(process_time)
                 
                 # Build response
@@ -234,11 +226,11 @@ class MASRService:
                 
             except Exception as e:
                 logger.error(f"Routing failed for query '{request.query[:100]}...': {e}")
-                self.service_stats["requests_failed"] += 1
-                raise HTTPException(status_code=500, detail=f"Routing failed: {str(e)}")
+                self.service_stats["requests_failed"] = int(self.service_stats["requests_failed"]) + 1
+                raise HTTPException(status_code=500, detail=f"Routing failed: {e!s}")
         
         @self.app.get("/metrics")
-        async def get_metrics() -> Dict[str, Any]:
+        async def get_metrics() -> dict[str, Any]:
             """Get service metrics."""
 
             metrics = self.service_stats.copy()
@@ -250,15 +242,16 @@ class MASRService:
             return metrics
         
         @self.app.get("/stats")
-        async def get_detailed_stats() -> Dict[str, Any]:
+        async def get_detailed_stats() -> dict[str, Any]:
             """Get detailed service statistics."""
 
-            stats = {
+            started_at_str = str(self.service_stats["started_at"])
+            stats: dict[str, Any] = {
                 "service": self.service_stats.copy(),
                 "environment": self.environment,
                 "uptime_seconds": (
-                    datetime.now() - 
-                    datetime.fromisoformat(self.service_stats["started_at"])
+                    datetime.now() -
+                    datetime.fromisoformat(started_at_str)
                 ).total_seconds(),
             }
             
@@ -266,8 +259,8 @@ class MASRService:
                 stats["masr_router"] = await self.masr_router.get_metrics()
             
             return stats
-    
-    def _setup_shutdown_handlers(self):
+
+    def _setup_shutdown_handlers(self) -> None:
         """Setup graceful shutdown handlers."""
         
         @self.app.on_event("startup")
@@ -326,19 +319,19 @@ class MASRService:
             await self.redis_client.close()
             logger.info("Redis connection closed")
     
-    def _update_average_response_time(self, response_time_ms: float):
+    def _update_average_response_time(self, response_time_ms: float) -> None:
         """Update average response time metric."""
-        
-        current_avg = self.service_stats["average_response_time_ms"]
-        total_requests = self.service_stats["requests_successful"]
-        
+
+        current_avg = float(self.service_stats["average_response_time_ms"])
+        total_requests = int(self.service_stats["requests_successful"])
+
         if total_requests == 1:
             self.service_stats["average_response_time_ms"] = response_time_ms
         else:
             new_avg = ((current_avg * (total_requests - 1)) + response_time_ms) / total_requests
             self.service_stats["average_response_time_ms"] = new_avg
-    
-    def run(self):
+
+    def run(self) -> None:
         """Run MASR service."""
         
         logger.info(f"Starting MASR service on {self.host}:{self.port}")
@@ -361,8 +354,7 @@ class MASRService:
                 "max_requests_jitter": int(os.getenv("MASR_MAX_REQUESTS_JITTER", "50")),
             })
         
-        # Setup signal handlers
-        def signal_handler(signum, frame):
+        def signal_handler(signum: int, frame: Any) -> None:
             logger.info(f"Received signal {signum}, shutting down gracefully...")
             asyncio.create_task(self._cleanup_components())
         
@@ -370,7 +362,7 @@ class MASRService:
         signal.signal(signal.SIGINT, signal_handler)
         
         # Start service
-        uvicorn.run(self.app, **uvicorn_config)
+        uvicorn.run(self.app, **uvicorn_config)  # type: ignore[arg-type]
 
 
 # Create global service instance

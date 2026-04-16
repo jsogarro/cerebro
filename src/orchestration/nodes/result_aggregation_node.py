@@ -41,7 +41,7 @@ async def result_aggregation_node(state: ResearchState) -> ResearchState:
             return state
 
         # Extract key components from results
-        aggregated = {
+        aggregated: dict[str, Any] = {
             "sources": aggregate_sources(agent_results),
             "findings": aggregate_findings(agent_results),
             "methodologies": aggregate_methodologies(agent_results),
@@ -121,7 +121,7 @@ def aggregate_sources(agent_results: dict[str, Any]) -> list[dict[str, Any]]:
     return all_sources
 
 
-def aggregate_findings(agent_results: dict[str, Any]) -> list[dict[str, Any]]:
+def aggregate_findings(agent_results: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """
     Aggregate findings from all agents.
 
@@ -129,13 +129,13 @@ def aggregate_findings(agent_results: dict[str, Any]) -> list[dict[str, Any]]:
         agent_results: Results from all agents
 
     Returns:
-        Consolidated findings
+        Consolidated findings grouped by category
     """
     findings = []
     finding_hashes = set()
 
     for agent_type, result in agent_results.items():
-        agent_findings = result.data.get("findings", [])
+        agent_findings = result.output.get("findings", [])
 
         for finding in agent_findings:
             # Create hash for deduplication
@@ -156,7 +156,7 @@ def aggregate_findings(agent_results: dict[str, Any]) -> list[dict[str, Any]]:
                 )
 
     # Group findings by category
-    categorized = {}
+    categorized: dict[str, list[dict[str, Any]]] = {}
     for finding in findings:
         category = finding["category"]
         if category not in categorized:
@@ -176,7 +176,7 @@ def aggregate_methodologies(agent_results: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Consolidated methodology information
     """
-    methodologies = {
+    methodologies: dict[str, Any] = {
         "recommended_approaches": [],
         "identified_biases": [],
         "validity_assessments": [],
@@ -185,7 +185,7 @@ def aggregate_methodologies(agent_results: dict[str, Any]) -> dict[str, Any]:
 
     # Check if methodology agent was used
     if "methodology" in agent_results:
-        method_data = agent_results["methodology"].data
+        method_data = agent_results["methodology"].output
 
         methodologies["recommended_approaches"] = method_data.get(
             "recommended_approaches", []
@@ -211,11 +211,11 @@ def aggregate_comparisons(agent_results: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Consolidated comparisons
     """
-    comparisons = {"frameworks": [], "metrics": {}, "visualizations": []}
+    comparisons: dict[str, Any] = {"frameworks": [], "metrics": {}, "visualizations": []}
 
     # Check if comparative analysis agent was used
     if "comparative_analysis" in agent_results:
-        comp_data = agent_results["comparative_analysis"].data
+        comp_data = agent_results["comparative_analysis"].output
 
         comparisons["frameworks"] = comp_data.get("comparison_frameworks", [])
         comparisons["metrics"] = comp_data.get("comparison_metrics", {})
@@ -339,9 +339,9 @@ def identify_conflicts(agent_results: dict[str, Any]) -> list[dict[str, Any]]:
     conflicts = []
 
     # Check for conflicting findings
-    all_findings = {}
+    all_findings: dict[str, list[dict[str, Any]]] = {}
     for agent_type, result in agent_results.items():
-        findings = result.data.get("findings", [])
+        findings = result.output.get("findings", [])
         for finding in findings:
             topic = finding.get("topic", "general")
             if topic not in all_findings:
@@ -388,7 +388,7 @@ async def resolve_conflicts(
     resolutions = []
 
     for conflict in conflicts:
-        resolution = {
+        resolution: dict[str, Any] = {
             "conflict": conflict,
             "resolution_strategy": None,
             "resolved_value": None,
@@ -515,7 +515,8 @@ def calculate_confidence_score(
     confidence = base_confidence - conflict_penalty + coverage_boost + source_boost
 
     # Clamp to [0, 1]
-    return max(0.0, min(1.0, confidence))
+    final_confidence: float = max(0.0, min(1.0, confidence))
+    return final_confidence
 
 
 def calculate_quality_score(aggregated: dict[str, Any], state: ResearchState) -> float:
@@ -533,9 +534,8 @@ def calculate_quality_score(aggregated: dict[str, Any], state: ResearchState) ->
 
     # Source quality
     source_count = len(aggregated.get("sources", []))
-    min_sources = state.research_plan.get("quality_targets", {}).get(
-        "minimum_sources", 10
-    )
+    quality_targets = state.research_plan.get("quality_targets", {}) if state.research_plan is not None else {}
+    min_sources = quality_targets.get("minimum_sources", 10)
     source_score = min(source_count / min_sources, 1.0)
     scores.append(source_score)
 
@@ -555,11 +555,13 @@ def calculate_quality_score(aggregated: dict[str, Any], state: ResearchState) ->
     scores.append(confidence)
 
     # Agent success rate
-    success_rate = state.metadata.total_nodes_executed / max(len(state.agent_tasks), 1)
-    scores.append(success_rate)
+    if state.metadata is not None:
+        success_rate = state.metadata.total_nodes_executed / max(len(state.agent_tasks), 1)
+        scores.append(success_rate)
 
     # Calculate weighted average
-    return statistics.mean(scores)
+    mean_score: float = statistics.mean(scores)
+    return mean_score
 
 
 __all__ = ["result_aggregation_node"]

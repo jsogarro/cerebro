@@ -226,7 +226,9 @@ def create_research_plan(
         plan["agents"] = ["literature_review", "synthesis"]
 
     # Define agent dependencies
-    plan["dependencies"] = create_dependencies(plan["agents"])
+    agents_list = plan.get("agents", [])
+    if isinstance(agents_list, list):
+        plan["dependencies"] = create_dependencies(agents_list)
 
     return plan
 
@@ -271,7 +273,7 @@ def create_dependencies(agents: list[str]) -> dict[str, list[str]]:
     Returns:
         Dependency mapping
     """
-    dependencies = {}
+    dependencies: dict[str, list[str]] = {}
 
     # Define standard dependencies
     if "literature_review" in agents:

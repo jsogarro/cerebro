@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy import String, and_, func, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db.research_result import ResearchResult, ResultType
 from src.repositories.base import BaseRepository
@@ -22,7 +23,7 @@ class ResultRepository(BaseRepository[ResearchResult]):
     Manages findings, sources, citations, and analysis results.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """Initialize result repository."""
         super().__init__(ResearchResult, session)
 
@@ -45,7 +46,7 @@ class ResultRepository(BaseRepository[ResearchResult]):
         Returns:
             List of results
         """
-        filters = {"project_id": project_id}
+        filters: dict[str, Any] = {"project_id": project_id}
 
         if result_type:
             filters["result_type"] = result_type
@@ -148,7 +149,7 @@ class ResultRepository(BaseRepository[ResearchResult]):
         """
         results = await self.get_by_project(project_id)
 
-        grouped = defaultdict(list)
+        grouped: defaultdict[str, list[ResearchResult]] = defaultdict(list)
         for result in results:
             grouped[result.result_type].append(result)
 

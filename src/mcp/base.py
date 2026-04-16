@@ -72,7 +72,7 @@ class BaseMCPTool(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, **kwargs) -> dict[str, Any]:
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """
         Execute the tool with given parameters.
 
@@ -84,7 +84,7 @@ class BaseMCPTool(ABC):
         """
         pass
 
-    async def validate_parameters(self, **kwargs) -> bool:
+    async def validate_parameters(self, **kwargs: Any) -> bool:
         """
         Validate tool parameters.
 
@@ -130,7 +130,7 @@ class BaseMCPTool(ABC):
         """
         return self._metadata.description
 
-    def log_execution(self, params: dict[str, Any], result: dict[str, Any]):
+    def log_execution(self, params: dict[str, Any], result: dict[str, Any]) -> None:
         """
         Log tool execution for monitoring.
 
@@ -177,7 +177,7 @@ class BaseMCPTool(ABC):
             "parameters": params,
         }
 
-    async def __call__(self, **kwargs) -> dict[str, Any]:
+    async def __call__(self, **kwargs: Any) -> dict[str, Any]:
         """
         Make tool callable.
 

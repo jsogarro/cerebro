@@ -13,7 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, Union
+from typing import Any
 
 from ..models import AgentMessage
 
@@ -71,13 +71,13 @@ class TalkHierContent:
     background: str = ""
 
     # Part 3: Intermediate outputs and working thoughts
-    intermediate_outputs: Dict[str, Any] = field(default_factory=dict)
+    intermediate_outputs: dict[str, Any] = field(default_factory=dict)
 
     # Additional structured elements
     confidence_score: float = 1.0
-    evidence: List[str] = field(default_factory=list)
-    assumptions: List[str] = field(default_factory=list)
-    limitations: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -90,9 +90,9 @@ class RefinementMetadata:
     consensus_threshold: float = 0.95
 
     # Refinement tracking
-    improvements_needed: List[str] = field(default_factory=list)
-    validation_criteria: List[str] = field(default_factory=list)
-    previous_consensus_scores: List[float] = field(default_factory=list)
+    improvements_needed: list[str] = field(default_factory=list)
+    validation_criteria: list[str] = field(default_factory=list)
+    previous_consensus_scores: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -100,13 +100,13 @@ class HierarchyMetadata:
     """Metadata for hierarchical communication."""
 
     hierarchy_level: int = 1  # 1=worker, 2=supervisor, 3=coordinator
-    supervisor_id: Optional[str] = None
-    worker_ids: List[str] = field(default_factory=list)
+    supervisor_id: str | None = None
+    worker_ids: list[str] = field(default_factory=list)
 
     # Delegation information
-    delegated_from: Optional[str] = None
+    delegated_from: str | None = None
     delegation_depth: int = 0
-    escalation_path: List[str] = field(default_factory=list)
+    escalation_path: list[str] = field(default_factory=list)
 
 
 class TalkHierMessage:
@@ -126,20 +126,20 @@ class TalkHierMessage:
         from_agent: str,
         to_agent: str,
         message_type: MessageType,
-        content: Union[TalkHierContent, Dict[str, Any], str],
+        content: TalkHierContent | dict[str, Any] | str,
         # Hierarchy and routing
-        hierarchy_metadata: Optional[HierarchyMetadata] = None,
-        conversation_id: Optional[str] = None,
+        hierarchy_metadata: HierarchyMetadata | None = None,
+        conversation_id: str | None = None,
         # Refinement and consensus
-        refinement_metadata: Optional[RefinementMetadata] = None,
+        refinement_metadata: RefinementMetadata | None = None,
         consensus_requirement: ConsensusRequirement = ConsensusRequirement.NONE,
         # Message properties
         priority: MessagePriority = MessagePriority.NORMAL,
-        tags: Optional[List[str]] = None,
-        dependencies: Optional[List[str]] = None,
+        tags: list[str] | None = None,
+        dependencies: list[str] | None = None,
         # Context and metadata
-        context: Optional[Dict[str, Any]] = None,
-        original_query: Optional[str] = None,
+        context: dict[str, Any] | None = None,
+        original_query: str | None = None,
     ):
         """Initialize TalkHier message."""
 
@@ -182,8 +182,8 @@ class TalkHierMessage:
 
         # Performance tracking
         self.created_at = datetime.now()
-        self.processed_at: Optional[datetime] = None
-        self.response_time_ms: Optional[int] = None
+        self.processed_at: datetime | None = None
+        self.response_time_ms: int | None = None
 
     def to_legacy_message(self) -> AgentMessage:
         """Convert to legacy AgentMessage for backward compatibility."""
@@ -263,7 +263,7 @@ class TalkHierMessage:
         """Check if message is broadcast to multiple agents."""
         return self.to_agent == "*" or "," in self.to_agent
 
-    def get_target_agents(self) -> List[str]:
+    def get_target_agents(self) -> list[str]:
         """Get list of target agents for this message."""
         if self.to_agent == "*":
             return ["*"]  # Broadcast to all
@@ -288,7 +288,7 @@ class TalkHierMessage:
         """Get consensus score for this message."""
         return self.talkhier_content.confidence_score
 
-    def mark_processed(self):
+    def mark_processed(self) -> None:
         """Mark message as processed."""
         self.processed_at = datetime.now()
         if self.created_at:
@@ -296,7 +296,7 @@ class TalkHierMessage:
                 (self.processed_at - self.created_at).total_seconds() * 1000
             )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert message to dictionary for serialization."""
         return {
             "message_id": self.message_id,
@@ -333,7 +333,7 @@ class TalkHierMessage:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TalkHierMessage":
+    def from_dict(cls, data: dict[str, Any]) -> "TalkHierMessage":
         """Create message from dictionary."""
 
         # Reconstruct TalkHier content
@@ -374,11 +374,11 @@ class TalkHierMessage:
 
 
 __all__ = [
-    "TalkHierMessage",
-    "TalkHierContent",
-    "MessageType",
     "ConsensusRequirement",
-    "MessagePriority",
-    "RefinementMetadata",
     "HierarchyMetadata",
+    "MessagePriority",
+    "MessageType",
+    "RefinementMetadata",
+    "TalkHierContent",
+    "TalkHierMessage",
 ]

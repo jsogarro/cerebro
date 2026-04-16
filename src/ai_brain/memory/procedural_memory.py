@@ -14,13 +14,13 @@ Procedural memory stores:
 - Agent behavior adaptations
 """
 
-import asyncio
+import json
 import logging
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from enum import Enum
 import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,23 +45,23 @@ class Procedure:
     procedure_type: ProcedureType = ProcedureType.WORKFLOW
 
     # Procedure definition
-    steps: List[Dict[str, Any]] = field(default_factory=list)
-    conditions: Dict[str, Any] = field(default_factory=dict)
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    conditions: dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     # Context and applicability
-    domain: Optional[str] = None
-    agent_type: Optional[str] = None
-    task_types: List[str] = field(default_factory=list)
+    domain: str | None = None
+    agent_type: str | None = None
+    task_types: list[str] = field(default_factory=list)
 
     # Performance data
     usage_count: int = 0
     success_count: int = 0
     avg_performance_score: float = 0.0
-    last_used: Optional[datetime] = None
+    last_used: datetime | None = None
 
     # Learning metadata
-    learned_from: List[str] = field(default_factory=list)  # Source episodes/experiences
+    learned_from: list[str] = field(default_factory=list)  # Source episodes/experiences
     confidence: float = 0.5  # Confidence in this procedure
     version: int = 1
 
@@ -70,22 +70,22 @@ class Procedure:
     last_updated: datetime = field(default_factory=datetime.now)
 
     # Additional metadata
-    tags: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class ProcedureQuery:
     """Query parameters for procedure retrieval."""
 
-    procedure_type: Optional[ProcedureType] = None
-    domain: Optional[str] = None
-    agent_type: Optional[str] = None
-    task_types: Optional[List[str]] = None
+    procedure_type: ProcedureType | None = None
+    domain: str | None = None
+    agent_type: str | None = None
+    task_types: list[str] | None = None
     min_confidence: float = 0.0
     min_success_rate: float = 0.0
     min_usage_count: int = 0
-    tags: Optional[List[str]] = None
+    tags: list[str] | None = None
     limit: int = 10
 
 
@@ -100,7 +100,7 @@ class ProceduralMemoryManager:
     - Performance improvement strategies
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize procedural memory manager."""
         self.config = config
 
@@ -114,7 +114,7 @@ class ProceduralMemoryManager:
         self.performance_decay_factor = config.get("performance_decay", 0.95)
 
         # In-memory storage
-        self.procedures: Dict[str, Procedure] = {}
+        self.procedures: dict[str, Procedure] = {}
 
         # Performance tracking
         self.store_count = 0
@@ -163,7 +163,7 @@ class ProceduralMemoryManager:
             logger.error(f"Failed to store procedure {procedure.id}: {e}")
             return False
 
-    async def retrieve_procedures(self, query: ProcedureQuery) -> List[Procedure]:
+    async def retrieve_procedures(self, query: ProcedureQuery) -> list[Procedure]:
         """
         Retrieve procedures based on query parameters.
 
@@ -224,8 +224,8 @@ class ProceduralMemoryManager:
             return []
 
     async def learn_from_episode(
-        self, episode_data: Dict[str, Any], performance_score: float, success: bool
-    ) -> Optional[str]:
+        self, episode_data: dict[str, Any], performance_score: float, success: bool
+    ) -> str | None:
         """
         Learn a new procedure from an episode.
 
@@ -334,7 +334,7 @@ class ProceduralMemoryManager:
             return False
 
     async def optimize_procedure(
-        self, procedure_id: str, optimization_data: Dict[str, Any]
+        self, procedure_id: str, optimization_data: dict[str, Any]
     ) -> bool:
         """
         Optimize an existing procedure based on new insights.
@@ -390,9 +390,9 @@ class ProceduralMemoryManager:
     async def get_best_procedure_for_task(
         self,
         task_type: str,
-        domain: Optional[str] = None,
-        agent_type: Optional[str] = None,
-    ) -> Optional[Procedure]:
+        domain: str | None = None,
+        agent_type: str | None = None,
+    ) -> Procedure | None:
         """Get the best procedure for a specific task."""
 
         query = ProcedureQuery(
@@ -434,10 +434,10 @@ class ProceduralMemoryManager:
 
         return removed_count
 
-    async def get_memory_stats(self) -> Dict[str, Any]:
+    async def get_memory_stats(self) -> dict[str, Any]:
         """Get procedural memory statistics."""
 
-        stats = {
+        stats: dict[str, Any] = {
             "store_count": self.store_count,
             "retrieve_count": self.retrieve_count,
             "learn_count": self.learn_count,
@@ -452,9 +452,9 @@ class ProceduralMemoryManager:
 
             stats.update(
                 {
-                    "avg_confidence": total_confidence / len(self.procedures),
-                    "total_usage": total_usage,
-                    "overall_success_rate": total_success / max(total_usage, 1),
+                    "avg_confidence": float(total_confidence / len(self.procedures)),
+                    "total_usage": int(total_usage),
+                    "overall_success_rate": float(total_success / max(total_usage, 1)),
                     "high_confidence_procedures": sum(
                         1 for p in self.procedures.values() if p.confidence > 0.8
                     ),
@@ -462,7 +462,7 @@ class ProceduralMemoryManager:
             )
 
             # Type distribution
-            type_counts = {}
+            type_counts: dict[str, int] = {}
             for procedure in self.procedures.values():
                 ptype = procedure.procedure_type.value
                 type_counts[ptype] = type_counts.get(ptype, 0) + 1
@@ -495,7 +495,7 @@ class ProceduralMemoryManager:
                 import os
 
                 if os.path.exists(self.storage_path):
-                    with open(self.storage_path, "r") as f:
+                    with open(self.storage_path) as f:
                         data = json.load(f)
 
                     # Convert back to Procedure objects

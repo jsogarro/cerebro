@@ -4,6 +4,8 @@ Gemini service for AI-powered research capabilities.
 This service integrates with Google's Gemini API following functional programming principles.
 """
 
+from __future__ import annotations
+
 import hashlib
 import logging
 from typing import Any
@@ -23,7 +25,7 @@ from src.services.gemini_config import (
     get_safety_settings,
 )
 from src.services.gemini_limiter import RateLimiter
-from src.utils.serialization import serialize_for_cache, deserialize_from_cache
+from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +45,8 @@ class GeminiService:
         api_key: str | None = None,
         model_name: str = "gemini-pro",
         config: GeminiConfig | None = None,
-        cache_client: aioredis.Redis | None = None,
-        **kwargs,
+        cache_client: aioredis.Redis[Any] | None = None,
+        **kwargs: Any,
     ):
         """
         Initialize Gemini service.
@@ -69,12 +71,12 @@ class GeminiService:
         self.model_name = self.config.model_name
 
         # Initialize Gemini
-        genai.configure(api_key=self.config.api_key)
+        genai.configure(api_key=self.config.api_key)  # type: ignore[attr-defined]
 
         # Initialize model with configuration
-        self.model = genai.GenerativeModel(
+        self.model = genai.GenerativeModel(  # type: ignore[attr-defined]
             model_name=self.config.model_name,
-            generation_config=get_generation_config(self.config),
+            generation_config=get_generation_config(self.config),  # type: ignore[arg-type]
             safety_settings=get_safety_settings(self.config),
         )
 
@@ -105,7 +107,7 @@ class GeminiService:
         async with self.rate_limiter.acquire():
             try:
                 response = await self.model.generate_content_async(prompt)
-                return response.text
+                return str(response.text)
             except Exception as e:
                 logger.error(f"Gemini API error: {e}")
                 raise
@@ -118,7 +120,7 @@ class GeminiService:
         """
         # Create deterministic string representation
         if isinstance(data, dict):
-            data_str = serialize_for_cache(data, sort_keys=True).decode("utf-8")
+            data_str = serialize_for_cache(data).decode("utf-8")
         else:
             data_str = str(data)
 
@@ -136,10 +138,13 @@ class GeminiService:
             return None
 
         try:
-            cached = await self.cache_client.get(cache_key)
-            if cached:
-                logger.debug(f"Cache hit for key: {cache_key}")
-                return deserialize_from_cache(cached)
+            if self.cache_client:
+                cached = await self.cache_client.get(cache_key)
+                if cached:
+                    logger.debug(f"Cache hit for key: {cache_key}")
+                    result = deserialize_from_cache(cached)
+                    if isinstance(result, dict):
+                        return result
         except Exception as e:
             logger.warning(f"Cache read error: {e}")
 
@@ -155,10 +160,11 @@ class GeminiService:
             return
 
         try:
-            await self.cache_client.set(
-                cache_key, serialize_for_cache(data).decode("utf-8"), ex=self.config.cache_ttl
-            )
-            logger.debug(f"Cached response for key: {cache_key}")
+            if self.cache_client:
+                await self.cache_client.set(
+                    cache_key, serialize_for_cache(data).decode("utf-8"), ex=self.config.cache_ttl
+                )
+                logger.debug(f"Cached response for key: {cache_key}")
         except Exception as e:
             logger.warning(f"Cache write error: {e}")
 

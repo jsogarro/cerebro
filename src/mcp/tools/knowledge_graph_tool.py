@@ -62,7 +62,7 @@ class KnowledgeGraphTool(BaseMCPTool):
             tags=["knowledge", "graph", "entity", "network", "visualization"],
         )
 
-    async def execute(self, **kwargs) -> dict[str, Any]:
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """
         Execute knowledge graph operation.
 
@@ -214,7 +214,7 @@ class KnowledgeGraphTool(BaseMCPTool):
             return {"success": False, "error": "No graph built yet"}
 
         # Calculate various metrics
-        metrics = {}
+        metrics: dict[str, Any] = {}
 
         # Centrality measures
         if self.graph.number_of_nodes() > 0:

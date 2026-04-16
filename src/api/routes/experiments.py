@@ -5,22 +5,27 @@ This module provides REST API endpoints for creating, managing, and
 analyzing experiments across the Cerebro AI Brain platform.
 """
 
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any, cast
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.dependencies import get_current_user
 from src.models.db.database import get_db
 from src.models.db.experiment import (
-    Experiment, ExperimentVariant, ExperimentAssignment,
-    ExperimentResult, ExperimentStatus, ExperimentType,
-    AllocationStrategy
+    AllocationStrategy,
+    Experiment,
+    ExperimentAnalysis,
+    ExperimentAssignment,
+    ExperimentResult,
+    ExperimentStatus,
+    ExperimentType,
+    ExperimentVariant,
 )
-from src.auth.dependencies import get_current_user
 from src.models.user import User
 
 
@@ -28,57 +33,57 @@ from src.models.user import User
 class VariantCreate(BaseModel):
     """Model for creating an experiment variant."""
     name: str = Field(..., description="Variant name (e.g., control, treatment_a)")
-    description: Optional[str] = Field(None, description="Variant description")
+    description: str | None = Field(None, description="Variant description")
     is_control: bool = Field(False, description="Is this the control variant?")
     allocation_percentage: float = Field(..., description="Percentage of traffic for this variant")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Variant parameters")
+    parameters: dict[str, Any] = Field(default_factory=dict, description="Variant parameters")
 
 
 class ExperimentCreate(BaseModel):
     """Model for creating a new experiment."""
     name: str = Field(..., description="Unique experiment name")
-    description: Optional[str] = Field(None, description="Experiment description")
+    description: str | None = Field(None, description="Experiment description")
     experiment_type: ExperimentType = Field(..., description="Type of experiment")
     allocation_strategy: AllocationStrategy = Field(
         AllocationStrategy.RANDOM,
         description="Traffic allocation strategy"
     )
     traffic_percentage: float = Field(100.0, description="Percentage of total traffic to include")
-    variants: List[VariantCreate] = Field(..., description="Experiment variants")
-    metrics: List[str] = Field(default_factory=list, description="Metrics to track")
-    success_criteria: Dict[str, Any] = Field(
+    variants: list[VariantCreate] = Field(..., description="Experiment variants")
+    metrics: list[str] = Field(default_factory=list, description="Metrics to track")
+    success_criteria: dict[str, Any] = Field(
         default_factory=dict,
         description="Success criteria for the experiment"
     )
     min_sample_size: int = Field(1000, description="Minimum sample size per variant")
     confidence_level: float = Field(0.95, description="Statistical confidence level")
-    start_date: Optional[datetime] = Field(None, description="Experiment start date")
-    end_date: Optional[datetime] = Field(None, description="Experiment end date")
+    start_date: datetime | None = Field(None, description="Experiment start date")
+    end_date: datetime | None = Field(None, description="Experiment end date")
 
 
 class ExperimentUpdate(BaseModel):
     """Model for updating an experiment."""
-    description: Optional[str] = None
-    status: Optional[ExperimentStatus] = None
-    traffic_percentage: Optional[float] = None
-    end_date: Optional[datetime] = None
-    success_criteria: Optional[Dict[str, Any]] = None
+    description: str | None = None
+    status: ExperimentStatus | None = None
+    traffic_percentage: float | None = None
+    end_date: datetime | None = None
+    success_criteria: dict[str, Any] | None = None
 
 
 class ExperimentResponse(BaseModel):
     """Response model for experiment data."""
     id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     experiment_type: ExperimentType
     status: ExperimentStatus
     allocation_strategy: AllocationStrategy
     traffic_percentage: float
-    variants: List[Dict[str, Any]]
-    metrics: List[str]
-    success_criteria: Dict[str, Any]
-    start_date: Optional[datetime]
-    end_date: Optional[datetime]
+    variants: list[dict[str, Any]]
+    metrics: list[str]
+    success_criteria: dict[str, Any]
+    start_date: datetime | None
+    end_date: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -86,7 +91,7 @@ class ExperimentResponse(BaseModel):
 class AssignmentRequest(BaseModel):
     """Request model for getting variant assignment."""
     user_id: str = Field(..., description="User or session ID")
-    context: Dict[str, Any] = Field(
+    context: dict[str, Any] = Field(
         default_factory=dict,
         description="Context for assignment (e.g., query complexity, domain)"
     )
@@ -97,7 +102,7 @@ class AssignmentResponse(BaseModel):
     experiment_id: UUID
     variant_id: UUID
     variant_name: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     assignment_key: str
 
 
@@ -106,16 +111,16 @@ class MetricRecord(BaseModel):
     assignment_id: UUID = Field(..., description="Assignment ID from variant assignment")
     metric_name: str = Field(..., description="Name of the metric")
     metric_value: float = Field(..., description="Metric value")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
 class ExperimentAnalysisResponse(BaseModel):
     """Response model for experiment analysis."""
     experiment_id: UUID
     analysis_type: str
-    results: Dict[str, Any]
-    recommendation: Optional[str]
-    confidence_score: Optional[float]
+    results: dict[str, Any]
+    recommendation: str | None
+    confidence_score: float | None
     analyzed_at: datetime
 
 
@@ -177,12 +182,12 @@ async def create_experiment(
     
     return ExperimentResponse(
         id=db_experiment.id,
-        name=db_experiment.name,
-        description=db_experiment.description,
-        experiment_type=db_experiment.experiment_type,
-        status=db_experiment.status,
-        allocation_strategy=db_experiment.allocation_strategy,
-        traffic_percentage=db_experiment.traffic_percentage,
+        name=cast(str, db_experiment.name),
+        description=cast(str | None, db_experiment.description),
+        experiment_type=cast(ExperimentType, db_experiment.experiment_type),
+        status=cast(ExperimentStatus, db_experiment.status),
+        allocation_strategy=cast(AllocationStrategy, db_experiment.allocation_strategy),
+        traffic_percentage=cast(float, db_experiment.traffic_percentage),
         variants=[{
             "id": v.id,
             "name": v.name,
@@ -190,22 +195,22 @@ async def create_experiment(
             "allocation_percentage": v.allocation_percentage,
             "parameters": v.parameters
         } for v in db_experiment.variants],
-        metrics=db_experiment.metrics,
-        success_criteria=db_experiment.success_criteria,
-        start_date=db_experiment.start_date,
-        end_date=db_experiment.end_date,
+        metrics=cast(list[str], db_experiment.metrics),
+        success_criteria=cast(dict[str, Any], db_experiment.success_criteria),
+        start_date=cast(datetime | None, db_experiment.start_date),
+        end_date=cast(datetime | None, db_experiment.end_date),
         created_at=db_experiment.created_at,
         updated_at=db_experiment.updated_at
     )
 
 
-@router.get("/", response_model=List[ExperimentResponse])
+@router.get("/", response_model=list[ExperimentResponse])
 async def list_experiments(
-    status: Optional[ExperimentStatus] = Query(None, description="Filter by status"),
-    experiment_type: Optional[ExperimentType] = Query(None, description="Filter by type"),
+    status: ExperimentStatus | None = Query(None, description="Filter by status"),
+    experiment_type: ExperimentType | None = Query(None, description="Filter by type"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
-) -> List[ExperimentResponse]:
+) -> list[ExperimentResponse]:
     """
     List all experiments with optional filtering.
     
@@ -226,12 +231,12 @@ async def list_experiments(
     return [
         ExperimentResponse(
             id=exp.id,
-            name=exp.name,
-            description=exp.description,
-            experiment_type=exp.experiment_type,
-            status=exp.status,
-            allocation_strategy=exp.allocation_strategy,
-            traffic_percentage=exp.traffic_percentage,
+            name=cast(str, exp.name),
+            description=cast(str | None, exp.description),
+            experiment_type=cast(ExperimentType, exp.experiment_type),
+            status=cast(ExperimentStatus, exp.status),
+            allocation_strategy=cast(AllocationStrategy, exp.allocation_strategy),
+            traffic_percentage=cast(float, exp.traffic_percentage),
             variants=[{
                 "id": v.id,
                 "name": v.name,
@@ -239,10 +244,10 @@ async def list_experiments(
                 "allocation_percentage": v.allocation_percentage,
                 "parameters": v.parameters
             } for v in exp.variants],
-            metrics=exp.metrics,
-            success_criteria=exp.success_criteria,
-            start_date=exp.start_date,
-            end_date=exp.end_date,
+            metrics=cast(list[str], exp.metrics),
+            success_criteria=cast(dict[str, Any], exp.success_criteria),
+            start_date=cast(datetime | None, exp.start_date),
+            end_date=cast(datetime | None, exp.end_date),
             created_at=exp.created_at,
             updated_at=exp.updated_at
         )
@@ -273,12 +278,12 @@ async def get_experiment(
     
     return ExperimentResponse(
         id=experiment.id,
-        name=experiment.name,
-        description=experiment.description,
-        experiment_type=experiment.experiment_type,
-        status=experiment.status,
-        allocation_strategy=experiment.allocation_strategy,
-        traffic_percentage=experiment.traffic_percentage,
+        name=cast(str, experiment.name),
+        description=cast(str | None, experiment.description),
+        experiment_type=cast(ExperimentType, experiment.experiment_type),
+        status=cast(ExperimentStatus, experiment.status),
+        allocation_strategy=cast(AllocationStrategy, experiment.allocation_strategy),
+        traffic_percentage=cast(float, experiment.traffic_percentage),
         variants=[{
             "id": v.id,
             "name": v.name,
@@ -286,10 +291,10 @@ async def get_experiment(
             "allocation_percentage": v.allocation_percentage,
             "parameters": v.parameters
         } for v in experiment.variants],
-        metrics=experiment.metrics,
-        success_criteria=experiment.success_criteria,
-        start_date=experiment.start_date,
-        end_date=experiment.end_date,
+        metrics=cast(list[str], experiment.metrics),
+        success_criteria=cast(dict[str, Any], experiment.success_criteria),
+        start_date=cast(datetime | None, experiment.start_date),
+        end_date=cast(datetime | None, experiment.end_date),
         created_at=experiment.created_at,
         updated_at=experiment.updated_at
     )
@@ -317,7 +322,7 @@ async def update_experiment(
     if not experiment:
         raise HTTPException(status_code=404, detail="Experiment not found")
     
-    # Update fields
+    # Update fields using setattr to satisfy mypy
     if update.description is not None:
         experiment.description = update.description
     if update.status is not None:
@@ -328,7 +333,7 @@ async def update_experiment(
         experiment.end_date = update.end_date
     if update.success_criteria is not None:
         experiment.success_criteria = update.success_criteria
-    
+
     experiment.updated_at = datetime.utcnow()
     
     await db.commit()
@@ -336,12 +341,12 @@ async def update_experiment(
     
     return ExperimentResponse(
         id=experiment.id,
-        name=experiment.name,
-        description=experiment.description,
-        experiment_type=experiment.experiment_type,
-        status=experiment.status,
-        allocation_strategy=experiment.allocation_strategy,
-        traffic_percentage=experiment.traffic_percentage,
+        name=cast(str, experiment.name),
+        description=cast(str | None, experiment.description),
+        experiment_type=cast(ExperimentType, experiment.experiment_type),
+        status=cast(ExperimentStatus, experiment.status),
+        allocation_strategy=cast(AllocationStrategy, experiment.allocation_strategy),
+        traffic_percentage=cast(float, experiment.traffic_percentage),
         variants=[{
             "id": v.id,
             "name": v.name,
@@ -349,10 +354,10 @@ async def update_experiment(
             "allocation_percentage": v.allocation_percentage,
             "parameters": v.parameters
         } for v in experiment.variants],
-        metrics=experiment.metrics,
-        success_criteria=experiment.success_criteria,
-        start_date=experiment.start_date,
-        end_date=experiment.end_date,
+        metrics=cast(list[str], experiment.metrics),
+        success_criteria=cast(dict[str, Any], experiment.success_criteria),
+        start_date=cast(datetime | None, experiment.start_date),
+        end_date=cast(datetime | None, experiment.end_date),
         created_at=experiment.created_at,
         updated_at=experiment.updated_at
     )
@@ -370,9 +375,10 @@ async def assign_variant(
     This endpoint determines which variant a user should be assigned to
     based on the experiment's allocation strategy.
     """
-    from sqlalchemy import select
     import hashlib
     import random
+
+    from sqlalchemy import select
     
     # Get experiment
     result = await db.execute(
@@ -404,11 +410,13 @@ async def assign_variant(
     if existing_assignment:
         # Return existing assignment
         variant = await db.get(ExperimentVariant, existing_assignment.variant_id)
+        if variant is None:
+            raise HTTPException(status_code=404, detail="Variant not found")
         return AssignmentResponse(
             experiment_id=experiment_id,
             variant_id=variant.id,
-            variant_name=variant.name,
-            parameters=variant.parameters,
+            variant_name=cast(str, variant.name),
+            parameters=cast(dict[str, Any], variant.parameters),
             assignment_key=assignment_key
         )
     
@@ -511,7 +519,7 @@ async def record_metric(
         raise HTTPException(status_code=404, detail="Assignment not found")
     
     # Record metric
-    result = ExperimentResult(
+    experiment_result = ExperimentResult(
         experiment_id=experiment_id,
         variant_id=assignment.variant_id,
         assignment_id=assignment.id,
@@ -519,8 +527,8 @@ async def record_metric(
         metric_value=metric.metric_value,
         metadata=metric.metadata
     )
-    
-    db.add(result)
+
+    db.add(experiment_result)
     await db.commit()
     
     return JSONResponse(
@@ -540,8 +548,7 @@ async def get_experiment_analysis(
     
     Returns statistical analysis comparing variants in the experiment.
     """
-    from sqlalchemy import select, func
-    from src.models.db.experiment import ExperimentAnalysis
+    from sqlalchemy import func, select
     
     # Check if experiment exists
     experiment = await db.get(Experiment, experiment_id)
@@ -584,17 +591,20 @@ async def get_experiment_analysis(
         if control_variant and control_variant.id in variant_stats:
             control_stats = variant_stats[control_variant.id]
             
-            analysis_results = {
-                "control_mean": float(control_stats.mean or 0),
-                "sample_sizes": {},
-                "variant_means": {}
-            }
-            
+            sample_sizes: dict[str, int] = {}
+            variant_means: dict[str, float] = {}
+
             for variant in experiment.variants:
                 if variant.id in variant_stats:
                     stats = variant_stats[variant.id]
-                    analysis_results["sample_sizes"][variant.name] = stats.count
-                    analysis_results["variant_means"][variant.name] = float(stats.mean or 0)
+                    sample_sizes[cast(str, variant.name)] = cast(int, stats.count)
+                    variant_means[cast(str, variant.name)] = float(stats.mean or 0)
+
+            analysis_results: dict[str, Any] = {
+                "control_mean": float(control_stats.mean or 0),
+                "sample_sizes": sample_sizes,
+                "variant_means": variant_means
+            }
             
             # Create analysis record
             analysis = ExperimentAnalysis(
@@ -608,12 +618,17 @@ async def get_experiment_analysis(
             db.add(analysis)
             await db.commit()
             await db.refresh(analysis)
-    
+        else:
+            raise HTTPException(status_code=404, detail="No analysis data available")
+
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="No analysis data available")
+
     return ExperimentAnalysisResponse(
-        experiment_id=analysis.experiment_id,
-        analysis_type=analysis.analysis_type,
-        results=analysis.results,
-        recommendation=analysis.recommendation,
-        confidence_score=analysis.confidence_score,
-        analyzed_at=analysis.analyzed_at
+        experiment_id=cast(UUID, analysis.experiment_id),
+        analysis_type=cast(str, analysis.analysis_type),
+        results=cast(dict[str, Any], analysis.results),
+        recommendation=cast(str | None, analysis.recommendation),
+        confidence_score=cast(float | None, analysis.confidence_score),
+        analyzed_at=cast(datetime, analysis.analyzed_at)
     )

@@ -7,13 +7,14 @@ Manages MFA configuration including TOTP, SMS, email, and backup codes.
 import secrets
 from datetime import datetime
 from enum import Enum
+from typing import Any
+from uuid import UUID as PyUUID
 
 import pyotp
 from passlib.context import CryptContext
 from sqlalchemy import (
     JSON,
     Boolean,
-    Column,
     DateTime,
     ForeignKey,
     Index,
@@ -21,7 +22,7 @@ from sqlalchemy import (
     String,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, ENUM, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -51,7 +52,7 @@ class MFASettings(BaseModel):
     __tablename__ = "mfa_settings"
 
     # Foreign key to user (one-to-one relationship)
-    user_id = Column(
+    user_id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
@@ -60,7 +61,7 @@ class MFASettings(BaseModel):
     )
 
     # MFA status
-    is_enabled = Column(
+    is_enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
@@ -68,7 +69,7 @@ class MFASettings(BaseModel):
         comment="Whether MFA is enabled for the user",
     )
 
-    is_enforced = Column(
+    is_enforced: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
@@ -76,29 +77,29 @@ class MFASettings(BaseModel):
     )
 
     # Primary MFA method
-    primary_method = Column(
+    primary_method: Mapped[MFAMethod | None] = mapped_column(
         ENUM(MFAMethod, name="mfa_method"), nullable=True, comment="Primary MFA method"
     )
 
     # Enabled methods
-    enabled_methods = Column(
+    enabled_methods: Mapped[list[str] | None] = mapped_column(
         ARRAY(String), nullable=True, default=[], comment="List of enabled MFA methods"
     )
 
     # TOTP settings
-    totp_secret = Column(
+    totp_secret: Mapped[str | None] = mapped_column(
         String(255), nullable=True, comment="TOTP secret key (encrypted)"
     )
 
-    totp_verified = Column(
+    totp_verified: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, comment="Whether TOTP has been verified"
     )
 
-    totp_last_used = Column(
+    totp_last_used: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Last time TOTP was used"
     )
 
-    totp_counter = Column(
+    totp_counter: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=0,
@@ -106,101 +107,101 @@ class MFASettings(BaseModel):
     )
 
     # SMS settings
-    sms_phone_number = Column(
+    sms_phone_number: Mapped[str | None] = mapped_column(
         String(20), nullable=True, comment="Phone number for SMS (encrypted)"
     )
 
-    sms_verified = Column(
+    sms_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
         comment="Whether SMS number has been verified",
     )
 
-    sms_last_sent = Column(
+    sms_last_sent: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Last time SMS was sent"
     )
 
-    sms_send_count = Column(
+    sms_send_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, comment="Number of SMS codes sent"
     )
 
     # Email settings (uses user's email)
-    email_verified = Column(
+    email_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
         comment="Whether email MFA has been verified",
     )
 
-    email_last_sent = Column(
+    email_last_sent: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Last time email code was sent"
     )
 
     # Backup codes
-    backup_codes = Column(JSON, nullable=True, comment="Hashed backup codes")
+    backup_codes: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True, comment="Hashed backup codes")
 
-    backup_codes_generated_at = Column(
+    backup_codes_generated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         comment="When backup codes were generated",
     )
 
-    backup_codes_used = Column(
+    backup_codes_used: Mapped[list[Any] | None] = mapped_column(
         JSON, nullable=True, default=[], comment="List of used backup code indices"
     )
 
     # WebAuthn settings
-    webauthn_credentials = Column(
+    webauthn_credentials: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, nullable=True, comment="WebAuthn credential data"
     )
 
     # Recovery settings
-    recovery_email = Column(
+    recovery_email: Mapped[str | None] = mapped_column(
         String(255), nullable=True, comment="Alternative email for recovery (encrypted)"
     )
 
-    recovery_phone = Column(
+    recovery_phone: Mapped[str | None] = mapped_column(
         String(20), nullable=True, comment="Alternative phone for recovery (encrypted)"
     )
 
     # Security settings
-    require_mfa_for_sensitive = Column(
+    require_mfa_for_sensitive: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=True,
         comment="Require MFA for sensitive operations",
     )
 
-    trusted_devices = Column(
+    trusted_devices: Mapped[list[Any] | None] = mapped_column(
         JSON, nullable=True, default=[], comment="List of trusted device IDs"
     )
 
     # Usage statistics
-    successful_verifications = Column(
+    successful_verifications: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, comment="Total successful MFA verifications"
     )
 
-    failed_attempts = Column(
+    failed_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, comment="Total failed MFA attempts"
     )
 
-    last_verified_at = Column(
+    last_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         comment="Last successful MFA verification",
     )
 
-    last_failed_at = Column(
+    last_failed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Last failed MFA attempt"
     )
 
     # Temporary codes for setup/recovery
-    temp_setup_code = Column(
+    temp_setup_code: Mapped[str | None] = mapped_column(
         String(255), nullable=True, comment="Temporary code for MFA setup"
     )
 
-    temp_setup_expires = Column(
+    temp_setup_expires: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="When temp setup code expires"
     )
 
@@ -272,7 +273,7 @@ class MFASettings(BaseModel):
         totp = pyotp.TOTP(self.totp_secret)
 
         # Verify with time window
-        is_valid = totp.verify(code, valid_window=window)
+        is_valid: bool = bool(totp.verify(code, valid_window=window))
 
         if is_valid:
             self.totp_verified = True
@@ -389,7 +390,7 @@ class MFASettings(BaseModel):
 
         return code
 
-    def add_trusted_device(self, device_id: str, device_info: dict) -> None:
+    def add_trusted_device(self, device_id: str, device_info: dict[str, Any]) -> None:
         """
         Add a trusted device.
 
@@ -476,7 +477,7 @@ class MFASettings(BaseModel):
         """Check if MFA requires setup."""
         return self.is_enabled and not self.enabled_methods
 
-    def to_dict(self, include_sensitive: bool = False) -> dict:
+    def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:
         """
         Convert to dictionary.
 

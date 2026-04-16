@@ -10,12 +10,13 @@ import logging
 import os
 import shutil
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from uuid import UUID
 
 from src.models.db.generated_report import GeneratedReport, ReportFormat
-from src.models.report import Report, ReportFormat as ReportFormatEnum, ReportOutput
-from src.repositories.report_repository import ReportRepository, ReportFormatRepository
+from src.models.report import Report, ReportOutput
+from src.models.report import ReportFormat as ReportFormatEnum
+from src.repositories.report_repository import ReportFormatRepository, ReportRepository
 from src.services.report_config import ReportSettings
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class ReportStorageService:
         self,
         report_repo: ReportRepository,
         format_repo: ReportFormatRepository,
-        settings: Optional[ReportSettings] = None
+        settings: ReportSettings | None = None
     ):
         """Initialize report storage service."""
         self.report_repo = report_repo
@@ -54,9 +55,9 @@ class ReportStorageService:
     async def store_report(
         self,
         report: Report,
-        outputs: Dict[ReportFormatEnum, ReportOutput],
-        user_id: Optional[UUID] = None,
-        project_id: Optional[UUID] = None
+        outputs: dict[ReportFormatEnum, ReportOutput],
+        user_id: UUID | None = None,
+        project_id: UUID | None = None
     ) -> GeneratedReport:
         """
         Store a generated report with all its format outputs.
@@ -118,8 +119,8 @@ class ReportStorageService:
     async def _create_report_record(
         self,
         report: Report,
-        user_id: Optional[UUID],
-        project_id: Optional[UUID],
+        user_id: UUID | None,
+        project_id: UUID | None,
         storage_path: str
     ) -> GeneratedReport:
         """Create database record for the report."""
@@ -230,7 +231,7 @@ class ReportStorageService:
         preview = " ".join(preview_parts)
         return preview[:max_length] + ("..." if len(preview) > max_length else "")
     
-    def _extract_key_findings(self, report: Report) -> List[str]:
+    def _extract_key_findings(self, report: Report) -> list[str]:
         """Extract key findings from report."""
         findings = []
         
@@ -255,7 +256,7 @@ class ReportStorageService:
         
         return findings
     
-    async def retrieve_report(self, report_id: UUID) -> Optional[GeneratedReport]:
+    async def retrieve_report(self, report_id: UUID) -> GeneratedReport | None:
         """Retrieve a report with all format information."""
         return await self.report_repo.get_report_with_formats(report_id)
     
@@ -263,7 +264,7 @@ class ReportStorageService:
         self,
         report_id: UUID,
         format_type: str
-    ) -> Optional[Tuple[bytes, str]]:
+    ) -> tuple[bytes, str] | None:
         """
         Retrieve content for a specific report format.
         
@@ -292,27 +293,27 @@ class ReportStorageService:
         self,
         user_id: UUID,
         limit: int = 50,
-        status_filter: Optional[str] = None
-    ) -> List[GeneratedReport]:
+        status_filter: str | None = None
+    ) -> list[GeneratedReport]:
         """List reports for a user."""
         return await self.report_repo.get_by_user_id(user_id, limit, status_filter)
     
     async def list_project_reports(
         self,
         project_id: UUID,
-        limit: Optional[int] = None
-    ) -> List[GeneratedReport]:
+        limit: int | None = None
+    ) -> list[GeneratedReport]:
         """List reports for a project."""
         return await self.report_repo.get_by_project_id(project_id, limit)
     
     async def search_reports(
         self,
         search_term: str,
-        user_id: Optional[UUID] = None,
-        filters: Optional[Dict[str, Any]] = None,
+        user_id: UUID | None = None,
+        filters: dict[str, Any] | None = None,
         limit: int = 50,
         offset: int = 0
-    ) -> Tuple[List[GeneratedReport], int]:
+    ) -> tuple[list[GeneratedReport], int]:
         """Search reports with various filters."""
         filters = filters or {}
         
@@ -365,7 +366,7 @@ class ReportStorageService:
         """Update access statistics for a report."""
         await self.report_repo.increment_access_count(report_id)
     
-    async def get_storage_statistics(self) -> Dict[str, Any]:
+    async def get_storage_statistics(self) -> dict[str, Any]:
         """Get storage usage statistics."""
         stats = await self.report_repo.get_report_statistics()
         
@@ -383,7 +384,7 @@ class ReportStorageService:
         
         return stats
     
-    def _calculate_storage_usage(self) -> Dict[str, Any]:
+    def _calculate_storage_usage(self) -> dict[str, Any]:
         """Calculate total storage usage."""
         total_size = 0
         total_files = 0
@@ -412,7 +413,7 @@ class ReportStorageService:
         days_old: int = 90,
         keep_public: bool = True,
         dry_run: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Clean up old reports and return statistics.
         
@@ -440,13 +441,13 @@ class ReportStorageService:
             'cleanup_date': datetime.utcnow().isoformat(),
         }
     
-    async def verify_report_integrity(self, report_id: UUID) -> Dict[str, Any]:
+    async def verify_report_integrity(self, report_id: UUID) -> dict[str, Any]:
         """Verify the integrity of a report and its files."""
         report = await self.retrieve_report(report_id)
         if not report:
             return {'status': 'error', 'message': 'Report not found'}
         
-        integrity_results = {
+        integrity_results: dict[str, Any] = {
             'report_id': str(report_id),
             'status': 'ok',
             'formats_checked': 0,
@@ -478,7 +479,7 @@ class ReportStorageService:
                     integrity_results['formats_valid'] += 1
                     
             except Exception as e:
-                integrity_results['errors'].append(f"{format_obj.format_type}: {str(e)}")
+                integrity_results['errors'].append(f"{format_obj.format_type}: {e!s}")
         
         # Determine overall status
         if integrity_results['missing_files'] or integrity_results['formats_invalid'] or integrity_results['errors']:
@@ -493,14 +494,14 @@ class ReportStorageService:
 def create_report_storage_service(
     report_repo: ReportRepository,
     format_repo: ReportFormatRepository,
-    settings: Optional[ReportSettings] = None
+    settings: ReportSettings | None = None
 ) -> ReportStorageService:
     """Factory function to create a report storage service."""
     return ReportStorageService(report_repo, format_repo, settings)
 
 
 __all__ = [
-    "ReportStorageService",
     "ReportStorageError",
+    "ReportStorageService",
     "create_report_storage_service",
 ]

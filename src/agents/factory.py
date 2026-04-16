@@ -121,7 +121,7 @@ class AgentFactory:
         return list(cls._agent_registry.keys())
 
     @classmethod
-    def register_agent(cls, agent_type: str, agent_class: type[BaseAgent]):
+    def register_agent(cls, agent_type: str, agent_class: type[BaseAgent]) -> None:
         """
         Register a new agent type.
 
@@ -138,7 +138,7 @@ class AgentFactory:
         logger.info(f"Registered new agent type: {agent_type}")
 
     @classmethod
-    def unregister_agent(cls, agent_type: str):
+    def unregister_agent(cls, agent_type: str) -> None:
         """
         Unregister an agent type.
 

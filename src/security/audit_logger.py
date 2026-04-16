@@ -33,7 +33,7 @@ class AuditLogger:
         cache_manager: CacheManager | None = None,
         buffer_size: int = 1000,
         flush_interval: int = 5,
-        alert_threshold: dict[str, int] = None,
+        alert_threshold: dict[str, int] | None = None,
     ):
         """
         Initialize audit logger.
@@ -59,7 +59,7 @@ class AuditLogger:
         self.buffer_lock = threading.Lock()
 
         # Background task for periodic flushing
-        self.flush_task = None
+        self.flush_task: asyncio.Task[None] | None = None
 
         # Metrics
         self.metrics = {
@@ -114,7 +114,7 @@ class AuditLogger:
         severity: AuditSeverity = AuditSeverity.INFO,
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> str:
         """
         Log an audit event.
@@ -282,8 +282,11 @@ class AuditLogger:
 
         elif event_type == AuditEventType.RATE_LIMIT_EXCEEDED:
             # Count recent rate limit hits
+            identifier = user_id or log_entry.get("ip_address")
+            if not identifier:
+                return
             count = await self._count_recent_events(
-                user_id or log_entry.get("ip_address"),
+                str(identifier),
                 AuditEventType.RATE_LIMIT_EXCEEDED,
                 minutes=5,
             )
@@ -311,8 +314,8 @@ class AuditLogger:
         cache_key = f"audit:count:{identifier}:{event_type.value}"
         if self.cache:
             cached_count = await self.cache.get(cache_key)
-            if cached_count is not None:
-                return int(cached_count)
+            if cached_count is not None and isinstance(cached_count, dict):
+                return int(cached_count.get("count", 0))
 
         # Query database if session available
         if self.db_session:
@@ -336,7 +339,7 @@ class AuditLogger:
 
             # Cache the result
             if self.cache:
-                await self.cache.set(cache_key, count, expire=60)
+                await self.cache.set(cache_key, {"count": count})
 
             return count
 
@@ -361,8 +364,8 @@ class AuditLogger:
 
         # Map audit event to alert type if not specified
         if not alert_type:
-            event_type = log_entry.get("event_type")
-            alert_type_map = {
+            event_type_raw = log_entry.get("event_type")
+            alert_type_map: dict[AuditEventType, AlertType] = {
                 AuditEventType.LOGIN_FAILED: AlertType.FAILED_LOGIN_ATTEMPTS,
                 AuditEventType.SUSPICIOUS_ACTIVITY: AlertType.SUSPICIOUS_LOGIN,
                 AuditEventType.RATE_LIMIT_EXCEEDED: AlertType.API_RATE_LIMIT,
@@ -371,7 +374,10 @@ class AuditLogger:
                 AuditEventType.UNAUTHORIZED_ACCESS: AlertType.UNAUTHORIZED_API_ACCESS,
                 AuditEventType.DATA_EXFILTRATION: AlertType.DATA_EXFILTRATION,
             }
-            alert_type = alert_type_map.get(event_type, AlertType.UNUSUAL_ACTIVITY)
+            if isinstance(event_type_raw, AuditEventType):
+                alert_type = alert_type_map.get(event_type_raw, AlertType.UNUSUAL_ACTIVITY)
+            else:
+                alert_type = AlertType.UNUSUAL_ACTIVITY
 
         # Create alert
         alert = SecurityAlert.create_alert(
@@ -461,8 +467,8 @@ class AuditLogger:
         query = query.order_by(AuditLog.created_at.desc())
         query = query.limit(limit).offset(offset)
 
-        result = await self.db_session.execute(query)
-        return result.scalars().all()
+        query_result = await self.db_session.execute(query)
+        return list(query_result.scalars().all())
 
     async def generate_compliance_report(
         self, start_date: datetime, end_date: datetime, compliance_type: str = "gdpr"
@@ -478,7 +484,7 @@ class AuditLogger:
         Returns:
             Compliance report dictionary
         """
-        report = {
+        report: dict[str, Any] = {
             "compliance_type": compliance_type,
             "period": {"start": start_date.isoformat(), "end": end_date.isoformat()},
             "summary": {},
@@ -526,7 +532,8 @@ class AuditLogger:
             for log in logs:
                 if (
                     log.event_type == AuditEventType.DATA_EXPORTED
-                    and not log.metadata.get("consent_verified")
+                    and log.event_metadata
+                    and not log.event_metadata.get("consent_verified")
                 ):
                     report["violations"].append(
                         {

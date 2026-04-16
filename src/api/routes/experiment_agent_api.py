@@ -6,48 +6,38 @@ experiments on the Agent Framework APIs, enabling systematic optimization
 of routing strategies, execution patterns, and quality metrics.
 """
 
-from typing import List, Optional, Dict, Any
+import logging
 from datetime import datetime
-from uuid import UUID
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Depends, Query, Body, WebSocket
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.models.db.database import get_db
-from src.auth.dependencies import get_current_user
-from src.models.user import User
 
 # Import A/B Testing Integration components
 from src.ai_brain.experimentation.integration.agent_framework_integration import (
-    AgentFrameworkExperimentor,
-    AgentExperimentType,
-    AgentExperimentConfig,
-    get_experimentor
+    get_experimentor,
 )
 from src.ai_brain.experimentation.monitoring.real_time_dashboard import (
-    RealTimeDashboard,
-    DashboardConfig,
-    get_dashboard
+    get_dashboard,
 )
 from src.ai_brain.experimentation.optimization.feedback_loop_optimizer import (
-    FeedbackLoopOptimizer,
-    OptimizationTarget,
-    get_feedback_optimizer
+    get_feedback_optimizer,
 )
+from src.auth.dependencies import get_current_user
+from src.models.user import User
 
+logger = logging.getLogger(__name__)
 
 # ==================== Pydantic Models ====================
 
 class RoutingExperimentCreate(BaseModel):
     """Model for creating a routing strategy experiment."""
     name: str = Field(..., description="Experiment name")
-    strategies: List[str] = Field(
+    strategies: list[str] = Field(
         ...,
         description="Routing strategies to test (e.g., cost_efficient, quality_focused)"
     )
-    target_domains: Optional[List[str]] = Field(
+    target_domains: list[str] | None = Field(
         None,
         description="Specific domains to target"
     )
@@ -58,11 +48,11 @@ class RoutingExperimentCreate(BaseModel):
 class APIPatternExperimentCreate(BaseModel):
     """Model for creating an API pattern experiment."""
     name: str = Field(..., description="Experiment name")
-    patterns: List[str] = Field(
+    patterns: list[str] = Field(
         default=["primary_heavy", "balanced", "bypass_heavy"],
         description="API pattern configurations to test"
     )
-    complexity_levels: List[str] = Field(
+    complexity_levels: list[str] = Field(
         default=["all"],
         description="Query complexity levels to target"
     )
@@ -73,7 +63,7 @@ class TalkHierExperimentCreate(BaseModel):
     name: str = Field(..., description="Experiment name")
     min_rounds: int = Field(1, description="Minimum refinement rounds")
     max_rounds: int = Field(5, description="Maximum refinement rounds")
-    consensus_thresholds: List[float] = Field(
+    consensus_thresholds: list[float] = Field(
         default=[0.7, 0.8, 0.9],
         description="Consensus thresholds to test"
     )
@@ -82,11 +72,11 @@ class TalkHierExperimentCreate(BaseModel):
 class SupervisorExperimentCreate(BaseModel):
     """Model for creating a supervisor coordination experiment."""
     name: str = Field(..., description="Experiment name")
-    execution_modes: List[str] = Field(
+    execution_modes: list[str] = Field(
         default=["sequential", "parallel", "adaptive"],
         description="Execution modes to test"
     )
-    worker_counts: List[int] = Field(
+    worker_counts: list[int] = Field(
         default=[2, 3, 5],
         description="Worker counts to test"
     )
@@ -96,11 +86,11 @@ class ExperimentExecutionRequest(BaseModel):
     """Model for executing a query with experiments."""
     query: str = Field(..., description="User query to execute")
     user_id: str = Field(..., description="User identifier")
-    context: Dict[str, Any] = Field(
+    context: dict[str, Any] = Field(
         default_factory=dict,
         description="Query context (domain, complexity, etc.)"
     )
-    experiment_ids: Optional[List[str]] = Field(
+    experiment_ids: list[str] | None = Field(
         None,
         description="Specific experiments to include"
     )
@@ -113,7 +103,7 @@ class OptimizationApproval(BaseModel):
         False,
         description="Apply immediately or use gradual rollout"
     )
-    rollout_percentage: Optional[float] = Field(
+    rollout_percentage: float | None = Field(
         None,
         description="Initial rollout percentage if gradual"
     )
@@ -129,11 +119,11 @@ router = APIRouter(
 
 # ==================== Experiment Creation Endpoints ====================
 
-@router.post("/routing", response_model=Dict[str, str])
+@router.post("/routing", response_model=dict[str, str])
 async def create_routing_experiment(
     experiment: RoutingExperimentCreate,
     current_user: User = Depends(get_current_user)
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Create a new MASR routing strategy A/B test.
     
@@ -172,11 +162,11 @@ async def create_routing_experiment(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api-pattern", response_model=Dict[str, str])
+@router.post("/api-pattern", response_model=dict[str, str])
 async def create_api_pattern_experiment(
     experiment: APIPatternExperimentCreate,
     current_user: User = Depends(get_current_user)
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Create an API pattern optimization experiment.
     
@@ -212,11 +202,11 @@ async def create_api_pattern_experiment(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/talkhier", response_model=Dict[str, str])
+@router.post("/talkhier", response_model=dict[str, str])
 async def create_talkhier_experiment(
     experiment: TalkHierExperimentCreate,
     current_user: User = Depends(get_current_user)
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Create a TalkHier protocol optimization experiment.
     
@@ -254,11 +244,11 @@ async def create_talkhier_experiment(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/supervisor", response_model=Dict[str, str])
+@router.post("/supervisor", response_model=dict[str, str])
 async def create_supervisor_experiment(
     experiment: SupervisorExperimentCreate,
     current_user: User = Depends(get_current_user)
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Create a supervisor coordination experiment.
     
@@ -296,10 +286,10 @@ async def create_supervisor_experiment(
 
 # ==================== Experiment Execution Endpoints ====================
 
-@router.post("/execute", response_model=Dict[str, Any])
+@router.post("/execute", response_model=dict[str, Any])
 async def execute_with_experiments(
     request: ExperimentExecutionRequest
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Execute a query while running A/B experiments.
     
@@ -324,10 +314,10 @@ async def execute_with_experiments(
 
 # ==================== Experiment Monitoring Endpoints ====================
 
-@router.get("/active", response_model=List[Dict[str, Any]])
+@router.get("/active", response_model=list[dict[str, Any]])
 async def get_active_experiments(
     current_user: User = Depends(get_current_user)
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Get list of all active Agent Framework experiments.
     
@@ -344,12 +334,12 @@ async def get_active_experiments(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{experiment_id}/results", response_model=Dict[str, Any])
+@router.get("/{experiment_id}/results", response_model=dict[str, Any])
 async def get_experiment_results(
     experiment_id: str,
     include_statistics: bool = Query(True, description="Include statistical analysis"),
     current_user: User = Depends(get_current_user)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get current results for an Agent Framework experiment.
     
@@ -369,12 +359,12 @@ async def get_experiment_results(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{experiment_id}/stop", response_model=Dict[str, Any])
+@router.post("/{experiment_id}/stop", response_model=dict[str, Any])
 async def stop_experiment(
     experiment_id: str,
     reason: str = Body("manual_stop", description="Reason for stopping"),
     current_user: User = Depends(get_current_user)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Stop an active experiment and get final results.
     
@@ -396,10 +386,10 @@ async def stop_experiment(
 
 # ==================== Optimization Endpoints ====================
 
-@router.get("/optimizations/pending", response_model=List[Dict[str, Any]])
+@router.get("/optimizations/pending", response_model=list[dict[str, Any]])
 async def get_pending_optimizations(
     current_user: User = Depends(get_current_user)
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Get pending optimization recommendations from experiments.
     
@@ -428,11 +418,11 @@ async def get_pending_optimizations(
     return pending
 
 
-@router.post("/optimizations/approve", response_model=Dict[str, str])
+@router.post("/optimizations/approve", response_model=dict[str, str])
 async def approve_optimization(
     approval: OptimizationApproval,
     current_user: User = Depends(get_current_user)
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Approve and apply an optimization recommendation.
     
@@ -500,8 +490,8 @@ async def dashboard_websocket(websocket: WebSocket) -> None:
 
 # ==================== Health Check ====================
 
-@router.get("/health", response_model=Dict[str, Any])
-async def experiment_system_health() -> Dict[str, Any]:
+@router.get("/health", response_model=dict[str, Any])
+async def experiment_system_health() -> dict[str, Any]:
     """
     Check health of the A/B testing system.
     

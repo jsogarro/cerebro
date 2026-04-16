@@ -9,9 +9,9 @@ import hashlib
 import logging
 from typing import Any
 
-from src.core.constants import LONG_TERM_CACHE_TTL
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
+from src.core.constants import LONG_TERM_CACHE_TTL
 from src.models.research_project import ResearchDepth
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_literature_agent_prompt
@@ -71,7 +71,8 @@ class LiteratureReviewAgent(BaseAgent):
             formatted_citations = await self._format_source_citations(academic_sources)
 
             # Process and rank sources
-            ranked_sources = self._rank_sources_by_relevance(academic_sources)
+            sources_list = academic_sources.get("sources", [])
+            ranked_sources = self._rank_sources_by_relevance(sources_list)
 
             # Analyze research gaps with enhanced analysis
             gaps = literature_analysis.get("research_gaps", [])
@@ -239,7 +240,7 @@ class LiteratureReviewAgent(BaseAgent):
         Returns:
             Categorized gaps
         """
-        categories = {
+        categories: dict[str, list[str]] = {
             "methodological": [],
             "geographical": [],
             "temporal": [],
@@ -455,7 +456,7 @@ class LiteratureReviewAgent(BaseAgent):
             self.log_info(
                 f"Academic search completed: {result.get('total_found', 0)} sources found"
             )
-            return result
+            return dict(result)
 
         except Exception as e:
             self.log_error(f"MCP academic search failed: {e}")
@@ -492,7 +493,8 @@ class LiteratureReviewAgent(BaseAgent):
         try:
             response = await self.gemini_service.generate_content(prompt)
             parsed_response = parse_json_response(response)
-            return parsed_response.get("literature_analysis", {})
+            result = parsed_response.get("literature_analysis", {})
+            return dict(result) if isinstance(result, dict) else {}
         except Exception as e:
             self.log_error(f"Gemini analysis failed: {e}")
             return self._generate_mock_analysis_from_sources(academic_sources)
@@ -533,7 +535,7 @@ class LiteratureReviewAgent(BaseAgent):
             self.log_info(
                 f"Knowledge graph built with {len(result.get('entities', []))} entities"
             )
-            return result
+            return dict(result)
         except Exception as e:
             self.log_error(f"Knowledge graph building failed: {e}")
             return {"success": False, "error": str(e)}
@@ -574,7 +576,7 @@ class LiteratureReviewAgent(BaseAgent):
                 sources=citation_sources, style="APA"
             )
             self.log_info(f"Formatted {len(citation_sources)} citations")
-            return result
+            return dict(result)
         except Exception as e:
             self.log_error(f"Citation formatting failed: {e}")
             return {"success": False, "error": str(e)}

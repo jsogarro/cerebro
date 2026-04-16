@@ -6,7 +6,8 @@ and the new AI Brain capabilities including MASR routing, multi-tier memory,
 foundation model providers, and hierarchical agent management.
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Any
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -113,7 +114,7 @@ class Settings(BaseSettings):
     MASR_DEFAULT_STRATEGY: str = "balanced"  # cost_efficient, quality_focused, speed_first, balanced, adaptive
     MASR_ENABLE_CACHING: bool = True
     MASR_ENABLE_ADAPTIVE: bool = True
-    MASR_COMPLEXITY_WEIGHTS: Dict[str, float] = {
+    MASR_COMPLEXITY_WEIGHTS: dict[str, float] = {
         "linguistic": 0.15,
         "reasoning": 0.25,
         "domain": 0.20,
@@ -122,7 +123,7 @@ class Settings(BaseSettings):
         "time": 0.05,
         "quality": 0.05
     }
-    MASR_COMPLEXITY_THRESHOLDS: Dict[str, float] = {
+    MASR_COMPLEXITY_THRESHOLDS: dict[str, float] = {
         "simple": 0.3,
         "moderate": 0.7,
         "complex": 1.0
@@ -246,7 +247,7 @@ class Settings(BaseSettings):
 
     @field_validator("SECRET_KEY")
     @classmethod
-    def validate_secret_key(cls, v: str, info) -> str:
+    def validate_secret_key(cls, v: str, info: Any) -> str:
         """Ensure SECRET_KEY is set properly in production."""
         # Get environment from raw values
         env = info.data.get("ENVIRONMENT", "development")
@@ -267,7 +268,7 @@ class Settings(BaseSettings):
 
     @field_validator("DATABASE_URL")
     @classmethod
-    def validate_database_url(cls, v: str, info) -> str:
+    def validate_database_url(cls, v: str, info: Any) -> str:
         """Ensure database credentials are not defaults in production."""
         env = info.data.get("ENVIRONMENT", "development")
 
@@ -283,7 +284,7 @@ class Settings(BaseSettings):
 
         return v
 
-    def get_ai_brain_config(self) -> Dict[str, Any]:
+    def get_ai_brain_config(self) -> dict[str, Any]:
         """Get complete AI Brain configuration as a dictionary."""
         return {
             # MASR Configuration
@@ -433,7 +434,7 @@ class Settings(BaseSettings):
             },
         }
     
-    def get_research_platform_config(self) -> Dict[str, Any]:
+    def get_research_platform_config(self) -> dict[str, Any]:
         """Get legacy research platform configuration for backward compatibility."""
         return {
             "database_url": self.DATABASE_URL,

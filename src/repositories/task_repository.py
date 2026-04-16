@@ -5,13 +5,17 @@ Provides specialized operations for agent task execution and monitoring.
 """
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from sqlalchemy import and_, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db.agent_task import AgentTask, TaskStatus
 from src.repositories.base import BaseRepository
+
+if TYPE_CHECKING:
+    pass
 
 
 class TaskRepository(BaseRepository[AgentTask]):
@@ -21,7 +25,7 @@ class TaskRepository(BaseRepository[AgentTask]):
     Manages task execution, dependencies, and monitoring.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """Initialize task repository."""
         super().__init__(AgentTask, session)
 
@@ -44,7 +48,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         Returns:
             List of tasks
         """
-        filters = {"project_id": project_id}
+        filters: dict[str, Any] = {"project_id": project_id}
 
         if status:
             filters["status"] = status
@@ -288,7 +292,7 @@ class TaskRepository(BaseRepository[AgentTask]):
 
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast(int, result.rowcount)
 
     async def get_ready_tasks(self, project_id: UUID) -> list[AgentTask]:
         """
@@ -352,7 +356,7 @@ class TaskRepository(BaseRepository[AgentTask]):
 
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast(int, result.rowcount)
 
 
 __all__ = ["TaskRepository"]

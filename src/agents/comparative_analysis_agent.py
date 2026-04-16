@@ -9,9 +9,9 @@ import hashlib
 import logging
 from typing import Any
 
-from src.core.constants import LONG_TERM_CACHE_TTL
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
+from src.core.constants import LONG_TERM_CACHE_TTL
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_comparative_agent_prompt
 
@@ -263,7 +263,7 @@ class ComparativeAnalysisAgent(BaseAgent):
                     )
 
         # Normalize values
-        normalized = {}
+        normalized: dict[str, dict[str, float]] = {}
         for item, scores in matrix.items():
             normalized[item] = {}
             for criterion, score in scores.items():
@@ -300,16 +300,16 @@ class ComparativeAnalysisAgent(BaseAgent):
 
         # Rank by each criterion
         for criterion in criteria:
-            scores = [
-                (item, scores.get(criterion, 0)) for item, scores in matrix.items()
+            criterion_scores = [
+                (item, item_scores.get(criterion, 0.0)) for item, item_scores in matrix.items()
             ]
-            scores.sort(key=lambda x: x[1], reverse=True)
-            rankings[criterion] = [item for item, _ in scores]
+            criterion_scores.sort(key=lambda x: x[1], reverse=True)
+            rankings[criterion] = [item for item, _ in criterion_scores]
 
         # Calculate overall ranking (simple average)
-        overall_scores = {}
-        for item, scores in matrix.items():
-            overall_scores[item] = sum(scores.values()) / len(scores) if scores else 0
+        overall_scores: dict[str, float] = {}
+        for item, item_scores in matrix.items():
+            overall_scores[item] = sum(item_scores.values()) / len(item_scores) if item_scores else 0.0
 
         overall_ranking = sorted(
             overall_scores.items(), key=lambda x: x[1], reverse=True
@@ -349,7 +349,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Categorized trade-offs
         """
-        categories = {
+        categories: dict[str, list[str]] = {
             "performance": [],
             "cost": [],
             "complexity": [],
@@ -392,7 +392,7 @@ class ComparativeAnalysisAgent(BaseAgent):
 
         # Calculate variance in scores to assess trade-off severity
         if matrix:
-            all_scores = []
+            all_scores: list[float] = []
             for scores in matrix.values():
                 all_scores.extend(scores.values())
 
@@ -428,7 +428,7 @@ class ComparativeAnalysisAgent(BaseAgent):
             return 0.0
 
         # Check if all items have scores for all criteria
-        all_criteria = set()
+        all_criteria: set[str] = set()
         for scores in matrix.values():
             all_criteria.update(scores.keys())
 
@@ -562,12 +562,17 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Visual data dictionary
         """
-        visual_data = {"chart_type": "radar", "labels": criteria, "data_points": {}}
-
+        data_points: dict[str, list[float]] = {}
         for item, scores in matrix.items():
-            visual_data["data_points"][item] = [
-                scores.get(criterion, 0) for criterion in criteria
+            data_points[item] = [
+                scores.get(criterion, 0.0) for criterion in criteria
             ]
+
+        visual_data: dict[str, Any] = {
+            "chart_type": "radar",
+            "labels": criteria,
+            "data_points": data_points
+        }
 
         return visual_data
 
@@ -604,7 +609,7 @@ class ComparativeAnalysisAgent(BaseAgent):
                 self.log_info(
                     f"Found {result.get('total_found', 0)} comparative studies"
                 )
-                return result
+                return dict(result)
             else:
                 raise Exception(
                     f"Comparative research search failed: {result.get('error')}"
@@ -708,7 +713,7 @@ class ComparativeAnalysisAgent(BaseAgent):
                 self.log_info(
                     f"Built comparison knowledge graph with {len(entities)} entities"
                 )
-                return result
+                return dict(result)
             else:
                 raise Exception(
                     f"Knowledge graph building failed: {result.get('error')}"
@@ -751,13 +756,13 @@ class ComparativeAnalysisAgent(BaseAgent):
         criteria = task.input_data.get("criteria", [])
 
         # Generate mock comparison matrix
-        matrix = {}
+        matrix: dict[str, dict[str, float]] = {}
         for i, item in enumerate(items):
             matrix[item] = {}
             for j, criterion in enumerate(criteria):
                 # Generate varied scores
-                matrix[item][criterion] = 0.5 + (i * 0.1) - (j * 0.05)
-                matrix[item][criterion] = max(0, min(1, matrix[item][criterion]))
+                score = 0.5 + (i * 0.1) - (j * 0.05)
+                matrix[item][criterion] = max(0.0, min(1.0, score))
 
         # Generate mock strengths and weaknesses
         strengths_weaknesses = {}
@@ -832,7 +837,7 @@ class ComparativeAnalysisAgent(BaseAgent):
                 "statistical_tests": len(statistical_data.get("tests_performed", [])),
             }
 
-            return analysis
+            return dict(analysis)
 
         except Exception as e:
             self.log_error(f"Gemini analysis with MCP data failed: {e}")
@@ -896,12 +901,12 @@ class ComparativeAnalysisAgent(BaseAgent):
             return {"method": "basic", "note": "No statistical data available"}
 
         # Calculate rankings with statistical significance
-        rankings = {}
+        rankings: dict[str, Any] = {}
 
         # Overall ranking with confidence scores
         item_scores = {}
         for item, scores in matrix.items():
-            mean_score = sum(scores.values()) / len(scores) if scores else 0
+            mean_score = sum(scores.values()) / len(scores) if scores else 0.0
             item_scores[item] = {
                 "score": mean_score,
                 "confidence": self._calculate_ranking_confidence(
@@ -914,10 +919,11 @@ class ComparativeAnalysisAgent(BaseAgent):
             item_scores.items(), key=lambda x: x[1]["score"], reverse=True
         )
 
-        rankings["overall_with_confidence"] = [
+        rankings_list: list[dict[str, str | float | int]] = [
             {"item": item, "score": data["score"], "confidence": data["confidence"]}
             for item, data in sorted_items
         ]
+        rankings["overall_with_confidence"] = rankings_list
 
         rankings["method"] = "statistical"
         rankings["tests_used"] = statistical_data.get("tests_performed", [])
@@ -1193,7 +1199,8 @@ class ComparativeAnalysisAgent(BaseAgent):
             Enhanced mock analysis
         """
         # Base mock analysis
-        analysis = self._generate_mock_analysis(input_data)
+        fake_task = AgentTask(id="mock", agent_type="comparative", input_data=input_data, priority=1)
+        analysis = self._generate_mock_analysis(fake_task)
 
         # Enhance with MCP insights
         if research_data.get("success"):

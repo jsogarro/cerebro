@@ -5,15 +5,17 @@ Advanced session coordination and analytics management for TalkHier protocol.
 Handles multi-session coordination, performance tracking, and analytics aggregation.
 """
 
-import asyncio
-from typing import Dict, List, Optional, Any, Set
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from collections import defaultdict
 import logging
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any
 
 from src.models.talkhier_api_models import (
-    SessionStatus, ProtocolType, CoordinationRequest, CoordinationStatus
+    CoordinationRequest,
+    CoordinationStatus,
+    ProtocolType,
+    SessionStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,13 +25,13 @@ logger = logging.getLogger(__name__)
 class SessionMetrics:
     """Metrics for a single session"""
     session_id: str
-    protocol_type: Optional[ProtocolType] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    protocol_type: ProtocolType | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     rounds_completed: int = 0
-    quality_scores: List[float] = field(default_factory=list)
-    consensus_scores: List[float] = field(default_factory=list)
-    round_durations: List[int] = field(default_factory=list)
+    quality_scores: list[float] = field(default_factory=list)
+    consensus_scores: list[float] = field(default_factory=list)
+    round_durations: list[int] = field(default_factory=list)
     final_quality: float = 0.0
     final_consensus: float = 0.0
     success: bool = False
@@ -39,12 +41,12 @@ class SessionMetrics:
 class CoordinationGroup:
     """Group of coordinated sessions"""
     coordination_id: str
-    session_ids: List[str]
+    session_ids: list[str]
     coordination_type: str
     created_at: datetime
     status: str = "active"
-    shared_context: Dict[str, Any] = field(default_factory=dict)
-    aggregated_results: Optional[Dict[str, Any]] = None
+    shared_context: dict[str, Any] = field(default_factory=dict)
+    aggregated_results: dict[str, Any] | None = None
 
 
 class TalkHierSessionManager:
@@ -52,11 +54,11 @@ class TalkHierSessionManager:
     Manages TalkHier sessions with analytics and coordination capabilities
     """
     
-    def __init__(self):
-        self.sessions: Dict[str, SessionMetrics] = {}
-        self.coordinations: Dict[str, CoordinationGroup] = {}
-        self.analytics_events: List[Dict[str, Any]] = []
-        self.protocol_stats: Dict[ProtocolType, Dict[str, Any]] = defaultdict(lambda: {
+    def __init__(self) -> None:
+        self.sessions: dict[str, SessionMetrics] = {}
+        self.coordinations: dict[str, CoordinationGroup] = {}
+        self.analytics_events: list[dict[str, Any]] = []
+        self.protocol_stats: dict[ProtocolType, dict[str, Any]] = defaultdict(lambda: {
             "total_sessions": 0,
             "successful_sessions": 0,
             "total_rounds": 0,
@@ -67,7 +69,7 @@ class TalkHierSessionManager:
     async def register_session(
         self,
         session_id: str,
-        config: Dict[str, Any]
+        config: dict[str, Any]
     ) -> None:
         """Register a new session for tracking"""
         self.sessions[session_id] = SessionMetrics(
@@ -98,7 +100,7 @@ class TalkHierSessionManager:
     async def update_round_metrics(
         self,
         session_id: str,
-        round_data: Dict[str, Any]
+        round_data: dict[str, Any]
     ) -> None:
         """Update metrics for a completed round"""
         if session_id in self.sessions:
@@ -184,9 +186,9 @@ class TalkHierSessionManager:
     async def get_analytics(
         self,
         time_range: str = "24h",
-        protocol_type: Optional[ProtocolType] = None,
-        min_quality: Optional[float] = None
-    ) -> Dict[str, Any]:
+        protocol_type: ProtocolType | None = None,
+        min_quality: float | None = None
+    ) -> dict[str, Any]:
         """Get aggregated analytics"""
         # Parse time range
         cutoff_time = self._parse_time_range(time_range)
@@ -220,7 +222,7 @@ class TalkHierSessionManager:
         timeout_rate = 0.0  # Would need timeout tracking
         
         # Protocol usage
-        protocol_usage = defaultdict(int)
+        protocol_usage: dict[str, int] = defaultdict(int)
         for metrics in filtered_sessions:
             if metrics.protocol_type:
                 protocol_usage[metrics.protocol_type.value] += 1
@@ -252,7 +254,7 @@ class TalkHierSessionManager:
         self,
         event_type: str,
         session_id: str,
-        metrics: Dict[str, Any],
+        metrics: dict[str, Any],
         timestamp: datetime
     ) -> None:
         """Log an analytics event"""
@@ -267,7 +269,7 @@ class TalkHierSessionManager:
         if len(self.analytics_events) > 10000:
             self.analytics_events = self.analytics_events[-10000:]
     
-    async def get_health_status(self) -> Dict[str, Any]:
+    async def get_health_status(self) -> dict[str, Any]:
         """Get health status of session manager"""
         return {
             "status": "healthy",
@@ -279,7 +281,7 @@ class TalkHierSessionManager:
     
     # Helper methods
     
-    def _parse_time_range(self, time_range: str) -> Optional[datetime]:
+    def _parse_time_range(self, time_range: str) -> datetime | None:
         """Parse time range string to datetime cutoff"""
         now = datetime.utcnow()
         
@@ -294,7 +296,7 @@ class TalkHierSessionManager:
         else:
             return None
     
-    def _empty_analytics(self) -> Dict[str, Any]:
+    def _empty_analytics(self) -> dict[str, Any]:
         """Return empty analytics structure"""
         return {
             "total_sessions": 0,
@@ -313,7 +315,7 @@ class TalkHierSessionManager:
     def _generate_coordination_insights(
         self,
         coordination: CoordinationGroup
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate insights for coordination group"""
         insights = []
         
@@ -331,8 +333,8 @@ class TalkHierSessionManager:
     
     def _calculate_strategy_performance(
         self,
-        sessions: List[SessionMetrics]
-    ) -> Dict[str, Dict[str, float]]:
+        sessions: list[SessionMetrics]
+    ) -> dict[str, dict[str, float]]:
         """Calculate performance by strategy"""
         # Simplified - would need strategy tracking
         return {
@@ -343,8 +345,8 @@ class TalkHierSessionManager:
     
     def _calculate_quality_trends(
         self,
-        sessions: List[SessionMetrics]
-    ) -> List[Dict[str, Any]]:
+        sessions: list[SessionMetrics]
+    ) -> list[dict[str, Any]]:
         """Calculate quality trends over time"""
         trends = []
         
@@ -367,8 +369,8 @@ class TalkHierSessionManager:
     
     def _calculate_consensus_patterns(
         self,
-        sessions: List[SessionMetrics]
-    ) -> Dict[str, Any]:
+        sessions: list[SessionMetrics]
+    ) -> dict[str, Any]:
         """Analyze consensus achievement patterns"""
         high_consensus = sum(1 for m in sessions if m.final_consensus >= 0.8)
         low_consensus = sum(1 for m in sessions if m.final_consensus < 0.5)

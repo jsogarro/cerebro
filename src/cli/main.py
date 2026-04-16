@@ -2,7 +2,11 @@
 Main CLI entry point for Research Platform.
 """
 
+from typing import Any
+
 import click
+from click.core import Context
+from click.exceptions import Exit
 from rich.console import Console
 
 from src.cli import __version__
@@ -38,7 +42,7 @@ from src.cli.formatters import OutputFormatter
     help="Disable colored output",
 )
 @click.pass_context
-def cli(ctx, api_url: str, format: str, verbose: bool, no_color: bool):
+def cli(ctx: Context, api_url: str | None, format: str, verbose: bool, no_color: bool) -> None:
     """Research Platform CLI - Manage research projects from the command line."""
     # Update config with command line options
     if api_url:
@@ -72,7 +76,7 @@ def cli(ctx, api_url: str, format: str, verbose: bool, no_color: bool):
 @click.argument("key", required=False)
 @click.argument("value", required=False)
 @click.pass_context
-def config_command(ctx, action: str, key: str, value: str):
+def config_command(ctx: Context, action: str, key: str | None, value: str | None) -> None:
     """Manage CLI configuration."""
     cli_config = ctx.obj["config"]
 
@@ -95,26 +99,29 @@ def config_command(ctx, action: str, key: str, value: str):
         # Set configuration value
         if not key or not value:
             click.echo("Usage: research-cli config set <key> <value>")
-            raise click.Exit(1)
+            raise Exit(1)
 
         if not hasattr(cli_config, key):
             click.echo(f"Unknown configuration key: {key}")
-            raise click.Exit(1)
+            raise Exit(1)
 
         # Update configuration
         try:
             # Handle boolean values
+            value_to_set: Any
             if key in ["verbose", "color"]:
-                value = value.lower() in ["true", "1", "yes"]
+                value_to_set = value.lower() in ["true", "1", "yes"]
             # Handle integer values
             elif key in ["api_timeout", "max_retries"]:
-                value = int(value)
+                value_to_set = int(value)
+            else:
+                value_to_set = value
 
-            setattr(cli_config, key, value)
-            click.echo(f"Set {key} = {value}")
+            setattr(cli_config, key, value_to_set)
+            click.echo(f"Set {key} = {value_to_set}")
         except Exception as e:
             click.echo(f"Error setting configuration: {e}")
-            raise click.Exit(1)
+            raise Exit(1)
 
     elif action == "save":
         # Save configuration to file
@@ -123,12 +130,12 @@ def config_command(ctx, action: str, key: str, value: str):
             click.echo("Configuration saved to ~/.research-cli.env")
         except Exception as e:
             click.echo(f"Error saving configuration: {e}")
-            raise click.Exit(1)
+            raise Exit(1)
 
 
 @cli.command(name="health")
 @click.pass_context
-def health_check(ctx):
+def health_check(ctx: Context) -> None:
     """Check API health status."""
     import asyncio
 
@@ -156,10 +163,10 @@ def health_check(ctx):
 
             except APIError as e:
                 print_error(f"API health check failed: {e.detail}")
-                raise click.Exit(1)
+                raise Exit(1)
             except Exception as e:
                 print_error(f"Failed to connect to API: {e}")
-                raise click.Exit(1)
+                raise Exit(1)
 
     asyncio.run(_check_health())
 
@@ -172,7 +179,7 @@ cli.add_command(projects_group)
 # Shell completion
 @cli.command(name="completion")
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
-def show_completion(shell: str):
+def show_completion(shell: str) -> None:
     """Show shell completion script."""
     if shell == "bash":
         click.echo(

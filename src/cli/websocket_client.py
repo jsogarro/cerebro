@@ -6,9 +6,11 @@ real-time updates instead of polling the API.
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 import websockets
@@ -16,7 +18,8 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.progress import Progress, TaskID
-from websockets.exceptions import ConnectionClosed, InvalidStatusCode
+from websockets.exceptions import ConnectionClosed, InvalidStatus
+from websockets.legacy.client import WebSocketClientProtocol
 
 from src.cli.config import config
 from src.cli.formatters import (
@@ -48,20 +51,20 @@ class CLIWebSocketClient:
         )
         self.token = token or config.auth_token
         self.verbose = verbose or config.verbose
-        self.websocket: websockets.WebSocketServerProtocol | None = None
+        self.websocket: WebSocketClientProtocol | None = None
         self.console = Console()
         self._shutdown = False
         self._connected = False
 
-    async def __aenter__(self) -> "WebSocketClient":
+    async def __aenter__(self) -> "CLIWebSocketClient":
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self.disconnect()
 
-    def _log(self, message: str):
+    def _log(self, message: str) -> None:
         """Log message if verbose mode is enabled."""
         if self.verbose:
             self.console.print(f"[dim]WS: {message}[/dim]")
@@ -90,27 +93,29 @@ class CLIWebSocketClient:
             headers = {"User-Agent": "research-cli/0.1.0"}
 
             # Connect to WebSocket
-            self.websocket = await websockets.connect(
+            ws_connection: Any = await websockets.connect(
                 ws_url,
                 extra_headers=headers,
                 ping_interval=30,
                 ping_timeout=10,
             )
+            self.websocket = ws_connection
 
             self._connected = True
             self._log("WebSocket connection established")
 
             return True
 
-        except InvalidStatusCode as e:
-            if e.status_code == 401:
+        except InvalidStatus as e:
+            status_code = getattr(e, 'status_code', getattr(e.response, 'status_code', 0))
+            if status_code == 401:
                 print_error("Authentication failed. Please check your token.")
-            elif e.status_code == 403:
+            elif status_code == 403:
                 print_error(
                     "Access denied. You don't have permission to access this project."
                 )
             else:
-                print_error(f"Connection failed with status {e.status_code}")
+                print_error(f"Connection failed with status {status_code}")
             return False
 
         except Exception as e:
@@ -177,6 +182,8 @@ class CLIWebSocketClient:
                 current_status = "Connecting..."
                 progress_percentage = 0.0
 
+                if self.websocket is None:
+                    return False
                 async for message in self.websocket:
                     if self._shutdown:
                         break
@@ -340,6 +347,8 @@ class CLIWebSocketClient:
         print_info(f"📋 Streaming logs for project {project_id} (level: {log_level})")
 
         try:
+            if self.websocket is None:
+                return False
             async for message in self.websocket:
                 if self._shutdown:
                     break
@@ -399,7 +408,8 @@ class CLIWebSocketClient:
 
                 # Wait for response (with timeout)
                 try:
-                    response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                    raw_response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                    response = raw_response if isinstance(raw_response, str) else raw_response.decode('utf-8')
                     self._log(f"Test response: {response}")
                     return True
                 except TimeoutError:
@@ -431,7 +441,8 @@ async def stream_project_progress(
         True if streaming was successful
     """
     async with CLIWebSocketClient(token=token, verbose=verbose) as client:
-        return await client.stream_progress(project_id, formatter)
+        result: bool = await client.stream_progress(project_id, formatter)
+        return result
 
 
 async def test_websocket_connection(

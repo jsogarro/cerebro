@@ -6,68 +6,76 @@ following the repository pattern established in the codebase.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, JSON, LargeBinary, ForeignKey, Boolean, Float
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
-from sqlalchemy.orm import relationship
-
-from src.models.db.base import BaseDBModel
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
-class GeneratedReport(BaseDBModel):
+class GeneratedReport(BaseModel):
     """Database model for generated research reports."""
     
     __tablename__ = "generated_reports"
-    
+
     # Primary key and relationships
-    id = Column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid4)
-    project_id = Column(PostgresUUID(as_uuid=True), ForeignKey("research_projects.id"), nullable=True)
-    workflow_id = Column(String(255), nullable=True, index=True)
-    user_id = Column(PostgresUUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    
+    id: Mapped[UUID] = mapped_column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id: Mapped[UUID | None] = mapped_column(PostgresUUID(as_uuid=True), ForeignKey("research_projects.id"), nullable=True)
+    workflow_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    user_id: Mapped[UUID | None] = mapped_column(PostgresUUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
     # Report metadata
-    title = Column(String(500), nullable=False, index=True)
-    report_type = Column(String(50), nullable=False, index=True)  # comprehensive, executive_summary, etc.
-    query = Column(Text, nullable=False)
-    domains = Column(JSON, nullable=True)  # List of research domains
-    
+    title: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    report_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    domains: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+
     # Generation settings
-    configuration = Column(JSON, nullable=True)  # ReportConfiguration as JSON
-    formats_generated = Column(JSON, nullable=True)  # List of formats generated
-    
+    configuration: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    formats_generated: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+
     # Quality metrics
-    quality_score = Column(Float, nullable=True, index=True)
-    confidence_score = Column(Float, nullable=True)
-    total_sources = Column(Integer, default=0)
-    total_citations = Column(Integer, default=0)
-    word_count = Column(Integer, default=0)
-    page_count = Column(Integer, nullable=True)
-    
+    quality_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_sources: Mapped[int] = mapped_column(Integer, default=0)
+    total_citations: Mapped[int] = mapped_column(Integer, default=0)
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Generation tracking
-    generation_status = Column(String(50), default="pending", index=True)  # pending, generating, completed, failed
-    generation_started_at = Column(DateTime, nullable=True)
-    generation_completed_at = Column(DateTime, nullable=True)
-    generation_time_seconds = Column(Float, nullable=True)
-    generation_errors = Column(JSON, nullable=True)  # List of error messages
-    
+    generation_status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+    generation_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    generation_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    generation_time_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    generation_errors: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+
     # Agent information
-    agents_used = Column(JSON, nullable=True)  # List of agent types used
-    
+    agents_used: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+
     # File storage information
-    storage_path = Column(String(1000), nullable=True)  # Base storage path
-    file_sizes = Column(JSON, nullable=True)  # File sizes by format
-    
+    storage_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    file_sizes: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
     # Content preview (for search and display)
-    executive_summary = Column(Text, nullable=True)
-    content_preview = Column(Text, nullable=True)  # First few paragraphs
-    key_findings = Column(JSON, nullable=True)  # List of key findings
-    
+    executive_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_findings: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+
     # Access and sharing
-    is_public = Column(Boolean, default=False, index=True)
-    access_count = Column(Integer, default=0)
-    last_accessed_at = Column(DateTime, nullable=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     
     # Relationships
     project = relationship("ResearchProject", back_populates="generated_reports")
@@ -87,7 +95,7 @@ class GeneratedReport(BaseDBModel):
         return self.generation_status == "failed"
     
     @property
-    def generation_duration(self) -> Optional[float]:
+    def generation_duration(self) -> float | None:
         """Get generation duration in seconds."""
         if self.generation_time_seconds:
             return self.generation_time_seconds
@@ -96,7 +104,7 @@ class GeneratedReport(BaseDBModel):
             return delta.total_seconds()
         return None
     
-    def get_file_path(self, format: str) -> Optional[str]:
+    def get_file_path(self, format: str) -> str | None:
         """Get file path for a specific format."""
         if not self.storage_path:
             return None
@@ -113,7 +121,7 @@ class GeneratedReport(BaseDBModel):
         extension = extensions.get(format.lower(), f'.{format}')
         return f"{self.storage_path}/report{extension}"
     
-    def get_file_size(self, format: str) -> Optional[int]:
+    def get_file_size(self, format: str) -> int | None:
         """Get file size for a specific format."""
         if not self.file_sizes:
             return None
@@ -140,9 +148,9 @@ class GeneratedReport(BaseDBModel):
     
     def mark_generation_completed(
         self,
-        formats: List[str],
+        formats: list[str],
         file_sizes: Dict[str, int],
-        generation_time: Optional[float] = None
+        generation_time: float | None = None
     ) -> None:
         """Mark report generation as completed."""
         self.generation_status = "completed"
@@ -162,7 +170,7 @@ class GeneratedReport(BaseDBModel):
         self.generation_completed_at = datetime.utcnow()
         self.add_generation_error(error_message)
     
-    def to_dict(self, include_content: bool = False) -> Dict[str, Any]:
+    def to_dict(self, include_content: bool = False) -> dict[str, Any]:
         """Convert model to dictionary."""
         data = {
             'id': str(self.id),
@@ -208,9 +216,9 @@ class GeneratedReport(BaseDBModel):
     @classmethod
     def from_report_data(
         cls,
-        report_data: Dict[str, Any],
-        user_id: Optional[UUID] = None,
-        project_id: Optional[UUID] = None
+        report_data: dict[str, Any],
+        user_id: UUID | None = None,
+        project_id: UUID | None = None
     ) -> "GeneratedReport":
         """Create GeneratedReport from report data dictionary."""
         return cls(

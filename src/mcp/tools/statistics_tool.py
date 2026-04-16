@@ -81,7 +81,7 @@ class StatisticsTool(BaseMCPTool):
             tags=["statistics", "analysis", "visualization", "hypothesis"],
         )
 
-    async def execute(self, **kwargs) -> dict[str, Any]:
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """
         Execute statistical operation.
 
