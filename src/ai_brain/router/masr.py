@@ -16,47 +16,22 @@ decisions about how to handle each query most effectively.
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 import uuid
 
 from .query_analyzer import QueryComplexityAnalyzer, ComplexityAnalysis, ComplexityLevel
 from .cost_optimizer import CostOptimizer, OptimizationResult, OptimizationStrategy
+from .routing_cache import RoutingCacheManager
+from .routing_metrics import RoutingMetricsCollector
+from .routing_types import (
+    CollaborationMode,
+    RoutingStrategy,
+    AgentAllocation,
+    RoutingMetrics,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class CollaborationMode(Enum):
-    """Agent collaboration modes for different query types."""
-
-    DIRECT = "direct"  # Single agent handles everything
-    PARALLEL = "parallel"  # Multiple agents work simultaneously
-    HIERARCHICAL = "hierarchical"  # Supervisor coordinates workers
-    DEBATE = "debate"  # Agents discuss and refine responses
-    ENSEMBLE = "ensemble"  # Multiple models/agents vote on result
-
-
-class RoutingStrategy(Enum):
-    """High-level routing strategies."""
-
-    SPEED_FIRST = "speed_first"  # Minimize latency
-    COST_EFFICIENT = "cost_efficient"  # Minimize cost
-    QUALITY_FOCUSED = "quality_focused"  # Maximize quality
-    BALANCED = "balanced"  # Balance all factors
-    ADAPTIVE = "adaptive"  # Learn from usage patterns
-
-
-@dataclass
-class AgentAllocation:
-    """Specification for agent allocation."""
-
-    supervisor_type: str
-    worker_count: int = 1
-    worker_types: List[str] = field(default_factory=list)
-    max_parallel: int = 5
-    timeout_seconds: int = 300
-    retry_attempts: int = 2
 
 
 @dataclass
@@ -90,24 +65,6 @@ class RoutingDecision:
     memory_allocation: Dict[str, int] = field(default_factory=dict)
 
 
-@dataclass
-class RoutingMetrics:
-    """Metrics for tracking routing performance."""
-
-    total_requests: int = 0
-    successful_requests: int = 0
-    failed_requests: int = 0
-    avg_response_time_ms: float = 0.0
-    avg_cost_per_request: float = 0.0
-    avg_quality_score: float = 0.0
-    fallback_usage_rate: float = 0.0
-
-    # Strategy effectiveness
-    strategy_performance: Dict[str, float] = field(default_factory=dict)
-    model_performance: Dict[str, float] = field(default_factory=dict)
-
-    # Time-based metrics
-    last_updated: datetime = field(default_factory=datetime.now)
 
 
 class MASRouter:
@@ -138,12 +95,26 @@ class MASRouter:
             config.get("cost_optimizer", {}), model_config_manager
         )
 
-        # Routing configuration
+        # Initialize cache manager
+        cache_config = self.config.get("cache", {})
+        self.cache_manager = RoutingCacheManager(
+            enabled=self.config.get("enable_caching", True),
+            max_size=cache_config.get("max_size", 1000),
+            eviction_batch_size=cache_config.get("eviction_batch_size", 100),
+        )
+
+        # Initialize metrics collector
         self.default_strategy = RoutingStrategy(
             self.config.get("default_strategy", "balanced")
         )
+        self.metrics_collector = RoutingMetricsCollector(
+            default_strategy=self.default_strategy,
+            adaptation_window_hours=self.config.get("adaptation_window_hours", 24),
+            min_history_for_adaptation=self.config.get("min_history_for_adaptation", 100),
+        )
+
+        # Routing configuration
         self.enable_adaptive_routing = self.config.get("enable_adaptive", True)
-        self.enable_caching = self.config.get("enable_caching", True)
 
         # Performance thresholds
         self.quality_threshold = self.config.get("min_quality", 0.8)
@@ -154,14 +125,8 @@ class MASRouter:
         self.max_agents_per_query = self.config.get("max_agents", 10)
         self.max_parallel_workers = self.config.get("max_parallel", 5)
 
-        # Performance tracking
-        self.metrics = RoutingMetrics()
-        self.routing_history: List[RoutingDecision] = []
-        self.decision_cache: Dict[str, RoutingDecision] = {}
-
         # Learning parameters for adaptive routing
         self.learning_enabled = self.config.get("enable_learning", True)
-        self.adaptation_window = self.config.get("adaptation_window_hours", 24)
 
     async def route(
         self,
@@ -189,11 +154,10 @@ class MASRouter:
 
         try:
             # Check cache first if enabled
-            if self.enable_caching:
-                cached_decision = self._check_cache(query, context)
-                if cached_decision:
-                    logger.info(f"Using cached routing for {query_id}")
-                    return cached_decision
+            cached_decision = self.cache_manager.check_cache(query, context)
+            if cached_decision:
+                logger.info(f"Using cached routing for {query_id}")
+                return cached_decision
 
             # Step 1: Analyze query complexity
             complexity_analysis = await self.complexity_analyzer.analyze(query, context)
@@ -243,19 +207,18 @@ class MASRouter:
                 memory_allocation=self._allocate_memory(complexity_analysis),
             )
 
-            # Cache decision if caching is enabled
-            if self.enable_caching:
-                self._cache_decision(query, context, decision)
+            # Cache decision
+            self.cache_manager.cache_decision(query, context, decision)
 
             # Update metrics
-            self._update_metrics(decision)
+            self.metrics_collector.update_metrics(decision)
 
             # Store in history for learning
-            self.routing_history.append(decision)
+            self.metrics_collector.add_to_history(decision)
 
             # Trigger adaptive learning if enabled
             if self.learning_enabled:
-                asyncio.create_task(self._adapt_from_decision(decision))
+                asyncio.create_task(self.metrics_collector.adapt_from_decision(decision))
 
             processing_time = (datetime.now() - start_time).total_seconds() * 1000
             logger.info(
@@ -281,8 +244,8 @@ class MASRouter:
             return RoutingStrategy(context["routing_strategy"])
 
         # Use adaptive strategy if enabled and we have enough history
-        if self.enable_adaptive_routing and len(self.routing_history) > 100:
-            return self._get_adaptive_strategy(complexity_analysis)
+        if self.enable_adaptive_routing and self.metrics_collector.get_history_size() > 100:
+            return self.metrics_collector.get_adaptive_strategy(complexity_analysis)
 
         # Strategy selection based on query characteristics
         if complexity_analysis.priority_level == "critical":
@@ -564,43 +527,6 @@ class MASRouter:
 
         return allocation
 
-    def _check_cache(
-        self, query: str, context: Optional[Dict]
-    ) -> Optional[RoutingDecision]:
-        """Check if we have a cached routing decision."""
-        cache_key = self._generate_cache_key(query, context)
-        return self.decision_cache.get(cache_key)
-
-    def _cache_decision(
-        self, query: str, context: Optional[Dict], decision: RoutingDecision
-    ):
-        """Cache a routing decision."""
-        cache_key = self._generate_cache_key(query, context)
-        self.decision_cache[cache_key] = decision
-
-        # Limit cache size
-        if len(self.decision_cache) > 1000:
-            # Remove oldest entries
-            oldest_keys = sorted(
-                self.decision_cache.keys(),
-                key=lambda k: self.decision_cache[k].timestamp,
-            )[:100]
-            for key in oldest_keys:
-                del self.decision_cache[key]
-
-    def _generate_cache_key(self, query: str, context: Optional[Dict]) -> str:
-        """Generate a cache key for query and context."""
-        import hashlib
-
-        # Create hash from query and relevant context
-        cache_data = {
-            "query": query.lower().strip(),
-            "user_id": context.get("user_id") if context else None,
-            "domain": context.get("domain") if context else None,
-        }
-
-        cache_string = str(sorted(cache_data.items()))
-        return hashlib.md5(cache_string.encode()).hexdigest()
 
     def _create_fallback_decision(
         self, query_id: str, query: str, error: Exception
@@ -678,60 +604,24 @@ class MASRouter:
             monitoring_level="detailed",
         )
 
-    def _update_metrics(self, decision: RoutingDecision):
-        """Update routing metrics with new decision."""
-        self.metrics.total_requests += 1
-        self.metrics.last_updated = datetime.now()
-        # Additional metrics would be updated after execution feedback
-
-    def _get_adaptive_strategy(self, complexity_analysis) -> RoutingStrategy:
-        """Get adaptive routing strategy based on historical performance."""
-        # Analyze recent performance by strategy
-        recent_cutoff = datetime.now() - timedelta(hours=self.adaptation_window)
-        recent_decisions = [
-            d for d in self.routing_history if d.timestamp > recent_cutoff
-        ]
-
-        if not recent_decisions:
-            return self.default_strategy
-
-        # Simple strategy selection based on average confidence
-        strategy_performance = {}
-        for decision in recent_decisions:
-            strategy = "balanced"  # Simplified for now
-            if strategy not in strategy_performance:
-                strategy_performance[strategy] = []
-            strategy_performance[strategy].append(decision.confidence_score)
-
-        # Select strategy with highest average confidence
-        best_strategy = max(
-            strategy_performance.items(), key=lambda x: sum(x[1]) / len(x[1])
-        )[0]
-
-        return RoutingStrategy(best_strategy)
-
-    async def _adapt_from_decision(self, decision: RoutingDecision):
-        """Adapt routing parameters based on decision outcomes."""
-        # This would implement learning from execution feedback
-        # For now, it's a placeholder for future ML-based adaptation
-        pass
 
     async def get_metrics(self) -> RoutingMetrics:
         """Get current routing metrics."""
-        return self.metrics
+        return self.metrics_collector.get_metrics()
 
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check on MASR components."""
+        metrics = self.metrics_collector.get_metrics()
         health = {
             "status": "healthy",
             "components": {
                 "complexity_analyzer": "healthy",
                 "cost_optimizer": "healthy",
-                "decision_cache": f"{len(self.decision_cache)} entries",
-                "routing_history": f"{len(self.routing_history)} decisions",
+                "decision_cache": f"{self.cache_manager.get_cache_size()} entries",
+                "routing_history": f"{self.metrics_collector.get_history_size()} decisions",
             },
             "metrics": {
-                "total_requests": self.metrics.total_requests,
+                "total_requests": metrics.total_requests,
                 "cache_hit_rate": "N/A",  # Would calculate from actual usage
                 "avg_routing_time_ms": "N/A",  # Would track routing performance
             },

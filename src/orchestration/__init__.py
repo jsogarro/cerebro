@@ -23,6 +23,15 @@ from src.orchestration.state import (
     StateCheckpoint,
     WorkflowMetadata,
 )
+from src.orchestration.multi_supervisor_orchestrator import (
+    MultiSupervisorOrchestrator,
+    SupervisorCoordinationMode,
+    SupervisorAllocation,
+    MultiSupervisorState,
+)
+from src.orchestration.query_decomposer import QueryDecomposer
+from src.orchestration.inter_supervisor_communicator import InterSupervisorCommunicator
+from src.orchestration.cross_domain_synthesizer import CrossDomainSynthesizer
 
 __all__ = [
     # State management
@@ -39,4 +48,12 @@ __all__ = [
     "ResearchOrchestrator",
     "OrchestratorConfig",
     "WorkflowResult",
+    # Multi-supervisor orchestration
+    "MultiSupervisorOrchestrator",
+    "SupervisorCoordinationMode",
+    "SupervisorAllocation",
+    "MultiSupervisorState",
+    "QueryDecomposer",
+    "InterSupervisorCommunicator",
+    "CrossDomainSynthesizer",
 ]
