@@ -8,12 +8,11 @@ The API enables multi-round refinement sessions with consensus building and qual
 through structured communication between supervisors and workers.
 """
 
-from typing import Dict, List, Optional, Any, Literal
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-import uuid
+from typing import Any, Literal
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ================================
 # Enums and Constants
@@ -87,9 +86,9 @@ class TalkHierSessionRequest(BaseModel):
     })
     
     query: str = Field(..., min_length=1, description="Query to refine through structured dialogue")
-    domains: List[str] = Field(default_factory=list, description="Relevant domains for the query")
-    participants: Optional[List[str]] = Field(None, description="Specific agents to participate")
-    supervisor_type: Optional[str] = Field(None, description="Type of supervisor to coordinate")
+    domains: list[str] = Field(default_factory=list, description="Relevant domains for the query")
+    participants: list[str] | None = Field(None, description="Specific agents to participate")
+    supervisor_type: str | None = Field(None, description="Type of supervisor to coordinate")
     
     # Protocol configuration
     protocol_type: ProtocolType = Field(ProtocolType.STANDARD, description="TalkHier protocol variant")
@@ -106,12 +105,12 @@ class TalkHierSessionRequest(BaseModel):
     consensus_threshold: float = Field(0.8, ge=0.5, le=1.0, description="Consensus agreement threshold")
     
     # Optional parameters
-    timeout_seconds: Optional[int] = Field(300, ge=30, le=3600, description="Session timeout")
+    timeout_seconds: int | None = Field(300, ge=30, le=3600, description="Session timeout")
     enable_debate: bool = Field(True, description="Allow agents to debate and disagree")
     require_evidence: bool = Field(True, description="Require supporting evidence in responses")
     
     @field_validator('min_rounds')
-    def validate_min_rounds(cls, v, info):
+    def validate_min_rounds(cls, v: int, info: Any) -> int:
         if 'max_rounds' in info.data and v > info.data['max_rounds']:
             raise ValueError("min_rounds cannot exceed max_rounds")
         return v
@@ -133,9 +132,9 @@ class RefinementRoundRequest(BaseModel):
     })
     
     round_number: int = Field(..., ge=1, description="Current round number")
-    previous_result: Optional[Dict[str, Any]] = Field(None, description="Result from previous round")
-    refinement_focus: Optional[str] = Field(None, description="Specific areas to refine")
-    participant_feedback: Optional[Dict[str, str]] = Field(
+    previous_result: dict[str, Any] | None = Field(None, description="Result from previous round")
+    refinement_focus: str | None = Field(None, description="Specific areas to refine")
+    participant_feedback: dict[str, str] | None = Field(
         None,
         description="Feedback from each participant"
     )
@@ -156,7 +155,7 @@ class ConsensusCheckRequest(BaseModel):
         }
     })
     
-    round_results: List[Dict[str, Any]] = Field(..., description="Results from current round")
+    round_results: list[dict[str, Any]] = Field(..., description="Results from current round")
     check_quality: bool = Field(True, description="Include quality assessment in consensus")
     include_minority_report: bool = Field(False, description="Include dissenting opinions")
 
@@ -164,7 +163,7 @@ class ConsensusCheckRequest(BaseModel):
 class SessionCloseRequest(BaseModel):
     """Request to close a TalkHier session"""
     
-    reason: Optional[str] = Field(None, description="Reason for closing session")
+    reason: str | None = Field(None, description="Reason for closing session")
     save_transcript: bool = Field(True, description="Save session transcript")
     generate_summary: bool = Field(True, description="Generate session summary")
 
@@ -183,8 +182,8 @@ class ProtocolValidationRequest(BaseModel):
         }
     })
     
-    messages: List[Dict[str, Any]] = Field(..., description="Messages to validate")
-    expected_protocol: Optional[ProtocolType] = Field(None, description="Expected protocol type")
+    messages: list[dict[str, Any]] = Field(..., description="Messages to validate")
+    expected_protocol: ProtocolType | None = Field(None, description="Expected protocol type")
     check_timing: bool = Field(True, description="Validate message timing")
     check_structure: bool = Field(True, description="Validate dialogue structure")
 
@@ -201,7 +200,7 @@ class ParticipantInfo(BaseModel):
     role: MessageRole = Field(..., description="Role in the session")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="Current confidence level")
     rounds_participated: int = Field(0, ge=0, description="Number of rounds participated")
-    quality_scores: List[float] = Field(default_factory=list, description="Quality scores per round")
+    quality_scores: list[float] = Field(default_factory=list, description="Quality scores per round")
 
 
 class RefinementRound(BaseModel):
@@ -210,16 +209,16 @@ class RefinementRound(BaseModel):
     round_number: int = Field(..., ge=1, description="Round sequence number")
     status: str = Field(..., description="Round status")
     started_at: datetime = Field(..., description="Round start time")
-    completed_at: Optional[datetime] = Field(None, description="Round completion time")
+    completed_at: datetime | None = Field(None, description="Round completion time")
     
-    participants: List[str] = Field(..., description="Participating agents")
-    messages: List[Dict[str, Any]] = Field(default_factory=list, description="Round messages")
+    participants: list[str] = Field(..., description="Participating agents")
+    messages: list[dict[str, Any]] = Field(default_factory=list, description="Round messages")
     
     quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Round quality score")
     consensus_score: float = Field(0.0, ge=0.0, le=1.0, description="Consensus level")
     refinement_delta: float = Field(0.0, description="Quality improvement from previous round")
     
-    result: Optional[Dict[str, Any]] = Field(None, description="Round result")
+    result: dict[str, Any] | None = Field(None, description="Round result")
 
 
 class ConsensusResult(BaseModel):
@@ -229,17 +228,17 @@ class ConsensusResult(BaseModel):
     consensus_type: ConsensusType = Field(..., description="Type of consensus checked")
     consensus_score: float = Field(..., ge=0.0, le=1.0, description="Consensus strength")
     
-    agreement_matrix: Dict[str, Dict[str, float]] = Field(
+    agreement_matrix: dict[str, dict[str, float]] = Field(
         default_factory=dict,
         description="Pairwise agreement scores between participants"
     )
     
-    quality_scores: Dict[str, float] = Field(
+    quality_scores: dict[str, float] = Field(
         default_factory=dict,
         description="Quality scores per participant"
     )
     
-    minority_reports: Optional[List[Dict[str, Any]]] = Field(
+    minority_reports: list[dict[str, Any]] | None = Field(
         None,
         description="Dissenting opinions if requested"
     )
@@ -258,13 +257,13 @@ class TalkHierSessionResponse(BaseModel):
     protocol_type: ProtocolType = Field(..., description="Active protocol type")
     refinement_strategy: RefinementStrategy = Field(..., description="Active refinement strategy")
     
-    participants: List[ParticipantInfo] = Field(..., description="Session participants")
-    supervisor: Optional[str] = Field(None, description="Coordinating supervisor")
+    participants: list[ParticipantInfo] = Field(..., description="Session participants")
+    supervisor: str | None = Field(None, description="Coordinating supervisor")
     
     max_rounds: int = Field(..., description="Maximum refinement rounds")
     quality_threshold: float = Field(..., description="Target quality threshold")
     
-    websocket_url: Optional[str] = Field(None, description="WebSocket URL for live updates")
+    websocket_url: str | None = Field(None, description="WebSocket URL for live updates")
     estimated_duration_seconds: int = Field(..., description="Estimated session duration")
 
 
@@ -277,13 +276,13 @@ class SessionStatusResponse(BaseModel):
     current_round: int = Field(0, description="Current round number")
     total_rounds: int = Field(0, description="Total rounds completed")
     
-    rounds: List[RefinementRound] = Field(default_factory=list, description="Round history")
+    rounds: list[RefinementRound] = Field(default_factory=list, description="Round history")
     
     current_quality: float = Field(0.0, ge=0.0, le=1.0, description="Current quality score")
     current_consensus: float = Field(0.0, ge=0.0, le=1.0, description="Current consensus level")
     
     elapsed_seconds: int = Field(0, description="Time elapsed")
-    remaining_seconds: Optional[int] = Field(None, description="Time remaining")
+    remaining_seconds: int | None = Field(None, description="Time remaining")
     
     last_update: datetime = Field(..., description="Last update timestamp")
 
@@ -297,19 +296,19 @@ class RefinementRoundResponse(BaseModel):
     round_status: str = Field(..., description="Round completion status")
     duration_ms: int = Field(..., description="Round duration in milliseconds")
     
-    participant_responses: Dict[str, Dict[str, Any]] = Field(
+    participant_responses: dict[str, dict[str, Any]] = Field(
         ...,
         description="Responses from each participant"
     )
     
-    aggregated_result: Dict[str, Any] = Field(..., description="Aggregated round result")
+    aggregated_result: dict[str, Any] = Field(..., description="Aggregated round result")
     
     quality_score: float = Field(..., ge=0.0, le=1.0, description="Round quality score")
     consensus_score: float = Field(..., ge=0.0, le=1.0, description="Round consensus score")
     improvement_delta: float = Field(..., description="Improvement from previous round")
     
     continue_refinement: bool = Field(..., description="Whether to continue refinement")
-    refinement_suggestion: Optional[str] = Field(None, description="Suggested refinement focus")
+    refinement_suggestion: str | None = Field(None, description="Suggested refinement focus")
 
 
 class SessionCloseResponse(BaseModel):
@@ -321,14 +320,14 @@ class SessionCloseResponse(BaseModel):
     total_rounds: int = Field(..., description="Total rounds completed")
     total_duration_seconds: int = Field(..., description="Total session duration")
     
-    final_result: Optional[Dict[str, Any]] = Field(None, description="Final refined result")
+    final_result: dict[str, Any] | None = Field(None, description="Final refined result")
     final_quality: float = Field(0.0, ge=0.0, le=1.0, description="Final quality score")
     final_consensus: float = Field(0.0, ge=0.0, le=1.0, description="Final consensus score")
     
-    transcript_url: Optional[str] = Field(None, description="URL to session transcript")
-    summary: Optional[Dict[str, Any]] = Field(None, description="Session summary")
+    transcript_url: str | None = Field(None, description="URL to session transcript")
+    summary: dict[str, Any] | None = Field(None, description="Session summary")
     
-    performance_metrics: Dict[str, Any] = Field(
+    performance_metrics: dict[str, Any] = Field(
         default_factory=dict,
         description="Session performance metrics"
     )
@@ -337,10 +336,10 @@ class SessionCloseResponse(BaseModel):
 class ProtocolListResponse(BaseModel):
     """Response listing available TalkHier protocols"""
     
-    protocols: List[Dict[str, Any]] = Field(..., description="Available protocol configurations")
+    protocols: list[dict[str, Any]] = Field(..., description="Available protocol configurations")
     default_protocol: ProtocolType = Field(..., description="Default protocol type")
     
-    recommended_protocols: Dict[str, ProtocolType] = Field(
+    recommended_protocols: dict[str, ProtocolType] = Field(
         default_factory=dict,
         description="Recommended protocols by query type"
     )
@@ -350,14 +349,14 @@ class ValidationResponse(BaseModel):
     """Response for protocol validation"""
     
     is_valid: bool = Field(..., description="Whether communication follows protocol")
-    protocol_detected: Optional[ProtocolType] = Field(None, description="Detected protocol type")
+    protocol_detected: ProtocolType | None = Field(None, description="Detected protocol type")
     
-    structural_errors: List[str] = Field(default_factory=list, description="Structure violations")
-    timing_errors: List[str] = Field(default_factory=list, description="Timing violations")
-    role_errors: List[str] = Field(default_factory=list, description="Role violations")
+    structural_errors: list[str] = Field(default_factory=list, description="Structure violations")
+    timing_errors: list[str] = Field(default_factory=list, description="Timing violations")
+    role_errors: list[str] = Field(default_factory=list, description="Role violations")
     
-    quality_assessment: Optional[float] = Field(None, description="Communication quality score")
-    recommendations: List[str] = Field(default_factory=list, description="Improvement recommendations")
+    quality_assessment: float | None = Field(None, description="Communication quality score")
+    recommendations: list[str] = Field(default_factory=list, description="Improvement recommendations")
 
 
 class AnalyticsResponse(BaseModel):
@@ -373,22 +372,22 @@ class AnalyticsResponse(BaseModel):
     success_rate: float = Field(..., ge=0.0, le=1.0, description="Session success rate")
     timeout_rate: float = Field(..., ge=0.0, le=1.0, description="Session timeout rate")
     
-    protocol_usage: Dict[str, int] = Field(
+    protocol_usage: dict[str, int] = Field(
         default_factory=dict,
         description="Usage count by protocol type"
     )
     
-    strategy_performance: Dict[str, Dict[str, float]] = Field(
+    strategy_performance: dict[str, dict[str, float]] = Field(
         default_factory=dict,
         description="Performance metrics by refinement strategy"
     )
     
-    quality_trends: List[Dict[str, Any]] = Field(
+    quality_trends: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Quality score trends over time"
     )
     
-    consensus_patterns: Dict[str, Any] = Field(
+    consensus_patterns: dict[str, Any] = Field(
         default_factory=dict,
         description="Consensus achievement patterns"
     )
@@ -404,7 +403,7 @@ class TalkHierWebSocketEvent(BaseModel):
     event_type: str = Field(..., description="Type of event")
     session_id: str = Field(..., description="Session identifier")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Event timestamp")
-    data: Dict[str, Any] = Field(..., description="Event-specific data")
+    data: dict[str, Any] = Field(..., description="Event-specific data")
 
 
 class RoundStartedEvent(TalkHierWebSocketEvent):
@@ -412,7 +411,7 @@ class RoundStartedEvent(TalkHierWebSocketEvent):
     
     event_type: Literal["round_started"] = "round_started"
     round_number: int = Field(..., description="Starting round number")
-    participants: List[str] = Field(..., description="Round participants")
+    participants: list[str] = Field(..., description="Round participants")
 
 
 class MessageExchangeEvent(TalkHierWebSocketEvent):
@@ -474,10 +473,10 @@ class InteractiveMessage(BaseModel):
     
     content: str = Field(..., min_length=1, description="Message content")
     role: MessageRole = Field(..., description="Sender role")
-    agent_id: Optional[str] = Field(None, description="Sender agent ID")
+    agent_id: str | None = Field(None, description="Sender agent ID")
     confidence: float = Field(0.5, ge=0.0, le=1.0, description="Message confidence")
-    supporting_evidence: Optional[List[str]] = Field(None, description="Supporting evidence")
-    in_response_to: Optional[str] = Field(None, description="Message being responded to")
+    supporting_evidence: list[str] | None = Field(None, description="Supporting evidence")
+    in_response_to: str | None = Field(None, description="Message being responded to")
 
 
 class InteractiveCommand(BaseModel):
@@ -487,8 +486,8 @@ class InteractiveCommand(BaseModel):
         ...,
         description="Session control command"
     )
-    reason: Optional[str] = Field(None, description="Command reason")
-    parameters: Optional[Dict[str, Any]] = Field(None, description="Command parameters")
+    reason: str | None = Field(None, description="Command reason")
+    parameters: dict[str, Any] | None = Field(None, description="Command parameters")
 
 
 # ================================
@@ -507,22 +506,22 @@ class CoordinationRequest(BaseModel):
         }
     })
     
-    session_ids: List[str] = Field(..., min_items=2, description="Sessions to coordinate")
+    session_ids: list[str] = Field(..., min_length=2, description="Sessions to coordinate")
     coordination_type: Literal["sequential", "parallel", "hierarchical"] = Field(
         ...,
         description="Coordination pattern"
     )
     share_context: bool = Field(True, description="Share context between sessions")
     aggregate_results: bool = Field(True, description="Aggregate final results")
-    master_session_id: Optional[str] = Field(None, description="Master session for hierarchical")
+    master_session_id: str | None = Field(None, description="Master session for hierarchical")
 
 
 class CoordinationStatus(BaseModel):
     """Status of coordinated sessions"""
     
     coordination_id: str = Field(..., description="Coordination identifier")
-    session_statuses: Dict[str, SessionStatus] = Field(..., description="Individual session statuses")
+    session_statuses: dict[str, SessionStatus] = Field(..., description="Individual session statuses")
     overall_progress: float = Field(..., ge=0.0, le=1.0, description="Overall progress")
     aggregated_quality: float = Field(..., ge=0.0, le=1.0, description="Aggregated quality score")
-    estimated_completion: Optional[datetime] = Field(None, description="Estimated completion time")
-    coordination_insights: List[str] = Field(default_factory=list, description="Coordination insights")
+    estimated_completion: datetime | None = Field(None, description="Estimated completion time")
+    coordination_insights: list[str] = Field(default_factory=list, description="Coordination insights")

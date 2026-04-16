@@ -15,13 +15,10 @@ Now supports dynamic model configuration instead of hard-coded specifications.
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
-import asyncio
-from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from ..config.model_config_manager import ModelConfigManager
-    from ..config.model_schemas import ModelSpecification
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +53,8 @@ class ModelSpec:
     cost_per_1k_tokens: float
     avg_latency_ms: int
     context_window: int
-    strengths: List[str] = field(default_factory=list)
-    weaknesses: List[str] = field(default_factory=list)
+    strengths: list[str] = field(default_factory=list)
+    weaknesses: list[str] = field(default_factory=list)
     availability: float = 0.99  # SLA availability
     rate_limit: int = 1000  # requests per minute
     supports_streaming: bool = False
@@ -83,12 +80,12 @@ class OptimizationResult:
     """Result of cost optimization analysis."""
 
     primary_model: ModelSpec
-    fallback_models: List[ModelSpec] = field(default_factory=list)
-    estimated_cost: CostEstimate = None
+    fallback_models: list[ModelSpec] = field(default_factory=list)
+    estimated_cost: CostEstimate | None = None
     strategy_used: OptimizationStrategy = OptimizationStrategy.BALANCED
     reasoning: str = ""
-    alternatives: List[Tuple[ModelSpec, CostEstimate]] = field(default_factory=list)
-    risk_factors: List[str] = field(default_factory=list)
+    alternatives: list[tuple[ModelSpec, CostEstimate]] = field(default_factory=list)
+    risk_factors: list[str] = field(default_factory=list)
 
 
 class CostOptimizer:
@@ -104,7 +101,7 @@ class CostOptimizer:
 
     def __init__(
         self,
-        config: Optional[Dict] = None,
+        config: dict[str, Any] | None = None,
         model_config_manager: Optional["ModelConfigManager"] = None,
     ):
         """Initialize cost optimizer with dynamic model configuration."""
@@ -112,7 +109,7 @@ class CostOptimizer:
         self.model_config_manager = model_config_manager
 
         # Dynamic model specifications
-        self.models: Dict[str, "ModelSpecification"] = {}
+        self.models: dict[str, ModelSpec] = {}
         self._models_loaded = False
 
         # Optimization parameters
@@ -180,7 +177,7 @@ class CostOptimizer:
         self._models_loaded = False
         await self.load_models()
 
-    def _initialize_models_legacy(self) -> Dict[str, ModelSpec]:
+    def _initialize_models_legacy(self) -> dict[str, ModelSpec]:
         """Initialize available model specifications."""
         models = {}
 
@@ -274,9 +271,9 @@ class CostOptimizer:
 
     async def optimize(
         self,
-        complexity_analysis,  # ComplexityAnalysis from query analyzer
-        strategy: Optional[OptimizationStrategy] = None,
-        constraints: Optional[Dict] = None,
+        complexity_analysis: Any,  # ComplexityAnalysis from query analyzer
+        strategy: OptimizationStrategy | None = None,
+        constraints: dict[str, Any] | None = None,
     ) -> OptimizationResult:
         """
         Optimize model selection based on complexity analysis and constraints.
@@ -355,8 +352,8 @@ class CostOptimizer:
         return result
 
     async def _filter_candidates(
-        self, complexity_analysis, constraints: Dict
-    ) -> List[ModelSpec]:
+        self, complexity_analysis: Any, constraints: dict[str, Any]
+    ) -> list[ModelSpec]:
         """Filter models based on basic requirements."""
         candidates = []
 
@@ -386,7 +383,7 @@ class CostOptimizer:
 
         return candidates
 
-    def _is_domain_compatible(self, model: ModelSpec, domains) -> bool:
+    def _is_domain_compatible(self, model: ModelSpec, domains: Any) -> bool:
         """Check if model is compatible with query domains."""
         # If it's a general query or model has general strengths, it's compatible
         if not domains or "general_purpose" in model.strengths:
@@ -416,8 +413,8 @@ class CostOptimizer:
         return True
 
     async def _calculate_costs(
-        self, candidates: List[ModelSpec], complexity_analysis
-    ) -> Dict[ModelSpec, CostEstimate]:
+        self, candidates: list[ModelSpec], complexity_analysis: Any
+    ) -> dict[ModelSpec, CostEstimate]:
         """Calculate cost estimates for candidate models."""
         estimates = {}
 
@@ -457,7 +454,7 @@ class CostOptimizer:
 
         return estimates
 
-    def _is_perfect_domain_fit(self, model: ModelSpec, complexity_analysis) -> bool:
+    def _is_perfect_domain_fit(self, model: ModelSpec, complexity_analysis: Any) -> bool:
         """Check if model is a perfect fit for the query domain."""
         # Check if model's strengths perfectly align with query requirements
         reasoning_types = complexity_analysis.reasoning_types
@@ -475,10 +472,10 @@ class CostOptimizer:
 
     async def _select_optimal_model(
         self,
-        cost_estimates: Dict[ModelSpec, CostEstimate],
+        cost_estimates: dict[ModelSpec, CostEstimate],
         strategy: OptimizationStrategy,
-        constraints: Dict,
-    ) -> Tuple[ModelSpec, CostEstimate]:
+        constraints: dict[str, Any],
+    ) -> tuple[ModelSpec, CostEstimate]:
         """Select the optimal model based on strategy."""
 
         if strategy == OptimizationStrategy.COST_MINIMIZED:
@@ -495,7 +492,7 @@ class CostOptimizer:
 
         else:  # BALANCED
             # Select model with best cost-quality-latency balance
-            def score_model(item):
+            def score_model(item: tuple[str, CostEstimate]) -> float:
                 model, estimate = item
                 # Normalize factors (0-1 scale)
                 cost_score = 1 - min(
@@ -523,10 +520,10 @@ class CostOptimizer:
 
     async def _select_fallback_models(
         self,
-        candidates: List[ModelSpec],
+        candidates: list[ModelSpec],
         primary_model: ModelSpec,
-        cost_estimates: Dict[ModelSpec, CostEstimate],
-    ) -> List[ModelSpec]:
+        cost_estimates: dict[ModelSpec, CostEstimate],
+    ) -> list[ModelSpec]:
         """Select appropriate fallback models."""
         fallbacks = []
 
@@ -547,8 +544,8 @@ class CostOptimizer:
         return fallbacks
 
     def _assess_risk_factors(
-        self, model: ModelSpec, complexity_analysis, constraints: Dict
-    ) -> List[str]:
+        self, model: ModelSpec, complexity_analysis: Any, constraints: dict[str, Any]
+    ) -> list[str]:
         """Assess risk factors for the selected model."""
         risks = []
 
@@ -579,7 +576,7 @@ class CostOptimizer:
         model: ModelSpec,
         estimate: CostEstimate,
         strategy: OptimizationStrategy,
-        alternatives: List[Tuple[ModelSpec, CostEstimate]],
+        alternatives: list[tuple[ModelSpec, CostEstimate]],
     ) -> str:
         """Generate human-readable reasoning for the selection."""
         reasoning_parts = []
@@ -617,10 +614,10 @@ class CostOptimizer:
 
 
 __all__ = [
+    "CostEstimate",
     "CostOptimizer",
+    "ModelSpec",
+    "ModelTier",
     "OptimizationResult",
     "OptimizationStrategy",
-    "ModelSpec",
-    "CostEstimate",
-    "ModelTier",
 ]

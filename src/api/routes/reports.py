@@ -169,16 +169,10 @@ class ReportStatisticsResponse(BaseModel):
 # Dependency functions
 
 
-def get_report_services():
-    """Get report services (would be dependency injection in real app)."""
-    # In a real application, these would be injected dependencies
-
-    # For now, we'll simulate the services
+def get_report_services() -> tuple[Any, Any, Any, Any]:
     settings = create_report_settings()
     generator = ReportGenerator(settings)
-
-    # These would be properly injected
-    session = None  # get_session()
+    session = None
     report_repo = ReportRepository(session) if session else None
     format_repo = ReportFormatRepository(session) if session else None
     storage_service = (
@@ -186,7 +180,6 @@ def get_report_services():
         if report_repo and format_repo
         else None
     )
-
     return generator, storage_service, report_repo, format_repo
 
 
@@ -224,10 +217,15 @@ async def generate_report(
             include_visualizations=request.include_visualizations,
             include_citations=request.include_citations,
             include_methodology=request.include_methodology,
+            max_sections=None,
+            custom_css=None,
+            template_name=None,
+            author_name=None,
+            institution=None,
         )
 
-        # Create generation request
         gen_request = ReportGenerationRequest(
+            project_id=request.project_id,
             workflow_data={
                 "title": request.title,
                 "query": request.query,
@@ -438,9 +436,9 @@ async def search_reports(request: ReportSearchRequest) -> ReportListResponse:
             )
 
         # Build search filters
-        filters = {}
+        filters: dict[str, str | int | float] = {}
         if request.report_type:
-            filters["report_type"] = request.report_type
+            filters["report_type"] = str(request.report_type)
         if request.min_quality_score is not None:
             filters["min_quality_score"] = request.min_quality_score
 
@@ -453,10 +451,9 @@ async def search_reports(request: ReportSearchRequest) -> ReportListResponse:
             offset=request.offset,
         )
 
-        # Convert to response models
         report_responses = [ReportResponse.from_db_report(report) for report in reports]
 
-        page = (request.offset // request.limit) + 1
+        page = int((request.offset // request.limit) + 1)
         has_more = request.offset + len(reports) < total_count
 
         return ReportListResponse(
@@ -563,9 +560,10 @@ async def verify_report_integrity(report_id: UUID) -> dict[str, Any]:
                 detail="Report storage service not available",
             )
 
+        from typing import cast
         integrity_result = await storage_service.verify_report_integrity(report_id)
 
-        return integrity_result
+        return cast(dict[str, Any], integrity_result)
 
     except Exception as e:
         logger.error(f"Failed to verify report integrity {report_id}", exc_info=e)

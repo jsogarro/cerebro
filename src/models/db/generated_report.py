@@ -5,6 +5,8 @@ This module defines the SQLAlchemy model for storing generated research reports,
 following the repository pattern established in the codebase.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -22,6 +24,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.models.db.base import BaseModel
 
 
 class GeneratedReport(BaseModel):
@@ -80,7 +84,13 @@ class GeneratedReport(BaseModel):
     # Relationships
     project = relationship("ResearchProject", back_populates="generated_reports")
     user = relationship("User", back_populates="generated_reports")
-    
+    formats = relationship(
+        "ReportFormat",
+        back_populates="report",
+        cascade="all, delete-orphan",
+        order_by="ReportFormat.format_type"
+    )
+
     def __repr__(self) -> str:
         return f"<GeneratedReport(id={self.id}, title='{self.title}', type='{self.report_type}')>"
     
@@ -149,7 +159,7 @@ class GeneratedReport(BaseModel):
     def mark_generation_completed(
         self,
         formats: list[str],
-        file_sizes: Dict[str, int],
+        file_sizes: dict[str, int],
         generation_time: float | None = None
     ) -> None:
         """Mark report generation as completed."""
@@ -219,7 +229,7 @@ class GeneratedReport(BaseModel):
         report_data: dict[str, Any],
         user_id: UUID | None = None,
         project_id: UUID | None = None
-    ) -> "GeneratedReport":
+    ) -> GeneratedReport:
         """Create GeneratedReport from report data dictionary."""
         return cls(
             project_id=project_id,
@@ -243,34 +253,34 @@ class GeneratedReport(BaseModel):
         )
 
 
-class ReportFormat(BaseDBModel):
+class ReportFormat(BaseModel):
     """Database model for storing different report format files."""
-    
+
     __tablename__ = "report_formats"
-    
+
     # Primary key and relationships
-    id = Column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid4)
-    report_id = Column(PostgresUUID(as_uuid=True), ForeignKey("generated_reports.id", ondelete="CASCADE"), nullable=False)
-    
+    id: Mapped[UUID] = mapped_column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid4)
+    report_id: Mapped[UUID] = mapped_column(PostgresUUID(as_uuid=True), ForeignKey("generated_reports.id", ondelete="CASCADE"), nullable=False)
+
     # Format information
-    format_type = Column(String(20), nullable=False, index=True)  # html, pdf, latex, docx, etc.
-    mime_type = Column(String(100), nullable=False)
-    file_extension = Column(String(10), nullable=False)
-    encoding = Column(String(20), default="utf-8")
-    
+    format_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    file_extension: Mapped[str] = mapped_column(String(10), nullable=False)
+    encoding: Mapped[str] = mapped_column(String(20), default="utf-8")
+
     # File information
-    file_path = Column(String(1000), nullable=True)
-    file_size = Column(Integer, nullable=True)
-    file_hash = Column(String(64), nullable=True)  # SHA-256 hash for integrity
-    
+    file_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Content (for small files or when file storage is not available)
-    content_text = Column(Text, nullable=True)  # For text-based formats
-    content_binary = Column(LargeBinary, nullable=True)  # For binary formats
-    
+    content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_binary: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+
     # Generation information
-    generated_at = Column(DateTime, default=datetime.utcnow)
-    generation_time_ms = Column(Integer, nullable=True)  # Time to generate this format
-    generator_version = Column(String(50), nullable=True)  # Version of the generator used
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    generation_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    generator_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     
     # Relationships
     report = relationship("GeneratedReport", back_populates="formats")
@@ -296,7 +306,8 @@ class ReportFormat(BaseDBModel):
         if self.content_binary:
             return self.content_binary
         elif self.content_text:
-            return self.content_text.encode(self.encoding)
+            encoding = self.encoding if self.encoding else "utf-8"
+            return self.content_text.encode(encoding)
         elif self.file_path and self.file_exists:
             with open(self.file_path, 'rb') as f:
                 return f.read()
@@ -319,21 +330,12 @@ class ReportFormat(BaseDBModel):
     def verify_integrity(self) -> bool:
         """Verify file integrity using stored hash."""
         if not self.file_hash:
-            return True  # No hash to verify against
-        
+            return True
+
         try:
             content = self.get_content()
             import hashlib
             current_hash = hashlib.sha256(content).hexdigest()
-            return current_hash == self.file_hash
+            return bool(current_hash == self.file_hash)
         except Exception:
             return False
-
-
-# Add relationship to GeneratedReport
-GeneratedReport.formats = relationship(
-    "ReportFormat",
-    back_populates="report",
-    cascade="all, delete-orphan",
-    order_by="ReportFormat.format_type"
-)

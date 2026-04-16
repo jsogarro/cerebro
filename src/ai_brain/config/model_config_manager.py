@@ -14,20 +14,24 @@ Features:
 - Configuration change notifications
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import threading
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable, Set
-import yaml
+from typing import Any, cast
+
+import yaml  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
 try:
-    from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
 
     WATCHDOG_AVAILABLE = True
 except ImportError:
@@ -37,11 +41,11 @@ except ImportError:
     logger.warning("watchdog not available - file watching disabled")
 
 from .model_schemas import (
+    ModelCapability,
     ModelConfiguration,
     ModelSpecification,
-    ProviderConfiguration,
     ModelTier,
-    ModelCapability,
+    ProviderConfiguration,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,8 +58,8 @@ class ConfigurationChangeEvent:
         self,
         change_type: str,
         config_path: str,
-        old_config: Optional[ModelConfiguration] = None,
-        new_config: Optional[ModelConfiguration] = None,
+        old_config: ModelConfiguration | None = None,
+        new_config: ModelConfiguration | None = None,
     ):
         self.change_type = change_type  # created, modified, deleted
         self.config_path = config_path
@@ -67,27 +71,27 @@ class ConfigurationChangeEvent:
 class ConfigFileWatcher:
     """File system watcher for configuration changes."""
 
-    def __init__(self, config_manager: "ModelConfigManager"):
+    def __init__(self, config_manager: ModelConfigManager):
         self.config_manager = config_manager
         self.debounce_delay = 1.0  # Seconds to wait before processing changes
-        self.pending_changes: Set[str] = set()
-        self._debounce_task = None
+        self.pending_changes: set[str] = set()
+        self._debounce_task: asyncio.Task[None] | None = None
 
         # Only inherit from FileSystemEventHandler if available
         if WATCHDOG_AVAILABLE:
             self.__class__.__bases__ = (FileSystemEventHandler,)
 
-    def on_modified(self, event):
+    def on_modified(self, event: Any) -> None:
         if not event.is_directory and event.src_path.endswith((".yaml", ".yml")):
             self.pending_changes.add(event.src_path)
             self._schedule_reload()
 
-    def on_created(self, event):
+    def on_created(self, event: Any) -> None:
         if not event.is_directory and event.src_path.endswith((".yaml", ".yml")):
             self.pending_changes.add(event.src_path)
             self._schedule_reload()
 
-    def _schedule_reload(self):
+    def _schedule_reload(self) -> None:
         """Schedule a debounced reload of configurations."""
 
         if self._debounce_task:
@@ -114,7 +118,7 @@ class ModelConfigManager:
     hot-reloading, validation, and environment-specific overrides.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize model configuration manager."""
         self.config = config
 
@@ -130,15 +134,15 @@ class ModelConfigManager:
 
         # Current configuration
         self._lock = threading.RLock()
-        self._current_config: Optional[ModelConfiguration] = None
-        self._config_timestamp: Optional[datetime] = None
+        self._current_config: ModelConfiguration | None = None
+        self._config_timestamp: datetime | None = None
 
         # Change notifications
-        self._change_listeners: List[Callable[[ConfigurationChangeEvent], None]] = []
+        self._change_listeners: list[Callable[[ConfigurationChangeEvent], None]] = []
 
         # File watcher
-        self._observer = None
-        self._watcher = None
+        self._observer: Observer | None = None
+        self._watcher: ConfigFileWatcher | None = None
 
         # Performance tracking
         self.load_count = 0
@@ -157,9 +161,10 @@ class ModelConfigManager:
         if self.enable_hot_reload:
             await self._start_file_watcher()
 
-        logger.info(
-            f"Model configuration manager initialized with {len(self._current_config.models)} models"
-        )
+        if self._current_config is not None:
+            logger.info(
+                f"Model configuration manager initialized with {len(self._current_config.models)} models"
+            )
 
     async def load_configuration(self) -> ModelConfiguration:
         """Load and validate configuration from files."""
@@ -213,11 +218,14 @@ class ModelConfigManager:
         if not self._current_config:
             await self.load_configuration()
 
+        if self._current_config is None:
+            raise RuntimeError("Failed to load configuration")
+
         return self._current_config
 
     async def get_model_specification(
         self, model_name: str
-    ) -> Optional[ModelSpecification]:
+    ) -> ModelSpecification | None:
         """Get specification for a specific model."""
 
         config = await self.get_configuration()
@@ -225,7 +233,7 @@ class ModelConfigManager:
 
     async def get_provider_configuration(
         self, provider_name: str
-    ) -> Optional[ProviderConfiguration]:
+    ) -> ProviderConfiguration | None:
         """Get configuration for a specific provider."""
 
         config = await self.get_configuration()
@@ -233,7 +241,7 @@ class ModelConfigManager:
 
     async def get_models_for_provider(
         self, provider_name: str
-    ) -> Dict[str, ModelSpecification]:
+    ) -> dict[str, ModelSpecification]:
         """Get all models for a specific provider."""
 
         config = await self.get_configuration()
@@ -241,7 +249,7 @@ class ModelConfigManager:
 
     async def get_models_by_capability(
         self, capability: ModelCapability
-    ) -> Dict[str, ModelSpecification]:
+    ) -> dict[str, ModelSpecification]:
         """Get all models that support a capability."""
 
         config = await self.get_configuration()
@@ -249,36 +257,36 @@ class ModelConfigManager:
 
     async def get_models_by_tier(
         self, tier: ModelTier
-    ) -> Dict[str, ModelSpecification]:
+    ) -> dict[str, ModelSpecification]:
         """Get all models in a specific tier."""
 
         config = await self.get_configuration()
         return config.get_models_by_tier(tier)
 
-    async def get_enabled_models(self) -> Dict[str, ModelSpecification]:
+    async def get_enabled_models(self) -> dict[str, ModelSpecification]:
         """Get all enabled models."""
 
         config = await self.get_configuration()
         return config.get_enabled_models()
 
-    async def get_enabled_providers(self) -> Dict[str, ProviderConfiguration]:
+    async def get_enabled_providers(self) -> dict[str, ProviderConfiguration]:
         """Get all enabled providers."""
 
         config = await self.get_configuration()
         return config.get_enabled_providers()
 
-    def add_change_listener(self, listener: Callable[[ConfigurationChangeEvent], None]):
+    def add_change_listener(self, listener: Callable[[ConfigurationChangeEvent], None]) -> None:
         """Add a listener for configuration changes."""
         self._change_listeners.append(listener)
 
     def remove_change_listener(
         self, listener: Callable[[ConfigurationChangeEvent], None]
-    ):
+    ) -> None:
         """Remove a configuration change listener."""
         if listener in self._change_listeners:
             self._change_listeners.remove(listener)
 
-    async def validate_configuration(self, config_path: Optional[Path] = None) -> bool:
+    async def validate_configuration(self, config_path: Path | None = None) -> bool:
         """Validate configuration file without loading it."""
 
         try:
@@ -293,12 +301,12 @@ class ModelConfigManager:
             logger.error(f"Configuration validation failed: {e}")
             return False
 
-    async def get_configuration_stats(self) -> Dict[str, Any]:
+    async def get_configuration_stats(self) -> dict[str, Any]:
         """Get configuration manager statistics."""
 
         config = await self.get_configuration()
 
-        return {
+        stats: dict[str, Any] = {
             "config_manager": {
                 "load_count": self.load_count,
                 "reload_count": self.reload_count,
@@ -329,8 +337,9 @@ class ModelConfigManager:
                 }.items()
             },
         }
+        return stats
 
-    async def _load_yaml_file(self, path: Path) -> Dict[str, Any]:
+    async def _load_yaml_file(self, path: Path) -> dict[str, Any]:
         """Load YAML file asynchronously."""
 
         if not path.exists():
@@ -350,15 +359,15 @@ class ModelConfigManager:
         if not config_data:
             raise ValueError(f"Empty or invalid YAML configuration: {path}")
 
-        return config_data
+        return cast(dict[str, Any], config_data)
 
     def _merge_configurations(
-        self, base_config: Dict[str, Any], override_config: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, base_config: dict[str, Any], override_config: dict[str, Any]
+    ) -> dict[str, Any]:
         """Merge base configuration with environment overrides."""
 
         # Deep merge function
-        def deep_merge(base: Dict, override: Dict) -> Dict:
+        def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
             result = base.copy()
 
             for key, value in override.items():
@@ -401,15 +410,20 @@ class ModelConfigManager:
             return
 
         try:
-            self._observer = Observer()
-            self._watcher = ConfigFileWatcher(self)
+            if Observer is None:
+                return
+
+            observer = Observer()
+            watcher = ConfigFileWatcher(self)
 
             # Watch config directory
-            self._observer.schedule(
-                self._watcher, str(self.config_dir), recursive=self.watch_subdirectories
+            observer.schedule(
+                watcher, str(self.config_dir), recursive=self.watch_subdirectories
             )
 
-            self._observer.start()
+            observer.start()
+            self._observer = observer
+            self._watcher = watcher
             logger.info(f"File watcher started for {self.config_dir}")
 
         except Exception as e:
@@ -432,8 +446,8 @@ class ModelConfigManager:
     async def _notify_change_listeners(
         self,
         change_type: str,
-        old_config: Optional[ModelConfiguration],
-        new_config: Optional[ModelConfiguration],
+        old_config: ModelConfiguration | None,
+        new_config: ModelConfiguration | None,
     ) -> None:
         """Notify all change listeners of configuration updates."""
 
@@ -468,11 +482,11 @@ class ConfigurationCache:
 
     def __init__(self, ttl_seconds: int = 300):
         self.ttl_seconds = ttl_seconds
-        self._cache: Dict[str, Any] = {}
-        self._timestamps: Dict[str, datetime] = {}
+        self._cache: dict[str, Any] = {}
+        self._timestamps: dict[str, datetime] = {}
         self._lock = threading.RLock()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Get cached value if not expired."""
 
         with self._lock:
@@ -490,14 +504,14 @@ class ConfigurationCache:
 
         return None
 
-    def set(self, key: str, value: Any):
+    def set(self, key: str, value: Any) -> None:
         """Cache a value with timestamp."""
 
         with self._lock:
             self._cache[key] = value
             self._timestamps[key] = datetime.now()
 
-    def invalidate(self, key: Optional[str] = None):
+    def invalidate(self, key: str | None = None) -> None:
         """Invalidate cache entry or entire cache."""
 
         with self._lock:
@@ -510,11 +524,11 @@ class ConfigurationCache:
 
 
 # Global configuration manager instance
-_config_manager: Optional[ModelConfigManager] = None
+_config_manager: ModelConfigManager | None = None
 
 
 async def get_model_config_manager(
-    config: Optional[Dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
 ) -> ModelConfigManager:
     """Get or create global model configuration manager."""
 
@@ -530,7 +544,7 @@ async def get_model_config_manager(
     return _config_manager
 
 
-async def get_model_specification(model_name: str) -> Optional[ModelSpecification]:
+async def get_model_specification(model_name: str) -> ModelSpecification | None:
     """Get model specification by name."""
 
     manager = await get_model_config_manager()
@@ -539,14 +553,14 @@ async def get_model_specification(model_name: str) -> Optional[ModelSpecificatio
 
 async def get_provider_configuration(
     provider_name: str,
-) -> Optional[ProviderConfiguration]:
+) -> ProviderConfiguration | None:
     """Get provider configuration by name."""
 
     manager = await get_model_config_manager()
     return await manager.get_provider_configuration(provider_name)
 
 
-async def get_enabled_models() -> Dict[str, ModelSpecification]:
+async def get_enabled_models() -> dict[str, ModelSpecification]:
     """Get all enabled models."""
 
     manager = await get_model_config_manager()
@@ -555,7 +569,7 @@ async def get_enabled_models() -> Dict[str, ModelSpecification]:
 
 async def get_models_by_capability(
     capability: ModelCapability,
-) -> Dict[str, ModelSpecification]:
+) -> dict[str, ModelSpecification]:
     """Get models supporting a specific capability."""
 
     manager = await get_model_config_manager()
@@ -563,13 +577,13 @@ async def get_models_by_capability(
 
 
 __all__ = [
-    "ModelConfigManager",
-    "ConfigurationChangeEvent",
     "ConfigFileWatcher",
     "ConfigurationCache",
+    "ConfigurationChangeEvent",
+    "ModelConfigManager",
+    "get_enabled_models",
     "get_model_config_manager",
     "get_model_specification",
-    "get_provider_configuration",
-    "get_enabled_models",
     "get_models_by_capability",
+    "get_provider_configuration",
 ]

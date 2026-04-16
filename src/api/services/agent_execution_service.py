@@ -264,13 +264,14 @@ class AgentExecutionService:
             for step_number, agent_type in enumerate(request.agent_chain):
                 step_start = datetime.now()
                 
-                # Create agent execution request
                 agent_request = AgentExecutionRequest(
                     query=request.query,
                     context=accumulated_context,
                     parameters={},
                     timeout_seconds=request.timeout_per_agent_seconds,
-                    enable_refinement=False,  # No refinement in chain steps
+                    enable_refinement=False,
+                    user_id=None,
+                    session_id=None,
                 )
                 
                 # Execute agent
@@ -377,7 +378,9 @@ class AgentExecutionService:
                     query=request.query,
                     context=request.context,
                     timeout_seconds=min(request.timeout_seconds, 600),
-                    enable_refinement=False,  # No refinement in mixture
+                    enable_refinement=False,
+                    user_id=None,
+                    session_id=None,
                 )
                 
                 task = asyncio.create_task(
@@ -389,9 +392,10 @@ class AgentExecutionService:
             # Execute agents in parallel (with concurrency limit)
             semaphore = asyncio.Semaphore(request.max_parallel)
             
-            async def execute_with_limit(agent_type: Any, task: Any) -> AgentExecutionResponse:
+            async def execute_with_limit(agent_type: Any, task: Any) -> Any:
                 async with semaphore:
-                    return await task
+                    result = await task
+                    return result
             
             # Wait for all agents to complete
             agent_results = {}

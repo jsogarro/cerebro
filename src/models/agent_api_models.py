@@ -8,10 +8,9 @@ Chain-of-Agents, and Mixture-of-Agents execution.
 
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, Union
-from uuid import UUID
+from typing import Any
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 
 
 class AgentType(str, Enum):
@@ -53,8 +52,8 @@ class AgentExecutionRequest(BaseModel):
     """Request model for direct agent execution."""
     
     query: str = Field(..., min_length=1, max_length=2000, description="Query for agent to process")
-    context: Dict[str, Any] = Field(default_factory=dict, description="Additional context for execution")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Agent-specific parameters")
+    context: dict[str, Any] = Field(default_factory=dict, description="Additional context for execution")
+    parameters: dict[str, Any] = Field(default_factory=dict, description="Agent-specific parameters")
     
     # Execution options
     timeout_seconds: int = Field(default=300, ge=30, le=1800, description="Execution timeout")
@@ -63,16 +62,16 @@ class AgentExecutionRequest(BaseModel):
     max_refinement_rounds: int = Field(default=3, ge=1, le=5, description="Maximum refinement rounds")
     
     # Metadata
-    user_id: Optional[str] = Field(None, description="User ID for tracking")
-    session_id: Optional[str] = Field(None, description="Session ID for context")
+    user_id: str | None = Field(None, description="User ID for tracking")
+    session_id: str | None = Field(None, description="Session ID for context")
 
 
 class ChainOfAgentsRequest(BaseModel):
     """Request model for Chain-of-Agents execution (sequential)."""
     
     query: str = Field(..., min_length=1, max_length=2000, description="Initial query")
-    agent_chain: List[AgentType] = Field(..., min_items=2, max_items=5, description="Ordered list of agents")
-    context: Dict[str, Any] = Field(default_factory=dict, description="Execution context")
+    agent_chain: list[AgentType] = Field(..., min_length=2, max_length=5, description="Ordered list of agents")
+    context: dict[str, Any] = Field(default_factory=dict, description="Execution context")
     
     # Chain configuration
     pass_intermediate_results: bool = Field(default=True, description="Pass results between agents")
@@ -88,8 +87,8 @@ class MixtureOfAgentsRequest(BaseModel):
     """Request model for Mixture-of-Agents execution (parallel)."""
     
     query: str = Field(..., min_length=1, max_length=2000, description="Query for all agents")
-    agent_types: List[AgentType] = Field(..., min_items=2, max_items=5, description="Agents to execute")
-    context: Dict[str, Any] = Field(default_factory=dict, description="Execution context")
+    agent_types: list[AgentType] = Field(..., min_length=2, max_length=5, description="Agents to execute")
+    context: dict[str, Any] = Field(default_factory=dict, description="Execution context")
     
     # Mixture configuration  
     aggregation_strategy: str = Field(default="consensus", description="Result aggregation method")
@@ -106,7 +105,7 @@ class AgentValidationRequest(BaseModel):
     
     agent_type: AgentType = Field(..., description="Agent type to validate for")
     query: str = Field(..., min_length=1, max_length=2000, description="Query to validate")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Parameters to validate")
+    parameters: dict[str, Any] = Field(default_factory=dict, description="Parameters to validate")
 
 
 # Response Models
@@ -117,7 +116,7 @@ class AgentInfo(BaseModel):
     agent_type: AgentType
     name: str
     description: str
-    capabilities: List[AgentCapability]
+    capabilities: list[AgentCapability]
     
     # Performance characteristics
     average_execution_time_ms: int
@@ -125,12 +124,12 @@ class AgentInfo(BaseModel):
     quality_score: float = Field(ge=0.0, le=1.0)
     
     # Resource requirements
-    complexity_handling: List[str]  # simple, moderate, complex
-    optimal_domains: List[str]
+    complexity_handling: list[str]  # simple, moderate, complex
+    optimal_domains: list[str]
     
     # API information
     version: str = "1.0.0"
-    endpoints: List[str]
+    endpoints: list[str]
 
 
 class AgentExecutionResponse(BaseModel):
@@ -141,14 +140,14 @@ class AgentExecutionResponse(BaseModel):
     status: str  # pending, running, completed, failed
     
     # Results
-    output: Dict[str, Any]
+    output: dict[str, Any]
     confidence: float = Field(ge=0.0, le=1.0)
     quality_score: float = Field(ge=0.0, le=1.0)
     
     # Execution metadata
     execution_time_seconds: float
-    tokens_used: Optional[int] = None
-    cost_estimate: Optional[float] = None
+    tokens_used: int | None = None
+    cost_estimate: float | None = None
     
     # Refinement information (if enabled)
     refinement_rounds: int = 0
@@ -156,11 +155,11 @@ class AgentExecutionResponse(BaseModel):
     
     # Timestamps
     started_at: datetime
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     
     # Error information
-    errors: List[str] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ChainOfAgentsResponse(BaseModel):
@@ -168,18 +167,18 @@ class ChainOfAgentsResponse(BaseModel):
     
     execution_id: str
     status: str
-    agent_chain: List[AgentType]
+    agent_chain: list[AgentType]
     
     # Chain results
-    intermediate_results: List[Dict[str, Any]]  # Results from each agent
-    final_result: Dict[str, Any]
+    intermediate_results: list[dict[str, Any]]  # Results from each agent
+    final_result: dict[str, Any]
     overall_confidence: float = Field(ge=0.0, le=1.0)
     
     # Chain performance
     total_execution_time_seconds: float
-    agent_execution_times: List[float]
+    agent_execution_times: list[float]
     early_stopped: bool = False
-    stopped_at_agent: Optional[AgentType] = None
+    stopped_at_agent: AgentType | None = None
     
     # Quality metrics
     chain_quality_score: float = Field(ge=0.0, le=1.0)
@@ -187,8 +186,8 @@ class ChainOfAgentsResponse(BaseModel):
     
     # Metadata
     started_at: datetime
-    completed_at: Optional[datetime] = None
-    errors: List[str] = Field(default_factory=list)
+    completed_at: datetime | None = None
+    errors: list[str] = Field(default_factory=list)
 
 
 class MixtureOfAgentsResponse(BaseModel):
@@ -196,16 +195,16 @@ class MixtureOfAgentsResponse(BaseModel):
     
     execution_id: str
     status: str
-    agent_types: List[AgentType]
+    agent_types: list[AgentType]
     
     # Mixture results
-    agent_results: Dict[str, Dict[str, Any]]  # Results keyed by agent type
-    aggregated_result: Dict[str, Any]
+    agent_results: dict[str, dict[str, Any]]  # Results keyed by agent type
+    aggregated_result: dict[str, Any]
     consensus_score: float = Field(ge=0.0, le=1.0)
     
     # Aggregation metadata
     aggregation_strategy: str
-    agent_weights: Dict[str, float]  # Weights used for aggregation
+    agent_weights: dict[str, float]  # Weights used for aggregation
     consensus_achieved: bool
     
     # Performance metrics
@@ -218,8 +217,8 @@ class MixtureOfAgentsResponse(BaseModel):
     
     # Metadata
     started_at: datetime
-    completed_at: Optional[datetime] = None
-    errors: List[str] = Field(default_factory=list)
+    completed_at: datetime | None = None
+    errors: list[str] = Field(default_factory=list)
 
 
 class AgentValidationResponse(BaseModel):
@@ -230,18 +229,18 @@ class AgentValidationResponse(BaseModel):
     validation_score: float = Field(ge=0.0, le=1.0)
     
     # Validation details
-    parameter_validation: Dict[str, bool]
+    parameter_validation: dict[str, bool]
     query_suitability: float = Field(ge=0.0, le=1.0)
     estimated_quality: float = Field(ge=0.0, le=1.0)
-    estimated_cost: Optional[float] = None
+    estimated_cost: float | None = None
     
     # Suggestions
-    recommendations: List[str] = Field(default_factory=list)
-    parameter_suggestions: Dict[str, Any] = Field(default_factory=dict)
+    recommendations: list[str] = Field(default_factory=list)
+    parameter_suggestions: dict[str, Any] = Field(default_factory=dict)
     
     # Issues
-    validation_issues: List[str] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
+    validation_issues: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class AgentMetricsResponse(BaseModel):
@@ -263,8 +262,8 @@ class AgentMetricsResponse(BaseModel):
     
     # Usage patterns
     peak_usage_hour: int = Field(ge=0, le=23)
-    most_common_domains: List[str]
-    complexity_distribution: Dict[str, int]  # simple, moderate, complex
+    most_common_domains: list[str]
+    complexity_distribution: dict[str, int]  # simple, moderate, complex
     
     # Quality trends
     quality_trend_7_days: float  # Positive = improving, negative = declining
@@ -282,7 +281,7 @@ class AgentMetricsResponse(BaseModel):
 class AgentListResponse(BaseModel):
     """Response model for listing available agents."""
     
-    agents: List[AgentInfo]
+    agents: list[AgentInfo]
     total_agents: int
     
     # System information
@@ -291,8 +290,8 @@ class AgentListResponse(BaseModel):
     
     # Capabilities summary
     total_capabilities: int
-    supported_domains: List[str]
-    supported_execution_modes: List[ExecutionMode]
+    supported_domains: list[str]
+    supported_execution_modes: list[ExecutionMode]
     
     # System metrics
     system_health: str  # healthy, degraded, unhealthy
@@ -311,15 +310,15 @@ class ExecutionProgress(BaseModel):
     current_phase: str
     
     # Phase details
-    completed_phases: List[str]
-    pending_phases: List[str]
+    completed_phases: list[str]
+    pending_phases: list[str]
     
     # Performance tracking
     elapsed_time_seconds: float
-    estimated_remaining_seconds: Optional[float] = None
+    estimated_remaining_seconds: float | None = None
     
     # Quality tracking
-    current_quality_score: Optional[float] = Field(None, ge=0.0, le=1.0)
+    current_quality_score: float | None = Field(None, ge=0.0, le=1.0)
     refinement_round: int = 0
     
     # Real-time metadata
@@ -331,8 +330,8 @@ class AgentError(BaseModel):
     
     error_code: str
     error_message: str
-    agent_type: Optional[AgentType] = None
-    execution_id: Optional[str] = None
+    agent_type: AgentType | None = None
+    execution_id: str | None = None
     
     # Error details
     error_category: str  # validation, execution, timeout, resource, system
@@ -341,10 +340,10 @@ class AgentError(BaseModel):
     
     # Context
     timestamp: datetime = Field(default_factory=datetime.now)
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
     
     # Suggestions
-    suggested_action: Optional[str] = None
+    suggested_action: str | None = None
     retry_recommended: bool = False
 
 
@@ -358,18 +357,18 @@ class ChainStep(BaseModel):
     status: str  # pending, running, completed, failed, skipped
     
     # Step results
-    input_data: Dict[str, Any]
-    output_data: Optional[Dict[str, Any]] = None
-    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    input_data: dict[str, Any]
+    output_data: dict[str, Any] | None = None
+    confidence: float | None = Field(None, ge=0.0, le=1.0)
     
     # Performance
-    execution_time_seconds: Optional[float] = None
-    quality_score: Optional[float] = Field(None, ge=0.0, le=1.0)
+    execution_time_seconds: float | None = None
+    quality_score: float | None = Field(None, ge=0.0, le=1.0)
     
     # Metadata
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    errors: List[str] = Field(default_factory=list)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    errors: list[str] = Field(default_factory=list)
 
 
 # Mixture-of-Agents specific models
@@ -381,18 +380,18 @@ class AgentContribution(BaseModel):
     status: str
     
     # Contribution details
-    output: Dict[str, Any]
+    output: dict[str, Any]
     confidence: float = Field(ge=0.0, le=1.0)
     quality_score: float = Field(ge=0.0, le=1.0)
     weight: float = Field(ge=0.0, le=1.0)  # Weight in final aggregation
     
     # Performance
     execution_time_seconds: float
-    tokens_used: Optional[int] = None
+    tokens_used: int | None = None
     
     # Metadata
     started_at: datetime
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
 
 # Common utility models
@@ -413,12 +412,12 @@ class AgentHealthStatus(BaseModel):
     queue_length: int = Field(ge=0)
     
     # Issues
-    current_issues: List[str] = Field(default_factory=list)
+    current_issues: list[str] = Field(default_factory=list)
     last_health_check: datetime
     
     # Recovery information
-    estimated_recovery_time: Optional[int] = None  # seconds
-    recovery_actions: List[str] = Field(default_factory=list)
+    estimated_recovery_time: int | None = None  # seconds
+    recovery_actions: list[str] = Field(default_factory=list)
 
 
 __all__ = [

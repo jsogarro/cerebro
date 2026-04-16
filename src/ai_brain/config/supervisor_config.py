@@ -13,13 +13,13 @@ Key Features:
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any
 
-from ..router.masr import RoutingStrategy, CollaborationMode
-from ..router.query_analyzer import ComplexityLevel
 from ...agents.supervisors.base_supervisor import SupervisionMode, WorkerAllocation
+from ..router.masr import CollaborationMode, RoutingStrategy
+from ..router.query_analyzer import ComplexityLevel
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class SupervisorConfigurationProfile:
 class ComplexityToWorkerMapper:
     """Maps complexity analysis to optimal worker allocation."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize complexity mapper."""
         self.config = config or {}
         
@@ -117,7 +117,7 @@ class ComplexityToWorkerMapper:
         domain: str,
         subtask_count: int,
         uncertainty: float
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Calculate optimal worker allocation.
         
@@ -139,12 +139,15 @@ class ComplexityToWorkerMapper:
         
         # Apply domain adjustments
         domain_adj = self.domain_adjustments.get(domain, {"worker_multiplier": 1.0, "quality_bonus": 0.0})
-        worker_multiplier = domain_adj["worker_multiplier"]
-        
+        worker_multiplier: float = domain_adj.get("worker_multiplier", 1.0)
+
         # Calculate worker counts
-        min_workers = max(1, int(base_allocation["min_workers"] * worker_multiplier))
-        optimal_workers = int(base_allocation["optimal_workers"] * worker_multiplier)
-        max_workers = int(base_allocation["max_workers"] * worker_multiplier)
+        base_min = base_allocation.get("min_workers", 1)
+        base_optimal = base_allocation.get("optimal_workers", 3)
+        base_max = base_allocation.get("max_workers", 5)
+        min_workers = max(1, int(base_min * worker_multiplier))
+        optimal_workers = int(base_optimal * worker_multiplier)
+        max_workers = int(base_max * worker_multiplier)
         
         # Adjust based on subtask count
         if subtask_count > 0:
@@ -177,7 +180,7 @@ class ComplexityToWorkerMapper:
 class QualityThresholdCalculator:
     """Calculates quality thresholds based on routing strategies."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize quality threshold calculator."""
         self.config = config or {}
         
@@ -223,7 +226,7 @@ class QualityThresholdCalculator:
         complexity_level: ComplexityLevel,
         uncertainty: float,
         priority_level: str = "normal"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Calculate quality thresholds for supervisor configuration.
         
@@ -243,16 +246,17 @@ class QualityThresholdCalculator:
             self.strategy_quality_map[RoutingStrategy.BALANCED]
         )
         
-        quality_threshold = base_config["quality_threshold"]
-        consensus_threshold = base_config["consensus_threshold"]
-        quality_focus = base_config["quality_focus"]
-        
+        quality_threshold: float = base_config.get("quality_threshold", 0.8)
+        consensus_threshold: float = base_config.get("consensus_threshold", 0.85)
+        quality_focus = base_config.get("quality_focus", QualityFocusLevel.STANDARD.value)
+
         # Apply complexity adjustments
         complexity_adj = self.complexity_adjustments.get(
             complexity_level, {"threshold_adjustment": 0.0}
         )
-        quality_threshold += complexity_adj["threshold_adjustment"]
-        consensus_threshold += complexity_adj["threshold_adjustment"]
+        threshold_adj: float = complexity_adj.get("threshold_adjustment", 0.0)
+        quality_threshold = quality_threshold + threshold_adj
+        consensus_threshold = consensus_threshold + threshold_adj
         
         # Adjust for uncertainty (higher uncertainty = higher quality requirements)
         if uncertainty > 0.6:
@@ -290,7 +294,7 @@ class QualityThresholdCalculator:
 class RefinementRoundCalculator:
     """Calculates refinement rounds based on uncertainty and quality requirements."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize refinement round calculator."""
         self.config = config or {}
         
@@ -308,7 +312,7 @@ class RefinementRoundCalculator:
         uncertainty: float,
         complexity_level: ComplexityLevel,
         enable_early_stopping: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Calculate optimal refinement rounds configuration.
         
@@ -374,7 +378,7 @@ class RefinementRoundCalculator:
 class CollaborationModeTranslator:
     """Translates MASR collaboration modes to supervision modes."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize collaboration mode translator."""
         self.config = config or {}
         
@@ -418,7 +422,7 @@ class CollaborationModeTranslator:
     
     def translate_collaboration_mode(
         self, collaboration_mode: CollaborationMode
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Translate collaboration mode to supervision configuration.
         
@@ -452,7 +456,7 @@ class SupervisorConfigurationManager:
     complexity analysis into comprehensive supervisor configurations.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize supervisor configuration manager."""
         self.config = config or {}
         
@@ -473,13 +477,13 @@ class SupervisorConfigurationManager:
     def create_supervisor_configuration(
         self,
         complexity_level: ComplexityLevel,
-        domains: List[str],
+        domains: list[str],
         subtask_count: int,
         uncertainty: float,
         routing_strategy: RoutingStrategy,
         collaboration_mode: CollaborationMode,
         priority_level: str = "normal",
-        additional_context: Optional[Dict[str, Any]] = None
+        additional_context: dict[str, Any] | None = None
     ) -> SupervisorConfigurationProfile:
         """
         Create comprehensive supervisor configuration.
@@ -579,7 +583,7 @@ class SupervisorConfigurationManager:
         
         return profile
     
-    async def get_configuration_stats(self) -> Dict[str, Any]:
+    async def get_configuration_stats(self) -> dict[str, Any]:
         """Get configuration manager statistics."""
         return {
             "components": {
@@ -595,11 +599,11 @@ class SupervisorConfigurationManager:
 
 
 __all__ = [
-    "SupervisorConfigurationManager",
-    "SupervisorConfigurationProfile",
+    "CollaborationModeTranslator",
     "ComplexityToWorkerMapper",
+    "QualityFocusLevel",
     "QualityThresholdCalculator",
     "RefinementRoundCalculator",
-    "CollaborationModeTranslator",
-    "QualityFocusLevel",
+    "SupervisorConfigurationManager",
+    "SupervisorConfigurationProfile",
 ]

@@ -19,7 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import INET, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -85,7 +85,7 @@ class UserSession(BaseModel):
 
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
-    last_activity = Column(
+    last_activity: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Last activity timestamp"
     )
 
@@ -101,11 +101,12 @@ class UserSession(BaseModel):
     @property
     def is_expired(self) -> bool:
         """Check if session is expired."""
-        return datetime.utcnow() > self.expires_at
+        return bool(datetime.utcnow() > self.expires_at)
 
     def update_activity(self) -> None:
         """Update last activity timestamp."""
-        self.last_activity = datetime.utcnow()
+        current_time: datetime = datetime.utcnow()
+        self.last_activity = current_time
 
 
 class AuditLog(BaseModel):
@@ -226,7 +227,7 @@ class MFASettings(BaseModel):
 
     totp_secret = Column(String(255), nullable=True, comment="Encrypted TOTP secret")
 
-    backup_codes = Column(
+    backup_codes: Mapped[list[str] | None] = mapped_column(
         ARRAY(String), nullable=True, comment="Encrypted backup codes"
     )
 

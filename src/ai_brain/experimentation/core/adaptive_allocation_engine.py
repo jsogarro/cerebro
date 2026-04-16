@@ -15,16 +15,16 @@ Features:
 
 import asyncio
 import logging
-import numpy as np
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple, Callable
+from datetime import datetime
 from enum import Enum
-import random
+from typing import Any
 
-from .unified_experiment_manager import ExperimentType, ExperimentStatus, SystemComponent
+import numpy as np
+
 from ..statistical.enhanced_statistical_engine import (
-    BanditAlgorithm, BanditResult, MultiBanditOptimizer
+    BanditAlgorithm,
+    MultiBanditOptimizer,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class AllocationConfig:
     """Configuration for allocation strategies."""
     
     strategy: AllocationStrategy
-    initial_allocation: Dict[str, float]  # Initial traffic percentages
+    initial_allocation: dict[str, float]  # Initial traffic percentages
     min_allocation: float = 0.05          # Minimum allocation per variant (safety)
     max_allocation: float = 0.70          # Maximum allocation per variant (safety)
     
@@ -60,7 +60,7 @@ class AllocationConfig:
     safety_sample_size: int = 100         # Minimum samples before adaptation
     
     # Context features for contextual bandits
-    context_features: List[str] = field(default_factory=list)
+    context_features: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -73,7 +73,7 @@ class AllocationDecision:
     allocation_strategy: AllocationStrategy
     
     # Decision context
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.5
     
     # Performance tracking
@@ -82,7 +82,7 @@ class AllocationDecision:
     
     # Safety information
     safety_check_passed: bool = True
-    safety_warnings: List[str] = field(default_factory=list)
+    safety_warnings: list[str] = field(default_factory=list)
     
     # Metadata
     timestamp: datetime = field(default_factory=datetime.now)
@@ -97,14 +97,14 @@ class AdaptiveAllocationEngine:
     while maintaining safety constraints and statistical rigor.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize adaptive allocation engine."""
         self.config = config or {}
         
         # Allocation state
-        self.active_experiments: Dict[str, AllocationConfig] = {}
-        self.bandit_optimizers: Dict[str, MultiBanditOptimizer] = {}
-        self.allocation_history: List[AllocationDecision] = []
+        self.active_experiments: dict[str, AllocationConfig] = {}
+        self.bandit_optimizers: dict[str, MultiBanditOptimizer] = {}
+        self.allocation_history: list[AllocationDecision] = []
         
         # Performance tracking
         self.allocation_stats = {
@@ -120,13 +120,13 @@ class AdaptiveAllocationEngine:
         self.global_max_allocation = self.config.get("global_max_allocation", 0.70)
         
         # Update scheduling
-        self.update_task: Optional[asyncio.Task] = None
+        self.update_task: asyncio.Task[None] | None = None
         self.update_interval = self.config.get("update_interval_seconds", 300)
     
     async def register_experiment(
         self,
         experiment_id: str,
-        variants: List[str],
+        variants: list[str],
         allocation_config: AllocationConfig
     ) -> None:
         """
@@ -167,7 +167,7 @@ class AdaptiveAllocationEngine:
     async def allocate_variant(
         self,
         experiment_id: str,
-        user_context: Optional[Dict[str, Any]] = None
+        user_context: dict[str, Any] | None = None
     ) -> AllocationDecision:
         """
         Allocate user to experiment variant.
@@ -219,7 +219,7 @@ class AdaptiveAllocationEngine:
         self,
         experiment_id: str,
         config: AllocationConfig,
-        context: Dict[str, Any]
+        context: dict[str, Any]
     ) -> AllocationDecision:
         """Fixed random allocation based on initial configuration."""
         
@@ -244,7 +244,7 @@ class AdaptiveAllocationEngine:
         self,
         experiment_id: str,
         config: AllocationConfig,
-        context: Dict[str, Any]
+        context: dict[str, Any]
     ) -> AllocationDecision:
         """Adaptive allocation using multi-armed bandit."""
         
@@ -276,7 +276,7 @@ class AdaptiveAllocationEngine:
         self,
         experiment_id: str,
         config: AllocationConfig,
-        context: Dict[str, Any]
+        context: dict[str, Any]
     ) -> AllocationDecision:
         """Contextual bandit allocation using user/query context."""
         
@@ -315,7 +315,7 @@ class AdaptiveAllocationEngine:
         self,
         experiment_id: str,
         config: AllocationConfig,
-        context: Dict[str, Any]
+        context: dict[str, Any]
     ) -> AllocationDecision:
         """Safety-constrained allocation with gradual rollout."""
         
@@ -396,7 +396,7 @@ class AdaptiveAllocationEngine:
         experiment_id: str,
         variant_id: str,
         reward: float,
-        context: Optional[Dict[str, Any]] = None
+        context: dict[str, Any] | None = None
     ) -> None:
         """
         Record experiment outcome for bandit learning.
@@ -432,7 +432,7 @@ class AdaptiveAllocationEngine:
         
         logger.debug(f"Recorded outcome for {experiment_id}: {variant_id} = {reward}")
     
-    async def update_allocations(self) -> List[str]:
+    async def update_allocations(self) -> list[str]:
         """Update all active experiment allocations based on performance."""
         
         updated_experiments = []
@@ -480,7 +480,7 @@ class AdaptiveAllocationEngine:
         experiment_id: str,
         config: AllocationConfig,
         bandit: MultiBanditOptimizer
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Calculate optimal allocation based on bandit performance."""
         
         if not hasattr(bandit, 'arm_values') or not bandit.arm_values:
@@ -506,7 +506,7 @@ class AdaptiveAllocationEngine:
             
         else:  # BAYESIAN_OPTIMAL
             # Bayesian optimal allocation (Thompson sampling)
-            probabilities = bandit.arm_probabilities
+            probabilities = bandit._calculate_arm_probabilities()
         
         # Convert to allocation dictionary
         allocation = {}
@@ -522,9 +522,9 @@ class AdaptiveAllocationEngine:
     
     def _apply_allocation_safety(
         self,
-        allocation: Dict[str, float],
+        allocation: dict[str, float],
         config: AllocationConfig
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Apply safety constraints to allocation."""
         
         safe_allocation = allocation.copy()
@@ -599,7 +599,7 @@ class AdaptiveAllocationEngine:
                 logger.error(f"Error in adaptive update loop: {e}")
                 await asyncio.sleep(60)  # Wait before retrying
     
-    async def get_experiment_performance(self, experiment_id: str) -> Dict[str, Any]:
+    async def get_experiment_performance(self, experiment_id: str) -> dict[str, Any]:
         """Get performance metrics for experiment."""
         
         config = self.active_experiments.get(experiment_id)
@@ -631,7 +631,7 @@ class AdaptiveAllocationEngine:
         
         return performance
     
-    async def get_allocation_stats(self) -> Dict[str, Any]:
+    async def get_allocation_stats(self) -> dict[str, Any]:
         """Get comprehensive allocation engine statistics."""
         
         return {
@@ -648,7 +648,7 @@ class AdaptiveAllocationEngine:
 
 
 # Global allocation engine instance
-_allocation_engine: Optional[AdaptiveAllocationEngine] = None
+_allocation_engine: AdaptiveAllocationEngine | None = None
 
 
 def get_allocation_engine() -> AdaptiveAllocationEngine:
@@ -663,8 +663,8 @@ def get_allocation_engine() -> AdaptiveAllocationEngine:
 
 __all__ = [
     "AdaptiveAllocationEngine",
-    "AllocationStrategy",
-    "AllocationConfig", 
+    "AllocationConfig",
     "AllocationDecision",
+    "AllocationStrategy",
     "get_allocation_engine",
 ]

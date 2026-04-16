@@ -65,16 +65,15 @@ class WebSocketConnection:
             return False
 
     async def send_heartbeat(self) -> bool:
-        """Send heartbeat to check connection health."""
         heartbeat = HeartbeatMessage(client_id=self.client_id)
         heartbeat_message = WSMessage(
             type=WSMessageType.HEARTBEAT,
+            project_id=None,
             data=heartbeat.model_dump(),
         )
         return await self.send_message(heartbeat_message)
 
-    def update_heartbeat(self):
-        """Update last heartbeat timestamp."""
+    def update_heartbeat(self) -> None:
         self.last_heartbeat = datetime.utcnow()
 
     def is_healthy(self, timeout_seconds: int = 60) -> bool:
@@ -85,12 +84,10 @@ class WebSocketConnection:
         time_since_heartbeat = datetime.utcnow() - self.last_heartbeat
         return time_since_heartbeat.total_seconds() < timeout_seconds
 
-    def subscribe_to_project(self, project_id: UUID):
-        """Subscribe to project updates."""
+    def subscribe_to_project(self, project_id: UUID) -> None:
         self.project_subscriptions.add(project_id)
 
-    def unsubscribe_from_project(self, project_id: UUID):
-        """Unsubscribe from project updates."""
+    def unsubscribe_from_project(self, project_id: UUID) -> None:
         self.project_subscriptions.discard(project_id)
 
     def is_subscribed_to_project(self, project_id: UUID) -> bool:
@@ -101,18 +98,11 @@ class WebSocketConnection:
 class ConnectionManager:
     """Manages WebSocket connections and message broadcasting."""
 
-    def __init__(self):
-        # Active connections by client ID
+    def __init__(self) -> None:
         self.connections: dict[str, WebSocketConnection] = {}
-
-        # Project subscriptions: project_id -> set of client_ids
         self.project_subscriptions: dict[UUID, set[str]] = {}
-
-        # User subscriptions: user_id -> set of client_ids
         self.user_subscriptions: dict[str, set[str]] = {}
-
-        # Background task for heartbeat monitoring
-        self._heartbeat_task: asyncio.Task | None = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
         self._shutdown = False
 
     async def connect(
@@ -147,9 +137,9 @@ class ConnectionManager:
             user_id=user_id,
         )
 
-        # Send connection confirmation
         welcome_message = WSMessage(
             type=WSMessageType.CONNECTED,
+            project_id=None,
             data={
                 "client_id": client_id,
                 "message": "Connected to Research Platform WebSocket",
@@ -363,11 +353,11 @@ class ConnectionManager:
             last_heartbeat=connection.last_heartbeat,
         )
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, int | dict[str, int] | list[UUID]]:
         """Get connection statistics."""
         return {
             "total_connections": len(self.connections),
-            "connections_by_type": {
+            "connections_by_type": dict[str, int]({
                 client_type: len(
                     [
                         c
@@ -376,7 +366,7 @@ class ConnectionManager:
                     ]
                 )
                 for client_type in set(c.client_type for c in self.connections.values())
-            },
+            }),
             "total_project_subscriptions": len(self.project_subscriptions),
             "total_user_subscriptions": len(self.user_subscriptions),
             "active_projects": list(self.project_subscriptions.keys()),

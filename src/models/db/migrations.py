@@ -9,12 +9,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine
-
-from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine
+
+from alembic import command
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,8 @@ class MigrationManager:
         Returns:
             Head revision ID
         """
-        return self.script_dir.get_current_head()
+        head = self.script_dir.get_current_head()
+        return str(head) if head is not None else ""
 
     def check_migration_status(self) -> dict[str, Any]:
         """
@@ -113,17 +114,17 @@ class MigrationManager:
         current = self.get_current_revision()
         head = self.get_head_revision()
 
-        status = {
+        status: dict[str, Any] = {
             "current_revision": current,
             "head_revision": head,
             "is_up_to_date": current == head,
             "pending_migrations": [],
         }
 
-        if current != head:
-            # Get list of pending migrations
+        if current != head and head and current:
             for script in self.script_dir.walk_revisions(head, current):
-                status["pending_migrations"].append(
+                pending_migrations_list: list[Any] = status["pending_migrations"]
+                pending_migrations_list.append(
                     {
                         "revision": script.revision,
                         "description": script.doc,
@@ -279,10 +280,10 @@ def run_migration_command(args: list[str]) -> int:
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.stdout:
-        logger.info("migration_output", output=result.stdout)
+        logger.info(f"migration_output: {result.stdout}")
 
     if result.stderr and result.returncode != 0:
-        logger.error("migration_error", error=result.stderr)
+        logger.error(f"migration_error: {result.stderr}")
 
     return result.returncode
 

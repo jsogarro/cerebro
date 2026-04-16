@@ -7,7 +7,7 @@ Manages OAuth provider connections for social authentication
 
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import (
     JSON,
@@ -384,7 +384,8 @@ class OAuthAccount(BaseModel):
         if active_only:
             query = query.filter(cls.is_active == True)
 
-        return query.first()
+        result = query.first()
+        return cast("OAuthAccount | None", result)
 
     @classmethod
     def find_by_provider_id(
@@ -404,11 +405,12 @@ class OAuthAccount(BaseModel):
         if not session:
             return None
 
-        return (
+        result = (
             session.query(cls)
             .filter(cls.provider == provider, cls.provider_user_id == provider_user_id)
             .first()
         )
+        return cast("OAuthAccount | None", result)
 
     def to_dict(self, include_tokens: bool = False) -> dict[str, Any]:
         """
@@ -432,9 +434,11 @@ class OAuthAccount(BaseModel):
             "is_active": self.is_active,
             "is_verified": self.is_verified,
             "scopes": self.scopes,
-            "first_connected_at": self.first_connected_at.isoformat(),
+            "first_connected_at": (
+                self.first_connected_at.isoformat() if self.first_connected_at is not None else None
+            ),
             "last_used_at": (
-                self.last_used_at.isoformat() if self.last_used_at else None
+                self.last_used_at.isoformat() if self.last_used_at is not None else None
             ),
             "connection_count": self.connection_count,
             "is_token_expired": self.is_token_expired,

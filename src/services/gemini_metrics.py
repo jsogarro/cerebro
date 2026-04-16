@@ -165,10 +165,10 @@ class GeminiMetrics:
 metrics = GeminiMetrics()
 
 
-def track_gemini_call(method: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def track_gemini_call(method: str) -> Callable[..., Any]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def async_wrapper(*args, **kwargs) -> Any:
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             import uuid
 
             request_id = str(uuid.uuid4())

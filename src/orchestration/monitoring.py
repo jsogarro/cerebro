@@ -609,10 +609,10 @@ class WorkflowVisualizer:
         """
         metrics = self.monitor.get_workflow_metrics(workflow_id)
 
-        if not metrics:
+        if not metrics or isinstance(metrics, list):
             return {}
 
-        timeline = {
+        timeline: dict[str, Any] = {
             "workflow_id": workflow_id,
             "start_time": metrics.started_at.isoformat(),
             "end_time": (
@@ -626,40 +626,43 @@ class WorkflowVisualizer:
         for phase in metrics.phases_completed:
             duration = metrics.phase_durations.get(phase, 0)
 
-            timeline["events"].append(
-                {
-                    "type": "phase",
-                    "name": phase,
-                    "start": current_time.isoformat(),
-                    "duration": duration,
-                    "end": (current_time + timedelta(seconds=duration)).isoformat(),
-                }
-            )
+            if isinstance(timeline["events"], list):
+                timeline["events"].append(
+                    {
+                        "type": "phase",
+                        "name": phase,
+                        "start": current_time.isoformat(),
+                        "duration": duration,
+                        "end": (current_time + timedelta(seconds=duration)).isoformat(),
+                    }
+                )
 
             current_time += timedelta(seconds=duration)
 
         # Add node executions
         for node_exec in metrics.node_executions:
-            timeline["events"].append(
-                {
-                    "type": "node",
-                    "name": node_exec["node_name"],
-                    "timestamp": node_exec["timestamp"],
-                    "duration": node_exec["duration"],
-                    "success": node_exec["success"],
-                }
-            )
+            if isinstance(timeline["events"], list):
+                timeline["events"].append(
+                    {
+                        "type": "node",
+                        "name": node_exec["node_name"],
+                        "timestamp": node_exec["timestamp"],
+                        "duration": node_exec["duration"],
+                        "success": node_exec["success"],
+                    }
+                )
 
         # Add errors
         for error in metrics.errors:
-            timeline["events"].append(
-                {
-                    "type": "error",
-                    "node": error["node"],
-                    "message": error["error"],
-                    "timestamp": error["timestamp"],
-                }
-            )
+            if isinstance(timeline["events"], list):
+                timeline["events"].append(
+                    {
+                        "type": "error",
+                        "node": error["node"],
+                        "message": error["error"],
+                        "timestamp": error["timestamp"],
+                    }
+                )
 
         return timeline
 
@@ -675,7 +678,7 @@ class WorkflowVisualizer:
         """
         metrics = self.monitor.get_workflow_metrics(workflow_id)
 
-        if not metrics:
+        if not metrics or isinstance(metrics, list):
             return ""
 
         dot_lines = ["digraph WorkflowExecution {"]
@@ -781,7 +784,12 @@ class WorkflowVisualizer:
         """Get recent errors across all workflows."""
         all_errors = []
 
-        for metrics in self.monitor.get_workflow_metrics():
+        metrics_result = self.monitor.get_workflow_metrics()
+        if metrics_result is None:
+            return []
+
+        metrics_list = metrics_result if isinstance(metrics_result, list) else [metrics_result]
+        for metrics in metrics_list:
             for error in metrics.errors:
                 all_errors.append(
                     {

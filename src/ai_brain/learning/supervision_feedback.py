@@ -14,18 +14,16 @@ Key Features:
 
 import asyncio
 import logging
-from dataclasses import dataclass, field, asdict
+import pickle
+import statistics
+from collections import defaultdict, deque
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
-from collections import defaultdict, deque
-import statistics
-import pickle
+from typing import Any
 
-from ..router.masr import RoutingDecision, RoutingStrategy, CollaborationMode
-from ..router.query_analyzer import ComplexityLevel
 from ..integration.masr_supervisor_bridge import SupervisorExecutionResult
-from ...agents.supervisors.base_supervisor import SupervisionMode
+from ..router.masr import RoutingDecision, RoutingStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +48,10 @@ class FeedbackEvent:
     
     # Routing context
     query_id: str
-    routing_decision: Dict[str, Any]
+    routing_decision: dict[str, Any]
     supervisor_type: str
     complexity_level: str
-    domains: List[str]
+    domains: list[str]
     
     # Execution metrics
     predicted_cost: float
@@ -70,9 +68,9 @@ class FeedbackEvent:
     consensus_achieved: bool
     
     # User and context information
-    user_id: Optional[str] = None
-    session_id: Optional[str] = None
-    context: Dict[str, Any] = field(default_factory=dict)
+    user_id: str | None = None
+    session_id: str | None = None
+    context: dict[str, Any] = field(default_factory=dict)
     
     # Calculated metrics
     cost_accuracy: float = 0.0
@@ -115,19 +113,19 @@ class PerformanceMetrics:
 class RoutingStrategyAnalyzer:
     """Analyzes routing strategy effectiveness."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize strategy analyzer."""
         self.config = config or {}
         
         # Strategy performance tracking
-        self.strategy_metrics: Dict[str, PerformanceMetrics] = defaultdict(PerformanceMetrics)
-        self.strategy_events: Dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
+        self.strategy_metrics: dict[str, PerformanceMetrics] = defaultdict(PerformanceMetrics)
+        self.strategy_events: dict[str, deque[FeedbackEvent]] = defaultdict(lambda: deque(maxlen=1000))
         
         # Analysis configuration
         self.analysis_window_hours = self.config.get("analysis_window_hours", 24)
         self.min_samples_for_analysis = self.config.get("min_samples", 10)
         
-    def record_strategy_feedback(self, strategy: RoutingStrategy, feedback: FeedbackEvent):
+    def record_strategy_feedback(self, strategy: RoutingStrategy, feedback: FeedbackEvent) -> None:
         """Record feedback for a specific routing strategy."""
         
         strategy_name = strategy.value if hasattr(strategy, 'value') else str(strategy)
@@ -163,8 +161,8 @@ class RoutingStrategyAnalyzer:
     
     def analyze_strategy_performance(
         self, 
-        time_window_hours: Optional[int] = None
-    ) -> Dict[str, Dict[str, Any]]:
+        time_window_hours: int | None = None
+    ) -> dict[str, dict[str, Any]]:
         """Analyze performance across all routing strategies."""
         
         window_hours = time_window_hours or self.analysis_window_hours
@@ -209,7 +207,7 @@ class RoutingStrategyAnalyzer:
         
         return analysis_results
     
-    def _calculate_trend(self, values: List[float]) -> float:
+    def _calculate_trend(self, values: list[float]) -> float:
         """Calculate trend direction for a series of values."""
         if len(values) < 3:
             return 0.0
@@ -230,7 +228,7 @@ class RoutingStrategyAnalyzer:
         slope = numerator / denominator
         return slope
     
-    def _calculate_overall_strategy_score(self, events: List[FeedbackEvent]) -> float:
+    def _calculate_overall_strategy_score(self, events: list[FeedbackEvent]) -> float:
         """Calculate overall performance score for a strategy."""
         if not events:
             return 0.0
@@ -260,8 +258,8 @@ class RoutingStrategyAnalyzer:
     
     def get_optimal_strategy_recommendation(
         self, 
-        context: Dict[str, Any]
-    ) -> Tuple[str, float]:
+        context: dict[str, Any]
+    ) -> tuple[str, float]:
         """Get optimal strategy recommendation based on context."""
         
         analysis = self.analyze_strategy_performance()
@@ -291,7 +289,7 @@ class RoutingStrategyAnalyzer:
         
         # Select best strategy
         if strategy_scores:
-            best_strategy = max(strategy_scores, key=strategy_scores.get)
+            best_strategy: str = max(strategy_scores, key=lambda k: strategy_scores[k])
             confidence = strategy_scores[best_strategy]
             return best_strategy, confidence
         
@@ -301,13 +299,13 @@ class RoutingStrategyAnalyzer:
 class CostPredictionOptimizer:
     """Optimizes cost prediction models based on feedback."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize cost prediction optimizer."""
         self.config = config or {}
         
         # Cost prediction tracking
-        self.cost_predictions: List[Tuple[float, float]] = []  # (predicted, actual)
-        self.cost_factors: Dict[str, float] = {
+        self.cost_predictions: list[tuple[float, float]] = []  # (predicted, actual)
+        self.cost_factors: dict[str, float] = {
             "complexity_multiplier": 1.0,
             "domain_adjustment": 1.0, 
             "supervisor_overhead": 1.0,
@@ -318,7 +316,7 @@ class CostPredictionOptimizer:
         self.learning_rate = self.config.get("learning_rate", 0.01)
         self.min_samples_for_update = self.config.get("min_samples", 20)
         
-    def record_cost_feedback(self, predicted_cost: float, actual_cost: float):
+    def record_cost_feedback(self, predicted_cost: float, actual_cost: float) -> None:
         """Record cost prediction vs actual cost."""
         self.cost_predictions.append((predicted_cost, actual_cost))
         
@@ -327,7 +325,7 @@ class CostPredictionOptimizer:
         if len(self.cost_predictions) > max_history:
             self.cost_predictions = self.cost_predictions[-max_history:]
     
-    def optimize_cost_factors(self) -> Dict[str, float]:
+    def optimize_cost_factors(self) -> dict[str, float]:
         """Optimize cost factors based on prediction accuracy."""
         if len(self.cost_predictions) < self.min_samples_for_update:
             return self.cost_factors
@@ -361,7 +359,7 @@ class CostPredictionOptimizer:
         
         return self.cost_factors
     
-    def get_cost_accuracy_metrics(self) -> Dict[str, float]:
+    def get_cost_accuracy_metrics(self) -> dict[str, float]:
         """Get cost prediction accuracy metrics."""
         if not self.cost_predictions:
             return {"accuracy": 0.0, "bias": 0.0, "variance": 0.0}
@@ -395,7 +393,7 @@ class SupervisionFeedbackLearner:
     and supervisor performance tracking to continuously improve MASR decisions.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize supervision feedback learner."""
         self.config = config or {}
         
@@ -408,8 +406,8 @@ class SupervisionFeedbackLearner:
         )
         
         # Feedback storage
-        self.feedback_events: deque = deque(maxlen=self.config.get("max_events", 10000))
-        self.supervisor_performance: Dict[str, PerformanceMetrics] = defaultdict(PerformanceMetrics)
+        self.feedback_events: deque[FeedbackEvent] = deque(maxlen=self.config.get("max_events", 10000))
+        self.supervisor_performance: dict[str, PerformanceMetrics] = defaultdict(PerformanceMetrics)
         
         # Learning configuration
         self.enable_adaptive_learning = self.config.get("enable_adaptive_learning", True)
@@ -426,14 +424,14 @@ class SupervisionFeedbackLearner:
         }
         
         # Scheduled learning task
-        self._learning_task: Optional[asyncio.Task] = None
+        self._learning_task: asyncio.Task | None = None
     
     def record_execution_feedback(
         self,
         routing_decision: RoutingDecision,
         execution_result: SupervisorExecutionResult,
-        user_feedback: Optional[Dict[str, Any]] = None
-    ):
+        user_feedback: dict[str, Any] | None = None
+    ) -> None:
         """
         Record comprehensive feedback from a supervisor execution.
         
@@ -489,18 +487,19 @@ class SupervisionFeedbackLearner:
         self.learning_stats["total_feedback_events"] += 1
         
         # Update component learners
-        routing_strategy = RoutingStrategy(routing_decision.__dict__.get("routing_strategy", "balanced"))
+        routing_strategy_value = routing_decision.__dict__.get("routing_strategy", "balanced")
+        routing_strategy = RoutingStrategy(routing_strategy_value) if isinstance(routing_strategy_value, str) else routing_strategy_value
         self.strategy_analyzer.record_strategy_feedback(routing_strategy, feedback_event)
         self.cost_optimizer.record_cost_feedback(
             routing_decision.estimated_cost,
             execution_result.actual_cost
         )
-        
+
         # Update supervisor performance
         supervisor_metrics = self.supervisor_performance[execution_result.supervisor_type]
-        supervisor_metrics.total_executions += 1
+        supervisor_metrics.total_executions = supervisor_metrics.total_executions + 1
         if execution_result.status.value == "completed":
-            supervisor_metrics.successful_executions += 1
+            supervisor_metrics.successful_executions = supervisor_metrics.successful_executions + 1
         supervisor_metrics.success_rate = (
             supervisor_metrics.successful_executions / supervisor_metrics.total_executions
         )
@@ -508,7 +507,7 @@ class SupervisionFeedbackLearner:
         logger.info(f"Recorded feedback for {execution_result.supervisor_type} supervisor: "
                    f"cost_accuracy={cost_accuracy:.3f}, quality_accuracy={quality_accuracy:.3f}")
     
-    async def perform_learning_cycle(self) -> Dict[str, Any]:
+    async def perform_learning_cycle(self) -> dict[str, Any]:
         """Perform a complete learning cycle to update routing strategies."""
         
         learning_start = datetime.now()
@@ -535,10 +534,16 @@ class SupervisionFeedbackLearner:
             improvements["supervisor"] = len(supervisor_report)
             
             # Update learning stats
-            self.learning_stats["learning_cycles_completed"] += 1
+            cycles_count = self.learning_stats.get("learning_cycles_completed", 0)
+            if isinstance(cycles_count, int):
+                self.learning_stats["learning_cycles_completed"] = cycles_count + 1
             self.learning_stats["last_learning_cycle"] = datetime.now().isoformat()
-            self.learning_stats["routing_improvements"] += improvements["routing"]
-            self.learning_stats["cost_improvements"] += improvements["cost"]
+            routing_impr = self.learning_stats.get("routing_improvements", 0)
+            if isinstance(routing_impr, int):
+                self.learning_stats["routing_improvements"] = routing_impr + improvements["routing"]
+            cost_impr = self.learning_stats.get("cost_improvements", 0)
+            if isinstance(cost_impr, int):
+                self.learning_stats["cost_improvements"] = cost_impr + improvements["cost"]
             
             learning_duration = (datetime.now() - learning_start).total_seconds()
             
@@ -564,7 +569,7 @@ class SupervisionFeedbackLearner:
                 "improvements": improvements,
             }
     
-    def _generate_supervisor_performance_report(self) -> Dict[str, Dict[str, Any]]:
+    def _generate_supervisor_performance_report(self) -> dict[str, dict[str, Any]]:
         """Generate comprehensive supervisor performance report."""
         
         report = {}
@@ -599,7 +604,7 @@ class SupervisionFeedbackLearner:
         
         return report
     
-    def get_routing_recommendations(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def get_routing_recommendations(self, context: dict[str, Any]) -> dict[str, Any]:
         """Get routing recommendations based on learned patterns."""
         
         # Get optimal strategy
@@ -625,7 +630,7 @@ class SupervisionFeedbackLearner:
             "learning_confidence": self._calculate_learning_confidence(),
         }
     
-    def _rank_supervisors_for_context(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _rank_supervisors_for_context(self, context: dict[str, Any]) -> list[dict[str, Any]]:
         """Rank supervisors based on context and performance history."""
         
         domain = context.get("domain", "research")
@@ -667,7 +672,7 @@ class SupervisionFeedbackLearner:
         
         return sorted(rankings, key=lambda x: x["score"], reverse=True)
     
-    def _explain_strategy_selection(self, strategy: str, context: Dict[str, Any]) -> str:
+    def _explain_strategy_selection(self, strategy: str, context: dict[str, Any]) -> str:
         """Explain why a particular strategy was selected."""
         
         explanations = {
@@ -708,7 +713,7 @@ class SupervisionFeedbackLearner:
         
         return overall_confidence
     
-    async def get_learning_stats(self) -> Dict[str, Any]:
+    async def get_learning_stats(self) -> dict[str, Any]:
         """Get comprehensive learning system statistics."""
         
         return {
@@ -762,10 +767,10 @@ class SupervisionFeedbackLearner:
 
 
 __all__ = [
-    "SupervisionFeedbackLearner",
+    "CostPredictionOptimizer",
     "FeedbackEvent",
     "FeedbackType",
     "PerformanceMetrics",
     "RoutingStrategyAnalyzer",
-    "CostPredictionOptimizer",
+    "SupervisionFeedbackLearner",
 ]

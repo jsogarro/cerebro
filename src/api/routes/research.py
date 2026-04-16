@@ -2,6 +2,7 @@
 Research API endpoints for Research Platform.
 """
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
 from src.api.services.direct_execution_service import get_direct_execution_service
+from src.models.db.research_project import ProjectStatus
 from src.models.db.session import get_session
-from src.repositories.research_repository import ResearchRepository
 from src.models.research_project import (
     ResearchProgress,
     ResearchProject,
@@ -18,8 +19,7 @@ from src.models.research_project import (
     ResearchScope,
     ResearchStatus,
 )
-from src.models.db.research_project import ProjectStatus
-from src.models.db import research_project as db_models
+from src.repositories.research_repository import ResearchRepository
 
 logger = get_logger()
 router = APIRouter(prefix="/research")
@@ -59,14 +59,14 @@ async def create_research_project(
             query=request.query.dict(),
             user_id=request.user_id,
             domains=request.scope.domains if request.scope else [],
-            status=ProjectStatus.PENDING,
+            status=ProjectStatus.DRAFT,
         )
 
-        # Convert to API model
+        from typing import cast
         project = ResearchProject(
             id=db_project.id,
             title=db_project.title,
-            query=ResearchQuery(**db_project.query),
+            query=ResearchQuery(**cast(dict[str, Any], db_project.query)),
             user_id=db_project.user_id,
             scope=request.scope,
             status=ResearchStatus.PENDING,
@@ -123,11 +123,11 @@ async def get_research_project(
             detail=f"Research project {project_id} not found",
         )
 
-    # Convert to API model
+    from typing import Any, cast
     project = ResearchProject(
         id=db_project.id,
         title=db_project.title,
-        query=ResearchQuery(**db_project.query),
+        query=ResearchQuery(**cast(dict[str, Any], db_project.query)),
         user_id=db_project.user_id,
         status=ResearchStatus(db_project.status.value),
         created_at=db_project.created_at,
@@ -186,11 +186,12 @@ async def list_research_projects(
         )
 
     # Convert to API models
+    from typing import Any, cast
     return [
         ResearchProject(
             id=p.id,
             title=p.title,
-            query=ResearchQuery(**p.query),
+            query=ResearchQuery(**cast(dict[str, Any], p.query)),
             user_id=p.user_id,
             status=ResearchStatus(p.status.value),
             created_at=p.created_at,

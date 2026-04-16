@@ -13,18 +13,18 @@ This bridge enables intelligent end-to-end query processing by connecting:
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Dict, List, Optional, Any, Type, Union
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
-from src.core.types import BridgeStatsDict, HealthCheckDict
+from src.core.types import HealthCheckDict
 
-from ...agents.supervisors.base_supervisor import BaseSupervisor, SupervisionState
-from ...agents.models import AgentTask, AgentResult
-from ..router.masr import RoutingDecision, CollaborationMode, RoutingStrategy
-from ..router.query_analyzer import QueryComplexityAnalyzer, ComplexityLevel
+from ...agents.models import AgentResult, AgentTask
+from ...agents.supervisors.base_supervisor import BaseSupervisor
+from ..router.masr import CollaborationMode, RoutingDecision, RoutingStrategy
+from ..router.query_analyzer import ComplexityLevel
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class SupervisorConfiguration:
     
     supervisor_type: str
     domain: str
-    worker_allocation: List[str]
+    worker_allocation: list[str]
     quality_threshold: float
     max_refinement_rounds: int
     timeout_seconds: int
@@ -65,7 +65,7 @@ class SupervisorConfiguration:
     confidence_score: float = 0.0
     
     # Additional context
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass 
@@ -78,8 +78,8 @@ class SupervisorExecutionResult:
     status: SupervisorExecutionStatus
     
     # Results
-    agent_result: Optional[AgentResult] = None
-    supervision_quality: Dict[str, float] = field(default_factory=dict)
+    agent_result: AgentResult | None = None
+    supervision_quality: dict[str, float] = field(default_factory=dict)
     
     # Performance metrics
     execution_time_seconds: float = 0.0
@@ -93,18 +93,18 @@ class SupervisorExecutionResult:
     confidence_score: float = 0.0
     
     # Error information
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     
     # Timestamps
     started_at: datetime = field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     
     # MASR feedback data
-    routing_accuracy: Optional[float] = None
-    cost_accuracy: Optional[float] = None
+    routing_accuracy: float | None = None
+    cost_accuracy: float | None = None
     
-    def mark_completed(self):
+    def mark_completed(self) -> None:
         """Mark execution as completed."""
         self.completed_at = datetime.now()
         if self.started_at:
@@ -116,7 +116,7 @@ class SupervisorExecutionResult:
 class RoutingDecisionTranslator:
     """Translates MASR routing decisions into supervisor configurations."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize translator with configuration."""
         self.config = config or {}
         
@@ -257,7 +257,7 @@ class RoutingDecisionTranslator:
 class ResourcePool:
     """Resource pool for managing supervisor instances."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize resource pool."""
         self.config = config or {}
         
@@ -266,8 +266,8 @@ class ResourcePool:
         self.idle_timeout = self.config.get("idle_timeout_seconds", 300)  # 5 minutes
         
         # Supervisor pools by type
-        self.supervisor_pools: Dict[str, List[BaseSupervisor]] = {}
-        self.active_supervisors: Dict[str, BaseSupervisor] = {}
+        self.supervisor_pools: dict[str, list[BaseSupervisor]] = {}
+        self.active_supervisors: dict[str, BaseSupervisor] = {}
         
         # Pool statistics
         self.pool_stats = {
@@ -278,11 +278,11 @@ class ResourcePool:
         }
         
         # Cleanup task
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: asyncio.Task | None = None
         
     async def get_supervisor(
         self, 
-        supervisor_class: Type[BaseSupervisor],
+        supervisor_class: type[BaseSupervisor],
         config: SupervisorConfiguration
     ) -> BaseSupervisor:
         """
@@ -309,6 +309,8 @@ class ResourcePool:
         
         # Create new supervisor
         supervisor = supervisor_class(
+            supervisor_type=config.supervisor_type,
+            domain=config.domain,
             gemini_service=None,  # Will be injected by factory
             cache_client=None,    # Will be injected by factory
             config=self._create_supervisor_config(config)
@@ -340,7 +342,7 @@ class ResourcePool:
             self.pool_stats["evicted"] += 1
             logger.debug(f"Evicted supervisor {supervisor_type} - pool full")
     
-    def _create_supervisor_config(self, config: SupervisorConfiguration) -> Dict[str, Any]:
+    def _create_supervisor_config(self, config: SupervisorConfiguration) -> dict[str, Any]:
         """Create supervisor-specific configuration."""
         return {
             "max_workers": config.max_workers,
@@ -367,7 +369,7 @@ class ResourcePool:
         self.pool_stats["evicted"] += total_evicted
         logger.debug(f"Cleaned up {total_evicted} idle supervisors")
     
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get pool statistics."""
         return {
             "pool_stats": self.pool_stats.copy(),
@@ -383,13 +385,13 @@ class ResourcePool:
 class SupervisorExecutor:
     """Manages supervisor execution lifecycle."""
     
-    def __init__(self, resource_pool: ResourcePool, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, resource_pool: ResourcePool, config: dict[str, Any] | None = None):
         """Initialize supervisor executor."""
         self.resource_pool = resource_pool
         self.config = config or {}
         
         # Execution tracking
-        self.active_executions: Dict[str, SupervisorExecutionResult] = {}
+        self.active_executions: dict[str, SupervisorExecutionResult] = {}
         
         # Performance metrics
         self.execution_stats = {
@@ -402,7 +404,7 @@ class SupervisorExecutor:
     
     async def execute(
         self,
-        supervisor_class: Type[BaseSupervisor], 
+        supervisor_class: type[BaseSupervisor], 
         config: SupervisorConfiguration,
         task: AgentTask
     ) -> SupervisorExecutionResult:
@@ -493,7 +495,7 @@ class SupervisorExecutor:
         
         return result
     
-    async def get_execution_status(self, execution_id: str) -> Optional[SupervisorExecutionResult]:
+    async def get_execution_status(self, execution_id: str) -> SupervisorExecutionResult | None:
         """Get status of active execution."""
         return self.active_executions.get(execution_id)
     
@@ -505,7 +507,7 @@ class SupervisorExecutor:
             return True
         return False
     
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get execution statistics."""
         return {
             "execution_stats": self.execution_stats.copy(),
@@ -522,7 +524,7 @@ class MASRSupervisorBridge:
     and executing them via hierarchical supervisors with TalkHier protocol.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize MASR-Supervisor bridge."""
         self.config = config or {}
         
@@ -547,7 +549,7 @@ class MASRSupervisorBridge:
         self,
         routing_decision: RoutingDecision,
         task: AgentTask,
-        supervisor_registry: Dict[str, Type[BaseSupervisor]]
+        supervisor_registry: dict[str, type[BaseSupervisor]]
     ) -> SupervisorExecutionResult:
         """
         Execute a MASR routing decision using appropriate supervisor.
@@ -616,18 +618,18 @@ class MASRSupervisorBridge:
             
             return result
     
-    def _update_average_response_time(self, execution_time: float):
+    def _update_average_response_time(self, execution_time: float) -> None:
         """Update average response time statistic."""
         total_time = (
-            self.bridge_stats["average_response_time"] * 
+            self.bridge_stats["average_response_time"] *
             (self.bridge_stats["total_requests"] - 1) +
             execution_time
         )
         self.bridge_stats["average_response_time"] = (
             total_time / self.bridge_stats["total_requests"]
         )
-    
-    def _update_routing_accuracy(self, accuracy: float):
+
+    def _update_routing_accuracy(self, accuracy: float) -> None:
         """Update routing accuracy statistic."""
         successful_requests = self.bridge_stats["successful_requests"]
         if successful_requests == 1:
@@ -638,7 +640,7 @@ class MASRSupervisorBridge:
                 (current_avg * (successful_requests - 1) + accuracy) / successful_requests
             )
     
-    async def get_bridge_stats(self) -> Dict[str, Any]:
+    async def get_bridge_stats(self) -> dict[str, Any]:
         """Get comprehensive bridge statistics."""
         return {
             "bridge": self.bridge_stats.copy(),
@@ -648,12 +650,11 @@ class MASRSupervisorBridge:
     
     async def health_check(self) -> HealthCheckDict:
         """Perform health check on bridge components."""
-        return {
+        health_dict: HealthCheckDict = {
             "status": "healthy",
-            "components": {
-                "translator": "healthy",
-                "resource_pool": "healthy", 
-                "executor": "healthy",
+            "metrics": {
+                "active_executions": len(self.active_executions),
+                "total_requests": self.bridge_stats["total_requests"],
             },
             "stats": await self.get_bridge_stats(),
         }
@@ -666,10 +667,10 @@ class MASRSupervisorBridge:
 
 __all__ = [
     "MASRSupervisorBridge",
-    "RoutingDecisionTranslator", 
-    "SupervisorExecutor",
     "ResourcePool",
-    "SupervisorExecutionResult",
+    "RoutingDecisionTranslator",
     "SupervisorConfiguration",
+    "SupervisorExecutionResult",
     "SupervisorExecutionStatus",
+    "SupervisorExecutor",
 ]

@@ -11,18 +11,15 @@ This is the RECOMMENDED API for most use cases, as it leverages
 Cerebro's full intelligence and learning capabilities.
 """
 
-import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any
-from uuid import UUID
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from structlog import get_logger
 
-from ...models.research_project import ResearchQuery, ResearchDepth
 from ...ai_brain.router.masr import RoutingStrategy
+from ...models.research_project import ResearchDepth, ResearchQuery
 from ..services.direct_execution_service import get_direct_execution_service
 
 logger = get_logger()
@@ -35,29 +32,28 @@ class IntelligentQueryRequest(BaseModel):
     """Request model for intelligent query routing."""
     
     query: str = Field(..., min_length=1, max_length=2000, description="Research query")
-    domains: List[str] = Field(default_factory=list, description="Domain hints (optional)")
-    context: Dict[str, Any] = Field(default_factory=dict, description="Additional context")
+    domains: list[str] = Field(default_factory=list, description="Domain hints (optional)")
+    context: dict[str, Any] = Field(default_factory=dict, description="Additional context")
     
     # Routing preferences (optional - MASR will optimize if not specified)
-    routing_strategy: Optional[RoutingStrategy] = Field(None, description="Routing strategy preference")
-    quality_preference: Optional[float] = Field(None, ge=0.0, le=1.0, description="Quality vs speed preference")
-    cost_preference: Optional[float] = Field(None, ge=0.0, le=1.0, description="Cost sensitivity")
+    routing_strategy: RoutingStrategy | None = Field(None, description="Routing strategy preference")
+    quality_preference: float | None = Field(None, ge=0.0, le=1.0, description="Quality vs speed preference")
+    cost_preference: float | None = Field(None, ge=0.0, le=1.0, description="Cost sensitivity")
     
     # Execution options
     enable_real_time_updates: bool = Field(default=True, description="Enable WebSocket progress updates")
     timeout_seconds: int = Field(default=300, ge=60, le=1800, description="Maximum execution time")
     
     # User context
-    user_id: Optional[str] = Field(None, description="User ID for personalization")
-    session_id: Optional[str] = Field(None, description="Session ID for context")
+    user_id: str | None = Field(None, description="User ID for personalization")
+    session_id: str | None = Field(None, description="Session ID for context")
 
 
 class AnalysisRequest(BaseModel):
-    """Request model for analysis-focused queries."""
-    
+
     query: str = Field(..., min_length=1, max_length=2000)
-    analysis_type: str = Field(default="comprehensive", regex="^(basic|comprehensive|comparative|methodological)$")
-    domains: List[str] = Field(default_factory=list)
+    analysis_type: str = Field(default="comprehensive", pattern="^(basic|comprehensive|comparative|methodological)$")
+    domains: list[str] = Field(default_factory=list)
     depth: ResearchDepth = Field(default=ResearchDepth.COMPREHENSIVE)
     
     # Analysis preferences
@@ -66,25 +62,23 @@ class AnalysisRequest(BaseModel):
     enable_comparison: bool = Field(default=True)
     
     # Context
-    context: Dict[str, Any] = Field(default_factory=dict)
-    user_id: Optional[str] = Field(None)
+    context: dict[str, Any] = Field(default_factory=dict)
+    user_id: str | None = Field(None)
 
 
 class SynthesisRequest(BaseModel):
-    """Request model for synthesis-focused queries."""
-    
+
     query: str = Field(..., min_length=1, max_length=2000)
-    synthesis_focus: str = Field(default="comprehensive", regex="^(comprehensive|thematic|comparative)$")
-    source_materials: List[Dict[str, Any]] = Field(default_factory=list, description="Pre-existing materials to synthesize")
-    
-    # Synthesis options
-    narrative_style: str = Field(default="academic", regex="^(academic|executive|technical)$")
+    synthesis_focus: str = Field(default="comprehensive", pattern="^(comprehensive|thematic|comparative)$")
+    source_materials: list[dict[str, Any]] = Field(default_factory=list, description="Pre-existing materials to synthesize")
+
+    narrative_style: str = Field(default="academic", pattern="^(academic|executive|technical)$")
     include_visualizations: bool = Field(default=True)
-    citation_style: str = Field(default="APA", regex="^(APA|MLA|Chicago)$")
+    citation_style: str = Field(default="APA", pattern="^(APA|MLA|Chicago)$")
     
     # Context
-    context: Dict[str, Any] = Field(default_factory=dict)
-    user_id: Optional[str] = Field(None)
+    context: dict[str, Any] = Field(default_factory=dict)
+    user_id: str | None = Field(None)
 
 
 # Response Models
@@ -97,15 +91,15 @@ class IntelligentQueryResponse(BaseModel):
     status: str  # pending, routing, executing, completed, failed
     
     # MASR routing information
-    routing_decision: Dict[str, Any]
+    routing_decision: dict[str, Any]
     supervisor_type: str
-    selected_agents: List[str]
+    selected_agents: list[str]
     estimated_cost: float
     estimated_quality: float
     
     # Execution results
-    results: Dict[str, Any]
-    quality_scores: Dict[str, float]
+    results: dict[str, Any]
+    quality_scores: dict[str, float]
     confidence: float
     
     # Performance metrics
@@ -114,12 +108,12 @@ class IntelligentQueryResponse(BaseModel):
     total_time_seconds: float
     
     # Learning feedback
-    routing_accuracy: Optional[float] = None
-    cost_accuracy: Optional[float] = None
+    routing_accuracy: float | None = None
+    cost_accuracy: float | None = None
     
     # Metadata
     started_at: str
-    completed_at: Optional[str] = None
+    completed_at: str | None = None
 
 
 # Primary API Endpoints (90% of usage should go through these)
@@ -152,9 +146,9 @@ async def intelligent_research_query(
         project = ResearchProject(
             title=f"API Query: {request.query[:50]}...",
             query=ResearchQuery(
-                question=request.query,
-                domains=request.domains,
-                depth_level=ResearchDepth.COMPREHENSIVE,
+                text=request.query,
+                domains=request.domains or ["general"],
+                depth_level=ResearchDepth.COMPREHENSIVE.value,
             ),
             user_id=request.user_id or "api_user",
             scope=ResearchScope()
@@ -179,8 +173,8 @@ async def intelligent_research_query(
             execution_id=execution_id,
             query_id=str(project.id),
             status=execution_status.status if execution_status else "pending",
-            routing_decision=execution_status.routing_decision if execution_status else {},
-            supervisor_type=execution_status.supervisor_type if execution_status else "research",
+            routing_decision=execution_status.routing_decision if execution_status and execution_status.routing_decision else {},
+            supervisor_type=execution_status.supervisor_type if execution_status and execution_status.supervisor_type else "research",
             selected_agents=[], # Would be populated from routing decision
             estimated_cost=0.015,  # Would come from MASR
             estimated_quality=0.85,  # Would come from MASR
@@ -194,7 +188,7 @@ async def intelligent_research_query(
         )
         
         logger.info(
-            f"Intelligent query routed",
+            "Intelligent query routed",
             execution_id=execution_id,
             supervisor_type=response.supervisor_type,
             estimated_cost=response.estimated_cost,
@@ -206,7 +200,7 @@ async def intelligent_research_query(
         logger.error(f"Intelligent research query failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Query execution failed: {str(e)}"
+            detail=f"Query execution failed: {e!s}"
         )
 
 
@@ -224,7 +218,6 @@ async def intelligent_analysis_query(
     try:
         logger.info(f"Intelligent analysis query: {request.query[:100]}...")
         
-        # Convert to intelligent query request
         intelligent_request = IntelligentQueryRequest(
             query=request.query,
             domains=request.domains,
@@ -238,7 +231,10 @@ async def intelligent_analysis_query(
                 "api_endpoint": "intelligent_analysis_query",
             },
             routing_strategy=RoutingStrategy.QUALITY_FOCUSED if request.analysis_type == "exhaustive" else None,
+            quality_preference=None,
+            cost_preference=None,
             user_id=request.user_id,
+            session_id=None,
         )
         
         return await intelligent_research_query(intelligent_request, background_tasks)
@@ -247,7 +243,7 @@ async def intelligent_analysis_query(
         logger.error(f"Intelligent analysis query failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analysis query failed: {str(e)}"
+            detail=f"Analysis query failed: {e!s}"
         )
 
 
@@ -265,7 +261,6 @@ async def intelligent_synthesis_query(
     try:
         logger.info(f"Intelligent synthesis query: {request.query[:100]}...")
         
-        # Convert to intelligent query request
         intelligent_request = IntelligentQueryRequest(
             query=request.query,
             context={
@@ -277,8 +272,11 @@ async def intelligent_synthesis_query(
                 "citation_style": request.citation_style,
                 "api_endpoint": "intelligent_synthesis_query",
             },
-            routing_strategy=RoutingStrategy.BALANCED,  # Synthesis benefits from balanced approach
+            routing_strategy=RoutingStrategy.BALANCED,
+            quality_preference=None,
+            cost_preference=None,
             user_id=request.user_id,
+            session_id=None,
         )
         
         return await intelligent_research_query(intelligent_request, background_tasks)
@@ -287,12 +285,12 @@ async def intelligent_synthesis_query(
         logger.error(f"Intelligent synthesis query failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Synthesis query failed: {str(e)}"
+            detail=f"Synthesis query failed: {e!s}"
         )
 
 
 @router.get("/execution/{execution_id}/status")
-async def get_execution_status(execution_id: str) -> Dict[str, Any]:
+async def get_execution_status(execution_id: str) -> dict[str, Any]:
     """
     Get real-time status of intelligent query execution.
     
@@ -301,27 +299,27 @@ async def get_execution_status(execution_id: str) -> Dict[str, Any]:
     """
     try:
         execution_service = get_direct_execution_service()
-        status = await execution_service.get_execution_status(execution_id)
-        
-        if not status:
+        exec_status = await execution_service.get_execution_status(execution_id)
+
+        if not exec_status:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Execution {execution_id} not found"
             )
-        
+
         return {
             "execution_id": execution_id,
-            "status": status.status,
-            "progress_percentage": status.progress_percentage,
-            "current_phase": status.current_phase,
-            "supervisor_type": status.supervisor_type,
-            "workers_used": status.workers_used,
-            "routing_decision": status.routing_decision,
-            "execution_time_seconds": status.execution_time_seconds,
-            "errors": status.errors,
+            "status": exec_status.status,
+            "progress_percentage": exec_status.progress_percentage,
+            "current_phase": exec_status.current_phase,
+            "supervisor_type": exec_status.supervisor_type,
+            "workers_used": exec_status.workers_used,
+            "routing_decision": exec_status.routing_decision,
+            "execution_time_seconds": exec_status.execution_time_seconds,
+            "errors": exec_status.errors,
             "timestamp": datetime.now().isoformat(),
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -333,7 +331,7 @@ async def get_execution_status(execution_id: str) -> Dict[str, Any]:
 
 
 @router.get("/execution/{execution_id}/results")
-async def get_execution_results(execution_id: str) -> Dict[str, Any]:
+async def get_execution_results(execution_id: str) -> dict[str, Any]:
     """Get results from completed intelligent query execution."""
     
     try:
@@ -363,7 +361,7 @@ async def get_execution_results(execution_id: str) -> Dict[str, Any]:
 @router.post("/literature")
 async def intelligent_literature_query(
     query: str = Query(..., min_length=10),
-    domains: List[str] = Query(default=[]),
+    domains: list[str] = Query(default=[]),
     max_sources: int = Query(50, ge=10, le=200),
     depth: ResearchDepth = ResearchDepth.COMPREHENSIVE,
 ) -> IntelligentQueryResponse:
@@ -380,7 +378,11 @@ async def intelligent_literature_query(
             "depth": depth.value,
             "focus": "literature_review",
         },
-        routing_strategy=RoutingStrategy.QUALITY_FOCUSED,  # Literature benefits from quality
+        routing_strategy=RoutingStrategy.QUALITY_FOCUSED,
+        quality_preference=None,
+        cost_preference=None,
+        user_id=None,
+        session_id=None,
     )
     
     return await intelligent_research_query(request, BackgroundTasks())
@@ -390,7 +392,7 @@ async def intelligent_literature_query(
 async def intelligent_methodology_query(
     query: str = Query(..., min_length=10),
     research_type: str = Query("mixed", regex="^(quantitative|qualitative|mixed)$"),
-    domains: List[str] = Query(default=[]),
+    domains: list[str] = Query(default=[]),
 ) -> IntelligentQueryResponse:
     """
     Methodology-focused query with MASR intelligent routing.
@@ -405,6 +407,10 @@ async def intelligent_methodology_query(
             "focus": "methodology",
         },
         routing_strategy=RoutingStrategy.BALANCED,
+        quality_preference=None,
+        cost_preference=None,
+        user_id=None,
+        session_id=None,
     )
     
     return await intelligent_research_query(request, BackgroundTasks())
@@ -414,7 +420,7 @@ async def intelligent_methodology_query(
 async def intelligent_comparison_query(
     query: str = Query(..., min_length=10),
     comparison_focus: str = Query("approaches", regex="^(approaches|theories|methods|findings)$"),
-    domains: List[str] = Query(default=[]),
+    domains: list[str] = Query(default=[]),
 ) -> IntelligentQueryResponse:
     """
     Comparison-focused query with MASR intelligent routing.
@@ -428,7 +434,11 @@ async def intelligent_comparison_query(
             "comparison_focus": comparison_focus,
             "focus": "comparative_analysis",
         },
-        routing_strategy=RoutingStrategy.QUALITY_FOCUSED,  # Comparisons need high quality
+        routing_strategy=RoutingStrategy.QUALITY_FOCUSED,
+        quality_preference=None,
+        cost_preference=None,
+        user_id=None,
+        session_id=None,
     )
     
     return await intelligent_research_query(request, BackgroundTasks())
@@ -437,7 +447,7 @@ async def intelligent_comparison_query(
 # System intelligence endpoints
 
 @router.get("/routing/strategies")
-async def get_available_routing_strategies() -> Dict[str, Any]:
+async def get_available_routing_strategies() -> dict[str, Any]:
     """
     Get available routing strategies and their characteristics.
     
@@ -491,8 +501,8 @@ async def get_available_routing_strategies() -> Dict[str, Any]:
 @router.get("/routing/recommend")
 async def get_routing_recommendation(
     query: str = Query(..., min_length=1),
-    context: Dict[str, Any] = Query(default_factory=dict),
-) -> Dict[str, Any]:
+    context: dict[str, Any] = Query(default_factory=dict),
+) -> dict[str, Any]:
     """
     Get MASR routing recommendation without executing query.
     

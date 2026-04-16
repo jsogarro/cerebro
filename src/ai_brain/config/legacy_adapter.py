@@ -13,20 +13,26 @@ Key Functions:
 """
 
 import logging
-from typing import Dict, List, Optional, Any
 from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from ..providers.base_provider import BaseProvider
+    from .model_config_manager import ModelConfigManager
+
+from ..providers.base_provider import ModelCapability as LegacyModelCapability
 from .model_schemas import (
+    ConfigurationMetadata,
+    GlobalSettings,
     ModelConfiguration,
     ModelSpecification,
-    ProviderConfiguration,
     ModelTier,
-    ModelCapability as ConfigModelCapability,
+    ProviderConfiguration,
     RoutingConfiguration,
-    GlobalSettings,
-    ConfigurationMetadata,
 )
-from ..providers.base_provider import ModelCapability as LegacyModelCapability
+from .model_schemas import (
+    ModelCapability as ConfigModelCapability,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +43,7 @@ class LegacyConfigurationAdapter:
     and new dynamic configuration system.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize legacy adapter."""
 
         # Capability mapping between legacy and new enums
@@ -60,10 +66,10 @@ class LegacyConfigurationAdapter:
     def migrate_provider_specs_to_config(
         self,
         provider_name: str,
-        legacy_model_specs: Dict[str, Dict[str, Any]],
-        legacy_capabilities: List[LegacyModelCapability],
-        provider_config: Dict[str, Any],
-    ) -> Dict[str, ModelSpecification]:
+        legacy_model_specs: dict[str, dict[str, Any]],
+        legacy_capabilities: list[LegacyModelCapability],
+        provider_config: dict[str, Any],
+    ) -> dict[str, ModelSpecification]:
         """
         Migrate legacy provider specifications to new configuration format.
 
@@ -115,7 +121,7 @@ class LegacyConfigurationAdapter:
         return migrated_models
 
     def create_provider_configuration(
-        self, provider_name: str, provider_config: Dict[str, Any]
+        self, provider_name: str, provider_config: dict[str, Any]
     ) -> ProviderConfiguration:
         """Create provider configuration from legacy config."""
 
@@ -134,7 +140,7 @@ class LegacyConfigurationAdapter:
         )
 
     def generate_configuration_from_legacy(
-        self, legacy_providers: Dict[str, Dict[str, Any]], environment: str = "migrated"
+        self, legacy_providers: dict[str, dict[str, Any]], environment: str = "migrated"
     ) -> ModelConfiguration:
         """
         Generate complete ModelConfiguration from legacy provider data.
@@ -185,7 +191,7 @@ class LegacyConfigurationAdapter:
 
         return config
 
-    def _infer_model_tier(self, legacy_spec: Dict[str, Any]) -> ModelTier:
+    def _infer_model_tier(self, legacy_spec: dict[str, Any]) -> ModelTier:
         """Infer model tier from legacy specification."""
 
         cost = legacy_spec.get("cost_per_1k_tokens", 0.001)
@@ -202,8 +208,8 @@ class LegacyConfigurationAdapter:
             return ModelTier.STANDARD
 
     def _convert_legacy_capabilities(
-        self, legacy_capabilities: List[LegacyModelCapability]
-    ) -> List[ConfigModelCapability]:
+        self, legacy_capabilities: list[LegacyModelCapability]
+    ) -> list[ConfigModelCapability]:
         """Convert legacy capabilities to new format."""
 
         converted = []
@@ -215,8 +221,8 @@ class LegacyConfigurationAdapter:
         return converted
 
     def convert_config_capabilities_to_legacy(
-        self, config_capabilities: List[ConfigModelCapability]
-    ) -> List[LegacyModelCapability]:
+        self, config_capabilities: list[ConfigModelCapability]
+    ) -> list[LegacyModelCapability]:
         """Convert configuration capabilities to legacy format."""
 
         converted = []
@@ -244,7 +250,7 @@ class LegacyProviderWrapper:
         self.model_config_manager = model_config_manager
         self.adapter = LegacyConfigurationAdapter()
 
-    async def get_legacy_model_specs(self) -> Dict[str, Dict[str, Any]]:
+    async def get_legacy_model_specs(self) -> dict[str, dict[str, Any]]:
         """Get model specifications in legacy format."""
 
         # Get current model specifications from configuration
@@ -273,7 +279,7 @@ class LegacyProviderWrapper:
 
         return legacy_specs
 
-    async def get_legacy_capabilities(self) -> List[LegacyModelCapability]:
+    async def get_legacy_capabilities(self) -> list[LegacyModelCapability]:
         """Get capabilities in legacy format."""
 
         # Get all capabilities from configured models

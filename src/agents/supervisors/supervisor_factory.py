@@ -14,19 +14,17 @@ Features:
 
 import asyncio
 import logging
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, Type, Set
-import uuid
+from typing import Any
 
 from src.core.types import FactoryStatsDict, HealthCheckDict, HealthReportDict
 
-from .base_supervisor import BaseSupervisor, SupervisionMode, WorkerAllocation
-from .research_supervisor import ResearchSupervisor
-from ..models import AgentTask
 from ...ai_brain.integration.masr_supervisor_bridge import SupervisorConfiguration
+from ..models import AgentTask
+from .base_supervisor import BaseSupervisor
+from .research_supervisor import ResearchSupervisor
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +64,9 @@ class SupervisorSpecification:
     """Specification for a registered supervisor type."""
     
     supervisor_type: str
-    supervisor_class: Type[BaseSupervisor]
+    supervisor_class: type[BaseSupervisor]
     domain: str
-    capabilities: Set[SupervisorCapability]
+    capabilities: set[SupervisorCapability]
     
     # Performance characteristics
     average_execution_time_ms: int = 60000  # 1 minute default
@@ -82,8 +80,8 @@ class SupervisorSpecification:
     memory_requirement_mb: int = 512
     
     # Optimization preferences
-    optimal_for_complexity: List[str] = field(default_factory=list)  # simple, moderate, complex
-    optimal_for_strategies: List[str] = field(default_factory=list)  # speed, cost, quality, balanced
+    optimal_for_complexity: list[str] = field(default_factory=list)  # simple, moderate, complex
+    optimal_for_strategies: list[str] = field(default_factory=list)  # speed, cost, quality, balanced
     
     # Health and monitoring
     health_status: str = "healthy"
@@ -100,7 +98,7 @@ class SupervisorSpecification:
 class SupervisorHealthMonitor:
     """Monitors supervisor health and performance."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize health monitor."""
         self.config = config or {}
         
@@ -110,21 +108,21 @@ class SupervisorHealthMonitor:
         self.recovery_time = self.config.get("recovery_time_seconds", 600)  # 10 minutes
         
         # Health data
-        self.supervisor_health: Dict[str, SupervisorSpecification] = {}
-        self.health_history: Dict[str, List[Dict[str, Any]]] = {}
+        self.supervisor_health: dict[str, SupervisorSpecification] = {}
+        self.health_history: dict[str, list[dict[str, Any]]] = {}
         
         # Monitoring task
-        self._monitoring_task: Optional[asyncio.Task] = None
+        self._monitoring_task: asyncio.Task[Any] | None = None
         self._monitoring_enabled = True
     
-    def register_supervisor(self, spec: SupervisorSpecification):
+    def register_supervisor(self, spec: SupervisorSpecification) -> None:
         """Register supervisor for health monitoring."""
         self.supervisor_health[spec.supervisor_type] = spec
         self.health_history[spec.supervisor_type] = []
-        
+
         logger.info(f"Registered supervisor {spec.supervisor_type} for health monitoring")
-    
-    def record_execution(self, supervisor_type: str, success: bool, execution_time_ms: int):
+
+    def record_execution(self, supervisor_type: str, success: bool, execution_time_ms: int) -> None:
         """Record execution result for health tracking."""
         if supervisor_type not in self.supervisor_health:
             return
@@ -167,7 +165,7 @@ class SupervisorHealthMonitor:
         # Update health status
         self._update_health_status(spec)
     
-    def _update_health_status(self, spec: SupervisorSpecification):
+    def _update_health_status(self, spec: SupervisorSpecification) -> None:
         """Update supervisor health status."""
         if spec.failure_count >= self.failure_threshold:
             spec.health_status = "unhealthy"
@@ -195,7 +193,7 @@ class SupervisorHealthMonitor:
         
         return spec.health_status in ["healthy", "warning", "degraded"]
     
-    def get_healthy_supervisors(self) -> List[str]:
+    def get_healthy_supervisors(self) -> list[str]:
         """Get list of healthy supervisor types."""
         return [
             supervisor_type
@@ -205,28 +203,30 @@ class SupervisorHealthMonitor:
     
     async def get_health_report(self) -> HealthReportDict:
         """Get comprehensive health report."""
-        report = {
-            "total_supervisors": len(self.supervisor_health),
-            "healthy_supervisors": len(self.get_healthy_supervisors()),
-            "supervisor_details": {},
-        }
-        
+        supervisor_details: dict[str, dict[str, Any]] = {}
+
         for supervisor_type, spec in self.supervisor_health.items():
-            report["supervisor_details"][supervisor_type] = {
+            supervisor_details[supervisor_type] = {
                 "health_status": spec.health_status,
                 "success_rate": spec.success_rate,
                 "failure_count": spec.failure_count,
                 "average_execution_time_ms": spec.average_execution_time_ms,
                 "last_health_check": spec.last_health_check.isoformat(),
             }
-        
+
+        report: HealthReportDict = {
+            "total_supervisors": len(self.supervisor_health),
+            "healthy_supervisors": len(self.get_healthy_supervisors()),
+            "supervisor_details": supervisor_details,
+        }
+
         return report
 
 
 class CapabilityMatcher:
     """Matches supervisor capabilities to task requirements."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize capability matcher."""
         self.config = config or {}
         
@@ -244,10 +244,10 @@ class CapabilityMatcher:
     
     def match_supervisor(
         self,
-        requirements: Dict[str, Any],
-        available_supervisors: List[SupervisorSpecification],
+        requirements: dict[str, Any],
+        available_supervisors: list[SupervisorSpecification],
         health_monitor: SupervisorHealthMonitor
-    ) -> Optional[SupervisorSpecification]:
+    ) -> SupervisorSpecification | None:
         """
         Match supervisor to requirements.
         
@@ -291,7 +291,7 @@ class CapabilityMatcher:
         return None
     
     def _calculate_match_score(
-        self, spec: SupervisorSpecification, requirements: Dict[str, Any]
+        self, spec: SupervisorSpecification, requirements: dict[str, Any]
     ) -> float:
         """Calculate match score for supervisor against requirements."""
         
@@ -363,7 +363,7 @@ class SupervisorFactory:
     selection and instantiation based on task requirements.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize supervisor factory."""
         self.config = config or {}
         
@@ -372,7 +372,7 @@ class SupervisorFactory:
         self.capability_matcher = CapabilityMatcher(self.config.get("capability_matcher", {}))
         
         # Supervisor registry
-        self.supervisor_registry: Dict[str, SupervisorSpecification] = {}
+        self.supervisor_registry: dict[str, SupervisorSpecification] = {}
         
         # Factory statistics
         self.factory_stats = {
@@ -385,7 +385,7 @@ class SupervisorFactory:
         # Initialize with built-in supervisors
         self._register_builtin_supervisors()
     
-    def _register_builtin_supervisors(self):
+    def _register_builtin_supervisors(self) -> None:
         """Register built-in supervisor types."""
         
         # Research Supervisor
@@ -418,7 +418,7 @@ class SupervisorFactory:
         
         self.register_supervisor(research_spec)
     
-    def register_supervisor(self, spec: SupervisorSpecification):
+    def register_supervisor(self, spec: SupervisorSpecification) -> None:
         """
         Register a supervisor type with the factory.
         
@@ -432,17 +432,17 @@ class SupervisorFactory:
         
         logger.info(f"Registered supervisor type: {spec.supervisor_type}")
     
-    def get_available_supervisors(self) -> List[SupervisorSpecification]:
+    def get_available_supervisors(self) -> list[SupervisorSpecification]:
         """Get list of all available supervisor specifications."""
         return list(self.supervisor_registry.values())
     
-    def get_supervisor_spec(self, supervisor_type: str) -> Optional[SupervisorSpecification]:
+    def get_supervisor_spec(self, supervisor_type: str) -> SupervisorSpecification | None:
         """Get specification for specific supervisor type."""
         return self.supervisor_registry.get(supervisor_type)
     
     async def create_supervisor_from_config(
         self, config: SupervisorConfiguration
-    ) -> Optional[BaseSupervisor]:
+    ) -> BaseSupervisor | None:
         """
         Create supervisor instance from configuration.
         
@@ -482,19 +482,22 @@ class SupervisorFactory:
             }
             
             # Instantiate supervisor
-            supervisor = spec.supervisor_class(
-                gemini_service=None,  # Will be injected by caller
-                cache_client=None,    # Will be injected by caller
-                config=supervisor_config
-            )
-            
+            kwargs: dict[str, Any] = {
+                'gemini_service': None,
+                'cache_client': None,
+                'config': supervisor_config
+            }
+            supervisor_instance = spec.supervisor_class(**kwargs)  # type: BaseSupervisor
+
             # Update statistics
             self.factory_stats["total_created"] += 1
             self.factory_stats["successful_creations"] += 1
-            
+
             logger.info(f"Created {config.supervisor_type} supervisor successfully")
-            
-            return supervisor
+
+            if isinstance(supervisor_instance, BaseSupervisor):
+                return supervisor_instance
+            return None
             
         except Exception as e:
             logger.error(f"Failed to create supervisor {config.supervisor_type}: {e}")
@@ -503,7 +506,7 @@ class SupervisorFactory:
     
     async def select_optimal_supervisor(
         self, config: SupervisorConfiguration, task: AgentTask
-    ) -> Optional[SupervisorSpecification]:
+    ) -> SupervisorSpecification | None:
         """
         Select optimal supervisor for configuration and task.
         
@@ -541,13 +544,13 @@ class SupervisorFactory:
         
         complexity_level = complexity_analysis.get("level", "moderate")
         if hasattr(complexity_level, 'lower'):
-            return complexity_level.lower()
-        
+            return str(complexity_level).lower()
+
         return "moderate"
     
     def _extract_required_capabilities(
         self, config: SupervisorConfiguration, task: AgentTask
-    ) -> List[SupervisorCapability]:
+    ) -> list[SupervisorCapability]:
         """Extract required capabilities from configuration and task."""
         capabilities = []
         
@@ -575,7 +578,7 @@ class SupervisorFactory:
     
     def record_execution_result(
         self, supervisor_type: str, success: bool, execution_time_ms: int
-    ):
+    ) -> None:
         """Record execution result for health monitoring."""
         self.health_monitor.record_execution(supervisor_type, success, execution_time_ms)
     
@@ -613,9 +616,9 @@ class SupervisorFactory:
 
 
 __all__ = [
-    "SupervisorFactory",
-    "SupervisorSpecification", 
-    "SupervisorCapability",
-    "SupervisorHealthMonitor",
     "CapabilityMatcher",
+    "SupervisorCapability",
+    "SupervisorFactory",
+    "SupervisorHealthMonitor",
+    "SupervisorSpecification",
 ]

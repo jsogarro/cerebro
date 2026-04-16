@@ -37,7 +37,7 @@ class RateLimiter:
         self.max_concurrent = max_concurrent
 
         # Token bucket state
-        self._tokens = rate_limit
+        self._tokens: float = float(rate_limit)
         self._last_refill = time.time()
         self._lock = asyncio.Lock()
 

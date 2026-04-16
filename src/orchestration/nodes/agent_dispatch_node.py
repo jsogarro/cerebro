@@ -184,7 +184,7 @@ async def execute_agents_parallel(
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Process results
-    execution_results = {}
+    execution_results: dict[str, Any] = {}
     for task, result in zip(tasks, results, strict=False):
         agent_type = agent_map[task]
 
@@ -265,7 +265,14 @@ async def execute_single_agent(
                 **agent_task.input_data,
                 "research_plan": state.research_plan,
                 "previous_results": {
-                    k: v.to_dict() for k, v in state.agent_results.items()
+                    k: {
+                        "task_id": v.task_id,
+                        "status": v.status,
+                        "output": v.output,
+                        "confidence": v.confidence,
+                        "execution_time": v.execution_time,
+                        "metadata": v.metadata,
+                    } for k, v in state.agent_results.items()
                 },
             },
             context=state.context,

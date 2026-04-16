@@ -6,6 +6,7 @@ This module contains configuration settings for the Gemini API integration.
 
 import os
 from dataclasses import dataclass
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -74,7 +75,7 @@ class GeminiConfig:
         )
 
 
-def get_generation_config(config: GeminiConfig) -> dict:
+def get_generation_config(config: GeminiConfig) -> dict[str, Any]:
     """
     Get generation configuration for Gemini model.
 
@@ -88,7 +89,7 @@ def get_generation_config(config: GeminiConfig) -> dict:
     }
 
 
-def get_safety_settings(config: GeminiConfig) -> list:
+def get_safety_settings(config: GeminiConfig) -> list[Any]:
     """
     Get safety settings for Gemini model.
 

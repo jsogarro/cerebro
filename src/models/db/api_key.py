@@ -128,7 +128,7 @@ class APIKey(BaseModel):
         name: str,
         permissions: list[str],
         expires_in_days: int | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> tuple["APIKey", str]:
         """
         Create a new API key.
@@ -274,7 +274,7 @@ class APIKey(BaseModel):
         delta = self.expires_at - datetime.utcnow()
         return max(0, delta.days)
 
-    def to_dict(self, include_sensitive: bool = False) -> dict:
+    def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:
         """
         Convert to dictionary.
 
@@ -306,7 +306,8 @@ class APIKey(BaseModel):
             data["use_count"] = self.use_count
             data["last_used_ip"] = self.last_used_ip
             data["rate_limit"] = self.rate_limit
-            data["allowed_ips"] = self.allowed_ips
+            allowed_ips_value: Any = self.allowed_ips
+            data["allowed_ips"] = allowed_ips_value
             data["revoked_at"] = (
                 self.revoked_at.isoformat() if self.revoked_at else None
             )

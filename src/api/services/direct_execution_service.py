@@ -16,18 +16,19 @@ Key Features:
 import asyncio
 import logging
 import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
+from typing import Any, cast
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
-from ...ai_brain.router.masr import MASRouter
-from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
-from ...agents.supervisors.supervisor_factory import SupervisorFactory
+
+from ...agents.models import AgentTask
 from ...agents.supervisors.research_supervisor import ResearchSupervisor
-from ...agents.models import AgentTask, AgentResult
+from ...agents.supervisors.supervisor_factory import SupervisorFactory
+from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
+from ...ai_brain.router.masr import MASRouter
 from ...models.research_project import ResearchProject
 from ..websocket.event_publisher import EventPublisher
 
@@ -45,36 +46,24 @@ class ExecutionStatus:
     current_phase: str = "initialization"
     
     # Results
-    agent_results: Dict[str, Any] = None
-    quality_scores: Dict[str, float] = None
-    final_output: Optional[Dict[str, Any]] = None
-    
+    agent_results: dict[str, Any] = field(default_factory=dict)
+    quality_scores: dict[str, float] = field(default_factory=dict)
+    final_output: dict[str, Any] | None = None
+
     # Timing
-    started_at: datetime = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime = field(default_factory=datetime.utcnow)
+    completed_at: datetime | None = None
     execution_time_seconds: float = 0.0
-    
+
     # MASR routing information
-    routing_decision: Optional[Dict[str, Any]] = None
-    supervisor_type: Optional[str] = None
+    routing_decision: dict[str, Any] | None = None
+    supervisor_type: str | None = None
     workers_used: int = 0
-    
+
     # Error handling
-    errors: List[str] = None
-    warnings: List[str] = None
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     retry_count: int = 0
-    
-    def __post_init__(self):
-        if self.agent_results is None:
-            self.agent_results = {}
-        if self.quality_scores is None:
-            self.quality_scores = {}
-        if self.errors is None:
-            self.errors = []
-        if self.warnings is None:
-            self.warnings = []
-        if self.started_at is None:
-            self.started_at = datetime.now()
 
 
 class DirectExecutionService:
@@ -87,10 +76,10 @@ class DirectExecutionService:
     
     def __init__(
         self,
-        masr_router: Optional[MASRouter] = None,
-        supervisor_bridge: Optional[MASRSupervisorBridge] = None,
-        supervisor_factory: Optional[SupervisorFactory] = None,
-        event_publisher: Optional[EventPublisher] = None,
+        masr_router: MASRouter | None = None,
+        supervisor_bridge: MASRSupervisorBridge | None = None,
+        supervisor_factory: SupervisorFactory | None = None,
+        event_publisher: EventPublisher | None = None,
     ):
         """Initialize direct execution service."""
         
@@ -101,7 +90,7 @@ class DirectExecutionService:
         self.event_publisher = event_publisher
         
         # Execution tracking
-        self.active_executions: Dict[str, ExecutionStatus] = {}
+        self.active_executions: dict[str, ExecutionStatus] = {}
         
         # Service configuration
         self.max_concurrent_executions = 50
@@ -121,7 +110,7 @@ class DirectExecutionService:
     async def start_research_execution(
         self, 
         project: ResearchProject,
-        context: Optional[Dict[str, Any]] = None
+        context: dict[str, Any] | None = None
     ) -> str:
         """
         Start direct research execution using MASR routing.
@@ -143,7 +132,7 @@ class DirectExecutionService:
         # Create execution status
         execution_status = ExecutionStatus(
             execution_id=execution_id,
-            project_id=project.id,
+            project_id=str(project.id),
             status="pending",
             current_phase="initialization"
         )
@@ -167,7 +156,7 @@ class DirectExecutionService:
         self,
         project: ResearchProject,
         execution_status: ExecutionStatus,
-        context: Optional[Dict[str, Any]] = None
+        context: dict[str, Any] | None = None
     ) -> None:
         """
         Execute research workflow with retry logic.
@@ -188,8 +177,8 @@ class DirectExecutionService:
             logger.info(f"Getting MASR routing for project {project.id}")
             
             routing_context = {
-                "query": project.query,
-                "domains": project.domains,
+                "query": project.query.text,
+                "domains": project.query.domains,
                 "project_id": project.id,
                 "user_id": str(project.user_id) if project.user_id else None,
             }
@@ -198,7 +187,7 @@ class DirectExecutionService:
                 routing_context.update(context)
             
             routing_decision = await self.masr_router.route(
-                query=project.query,
+                query=project.query.text,
                 context=routing_context
             )
             
@@ -216,28 +205,29 @@ class DirectExecutionService:
                 id=f"research_{project.id}_{execution_status.execution_id}",
                 agent_type="research",
                 input_data={
-                    "query": project.query,
-                    "domains": project.domains,
+                    "query": project.query.text,
+                    "domains": project.query.domains,
                     "context": routing_context,
                     "project_data": {
                         "title": project.title,
-                        "description": project.description,
-                        "scope": project.scope,
-                        "query": project.query.__dict__ if hasattr(project.query, '__dict__') else {},
+                        "scope": project.scope.model_dump() if project.scope else {},
+                        "query": project.query.model_dump(),
                     },
-                    "routing_decision": routing_decision.__dict__,
+                    "routing_decision": asdict(routing_decision),
                 }
             )
             
             # Get supervisor registry
-            supervisor_registry = {
-                "research": ResearchSupervisor
-            }
-            
+            from ...agents.supervisors.base_supervisor import BaseSupervisor
+            supervisor_registry: dict[str, type[BaseSupervisor]] = cast(
+                dict[str, type[BaseSupervisor]],
+                {"research": ResearchSupervisor}
+            )
+
             execution_status.current_phase = "hierarchical_coordination"
             execution_status.progress_percentage = 40.0
             await self._publish_progress_update(execution_status)
-            
+
             # Execute via MASR-Supervisor bridge
             supervisor_result = await self.supervisor_bridge.execute_routing_decision(
                 routing_decision=routing_decision,
@@ -315,11 +305,11 @@ class DirectExecutionService:
             # Final progress update
             await self._publish_progress_update(execution_status)
     
-    async def get_execution_status(self, execution_id: str) -> Optional[ExecutionStatus]:
+    async def get_execution_status(self, execution_id: str) -> ExecutionStatus | None:
         """Get current status of execution."""
         return self.active_executions.get(execution_id)
     
-    async def get_execution_results(self, execution_id: str) -> Optional[Dict[str, Any]]:
+    async def get_execution_results(self, execution_id: str) -> dict[str, Any] | None:
         """Get results of completed execution."""
         
         execution = self.active_executions.get(execution_id)
@@ -351,7 +341,7 @@ class DirectExecutionService:
         
         return False
     
-    async def list_active_executions(self) -> List[ExecutionStatus]:
+    async def list_active_executions(self) -> list[ExecutionStatus]:
         """List all active executions."""
         return [
             execution for execution in self.active_executions.values()
@@ -412,7 +402,7 @@ class DirectExecutionService:
         except Exception as e:
             logger.warning(f"Failed to publish progress update: {e}")
     
-    async def get_service_stats(self) -> Dict[str, Any]:
+    async def get_service_stats(self) -> dict[str, Any]:
         """Get service statistics."""
         
         return {
@@ -437,60 +427,62 @@ class DirectExecutionService:
             }
         }
     
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """Perform health check on service components."""
-        
-        health = {
-            "status": "healthy",
-            "components": {},
-            "active_executions": len(self.active_executions),
-            "service_stats": self.execution_stats,
-        }
-        
+
+        components: dict[str, str] = {}
+
         # Check MASR router health
         if self.masr_router:
             try:
                 masr_health = await self.masr_router.health_check()
-                health["components"]["masr_router"] = masr_health.get("status", "unknown")
+                components["masr_router"] = str(masr_health.get("status", "unknown"))
             except Exception as e:
-                health["components"]["masr_router"] = f"unhealthy: {e}"
+                components["masr_router"] = f"unhealthy: {e}"
         else:
-            health["components"]["masr_router"] = "unavailable"
-        
+            components["masr_router"] = "unavailable"
+
         # Check supervisor bridge health
         if self.supervisor_bridge:
             try:
                 bridge_health = await self.supervisor_bridge.health_check()
-                health["components"]["supervisor_bridge"] = bridge_health.get("status", "unknown")
+                components["supervisor_bridge"] = str(bridge_health.get("status", "unknown"))
             except Exception as e:
-                health["components"]["supervisor_bridge"] = f"unhealthy: {e}"
+                components["supervisor_bridge"] = f"unhealthy: {e}"
         else:
-            health["components"]["supervisor_bridge"] = "unavailable"
-        
+            components["supervisor_bridge"] = "unavailable"
+
         # Check supervisor factory health
         if self.supervisor_factory:
             try:
                 factory_health = await self.supervisor_factory.health_check()
-                health["components"]["supervisor_factory"] = factory_health.get("status", "unknown")
+                components["supervisor_factory"] = str(factory_health.get("status", "unknown"))
             except Exception as e:
-                health["components"]["supervisor_factory"] = f"unhealthy: {e}"
+                components["supervisor_factory"] = f"unhealthy: {e}"
         else:
-            health["components"]["supervisor_factory"] = "unavailable"
-        
+            components["supervisor_factory"] = "unavailable"
+
         # Determine overall health
-        component_statuses = list(health["components"].values())
+        component_statuses = list(components.values())
         if all("healthy" in status for status in component_statuses):
-            health["status"] = "healthy"
+            overall_status = "healthy"
         elif any("unhealthy" in status for status in component_statuses):
-            health["status"] = "degraded"
+            overall_status = "degraded"
         else:
-            health["status"] = "unknown"
-        
+            overall_status = "unknown"
+
+        health = {
+            "status": overall_status,
+            "components": components,
+            "active_executions": len(self.active_executions),
+            "service_stats": self.execution_stats,
+        }
+
         return health
 
 
 # Legacy compatibility functions for migration
-async def create_research_plan(project_data: Dict[str, Any]) -> Dict[str, Any]:
+async def create_research_plan(project_data: dict[str, Any]) -> dict[str, Any]:
     """Legacy function for compatibility during migration."""
     logger.warning("Using legacy create_research_plan - should migrate to direct execution")
     
@@ -502,7 +494,7 @@ async def create_research_plan(project_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-async def execute_agent_task(agent_task_data: Dict[str, Any]) -> Dict[str, Any]:
+async def execute_agent_task(agent_task_data: dict[str, Any]) -> dict[str, Any]:
     """Legacy function for compatibility during migration."""
     logger.warning("Using legacy execute_agent_task - should use supervisor execution")
     
@@ -514,7 +506,7 @@ async def execute_agent_task(agent_task_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-async def aggregate_results(results_data: Dict[str, Any]) -> Dict[str, Any]:
+async def aggregate_results(results_data: dict[str, Any]) -> dict[str, Any]:
     """Legacy function for compatibility during migration."""
     logger.warning("Using legacy aggregate_results - handled by supervisors now")
     
@@ -527,7 +519,7 @@ async def aggregate_results(results_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # Global service instance (would be properly injected in production)
-_direct_execution_service: Optional[DirectExecutionService] = None
+_direct_execution_service: DirectExecutionService | None = None
 
 
 def get_direct_execution_service() -> DirectExecutionService:

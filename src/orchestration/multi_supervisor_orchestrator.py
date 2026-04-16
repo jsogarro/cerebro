@@ -402,14 +402,17 @@ class MultiSupervisorOrchestrator:
             if isinstance(result, Exception):
                 logger.error(f"Supervisor {supervisor_type} failed: {result}")
                 # Create failed result
+                from src.ai_brain.integration.masr_supervisor_bridge import (
+                    SupervisorExecutionStatus,
+                )
                 supervisor_results[supervisor_type] = SupervisorExecutionResult(
                     execution_id=f"failed_{supervisor_type}",
                     supervisor_type=supervisor_type,
                     domain=supervisor_type,
-                    status="failed",
+                    status=SupervisorExecutionStatus.FAILED,
                     errors=[str(result)],
                 )
-            else:
+            elif isinstance(result, SupervisorExecutionResult):
                 supervisor_results[supervisor_type] = result
         
         return supervisor_results
@@ -420,12 +423,15 @@ class MultiSupervisorOrchestrator:
         decomposition: dict[str, Any]
     ) -> dict[str, SupervisorExecutionResult]:
         """Execute supervisors sequentially."""
-        
+
         allocation = multi_state.supervisor_allocation
+        if allocation is None:
+            return {}
+
         all_supervisors = [allocation.primary_supervisor] + allocation.supporting_supervisors
-        
-        supervisor_results = {}
-        accumulated_context = {}
+
+        supervisor_results: dict[str, SupervisorExecutionResult] = {}
+        accumulated_context: dict[str, Any] = {}
         
         for supervisor_type in all_supervisors:
             # Create task with accumulated context from previous supervisors
@@ -460,17 +466,20 @@ class MultiSupervisorOrchestrator:
         decomposition: dict[str, Any]
     ) -> dict[str, SupervisorExecutionResult]:
         """Execute supervisors in pipeline mode with dependency handling."""
-        
+
         allocation = multi_state.supervisor_allocation
+        if allocation is None:
+            return {}
+
         dependencies = allocation.cross_domain_dependencies
-        
+
         # Build execution order based on dependencies
         execution_order = self._build_execution_order(
             [allocation.primary_supervisor] + allocation.supporting_supervisors,
             dependencies
         )
-        
-        supervisor_results = {}
+
+        supervisor_results: dict[str, SupervisorExecutionResult] = {}
         
         for supervisor_type in execution_order:
             # Collect inputs from dependencies
@@ -500,8 +509,11 @@ class MultiSupervisorOrchestrator:
         decomposition: dict[str, Any]
     ) -> dict[str, SupervisorExecutionResult]:
         """Execute supervisors in hierarchical mode with primary coordination."""
-        
+
         allocation = multi_state.supervisor_allocation
+        if allocation is None:
+            return {}
+
         primary_supervisor = allocation.primary_supervisor
         supporting_supervisors = allocation.supporting_supervisors
         
@@ -525,7 +537,7 @@ class MultiSupervisorOrchestrator:
             )
             
             for i, (supervisor_type, result) in enumerate(zip(supporting_tasks.keys(), results)):
-                if not isinstance(result, Exception):
+                if not isinstance(result, Exception) and isinstance(result, SupervisorExecutionResult):
                     supporting_results[supervisor_type] = result
         
         # Execute primary supervisor with supporting results as context
@@ -533,10 +545,11 @@ class MultiSupervisorOrchestrator:
         primary_task = self._create_supervisor_task(
             primary_supervisor, primary_sub_query, multi_state, decomposition
         )
-        primary_task.input_data["supporting_results"] = {
-            supervisor_type: result.agent_result.output if result.agent_result else {}
-            for supervisor_type, result in supporting_results.items()
-        }
+        if isinstance(supporting_results, dict):
+            primary_task.input_data["supporting_results"] = {
+                supervisor_type: result.agent_result.output if result.agent_result else {}
+                for supervisor_type, result in supporting_results.items()
+            }
         
         primary_result = await self._execute_single_supervisor(primary_supervisor, primary_task)
         
@@ -555,17 +568,22 @@ class MultiSupervisorOrchestrator:
     ) -> AgentTask:
         """Create agent task for supervisor execution."""
         
+        allocation = multi_state.supervisor_allocation
+        if allocation is None:
+            raise ValueError("Supervisor allocation is None")
+
+        from src.models.query import QueryDomain
         return AgentTask(
             id=f"multi_super_{supervisor_type}_{multi_state.query_id}",
             agent_type=supervisor_type,
             input_data={
                 "query": sub_query,
                 "original_query": multi_state.original_query,
-                "domains": [supervisor_type],
+                "domains": [QueryDomain(supervisor_type)],
                 "context": {
                     "multi_supervisor_orchestration": True,
-                    "primary_supervisor": multi_state.supervisor_allocation.primary_supervisor,
-                    "coordination_mode": multi_state.supervisor_allocation.coordination_mode.value,
+                    "primary_supervisor": allocation.primary_supervisor,
+                    "coordination_mode": allocation.coordination_mode.value,
                     "decomposition": decomposition,
                 }
             }
@@ -581,6 +599,10 @@ class MultiSupervisorOrchestrator:
             self.base_orchestrator._supervisor_bridge):
             
             # Create mock routing decision for supervisor execution
+            from src.models.query import QueryDomain
+
+            from ..ai_brain.models.model_spec import ModelSpec
+            from ..ai_brain.router.cost_optimizer import OptimizationResult
             from ..ai_brain.router.masr import (
                 AgentAllocation,
                 CollaborationMode,
@@ -591,7 +613,7 @@ class MultiSupervisorOrchestrator:
                 ComplexityFactors,
                 ComplexityLevel,
             )
-            
+
             mock_routing_decision = RoutingDecision(
                 query_id=task.id,
                 timestamp=datetime.now(),
@@ -599,14 +621,17 @@ class MultiSupervisorOrchestrator:
                     score=0.7,
                     level=ComplexityLevel.MODERATE,
                     factors=ComplexityFactors(),
-                    domains=[supervisor_type],
+                    domains=[QueryDomain(supervisor_type)],
                     subtask_count=3,
                     uncertainty=0.3,
                     reasoning_types=[],
                     recommended_agents={supervisor_type: 1},
                     estimated_tokens=HIGH_ESTIMATED_TOKENS,
                 ),
-                optimization_result=None,  # Would be populated in real implementation
+                optimization_result=OptimizationResult(
+                    primary_model=ModelSpec(model_id="gemini-pro", provider="google", capabilities=[], tier="standard", context_window=32000, cost_per_1k_input=0.0005, cost_per_1k_output=0.0015),
+                    reasoning="Mock optimization for supervisor"
+                ),
                 collaboration_mode=CollaborationMode.HIERARCHICAL,
                 agent_allocation=AgentAllocation(
                     supervisor_type=supervisor_type,
@@ -620,9 +645,13 @@ class MultiSupervisorOrchestrator:
             )
             
             # Get supervisor registry
-            supervisor_registry = {
-                supervisor_type: self.base_orchestrator._supervisor_factory.supervisor_registry[supervisor_type].supervisor_class
-            } if hasattr(self.base_orchestrator, '_supervisor_factory') and supervisor_type in self.base_orchestrator._supervisor_factory.supervisor_registry else {}
+            supervisor_registry = {}
+            if hasattr(self.base_orchestrator, '_supervisor_factory'):
+                factory = self.base_orchestrator._supervisor_factory
+                if factory is not None and hasattr(factory, 'supervisor_registry') and supervisor_type in factory.supervisor_registry:
+                    supervisor_registry = {
+                        supervisor_type: factory.supervisor_registry[supervisor_type].supervisor_class
+                    }
             
             if supervisor_registry:
                 # Execute via MASR-Supervisor bridge
@@ -633,11 +662,14 @@ class MultiSupervisorOrchestrator:
                 )
         
         # Fallback: simulate supervisor execution
+        from src.ai_brain.integration.masr_supervisor_bridge import (
+            SupervisorExecutionStatus,
+        )
         return SupervisorExecutionResult(
             execution_id=f"simulated_{supervisor_type}_{task.id}",
             supervisor_type=supervisor_type,
             domain=supervisor_type,
-            status="completed",
+            status=SupervisorExecutionStatus.COMPLETED,
             quality_score=0.85,
             consensus_score=0.9,
             execution_time_seconds=60.0,
@@ -695,8 +727,11 @@ class MultiSupervisorOrchestrator:
         self, query: str, context: dict[str, Any] | None
     ) -> WorkflowResult:
         """Delegate to base orchestrator for single-domain queries."""
-        
+
         # Extract required parameters for base orchestrator
+        if context is None:
+            context = {}
+
         project_id = context.get("project_id", f"delegated_{uuid.uuid4()}")
         domains = context.get("domains", ["research"])
         
@@ -728,21 +763,23 @@ class MultiSupervisorOrchestrator:
         
         base_health = await self.base_orchestrator.health_check()
         
-        multi_supervisor_health = {
+        multi_supervisor_components = {
             "query_decomposer": "healthy",
             "inter_supervisor_communicator": "healthy",
             "cross_domain_synthesizer": "healthy",
-            "coordination_modes": [mode.value for mode in SupervisorCoordinationMode],
         }
-        
+
         return {
             "status": "healthy",
-            "base_orchestrator": base_health,
-            "multi_supervisor_components": multi_supervisor_health,
-            "capabilities": {
+            "components": {
+                **base_health.get("components", {}),
+                **multi_supervisor_components,
+            },
+            "metrics": {
                 "max_concurrent_supervisors": self.max_concurrent_supervisors,
                 "coordination_timeout": self.coordination_timeout,
                 "cross_domain_synthesis": self.enable_cross_domain_synthesis,
+                "coordination_modes": [mode.value for mode in SupervisorCoordinationMode],
             }
         }
 

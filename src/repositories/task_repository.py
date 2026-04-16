@@ -292,7 +292,7 @@ class TaskRepository(BaseRepository[AgentTask]):
 
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return cast(int, result.rowcount)
+        return cast(int, getattr(result, "rowcount", 0))
 
     async def get_ready_tasks(self, project_id: UUID) -> list[AgentTask]:
         """
@@ -356,7 +356,7 @@ class TaskRepository(BaseRepository[AgentTask]):
 
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return cast(int, result.rowcount)
+        return cast(int, getattr(result, "rowcount", 0))
 
 
 __all__ = ["TaskRepository"]

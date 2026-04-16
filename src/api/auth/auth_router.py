@@ -28,7 +28,7 @@ from src.auth.models import (
 from src.auth.password_service import PasswordService
 from src.core.config import settings
 from src.middleware.auth_middleware import get_current_user
-from src.models.db.session import get_async_session
+from src.models.db.session import get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
 
@@ -69,7 +69,7 @@ async def get_password_service() -> PasswordService:
 async def register(
     request: RegisterRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_session),
     jwt_service: JWTService = Depends(get_jwt_service),
     password_service: PasswordService = Depends(get_password_service),
 ) -> AuthResponse:
@@ -157,7 +157,7 @@ async def register(
 async def login(
     request: LoginRequest,
     req: Request,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_session),
     jwt_service: JWTService = Depends(get_jwt_service),
     password_service: PasswordService = Depends(get_password_service),
 ) -> AuthResponse:
@@ -274,9 +274,9 @@ async def logout(
 async def forgot_password(
     request: PasswordResetRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_session),
     password_service: PasswordService = Depends(get_password_service),
-) -> dict:
+) -> dict[str, str]:
     """
     Request password reset.
 
@@ -307,9 +307,9 @@ async def forgot_password(
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
 async def reset_password(
     request: PasswordResetConfirm,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_session),
     password_service: PasswordService = Depends(get_password_service),
-) -> dict:
+) -> dict[str, str]:
     """
     Reset password with token.
 
@@ -379,9 +379,9 @@ async def reset_password(
 async def change_password(
     request: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_session),
     password_service: PasswordService = Depends(get_password_service),
-) -> dict:
+) -> dict[str, str]:
     """
     Change password for authenticated user.
 
@@ -444,8 +444,8 @@ async def change_password(
 @router.get("/verify-email", status_code=status.HTTP_200_OK)
 async def verify_email(
     token: str,
-    db: AsyncSession = Depends(get_async_session),
-) -> dict:
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
     """
     Verify email address with token.
 
@@ -472,7 +472,10 @@ async def get_sessions(
     return [
         SessionInfo(
             device_id=session.get("device_id"),
-            created_at=session.get("created_at"),
+            created_at=str(session.get("created_at")) if session.get("created_at") else "",
+            last_activity=session.get("last_activity"),
+            ip_address=session.get("ip_address"),
+            user_agent=session.get("user_agent"),
         )
         for session in sessions
     ]

@@ -9,14 +9,14 @@ Now supports dynamic model configuration loading from YAML files instead of
 hard-coded specifications.
 """
 
-import asyncio
 import logging
+import uuid
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, AsyncGenerator, TYPE_CHECKING
-import uuid
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from ..config.model_config_manager import ModelConfigManager
@@ -58,14 +58,14 @@ class ModelRequest:
 
     # Core request data
     prompt: str = ""
-    messages: List[Dict[str, str]] = field(default_factory=list)  # For chat models
-    system_prompt: Optional[str] = None
+    messages: list[dict[str, str]] = field(default_factory=list)  # For chat models
+    system_prompt: str | None = None
 
     # Generation parameters
     max_tokens: int = 1000
     temperature: float = 0.7
     top_p: float = 0.9
-    top_k: Optional[int] = None
+    top_k: int | None = None
 
     # Response configuration
     response_format: ResponseFormat = ResponseFormat.TEXT
@@ -73,7 +73,7 @@ class ModelRequest:
 
     # Context and constraints
     context_window_usage: float = 0.0  # Percentage of context window used
-    quality_requirements: Dict[str, Any] = field(default_factory=dict)
+    quality_requirements: dict[str, Any] = field(default_factory=dict)
 
     # Performance constraints
     timeout_seconds: int = 30
@@ -81,9 +81,9 @@ class ModelRequest:
     priority: str = "normal"  # low, normal, high, critical
 
     # Metadata
-    user_id: Optional[str] = None
-    session_id: Optional[str] = None
-    domain: Optional[str] = None
+    user_id: str | None = None
+    session_id: str | None = None
+    domain: str | None = None
     complexity_score: float = 0.5
 
 
@@ -98,7 +98,7 @@ class ModelResponse:
 
     # Core response data
     content: str = ""
-    structured_content: Optional[Dict[str, Any]] = None
+    structured_content: dict[str, Any] | None = None
 
     # Generation metadata
     model_name: str = ""
@@ -114,21 +114,21 @@ class ModelResponse:
 
     # Quality metrics
     confidence_score: float = 0.0
-    quality_indicators: Dict[str, float] = field(default_factory=dict)
+    quality_indicators: dict[str, float] = field(default_factory=dict)
 
     # Status and error handling
     success: bool = True
-    error_message: Optional[str] = None
-    error_type: Optional[str] = None
+    error_message: str | None = None
+    error_type: str | None = None
     retry_count: int = 0
 
     # Cost information
     cost_estimate: float = 0.0
-    cost_breakdown: Dict[str, float] = field(default_factory=dict)
+    cost_breakdown: dict[str, float] = field(default_factory=dict)
 
     # Additional metadata
     finish_reason: str = "completed"  # completed, length, stop, error
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -150,14 +150,14 @@ class ProviderHealthStatus:
     available_capacity: float = 1.0
 
     # Error information
-    recent_errors: List[str] = field(default_factory=list)
-    last_error: Optional[str] = None
+    recent_errors: list[str] = field(default_factory=list)
+    last_error: str | None = None
     error_rate: float = 0.0
 
     # Provider-specific status
     api_status: str = "operational"
-    rate_limit_remaining: Optional[int] = None
-    rate_limit_reset: Optional[datetime] = None
+    rate_limit_remaining: int | None = None
+    rate_limit_reset: datetime | None = None
 
 
 class BaseProvider(ABC):
@@ -173,7 +173,7 @@ class BaseProvider(ABC):
 
     def __init__(
         self,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         model_config_manager: Optional["ModelConfigManager"] = None,
     ):
         """
@@ -188,13 +188,13 @@ class BaseProvider(ABC):
         self.provider_name = self._get_provider_name()
 
         # Dynamic configuration support
-        self._provider_config: Optional["ProviderConfiguration"] = None
-        self._model_specs: Dict[str, "ModelSpecification"] = {}
+        self._provider_config: ProviderConfiguration | None = None
+        self._model_specs: dict[str, ModelSpecification] = {}
         self._config_loaded = False
 
         # Legacy support - will be populated from configuration
-        self.supported_capabilities = []
-        self.supported_models = []
+        self.supported_capabilities: list[ModelCapability] = []
+        self.supported_models: list[str] = []
 
         # Performance tracking
         self.request_count = 0
@@ -291,14 +291,14 @@ class BaseProvider(ABC):
             self.supported_capabilities = self._get_supported_capabilities_legacy()
             self.supported_models = self._get_supported_models_legacy()
 
-    def _get_supported_capabilities_legacy(self) -> List[ModelCapability]:
+    def _get_supported_capabilities_legacy(self) -> list[ModelCapability]:
         """
         Legacy method for hard-coded capabilities.
         Should be implemented by subclasses for backward compatibility.
         """
         return []
 
-    def _get_supported_models_legacy(self) -> List[str]:
+    def _get_supported_models_legacy(self) -> list[str]:
         """
         Legacy method for hard-coded models.
         Should be implemented by subclasses for backward compatibility.
@@ -307,7 +307,7 @@ class BaseProvider(ABC):
 
     @abstractmethod
     async def generate(
-        self, request: ModelRequest, model_name: Optional[str] = None
+        self, request: ModelRequest, model_name: str | None = None
     ) -> ModelResponse:
         """
         Generate a response using the specified model.
@@ -322,7 +322,7 @@ class BaseProvider(ABC):
         pass
 
     async def stream(
-        self, request: ModelRequest, model_name: Optional[str] = None
+        self, request: ModelRequest, model_name: str | None = None
     ) -> AsyncGenerator[str, None]:
         """
         Stream a response using the specified model.
@@ -386,7 +386,7 @@ class BaseProvider(ABC):
         """Check if this provider supports a specific model."""
         return model_name in self.supported_models
 
-    def get_model_info(self, model_name: str) -> Optional[Dict[str, Any]]:
+    def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get information about a specific model."""
         if not self.supports_model(model_name):
             return None
@@ -518,7 +518,7 @@ class BaseProvider(ABC):
 
         return True
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get provider performance metrics."""
         return {
             "provider": self.provider_name,
@@ -533,9 +533,9 @@ class BaseProvider(ABC):
 
 __all__ = [
     "BaseProvider",
+    "ModelCapability",
     "ModelRequest",
     "ModelResponse",
     "ProviderHealthStatus",
-    "ModelCapability",
     "ResponseFormat",
 ]

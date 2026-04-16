@@ -10,7 +10,7 @@ import asyncio
 import logging
 import uuid
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 from temporalio import activity, workflow
 from temporalio.client import Client as TemporalClient
@@ -50,13 +50,13 @@ class TemporalBridge:
         """
         self.temporal_client = temporal_client
         self.orchestrator = orchestrator or ResearchOrchestrator()
-        self._activity_functions = {}
-        self._workflow_mappings = {}
+        self._activity_functions: dict[str, Any] = {}
+        self._workflow_mappings: dict[str, Any] = {}
 
         # Register activity functions
         self._register_activities()
 
-    def _register_activities(self):
+    def _register_activities(self) -> None:
         """Register LangGraph nodes as Temporal activities."""
         # Map LangGraph nodes to Temporal activities
         from src.orchestration.nodes import (
@@ -81,7 +81,7 @@ class TemporalBridge:
             ),
         }
 
-    def _wrap_as_activity(self, node_func):
+    def _wrap_as_activity(self, node_func: Any) -> Any:
         """
         Wrap a LangGraph node function as a Temporal activity.
 
@@ -109,7 +109,7 @@ class TemporalBridge:
                 logger.error(f"Activity execution failed: {e}")
                 raise
 
-        return temporal_activity
+        return cast(Any, temporal_activity)
 
     def _state_to_dict(self, state: ResearchState) -> dict[str, Any]:
         """
@@ -141,7 +141,16 @@ class TemporalBridge:
                 }
                 for k, v in state.agent_tasks.items()
             },
-            "agent_results": {k: v.to_dict() for k, v in state.agent_results.items()},
+            "agent_results": {
+                k: {
+                    "task_id": v.task_id,
+                    "status": v.status,
+                    "output": v.output,
+                    "confidence": v.confidence,
+                    "execution_time": v.execution_time,
+                    "metadata": v.metadata,
+                } for k, v in state.agent_results.items()
+            },
             "completed_agents": list(state.completed_agents),
             "failed_agents": list(state.failed_agents),
             "pending_agents": list(state.pending_agents),
@@ -245,7 +254,7 @@ class TemporalBridge:
         # Wait for result
         result = await handle.result()
 
-        return result
+        return cast(dict[str, Any], result)
 
     async def run_temporal_in_langgraph(self, state: ResearchState) -> ResearchState:
         """
@@ -390,7 +399,7 @@ class LangGraphTemporalWorkflow:
 
         workflow.logger.info("LangGraph orchestration complete")
 
-        return result
+        return cast(dict[str, Any], result)
 
 
 @activity.defn(name="langgraph_orchestration_activity")
@@ -531,7 +540,12 @@ class HybridWorkflow:
             success=result.get("success", False),
             workflow_id=result.get("workflow_id", ""),
             project_id=project_id,
-            final_state=None,  # Would need to reconstruct
+            final_state=ResearchState(
+                workflow_id=result.get("workflow_id", ""),
+                project_id=project_id,
+                query="",
+                domains=[],
+            ),
             report=result.get("report"),
             outputs=result.get("outputs"),
             quality_score=result.get("quality_score", 0.0),
@@ -592,7 +606,12 @@ class HybridWorkflow:
                 success=False,
                 workflow_id=f"hybrid-{project_id}",
                 project_id=project_id,
-                final_state=None,
+                final_state=ResearchState(
+                    workflow_id=f"hybrid-{project_id}",
+                    project_id=project_id,
+                    query=query,
+                    domains=domains,
+                ),
                 errors=["Both orchestration approaches failed"],
             )
 

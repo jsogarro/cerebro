@@ -5,9 +5,10 @@ Manages caching of routing decisions to improve response time and reduce
 redundant complexity analysis and optimization for similar queries.
 """
 
+from __future__ import annotations
+
 import hashlib
-from typing import Dict, Optional, TYPE_CHECKING
-from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .masr import RoutingDecision
@@ -37,11 +38,11 @@ class RoutingCacheManager:
         self.enabled = enabled
         self.max_size = max_size
         self.eviction_batch_size = eviction_batch_size
-        self.decision_cache: Dict[str, RoutingDecision] = {}
+        self.decision_cache: dict[str, RoutingDecision] = {}
 
     def check_cache(
-        self, query: str, context: Optional[Dict]
-    ) -> Optional["RoutingDecision"]:
+        self, query: str, context: dict[str, Any] | None
+    ) -> RoutingDecision | None:
         """
         Check if we have a cached routing decision.
 
@@ -59,8 +60,8 @@ class RoutingCacheManager:
         return self.decision_cache.get(cache_key)
 
     def cache_decision(
-        self, query: str, context: Optional[Dict], decision: "RoutingDecision"
-    ):
+        self, query: str, context: dict[str, Any] | None, decision: RoutingDecision
+    ) -> None:
         """
         Cache a routing decision.
 
@@ -79,7 +80,7 @@ class RoutingCacheManager:
         if len(self.decision_cache) > self.max_size:
             self._evict_oldest_entries()
 
-    def _generate_cache_key(self, query: str, context: Optional[Dict]) -> str:
+    def _generate_cache_key(self, query: str, context: dict[str, Any] | None) -> str:
         """
         Generate a cache key for query and context.
 
@@ -100,7 +101,7 @@ class RoutingCacheManager:
         cache_string = str(sorted(cache_data.items()))
         return hashlib.md5(cache_string.encode()).hexdigest()
 
-    def _evict_oldest_entries(self):
+    def _evict_oldest_entries(self) -> None:
         """Remove oldest entries from cache based on timestamp."""
         oldest_keys = sorted(
             self.decision_cache.keys(),
@@ -110,7 +111,7 @@ class RoutingCacheManager:
         for key in oldest_keys:
             del self.decision_cache[key]
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all cached decisions."""
         self.decision_cache.clear()
 

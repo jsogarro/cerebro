@@ -5,6 +5,7 @@ Implements domain models following TDD principles.
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -86,14 +87,14 @@ class AgentTask(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error_message: str | None = None
-    result: dict | None = None
+    result: dict[str, Any] | None = None
 
     def start(self) -> None:
         """Mark task as started."""
         self.status = "in_progress"
         self.started_at = datetime.utcnow()
 
-    def complete(self, result: dict | None = None) -> None:
+    def complete(self, result: dict[str, Any] | None = None) -> None:
         """Mark task as completed."""
         self.status = "completed"
         self.completed_at = datetime.utcnow()
@@ -140,8 +141,8 @@ class ResearchProject(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error_message: str | None = None
-    results: dict | None = None
-    metadata: dict = Field(default_factory=dict)
+    results: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def start_planning(self) -> None:
         """Transition to planning status."""
@@ -158,7 +159,7 @@ class ResearchProject(BaseModel):
         self.started_at = datetime.utcnow()
         self.updated_at = datetime.utcnow()
 
-    def complete(self, results: dict | None = None) -> None:
+    def complete(self, results: dict[str, Any] | None = None) -> None:
         """Mark project as completed."""
         if self.status != ResearchStatus.IN_PROGRESS:
             raise ValueError(f"Cannot complete project from status: {self.status}")
@@ -229,7 +230,7 @@ class ResearchProgress(BaseModel):
     progress_percentage: float = 0.0
     estimated_time_remaining_seconds: int | None = None
     current_agent: str | None = None
-    current_agent_activities: list[dict] = Field(default_factory=list)
+    current_agent_activities: list[dict[str, Any]] = Field(default_factory=list)
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
     def update_from_tasks(self, tasks: list[AgentTask]) -> None:

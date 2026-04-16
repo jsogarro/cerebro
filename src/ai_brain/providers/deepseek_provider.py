@@ -202,6 +202,9 @@ class DeepSeekProvider(BaseProvider):
         payload = self._build_request_payload(request, model_name)
         payload["stream"] = True
 
+        if not self.client:
+            raise ValueError("HTTP client not initialized")
+
         try:
             async with self.client.stream(
                 "POST",
@@ -211,7 +214,8 @@ class DeepSeekProvider(BaseProvider):
             ) as response:
 
                 if response.status_code != 200:
-                    error_text = await response.aread()
+                    error_bytes = await response.aread()
+                    error_text = error_bytes.decode("utf-8")
                     raise Exception(f"API error: {response.status_code} - {error_text}")
 
                 async for line in response.aiter_lines():
@@ -222,7 +226,7 @@ class DeepSeekProvider(BaseProvider):
                             break
 
                         try:
-                            chunk = deserialize(data)
+                            chunk = json.loads(data)
                             delta = chunk.get("choices", [{}])[0].get("delta", {})
                             content = delta.get("content", "")
 
@@ -252,13 +256,17 @@ class DeepSeekProvider(BaseProvider):
         # Get max tokens from configuration or legacy specs
         max_tokens = request.max_tokens
         if self._config_loaded and model_name in self._model_specs:
-            configured_max = self._model_specs[model_name].max_output_tokens
+            configured_max: int = self._model_specs[model_name].max_output_tokens
             max_tokens = min(request.max_tokens, configured_max)
         else:
             # Fallback to legacy specs
-            legacy_max = self._legacy_model_specs.get(model_name, {}).get(
+            legacy_max_obj = self._legacy_model_specs.get(model_name, {}).get(
                 "max_output_tokens", 8000
             )
+            if isinstance(legacy_max_obj, int):
+                legacy_max = legacy_max_obj
+            else:
+                legacy_max = 8000
             max_tokens = min(request.max_tokens, legacy_max)
 
         # Build payload
@@ -288,6 +296,9 @@ class DeepSeekProvider(BaseProvider):
     async def _make_api_request(self, payload: dict[str, Any]) -> httpx.Response:
         """Make API request to DeepSeek."""
 
+        if not self.client:
+            raise ValueError("HTTP client not initialized")
+
         response = await self.client.post(
             f"{self.api_endpoint}/chat/completions",
             headers=self._get_headers(),
@@ -295,7 +306,8 @@ class DeepSeekProvider(BaseProvider):
         )
 
         if response.status_code != 200:
-            error_detail = await response.aread()
+            error_bytes = await response.aread()
+            error_detail = error_bytes.decode("utf-8")
             raise Exception(
                 f"DeepSeek API error: {response.status_code} - {error_detail}"
             )
@@ -341,7 +353,7 @@ class DeepSeekProvider(BaseProvider):
         structured_content = None
         if request.response_format == ResponseFormat.JSON:
             try:
-                structured_content = deserialize(content)
+                structured_content = json.loads(content)
             except json.JSONDecodeError:
                 logger.warning("Failed to parse JSON response")
 
@@ -461,16 +473,20 @@ class DeepSeekProvider(BaseProvider):
         if not self.supports_model(model_name):
             return None
 
-        spec = self.model_specs.get(model_name, {})
+        spec_obj = self._model_specs.get(model_name) if self._config_loaded else None
+        if spec_obj is None:
+            spec_dict = self._legacy_model_specs.get(model_name, {})
+        else:
+            spec_dict = None
 
         return {
             "name": model_name,
             "provider": self.provider_name,
             "capabilities": self.supported_capabilities,
-            "context_window": spec.get("context_window"),
-            "cost_per_1k_tokens": spec.get("cost_per_1k_tokens"),
-            "max_output_tokens": spec.get("max_output_tokens"),
-            "strengths": spec.get("strengths", []),
+            "context_window": spec_dict.get("context_window") if spec_dict else None,
+            "cost_per_1k_tokens": spec_dict.get("cost_per_1k_tokens") if spec_dict else None,
+            "max_output_tokens": spec_dict.get("max_output_tokens") if spec_dict else None,
+            "strengths": spec_dict.get("strengths", []) if spec_dict else [],
             "best_for": [
                 "Mathematical reasoning",
                 "Complex analysis",
@@ -487,7 +503,8 @@ class DeepSeekProvider(BaseProvider):
 
     async def close(self) -> None:
         """Clean up resources."""
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()
 
 
 __all__ = ["DeepSeekProvider"]

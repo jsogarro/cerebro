@@ -11,31 +11,28 @@ Implements:
 - Agent capability discovery and performance monitoring
 """
 
-import logging
 import statistics
 from datetime import datetime
-from typing import List, Dict, Any
-from uuid import UUID
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from structlog import get_logger
 
 from ...models.agent_api_models import (
-    AgentType,
     AgentExecutionRequest,
     AgentExecutionResponse,
-    ChainOfAgentsRequest,
-    ChainOfAgentsResponse,
-    MixtureOfAgentsRequest,
-    MixtureOfAgentsResponse,
-    AgentValidationRequest,
-    AgentValidationResponse,
+    AgentHealthStatus,
     AgentInfo,
     AgentListResponse,
     AgentMetricsResponse,
-    AgentHealthStatus,
+    AgentType,
+    AgentValidationRequest,
+    AgentValidationResponse,
+    ChainOfAgentsRequest,
+    ChainOfAgentsResponse,
     ExecutionMode,
+    MixtureOfAgentsRequest,
+    MixtureOfAgentsResponse,
 )
 from ..services.agent_execution_service import get_agent_execution_service
 
@@ -136,7 +133,7 @@ async def execute_agent(
         response = await service.execute_single_agent(agent_type, request)
         
         logger.info(
-            f"Agent execution completed",
+            "Agent execution completed",
             agent_type=agent_type.value,
             execution_id=response.execution_id,
             status=response.status,
@@ -150,7 +147,7 @@ async def execute_agent(
         logger.error(f"Agent execution failed: {agent_type.value} - {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent execution failed: {str(e)}"
+            detail=f"Agent execution failed: {e!s}"
         )
 
 
@@ -173,7 +170,7 @@ async def execute_chain_of_agents(request: ChainOfAgentsRequest) -> ChainOfAgent
         response = await service.execute_chain_of_agents(request)
         
         logger.info(
-            f"Chain-of-Agents completed",
+            "Chain-of-Agents completed",
             execution_id=response.execution_id,
             agent_chain=[a.value for a in response.agent_chain],
             status=response.status,
@@ -188,7 +185,7 @@ async def execute_chain_of_agents(request: ChainOfAgentsRequest) -> ChainOfAgent
         logger.error(f"Chain-of-Agents execution failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Chain execution failed: {str(e)}"
+            detail=f"Chain execution failed: {e!s}"
         )
 
 
@@ -211,7 +208,7 @@ async def execute_mixture_of_agents(request: MixtureOfAgentsRequest) -> MixtureO
         response = await service.execute_mixture_of_agents(request)
         
         logger.info(
-            f"Mixture-of-Agents completed",
+            "Mixture-of-Agents completed",
             execution_id=response.execution_id,
             agent_types=[a.value for a in response.agent_types],
             status=response.status,
@@ -226,7 +223,7 @@ async def execute_mixture_of_agents(request: MixtureOfAgentsRequest) -> MixtureO
         logger.error(f"Mixture-of-Agents execution failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Mixture execution failed: {str(e)}"
+            detail=f"Mixture execution failed: {e!s}"
         )
 
 
@@ -336,7 +333,7 @@ async def get_agent_health(agent_type: AgentType) -> AgentHealthStatus:
 
 
 @router.get("/system/stats")
-async def get_system_stats() -> Dict[str, Any]:
+async def get_system_stats() -> dict[str, Any]:
     """
     Get comprehensive system statistics.
     
@@ -358,7 +355,7 @@ async def get_system_stats() -> Dict[str, Any]:
 
 
 @router.get("/executions/active")
-async def get_active_executions() -> Dict[str, Any]:
+async def get_active_executions() -> dict[str, Any]:
     """
     Get information about currently active agent executions.
     
@@ -400,7 +397,7 @@ async def get_active_executions() -> Dict[str, Any]:
 async def literature_search(
     query: str = Query(..., min_length=1, max_length=500),
     max_sources: int = Query(25, ge=5, le=100),
-    domains: List[str] = Query(default=[]),
+    domains: list[str] = Query(default=[]),
 ) -> AgentExecutionResponse:
     """
     Optimized literature search endpoint.
@@ -413,7 +410,9 @@ async def literature_search(
         parameters={
             "max_sources": max_sources,
             "domains": domains,
-        }
+        },
+        user_id=None,
+        session_id=None,
     )
     
     return await execute_agent(AgentType.LITERATURE_REVIEW, request, BackgroundTasks())
@@ -421,7 +420,7 @@ async def literature_search(
 
 @router.post("/citation/format", response_model=AgentExecutionResponse)
 async def format_citations(
-    sources: List[str] = Query(..., min_items=1),
+    sources: list[str] = Query(..., min_items=1),
     style: str = Query("APA", regex="^(APA|MLA|Chicago)$"),
 ) -> AgentExecutionResponse:
     """
@@ -434,7 +433,9 @@ async def format_citations(
         parameters={
             "sources": sources,
             "citation_style": style,
-        }
+        },
+        user_id=None,
+        session_id=None,
     )
     
     return await execute_agent(AgentType.CITATION, request, BackgroundTasks())
@@ -442,7 +443,7 @@ async def format_citations(
 
 @router.post("/synthesis/combine", response_model=AgentExecutionResponse)
 async def synthesize_findings(
-    findings: List[Dict[str, Any]] = Query(..., min_items=2),
+    findings: list[dict[str, Any]] = Query(..., min_items=2),
     synthesis_focus: str = Query("comprehensive", regex="^(comprehensive|comparative|thematic)$"),
 ) -> AgentExecutionResponse:
     """
@@ -455,7 +456,9 @@ async def synthesize_findings(
         parameters={
             "findings": findings,
             "synthesis_focus": synthesis_focus,
-        }
+        },
+        user_id=None,
+        session_id=None,
     )
     
     return await execute_agent(AgentType.SYNTHESIS, request, BackgroundTasks())
@@ -466,7 +469,7 @@ async def synthesize_findings(
 @router.post("/workflows/literature-analysis", response_model=ChainOfAgentsResponse)
 async def literature_analysis_workflow(
     query: str = Query(..., min_length=10),
-    domains: List[str] = Query(default=[]),
+    domains: list[str] = Query(default=[]),
     max_sources: int = Query(25, ge=10, le=100),
 ) -> ChainOfAgentsResponse:
     """
@@ -496,7 +499,7 @@ async def literature_analysis_workflow(
 @router.post("/workflows/comprehensive-research", response_model=MixtureOfAgentsResponse)
 async def comprehensive_research_workflow(
     query: str = Query(..., min_length=10),
-    domains: List[str] = Query(default=[]),
+    domains: list[str] = Query(default=[]),
     analysis_depth: str = Query("comprehensive", regex="^(basic|comprehensive|exhaustive)$"),
 ) -> MixtureOfAgentsResponse:
     """
@@ -533,7 +536,7 @@ async def comprehensive_research_workflow(
 # System monitoring endpoints
 
 @router.get("/health/summary")
-async def get_agents_health_summary() -> Dict[str, Any]:
+async def get_agents_health_summary() -> dict[str, Any]:
     """Get health summary for all agents."""
     
     try:
@@ -582,7 +585,7 @@ async def get_agents_health_summary() -> Dict[str, Any]:
 async def compare_agent_performance(
     metric: str = Query("quality_score", regex="^(quality_score|execution_time|success_rate|cost_efficiency)$"),
     time_period_hours: int = Query(24, ge=1, le=168),  # 1 hour to 1 week
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Compare performance across all agent types.
     

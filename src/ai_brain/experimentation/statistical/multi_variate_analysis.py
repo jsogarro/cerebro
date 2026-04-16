@@ -122,9 +122,9 @@ class ParetoSolution:
 @dataclass
 class MultiVariateResult:
     """Results from multi-variate analysis."""
-    
+
     pareto_frontier: list[ParetoSolution]
-    optimal_solution: ParetoSolution
+    optimal_solution: ParetoSolution | None
     interaction_effects: list[InteractionEffect]
     correlation_matrix: pd.DataFrame
     component_importance: dict[str, float]
@@ -158,16 +158,16 @@ class MultiVariateAnalyzer:
         self.optimization_objective = optimization_objective
         
         # Storage for analysis results
-        self.solutions = []
+        self.solutions: list[ParetoSolution] = []
         self.interaction_matrix = None
         self.component_graph = nx.DiGraph()
-        
+
         # Optimization state
-        self.best_solutions = []
+        self.best_solutions: list[ParetoSolution] = []
         self.iteration_count = 0
     
     async def analyze_system(self,
-                            evaluation_function: Callable,
+                            evaluation_function: Callable[..., Any],
                             parameter_bounds: dict[str, tuple[float, float]],
                             n_iterations: int = 100,
                             population_size: int = 50) -> MultiVariateResult:
@@ -232,7 +232,7 @@ class MultiVariateAnalyzer:
         )
     
     async def _find_pareto_frontier(self,
-                                   evaluation_function: Callable,
+                                   evaluation_function: Callable[..., Any],
                                    parameter_bounds: dict[str, tuple[float, float]],
                                    n_iterations: int,
                                    population_size: int) -> list[ParetoSolution]:
@@ -319,18 +319,18 @@ class MultiVariateAnalyzer:
         # Assign remaining solutions to fronts
         front_idx = 0
         while front_idx < len(fronts) and fronts[front_idx]:
-            next_front = []
+            next_front: list[ParetoSolution] = []
             for sol in fronts[front_idx]:
                 # Process dominated solutions
                 pass  # Simplified for brevity
-            
+
             if next_front:
                 fronts.append(next_front)
             front_idx += 1
-        
+
         return fronts
     
-    def _assign_crowding_distance(self, front: list[ParetoSolution]):
+    def _assign_crowding_distance(self, front: list[ParetoSolution]) -> None:
         """Assign crowding distance to solutions in a front."""
         n = len(front)
         if n == 0:
@@ -363,9 +363,9 @@ class MultiVariateAnalyzer:
                                    solutions: list[ParetoSolution]) -> list[InteractionEffect]:
         """Analyze interaction effects between system components."""
         interactions = []
-        
+
         # Extract component metrics
-        component_metrics = {}
+        component_metrics: dict[str, dict[str, list[float]]] = {}
         for sol in solutions:
             for metric_name, value in sol.metrics.items():
                 if metric_name in self.metrics:
@@ -461,8 +461,8 @@ class MultiVariateAnalyzer:
         
         return importance
     
-    def _select_optimal_solution(self, 
-                                pareto_frontier: list[ParetoSolution]) -> ParetoSolution:
+    def _select_optimal_solution(self,
+                                pareto_frontier: list[ParetoSolution]) -> ParetoSolution | None:
         """Select optimal solution from Pareto frontier."""
         if not pareto_frontier:
             return None
@@ -494,16 +494,19 @@ class MultiVariateAnalyzer:
         return best_solution
     
     async def _sensitivity_analysis(self,
-                                   solution: ParetoSolution,
-                                   evaluation_function: Callable,
+                                   solution: ParetoSolution | None,
+                                   evaluation_function: Callable[..., Any],
                                    parameter_bounds: dict[str, tuple[float, float]],
                                    n_samples: int = 100) -> dict[str, dict[str, float]]:
         """Perform sensitivity analysis around optimal solution."""
-        sensitivity = {}
-        
+        sensitivity: dict[str, dict[str, float]] = {}
+
+        if solution is None:
+            return sensitivity
+
         for param_name, (min_val, max_val) in parameter_bounds.items():
-            param_sensitivity = {}
-            
+            param_sensitivity: dict[str, float] = {}
+
             # Sample around current value
             current_value = solution.parameters.get(param_name, (min_val + max_val) / 2)
             perturbations = np.linspace(
@@ -532,17 +535,17 @@ class MultiVariateAnalyzer:
                         sensitivities.append(sensitivity_value)
                 
                 # Average sensitivity
-                param_sensitivity[metric_name] = np.mean(sensitivities) if sensitivities else 0.0
+                param_sensitivity[metric_name] = float(np.mean(sensitivities)) if sensitivities else 0.0
             
             sensitivity[param_name] = param_sensitivity
         
         return sensitivity
     
     async def optimize_with_constraints(self,
-                                       evaluation_function: Callable,
+                                       evaluation_function: Callable[..., Any],
                                        parameter_bounds: dict[str, tuple[float, float]],
-                                       hard_constraints: list[Callable],
-                                       soft_constraints: list[Callable],
+                                       hard_constraints: list[Callable[..., Any]],
+                                       soft_constraints: list[Callable[..., Any]],
                                        penalty_weights: dict[str, float] | None = None) -> ParetoSolution:
         """
         Optimize with both hard and soft constraints.
@@ -558,8 +561,8 @@ class MultiVariateAnalyzer:
             Optimal solution satisfying constraints
         """
         penalty_weights = penalty_weights or {}
-        
-        def constrained_objective(params_array):
+
+        def constrained_objective(params_array: Any) -> float:
             # Convert array to dict
             params = {}
             for i, (name, _) in enumerate(parameter_bounds.items()):
@@ -667,13 +670,15 @@ class MultiVariateAnalyzer:
     
     async def _evaluate_individual(self,
                                   params: dict[str, float],
-                                  evaluation_function: Callable) -> dict[str, float]:
+                                  evaluation_function: Callable[..., Any]) -> dict[str, float]:
         """Evaluate an individual configuration."""
+        result: dict[str, float]
         if asyncio.iscoroutinefunction(evaluation_function):
-            return await evaluation_function(params)
+            result = await evaluation_function(params)
         else:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, evaluation_function, params)
+            result = await loop.run_in_executor(None, evaluation_function, params)
+        return result
     
     def _tournament_selection(self,
                              population: list[ParetoSolution],
@@ -682,7 +687,8 @@ class MultiVariateAnalyzer:
         """Tournament selection for genetic algorithm."""
         selected = []
         for _ in range(n_select):
-            tournament = np.random.choice(population, tournament_size, replace=False)
+            tournament_indices = np.random.choice(len(population), tournament_size, replace=False)
+            tournament = [population[i] for i in tournament_indices]
             winner = min(tournament, key=lambda x: (x.rank, -x.crowding_distance))
             selected.append(winner.parameters)
         return selected
@@ -772,7 +778,7 @@ class MultiVariateAnalyzer:
         return history
     
     async def _weighted_sum_optimization(self,
-                                        evaluation_function: Callable,
+                                        evaluation_function: Callable[..., Any],
                                         parameter_bounds: dict[str, tuple[float, float]],
                                         n_iterations: int) -> list[ParetoSolution]:
         """Optimize using weighted sum method."""
@@ -804,7 +810,7 @@ class MultiVariateAnalyzer:
         return solutions
     
     async def _multi_objective_optimization(self,
-                                          evaluation_function: Callable,
+                                          evaluation_function: Callable[..., Any],
                                           parameter_bounds: dict[str, tuple[float, float]],
                                           n_iterations: int) -> list[ParetoSolution]:
         """Generic multi-objective optimization."""

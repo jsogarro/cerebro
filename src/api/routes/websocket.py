@@ -85,6 +85,7 @@ async def websocket_endpoint(
                     # Send response back to client
                     response_message = WSMessage(
                         type=WSMessageType.INFO,
+                        project_id=None,
                         data=response.model_dump(),
                     )
                     await websocket_manager.connections[client_id].send_message(
@@ -211,6 +212,7 @@ async def project_websocket_endpoint(
 
                     response_message = WSMessage(
                         type=WSMessageType.INFO,
+                        project_id=None,
                         data=response.model_dump(),
                     )
                     await websocket_manager.connections[client_id].send_message(
@@ -377,7 +379,7 @@ async def cli_websocket_endpoint(
 
 # Health endpoint for WebSocket service
 @router.get("/ws/health")
-async def websocket_health() -> dict[str, str | dict]:
+async def websocket_health() -> dict[str, str | dict[str, int]]:
     """Get WebSocket service health and statistics."""
     stats = websocket_manager.get_stats()
 

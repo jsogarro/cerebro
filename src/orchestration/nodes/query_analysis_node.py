@@ -448,7 +448,7 @@ async def analyze_with_gemini(
         Query: {query}
         """
 
-        response = await gemini_service.generate_response(prompt)
+        response = await gemini_service._generate_content(prompt)
 
         # Parse response (simplified - actual implementation would parse structured output)
         return {"enhanced_analysis": response, "gemini_processed": True}

@@ -25,18 +25,21 @@ except ImportError:
 
 try:
     import matplotlib
-    import matplotlib.pyplot as plt
-    import networkx as nx
+    import matplotlib.pyplot as plt_module
+    import networkx as nx_module
     matplotlib.use('Agg')
     NETWORKX_AVAILABLE = True
+    nx: Any = nx_module
+    plt: Any = plt_module
 except ImportError:
     NETWORKX_AVAILABLE = False
     nx = None
     plt = None
 
 try:
-    from wordcloud import WordCloud
+    from wordcloud import WordCloud as WordCloudModule
     WORDCLOUD_AVAILABLE = True
+    WordCloud: Any = WordCloudModule
 except ImportError:
     WORDCLOUD_AVAILABLE = False
     WordCloud = None

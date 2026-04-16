@@ -6,14 +6,16 @@ Enhanced with WebSocket event publishing for real-time updates.
 """
 
 import logging
+from typing import Any
 from uuid import UUID
+
+from src.temporal.client import TemporalResearchClient
 
 from src.api.services.event_publisher import event_publisher
 from src.models.research_project import ResearchProject, ResearchStatus
 from src.models.websocket_messages import (
     ProgressUpdate,
 )
-from src.temporal.client import TemporalResearchClient
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +74,9 @@ class WorkflowService:
             )
             await event_publisher.publish_progress_update(project.id, initial_progress)
 
-            return workflow_id
+            return str(workflow_id)
 
         except Exception as e:
-            # Publish error event if workflow start fails
             await event_publisher.publish_error(
                 project.id,
                 f"Failed to start research workflow: {e!s}",
@@ -83,7 +84,7 @@ class WorkflowService:
             )
             raise
 
-    async def get_progress(self, project_id: UUID) -> dict[str, any]:
+    async def get_progress(self, project_id: UUID) -> dict[str, Any]:
         """
         Get the progress of a research workflow and publish updates.
 
@@ -171,7 +172,7 @@ class WorkflowService:
                     "Failed to cancel research workflow",
                 )
 
-            return success
+            return bool(success)
 
         except Exception as e:
             logger.error(f"Error cancelling workflow: {e}")
@@ -181,7 +182,7 @@ class WorkflowService:
             )
             return False
 
-    async def get_results(self, project_id: UUID) -> dict[str, any] | None:
+    async def get_results(self, project_id: UUID) -> dict[str, Any] | None:
         """
         Get the results of a completed research workflow.
 
@@ -205,21 +206,19 @@ class WorkflowService:
                     results_summary,
                 )
 
-            return results
+            return dict[str, Any](results) if results else None
         except Exception as e:
             logger.warning(f"Workflow not complete or failed: {e}")
             return None
 
-    def _extract_results_summary(self, results: dict[str, any]) -> str:
-        """Extract a brief summary from research results."""
+    def _extract_results_summary(self, results: dict[str, Any]) -> str:
         if not results:
             return "Research completed"
 
-        # Try to extract key metrics or summary
         if "summary" in results:
-            return results["summary"][:200]  # Truncate to 200 chars
+            return str(results["summary"])[:200]
         elif "conclusion" in results:
-            return results["conclusion"][:200]
+            return str(results["conclusion"])[:200]
         elif "findings" in results:
             findings = results["findings"]
             if isinstance(findings, list) and findings:
@@ -229,7 +228,7 @@ class WorkflowService:
 
         return f"Research completed with {len(results)} result sections"
 
-    async def list_active_workflows(self, limit: int = 100) -> list[dict[str, any]]:
+    async def list_active_workflows(self, limit: int = 100) -> list[dict[str, Any]]:
         """
         List all active research workflows.
 
@@ -245,7 +244,7 @@ class WorkflowService:
             limit=limit,
         )
 
-        return workflows
+        return list[dict[str, Any]](workflows)
 
     async def get_workflow_status(self, project_id: UUID) -> ResearchStatus:
         """

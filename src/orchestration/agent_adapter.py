@@ -93,7 +93,14 @@ class AgentAdapter:
                 logger.warning(
                     f"Agent {agent_task_state.agent_type} result validation failed"
                 )
-                result.status = "validation_failed"
+                result = AgentResult(
+                    task_id=result.task_id,
+                    status="validation_failed",
+                    output=result.output,
+                    confidence=result.confidence,
+                    execution_time=result.execution_time,
+                    metadata=result.metadata,
+                )
 
             # Update metrics
             self._update_agent_metrics(
@@ -108,11 +115,12 @@ class AgentAdapter:
             # Create error result
             return AgentResult(
                 task_id=agent_task_state.task_id,
-                agent_type=agent_task_state.agent_type,
                 status="error",
-                data={},
-                error=str(e),
+                output={},
+                confidence=0.0,
+                execution_time=(datetime.utcnow() - start_time).total_seconds(),
                 metadata={
+                    "error": str(e),
                     "error_time": datetime.utcnow().isoformat(),
                     "retry_count": agent_task_state.retry_count,
                 },
@@ -160,12 +168,13 @@ class AgentAdapter:
                 )
                 results[agent_task.agent_type] = AgentResult(
                     task_id=agent_task.task_id,
-                    agent_type=agent_task.agent_type,
                     status="error",
-                    data={},
-                    error=str(result),
+                    output={},
+                    confidence=0.0,
+                    execution_time=0.0,
+                    metadata={"error": str(result)},
                 )
-            else:
+            elif isinstance(result, AgentResult):
                 results[agent_task.agent_type] = result
 
         return results
@@ -248,7 +257,7 @@ class AgentAdapter:
 
     def _update_agent_metrics(
         self, agent_type: str, start_time: datetime, success: bool
-    ):
+    ) -> None:
         """
         Update agent execution metrics.
 
@@ -370,10 +379,11 @@ class LangGraphAgentNode:
                 state.complete_agent_task(agent_task.task_id, result)
                 logger.info(f"{self.agent_type} completed successfully")
             else:
+                error_msg = result.metadata.get("error", "Unknown error")
                 state.fail_agent_task(
-                    agent_task.task_id, result.error or "Unknown error"
+                    agent_task.task_id, error_msg
                 )
-                logger.error(f"{self.agent_type} failed: {result.error}")
+                logger.error(f"{self.agent_type} failed: {error_msg}")
 
         except Exception as e:
             logger.error(f"Error executing {self.agent_type}: {e}")
@@ -448,7 +458,7 @@ class MCPToolAdapter:
 
         # Execute tool
         logger.info(f"Calling MCP tool: {tool_name}")
-        result = await self.mcp_client.call_tool(tool_name, parameters)
+        result = await self.mcp_client.server.execute_tool(tool_name, **parameters)
 
         # Cache result if requested
         if cache_result:
@@ -463,10 +473,10 @@ class MCPToolAdapter:
         Returns:
             List of tool names
         """
-        tools = await self.mcp_client.list_tools()
-        return [tool["name"] for tool in tools]
+        tools = self.mcp_client.server.get_registered_tools()
+        return tools
 
-    def create_tool_node(self, tool_name: str):
+    def create_tool_node(self, tool_name: str) -> Any:
         """
         Create a LangGraph node that wraps an MCP tool.
 
@@ -518,7 +528,7 @@ class MCPToolAdapter:
             Tool parameters
         """
         # Default parameters
-        parameters = {"query": state.query, "domains": state.domains}
+        parameters: dict[str, Any] = {"query": state.query, "domains": state.domains}
 
         # Tool-specific parameter mapping
         if tool_name == "search_academic":
@@ -543,7 +553,7 @@ class MCPToolAdapter:
 
         return parameters
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         """Clear the tool result cache."""
         self._tool_cache.clear()
         logger.info("MCP tool cache cleared")

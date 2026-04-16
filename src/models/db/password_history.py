@@ -5,17 +5,22 @@ Tracks password changes to prevent password reuse and enforce
 password history policies.
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from passlib.context import CryptContext
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
-# Password hashing context
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
@@ -29,48 +34,44 @@ class PasswordHistory(BaseModel):
 
     __tablename__ = "password_history"
 
-    # Foreign key to user
-    user_id = Column(
-        UUID(as_uuid=True),
+    user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
-    # Hashed password
-    hashed_password = Column(
+    hashed_password: Mapped[str] = mapped_column(
         String(255), nullable=False, comment="Bcrypt hashed password"
     )
 
-    # Password metadata
-    changed_by = Column(
+    changed_by: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
         comment="Who initiated the password change (user, admin, system)",
     )
 
-    change_reason = Column(
+    change_reason: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,
         comment="Reason for password change (expired, reset, voluntary)",
     )
 
-    ip_address = Column(
+    ip_address: Mapped[str | None] = mapped_column(
         String(45), nullable=True, comment="IP address from which password was changed"
     )
 
-    user_agent = Column(
+    user_agent: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,
         comment="User agent string when password was changed",
     )
 
-    # Password strength metrics
-    password_strength = Column(
+    password_strength: Mapped[int | None] = mapped_column(
         Integer, nullable=True, comment="Password strength score (0-100)"
     )
 
-    expires_at = Column(
+    expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         comment="When this password expired (if applicable)",
@@ -96,7 +97,7 @@ class PasswordHistory(BaseModel):
         user_agent: str | None = None,
         password_strength: int | None = None,
         expires_in_days: int | None = None,
-    ) -> "PasswordHistory":
+    ) -> PasswordHistory:
         """
         Create a new password history entry.
 
@@ -140,14 +141,14 @@ class PasswordHistory(BaseModel):
         Returns:
             True if password matches
         """
-        return pwd_context.verify(password, self.hashed_password)
+        return bool(pwd_context.verify(password, self.hashed_password))
 
     @property
     def is_expired(self) -> bool:
         """Check if this password has expired."""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        return bool(datetime.utcnow() > self.expires_at)
 
     @property
     def age_in_days(self) -> int:
@@ -157,7 +158,7 @@ class PasswordHistory(BaseModel):
 
     @classmethod
     def check_password_reuse(
-        cls, user_id: str, password: str, history_count: int = 5, session=None
+        cls, user_id: str, password: str, history_count: int = 5, session: Session | None = None
     ) -> bool:
         """
         Check if password has been used recently.
@@ -191,7 +192,7 @@ class PasswordHistory(BaseModel):
         return False
 
     @classmethod
-    def get_last_change(cls, user_id: str, session=None) -> Optional["PasswordHistory"]:
+    def get_last_change(cls, user_id: str, session: Session | None = None) -> PasswordHistory | None:
         """
         Get the most recent password change for a user.
 
@@ -205,14 +206,15 @@ class PasswordHistory(BaseModel):
         if not session:
             return None
 
-        return (
+        result = (
             session.query(cls)
             .filter(cls.user_id == user_id, cls.deleted_at.is_(None))
             .order_by(cls.created_at.desc())
             .first()
         )
+        return result
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert to dictionary.
 

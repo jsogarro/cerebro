@@ -8,13 +8,13 @@ following functional programming principles.
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 import jinja2
 import markdown
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from src.models.report import Report, ReportConfiguration, ReportType
+from src.models.report import Report, ReportType
 from src.services.report_config import ReportSettings, ReportTemplateConfig
 
 logger = logging.getLogger(__name__)
@@ -30,8 +30,8 @@ class TemplateRenderer:
     
     def __init__(
         self,
-        settings: Optional[ReportSettings] = None,
-        template_config: Optional[ReportTemplateConfig] = None,
+        settings: ReportSettings | None = None,
+        template_config: ReportTemplateConfig | None = None,
     ):
         """Initialize the template renderer."""
         self.settings = settings or ReportSettings()
@@ -41,7 +41,7 @@ class TemplateRenderer:
         self.env = self._create_jinja_environment()
         
         # Template cache
-        self._template_cache: Dict[str, jinja2.Template] = {}
+        self._template_cache: dict[str, jinja2.Template] = {}
     
     def _create_jinja_environment(self) -> Environment:
         """Create and configure Jinja2 environment with custom filters."""
@@ -68,7 +68,7 @@ class TemplateRenderer:
         
         return env
     
-    def _get_custom_filters(self) -> Dict[str, Any]:
+    def _get_custom_filters(self) -> dict[str, Any]:
         """Get custom Jinja2 filters for report rendering."""
         return {
             'markdown': self._markdown_filter,
@@ -82,7 +82,7 @@ class TemplateRenderer:
             'format_duration': self._format_duration_filter,
         }
     
-    def _get_custom_functions(self) -> Dict[str, Any]:
+    def _get_custom_functions(self) -> dict[str, Any]:
         """Get custom Jinja2 global functions."""
         return {
             'get_section_number': self._get_section_number,
@@ -95,7 +95,7 @@ class TemplateRenderer:
     def render_report(
         self,
         report: Report,
-        template_name: Optional[str] = None
+        template_name: str | None = None
     ) -> str:
         """
         Render a report using the appropriate template.
@@ -172,9 +172,9 @@ class TemplateRenderer:
                 logger.info("Using base template as fallback")
                 return template
             except jinja2.TemplateNotFound:
-                raise TemplateRenderingError(f"No templates found (including base.html.j2)")
+                raise TemplateRenderingError("No templates found (including base.html.j2)")
     
-    def _build_template_context(self, report: Report) -> Dict[str, Any]:
+    def _build_template_context(self, report: Report) -> dict[str, Any]:
         """Build the context dictionary for template rendering."""
         return {
             'report': report,
@@ -213,7 +213,8 @@ class TemplateRenderer:
                     }
                 }
             )
-            return md.convert(text)
+            result = md.convert(text)
+            return str(result)
             
         except Exception as e:
             logger.warning(f"Markdown conversion failed: {e}")
@@ -311,7 +312,7 @@ class TemplateRenderer:
             return f"{hours:.1f} hours"
     
     # Custom Jinja2 global functions
-    def _get_section_number(self, sections: list, current_index: int) -> str:
+    def _get_section_number(self, sections: list[Any], current_index: int) -> str:
         """Get section number for table of contents."""
         return str(current_index + 1)
     
@@ -345,10 +346,11 @@ class TemplateRenderer:
         else:
             return "Low"
     
-    def _format_date(self, date, format_string: str = "%B %d, %Y") -> str:
+    def _format_date(self, date: Any, format_string: str = "%B %d, %Y") -> str:
         """Format datetime object."""
         try:
-            return date.strftime(format_string)
+            result = date.strftime(format_string)
+            return str(result)
         except (AttributeError, ValueError):
             return str(date)
     
@@ -383,8 +385,8 @@ class TemplateRenderer:
 
 
 def create_template_renderer(
-    settings: Optional[ReportSettings] = None,
-    template_config: Optional[ReportTemplateConfig] = None,
+    settings: ReportSettings | None = None,
+    template_config: ReportTemplateConfig | None = None,
 ) -> TemplateRenderer:
     """Factory function to create a template renderer."""
     return TemplateRenderer(settings, template_config)

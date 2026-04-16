@@ -6,37 +6,39 @@ as REST API endpoints for cost optimization, routing decisions, and
 learning-based LLM routing following MasRouter research patterns.
 """
 
-from typing import List, Optional, Dict, Any
 from datetime import datetime
-from uuid import UUID
-import asyncio
+from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from src.ai_brain.router.masr import MASRRouter
 from src.ai_brain.models.routing import (
-    QueryComplexity, QueryDomain, CollaborationMode,
-    RoutingStrategy, ModelTier
+    CollaborationMode,
+    QueryComplexity,
+    QueryDomain,
+    RoutingStrategy,
 )
 from src.auth.dependencies import get_current_user_optional
 from src.models.user import User
+
+if TYPE_CHECKING:
+    from src.ai_brain.router.masr import MASRouter
 
 
 # Pydantic models for API
 class RoutingRequest(BaseModel):
     """Request model for getting routing decision."""
     query: str = Field(..., description="The query to route")
-    context: Dict[str, Any] = Field(
+    context: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional context for routing decision"
     )
-    strategy_override: Optional[RoutingStrategy] = Field(
+    strategy_override: RoutingStrategy | None = Field(
         None,
         description="Override default routing strategy"
     )
-    max_cost_usd: Optional[float] = Field(
+    max_cost_usd: float | None = Field(
         None,
         description="Maximum cost limit in USD"
     )
@@ -49,9 +51,9 @@ class RoutingResponse(BaseModel):
     query_domain: QueryDomain
     selected_strategy: RoutingStrategy
     supervisor_type: str
-    allocated_agents: List[Dict[str, Any]]
+    allocated_agents: list[dict[str, Any]]
     collaboration_mode: CollaborationMode
-    model_recommendations: Dict[str, str]
+    model_recommendations: dict[str, str]
     estimated_cost_usd: float
     estimated_latency_ms: int
     confidence_score: float
@@ -61,7 +63,7 @@ class RoutingResponse(BaseModel):
 class CostEstimateRequest(BaseModel):
     """Request model for cost estimation."""
     query: str = Field(..., description="The query to estimate cost for")
-    strategy: Optional[RoutingStrategy] = Field(
+    strategy: RoutingStrategy | None = Field(
         None,
         description="Routing strategy to use for estimation"
     )
@@ -75,8 +77,8 @@ class CostEstimateResponse(BaseModel):
     """Response model for cost estimation."""
     estimated_cost_usd: float
     confidence_interval: tuple[float, float]
-    breakdown: Optional[Dict[str, float]] = None
-    strategy_comparison: Optional[Dict[str, float]] = None
+    breakdown: dict[str, float] | None = None
+    strategy_comparison: dict[str, float] | None = None
 
 
 class StrategyEvaluationRequest(BaseModel):
@@ -92,8 +94,8 @@ class StrategyEvaluationResponse(BaseModel):
     """Response model for strategy evaluation."""
     recommended_strategy: RoutingStrategy
     reasoning: str
-    strategy_scores: Dict[str, Dict[str, float]]
-    trade_offs: Dict[str, str]
+    strategy_scores: dict[str, dict[str, float]]
+    trade_offs: dict[str, str]
 
 
 class ComplexityAnalysisRequest(BaseModel):
@@ -109,7 +111,7 @@ class ComplexityAnalysisResponse(BaseModel):
     """Response model for complexity analysis."""
     complexity: QueryComplexity
     domain: QueryDomain
-    features: Dict[str, Any]
+    features: dict[str, Any]
     reasoning: str
     confidence: float
 
@@ -121,27 +123,28 @@ class RoutingFeedback(BaseModel):
     actual_latency_ms: int = Field(..., description="Actual latency in milliseconds")
     quality_score: float = Field(..., description="Quality score (0-1)")
     success: bool = Field(..., description="Whether the routing was successful")
-    feedback: Optional[str] = Field(None, description="Additional feedback")
+    feedback: str | None = Field(None, description="Additional feedback")
 
 
 class RouterStatusResponse(BaseModel):
     """Response model for router status."""
     status: str
-    active_strategies: List[str]
-    performance_metrics: Dict[str, Any]
+    active_strategies: list[str]
+    performance_metrics: dict[str, Any]
     learning_enabled: bool
-    cache_stats: Dict[str, int]
-    recent_optimizations: List[Dict[str, Any]]
+    cache_stats: dict[str, int | float]
+    recent_optimizations: list[dict[str, Any]]
 
 
 # Create router instance (singleton)
 _masr_router = None
 
-def get_masr_router() -> MASRRouter:
+def get_masr_router() -> "MASRouter":
     """Get or create MASR router instance."""
     global _masr_router
     if _masr_router is None:
-        _masr_router = MASRRouter()
+        from src.ai_brain.router.masr import MASRouter
+        _masr_router = MASRouter()
     return _masr_router
 
 
@@ -152,7 +155,7 @@ router = APIRouter(prefix="/api/v1/masr", tags=["masr", "routing"])
 @router.post("/route", response_model=RoutingResponse)
 async def get_routing_decision(
     request: RoutingRequest,
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: User | None = Depends(get_current_user_optional)
 ) -> RoutingResponse:
     """
     Get intelligent routing decision for a query.
@@ -162,13 +165,14 @@ async def get_routing_decision(
     complexity analysis and cost optimization.
     """
     masr = get_masr_router()
-    
+
     # Get routing decision
-    decision = await asyncio.to_thread(
-        masr.route,
-        request.query,
-        request.strategy_override,
-        request.max_cost_usd
+    constraints = {"max_cost_usd": request.max_cost_usd} if request.max_cost_usd else None
+    decision = await masr.route(
+        query=request.query,
+        context=request.context,
+        strategy=request.strategy_override,
+        constraints=constraints
     )
     
     # Format response
@@ -199,7 +203,7 @@ async def get_routing_decision(
 @router.post("/estimate-cost", response_model=CostEstimateResponse)
 async def estimate_cost(
     request: CostEstimateRequest,
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: User | None = Depends(get_current_user_optional)
 ) -> CostEstimateResponse:
     """
     Estimate cost for processing a query.
@@ -208,31 +212,21 @@ async def estimate_cost(
     breakdown by component (models, coordination, memory operations).
     """
     masr = get_masr_router()
-    
-    # Analyze query complexity
-    complexity = masr._analyze_query_complexity(request.query)
-    domain = masr._determine_domain(request.query)
-    
-    # Get cost estimate
-    if request.strategy:
-        strategy = request.strategy
-    else:
-        strategy = masr._select_strategy(complexity, domain)
-    
-    # Calculate base cost
-    base_cost = masr.cost_optimizer.calculate_cost(
-        complexity,
-        domain,
-        strategy,
-        masr._get_domain_worker_types(domain)
+
+    # Get routing decision which includes cost estimation
+    decision = await masr.route(
+        query=request.query,
+        strategy=request.strategy
     )
-    
+
+    base_cost = decision.estimated_cost
+
     # Calculate confidence interval (simplified)
     confidence_interval = (
         base_cost * 0.85,  # Lower bound
         base_cost * 1.15   # Upper bound
     )
-    
+
     # Prepare breakdown if requested
     breakdown = None
     if request.include_breakdown:
@@ -241,19 +235,14 @@ async def estimate_cost(
             "coordination_overhead": base_cost * 0.2,  # 20% coordination
             "memory_operations": base_cost * 0.1  # 10% memory ops
         }
-    
-    # Compare strategies if requested
+
+    # Compare strategies if no specific strategy requested
     strategy_comparison = None
-    if request.compare_all or not request.strategy:
+    if not request.strategy:
         strategy_comparison = {}
         for strat in RoutingStrategy:
-            cost = masr.cost_optimizer.calculate_cost(
-                complexity,
-                domain,
-                strat,
-                masr._get_domain_worker_types(domain)
-            )
-            strategy_comparison[strat.value] = cost
+            strat_decision = await masr.route(query=request.query, strategy=strat)
+            strategy_comparison[strat.value] = strat_decision.estimated_cost
     
     return CostEstimateResponse(
         estimated_cost_usd=base_cost,
@@ -266,7 +255,7 @@ async def estimate_cost(
 @router.post("/evaluate-strategies", response_model=StrategyEvaluationResponse)
 async def evaluate_strategies(
     request: StrategyEvaluationRequest,
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: User | None = Depends(get_current_user_optional)
 ) -> StrategyEvaluationResponse:
     """
     Evaluate and compare routing strategies for a query.
@@ -333,7 +322,7 @@ async def evaluate_strategies(
 @router.post("/analyze-complexity", response_model=ComplexityAnalysisResponse)
 async def analyze_complexity(
     request: ComplexityAnalysisRequest,
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: User | None = Depends(get_current_user_optional)
 ) -> ComplexityAnalysisResponse:
     """
     Analyze query complexity and domain.
@@ -391,7 +380,7 @@ async def analyze_complexity(
 @router.post("/feedback")
 async def submit_routing_feedback(
     feedback: RoutingFeedback,
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: User | None = Depends(get_current_user_optional)
 ) -> JSONResponse:
     """
     Submit feedback on routing performance.
@@ -427,7 +416,7 @@ async def submit_routing_feedback(
 
 @router.get("/status", response_model=RouterStatusResponse)
 async def get_router_status(
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: User | None = Depends(get_current_user_optional)
 ) -> RouterStatusResponse:
     """
     Get MASR router status and performance metrics.
@@ -481,7 +470,7 @@ async def get_router_status(
 
 @router.get("/models")
 async def get_available_models(
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: User | None = Depends(get_current_user_optional)
 ) -> JSONResponse:
     """
     Get list of available models and their characteristics.

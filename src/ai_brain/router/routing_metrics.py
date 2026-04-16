@@ -5,8 +5,10 @@ Tracks routing performance, strategy effectiveness, and enables adaptive
 routing through historical analysis of routing decisions.
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .routing_types import RoutingMetrics, RoutingStrategy
 
@@ -42,9 +44,9 @@ class RoutingMetricsCollector:
         self.min_history_for_adaptation = min_history_for_adaptation
 
         self.metrics = RoutingMetrics()
-        self.routing_history: List["RoutingDecision"] = []
+        self.routing_history: list[RoutingDecision] = []
 
-    def update_metrics(self, decision: "RoutingDecision"):
+    def update_metrics(self, decision: RoutingDecision) -> None:
         """
         Update routing metrics with new decision.
 
@@ -64,7 +66,7 @@ class RoutingMetricsCollector:
         """
         return self.metrics
 
-    def add_to_history(self, decision: "RoutingDecision"):
+    def add_to_history(self, decision: RoutingDecision) -> None:
         """
         Add a routing decision to history for adaptive learning.
 
@@ -73,7 +75,7 @@ class RoutingMetricsCollector:
         """
         self.routing_history.append(decision)
 
-    def get_adaptive_strategy(self, complexity_analysis) -> RoutingStrategy:
+    def get_adaptive_strategy(self, complexity_analysis: Any) -> RoutingStrategy:
         """
         Get adaptive routing strategy based on historical performance.
 
@@ -99,7 +101,7 @@ class RoutingMetricsCollector:
             return self.default_strategy
 
         # Simple strategy selection based on average confidence
-        strategy_performance = {}
+        strategy_performance: dict[str, list[float]] = {}
         for decision in recent_decisions:
             strategy = "balanced"  # Simplified for now
             if strategy not in strategy_performance:
@@ -113,7 +115,7 @@ class RoutingMetricsCollector:
 
         return RoutingStrategy(best_strategy)
 
-    async def adapt_from_decision(self, decision: "RoutingDecision") -> None:
+    async def adapt_from_decision(self, decision: RoutingDecision) -> None:
         """
         Adapt routing parameters based on decision outcomes.
 
@@ -132,7 +134,7 @@ class RoutingMetricsCollector:
         """Get current routing history size."""
         return len(self.routing_history)
 
-    def clear_history(self):
+    def clear_history(self) -> None:
         """Clear routing history (use with caution)."""
         self.routing_history.clear()
 

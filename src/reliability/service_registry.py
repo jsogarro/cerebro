@@ -5,6 +5,8 @@ This module provides service registration, discovery, and load balancing
 for microservices architecture with health-aware routing.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
@@ -14,7 +16,8 @@ from enum import Enum
 from typing import Any
 
 import redis.asyncio as redis
-from src.utils.serialization import serialize_for_cache, deserialize_from_cache
+
+from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +73,7 @@ class ServiceMetadata:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ServiceMetadata":
+    def from_dict(cls, data: dict[str, Any]) -> ServiceMetadata:
         """Create from dictionary."""
         return cls(**data)
 
@@ -110,7 +113,7 @@ class ServiceInstance:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ServiceInstance":
+    def from_dict(cls, data: dict[str, Any]) -> ServiceInstance:
         """Create from dictionary."""
         metadata = ServiceMetadata.from_dict(data["metadata"])
         instance = cls(metadata=metadata)
@@ -165,7 +168,7 @@ class ServiceRegistry:
     - Redis-based persistence
     """
 
-    def __init__(self, redis_client: redis.Redis | None = None):
+    def __init__(self, redis_client: redis.Redis[Any] | None = None):
         """
         Initialize service registry.
 
@@ -178,7 +181,7 @@ class ServiceRegistry:
         self._ttl = 300  # 5 minutes default TTL
         self._heartbeat_interval = 30  # 30 seconds
         self._health_check_interval = 60  # 60 seconds
-        self._background_tasks: list[asyncio.Task] = []
+        self._background_tasks: list[asyncio.Task[Any]] = []
 
     async def register(
         self,
@@ -213,7 +216,7 @@ class ServiceRegistry:
         if self._redis_client:
             key = f"{self._registry_prefix}{service.name}:{service.instance_id}"
             await self._redis_client.setex(
-                key, ttl or self._ttl, serialize_for_cache(instance.to_dict().decode("utf-8"))
+                key, ttl or self._ttl, serialize_for_cache(instance.to_dict())
             )
 
         logger.info(
@@ -264,7 +267,7 @@ class ServiceRegistry:
             if self._redis_client:
                 key = f"{self._registry_prefix}{service_name}:{instance_id}"
                 await self._redis_client.setex(
-                    key, self._ttl, serialize_for_cache(instance.to_dict().decode("utf-8"))
+                    key, self._ttl, serialize_for_cache(instance.to_dict())
                 )
 
     async def update_status(
@@ -289,7 +292,7 @@ class ServiceRegistry:
             if self._redis_client:
                 key = f"{self._registry_prefix}{service_name}:{instance_id}"
                 await self._redis_client.setex(
-                    key, self._ttl, serialize_for_cache(instance.to_dict().decode("utf-8"))
+                    key, self._ttl, serialize_for_cache(instance.to_dict())
                 )
 
             logger.info(
@@ -343,7 +346,7 @@ class ServiceRegistry:
         Returns:
             List of service instances
         """
-        instances = []
+        instances: list[ServiceInstance] = []
 
         # Get from memory
         if service_name in self._services:
@@ -528,7 +531,7 @@ class ServiceDiscovery:
         endpoint: str,
         method: str = "GET",
         strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """
         Call a service with automatic discovery and load balancing.
@@ -605,7 +608,7 @@ class LoadBalancer:
         self._max_failures = 3
 
     async def execute(
-        self, endpoint: str, method: str = "GET", max_retries: int = 3, **kwargs
+        self, endpoint: str, method: str = "GET", max_retries: int = 3, **kwargs: Any
     ) -> Any:
         """
         Execute request with load balancing and retry.
@@ -658,7 +661,9 @@ class LoadBalancer:
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2**attempt)  # Exponential backoff
 
-        raise last_error
+        if last_error:
+            raise last_error
+        raise RuntimeError("Service execution failed with no error details")
 
     async def _get_instance(self) -> ServiceInstance | None:
         """Get an instance excluding failed ones."""
@@ -689,7 +694,7 @@ _global_registry: ServiceRegistry | None = None
 _global_discovery: ServiceDiscovery | None = None
 
 
-async def initialize_service_registry(redis_client: redis.Redis | None = None) -> None:
+async def initialize_service_registry(redis_client: redis.Redis[Any] | None = None) -> None:
     """Initialize global service registry."""
     global _global_registry, _global_discovery
 

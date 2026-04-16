@@ -14,14 +14,14 @@ This service acts as the glue between:
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional, List, Set
 from datetime import datetime
+from typing import Any
 
-from .model_config_manager import ModelConfigManager, ConfigurationChangeEvent
-from .model_schemas import ModelConfiguration, ModelSpecification, ProviderConfiguration
-from ..router.masr import MASRouter
-from ..router.cost_optimizer import CostOptimizer
 from ..providers.model_router import ModelRouter
+from ..router.cost_optimizer import CostOptimizer
+from ..router.masr import MASRouter
+from .model_config_manager import ConfigurationChangeEvent, ModelConfigManager
+from .model_schemas import ModelConfiguration, ModelSpecification, ProviderConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -37,19 +37,19 @@ class ConfigurationIntegrationService:
     - Maintain component health and consistency
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize configuration integration service."""
         self.config = config
 
         # Core components
-        self.model_config_manager: Optional[ModelConfigManager] = None
-        self.masr_router: Optional[MASRouter] = None
-        self.cost_optimizer: Optional[CostOptimizer] = None
-        self.model_router: Optional[ModelRouter] = None
+        self.model_config_manager: ModelConfigManager | None = None
+        self.masr_router: MASRouter | None = None
+        self.cost_optimizer: CostOptimizer | None = None
+        self.model_router: ModelRouter | None = None
 
         # Component registry
-        self._components: Dict[str, Any] = {}
-        self._configuration_dependent_components: Set[str] = set()
+        self._components: dict[str, Any] = {}
+        self._configuration_dependent_components: set[str] = set()
 
         # Status tracking
         self.initialized = False
@@ -70,7 +70,9 @@ class ConfigurationIntegrationService:
             self._components["model_config_manager"] = self.model_config_manager
 
             # Register for configuration change notifications
-            self.model_config_manager.add_change_listener(self._on_configuration_change)
+            def listener(event: "ConfigurationChangeEvent") -> None:
+                asyncio.create_task(self._on_configuration_change(event))
+            self.model_config_manager.add_change_listener(listener)
 
             # Initialize MASR with configuration manager
             masr_config = self.config.get("masr", {})
@@ -94,7 +96,7 @@ class ConfigurationIntegrationService:
             self._configuration_dependent_components.add("model_router")
 
             self.initialized = True
-            self.last_update = datetime.now()
+            self.last_update: datetime | None = datetime.now()
 
             logger.info("Configuration integration service initialized successfully")
 
@@ -148,7 +150,7 @@ class ConfigurationIntegrationService:
 
         try:
             # MASR router needs to know about model changes for routing decisions
-            if hasattr(self.masr_router, "reload_configuration"):
+            if self.masr_router and hasattr(self.masr_router, "reload_configuration"):
                 await self.masr_router.reload_configuration()
             else:
                 logger.info(
@@ -162,7 +164,7 @@ class ConfigurationIntegrationService:
 
         try:
             # Cost optimizer needs fresh model specifications for accurate cost calculation
-            if hasattr(self.cost_optimizer, "reload_models"):
+            if self.cost_optimizer and hasattr(self.cost_optimizer, "reload_models"):
                 await self.cost_optimizer.reload_models()
             else:
                 logger.info(
@@ -176,7 +178,7 @@ class ConfigurationIntegrationService:
 
         try:
             # Model router needs to refresh provider registry
-            if hasattr(self.model_router, "reload_providers"):
+            if self.model_router and hasattr(self.model_router, "reload_providers"):
                 await self.model_router.reload_providers()
             else:
                 logger.info(
@@ -193,7 +195,7 @@ class ConfigurationIntegrationService:
 
         return await self.model_config_manager.get_configuration()
 
-    async def get_enabled_models(self) -> Dict[str, ModelSpecification]:
+    async def get_enabled_models(self) -> dict[str, ModelSpecification]:
         """Get all currently enabled models."""
 
         if not self.model_config_manager:
@@ -201,7 +203,7 @@ class ConfigurationIntegrationService:
 
         return await self.model_config_manager.get_enabled_models()
 
-    async def get_enabled_providers(self) -> Dict[str, ProviderConfiguration]:
+    async def get_enabled_providers(self) -> dict[str, ProviderConfiguration]:
         """Get all currently enabled providers."""
 
         if not self.model_config_manager:
@@ -209,10 +211,10 @@ class ConfigurationIntegrationService:
 
         return await self.model_config_manager.get_enabled_providers()
 
-    async def validate_system_configuration(self) -> Dict[str, Any]:
+    async def validate_system_configuration(self) -> dict[str, Any]:
         """Validate the entire system configuration."""
 
-        validation_results = {
+        validation_results: dict[str, Any] = {
             "valid": True,
             "errors": [],
             "warnings": [],
@@ -227,9 +229,13 @@ class ConfigurationIntegrationService:
             enabled_models = config.get_enabled_models()
             enabled_providers = config.get_enabled_providers()
 
+            errors_list: list[str] = validation_results["errors"]
+            warnings_list: list[str] = validation_results["warnings"]
+            component_status_dict: dict[str, Any] = validation_results["component_status"]
+
             for model_name, model_spec in enabled_models.items():
                 if model_spec.provider not in enabled_providers:
-                    validation_results["errors"].append(
+                    errors_list.append(
                         f"Model '{model_name}' references disabled provider '{model_spec.provider}'"
                     )
                     validation_results["valid"] = False
@@ -239,10 +245,10 @@ class ConfigurationIntegrationService:
                 component_status = await self._validate_provider_connectivity(
                     provider_name, provider_config
                 )
-                validation_results["component_status"][provider_name] = component_status
+                component_status_dict[provider_name] = component_status
 
                 if not component_status["reachable"]:
-                    validation_results["warnings"].append(
+                    warnings_list.append(
                         f"Provider '{provider_name}' is not reachable"
                     )
 
@@ -251,28 +257,29 @@ class ConfigurationIntegrationService:
                 if hasattr(component, "health_check"):
                     try:
                         health = await component.health_check()
-                        validation_results["component_status"][component_name] = {
+                        component_status_dict[component_name] = {
                             "healthy": getattr(health, "healthy", True),
                             "status": "ok",
                         }
                     except Exception as e:
-                        validation_results["component_status"][component_name] = {
+                        component_status_dict[component_name] = {
                             "healthy": False,
                             "error": str(e),
                         }
-                        validation_results["warnings"].append(
+                        warnings_list.append(
                             f"Component '{component_name}' health check failed: {e}"
                         )
 
         except Exception as e:
             validation_results["valid"] = False
-            validation_results["errors"].append(f"Configuration validation failed: {e}")
+            error_list_temp: list[str] = validation_results.get("errors", [])
+            error_list_temp.append(f"Configuration validation failed: {e}")
 
         return validation_results
 
     async def _validate_provider_connectivity(
         self, provider_name: str, provider_config: ProviderConfiguration
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Validate that a provider is reachable."""
 
         try:
@@ -297,10 +304,10 @@ class ConfigurationIntegrationService:
         except Exception as e:
             return {"reachable": False, "error": str(e), "status_code": None}
 
-    async def get_integration_stats(self) -> Dict[str, Any]:
+    async def get_integration_stats(self) -> dict[str, Any]:
         """Get integration service statistics."""
 
-        stats = {
+        stats: dict[str, Any] = {
             "service": {
                 "initialized": self.initialized,
                 "last_update": (
@@ -352,11 +359,11 @@ class ConfigurationIntegrationService:
 
 
 # Global integration service instance
-_integration_service: Optional[ConfigurationIntegrationService] = None
+_integration_service: ConfigurationIntegrationService | None = None
 
 
 async def get_integration_service(
-    config: Optional[Dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
 ) -> ConfigurationIntegrationService:
     """Get or create global configuration integration service."""
 

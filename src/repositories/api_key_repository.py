@@ -227,7 +227,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
         result = await self.session.execute(stmt)
         await self.session.flush()
 
-        return cast(int, result.rowcount)
+        return cast(int, getattr(result, "rowcount", 0))
 
     async def get_usage_statistics(
         self, key_id: UUID, days: int = 30
@@ -366,7 +366,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
         )
 
         result = await self.session.execute(user_query)
-        keys_per_user = [int(row.count) for row in result]
+        keys_per_user = [int(row[1]) for row in result]
         avg_keys_per_user: float = (
             float(sum(keys_per_user)) / float(len(keys_per_user)) if keys_per_user else 0.0
         )

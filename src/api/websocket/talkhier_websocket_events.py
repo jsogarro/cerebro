@@ -5,17 +5,25 @@ Manages real-time WebSocket communication for TalkHier protocol sessions,
 including live updates, interactive dialogue, and multi-session coordination.
 """
 
-import asyncio
-from typing import Dict, List, Set, Optional, Any
-from datetime import datetime
-from fastapi import WebSocket
 import logging
+from datetime import datetime
+from typing import Any
+
+from fastapi import WebSocket
 
 from src.models.talkhier_api_models import (
-    TalkHierWebSocketEvent, RoundStartedEvent, MessageExchangeEvent,
-    ConsensusUpdateEvent, QualityUpdateEvent, SessionCompletedEvent,
-    InteractiveMessage, InteractiveCommand, MessageRole,
-    RefinementRoundResponse, ConsensusResult, SessionCloseResponse
+    ConsensusResult,
+    ConsensusUpdateEvent,
+    InteractiveCommand,
+    InteractiveMessage,
+    MessageExchangeEvent,
+    MessageRole,
+    QualityUpdateEvent,
+    RefinementRoundResponse,
+    RoundStartedEvent,
+    SessionCloseResponse,
+    SessionCompletedEvent,
+    TalkHierWebSocketEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,18 +34,11 @@ class TalkHierWebSocketHandler:
     Handles WebSocket events for TalkHier protocol sessions
     """
     
-    def __init__(self):
-        # Session connections: session_id -> Set[connection_id]
-        self.session_connections: Dict[str, Set[str]] = {}
-        
-        # Connection mapping: connection_id -> WebSocket
-        self.connections: Dict[str, WebSocket] = {}
-        
-        # Interactive sessions: session_id -> Set[connection_id]
-        self.interactive_sessions: Dict[str, Set[str]] = {}
-        
-        # Coordination monitors: coordination_id -> Set[connection_id]
-        self.coordination_monitors: Dict[str, Set[str]] = {}
+    def __init__(self) -> None:
+        self.session_connections: dict[str, set[str]] = {}
+        self.connections: dict[str, WebSocket] = {}
+        self.interactive_sessions: dict[str, set[str]] = {}
+        self.coordination_monitors: dict[str, set[str]] = {}
         
     # ================================
     # Session Connection Management
@@ -83,7 +84,7 @@ class TalkHierWebSocketHandler:
         self,
         session_id: str,
         round_number: int,
-        participants: List[str]
+        participants: list[str]
     ) -> None:
         """Broadcast round started event"""
         event = RoundStartedEvent(
@@ -146,14 +147,15 @@ class TalkHierWebSocketHandler:
         session_id: str,
         consensus_result: ConsensusResult
     ) -> None:
-        """Broadcast consensus update event"""
-        # Determine trend
-        trending = "stable"
+        from typing import Literal
+        trending: Literal["improving", "declining", "stable"]
         if consensus_result.consensus_score > 0.8:
             trending = "improving"
         elif consensus_result.consensus_score < 0.5:
             trending = "declining"
-        
+        else:
+            trending = "stable"
+
         event = ConsensusUpdateEvent(
             event_type="consensus_update",
             session_id=session_id,
@@ -390,7 +392,7 @@ class TalkHierWebSocketHandler:
     async def broadcast_coordination_update(
         self,
         coordination_id: str,
-        update_data: Dict[str, Any]
+        update_data: dict[str, Any]
     ) -> None:
         """Broadcast coordination update"""
         if coordination_id in self.coordination_monitors:
@@ -405,7 +407,7 @@ class TalkHierWebSocketHandler:
                             "timestamp": datetime.utcnow().isoformat()
                         })
                     except Exception as e:
-                        logger.error(f"Failed to send coordination update: {str(e)}")
+                        logger.error(f"Failed to send coordination update: {e!s}")
     
     # ================================
     # Helper Methods
@@ -414,7 +416,7 @@ class TalkHierWebSocketHandler:
     async def _broadcast_to_session(
         self,
         session_id: str,
-        event_data: Dict[str, Any]
+        event_data: dict[str, Any]
     ) -> None:
         """Broadcast event to all session connections"""
         if session_id in self.session_connections:
@@ -424,13 +426,13 @@ class TalkHierWebSocketHandler:
                     try:
                         await websocket.send_json(event_data)
                     except Exception as e:
-                        logger.error(f"Failed to send event to {connection_id}: {str(e)}")
+                        logger.error(f"Failed to send event to {connection_id}: {e!s}")
     
     async def _broadcast_to_interactive(
         self,
         session_id: str,
-        data: Dict[str, Any],
-        exclude_connection: Optional[str] = None
+        data: dict[str, Any],
+        exclude_connection: str | None = None
     ) -> None:
         """Broadcast to interactive session participants"""
         if session_id in self.interactive_sessions:
@@ -440,13 +442,13 @@ class TalkHierWebSocketHandler:
                     try:
                         await websocket.send_json(data)
                     except Exception as e:
-                        logger.error(f"Failed to send to interactive participant {connection_id}: {str(e)}")
+                        logger.error(f"Failed to send to interactive participant {connection_id}: {e!s}")
     
     async def _process_interactive_command(
         self,
         session_id: str,
         command: InteractiveCommand
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Process an interactive command"""
         result = {"success": False, "effect": ""}
         
@@ -484,11 +486,11 @@ class TalkHierWebSocketHandler:
         """Get number of connections for a session"""
         return len(self.session_connections.get(session_id, set()))
     
-    def get_all_active_sessions(self) -> List[str]:
+    def get_all_active_sessions(self) -> list[str]:
         """Get all active session IDs"""
         return list(self.session_connections.keys())
     
-    def get_connection_sessions(self, connection_id: str) -> List[str]:
+    def get_connection_sessions(self, connection_id: str) -> list[str]:
         """Get all sessions for a connection"""
         sessions = []
         for session_id, connections in self.session_connections.items():

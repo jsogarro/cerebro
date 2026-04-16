@@ -13,25 +13,27 @@ Coordinates:
 - Citation Agent: Source verification and formatting
 """
 
-import asyncio
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
+from ..citation_agent import CitationAgent
+from ..communication.talkhier_message import (
+    MessageType,
+    TalkHierContent,
+    TalkHierMessage,
+)
+from ..comparative_analysis_agent import ComparativeAnalysisAgent
+from ..literature_review_agent import LiteratureReviewAgent
+from ..methodology_agent import MethodologyAgent
+from ..models import AgentTask
+from ..synthesis_agent import SynthesisAgent
 from .base_supervisor import (
     BaseSupervisor,
     SupervisionState,
     WorkerDefinition,
-    SupervisionMode,
 )
-from ..models import AgentTask
-from ..communication.talkhier_message import TalkHierContent, MessageType
-from ..literature_review_agent import LiteratureReviewAgent
-from ..methodology_agent import MethodologyAgent
-from ..comparative_analysis_agent import ComparativeAnalysisAgent
-from ..synthesis_agent import SynthesisAgent
-from ..citation_agent import CitationAgent
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +54,9 @@ class ResearchSupervisor(BaseSupervisor):
 
     def __init__(
         self,
-        gemini_service: Optional[Any] = None,
-        cache_client: Optional[Any] = None,
-        config: Optional[Dict[str, Any]] = None,
+        gemini_service: Any | None = None,
+        cache_client: Any | None = None,
+        config: dict[str, Any] | None = None,
     ):
         """Initialize research supervisor."""
         super().__init__(
@@ -72,7 +74,7 @@ class ResearchSupervisor(BaseSupervisor):
         self.max_sources = config.get("max_sources", 50) if config else 50
         self.citation_style = config.get("citation_style", "APA") if config else "APA"
 
-    def _register_worker_types(self):
+    def _register_worker_types(self) -> None:
         """Register research worker types."""
 
         # Literature Review Worker
@@ -152,7 +154,7 @@ class ResearchSupervisor(BaseSupervisor):
             quality_score=0.85,
         )
 
-    def _build_workflow_graph(self):
+    def _build_workflow_graph(self) -> None:
         """Build LangGraph workflow for research supervision."""
 
         # Create workflow graph
@@ -226,7 +228,7 @@ class ResearchSupervisor(BaseSupervisor):
         )
 
         # Compile the graph
-        self.workflow_graph = self.workflow_graph.compile()
+        self.workflow_graph = self.workflow_graph.compile()  # type: Any
 
     async def _coordinate_workers(
         self, state: SupervisionState, task: AgentTask
@@ -248,7 +250,7 @@ class ResearchSupervisor(BaseSupervisor):
 
         return state
 
-    async def _plan_research_phase(self, langgraph_state: Dict) -> Dict:
+    async def _plan_research_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Plan research execution and worker allocation."""
 
         state = langgraph_state["supervision_state"]
@@ -284,7 +286,7 @@ class ResearchSupervisor(BaseSupervisor):
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
-    async def _coordinate_literature_phase(self, langgraph_state: Dict) -> Dict:
+    async def _coordinate_literature_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate literature review worker."""
 
         state = langgraph_state["supervision_state"]
@@ -312,7 +314,7 @@ class ResearchSupervisor(BaseSupervisor):
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
-    async def _coordinate_methodology_phase(self, langgraph_state: Dict) -> Dict:
+    async def _coordinate_methodology_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate methodology worker."""
 
         state = langgraph_state["supervision_state"]
@@ -345,7 +347,7 @@ class ResearchSupervisor(BaseSupervisor):
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
-    async def _coordinate_analysis_phase(self, langgraph_state: Dict) -> Dict:
+    async def _coordinate_analysis_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate comparative analysis worker."""
 
         state = langgraph_state["supervision_state"]
@@ -380,7 +382,7 @@ class ResearchSupervisor(BaseSupervisor):
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
-    async def _coordinate_synthesis_phase(self, langgraph_state: Dict) -> Dict:
+    async def _coordinate_synthesis_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate synthesis worker."""
 
         state = langgraph_state["supervision_state"]
@@ -418,7 +420,7 @@ class ResearchSupervisor(BaseSupervisor):
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
-    async def _coordinate_citation_phase(self, langgraph_state: Dict) -> Dict:
+    async def _coordinate_citation_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate citation worker."""
 
         state = langgraph_state["supervision_state"]
@@ -453,7 +455,7 @@ class ResearchSupervisor(BaseSupervisor):
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
-    async def _evaluate_consensus_phase(self, langgraph_state: Dict) -> Dict:
+    async def _evaluate_consensus_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Evaluate consensus across all workers."""
 
         state = langgraph_state["supervision_state"]
@@ -491,7 +493,7 @@ class ResearchSupervisor(BaseSupervisor):
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
-    def _should_continue_refinement(self, langgraph_state: Dict) -> str:
+    def _should_continue_refinement(self, langgraph_state: dict[str, Any]) -> str:
         """Determine if another refinement round is needed."""
 
         state = langgraph_state["supervision_state"]
@@ -511,13 +513,15 @@ class ResearchSupervisor(BaseSupervisor):
 
     async def get_research_quality_assessment(
         self, state: SupervisionState
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get comprehensive research quality assessment."""
+
+        worker_contributions: dict[str, Any] = {}
 
         quality_assessment = {
             "overall_quality": state.quality_score,
             "consensus_score": state.consensus_score,
-            "worker_contributions": {},
+            "worker_contributions": worker_contributions,
             "research_completeness": 0.0,
             "methodological_rigor": 0.0,
             "evidence_strength": 0.0,
@@ -526,10 +530,11 @@ class ResearchSupervisor(BaseSupervisor):
         # Assess each worker contribution
         for worker_type, result in state.worker_results.items():
             if result and hasattr(result, "confidence_score"):
-                quality_assessment["worker_contributions"][worker_type] = {
+                worker_contributions[worker_type] = {
                     "confidence": result.confidence_score,
-                    "contribution_quality": result.confidence_score,  # Simplified
+                    "contribution_quality": result.confidence_score,
                 }
+                quality_assessment["worker_contributions"] = worker_contributions
 
         # Calculate research completeness
         expected_workers = ["literature_review", "methodology", "synthesis"]

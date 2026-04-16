@@ -195,7 +195,7 @@ class AgentTask(BaseModel):
         """Check if task completed successfully."""
         return self.status == TaskStatus.COMPLETED
 
-    def can_start(self, completed_task_ids: set) -> bool:
+    def can_start(self, completed_task_ids: set[Any]) -> bool:
         """
         Check if task can start based on dependencies.
 
@@ -211,7 +211,7 @@ class AgentTask(BaseModel):
         dependencies = set(self.depends_on)
         return dependencies.issubset(completed_task_ids)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with additional properties."""
         data = super().to_dict()
         data["is_pending"] = self.is_pending

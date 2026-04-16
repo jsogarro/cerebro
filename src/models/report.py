@@ -7,7 +7,7 @@ and their components following functional programming principles.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
@@ -65,16 +65,16 @@ class ReportSection(BaseModel):
     
     title: str = Field(..., description="Section title")
     content: str = Field(..., description="Section content in markdown")
-    subsections: List["ReportSection"] = Field(
+    subsections: list["ReportSection"] = Field(
         default_factory=list, description="Nested subsections"
     )
     level: int = Field(default=1, ge=1, le=6, description="Heading level (1-6)")
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional section metadata"
     )
     
     @validator('level')
-    def validate_level(cls, v):
+    def validate_level(cls, v: int) -> int:
         """Ensure heading level is valid."""
         return max(1, min(6, v))
 
@@ -85,31 +85,31 @@ class Visualization(BaseModel):
     id: str = Field(..., description="Unique identifier for the visualization")
     type: VisualizationType = Field(..., description="Type of visualization")
     title: str = Field(..., description="Visualization title")
-    data: Dict[str, Any] = Field(..., description="Data for the visualization")
-    config: Dict[str, Any] = Field(
+    data: dict[str, Any] = Field(..., description="Data for the visualization")
+    config: dict[str, Any] = Field(
         default_factory=dict, description="Visualization configuration"
     )
-    caption: Optional[str] = Field(None, description="Caption text")
-    width: Optional[int] = Field(None, ge=100, description="Width in pixels")
-    height: Optional[int] = Field(None, ge=100, description="Height in pixels")
+    caption: str | None = Field(None, description="Caption text")
+    width: int | None = Field(None, ge=100, description="Width in pixels")
+    height: int | None = Field(None, ge=100, description="Height in pixels")
 
 
 class Citation(BaseModel):
     """A formatted citation."""
     
     id: str = Field(..., description="Unique citation identifier")
-    authors: List[str] = Field(..., description="List of authors")
+    authors: list[str] = Field(..., description="List of authors")
     title: str = Field(..., description="Publication title")
-    year: Optional[int] = Field(None, description="Publication year")
-    journal: Optional[str] = Field(None, description="Journal name")
-    volume: Optional[str] = Field(None, description="Volume number")
-    issue: Optional[str] = Field(None, description="Issue number")
-    pages: Optional[str] = Field(None, description="Page range")
-    doi: Optional[str] = Field(None, description="Digital Object Identifier")
-    url: Optional[str] = Field(None, description="URL if available")
-    publisher: Optional[str] = Field(None, description="Publisher name")
-    location: Optional[str] = Field(None, description="Publication location")
-    isbn: Optional[str] = Field(None, description="ISBN for books")
+    year: int | None = Field(None, description="Publication year")
+    journal: str | None = Field(None, description="Journal name")
+    volume: str | None = Field(None, description="Volume number")
+    issue: str | None = Field(None, description="Issue number")
+    pages: str | None = Field(None, description="Page range")
+    doi: str | None = Field(None, description="Digital Object Identifier")
+    url: str | None = Field(None, description="URL if available")
+    publisher: str | None = Field(None, description="Publisher name")
+    location: str | None = Field(None, description="Publication location")
+    isbn: str | None = Field(None, description="ISBN for books")
     source_type: str = Field(default="journal", description="Type of source")
     
     def format_citation(self, style: CitationStyle) -> str:
@@ -167,7 +167,7 @@ class Citation(BaseModel):
                 citation += f" {self.volume}"
                 if self.issue:
                     citation += f", no. {self.issue}"
-            citation += f" {year_str.strip('()')}"
+            citation += f" {year.strip('()')}"
             if self.pages:
                 citation += f": {self.pages}"
         return citation + "."
@@ -205,21 +205,21 @@ class ReportMetadata(BaseModel):
     """Metadata for a research report."""
     
     generated_at: datetime = Field(default_factory=datetime.utcnow)
-    workflow_id: Optional[str] = Field(None, description="Associated workflow ID")
-    project_id: Optional[UUID] = Field(None, description="Associated project ID")
-    user_id: Optional[UUID] = Field(None, description="Report creator ID")
+    workflow_id: str | None = Field(None, description="Associated workflow ID")
+    project_id: UUID | None = Field(None, description="Associated project ID")
+    user_id: UUID | None = Field(None, description="Report creator ID")
     quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Quality assessment score")
     confidence_score: float = Field(0.0, ge=0.0, le=1.0, description="Overall confidence")
     total_sources: int = Field(0, ge=0, description="Number of sources analyzed")
     total_citations: int = Field(0, ge=0, description="Number of citations")
-    agents_used: List[str] = Field(default_factory=list, description="Agents involved")
+    agents_used: list[str] = Field(default_factory=list, description="Agents involved")
     generation_time_seconds: float = Field(0.0, ge=0.0, description="Generation time")
     word_count: int = Field(0, ge=0, description="Total word count")
-    page_count: Optional[int] = Field(None, ge=1, description="Estimated page count")
+    page_count: int | None = Field(None, ge=1, description="Estimated page count")
     version: str = Field(default="1.0", description="Report version")
     
     @validator('quality_score', 'confidence_score')
-    def validate_scores(cls, v):
+    def validate_scores(cls, v: float) -> float:
         """Ensure scores are between 0 and 1."""
         return max(0.0, min(1.0, v))
 
@@ -236,15 +236,15 @@ class ReportConfiguration(BaseModel):
     include_appendices: bool = Field(default=False)
     include_citations: bool = Field(default=True)
     include_methodology: bool = Field(default=True)
-    max_sections: Optional[int] = Field(None, ge=1, description="Maximum sections")
-    custom_css: Optional[str] = Field(None, description="Custom CSS styles")
-    template_name: Optional[str] = Field(None, description="Custom template name")
+    max_sections: int | None = Field(None, ge=1, description="Maximum sections")
+    custom_css: str | None = Field(None, description="Custom CSS styles")
+    template_name: str | None = Field(None, description="Custom template name")
     language: str = Field(default="en", description="Report language")
-    author_name: Optional[str] = Field(None, description="Report author")
-    institution: Optional[str] = Field(None, description="Author institution")
+    author_name: str | None = Field(None, description="Report author")
+    institution: str | None = Field(None, description="Author institution")
     
     # PDF-specific settings
-    pdf_settings: Dict[str, Any] = Field(
+    pdf_settings: dict[str, Any] = Field(
         default_factory=lambda: {
             "page_size": "A4",
             "margin_top": "2cm",
@@ -259,7 +259,7 @@ class ReportConfiguration(BaseModel):
     )
     
     # LaTeX-specific settings
-    latex_settings: Dict[str, Any] = Field(
+    latex_settings: dict[str, Any] = Field(
         default_factory=lambda: {
             "document_class": "article",
             "packages": ["geometry", "graphicx", "hyperref", "cite"],
@@ -274,9 +274,9 @@ class ReportOutput(BaseModel):
     """Generated report output in a specific format."""
     
     format: ReportFormat = Field(..., description="Output format")
-    content: Union[str, bytes] = Field(..., description="Report content")
-    file_path: Optional[str] = Field(None, description="File path if saved")
-    file_size: Optional[int] = Field(None, ge=0, description="File size in bytes")
+    content: str | bytes = Field(..., description="Report content")
+    file_path: str | None = Field(None, description="File path if saved")
+    file_size: int | None = Field(None, ge=0, description="File size in bytes")
     mime_type: str = Field(..., description="MIME type of the content")
     encoding: str = Field(default="utf-8", description="Character encoding")
     
@@ -292,36 +292,55 @@ class Report(BaseModel):
     id: str = Field(..., description="Unique report identifier")
     title: str = Field(..., description="Report title")
     query: str = Field(..., description="Original research question")
-    domains: List[str] = Field(default_factory=list, description="Research domains")
-    abstract: Optional[str] = Field(None, description="Report abstract")
-    executive_summary: Optional[str] = Field(None, description="Executive summary")
+    domains: list[str] = Field(default_factory=list, description="Research domains")
+    abstract: str | None = Field(None, description="Report abstract")
+    executive_summary: str | None = Field(None, description="Executive summary")
     
     # Report structure
-    sections: List[ReportSection] = Field(
+    sections: list[ReportSection] = Field(
         default_factory=list, description="Main report sections"
     )
-    appendices: List[ReportSection] = Field(
+    appendices: list[ReportSection] = Field(
         default_factory=list, description="Report appendices"
     )
     
     # Content elements
-    citations: List[Citation] = Field(
+    citations: list[Citation] = Field(
         default_factory=list, description="Bibliography"
     )
-    visualizations: List[Visualization] = Field(
+    visualizations: list[Visualization] = Field(
         default_factory=list, description="Charts and graphs"
     )
     
     # Metadata and configuration
     metadata: ReportMetadata = Field(
-        default_factory=ReportMetadata, description="Report metadata"
+        default_factory=lambda: ReportMetadata(
+            workflow_id=None,
+            project_id=None,
+            user_id=None,
+            quality_score=0.0,
+            confidence_score=0.0,
+            total_sources=0,
+            total_citations=0,
+            generation_time_seconds=0.0,
+            word_count=0,
+            page_count=None,
+        ),
+        description="Report metadata"
     )
     configuration: ReportConfiguration = Field(
-        default_factory=ReportConfiguration, description="Generation configuration"
+        default_factory=lambda: ReportConfiguration(
+            max_sections=None,
+            custom_css=None,
+            template_name=None,
+            author_name=None,
+            institution=None,
+        ),
+        description="Generation configuration"
     )
-    
+
     # Generated outputs
-    outputs: Dict[ReportFormat, ReportOutput] = Field(
+    outputs: dict[ReportFormat, ReportOutput] = Field(
         default_factory=dict, description="Generated outputs by format"
     )
     
@@ -330,7 +349,7 @@ class Report(BaseModel):
         title: str,
         content: str,
         level: int = 1,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: dict[str, Any] | None = None
     ) -> ReportSection:
         """Add a new section to the report."""
         section = ReportSection(
@@ -395,14 +414,21 @@ ReportSection.model_rebuild()
 class ReportGenerationRequest(BaseModel):
     """Request model for report generation."""
     
-    project_id: Optional[UUID] = Field(None, description="Project ID to generate report for")
-    workflow_data: Optional[Dict[str, Any]] = Field(
+    project_id: UUID | None = Field(None, description="Project ID to generate report for")
+    workflow_data: dict[str, Any] | None = Field(
         None, description="Direct workflow data if no project"
     )
     configuration: ReportConfiguration = Field(
-        default_factory=ReportConfiguration, description="Generation configuration"
+        default_factory=lambda: ReportConfiguration(
+            max_sections=None,
+            custom_css=None,
+            template_name=None,
+            author_name=None,
+            institution=None,
+        ),
+        description="Generation configuration"
     )
-    formats: List[ReportFormat] = Field(
+    formats: list[ReportFormat] = Field(
         default=[ReportFormat.HTML], description="Desired output formats"
     )
     save_to_storage: bool = Field(default=True, description="Save generated reports")
@@ -414,30 +440,30 @@ class ReportGenerationResponse(BaseModel):
     
     report_id: str = Field(..., description="Generated report ID")
     status: str = Field(..., description="Generation status")
-    formats_generated: List[ReportFormat] = Field(
+    formats_generated: list[ReportFormat] = Field(
         ..., description="Successfully generated formats"
     )
     generation_time: float = Field(..., description="Total generation time in seconds")
     word_count: int = Field(..., description="Report word count")
     page_count: int = Field(..., description="Estimated page count")
-    download_urls: Dict[ReportFormat, str] = Field(
+    download_urls: dict[ReportFormat, str] = Field(
         default_factory=dict, description="Download URLs by format"
     )
-    errors: List[str] = Field(default_factory=list, description="Generation errors")
+    errors: list[str] = Field(default_factory=list, description="Generation errors")
 
 
 __all__ = [
-    "ReportFormat",
-    "ReportType", 
-    "CitationStyle",
-    "VisualizationType",
-    "ReportSection",
-    "Visualization",
     "Citation",
-    "ReportMetadata",
-    "ReportConfiguration",
-    "ReportOutput",
+    "CitationStyle",
     "Report",
+    "ReportConfiguration",
+    "ReportFormat",
     "ReportGenerationRequest",
     "ReportGenerationResponse",
+    "ReportMetadata",
+    "ReportOutput",
+    "ReportSection",
+    "ReportType",
+    "Visualization",
+    "VisualizationType",
 ]

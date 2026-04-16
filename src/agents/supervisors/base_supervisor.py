@@ -13,34 +13,29 @@ Key Features:
 - Integration with MASR routing decisions
 """
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Type, Union
+from datetime import datetime
 from enum import Enum
+from typing import Any
 
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolExecutor
+from langgraph.graph import StateGraph
 
 from src.core.types import SupervisionStatsDict
 
+from ...prompts.manager import get_prompt_manager
 from ..base import BaseAgent
-from ..models import AgentTask, AgentResult
 from ..communication.communication_protocol import (
     CommunicationProtocol,
-    RefinementResult,
-    CommunicationMode,
 )
 from ..communication.talkhier_message import (
-    TalkHierMessage,
-    TalkHierContent,
-    MessageType,
     HierarchyMetadata,
-    RefinementMetadata,
+    MessageType,
+    TalkHierContent,
+    TalkHierMessage,
 )
-from ...prompts.manager import get_prompt_manager
+from ..models import AgentResult, AgentTask
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +69,9 @@ class SupervisionState:
     domain: str = ""
 
     # Worker management
-    allocated_workers: List[str] = field(default_factory=list)
-    worker_tasks: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    worker_results: Dict[str, Any] = field(default_factory=dict)
+    allocated_workers: list[str] = field(default_factory=list)
+    worker_tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
+    worker_results: dict[str, Any] = field(default_factory=dict)
 
     # Coordination state
     current_phase: str = "initialization"
@@ -89,11 +84,11 @@ class SupervisionState:
 
     # Progress tracking
     started_at: datetime = field(default_factory=datetime.now)
-    phase_history: List[Dict[str, Any]] = field(default_factory=list)
+    phase_history: list[dict[str, Any]] = field(default_factory=list)
 
     # Context and metadata
-    context: Dict[str, Any] = field(default_factory=dict)
-    supervision_metadata: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
+    supervision_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -101,15 +96,15 @@ class WorkerDefinition:
     """Definition of a worker agent type."""
 
     worker_type: str
-    agent_class: Type[BaseAgent]
+    agent_class: type[BaseAgent]
     specialization: str
-    capabilities: List[str] = field(default_factory=list)
+    capabilities: list[str] = field(default_factory=list)
 
     # Allocation preferences
-    required_for: List[str] = field(
+    required_for: list[str] = field(
         default_factory=list
     )  # Always required for these tasks
-    optimal_for: List[str] = field(default_factory=list)  # Optimal for these tasks
+    optimal_for: list[str] = field(default_factory=list)  # Optimal for these tasks
 
     # Performance characteristics
     avg_execution_time_ms: int = 30000
@@ -132,9 +127,9 @@ class BaseSupervisor(BaseAgent, ABC):
         self,
         supervisor_type: str,
         domain: str,
-        gemini_service: Optional[Any] = None,
-        cache_client: Optional[Any] = None,
-        config: Optional[Dict[str, Any]] = None,
+        gemini_service: Any | None = None,
+        cache_client: Any | None = None,
+        config: dict[str, Any] | None = None,
     ):
         """Initialize base supervisor."""
         super().__init__(gemini_service, cache_client, config)
@@ -143,13 +138,13 @@ class BaseSupervisor(BaseAgent, ABC):
         self.domain = domain
 
         # Worker management
-        self.worker_definitions: Dict[str, WorkerDefinition] = {}
-        self.active_workers: Dict[str, BaseAgent] = {}
+        self.worker_definitions: dict[str, WorkerDefinition] = {}
+        self.active_workers: dict[str, BaseAgent] = {}
         self.worker_allocation_strategy = WorkerAllocation.OPTIMAL_SET
 
         # LangGraph components
-        self.workflow_graph: Optional[StateGraph] = None
-        self.tool_executor: Optional[ToolExecutor] = None
+        self.workflow_graph: StateGraph[Any, Any, Any, Any] | None = None
+        self.tool_executor: Any | None = None
 
         # Communication protocol
         self.communication_protocol = CommunicationProtocol(
@@ -173,12 +168,12 @@ class BaseSupervisor(BaseAgent, ABC):
         self._build_workflow_graph()
 
     @abstractmethod
-    def _register_worker_types(self):
+    def _register_worker_types(self) -> None:
         """Register worker types for this supervisor."""
         pass
 
     @abstractmethod
-    def _build_workflow_graph(self):
+    def _build_workflow_graph(self) -> None:
         """Build LangGraph workflow for this supervisor."""
         pass
 
@@ -251,9 +246,9 @@ class BaseSupervisor(BaseAgent, ABC):
             "overall_quality", 0.0
         )
 
-        return quality_score >= self.quality_threshold
+        return bool(quality_score >= self.quality_threshold)
 
-    def register_worker(self, worker_def: WorkerDefinition, worker_instance: BaseAgent):
+    def register_worker(self, worker_def: WorkerDefinition, worker_instance: BaseAgent) -> None:
         """Register a worker agent with this supervisor."""
 
         self.worker_definitions[worker_def.worker_type] = worker_def
@@ -263,7 +258,7 @@ class BaseSupervisor(BaseAgent, ABC):
             f"Registered worker {worker_def.worker_type} with {self.supervisor_type} supervisor"
         )
 
-    async def allocate_workers(self, task: AgentTask) -> List[str]:
+    async def allocate_workers(self, task: AgentTask) -> list[str]:
         """
         Allocate optimal workers for a task.
 
@@ -356,12 +351,18 @@ class BaseSupervisor(BaseAgent, ABC):
         }
 
         # Execute workflow
-        final_langgraph_state = await self.workflow_graph.ainvoke(langgraph_state)
+        if not self.workflow_graph:
+            return state
 
-        # Extract final state
-        final_state = final_langgraph_state["supervision_state"]
+        if hasattr(self.workflow_graph, 'ainvoke'):
+            final_langgraph_state = await self.workflow_graph.ainvoke(langgraph_state)
 
-        return final_state
+            # Extract final state
+            final_state: SupervisionState = final_langgraph_state["supervision_state"]
+
+            return final_state
+
+        return state
 
     async def _build_supervision_result(
         self, state: SupervisionState, task: AgentTask, start_time: datetime
@@ -415,9 +416,9 @@ class BaseSupervisor(BaseAgent, ABC):
         self,
         target_worker: str,
         message_type: MessageType,
-        content: Union[TalkHierContent, str],
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Optional[TalkHierMessage]:
+        content: TalkHierContent | str,
+        context: dict[str, Any] | None = None,
+    ) -> TalkHierMessage | None:
         """Send TalkHier message to worker agent."""
 
         worker = self.active_workers.get(target_worker)
@@ -457,9 +458,9 @@ class BaseSupervisor(BaseAgent, ABC):
     async def broadcast_to_workers(
         self,
         message_type: MessageType,
-        content: Union[TalkHierContent, str],
-        worker_subset: Optional[List[str]] = None,
-    ) -> List[TalkHierMessage]:
+        content: TalkHierContent | str,
+        worker_subset: list[str] | None = None,
+    ) -> list[TalkHierMessage]:
         """Broadcast message to all or subset of workers."""
 
         target_workers = worker_subset or list(self.active_workers.keys())
@@ -561,15 +562,16 @@ class BaseSupervisor(BaseAgent, ABC):
                 "active_workers": len(self.active_workers),
                 "worker_types": list(self.worker_definitions.keys()),
             },
-            "communication": await self.communication_protocol.get_protocol_stats(),
+            "communication": dict(await self.communication_protocol.get_protocol_stats()),
         }
 
-    def _create_langgraph_node(self, node_name: str, node_func: callable):
+    def _create_langgraph_node(self, node_name: str, node_func: Any) -> Any:
         """Create LangGraph node with error handling."""
 
         async def wrapped_node(state: dict[str, Any]) -> dict[str, Any]:
             try:
-                return await node_func(state)
+                result = await node_func(state)
+                return dict(result) if result else state
             except Exception as e:
                 logger.error(f"LangGraph node {node_name} failed: {e}")
                 # Return state with error information
@@ -597,8 +599,8 @@ class BaseSupervisor(BaseAgent, ABC):
 
 __all__ = [
     "BaseSupervisor",
-    "SupervisionState",
-    "WorkerDefinition",
     "SupervisionMode",
+    "SupervisionState",
     "WorkerAllocation",
+    "WorkerDefinition",
 ]

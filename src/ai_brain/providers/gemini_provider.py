@@ -8,23 +8,28 @@ service in the research platform.
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any, AsyncGenerator
+from collections.abc import AsyncGenerator
 from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from .base_provider import (
     BaseProvider,
+    ModelCapability,
     ModelRequest,
     ModelResponse,
-    ModelCapability,
-    ResponseFormat,
+    ProviderHealthStatus,
 )
+
+if TYPE_CHECKING:
+    from src.services.gemini_service import GeminiService
 
 # Import existing Gemini service from research platform
 try:
-    from src.services.gemini_service import GeminiService
+    from src.services.gemini_service import GeminiService as GeminiServiceClass
+    GEMINI_SERVICE_AVAILABLE = True
 except ImportError:
-    # Fallback if not available
-    GeminiService = None
+    GeminiServiceClass = None  # type: ignore[assignment,misc]
+    GEMINI_SERVICE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +48,7 @@ class GeminiProvider(BaseProvider):
     - Good balance of cost and quality
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize Gemini provider."""
         super().__init__(config)
 
@@ -55,16 +60,16 @@ class GeminiProvider(BaseProvider):
             raise ValueError("Gemini API key is required")
 
         # Initialize underlying Gemini service if available
-        if GeminiService:
-            gemini_config = {
+        self.gemini_service: GeminiService | None = None
+        if GEMINI_SERVICE_AVAILABLE and GeminiServiceClass is not None:
+            gemini_config_obj: dict[str, Any] = {
                 "api_key": self.api_key,
                 "model": self.default_model,
-                **config.get("gemini_service_config", {}),
             }
-            self.gemini_service = GeminiService(gemini_config)
+            gemini_config_obj.update(config.get("gemini_service_config", {}))
+            self.gemini_service = GeminiServiceClass(self.api_key)
         else:
             logger.warning("GeminiService not available, using direct API calls")
-            self.gemini_service = None
 
         # Model specifications
         self.model_specs = {
@@ -91,7 +96,7 @@ class GeminiProvider(BaseProvider):
     def _get_provider_name(self) -> str:
         return "gemini"
 
-    def _get_supported_capabilities(self) -> List[ModelCapability]:
+    def _get_supported_capabilities(self) -> list[ModelCapability]:
         return [
             ModelCapability.TEXT_GENERATION,
             ModelCapability.CHAT,
@@ -100,17 +105,23 @@ class GeminiProvider(BaseProvider):
             ModelCapability.MULTIMODAL,
         ]
 
-    def _get_supported_models(self) -> List[str]:
+    def _get_supported_models(self) -> list[str]:
         return list(self.model_specs.keys())
 
     def _get_model_context_window(self, model_name: str) -> int:
-        return self.model_specs.get(model_name, {}).get("context_window", 100000)
+        context = self.model_specs.get(model_name, {}).get("context_window", 100000)
+        if isinstance(context, int):
+            return context
+        return 100000
 
     def _get_model_cost(self, model_name: str) -> float:
-        return self.model_specs.get(model_name, {}).get("cost_per_1k_tokens", 0.001)
+        cost = self.model_specs.get(model_name, {}).get("cost_per_1k_tokens", 0.001)
+        if isinstance(cost, (int, float)):
+            return float(cost)
+        return 0.001
 
     async def generate(
-        self, request: ModelRequest, model_name: Optional[str] = None
+        self, request: ModelRequest, model_name: str | None = None
     ) -> ModelResponse:
         """Generate response using Gemini models."""
 
@@ -162,34 +173,38 @@ class GeminiProvider(BaseProvider):
             prompt = f"{request.system_prompt}\n\n{prompt}"
 
         # Call existing service
+        if not self.gemini_service:
+            raise ValueError("GeminiService not available")
+
         try:
-            # This would use the existing GeminiService.generate method
-            service_response = await self.gemini_service.generate(
-                prompt=prompt,
-                max_tokens=request.max_tokens,
-                temperature=request.temperature,
+            # This would use the existing GeminiService method
+            service_response = await self.gemini_service.generate_research_plan(
+                query=prompt
             )
+            service_text = str(service_response)
 
             # Convert service response to ModelResponse
             end_time = datetime.now()
             latency_ms = int((end_time - start_time).total_seconds() * 1000)
 
             # Estimate token usage (Gemini service might provide this)
-            prompt_tokens = len(prompt.split()) * 1.3
-            completion_tokens = len(service_response.split()) * 1.3
+            prompt_tokens_float = len(prompt.split()) * 1.3
+            completion_tokens_float = len(service_text.split()) * 1.3
+            prompt_tokens = int(prompt_tokens_float)
+            completion_tokens = int(completion_tokens_float)
             total_tokens = prompt_tokens + completion_tokens
 
             cost = self._calculate_cost(prompt_tokens, completion_tokens, model_name)
-            confidence = self._calculate_confidence_score(service_response, request)
+            confidence = self._calculate_confidence_score(service_text, request)
 
             return ModelResponse(
                 request_id=request.request_id,
-                content=service_response,
+                content=service_text,
                 model_name=model_name,
                 provider=self.provider_name,
-                completion_tokens=int(completion_tokens),
-                prompt_tokens=int(prompt_tokens),
-                total_tokens=int(total_tokens),
+                completion_tokens=completion_tokens,
+                prompt_tokens=prompt_tokens,
+                total_tokens=total_tokens,
                 latency_ms=latency_ms,
                 processing_time_ms=latency_ms,
                 confidence_score=confidence,
@@ -223,7 +238,7 @@ class GeminiProvider(BaseProvider):
             latency_ms=latency_ms,
         )
 
-    def _convert_messages_to_prompt(self, messages: List[Dict[str, str]]) -> str:
+    def _convert_messages_to_prompt(self, messages: list[dict[str, str]]) -> str:
         """Convert chat messages to a single prompt for Gemini."""
         prompt_parts = []
 
@@ -256,14 +271,16 @@ class GeminiProvider(BaseProvider):
             base_confidence -= 0.05  # Slight decrease for very complex tasks
 
         # Multimodal requests (if supported)
-        if "vision" in request.domain or "image" in (request.prompt or "").lower():
-            if "gemini-pro-vision" in request.metadata.get("model_name", ""):
+        domain_str = request.domain if request.domain else ""
+        if "vision" in domain_str or "image" in (request.prompt or "").lower():
+            model_name_meta = request.metadata.get("model_name", "") if hasattr(request, "metadata") else ""
+            if "gemini-pro-vision" in model_name_meta:
                 base_confidence += 0.1  # Gemini Vision is strong
 
         return min(max(base_confidence, 0.0), 1.0)
 
     async def stream(
-        self, request: ModelRequest, model_name: Optional[str] = None
+        self, request: ModelRequest, model_name: str | None = None
     ) -> AsyncGenerator[str, None]:
         """Stream response using Gemini models."""
 
@@ -292,9 +309,9 @@ class GeminiProvider(BaseProvider):
 
         except Exception as e:
             logger.error(f"Gemini streaming failed: {e}")
-            yield f"Error: {str(e)}"
+            yield f"Error: {e!s}"
 
-    async def health_check(self) -> "ProviderHealthStatus":
+    async def health_check(self) -> ProviderHealthStatus:
         """Perform Gemini-specific health check."""
 
         try:
@@ -348,7 +365,7 @@ class GeminiProvider(BaseProvider):
 
         return True
 
-    def get_model_info(self, model_name: str) -> Optional[Dict[str, Any]]:
+    def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get Gemini model information."""
 
         if not self.supports_model(model_name):
@@ -356,10 +373,10 @@ class GeminiProvider(BaseProvider):
 
         spec = self.model_specs.get(model_name, {})
 
-        base_info = {
+        base_info: dict[str, Any] = {
             "name": model_name,
             "provider": self.provider_name,
-            "capabilities": self.supported_capabilities,
+            "capabilities": list(self.supported_capabilities),
             "context_window": spec.get("context_window"),
             "cost_per_1k_tokens": spec.get("cost_per_1k_tokens"),
             "max_output_tokens": spec.get("max_output_tokens"),
@@ -401,7 +418,7 @@ class GeminiProvider(BaseProvider):
         """Check if a specific model supports multimodal inputs."""
         return "vision" in model_name or "ultra" in model_name
 
-    def get_rate_limits(self) -> Dict[str, int]:
+    def get_rate_limits(self) -> dict[str, int]:
         """Get current rate limits for Gemini API."""
         return {
             "requests_per_minute": 60,

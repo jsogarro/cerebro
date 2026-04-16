@@ -8,26 +8,16 @@ and strategy evaluation notifications.
 Based on "MasRouter: Learning to Route LLMs" research patterns.
 """
 
-import asyncio
-from typing import Dict, List, Optional, Any, Set
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from src.api.websocket.models import WebSocketMessage, MessageType
-from src.ai_brain.models.masr import (
-    QueryDomain,
-    QueryComplexity,
-    RoutingStrategy,
-    RoutingDecision
-)
-from src.models.masr_api_models import (
-    RoutingDecisionResponse,
-    CostEstimationResponse,
-    RouterStatus
-)
+from src.ai_brain.models.masr import QueryComplexity
+from src.api.websocket.models import MessageType, WebSocketMessage
+from src.models.masr_api_models import RoutingDecisionResponse
 
 
 class MASREventType(str, Enum):
@@ -49,9 +39,9 @@ class MASREvent(BaseModel):
     """Base MASR routing event"""
     event_type: MASREventType
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    routing_id: Optional[str] = None
-    data: Dict[str, Any]
-    metadata: Optional[Dict[str, Any]] = None
+    routing_id: str | None = None
+    data: dict[str, Any]
+    metadata: dict[str, Any] | None = None
 
 
 class RoutingProgressEvent(MASREvent):
@@ -60,7 +50,7 @@ class RoutingProgressEvent(MASREvent):
     query_preview: str
     estimated_complexity: QueryComplexity
     estimated_duration_ms: int
-    stages: List[str] = [
+    stages: list[str] = [
         "query_analysis",
         "strategy_selection", 
         "supervisor_allocation",
@@ -78,17 +68,17 @@ class CostOptimizationEvent(MASREvent):
     cost_reduction_percent: float
     optimization_strategy: str
     confidence_score: float
-    breakdown: Optional[Dict[str, float]] = None
+    breakdown: dict[str, float] | None = None
 
 
 class StrategyEvaluationEvent(MASREvent):
     """Strategy evaluation progress"""
     event_type: MASREventType = MASREventType.STRATEGY_CHANGE
-    strategies_evaluated: List[str]
+    strategies_evaluated: list[str]
     current_best: str
     current_score: float
     evaluation_progress: float  # 0-1
-    trade_offs: Dict[str, str]
+    trade_offs: dict[str, str]
 
 
 class LearningUpdateEvent(MASREvent):
@@ -98,8 +88,8 @@ class LearningUpdateEvent(MASREvent):
     accuracy_improvement: float
     cost_prediction_accuracy: float
     quality_prediction_accuracy: float
-    strategies_refined: List[str]
-    next_retraining: Optional[datetime] = None
+    strategies_refined: list[str]
+    next_retraining: datetime | None = None
 
 
 class PerformanceAlertEvent(MASREvent):
@@ -110,7 +100,7 @@ class PerformanceAlertEvent(MASREvent):
     current_value: float
     threshold: float
     message: str
-    recommendations: List[str]
+    recommendations: list[str]
 
 
 class MASRWebSocketManager:
@@ -125,23 +115,22 @@ class MASRWebSocketManager:
     - Learning update broadcasts
     """
     
-    def __init__(self):
-        """Initialize WebSocket manager"""
-        self.active_connections: Dict[str, Set[WebSocket]] = {
-            "global": set(),  # Global MASR events
-            "routing": set(),  # Active routing sessions
-            "learning": set(),  # Learning updates
-            "monitoring": set()  # Performance monitoring
+    def __init__(self) -> None:
+        self.active_connections: dict[str, set[WebSocket]] = {
+            "global": set(),
+            "routing": set(),
+            "learning": set(),
+            "monitoring": set()
         }
-        self.routing_sessions: Dict[str, Dict[str, Any]] = {}
-        self.event_history: List[MASREvent] = []
+        self.routing_sessions: dict[str, dict[str, Any]] = {}
+        self.event_history: list[MASREvent] = []
         self.max_history_size = 1000
         
     async def connect(
         self,
         websocket: WebSocket,
         channel: str = "global",
-        routing_id: Optional[str] = None
+        routing_id: str | None = None
     ) -> None:
         """
         Connect a WebSocket client to MASR events.
@@ -181,14 +170,7 @@ class MASRWebSocketManager:
             )
         )
     
-    def disconnect(self, websocket: WebSocket):
-        """
-        Disconnect a WebSocket client.
-        
-        Args:
-            websocket: WebSocket connection to disconnect
-        """
-        # Remove from all channels
+    def disconnect(self, websocket: WebSocket) -> None:
         for channel in self.active_connections:
             self.active_connections[channel].discard(websocket)
         
@@ -200,7 +182,7 @@ class MASRWebSocketManager:
         self,
         routing_id: str,
         stage: str,
-        progress_data: Dict[str, Any]
+        progress_data: dict[str, Any]
     ) -> None:
         """
         Broadcast routing progress to subscribed clients.
@@ -231,7 +213,7 @@ class MASRWebSocketManager:
         routing_id: str,
         original_cost: float,
         optimized_cost: float,
-        optimization_details: Dict[str, Any]
+        optimization_details: dict[str, Any]
     ) -> None:
         """
         Broadcast cost optimization updates.
@@ -261,9 +243,9 @@ class MASRWebSocketManager:
     async def broadcast_strategy_evaluation(
         self,
         routing_id: str,
-        strategies: List[str],
+        strategies: list[str],
         current_best: str,
-        evaluation_data: Dict[str, Any]
+        evaluation_data: dict[str, Any]
     ) -> None:
         """
         Broadcast strategy evaluation progress.
@@ -288,8 +270,8 @@ class MASRWebSocketManager:
     
     async def broadcast_learning_update(
         self,
-        feedback_stats: Dict[str, Any],
-        improvements: Dict[str, float]
+        feedback_stats: dict[str, Any],
+        improvements: dict[str, float]
     ) -> None:
         """
         Broadcast learning system updates.
@@ -397,9 +379,9 @@ class MASRWebSocketManager:
     
     async def send_routing_error(
         self,
-        routing_id: Optional[str],
+        routing_id: str | None,
         error: str,
-        details: Optional[Dict[str, Any]] = None
+        details: dict[str, Any] | None = None
     ) -> None:
         """
         Send routing error notification.
@@ -469,7 +451,7 @@ class MASRWebSocketManager:
         
         await websocket.send_json(message.dict())
     
-    def _add_to_history(self, event: MASREvent):
+    def _add_to_history(self, event: MASREvent) -> None:
         """
         Add event to history with size limit.
         
@@ -484,10 +466,10 @@ class MASRWebSocketManager:
     
     async def get_event_history(
         self,
-        event_type: Optional[MASREventType] = None,
-        routing_id: Optional[str] = None,
+        event_type: MASREventType | None = None,
+        routing_id: str | None = None,
         limit: int = 100
-    ) -> List[MASREvent]:
+    ) -> list[MASREvent]:
         """
         Get historical events with optional filtering.
         

@@ -184,9 +184,9 @@ async def create_experiment(
         id=db_experiment.id,
         name=cast(str, db_experiment.name),
         description=cast(str | None, db_experiment.description),
-        experiment_type=cast(ExperimentType, db_experiment.experiment_type),
-        status=cast(ExperimentStatus, db_experiment.status),
-        allocation_strategy=cast(AllocationStrategy, db_experiment.allocation_strategy),
+        experiment_type=db_experiment.experiment_type,
+        status=db_experiment.status,
+        allocation_strategy=db_experiment.allocation_strategy,
         traffic_percentage=cast(float, db_experiment.traffic_percentage),
         variants=[{
             "id": v.id,
@@ -231,12 +231,12 @@ async def list_experiments(
     return [
         ExperimentResponse(
             id=exp.id,
-            name=cast(str, exp.name),
-            description=cast(str | None, exp.description),
-            experiment_type=cast(ExperimentType, exp.experiment_type),
-            status=cast(ExperimentStatus, exp.status),
-            allocation_strategy=cast(AllocationStrategy, exp.allocation_strategy),
-            traffic_percentage=cast(float, exp.traffic_percentage),
+            name=exp.name,
+            description=exp.description,
+            experiment_type=exp.experiment_type,
+            status=exp.status,
+            allocation_strategy=exp.allocation_strategy,
+            traffic_percentage=exp.traffic_percentage,
             variants=[{
                 "id": v.id,
                 "name": v.name,
@@ -278,12 +278,12 @@ async def get_experiment(
     
     return ExperimentResponse(
         id=experiment.id,
-        name=cast(str, experiment.name),
-        description=cast(str | None, experiment.description),
-        experiment_type=cast(ExperimentType, experiment.experiment_type),
-        status=cast(ExperimentStatus, experiment.status),
-        allocation_strategy=cast(AllocationStrategy, experiment.allocation_strategy),
-        traffic_percentage=cast(float, experiment.traffic_percentage),
+        name=experiment.name,
+        description=experiment.description,
+        experiment_type=experiment.experiment_type,
+        status=experiment.status,
+        allocation_strategy=experiment.allocation_strategy,
+        traffic_percentage=experiment.traffic_percentage,
         variants=[{
             "id": v.id,
             "name": v.name,
@@ -322,31 +322,30 @@ async def update_experiment(
     if not experiment:
         raise HTTPException(status_code=404, detail="Experiment not found")
     
-    # Update fields using setattr to satisfy mypy
     if update.description is not None:
-        experiment.description = update.description
+        object.__setattr__(experiment, "description", update.description)
     if update.status is not None:
-        experiment.status = update.status
+        object.__setattr__(experiment, "status", update.status)
     if update.traffic_percentage is not None:
-        experiment.traffic_percentage = update.traffic_percentage
+        object.__setattr__(experiment, "traffic_percentage", update.traffic_percentage)
     if update.end_date is not None:
-        experiment.end_date = update.end_date
+        object.__setattr__(experiment, "end_date", update.end_date)
     if update.success_criteria is not None:
-        experiment.success_criteria = update.success_criteria
+        object.__setattr__(experiment, "success_criteria", update.success_criteria)
 
-    experiment.updated_at = datetime.utcnow()
+    object.__setattr__(experiment, "updated_at", datetime.utcnow())
     
     await db.commit()
     await db.refresh(experiment)
     
     return ExperimentResponse(
         id=experiment.id,
-        name=cast(str, experiment.name),
-        description=cast(str | None, experiment.description),
-        experiment_type=cast(ExperimentType, experiment.experiment_type),
-        status=cast(ExperimentStatus, experiment.status),
-        allocation_strategy=cast(AllocationStrategy, experiment.allocation_strategy),
-        traffic_percentage=cast(float, experiment.traffic_percentage),
+        name=experiment.name,
+        description=experiment.description,
+        experiment_type=experiment.experiment_type,
+        status=experiment.status,
+        allocation_strategy=experiment.allocation_strategy,
+        traffic_percentage=experiment.traffic_percentage,
         variants=[{
             "id": v.id,
             "name": v.name,

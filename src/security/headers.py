@@ -268,7 +268,8 @@ class SecurityHeadersMiddleware:
         ]
 
         for header in headers_to_remove:
-            response.headers.pop(header, None)
+            if header in response.headers:
+                del response.headers[header]
 
         # Add custom headers
         for header, value in self.custom_headers.items():
@@ -368,22 +369,22 @@ class CORSSecurityMiddleware:
 
         # Handle preflight requests
         if request.method == "OPTIONS":
-            response = Response()
+            preflight_response = Response()
 
             if origin and self._is_origin_allowed(origin):
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers["Access-Control-Allow-Methods"] = ", ".join(
+                preflight_response.headers["Access-Control-Allow-Origin"] = origin
+                preflight_response.headers["Access-Control-Allow-Methods"] = ", ".join(
                     self.allowed_methods
                 )
-                response.headers["Access-Control-Allow-Headers"] = ", ".join(
+                preflight_response.headers["Access-Control-Allow-Headers"] = ", ".join(
                     self.allowed_headers
                 )
-                response.headers["Access-Control-Max-Age"] = str(self.max_age)
+                preflight_response.headers["Access-Control-Max-Age"] = str(self.max_age)
 
                 if self.allow_credentials:
-                    response.headers["Access-Control-Allow-Credentials"] = "true"
+                    preflight_response.headers["Access-Control-Allow-Credentials"] = "true"
 
-            return response
+            return preflight_response
 
         # Process actual request
         response: Response = await call_next(request)

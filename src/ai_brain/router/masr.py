@@ -13,36 +13,43 @@ This is the brain of Cerebro's AI orchestration system, making intelligent
 decisions about how to handle each query most effectively.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any
-import uuid
+from typing import TYPE_CHECKING, Any
 
 from src.core.types import HealthCheckDict
 
+if TYPE_CHECKING:
+    from src.ai_brain.config.model_config_manager import ModelConfigManager
+
 from src.core.constants import (
+    DEFAULT_AGENT_TIMEOUT,
+    DEFAULT_ESTIMATED_TOKENS,
     DEFAULT_RETRY_ATTEMPTS,
+    DIRECT_MODE_PARALLELISM,
+    HIGH_PARALLELISM,
+    LONG_TIMEOUT,
+    LOW_PARALLELISM,
     MAX_RETRY_ATTEMPTS,
+    MEDIUM_TIMEOUT,
     MIN_RETRY_ATTEMPTS,
     SHORT_TIMEOUT,
-    MEDIUM_TIMEOUT,
-    LONG_TIMEOUT,
-    DIRECT_MODE_PARALLELISM,
-    LOW_PARALLELISM,
-    HIGH_PARALLELISM,
-    DEFAULT_ESTIMATED_TOKENS,
 )
-from .query_analyzer import QueryComplexityAnalyzer, ComplexityAnalysis, ComplexityLevel
+
 from .cost_optimizer import CostOptimizer, OptimizationResult, OptimizationStrategy
+from .query_analyzer import ComplexityAnalysis, ComplexityLevel, QueryComplexityAnalyzer
 from .routing_cache import RoutingCacheManager
 from .routing_metrics import RoutingMetricsCollector
 from .routing_types import (
-    CollaborationMode,
-    RoutingStrategy,
     AgentAllocation,
+    CollaborationMode,
     RoutingMetrics,
+    RoutingStrategy,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,8 +82,8 @@ class RoutingDecision:
     monitoring_level: str = "standard"  # minimal, standard, detailed
 
     # Context preservation
-    context_requirements: Dict[str, Any] = field(default_factory=dict)
-    memory_allocation: Dict[str, int] = field(default_factory=dict)
+    context_requirements: dict[str, Any] = field(default_factory=dict)
+    memory_allocation: dict[str, int] = field(default_factory=dict)
 
 
 
@@ -94,8 +101,8 @@ class MASRouter:
 
     def __init__(
         self,
-        config: Optional[Dict] = None,
-        model_config_manager: Optional["ModelConfigManager"] = None,
+        config: dict[str, Any] | None = None,
+        model_config_manager: ModelConfigManager | None = None,
     ):
         """Initialize MASR with configuration."""
         self.config = config or {}
@@ -103,10 +110,11 @@ class MASRouter:
 
         # Initialize components
         self.complexity_analyzer = QueryComplexityAnalyzer(
-            config.get("complexity_analyzer", {})
+            self.config.get("complexity_analyzer", {})
         )
+        cost_opt_config = config.get("cost_optimizer", {}) if config else {}
         self.cost_optimizer = CostOptimizer(
-            config.get("cost_optimizer", {}), model_config_manager
+            cost_opt_config, model_config_manager
         )
 
         # Initialize cache manager
@@ -145,9 +153,9 @@ class MASRouter:
     async def route(
         self,
         query: str,
-        context: Optional[Dict] = None,
-        strategy: Optional[RoutingStrategy] = None,
-        constraints: Optional[Dict] = None,
+        context: dict[str, Any] | None = None,
+        strategy: RoutingStrategy | None = None,
+        constraints: dict[str, Any] | None = None,
     ) -> RoutingDecision:
         """
         Route a query through intelligent analysis and optimization.
@@ -210,7 +218,7 @@ class MASRouter:
                 collaboration_mode=collaboration_mode,
                 agent_allocation=agent_allocation,
                 estimated_cost=predictions["cost"],
-                estimated_latency_ms=predictions["latency"],
+                estimated_latency_ms=int(predictions["latency"]),
                 estimated_quality=predictions["quality"],
                 confidence_score=predictions["confidence"],
                 fallback_strategy=self._select_fallback_strategy(complexity_analysis),
@@ -249,7 +257,7 @@ class MASRouter:
             return self._create_fallback_decision(query_id, query, e)
 
     def _select_routing_strategy(
-        self, complexity_analysis: ComplexityAnalysis, context: Optional[Dict]
+        self, complexity_analysis: ComplexityAnalysis, context: dict[str, Any] | None
     ) -> RoutingStrategy:
         """Select the optimal routing strategy based on analysis and context."""
 
@@ -382,7 +390,7 @@ class MASRouter:
                 retry_attempts=MIN_RETRY_ATTEMPTS,
             )
 
-    def _get_domain_supervisor_types(self, domains) -> List[str]:
+    def _get_domain_supervisor_types(self, domains: Any) -> list[str]:
         """Get supervisor types based on identified domains (enhanced for hierarchical routing)."""
         supervisor_types = []
 
@@ -406,7 +414,7 @@ class MASRouter:
 
         return supervisor_types
 
-    def _get_domain_worker_types(self, domains) -> List[str]:
+    def _get_domain_worker_types(self, domains: Any) -> list[str]:
         """Get worker types based on identified domains (legacy method for backward compatibility)."""
         worker_types = []
 
@@ -430,7 +438,7 @@ class MASRouter:
 
         return worker_types
 
-    def _get_specialized_worker_types(self, complexity_analysis) -> List[str]:
+    def _get_specialized_worker_types(self, complexity_analysis: Any) -> list[str]:
         """Get specialized worker types for hierarchical mode."""
         worker_types = []
 
@@ -460,10 +468,13 @@ class MASRouter:
         complexity_analysis: ComplexityAnalysis,
         optimization_result: OptimizationResult,
         agent_allocation: AgentAllocation,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Predict performance metrics for the routing decision."""
 
         # Base predictions from optimization
+        if optimization_result.estimated_cost is None:
+            return {"cost": 0.0, "latency": 0.0, "quality": 0.0, "confidence": 0.0}
+
         base_cost = optimization_result.estimated_cost.cost_per_request
         base_latency = optimization_result.estimated_cost.latency_estimate_ms
         base_quality = optimization_result.estimated_cost.quality_score
@@ -488,7 +499,7 @@ class MASRouter:
             "confidence": confidence,
         }
 
-    def _select_fallback_strategy(self, complexity_analysis) -> str:
+    def _select_fallback_strategy(self, complexity_analysis: Any) -> str:
         """Select appropriate fallback strategy."""
         if complexity_analysis.priority_level == "critical":
             return "immediate_fallback"
@@ -497,20 +508,18 @@ class MASRouter:
         else:
             return "graceful_degradation"
 
-    def _select_monitoring_level(self, complexity_analysis) -> str:
+    def _select_monitoring_level(self, complexity_analysis: Any) -> str:
         """Select monitoring level based on complexity."""
-        if complexity_analysis.level == ComplexityLevel.COMPLEX:
-            return "detailed"
-        elif complexity_analysis.uncertainty > 0.7:
+        if complexity_analysis.level == ComplexityLevel.COMPLEX or complexity_analysis.uncertainty > 0.7:
             return "detailed"
         else:
             return "standard"
 
     def _determine_context_requirements(
-        self, complexity_analysis, context: Optional[Dict]
-    ) -> Dict[str, Any]:
+        self, complexity_analysis: Any, context: dict[str, Any] | None
+    ) -> dict[str, Any]:
         """Determine context preservation requirements."""
-        requirements = {}
+        requirements: dict[str, Any] = {}
 
         # Memory requirements based on complexity
         if complexity_analysis.level != ComplexityLevel.SIMPLE:
@@ -526,9 +535,9 @@ class MASRouter:
 
         return requirements
 
-    def _allocate_memory(self, complexity_analysis) -> Dict[str, int]:
+    def _allocate_memory(self, complexity_analysis: Any) -> dict[str, int]:
         """Allocate memory resources based on complexity."""
-        allocation = {}
+        allocation: dict[str, int] = {}
 
         # Working memory allocation
         allocation["working_memory_mb"] = 100 + (complexity_analysis.subtask_count * 50)
@@ -551,8 +560,8 @@ class MASRouter:
         # Simple fallback analysis
         from .query_analyzer import (
             ComplexityAnalysis,
-            ComplexityLevel,
             ComplexityFactors,
+            ComplexityLevel,
         )
 
         fallback_analysis = ComplexityAnalysis(
@@ -569,10 +578,10 @@ class MASRouter:
 
         # Simple fallback optimization
         from .cost_optimizer import (
-            OptimizationResult,
-            ModelSpec,
             CostEstimate,
+            ModelSpec,
             ModelTier,
+            OptimizationResult,
         )
 
         fallback_model = ModelSpec(
@@ -626,7 +635,7 @@ class MASRouter:
     async def health_check(self) -> HealthCheckDict:
         """Perform health check on MASR components."""
         metrics = self.metrics_collector.get_metrics()
-        health = {
+        health: HealthCheckDict = {
             "status": "healthy",
             "components": {
                 "complexity_analyzer": "healthy",
@@ -636,8 +645,8 @@ class MASRouter:
             },
             "metrics": {
                 "total_requests": metrics.total_requests,
-                "cache_hit_rate": "N/A",  # Would calculate from actual usage
-                "avg_routing_time_ms": "N/A",  # Would track routing performance
+                "cache_hit_rate": "N/A",
+                "avg_routing_time_ms": "N/A",
             },
         }
 
@@ -645,10 +654,10 @@ class MASRouter:
 
 
 __all__ = [
+    "AgentAllocation",
+    "CollaborationMode",
     "MASRouter",
     "RoutingDecision",
-    "CollaborationMode",
-    "RoutingStrategy",
-    "AgentAllocation",
     "RoutingMetrics",
+    "RoutingStrategy",
 ]

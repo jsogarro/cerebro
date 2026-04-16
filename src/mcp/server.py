@@ -75,10 +75,11 @@ class MCPServer:
             params_schema[param.name] = param_def
 
         # Register tool with FastMCP
-        @self.mcp.tool(name=metadata.name, description=metadata.description)
         async def tool_wrapper(**kwargs: Any) -> dict[str, Any]:
             """Wrapper function for MCP tool execution."""
             return await tool.execute(**kwargs)
+
+        decorated_tool = self.mcp.tool(name=metadata.name, description=metadata.description)(tool_wrapper)
 
         logger.info(f"Registered tool: {metadata.name}")
 

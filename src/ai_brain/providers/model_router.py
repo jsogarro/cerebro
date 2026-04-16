@@ -7,11 +7,11 @@ monitoring. This is the execution layer that implements the routing decisions
 from the MASR system.
 """
 
-import asyncio
 import logging
-from typing import Dict, List, Optional, Any, Type, AsyncGenerator
-from datetime import datetime, timedelta
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any
 
 from .base_provider import (
     BaseProvider,
@@ -20,8 +20,8 @@ from .base_provider import (
     ProviderHealthStatus,
 )
 from .deepseek_provider import DeepSeekProvider
-from .llama_provider import LlamaProvider
 from .gemini_provider import GeminiProvider
+from .llama_provider import LlamaProvider
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +30,10 @@ logger = logging.getLogger(__name__)
 class ProviderRegistry:
     """Registry of available model providers."""
 
-    providers: Dict[str, BaseProvider] = field(default_factory=dict)
-    provider_configs: Dict[str, Dict] = field(default_factory=dict)
-    health_status: Dict[str, ProviderHealthStatus] = field(default_factory=dict)
-    last_health_check: Dict[str, datetime] = field(default_factory=dict)
+    providers: dict[str, BaseProvider] = field(default_factory=dict)
+    provider_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    health_status: dict[str, ProviderHealthStatus] = field(default_factory=dict)
+    last_health_check: dict[str, datetime] = field(default_factory=dict)
 
 
 @dataclass
@@ -43,7 +43,7 @@ class RoutingDecision:
     provider_name: str
     model_name: str
     confidence: float
-    fallback_providers: List[str] = field(default_factory=list)
+    fallback_providers: list[str] = field(default_factory=list)
     routing_reason: str = ""
 
 
@@ -56,7 +56,7 @@ class ModelRouter:
     foundation models in the Cerebro system.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize model router with configuration."""
         self.config = config
 
@@ -85,7 +85,7 @@ class ModelRouter:
         # Initialize providers
         self._initialize_providers()
 
-    def _initialize_providers(self):
+    def _initialize_providers(self) -> None:
         """Initialize all configured providers."""
 
         provider_configs = self.config.get("providers", {})
@@ -113,7 +113,7 @@ class ModelRouter:
                 logger.error(f"Failed to initialize provider {provider_name}: {e}")
 
     async def route_and_generate(
-        self, request: ModelRequest, routing_decision: Optional[Dict] = None
+        self, request: ModelRequest, routing_decision: dict[str, Any] | None = None
     ) -> ModelResponse:
         """
         Route request and generate response using optimal provider.
@@ -206,7 +206,7 @@ class ModelRouter:
 
         return response
 
-    async def _make_routing_decision(self, request: ModelRequest) -> Dict:
+    async def _make_routing_decision(self, request: ModelRequest) -> dict[str, Any]:
         """Make routing decision when not provided by MASR."""
 
         # Simple fallback routing logic
@@ -215,7 +215,8 @@ class ModelRouter:
         available_providers = [
             name
             for name, provider in self.registry.providers.items()
-            if self.registry.health_status.get(name, {}).get("healthy", True)
+            if isinstance(self.registry.health_status.get(name), ProviderHealthStatus)
+            and self.registry.health_status.get(name, ProviderHealthStatus(healthy=False, avg_latency_ms=0, last_check=datetime.now(), error_rate=0.0)).healthy
         ]
 
         if not available_providers:
@@ -302,7 +303,7 @@ class ModelRouter:
             confidence_score=0.0,
         )
 
-    async def get_available_models(self) -> Dict[str, List[str]]:
+    async def get_available_models(self) -> dict[str, list[str]]:
         """Get all available models from all providers."""
 
         available_models = {}
@@ -317,7 +318,7 @@ class ModelRouter:
 
     async def get_model_info(
         self, provider_name: str, model_name: str
-    ) -> Optional[Dict]:
+    ) -> dict[str, Any] | None:
         """Get detailed information about a specific model."""
 
         provider = self.registry.providers.get(provider_name)
@@ -326,7 +327,7 @@ class ModelRouter:
 
         return provider.get_model_info(model_name)
 
-    async def get_provider_metrics(self) -> Dict[str, Any]:
+    async def get_provider_metrics(self) -> dict[str, Any]:
         """Get metrics for all providers."""
 
         metrics = {
@@ -340,7 +341,7 @@ class ModelRouter:
         }
 
         for provider_name, provider in self.registry.providers.items():
-            provider_metrics = provider.get_metrics()
+            provider_metrics: dict[str, Any] = provider.get_metrics()
             health_status = self.registry.health_status.get(provider_name)
 
             if health_status:
@@ -355,7 +356,7 @@ class ModelRouter:
 
         return metrics
 
-    async def health_check_all_providers(self) -> Dict[str, ProviderHealthStatus]:
+    async def health_check_all_providers(self) -> dict[str, ProviderHealthStatus]:
         """Perform health check on all providers."""
 
         health_results = {}
@@ -368,7 +369,7 @@ class ModelRouter:
         return health_results
 
     async def stream_response(
-        self, request: ModelRequest, routing_decision: Optional[Dict] = None
+        self, request: ModelRequest, routing_decision: dict[str, Any] | None = None
     ) -> AsyncGenerator[str, None]:
         """Stream response using optimal provider."""
 
@@ -398,9 +399,9 @@ class ModelRouter:
 
         except Exception as e:
             logger.error(f"Streaming failed: {e}")
-            yield f"Error: {str(e)}"
+            yield f"Error: {e!s}"
 
-    def add_provider(self, provider_name: str, provider_config: Dict):
+    def add_provider(self, provider_name: str, provider_config: dict[str, Any]) -> None:
         """Dynamically add a new provider."""
 
         try:
@@ -419,7 +420,7 @@ class ModelRouter:
             logger.error(f"Failed to add provider {provider_name}: {e}")
             raise
 
-    def remove_provider(self, provider_name: str):
+    def remove_provider(self, provider_name: str) -> None:
         """Remove a provider from the registry."""
 
         if provider_name in self.registry.providers:

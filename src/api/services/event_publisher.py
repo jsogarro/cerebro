@@ -7,6 +7,7 @@ across multiple server instances.
 """
 
 import asyncio
+import json
 from typing import Any
 from uuid import UUID
 
@@ -34,10 +35,10 @@ class EventPublisher:
     for distribution across multiple server instances.
     """
 
-    def __init__(self):
-        self.redis_client: redis.Redis | None = None
-        self.redis_subscriber: redis.Redis | None = None
-        self.subscription_task: asyncio.Task | None = None
+    def __init__(self) -> None:
+        self.redis_client: redis.Redis[bytes] | None = None
+        self.redis_subscriber: redis.Redis[bytes] | None = None
+        self.subscription_task: asyncio.Task[None] | None = None
         self._shutdown = False
 
     async def initialize(self) -> None:
@@ -76,11 +77,10 @@ class EventPublisher:
             except asyncio.CancelledError:
                 pass
 
-        # Close Redis connections
         if self.redis_client:
-            await self.redis_client.aclose()
+            await self.redis_client.close()
         if self.redis_subscriber:
-            await self.redis_subscriber.aclose()
+            await self.redis_subscriber.close()
 
         logger.info("Event publisher shutdown complete")
 
@@ -418,8 +418,7 @@ class EventPublisher:
                     message = await pubsub.get_message(timeout=1.0)
 
                     if message and message["type"] == "message":
-                        # Parse and handle event
-                        event_data = deserialize_from_cache(message["data"])
+                        event_data = json.loads(message["data"])
                         ws_message = WSMessage(**event_data)
 
                         # Broadcast to local WebSocket connections
@@ -453,7 +452,7 @@ class EventPublisher:
                     await asyncio.sleep(1)  # Brief pause before retrying
 
             await pubsub.unsubscribe("research_platform:events")
-            await pubsub.aclose()
+            await pubsub.close()
 
         except Exception as e:
             logger.error(

@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -18,13 +18,12 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool, QueuePool
 
-from src.core.config import get_settings
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Global engine and session factory
 _engine: AsyncEngine | None = None
-_async_session_factory: async_sessionmaker | None = None
+_async_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_database_url() -> str:
@@ -34,8 +33,7 @@ def get_database_url() -> str:
     Returns:
         Database URL
     """
-    settings = get_settings()
-    return settings.DATABASE_URL
+    return str(settings.DATABASE_URL)
 
 
 def create_engine(
@@ -85,17 +83,17 @@ def create_engine(
     if echo_pool:
 
         @event.listens_for(engine.sync_engine, "connect")
-        def receive_connect(dbapi_conn, connection_record):
+        def receive_connect(dbapi_conn: Any, connection_record: Any) -> None:
             logger.debug(f"Pool connect: {connection_record}")
 
         @event.listens_for(engine.sync_engine, "checkout")
-        def receive_checkout(dbapi_conn, connection_record, connection_proxy):
+        def receive_checkout(dbapi_conn: Any, connection_record: Any, connection_proxy: Any) -> None:
             logger.debug(f"Pool checkout: {connection_record}")
 
     return engine
 
 
-async def init_db(database_url: str | None = None, **engine_kwargs) -> None:
+async def init_db(database_url: str | None = None, **engine_kwargs: Any) -> None:
     """
     Initialize database connection.
 
@@ -126,7 +124,7 @@ async def init_db(database_url: str | None = None, **engine_kwargs) -> None:
     # Test connection
     try:
         async with _engine.begin() as conn:
-            await conn.execute("SELECT 1")
+            await conn.execute(text("SELECT 1"))
         logger.info("Database connection successful")
     except Exception as e:
         logger.error(f"Database connection failed: {e}")
@@ -145,7 +143,7 @@ async def close_db() -> None:
         _async_session_factory = None
 
 
-def get_session_factory() -> async_sessionmaker:
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
     """
     Get async session factory.
 
@@ -190,16 +188,15 @@ async def get_transaction() -> AsyncGenerator[AsyncSession, None]:
     """
     session_factory = get_session_factory()
 
-    async with session_factory() as session:
-        async with session.begin():
-            try:
-                yield session
-            except Exception:
-                await session.rollback()
-                raise
+    async with session_factory() as session, session.begin():
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 
-async def execute_in_transaction(func, *args, **kwargs) -> Any:
+async def execute_in_transaction(func: Any, *args: Any, **kwargs: Any) -> Any:
     """
     Execute function in transaction.
 
@@ -229,10 +226,12 @@ class DatabaseManager:
         Args:
             engine: Database engine (uses global if not provided)
         """
-        self.engine = engine or _engine
+        resolved_engine = engine or _engine
 
-        if self.engine is None:
+        if resolved_engine is None:
             raise RuntimeError("Database not initialized")
+
+        self.engine: AsyncEngine = resolved_engine
 
     async def check_connection(self) -> bool:
         """
@@ -243,13 +242,13 @@ class DatabaseManager:
         """
         try:
             async with self.engine.begin() as conn:
-                await conn.execute("SELECT 1")
+                await conn.execute(text("SELECT 1"))
             return True
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")
             return False
 
-    async def get_pool_status(self) -> dict:
+    async def get_pool_status(self) -> dict[str, Any]:
         """
         Get connection pool status.
 
@@ -266,7 +265,7 @@ class DatabaseManager:
             "total": pool.total() if hasattr(pool, "total") else None,
         }
 
-    async def get_table_sizes(self) -> dict:
+    async def get_table_sizes(self) -> dict[str, Any]:
         """
         Get table sizes.
 
@@ -285,7 +284,7 @@ class DatabaseManager:
         """
 
         async with self.engine.begin() as conn:
-            result = await conn.execute(query)
+            result = await conn.execute(text(query))
             rows = result.fetchall()
 
         return {
@@ -293,7 +292,7 @@ class DatabaseManager:
             for row in rows
         }
 
-    async def get_slow_queries(self, min_duration_ms: int = 1000) -> list:
+    async def get_slow_queries(self, min_duration_ms: int = 1000) -> list[dict[str, Any]]:
         """
         Get slow queries.
 
@@ -319,7 +318,7 @@ class DatabaseManager:
 
         try:
             async with self.engine.begin() as conn:
-                result = await conn.execute(query)
+                result = await conn.execute(text(query))
                 rows = result.fetchall()
 
             return [
@@ -339,7 +338,7 @@ class DatabaseManager:
             )
             return []
 
-    async def analyze_indexes(self) -> dict:
+    async def analyze_indexes(self) -> dict[str, Any]:
         """
         Analyze index usage.
 
@@ -371,14 +370,14 @@ class DatabaseManager:
 
         async with self.engine.begin() as conn:
             # Get unused indexes
-            result = await conn.execute(unused_query)
+            result = await conn.execute(text(unused_query))
             unused = [
                 {"table": row.tablename, "index": row.indexname, "size": row.index_size}
                 for row in result.fetchall()
             ]
 
             # Get hit rate
-            result = await conn.execute(hit_rate_query)
+            result = await conn.execute(text(hit_rate_query))
             hit_rate = result.scalar()
 
         return {"unused_indexes": unused, "index_hit_rate": hit_rate}
@@ -396,7 +395,7 @@ class DatabaseManager:
             query = "VACUUM ANALYZE"
 
         async with self.engine.begin() as conn:
-            await conn.execute(query)
+            await conn.execute(text(query))
 
         logger.info(f"VACUUM ANALYZE completed for {table_name or 'all tables'}")
 

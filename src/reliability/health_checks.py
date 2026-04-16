@@ -5,6 +5,8 @@ This module provides comprehensive health checking functionality including
 liveness probes, readiness probes, and dependency health checks.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -92,29 +94,28 @@ class SystemHealth:
 class HealthChecker:
     """Main health checker class."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize health checker."""
         self.start_time = time.time()
-        self.health_checks: dict[str, Callable] = {}
-        self.dependency_checks: dict[str, Callable] = {}
+        self.health_checks: dict[str, Callable[..., Any]] = {}
+        self.dependency_checks: dict[str, Callable[..., Any]] = {}
         self.cached_results: dict[str, HealthCheckResult] = {}
         self.cache_ttl = config.monitoring.health_check_interval
         self._register_default_checks()
 
-    def _register_default_checks(self):
+    def _register_default_checks(self) -> None:
         """Register default health checks."""
-        # Core component checks
         self.register_health_check("database", self.check_database)
         self.register_health_check("redis", self.check_redis)
         self.register_health_check("temporal", self.check_temporal)
         self.register_health_check("mcp", self.check_mcp)
         self.register_health_check("gemini", self.check_gemini)
 
-    def register_health_check(self, name: str, check_func: Callable):
+    def register_health_check(self, name: str, check_func: Callable[..., Any]) -> None:
         """Register a health check function."""
         self.health_checks[name] = check_func
 
-    def register_dependency_check(self, name: str, check_func: Callable):
+    def register_dependency_check(self, name: str, check_func: Callable[..., Any]) -> None:
         """Register a dependency check function."""
         self.dependency_checks[name] = check_func
 
@@ -397,8 +398,7 @@ class HealthChecker:
 
         results = await asyncio.gather(*check_tasks, return_exceptions=True)
 
-        # Process results
-        health_results = []
+        health_results: list[HealthCheckResult] = []
         overall_status = HealthStatus.HEALTHY
 
         for result in results:
@@ -412,7 +412,7 @@ class HealthChecker:
                     )
                 )
                 overall_status = HealthStatus.UNHEALTHY
-            else:
+            elif isinstance(result, HealthCheckResult):
                 health_results.append(result)
                 if result.status == HealthStatus.UNHEALTHY:
                     overall_status = HealthStatus.UNHEALTHY
@@ -459,9 +459,8 @@ class HealthChecker:
                     )
                 )
                 overall_status = HealthStatus.UNHEALTHY
-            else:
+            elif isinstance(result, HealthCheckResult):
                 health_results.append(result)
-                # During startup, degraded is acceptable
                 if result.status == HealthStatus.UNHEALTHY:
                     overall_status = HealthStatus.UNHEALTHY
 
@@ -490,8 +489,7 @@ class HealthChecker:
 
         results = await asyncio.gather(*check_tasks, return_exceptions=True)
 
-        # Process results
-        health_results = []
+        health_results: list[HealthCheckResult] = []
         overall_status = HealthStatus.HEALTHY
 
         for result in results:
@@ -505,7 +503,7 @@ class HealthChecker:
                     )
                 )
                 overall_status = HealthStatus.UNHEALTHY
-            else:
+            elif isinstance(result, HealthCheckResult):
                 health_results.append(result)
                 if result.status == HealthStatus.UNHEALTHY:
                     overall_status = HealthStatus.UNHEALTHY
@@ -527,7 +525,7 @@ class HealthChecker:
 health_checker = HealthChecker()
 
 
-def register_health_endpoints(app: FastAPI):
+def register_health_endpoints(app: FastAPI) -> None:
     """Register health check endpoints with FastAPI application."""
 
     @app.get("/health/live", tags=["health"])
@@ -608,7 +606,7 @@ def register_health_endpoints(app: FastAPI):
             response.status_code = status.HTTP_404_NOT_FOUND
             return {"error": f"Unknown component: {component}"}
 
-        result = await health_checker.health_checks[component]()
+        result: HealthCheckResult = await health_checker.health_checks[component]()
 
         if result.status == HealthStatus.HEALTHY:
             return result.to_dict()

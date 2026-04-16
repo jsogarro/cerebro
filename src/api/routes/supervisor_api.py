@@ -7,39 +7,45 @@ Provides comprehensive supervisor management, worker coordination, and
 cross-domain orchestration capabilities.
 """
 
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status
-from fastapi.responses import JSONResponse
 import asyncio
+import json
 import logging
+from typing import Any
 
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
+
+from src.api.services.supervisor_coordination_service import (
+    SupervisorCoordinationService,
+)
 from src.models.supervisor_api_models import (
-    SupervisorType,
-    SupervisorExecuteRequest,
-    SupervisorExecuteResponse,
-    WorkerCoordinationRequest,
-    WorkerCoordinationResponse,
-    MultiSupervisorOrchestrationRequest,
-    MultiSupervisorOrchestrationResponse,
-    WorkerAllocationOptimizationRequest,
-    WorkerAllocationOptimizationResponse,
     ConflictResolutionRequest,
     ConflictResolutionResponse,
     ExperimentRequest,
     ExperimentResponse,
-    SupervisorInfo,
-    WorkerInfo,
-    SupervisorStatsResponse,
-    SupervisorHealthResponse,
+    MultiSupervisorOrchestrationRequest,
+    MultiSupervisorOrchestrationResponse,
     SupervisorComparisonResponse,
+    SupervisorExecuteRequest,
+    SupervisorExecuteResponse,
+    SupervisorHealthResponse,
+    SupervisorInfo,
     SupervisorListResponse,
-    WorkerListResponse,
+    SupervisorStatsResponse,
+    SupervisorType,
     SupervisorWebSocketEvent,
+    WorkerAllocationOptimizationRequest,
+    WorkerAllocationOptimizationResponse,
     WorkerCoordinationProgressEvent,
-    SupervisorErrorResponse,
+    WorkerCoordinationRequest,
+    WorkerCoordinationResponse,
+    WorkerListResponse,
 )
-from src.api.services.supervisor_coordination_service import SupervisorCoordinationService
-
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -59,11 +65,10 @@ supervisor_service = SupervisorCoordinationService()
 
 # WebSocket connection manager for real-time updates
 class SupervisorConnectionManager:
-    """Manages WebSocket connections for supervisor real-time updates"""
-    
-    def __init__(self):
-        self.active_connections: Dict[str, List[WebSocket]] = {}
-        self.supervisor_subscriptions: Dict[str, List[WebSocket]] = {}
+
+    def __init__(self) -> None:
+        self.active_connections: dict[str, list[WebSocket]] = {}
+        self.supervisor_subscriptions: dict[str, list[WebSocket]] = {}
     
     async def connect(self, websocket: WebSocket, client_id: str) -> None:
         """Accept and register a WebSocket connection"""
@@ -88,8 +93,7 @@ class SupervisorConnectionManager:
                 except Exception as e:
                     logger.error(f"Error sending event to client: {e}")
     
-    async def broadcast_event(self, event: dict) -> None:
-        """Broadcast event to all connected clients"""
+    async def broadcast_event(self, event: dict[str, Any]) -> None:
         for client_connections in self.active_connections.values():
             for connection in client_connections:
                 try:
@@ -401,7 +405,7 @@ async def resolve_conflicts(
 
 @router.get("/performance/compare", response_model=SupervisorComparisonResponse)
 async def compare_supervisor_performance(
-    supervisors: List[SupervisorType] = Query(
+    supervisors: list[SupervisorType] = Query(
         ...,
         description="List of supervisor types to compare"
     )
@@ -461,7 +465,7 @@ async def run_coordination_experiment(
 async def supervisor_websocket(
     websocket: WebSocket,
     supervisor_type: SupervisorType,
-    client_id: Optional[str] = Query(None)
+    client_id: str | None = Query(None)
 ) -> None:
     """
     WebSocket endpoint for real-time supervisor updates.
@@ -528,7 +532,7 @@ async def supervisor_websocket(
 @router.websocket("/coordination/ws")
 async def coordination_progress_websocket(
     websocket: WebSocket,
-    coordination_id: Optional[str] = Query(None)
+    coordination_id: str | None = Query(None)
 ) -> None:
     """
     WebSocket endpoint for real-time worker coordination progress updates.
@@ -586,31 +590,29 @@ async def coordination_progress_websocket(
         connection_manager.disconnect(websocket, client_id)
 
 
-# Error Handlers
+# Error Handlers (deprecated - use FastAPI exception handlers in main app)
 
-@router.exception_handler(ValueError)
-async def value_error_handler(request, exc: ValueError) -> JSONResponse:
-    """Handle ValueError exceptions"""
-    return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content=SupervisorErrorResponse(
-            error_code="INVALID_VALUE",
-            message=str(exc),
-            request_id=str(id(request))
-        ).model_dump()
-    )
+# @router.exception_handler(ValueError)
+# async def value_error_handler(request: Any, exc: ValueError) -> JSONResponse:
+#     return JSONResponse(
+#         status_code=status.HTTP_400_BAD_REQUEST,
+#         content=SupervisorErrorResponse(
+#             error_code="INVALID_VALUE",
+#             message=str(exc),
+#             request_id=str(id(request))
+#         ).model_dump()
+#     )
 
 
-@router.exception_handler(Exception)
-async def general_exception_handler(request, exc: Exception) -> JSONResponse:
-    """Handle general exceptions"""
-    logger.error(f"Unhandled exception: {exc}")
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=SupervisorErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message="An internal error occurred",
-            request_id=str(id(request)),
-            suggestions=["Please try again later", "Contact support if problem persists"]
-        ).model_dump()
-    )
+# @router.exception_handler(Exception)
+# async def general_exception_handler(request: Any, exc: Exception) -> JSONResponse:
+#     logger.error(f"Unhandled exception: {exc}")
+#     return JSONResponse(
+#         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#         content=SupervisorErrorResponse(
+#             error_code="INTERNAL_ERROR",
+#             message="An internal error occurred",
+#             request_id=str(id(request)),
+#             suggestions=["Please try again later", "Contact support if problem persists"]
+#         ).model_dump()
+#     )

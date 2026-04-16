@@ -31,9 +31,9 @@ class CacheManager:
 
     def __init__(
         self,
-        redis_client: aioredis.Redis,
+        redis_client: aioredis.Redis[Any],
         strategy: CacheStrategy | None = None,
-        compression_threshold: int = 1024,  # Compress values larger than 1KB
+        compression_threshold: int = 1024,
         namespace: str = "gemini",
     ):
         """
@@ -139,7 +139,7 @@ class CacheManager:
 
             self.metrics["hits"] += 1
             logger.debug(f"Cache hit for key: {key}")
-            return value
+            return value if isinstance(value, dict) else None
 
         except Exception as e:
             logger.error(f"Cache get error for key {key}: {e}")
@@ -221,7 +221,7 @@ class CacheManager:
 
             results = await pipe.execute()
 
-            deleted = results[0] > 0
+            deleted = bool(results[0] > 0)
             if deleted:
                 self.metrics["deletes"] += 1
                 logger.debug(f"Cache delete for key: {key}")
@@ -246,7 +246,7 @@ class CacheManager:
         if not keys:
             return {}
 
-        results = {}
+        results: dict[str, dict[str, Any] | None] = {}
 
         # Use pipeline for efficiency
         pipe = self.redis.pipeline()

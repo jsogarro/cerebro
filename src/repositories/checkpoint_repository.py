@@ -4,6 +4,8 @@ Checkpoint repository for workflow state management.
 Provides operations for workflow checkpoint storage and recovery.
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
@@ -116,7 +118,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         result = await self.session.execute(delete_stmt)
         await self.session.flush()
 
-        return cast(int, result.rowcount)
+        return cast(int, getattr(result, "rowcount", 0))
 
     async def get_recovery_point(
         self, project_id: UUID
@@ -399,7 +401,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             )
 
             result = await self.session.execute(delete_stmt)
-            deleted_count += cast(int, result.rowcount)
+            deleted_count += cast(int, getattr(result, "rowcount", 0))
 
         await self.session.flush()
         return deleted_count

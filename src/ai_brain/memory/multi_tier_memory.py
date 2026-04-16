@@ -18,13 +18,13 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple, Union
 from enum import Enum
+from typing import Any
 
-from .working_memory import WorkingMemoryManager, ConversationContext
-from .episodic_memory import EpisodicMemoryManager, Episode, EventType, EpisodeQuery
-from .semantic_memory import SemanticMemoryManager, SemanticItem, SemanticQuery
-from .procedural_memory import ProceduralMemoryManager, Procedure, ProcedureType
+from .episodic_memory import Episode, EpisodeQuery, EpisodicMemoryManager, EventType
+from .procedural_memory import ProceduralMemoryManager, Procedure
+from .semantic_memory import SemanticMemoryManager
+from .working_memory import ConversationContext, WorkingMemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +42,12 @@ class MemoryTier(Enum):
 class MemoryContext:
     """Context for memory operations."""
 
-    session_id: Optional[str] = None
-    user_id: Optional[str] = None
-    agent_id: Optional[str] = None
-    domain: Optional[str] = None
-    task_type: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
+    session_id: str | None = None
+    user_id: str | None = None
+    agent_id: str | None = None
+    domain: str | None = None
+    task_type: str | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -58,17 +58,17 @@ class MemoryResult:
     content: Any
     relevance_score: float
     timestamp: datetime
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class IntelligentRecall:
     """Result from intelligent memory recall."""
 
-    primary_results: List[MemoryResult] = field(default_factory=list)
-    supporting_context: Dict[str, Any] = field(default_factory=dict)
-    related_episodes: List[Episode] = field(default_factory=list)
-    applicable_procedures: List[Procedure] = field(default_factory=list)
+    primary_results: list[MemoryResult] = field(default_factory=list)
+    supporting_context: dict[str, Any] = field(default_factory=dict)
+    related_episodes: list[Episode] = field(default_factory=list)
+    applicable_procedures: list[Procedure] = field(default_factory=list)
     confidence_score: float = 0.0
     recall_reasoning: str = ""
 
@@ -85,7 +85,7 @@ class MultiTierMemorySystem:
     - Memory consolidation and cleanup
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize multi-tier memory system."""
         self.config = config
 
@@ -110,7 +110,7 @@ class MultiTierMemorySystem:
         self.consolidation_count = 0
 
         # Background tasks
-        self._consolidation_task = None
+        self._consolidation_task: asyncio.Task[None] | None = None
 
     async def initialize(self) -> None:
         """Initialize all memory tiers."""
@@ -132,8 +132,8 @@ class MultiTierMemorySystem:
     async def store_interaction(
         self,
         context: MemoryContext,
-        interaction_data: Dict[str, Any],
-        performance_score: Optional[float] = None,
+        interaction_data: dict[str, Any],
+        performance_score: float | None = None,
     ) -> bool:
         """
         Store an interaction across appropriate memory tiers.
@@ -187,7 +187,7 @@ class MultiTierMemorySystem:
             return False
 
     async def intelligent_recall(
-        self, query: str, context: MemoryContext, max_results: Optional[int] = None
+        self, query: str, context: MemoryContext, max_results: int | None = None
     ) -> IntelligentRecall:
         """
         Perform intelligent memory recall across all tiers.
@@ -244,10 +244,10 @@ class MultiTierMemorySystem:
 
             # Combine and rank results
             recall = self._combine_and_rank_results(
-                working_results or [],
-                episodic_results or [],
-                semantic_results or [],
-                procedural_results or [],
+                working_results if not isinstance(working_results, BaseException) else [],
+                episodic_results if not isinstance(episodic_results, BaseException) else [],
+                semantic_results if not isinstance(semantic_results, BaseException) else [],
+                procedural_results if not isinstance(procedural_results, BaseException) else [],
                 query,
                 max_results,
             )
@@ -262,12 +262,12 @@ class MultiTierMemorySystem:
 
     async def get_conversation_context(
         self, session_id: str
-    ) -> Optional[ConversationContext]:
+    ) -> ConversationContext | None:
         """Get conversation context from working memory."""
         return await self.working_memory.retrieve_conversation_context(session_id)
 
     async def update_conversation_context(
-        self, session_id: str, updates: Dict[str, Any]
+        self, session_id: str, updates: dict[str, Any]
     ) -> bool:
         """Update conversation context in working memory."""
         return await self.working_memory.update_conversation_context(
@@ -275,28 +275,28 @@ class MultiTierMemorySystem:
         )
 
     async def add_message_to_context(
-        self, session_id: str, message: Dict[str, Any]
+        self, session_id: str, message: dict[str, Any]
     ) -> bool:
         """Add message to conversation context."""
         return await self.working_memory.add_message_to_context(session_id, message)
 
     async def store_agent_state(
-        self, agent_id: str, state: Dict[str, Any], session_id: Optional[str] = None
+        self, agent_id: str, state: dict[str, Any], session_id: str | None = None
     ) -> bool:
         """Store agent state in working memory."""
         return await self.working_memory.store_agent_state(agent_id, state, session_id)
 
     async def retrieve_agent_state(
-        self, agent_id: str, session_id: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, agent_id: str, session_id: str | None = None
+    ) -> dict[str, Any] | None:
         """Retrieve agent state from working memory."""
         return await self.working_memory.retrieve_agent_state(agent_id, session_id)
 
     async def store_knowledge(
         self,
         content: str,
-        domain: Optional[str] = None,
-        source: Optional[str] = None,
+        domain: str | None = None,
+        source: str | None = None,
         confidence: float = 1.0,
     ) -> str:
         """Store knowledge in semantic memory."""
@@ -305,8 +305,8 @@ class MultiTierMemorySystem:
         )
 
     async def retrieve_knowledge(
-        self, query: str, domain: Optional[str] = None, limit: int = 5
-    ) -> List[Dict[str, Any]]:
+        self, query: str, domain: str | None = None, limit: int = 5
+    ) -> list[dict[str, Any]]:
         """Retrieve relevant knowledge."""
         return await self.semantic_memory.retrieve_knowledge(
             query, domain=domain, limit=limit
@@ -315,9 +315,9 @@ class MultiTierMemorySystem:
     async def get_best_procedure(
         self,
         task_type: str,
-        domain: Optional[str] = None,
-        agent_type: Optional[str] = None,
-    ) -> Optional[Procedure]:
+        domain: str | None = None,
+        agent_type: str | None = None,
+    ) -> Procedure | None:
         """Get best procedure for a task."""
         return await self.procedural_memory.get_best_procedure_for_task(
             task_type, domain=domain, agent_type=agent_type
@@ -326,13 +326,13 @@ class MultiTierMemorySystem:
     async def learn_from_interaction(
         self,
         context: MemoryContext,
-        interaction_data: Dict[str, Any],
+        interaction_data: dict[str, Any],
         performance_score: float,
         success: bool,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Learn from an interaction across all memory tiers."""
 
-        results = {
+        results: dict[str, Any] = {
             "episodic_stored": False,
             "knowledge_extracted": False,
             "procedure_learned": False,
@@ -393,7 +393,7 @@ class MultiTierMemorySystem:
 
         return results
 
-    async def consolidate_memory(self) -> Dict[str, int]:
+    async def consolidate_memory(self) -> dict[str, int]:
         """Perform memory consolidation across tiers."""
 
         consolidation_results = {
@@ -433,7 +433,7 @@ class MultiTierMemorySystem:
 
         return consolidation_results
 
-    async def get_memory_stats(self) -> Dict[str, Any]:
+    async def get_memory_stats(self) -> dict[str, Any]:
         """Get comprehensive memory statistics."""
 
         # Get stats from all tiers
@@ -456,7 +456,7 @@ class MultiTierMemorySystem:
         }
 
     async def _store_in_working_memory(
-        self, context: MemoryContext, interaction_data: Dict[str, Any]
+        self, context: MemoryContext, interaction_data: dict[str, Any]
     ) -> bool:
         """Store interaction in working memory."""
 
@@ -489,8 +489,8 @@ class MultiTierMemorySystem:
     async def _store_in_episodic_memory(
         self,
         context: MemoryContext,
-        interaction_data: Dict[str, Any],
-        performance_score: Optional[float],
+        interaction_data: dict[str, Any],
+        performance_score: float | None,
     ) -> bool:
         """Store interaction in episodic memory."""
 
@@ -508,7 +508,7 @@ class MultiTierMemorySystem:
         return await self.episodic_memory.store_episode(episode)
 
     async def _extract_and_store_knowledge(
-        self, context: MemoryContext, interaction_data: Dict[str, Any]
+        self, context: MemoryContext, interaction_data: dict[str, Any]
     ) -> bool:
         """Extract and store knowledge from interaction."""
 
@@ -529,8 +529,8 @@ class MultiTierMemorySystem:
     async def _learn_procedures(
         self,
         context: MemoryContext,
-        interaction_data: Dict[str, Any],
-        performance_score: Optional[float],
+        interaction_data: dict[str, Any],
+        performance_score: float | None,
     ) -> bool:
         """Learn procedures from interaction."""
 
@@ -556,8 +556,8 @@ class MultiTierMemorySystem:
         return bool(procedure_id)
 
     def _extract_knowledge_from_interaction(
-        self, interaction_data: Dict[str, Any]
-    ) -> Optional[str]:
+        self, interaction_data: dict[str, Any]
+    ) -> str | None:
         """Extract knowledge content from interaction data."""
 
         # Simple extraction - look for knowledge indicators
@@ -567,12 +567,14 @@ class MultiTierMemorySystem:
                 return result
 
         if "summary" in interaction_data:
-            return interaction_data["summary"]
+            summary = interaction_data["summary"]
+            if isinstance(summary, str):
+                return summary
 
         if "insights" in interaction_data:
             insights = interaction_data["insights"]
             if isinstance(insights, list):
-                return ". ".join(insights)
+                return ". ".join(str(i) for i in insights)
             elif isinstance(insights, str):
                 return insights
 
@@ -580,7 +582,7 @@ class MultiTierMemorySystem:
 
     async def _recall_from_working_memory(
         self, query: str, context: MemoryContext
-    ) -> List[MemoryResult]:
+    ) -> list[MemoryResult]:
         """Recall from working memory."""
 
         results = []
@@ -620,7 +622,7 @@ class MultiTierMemorySystem:
 
     async def _recall_from_episodic_memory(
         self, query: str, context: MemoryContext
-    ) -> List[MemoryResult]:
+    ) -> list[MemoryResult]:
         """Recall from episodic memory."""
 
         results = []
@@ -658,7 +660,7 @@ class MultiTierMemorySystem:
 
     async def _recall_from_semantic_memory(
         self, query: str, context: MemoryContext
-    ) -> List[MemoryResult]:
+    ) -> list[MemoryResult]:
         """Recall from semantic memory."""
 
         results = []
@@ -685,7 +687,7 @@ class MultiTierMemorySystem:
 
     async def _recall_from_procedural_memory(
         self, query: str, context: MemoryContext
-    ) -> List[MemoryResult]:
+    ) -> list[MemoryResult]:
         """Recall from procedural memory."""
 
         results = []
@@ -716,10 +718,10 @@ class MultiTierMemorySystem:
 
     def _combine_and_rank_results(
         self,
-        working_results: List[MemoryResult],
-        episodic_results: List[MemoryResult],
-        semantic_results: List[MemoryResult],
-        procedural_results: List[MemoryResult],
+        working_results: list[MemoryResult],
+        episodic_results: list[MemoryResult],
+        semantic_results: list[MemoryResult],
+        procedural_results: list[MemoryResult],
         query: str,
         max_results: int,
     ) -> IntelligentRecall:
@@ -811,9 +813,9 @@ class MultiTierMemorySystem:
 
 
 __all__ = [
-    "MultiTierMemorySystem",
+    "IntelligentRecall",
     "MemoryContext",
     "MemoryResult",
-    "IntelligentRecall",
     "MemoryTier",
+    "MultiTierMemorySystem",
 ]

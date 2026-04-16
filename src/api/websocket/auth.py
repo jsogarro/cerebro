@@ -67,7 +67,7 @@ async def verify_websocket_token(token: str | None) -> str | None:
             user_id=user_id,
         )
 
-        return user_id
+        return str(user_id)
 
     except JWTError as e:
         logger.warning(

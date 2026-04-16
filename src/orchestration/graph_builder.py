@@ -10,7 +10,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from langgraph.checkpoint import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from src.orchestration.edges import RouterConfig, WorkflowRouter
@@ -31,7 +30,7 @@ class NodeConfig:
     retry_policy: dict[str, Any] | None = None
     dependencies: list[str] = field(default_factory=list)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate node configuration."""
         if not self.name:
             raise ValueError("Node name is required")
@@ -48,7 +47,7 @@ class EdgeConfig:
     condition: Callable[[ResearchState], bool] | None = None
     description: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate edge configuration."""
         if not self.source:
             raise ValueError("Edge source is required")
@@ -68,7 +67,7 @@ class GraphConfig:
     enable_visualization: bool = True
     router_config: RouterConfig | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize router configuration if not provided."""
         if self.router_config is None:
             self.router_config = RouterConfig(
@@ -95,18 +94,18 @@ class ResearchGraphBuilder:
         self.nodes: dict[str, NodeConfig] = {}
         self.edges: list[EdgeConfig] = []
         self.router = WorkflowRouter(self.config.router_config)
-        self._graph: StateGraph | None = None
-        self._compiled_graph = None
+        self._graph: StateGraph[ResearchState] | None = None
+        self._compiled_graph: Any = None
 
         # Checkpointing
-        self.checkpointer = MemorySaver() if self.config.enable_checkpointing else None
+        self.checkpointer: Any = None
 
     def add_node(
         self,
         name: str,
         handler: Callable[[ResearchState], ResearchState],
         phase: WorkflowPhase,
-        **kwargs,
+        **kwargs: Any,
     ) -> "ResearchGraphBuilder":
         """
         Add a node to the graph.
@@ -221,7 +220,7 @@ class ResearchGraphBuilder:
 
         return self
 
-    def build(self) -> StateGraph:
+    def build(self) -> StateGraph[ResearchState]:
         """
         Build the workflow graph.
 
@@ -248,8 +247,9 @@ class ResearchGraphBuilder:
                 if edge.condition:
                     # Add with condition
                     def conditional_target(state: ResearchState) -> str:
-                        if edge.condition(state):
-                            return edge.target
+                        if edge.condition and edge.condition(state):
+                            if isinstance(edge.target, str):
+                                return edge.target
                         return END
 
                     self._graph.add_conditional_edges(edge.source, conditional_target)
@@ -271,7 +271,7 @@ class ResearchGraphBuilder:
 
         return self._graph
 
-    def compile(self, **kwargs):
+    def compile(self, **kwargs: Any) -> Any:
         """
         Compile the workflow graph.
 
@@ -296,7 +296,7 @@ class ResearchGraphBuilder:
 
         return self._compiled_graph
 
-    def _wrap_handler(self, node_config: NodeConfig) -> Callable:
+    def _wrap_handler(self, node_config: NodeConfig) -> Callable[..., Any]:
         """
         Wrap node handler with error handling and logging.
 

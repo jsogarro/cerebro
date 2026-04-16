@@ -5,6 +5,7 @@ This module provides mechanisms for saving and restoring workflow state,
 enabling recovery from failures and resumption of long-running workflows.
 """
 
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,7 @@ from pathlib import Path
 import redis.asyncio as redis
 
 from src.orchestration.state import ResearchState, StateCheckpoint, WorkflowPhase
-from src.utils.serialization import serialize_for_cache, deserialize_from_cache
+from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class CheckpointStorage:
 class MemoryCheckpointStorage(CheckpointStorage):
     """In-memory checkpoint storage for testing."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize memory storage."""
         self.checkpoints: dict[str, StateCheckpoint] = {}
 
@@ -156,7 +157,7 @@ class FileCheckpointStorage(CheckpointStorage):
 class RedisCheckpointStorage(CheckpointStorage):
     """Redis-based checkpoint storage for distributed systems."""
 
-    def __init__(self, redis_client: redis.Redis, ttl: int = 86400):
+    def __init__(self, redis_client: redis.Redis[bytes], ttl: int = 86400):
         """
         Initialize Redis storage.
 
@@ -178,7 +179,7 @@ class RedisCheckpointStorage(CheckpointStorage):
             key = self._get_key(checkpoint_id)
 
             # Serialize checkpoint
-            checkpoint_data = serialize_for_cache(checkpoint.to_dict().decode("utf-8"), default=str)
+            checkpoint_data = serialize_for_cache(checkpoint.to_dict())
 
             # Save with TTL
             await self.redis_client.setex(key, self.ttl, checkpoint_data)
@@ -391,10 +392,10 @@ class WorkflowCheckpointer:
             True if checkpoint should be created
         """
         # Check if it's time for auto-checkpoint
-        node_count = state.metadata.total_nodes_executed
-
-        if node_count % self.auto_checkpoint_interval == 0:
-            return True
+        if state.metadata is not None:
+            node_count = state.metadata.total_nodes_executed
+            if node_count % self.auto_checkpoint_interval == 0:
+                return True
 
         # Also checkpoint on phase transitions and errors
         return state.should_checkpoint()

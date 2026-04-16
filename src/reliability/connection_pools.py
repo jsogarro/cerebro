@@ -6,6 +6,8 @@ cache systems, HTTP clients, and message queues with health monitoring,
 auto-scaling, and metrics collection.
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import logging
@@ -21,8 +23,11 @@ import asyncpg
 import httpx
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool as RedisConnectionPool
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    create_async_engine,
+)
 from sqlalchemy.pool import QueuePool
 
 from config import config
@@ -88,11 +93,11 @@ class DatabasePoolManager:
     - Metrics collection
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize database pool manager."""
         self._engine: AsyncEngine | None = None
-        self._sessionmaker: sessionmaker | None = None
-        self._pool: asyncpg.Pool | None = None
+        self._sessionmaker: Any = None
+        self._pool: asyncpg.Pool[Any] | None = None
         self._metrics = PoolMetrics()
         self._status = PoolStatus.UNHEALTHY
         self._last_health_check = datetime.utcnow()
@@ -130,9 +135,8 @@ class DatabasePoolManager:
             )
 
             # Create session factory
-            self._sessionmaker = sessionmaker(
-                self._engine, class_=AsyncSession, expire_on_commit=False
-            )
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+            self._sessionmaker = async_sessionmaker(self._engine, class_=AsyncSession, expire_on_commit=False)
 
             # Create asyncpg pool for direct queries
             self._pool = await asyncpg.create_pool(
@@ -170,6 +174,8 @@ class DatabasePoolManager:
         """
         if not self._sessionmaker:
             raise RuntimeError("Database pool not initialized")
+        if not self._connection_semaphore:
+            raise RuntimeError("Connection semaphore not initialized")
 
         start_time = time.time()
         self._metrics.total_requests += 1
@@ -234,7 +240,7 @@ class DatabasePoolManager:
         finally:
             self._metrics.active_connections -= 1
 
-    async def execute_query(self, query: str, *args, timeout: float | None = None) -> list[Any]:
+    async def execute_query(self, query: str, *args: Any, timeout: float | None = None) -> list[Any]:
         """
         Execute a query with automatic retry and timeout.
 
@@ -247,7 +253,8 @@ class DatabasePoolManager:
             Query result
         """
         async with self.acquire_connection() as conn:
-            return await conn.fetch(query, *args, timeout=timeout)
+            result: list[Any] = await conn.fetch(query, *args, timeout=timeout)
+            return result
 
     async def health_check(self) -> PoolStatus:
         """
@@ -304,10 +311,10 @@ class RedisPoolManager:
     - Metrics collection
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize Redis pool manager."""
-        self._pool: RedisConnectionPool | None = None
-        self._client: redis.Redis | None = None
+        self._pool: RedisConnectionPool[Any] | None = None
+        self._client: redis.Redis[Any] | None = None
         self._pubsub_clients: dict[str, redis.client.PubSub] = {}
         self._metrics = PoolMetrics()
         self._status = PoolStatus.UNHEALTHY
@@ -357,7 +364,7 @@ class RedisPoolManager:
             logger.error(f"Failed to initialize Redis pool: {e}")
             raise
 
-    async def get_client(self) -> redis.Redis:
+    async def get_client(self) -> redis.Redis[Any]:
         """
         Get Redis client.
 
@@ -370,7 +377,7 @@ class RedisPoolManager:
         self._metrics.total_requests += 1
         return self._client
 
-    async def execute_command(self, command: str, *args, **kwargs) -> Any:
+    async def execute_command(self, command: str, *args: Any, **kwargs: Any) -> Any:
         """
         Execute Redis command with retry.
 
@@ -478,7 +485,7 @@ class HTTPPoolManager:
     - Retry logic
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize HTTP pool manager."""
         self._clients: dict[str, httpx.AsyncClient] = {}
         self._metrics: dict[str, PoolMetrics] = {}
@@ -534,7 +541,7 @@ class HTTPPoolManager:
         logger.debug(f"HTTP Response: {response.status_code} from {response.url}")
 
     async def request(
-        self, method: str, url: str, base_url: str | None = None, **kwargs
+        self, method: str, url: str, base_url: str | None = None, **kwargs: Any
     ) -> httpx.Response:
         """
         Make HTTP request with pooled client.
@@ -597,7 +604,7 @@ class TemporalPoolManager:
     - Health monitoring
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize Temporal pool manager."""
         self._worker_clients: list[Any] = []
         self._workflow_clients: list[Any] = []

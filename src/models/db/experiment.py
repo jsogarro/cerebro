@@ -7,15 +7,24 @@ variants, assignments, and results across the Cerebro AI Brain platform.
 
 import enum
 from datetime import datetime
-from typing import Optional, Dict, Any, List
-from uuid import UUID
+from typing import Any
 
 from sqlalchemy import (
-    Column, String, Integer, Float, Boolean, DateTime, 
-    ForeignKey, JSON, Enum, Text, UniqueConstraint, Index
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -31,37 +40,35 @@ class ExperimentStatus(enum.Enum):
 
 class ExperimentType(enum.Enum):
     """Type of experiment being run."""
-    PROMPT = "prompt"  # Prompt optimization
-    ROUTING = "routing"  # MASR routing strategy
-    API_PATTERN = "api_pattern"  # Agent API patterns
-    MEMORY = "memory"  # Memory system optimization
-    SUPERVISOR = "supervisor"  # Supervisor coordination
-    MODEL = "model"  # Model selection
-    SYSTEM = "system"  # System-wide optimization
+    PROMPT = "prompt"
+    ROUTING = "routing"
+    API_PATTERN = "api_pattern"
+    MEMORY = "memory"
+    SUPERVISOR = "supervisor"
+    MODEL = "model"
+    SYSTEM = "system"
 
 
 class AllocationStrategy(enum.Enum):
     """Traffic allocation strategy for experiments."""
-    RANDOM = "random"  # Random assignment
-    WEIGHTED = "weighted"  # Weighted random
-    DETERMINISTIC = "deterministic"  # Hash-based assignment
-    ADAPTIVE = "adaptive"  # Multi-armed bandit
-    CONTEXTUAL = "contextual"  # Contextual bandit
+    RANDOM = "random"
+    WEIGHTED = "weighted"
+    DETERMINISTIC = "deterministic"
+    ADAPTIVE = "adaptive"
+    CONTEXTUAL = "contextual"
 
 
 class Experiment(BaseModel):
     """Main experiment model for A/B testing."""
-    
+
     __tablename__ = "experiments"
-    
-    # Basic Information
+
     name = Column(String(255), nullable=False, unique=True)
     description = Column(Text)
-    experiment_type = Column(Enum(ExperimentType), nullable=False)
-    status = Column(Enum(ExperimentStatus), default=ExperimentStatus.DRAFT)
-    
-    # Targeting and Allocation
-    allocation_strategy = Column(Enum(AllocationStrategy), default=AllocationStrategy.RANDOM)
+    experiment_type: Mapped[ExperimentType] = mapped_column(Enum(ExperimentType), nullable=False)
+    status: Mapped[ExperimentStatus] = mapped_column(Enum(ExperimentStatus), default=ExperimentStatus.DRAFT)
+
+    allocation_strategy: Mapped[AllocationStrategy] = mapped_column(Enum(AllocationStrategy), default=AllocationStrategy.RANDOM)
     traffic_percentage = Column(Float, default=100.0)  # % of traffic to include
     target_segments = Column(JSON, default=dict)  # User segments to target
     
@@ -179,7 +186,7 @@ class ExperimentResult(BaseModel):
     metric_value = Column(Float, nullable=False)
     
     # Additional Data
-    metadata = Column(JSON, default=dict)
+    metadata_: Any = Column("metadata", JSON, default=dict)
     # e.g., {"latency_ms": 150, "cost_usd": 0.002, "quality_score": 0.95}
     
     # Context

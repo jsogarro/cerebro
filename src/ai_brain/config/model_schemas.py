@@ -8,8 +8,9 @@ loaded from YAML files.
 
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Union, Any
-from pydantic import BaseModel, Field, validator, ConfigDict
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, validator
 
 
 class ModelTier(str, Enum):
@@ -79,30 +80,30 @@ class ModelSpecification(BaseModel):
     )
 
     # Capabilities and characteristics
-    capabilities: List[ModelCapability] = Field(
+    capabilities: list[ModelCapability] = Field(
         default_factory=list, description="Model capabilities"
     )
-    strengths: List[str] = Field(default_factory=list, description="Model strengths")
-    weaknesses: List[str] = Field(default_factory=list, description="Model weaknesses")
+    strengths: list[str] = Field(default_factory=list, description="Model strengths")
+    weaknesses: list[str] = Field(default_factory=list, description="Model weaknesses")
 
     # Optimization criteria
-    optimal_for: Optional[Dict[str, Any]] = Field(
+    optimal_for: dict[str, Any] | None = Field(
         default=None, description="Conditions when this model is optimal"
     )
 
     # Documentation and metadata
-    metadata: Optional[Dict[str, Any]] = Field(
+    metadata: dict[str, Any] | None = Field(
         default_factory=dict, description="Additional model metadata"
     )
 
     @validator("cost_per_1k_tokens")
-    def validate_reasonable_cost(cls, v):
+    def validate_reasonable_cost(cls, v: float) -> float:
         if v > 1.0:  # More than $1 per 1K tokens seems unreasonable
             raise ValueError("Cost per 1K tokens seems too high (> $1.00)")
         return v
 
     @validator("quality_score")
-    def validate_quality_score(cls, v):
+    def validate_quality_score(cls, v: float) -> float:
         if v < 0.1:  # Quality score too low to be useful
             raise ValueError("Quality score must be at least 0.1")
         return v
@@ -119,10 +120,10 @@ class ProviderConfiguration(BaseModel):
 
     # API configuration
     api_endpoint: str = Field(..., description="API endpoint URL")
-    api_key_env: Optional[str] = Field(
+    api_key_env: str | None = Field(
         default=None, description="Environment variable name for API key"
     )
-    health_check_endpoint: Optional[str] = Field(
+    health_check_endpoint: str | None = Field(
         default=None, description="Health check endpoint path"
     )
 
@@ -136,12 +137,12 @@ class ProviderConfiguration(BaseModel):
     )
 
     # Provider-specific settings
-    provider_settings: Dict[str, Any] = Field(
+    provider_settings: dict[str, Any] = Field(
         default_factory=dict, description="Provider-specific configuration"
     )
 
     @validator("api_endpoint")
-    def validate_endpoint_format(cls, v):
+    def validate_endpoint_format(cls, v: str) -> str:
         if not (v.startswith("http://") or v.startswith("https://")):
             raise ValueError("API endpoint must be a valid HTTP/HTTPS URL")
         return v
@@ -169,23 +170,23 @@ class PerformanceOptimizationConfig(BaseModel):
 class SelectionRule(BaseModel):
     """Model selection rule for specific conditions."""
 
-    preferred_models: List[str] = Field(default_factory=list)
-    avoid_models: List[str] = Field(default_factory=list)
-    max_cost: Optional[float] = Field(default=None, ge=0.0)
-    target_latency_ms: Optional[int] = Field(default=None, ge=0)
-    quality_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    preferred_models: list[str] = Field(default_factory=list)
+    avoid_models: list[str] = Field(default_factory=list)
+    max_cost: float | None = Field(default=None, ge=0.0)
+    target_latency_ms: int | None = Field(default=None, ge=0)
+    quality_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     require_fallback: bool = False
-    required_capabilities: List[ModelCapability] = Field(default_factory=list)
+    required_capabilities: list[ModelCapability] = Field(default_factory=list)
 
 
 class DomainPreference(BaseModel):
     """Domain-specific model preferences."""
 
-    preferred_models: List[str] = Field(default_factory=list)
+    preferred_models: list[str] = Field(default_factory=list)
     quality_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
-    cost_threshold: Optional[float] = Field(default=None, ge=0.0)
-    max_latency_ms: Optional[int] = Field(default=None, ge=0)
-    required_capabilities: List[ModelCapability] = Field(default_factory=list)
+    cost_threshold: float | None = Field(default=None, ge=0.0)
+    max_latency_ms: int | None = Field(default=None, ge=0)
+    required_capabilities: list[ModelCapability] = Field(default_factory=list)
     require_validation: bool = False
 
 
@@ -206,7 +207,7 @@ class RoutingConfiguration(BaseModel):
     complex_queries: SelectionRule = Field(default_factory=SelectionRule)
 
     # Domain-specific preferences
-    domain_preferences: Dict[str, DomainPreference] = Field(default_factory=dict)
+    domain_preferences: dict[str, DomainPreference] = Field(default_factory=dict)
 
 
 class GlobalSettings(BaseModel):
@@ -232,18 +233,18 @@ class ConfigurationMetadata(BaseModel):
     schema_version: str = "1.0"
     config_name: str = "unknown"
     description: str = ""
-    environment: Optional[str] = None
-    extends: Optional[str] = None
+    environment: str | None = None
+    extends: str | None = None
 
     # Maintenance information
     maintainer: str = "Cerebro Development Team"
     last_updated: str = Field(default_factory=lambda: datetime.now().isoformat())
-    last_validated: Optional[str] = None
+    last_validated: str | None = None
     validation_required: bool = True
 
     # Deployment information
-    deployment_notes: List[str] = Field(default_factory=list)
-    sla_requirements: Dict[str, Any] = Field(default_factory=dict)
+    deployment_notes: list[str] = Field(default_factory=list)
+    sla_requirements: dict[str, Any] = Field(default_factory=dict)
 
 
 class ModelConfiguration(BaseModel):
@@ -259,20 +260,20 @@ class ModelConfiguration(BaseModel):
     global_settings: GlobalSettings = Field(default_factory=GlobalSettings)
 
     # Model and provider specifications
-    models: Dict[str, ModelSpecification] = Field(default_factory=dict)
-    providers: Dict[str, ProviderConfiguration] = Field(default_factory=dict)
+    models: dict[str, ModelSpecification] = Field(default_factory=dict)
+    providers: dict[str, ProviderConfiguration] = Field(default_factory=dict)
 
     # Routing and optimization
     routing_config: RoutingConfiguration = Field(default_factory=RoutingConfiguration)
 
     # Additional configuration sections
-    testing_config: Optional[Dict[str, Any]] = None
-    monitoring: Optional[Dict[str, Any]] = None
-    security: Optional[Dict[str, Any]] = None
-    disaster_recovery: Optional[Dict[str, Any]] = None
+    testing_config: dict[str, Any] | None = None
+    monitoring: dict[str, Any] | None = None
+    security: dict[str, Any] | None = None
+    disaster_recovery: dict[str, Any] | None = None
 
     @validator("models", always=True)
-    def validate_models_have_providers(cls, v, values):
+    def validate_models_have_providers(cls, v: dict[str, ModelSpecification], values: dict[str, Any]) -> dict[str, ModelSpecification]:
         """Ensure all models reference valid providers."""
         # Skip validation if providers haven't been processed yet
         providers = values.get("providers")
@@ -287,11 +288,11 @@ class ModelConfiguration(BaseModel):
 
         return v
 
-    def get_enabled_models(self) -> Dict[str, ModelSpecification]:
+    def get_enabled_models(self) -> dict[str, ModelSpecification]:
         """Get only enabled models."""
         return {name: spec for name, spec in self.models.items() if spec.enabled}
 
-    def get_enabled_providers(self) -> Dict[str, ProviderConfiguration]:
+    def get_enabled_providers(self) -> dict[str, ProviderConfiguration]:
         """Get only enabled providers."""
         return {
             name: config for name, config in self.providers.items() if config.enabled
@@ -299,7 +300,7 @@ class ModelConfiguration(BaseModel):
 
     def get_models_for_provider(
         self, provider_name: str
-    ) -> Dict[str, ModelSpecification]:
+    ) -> dict[str, ModelSpecification]:
         """Get all models for a specific provider."""
         return {
             name: spec
@@ -309,7 +310,7 @@ class ModelConfiguration(BaseModel):
 
     def get_models_by_capability(
         self, capability: ModelCapability
-    ) -> Dict[str, ModelSpecification]:
+    ) -> dict[str, ModelSpecification]:
         """Get all models that support a specific capability."""
         return {
             name: spec
@@ -317,7 +318,7 @@ class ModelConfiguration(BaseModel):
             if capability in spec.capabilities and spec.enabled
         }
 
-    def get_models_by_tier(self, tier: ModelTier) -> Dict[str, ModelSpecification]:
+    def get_models_by_tier(self, tier: ModelTier) -> dict[str, ModelSpecification]:
         """Get all models in a specific tier."""
         return {
             name: spec
@@ -327,15 +328,15 @@ class ModelConfiguration(BaseModel):
 
 
 __all__ = [
-    "ModelSpecification",
-    "ProviderConfiguration",
-    "ModelConfiguration",
-    "RoutingConfiguration",
-    "GlobalSettings",
     "ConfigurationMetadata",
-    "ModelTier",
+    "DomainPreference",
+    "GlobalSettings",
     "ModelCapability",
+    "ModelConfiguration",
+    "ModelSpecification",
+    "ModelTier",
+    "ProviderConfiguration",
+    "RoutingConfiguration",
     "RoutingStrategy",
     "SelectionRule",
-    "DomainPreference",
 ]

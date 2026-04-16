@@ -7,10 +7,12 @@ weighted average) and handles cross-domain conflict resolution.
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Dict, Optional, Any, Callable, Awaitable
+from typing import Any
 
 from src.core.constants import HIGH_CONSENSUS_THRESHOLD
+
 from ..ai_brain.integration.masr_supervisor_bridge import SupervisorExecutionResult
 
 logger = logging.getLogger(__name__)
@@ -19,13 +21,13 @@ logger = logging.getLogger(__name__)
 class CrossDomainSynthesizer:
     """Synthesizes results across multiple domains."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize cross-domain synthesizer."""
         self.config = config or {}
 
         # Synthesis strategies
-        self.synthesis_strategies: Dict[
-            str, Callable[[Dict[str, SupervisorExecutionResult]], Awaitable[Dict[str, Any]]]
+        self.synthesis_strategies: dict[
+            str, Callable[[dict[str, SupervisorExecutionResult]], Awaitable[dict[str, Any]]]
         ] = {
             "comprehensive": self._comprehensive_synthesis,
             "prioritized": self._prioritized_synthesis,
@@ -35,9 +37,9 @@ class CrossDomainSynthesizer:
 
     async def synthesize_supervisor_results(
         self,
-        supervisor_results: Dict[str, SupervisorExecutionResult],
+        supervisor_results: dict[str, SupervisorExecutionResult],
         synthesis_strategy: str = "comprehensive",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Synthesize results from multiple supervisors.
 
@@ -73,7 +75,7 @@ class CrossDomainSynthesizer:
         except Exception as e:
             logger.error(f"Cross-domain synthesis failed: {e}")
             return {
-                "error": f"Synthesis failed: {str(e)}",
+                "error": f"Synthesis failed: {e!s}",
                 "fallback_results": {
                     supervisor: result.agent_result.output if result.agent_result else {}
                     for supervisor, result in supervisor_results.items()
@@ -81,8 +83,8 @@ class CrossDomainSynthesizer:
             }
 
     async def _comprehensive_synthesis(
-        self, supervisor_results: Dict[str, SupervisorExecutionResult]
-    ) -> Dict[str, Any]:
+        self, supervisor_results: dict[str, SupervisorExecutionResult]
+    ) -> dict[str, Any]:
         """Comprehensive synthesis combining all supervisor outputs."""
 
         synthesized = {
@@ -94,14 +96,16 @@ class CrossDomainSynthesizer:
         }
 
         # Aggregate domain results
-        for supervisor_type, result in supervisor_results.items():
-            if result.agent_result and result.agent_result.output:
-                synthesized["domain_results"][supervisor_type] = {
-                    "output": result.agent_result.output,
-                    "quality_score": result.quality_score,
-                    "consensus_score": result.consensus_score,
-                    "execution_time": result.execution_time_seconds,
-                }
+        domain_results = synthesized["domain_results"]
+        if isinstance(domain_results, dict):
+            for supervisor_type, result in supervisor_results.items():
+                if result.agent_result and result.agent_result.output:
+                    domain_results[supervisor_type] = {
+                        "output": result.agent_result.output,
+                        "quality_score": result.quality_score,
+                        "consensus_score": result.consensus_score,
+                        "execution_time": result.execution_time_seconds,
+                    }
 
         # Identify cross-domain patterns (simplified)
         if len(supervisor_results) > 1:
@@ -129,8 +133,8 @@ class CrossDomainSynthesizer:
         return synthesized
 
     async def _prioritized_synthesis(
-        self, supervisor_results: Dict[str, SupervisorExecutionResult]
-    ) -> Dict[str, Any]:
+        self, supervisor_results: dict[str, SupervisorExecutionResult]
+    ) -> dict[str, Any]:
         """Prioritized synthesis focusing on highest-quality results."""
 
         # Sort by quality score
@@ -138,7 +142,7 @@ class CrossDomainSynthesizer:
             supervisor_results.items(), key=lambda x: x[1].quality_score, reverse=True
         )
 
-        synthesized = {
+        synthesized: dict[str, Any] = {
             "synthesis_type": "prioritized",
             "primary_result": None,
             "supporting_results": [],
@@ -156,14 +160,16 @@ class CrossDomainSynthesizer:
             }
 
             # Add supporting results
-            for supervisor, result in sorted_results[1:]:
-                synthesized["supporting_results"].append(
-                    {
-                        "supervisor": supervisor,
-                        "output": result.agent_result.output if result.agent_result else {},
-                        "quality_score": result.quality_score,
-                    }
-                )
+            supporting_results = synthesized["supporting_results"]
+            if isinstance(supporting_results, list):
+                for supervisor, result in sorted_results[1:]:
+                    supporting_results.append(
+                        {
+                            "supervisor": supervisor,
+                            "output": result.agent_result.output if result.agent_result else {},
+                            "quality_score": result.quality_score,
+                        }
+                    )
 
             synthesized["quality_ranking"] = [
                 {"supervisor": supervisor, "quality": result.quality_score}
@@ -173,8 +179,8 @@ class CrossDomainSynthesizer:
         return synthesized
 
     async def _consensus_based_synthesis(
-        self, supervisor_results: Dict[str, SupervisorExecutionResult]
-    ) -> Dict[str, Any]:
+        self, supervisor_results: dict[str, SupervisorExecutionResult]
+    ) -> dict[str, Any]:
         """Consensus-based synthesis focusing on agreement between supervisors."""
 
         synthesized = {
@@ -209,7 +215,7 @@ class CrossDomainSynthesizer:
         low_consensus_results = [
             (supervisor, result)
             for supervisor, result in supervisor_results.items()
-            if result.consensus_score < high_consensus_threshold
+            if result.consensus_score < HIGH_CONSENSUS_THRESHOLD
         ]
 
         synthesized["conflicting_areas"] = [
@@ -224,8 +230,8 @@ class CrossDomainSynthesizer:
         return synthesized
 
     async def _weighted_average_synthesis(
-        self, supervisor_results: Dict[str, SupervisorExecutionResult]
-    ) -> Dict[str, Any]:
+        self, supervisor_results: dict[str, SupervisorExecutionResult]
+    ) -> dict[str, Any]:
         """Weighted average synthesis based on quality scores."""
 
         synthesized = {
@@ -239,28 +245,33 @@ class CrossDomainSynthesizer:
         total_quality = sum(r.quality_score for r in supervisor_results.values())
 
         if total_quality > 0:
+            quality_weights = synthesized["quality_weights"]
+            weighted_results = synthesized["weighted_results"]
             for supervisor, result in supervisor_results.items():
                 weight = result.quality_score / total_quality
-                synthesized["quality_weights"][supervisor] = weight
+                if isinstance(quality_weights, dict):
+                    quality_weights[supervisor] = weight
 
                 if result.agent_result and result.agent_result.output:
-                    synthesized["weighted_results"][supervisor] = {
-                        "output": result.agent_result.output,
-                        "weight": weight,
-                        "quality_score": result.quality_score,
-                    }
+                    if isinstance(weighted_results, dict):
+                        weighted_results[supervisor] = {
+                            "output": result.agent_result.output,
+                            "weight": weight,
+                            "quality_score": result.quality_score,
+                        }
 
             # Calculate overall weighted score
-            synthesized["overall_weighted_score"] = sum(
-                result.quality_score * synthesized["quality_weights"][supervisor]
-                for supervisor, result in supervisor_results.items()
-                if supervisor in synthesized["quality_weights"]
-            )
+            if isinstance(quality_weights, dict):
+                synthesized["overall_weighted_score"] = sum(
+                    result.quality_score * quality_weights[supervisor]
+                    for supervisor, result in supervisor_results.items()
+                    if supervisor in quality_weights
+                )
 
         return synthesized
 
     def _calculate_overall_confidence(
-        self, supervisor_results: Dict[str, SupervisorExecutionResult]
+        self, supervisor_results: dict[str, SupervisorExecutionResult]
     ) -> float:
         """Calculate overall confidence across all supervisor results."""
 

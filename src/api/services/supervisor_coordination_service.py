@@ -619,10 +619,9 @@ class SupervisorCoordinationService:
             )
         
         # Calculate quality metrics
+        quality_scores = [float(r["quality_score"]) for r in individual_results.values() if "quality_score" in r and r["quality_score"] is not None]
         quality_metrics = {
-            "average_quality": sum(
-                r["quality_score"] for r in individual_results.values()
-            ) / len(individual_results),
+            "average_quality": sum(quality_scores) / len(quality_scores) if quality_scores else 0.0,
             "consistency": self._calculate_consistency(individual_results),
             "coverage": len(individual_results) / len(request.supervisor_types)
         }
@@ -656,10 +655,9 @@ class SupervisorCoordinationService:
         
         synthesized = f"Synthesized result combining: {'; '.join(synthesis_parts)}"
         
-        # Check for consensus (simplified)
         quality_scores = [r["quality_score"] for r in results.values()]
-        consensus = all(abs(q - quality_scores[0]) < 0.1 for q in quality_scores)
-        
+        consensus = bool(all(abs(q - quality_scores[0]) < 0.1 for q in quality_scores))
+
         return synthesized, consensus
     
     def _calculate_consistency(self, results: dict[str, Any]) -> float:
@@ -671,9 +669,8 @@ class SupervisorCoordinationService:
         mean_score = sum(quality_scores) / len(quality_scores)
         variance = sum((q - mean_score) ** 2 for q in quality_scores) / len(quality_scores)
         
-        # Convert variance to consistency score (lower variance = higher consistency)
         consistency = max(0.0, 1.0 - (variance * 10))
-        return consistency
+        return float(consistency)
     
     async def get_supervisor_stats(self, supervisor_type: str) -> SupervisorStatsResponse:
         """Get performance statistics for a supervisor"""

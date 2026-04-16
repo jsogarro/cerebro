@@ -14,16 +14,20 @@ Working memory stores:
 
 import asyncio
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Union
-import uuid
-from src.utils.serialization import serialize_for_cache, deserialize_from_cache
+from typing import Any
+
+from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 try:
-    import redis.asyncio as redis
+    import redis.asyncio as redis_module
+    from redis.asyncio import Redis as RedisType
+    REDIS_AVAILABLE = True
 except ImportError:
-    redis = None
+    redis_module = None
+    RedisType = type(None)
+    REDIS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +39,11 @@ class WorkingMemoryItem:
     key: str
     value: Any
     created_at: datetime = field(default_factory=datetime.now)
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     access_count: int = 0
     last_accessed: datetime = field(default_factory=datetime.now)
-    tags: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -47,12 +51,12 @@ class ConversationContext:
     """Conversation context stored in working memory."""
 
     session_id: str
-    user_id: Optional[str] = None
-    agent_id: Optional[str] = None
-    messages: List[Dict[str, Any]] = field(default_factory=list)
-    current_task: Optional[str] = None
-    context_variables: Dict[str, Any] = field(default_factory=dict)
-    agent_state: Dict[str, Any] = field(default_factory=dict)
+    user_id: str | None = None
+    agent_id: str | None = None
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    current_task: str | None = None
+    context_variables: dict[str, Any] = field(default_factory=dict)
+    agent_state: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.now)
     last_updated: datetime = field(default_factory=datetime.now)
 
@@ -68,7 +72,7 @@ class WorkingMemoryManager:
     - Real-time access patterns
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize working memory manager."""
         self.config = config
 
@@ -83,11 +87,11 @@ class WorkingMemoryManager:
 
         # Redis client
         self.redis_client = None
-        if redis:
-            self.redis_client = redis.from_url(self.redis_url)
+        if REDIS_AVAILABLE and redis_module:
+            self.redis_client = redis_module.from_url(self.redis_url)
         else:
             logger.warning("Redis not available, using in-memory fallback")
-            self._memory_fallback = {}
+            self._memory_fallback: dict[str, Any] = {}
 
         # Performance tracking
         self.hit_count = 0
@@ -95,7 +99,7 @@ class WorkingMemoryManager:
         self.write_count = 0
 
         # Background cleanup task
-        self._cleanup_task = None
+        self._cleanup_task: asyncio.Task[None] | None = None
 
     async def initialize(self) -> None:
         """Initialize the working memory system."""
@@ -119,9 +123,9 @@ class WorkingMemoryManager:
         self,
         key: str,
         value: Any,
-        ttl: Optional[int] = None,
-        tags: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        ttl: int | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         """
         Store an item in working memory.
@@ -161,7 +165,7 @@ class WorkingMemoryManager:
             logger.error(f"Failed to store working memory item {key}: {e}")
             return False
 
-    async def retrieve(self, key: str) -> Optional[Any]:
+    async def retrieve(self, key: str) -> Any | None:
         """
         Retrieve an item from working memory.
 
@@ -246,7 +250,7 @@ class WorkingMemoryManager:
 
     async def retrieve_conversation_context(
         self, session_id: str
-    ) -> Optional[ConversationContext]:
+    ) -> ConversationContext | None:
         """Retrieve conversation context from working memory."""
 
         key = f"conversation:{session_id}"
@@ -262,7 +266,7 @@ class WorkingMemoryManager:
         return None
 
     async def update_conversation_context(
-        self, session_id: str, updates: Dict[str, Any]
+        self, session_id: str, updates: dict[str, Any]
     ) -> bool:
         """Update specific fields in conversation context."""
 
@@ -279,7 +283,7 @@ class WorkingMemoryManager:
         return await self.store_conversation_context(context)
 
     async def add_message_to_context(
-        self, session_id: str, message: Dict[str, Any]
+        self, session_id: str, message: dict[str, Any]
     ) -> bool:
         """Add a message to conversation context."""
 
@@ -300,7 +304,7 @@ class WorkingMemoryManager:
         return await self.store_conversation_context(context)
 
     async def store_agent_state(
-        self, agent_id: str, state: Dict[str, Any], session_id: Optional[str] = None
+        self, agent_id: str, state: dict[str, Any], session_id: str | None = None
     ) -> bool:
         """Store agent state in working memory."""
 
@@ -317,8 +321,8 @@ class WorkingMemoryManager:
         )
 
     async def retrieve_agent_state(
-        self, agent_id: str, session_id: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, agent_id: str, session_id: str | None = None
+    ) -> dict[str, Any] | None:
         """Retrieve agent state from working memory."""
 
         key = f"agent_state:{agent_id}"
@@ -327,7 +331,7 @@ class WorkingMemoryManager:
 
         return await self.retrieve(key)
 
-    async def get_keys_by_pattern(self, pattern: str) -> List[str]:
+    async def get_keys_by_pattern(self, pattern: str) -> list[str]:
         """Get all keys matching a pattern."""
 
         try:
@@ -350,7 +354,7 @@ class WorkingMemoryManager:
             logger.error(f"Failed to get keys by pattern {pattern}: {e}")
             return []
 
-    async def get_keys_by_tags(self, tags: List[str]) -> List[str]:
+    async def get_keys_by_tags(self, tags: list[str]) -> list[str]:
         """Get all keys that have specific tags."""
 
         matching_keys = []
@@ -419,7 +423,7 @@ class WorkingMemoryManager:
 
         return cleaned_count
 
-    async def get_memory_stats(self) -> Dict[str, Any]:
+    async def get_memory_stats(self) -> dict[str, Any]:
         """Get working memory statistics."""
 
         stats = {
@@ -471,13 +475,16 @@ class WorkingMemoryManager:
             "metadata": item.metadata,
         }
 
-        await self.redis_client.setex(
-            redis_key, ttl, serialize_for_cache(item_data, default=str).decode("utf-8")
-        )
+        if self.redis_client is not None:
+            await self.redis_client.setex(
+                redis_key, ttl, serialize_for_cache(item_data).decode("utf-8")
+            )
 
-    async def _retrieve_redis(self, key: str) -> Optional[WorkingMemoryItem]:
+    async def _retrieve_redis(self, key: str) -> WorkingMemoryItem | None:
         """Retrieve item from Redis."""
         redis_key = self._make_key(key)
+        if self.redis_client is None:
+            return None
         data = await self.redis_client.get(redis_key)
 
         if data:
@@ -508,11 +515,11 @@ class WorkingMemoryManager:
 
         return None
 
-    def _store_fallback(self, key: str, item: WorkingMemoryItem):
+    def _store_fallback(self, key: str, item: WorkingMemoryItem) -> None:
         """Store item in memory fallback."""
         self._memory_fallback[key] = item
 
-    def _retrieve_fallback(self, key: str) -> Optional[WorkingMemoryItem]:
+    def _retrieve_fallback(self, key: str) -> WorkingMemoryItem | None:
         """Retrieve item from memory fallback."""
         item = self._memory_fallback.get(key)
 
@@ -556,4 +563,4 @@ class WorkingMemoryManager:
             await self.redis_client.close()
 
 
-__all__ = ["WorkingMemoryManager", "WorkingMemoryItem", "ConversationContext"]
+__all__ = ["ConversationContext", "WorkingMemoryItem", "WorkingMemoryManager"]

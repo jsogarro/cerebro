@@ -8,7 +8,7 @@ following the repository pattern with functional programming principles.
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import and_, desc, func, or_
@@ -415,10 +415,11 @@ class ReportRepository(BaseRepository[GeneratedReport]):
     
     async def get_report_with_formats(self, report_id: UUID) -> GeneratedReport | None:
         """Get report with all format files loaded."""
+        formats_attr = cast(Any, GeneratedReport.formats)
         query = self.build_query().options(
-            selectinload(GeneratedReport.formats)
+            selectinload(formats_attr)
         ).filter(GeneratedReport.id == report_id)
-        
+
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
@@ -450,7 +451,12 @@ class ReportFormatRepository(BaseRepository[ReportFormat]):
         report_format = await self.create(**format_data)
         report_format.set_content(content)
 
-        await self.update(report_format.id, {"content": report_format.content})
+        update_data: dict[str, Any] = {}
+        if report_format.content_text:
+            update_data["content_text"] = report_format.content_text
+        if report_format.content_binary:
+            update_data["content_binary"] = report_format.content_binary
+        await self.update(report_format.id, update_data)
         return report_format
     
     async def get_by_report_and_format(

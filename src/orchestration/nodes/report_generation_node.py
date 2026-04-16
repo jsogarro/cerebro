@@ -6,22 +6,21 @@ based on the aggregated and quality-checked results, now integrated
 with the advanced report generation system.
 """
 
-import asyncio
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.models.report import (
+    CitationStyle,
     ReportConfiguration,
     ReportFormat,
     ReportGenerationRequest,
     ReportType,
-    CitationStyle,
 )
 from src.orchestration.state import ResearchState, WorkflowPhase
-from src.services.report_generator import ReportGenerator
 from src.services.report_config import create_report_settings
-from src.utils.serialization import serialize_to_str, serialize
+from src.services.report_generator import ReportGenerator
+from src.utils.serialization import serialize_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +57,7 @@ async def report_generation_node(state: ResearchState) -> ResearchState:
         
         # Create report generation request
         generation_request = ReportGenerationRequest(
+            project_id=None,
             workflow_data=workflow_data,
             configuration=report_config,
             formats=requested_formats,
@@ -140,7 +140,7 @@ def _build_report_configuration(state: ResearchState) -> ReportConfiguration:
     
     # Build configuration
     config = ReportConfiguration(
-        format=ReportFormat.HTML,  # Primary format, others will be added to formats list
+        format=ReportFormat.HTML,
         type=report_type,
         citation_style=citation_style,
         include_toc=context.get("include_toc", True),
@@ -148,6 +148,9 @@ def _build_report_configuration(state: ResearchState) -> ReportConfiguration:
         include_visualizations=context.get("include_visualizations", True),
         include_citations=context.get("include_citations", True),
         include_methodology=context.get("include_methodology", True),
+        max_sections=None,
+        custom_css=None,
+        template_name=None,
         author_name=context.get("author_name"),
         institution=context.get("institution"),
         language=context.get("language", "en"),
@@ -182,7 +185,7 @@ def _determine_report_type(state: ResearchState) -> ReportType:
         return ReportType.COMPREHENSIVE  # Default
 
 
-def _determine_output_formats(state: ResearchState) -> List[ReportFormat]:
+def _determine_output_formats(state: ResearchState) -> list[ReportFormat]:
     """Determine which output formats to generate."""
     context = state.context
     requested_formats = context.get("output_formats", ["html", "markdown"])
@@ -204,7 +207,7 @@ def _determine_output_formats(state: ResearchState) -> List[ReportFormat]:
     return formats
 
 
-def _prepare_workflow_data(state: ResearchState) -> Dict[str, Any]:
+def _prepare_workflow_data(state: ResearchState) -> dict[str, Any]:
     """Prepare workflow data for the report generator."""
     aggregated_results = state.context.get("aggregated_results", {})
     quality_report = state.context.get("quality_report", {})
@@ -232,10 +235,12 @@ def _prepare_workflow_data(state: ResearchState) -> Dict[str, Any]:
 def _generate_report_title(state: ResearchState) -> str:
     """Generate an appropriate title for the report."""
     context = state.context
-    
+
     # Check if title is provided in context
     if context.get("report_title"):
-        return context["report_title"]
+        title = context["report_title"]
+        if isinstance(title, str):
+            return title
     
     # Generate title based on query and domains
     query = state.query
@@ -250,7 +255,7 @@ def _generate_report_title(state: ResearchState) -> str:
         return f"Research Report: {query}"
 
 
-def _convert_to_legacy_format(workflow_data: Dict[str, Any], response) -> Dict[str, Any]:
+def _convert_to_legacy_format(workflow_data: dict[str, Any], response: Any) -> dict[str, Any]:
     """Convert new report response to legacy format for backward compatibility."""
     return {
         "title": workflow_data["title"],
@@ -302,7 +307,7 @@ async def _fallback_legacy_generation(state: ResearchState) -> ResearchState:
 
     # Generate basic outputs
     outputs = {
-        "json": serialize_to_str(report, indent=2, default=str),
+        "json": serialize_to_str(report),
         "markdown": generate_markdown_report(report),
     }
 
@@ -336,11 +341,12 @@ def create_report_structure(
     Returns:
         Report structure
     """
-    report = {
+    research_plan = state.research_plan if state.research_plan is not None else {}
+    report: dict[str, Any] = {
         "title": f"Research Report: {state.query}",
         "query": state.query,
         "domains": state.domains,
-        "research_approach": state.research_plan.get(
+        "research_approach": research_plan.get(
             "research_approach", "comprehensive"
         ),
         "sections": [],
@@ -545,7 +551,7 @@ def create_recommendations_section(results: dict[str, Any]) -> dict[str, Any]:
     recommendations = results.get("recommendations", [])
 
     if not recommendations:
-        return None
+        return {"title": "Recommendations", "content": "", "subsections": []}
 
     content = "## Recommendations\n\nBased on the research findings:\n\n"
 
@@ -630,16 +636,18 @@ def create_abstract_section(
     state: ResearchState, results: dict[str, Any]
 ) -> dict[str, Any]:
     """Create abstract section for academic report."""
+    research_plan = state.research_plan if state.research_plan is not None else {}
+    results_dict = results if results is not None else {}
     return {
         "title": "Abstract",
         "content": f"""
 This study investigates: {state.query}
 
-Methods: {state.research_plan.get('research_approach', 'comprehensive')} research approach across {len(state.domains)} domains.
+Methods: {research_plan.get('research_approach', 'comprehensive')} research approach across {len(state.domains)} domains.
 
-Results: Analysis of {len(results.get('sources', []))} sources yielded {sum(len(f) for f in results.get('findings', {}).values())} findings.
+Results: Analysis of {len(results_dict.get('sources', []))} sources yielded {sum(len(f) for f in results_dict.get('findings', {}).values())} findings.
 
-Conclusions: {', '.join(results.get('recommendations', ['Further research recommended'])[:2])}
+Conclusions: {', '.join(results_dict.get('recommendations', ['Further research recommended'])[:2])}
         """.strip(),
         "subsections": [],
     }
@@ -672,21 +680,24 @@ def generate_executive_summary(report: dict[str, Any], state: ResearchState) -> 
     Returns:
         Executive summary text
     """
+    research_plan = state.research_plan if state.research_plan is not None else {}
+    aggregated_results = state.context.get("aggregated_results", {}) if state.context is not None else {}
+
     summary = f"""# Executive Summary
 
 **Research Question:** {state.query}
 
-**Approach:** {state.research_plan.get('research_approach', 'comprehensive').replace('_', ' ').title()}
+**Approach:** {research_plan.get('research_approach', 'comprehensive').replace('_', ' ').title()}
 
 **Key Outcomes:**
-- Analyzed {len(state.context.get('aggregated_results', {}).get('sources', []))} sources
-- Identified {sum(len(f) for f in state.context.get('aggregated_results', {}).get('findings', {}).values())} key findings
+- Analyzed {len(aggregated_results.get('sources', []))} sources
+- Identified {sum(len(f) for f in aggregated_results.get('findings', {}).values())} key findings
 - Quality Score: {state.quality_score:.2%}
 
 **Main Insights:**
 """
 
-    insights = state.context.get("aggregated_results", {}).get("insights", [])
+    insights = aggregated_results.get("insights", [])
     for insight in insights[:3]:  # Top 3 insights
         summary += f"- {insight.get('text', '')}\n"
 
@@ -791,7 +802,7 @@ def generate_visualizations(results: dict[str, Any]) -> list[dict[str, Any]]:
     # Source distribution chart
     sources = results.get("sources", [])
     if sources:
-        year_dist = {}
+        year_dist: dict[Any, int] = {}
         for source in sources:
             year = source.get("year", "Unknown")
             year_dist[year] = year_dist.get(year, 0) + 1

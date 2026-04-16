@@ -13,16 +13,15 @@ predictions for hierarchical multi-agent systems.
 """
 
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
 import math
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
-from .cost_optimizer import CostOptimizer, CostEstimate, ModelSpec, OptimizationResult
-from .query_analyzer import ComplexityLevel, ComplexityAnalysis
-from .masr import CollaborationMode, RoutingStrategy
 from ...agents.supervisors.base_supervisor import SupervisionMode
+from .cost_optimizer import CostOptimizer
+from .masr import RoutingStrategy
+from .query_analyzer import ComplexityAnalysis, ComplexityLevel
 
 logger = logging.getLogger(__name__)
 
@@ -97,13 +96,13 @@ class HierarchicalCostEstimate:
     estimated_tokens: int = 0
     
     # Hierarchical system costs
-    supervisor_costs: Dict[str, float] = field(default_factory=dict)
-    worker_costs: Dict[str, float] = field(default_factory=dict)
-    coordination_costs: Dict[str, float] = field(default_factory=dict)
-    communication_costs: Dict[str, float] = field(default_factory=dict)
+    supervisor_costs: dict[str, float] = field(default_factory=dict)
+    worker_costs: dict[str, float] = field(default_factory=dict)
+    coordination_costs: dict[str, float] = field(default_factory=dict)
+    communication_costs: dict[str, float] = field(default_factory=dict)
     
     # Efficiency savings
-    efficiency_savings: Dict[str, float] = field(default_factory=dict)
+    efficiency_savings: dict[str, float] = field(default_factory=dict)
     
     # Total cost breakdown
     total_instantiation_cost: float = 0.0
@@ -124,7 +123,7 @@ class HierarchicalCostEstimate:
     # Cost accuracy metrics
     cost_variance: float = 0.0  # Expected variance in cost
     
-    def calculate_totals(self):
+    def calculate_totals(self) -> None:
         """Calculate total costs from components."""
         
         # Sum component costs
@@ -153,12 +152,12 @@ class HierarchicalCostEstimate:
 class SupervisorCostCalculator:
     """Calculates costs specific to supervisor instantiation and coordination."""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize supervisor cost calculator."""
         self.config = config or {}
         
         # Initialize supervisor cost profiles
-        self.supervisor_profiles: Dict[str, SupervisorCostProfile] = {}
+        self.supervisor_profiles: dict[str, SupervisorCostProfile] = {}
         self._initialize_supervisor_profiles()
         
         # Cost factors
@@ -171,7 +170,7 @@ class SupervisorCostCalculator:
                 if field in self.config:
                     setattr(self.cost_factors, field, self.config[field])
     
-    def _initialize_supervisor_profiles(self):
+    def _initialize_supervisor_profiles(self) -> None:
         """Initialize built-in supervisor cost profiles."""
         
         # Research Supervisor Profile
@@ -282,7 +281,7 @@ class WorkerCoordinationCostCalculator:
     def calculate_worker_instantiation_costs(
         self, 
         worker_count: int,
-        worker_types: List[str],
+        worker_types: list[str],
         complexity_level: ComplexityLevel
     ) -> float:
         """Calculate total cost of instantiating workers."""
@@ -356,7 +355,7 @@ class TalkHierCommunicationCostCalculator:
         refinement_rounds: int,
         worker_count: int,
         enable_consensus_building: bool = True
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Calculate TalkHier communication costs."""
         
         costs = {}
@@ -430,7 +429,7 @@ class EfficiencySavingsCalculator:
         enable_caching: bool = True,
         enable_parallel_optimization: bool = True,
         worker_count: int = 1
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Calculate efficiency savings from various optimizations."""
         
         savings = {}
@@ -477,7 +476,7 @@ class HierarchicalCostOptimizer:
     def __init__(
         self, 
         base_cost_optimizer: CostOptimizer,
-        config: Optional[Dict[str, Any]] = None
+        config: dict[str, Any] | None = None
     ):
         """Initialize hierarchical cost optimizer."""
         self.base_optimizer = base_cost_optimizer
@@ -493,7 +492,7 @@ class HierarchicalCostOptimizer:
         self.efficiency_calculator = EfficiencySavingsCalculator(self.cost_factors)
         
         # Performance tracking
-        self.cost_predictions = []
+        self.cost_predictions: list[dict[str, Any]] = []
         self.accuracy_metrics = {
             "total_predictions": 0,
             "accurate_predictions": 0,
@@ -505,7 +504,7 @@ class HierarchicalCostOptimizer:
         complexity_analysis: ComplexityAnalysis,
         supervisor_type: str,
         worker_count: int,
-        worker_types: List[str],
+        worker_types: list[str],
         refinement_rounds: int = 2,
         supervision_mode: SupervisionMode = SupervisionMode.PARALLEL,
         routing_strategy: RoutingStrategy = RoutingStrategy.BALANCED,
@@ -529,13 +528,18 @@ class HierarchicalCostOptimizer:
         """
         
         # Get base model cost estimate from existing optimizer
+        from .cost_optimizer import OptimizationStrategy
         base_result = await self.base_optimizer.optimize(
             complexity_analysis,
-            self.base_optimizer._map_routing_to_optimization_strategy(routing_strategy)
+            OptimizationStrategy.BALANCED
         )
-        
-        base_cost = base_result.estimated_cost.cost_per_request
-        estimated_tokens = base_result.estimated_cost.estimated_tokens
+
+        if base_result.estimated_cost:
+            base_cost = base_result.estimated_cost.cost_per_request
+            estimated_tokens = base_result.estimated_cost.estimated_tokens
+        else:
+            base_cost = 0.0
+            estimated_tokens = 0
         
         # Initialize hierarchical cost estimate
         estimate = HierarchicalCostEstimate(
@@ -715,7 +719,7 @@ class HierarchicalCostOptimizer:
     
     def record_actual_cost(
         self, prediction_id: str, actual_cost: float, actual_quality: float
-    ):
+    ) -> None:
         """Record actual execution cost for accuracy tracking."""
         
         # Update accuracy metrics (simplified implementation)
@@ -725,7 +729,7 @@ class HierarchicalCostOptimizer:
         # and calculate detailed accuracy metrics
         logger.info(f"Recorded actual cost: {actual_cost:.6f}")
     
-    async def get_cost_model_stats(self) -> Dict[str, Any]:
+    async def get_cost_model_stats(self) -> dict[str, Any]:
         """Get cost model performance statistics."""
         
         return {
@@ -753,13 +757,13 @@ class HierarchicalCostOptimizer:
 
 
 __all__ = [
-    "HierarchicalCostOptimizer",
-    "HierarchicalCostEstimate", 
-    "HierarchicalCostFactors",
-    "SupervisorCostCalculator",
-    "WorkerCoordinationCostCalculator",
-    "TalkHierCommunicationCostCalculator",
     "EfficiencySavingsCalculator",
-    "SupervisorCostProfile",
+    "HierarchicalCostEstimate",
+    "HierarchicalCostFactors",
+    "HierarchicalCostOptimizer",
     "ResourceType",
+    "SupervisorCostCalculator",
+    "SupervisorCostProfile",
+    "TalkHierCommunicationCostCalculator",
+    "WorkerCoordinationCostCalculator",
 ]
