@@ -13,13 +13,13 @@ Semantic memory stores:
 - Retrieved information with relevance scoring
 """
 
-import asyncio
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-import numpy as np
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 try:
     # Try to import sentence transformers for embeddings
@@ -37,8 +37,6 @@ except ImportError:
     models = None
     logger.warning("qdrant-client not available - using fallback storage")
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class SemanticItem:
@@ -46,13 +44,13 @@ class SemanticItem:
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     content: str = ""
-    embedding: Optional[List[float]] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    embedding: list[float] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # Knowledge organization
-    domain: Optional[str] = None
-    category: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
+    domain: str | None = None
+    category: str | None = None
+    tags: list[str] = field(default_factory=list)
 
     # Temporal information
     created_at: datetime = field(default_factory=datetime.now)
@@ -61,7 +59,7 @@ class SemanticItem:
 
     # Quality and relevance
     confidence_score: float = 1.0
-    source: Optional[str] = None
+    source: str | None = None
     verified: bool = False
 
 
@@ -70,10 +68,10 @@ class SemanticQuery:
     """Query parameters for semantic search."""
 
     query_text: str = ""
-    query_embedding: Optional[List[float]] = None
-    domain: Optional[str] = None
-    categories: Optional[List[str]] = None
-    tags: Optional[List[str]] = None
+    query_embedding: list[float] | None = None
+    domain: str | None = None
+    categories: list[str] | None = None
+    tags: list[str] | None = None
     min_confidence: float = 0.0
     limit: int = 10
     similarity_threshold: float = 0.7
@@ -99,7 +97,7 @@ class SemanticMemoryManager:
     - Relevance scoring and explanation
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize semantic memory manager."""
         self.config = config
 
@@ -116,13 +114,13 @@ class SemanticMemoryManager:
         self.vector_client = None
 
         # Fallback storage
-        self._fallback_storage: List[SemanticItem] = []
+        self._fallback_storage: list[SemanticItem] = []
 
         # Performance tracking
         self.store_count = 0
         self.search_count = 0
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the semantic memory system."""
 
         # Initialize embedding model
@@ -180,7 +178,7 @@ class SemanticMemoryManager:
             logger.error(f"Failed to store semantic item {item.id}: {e}")
             return False
 
-    async def search(self, query: SemanticQuery) -> List[SemanticResult]:
+    async def search(self, query: SemanticQuery) -> list[SemanticResult]:
         """
         Search semantic memory for relevant items.
 
@@ -212,10 +210,10 @@ class SemanticMemoryManager:
     async def store_knowledge(
         self,
         content: str,
-        domain: Optional[str] = None,
-        category: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-        source: Optional[str] = None,
+        domain: str | None = None,
+        category: str | None = None,
+        tags: list[str] | None = None,
+        source: str | None = None,
         confidence: float = 1.0,
     ) -> str:
         """
@@ -249,10 +247,10 @@ class SemanticMemoryManager:
     async def retrieve_knowledge(
         self,
         query: str,
-        domain: Optional[str] = None,
+        domain: str | None = None,
         limit: int = 5,
         min_similarity: float = 0.7,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Retrieve relevant knowledge for a query.
 
@@ -293,7 +291,7 @@ class SemanticMemoryManager:
 
         return knowledge_items
 
-    async def update_item(self, item_id: str, updates: Dict[str, Any]) -> bool:
+    async def update_item(self, item_id: str, updates: dict[str, Any]) -> bool:
         """Update an existing semantic memory item."""
 
         try:
@@ -337,7 +335,7 @@ class SemanticMemoryManager:
             logger.error(f"Failed to delete semantic item {item_id}: {e}")
             return False
 
-    async def get_memory_stats(self) -> Dict[str, Any]:
+    async def get_memory_stats(self) -> dict[str, Any]:
         """Get semantic memory statistics."""
 
         stats = {
@@ -371,7 +369,7 @@ class SemanticMemoryManager:
 
         return stats
 
-    async def _generate_embedding(self, text: str) -> Optional[List[float]]:
+    async def _generate_embedding(self, text: str) -> list[float] | None:
         """Generate embedding for text."""
 
         if self.embedding_model:
@@ -398,7 +396,7 @@ class SemanticMemoryManager:
 
         return pseudo_embedding[: self.embedding_dimension]
 
-    async def _ensure_collection_exists(self):
+    async def _ensure_collection_exists(self) -> None:
         """Ensure vector collection exists."""
 
         try:
@@ -420,7 +418,7 @@ class SemanticMemoryManager:
             logger.error(f"Failed to ensure collection exists: {e}")
             raise
 
-    async def _store_vector_db(self, item: SemanticItem):
+    async def _store_vector_db(self, item: SemanticItem) -> None:
         """Store item in vector database."""
 
         point = models.PointStruct(
@@ -443,7 +441,7 @@ class SemanticMemoryManager:
             collection_name=self.collection_name, points=[point]
         )
 
-    async def _search_vector_db(self, query: SemanticQuery) -> List[SemanticResult]:
+    async def _search_vector_db(self, query: SemanticQuery) -> list[SemanticResult]:
         """Search vector database."""
 
         # Build filter conditions
@@ -527,7 +525,7 @@ class SemanticMemoryManager:
             self._fallback_storage.sort(key=lambda x: x.created_at)
             self._fallback_storage = self._fallback_storage[-max_fallback_size:]
 
-    def _search_fallback(self, query: SemanticQuery) -> List[SemanticResult]:
+    def _search_fallback(self, query: SemanticQuery) -> list[SemanticResult]:
         """Search fallback storage using simple text matching."""
 
         results = []
@@ -573,11 +571,11 @@ class SemanticMemoryManager:
         results.sort(key=lambda x: x.similarity_score, reverse=True)
         return results[: query.limit]
 
-    async def close(self):
+    async def close(self) -> None:
         """Close semantic memory manager and cleanup resources."""
         if self.vector_client:
             # Qdrant client doesn't need explicit closing
             pass
 
 
-__all__ = ["SemanticMemoryManager", "SemanticItem", "SemanticQuery", "SemanticResult"]
+__all__ = ["SemanticItem", "SemanticMemoryManager", "SemanticQuery", "SemanticResult"]

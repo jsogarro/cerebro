@@ -206,7 +206,7 @@ class SecurityHeadersMiddleware:
 
         return json.dumps(report_to)
 
-    async def __call__(self, request: Request, call_next):
+    async def __call__(self, request: Request, call_next) -> Response:
         """Apply security headers to response."""
         # Generate CSP nonce if enabled
         nonce = None
@@ -361,7 +361,7 @@ class CORSSecurityMiddleware:
 
         return False
 
-    async def __call__(self, request: Request, call_next):
+    async def __call__(self, request: Request, call_next) -> Response:
         """Process CORS headers."""
         origin = request.headers.get("Origin")
 

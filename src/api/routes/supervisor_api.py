@@ -65,21 +65,21 @@ class SupervisorConnectionManager:
         self.active_connections: Dict[str, List[WebSocket]] = {}
         self.supervisor_subscriptions: Dict[str, List[WebSocket]] = {}
     
-    async def connect(self, websocket: WebSocket, client_id: str):
+    async def connect(self, websocket: WebSocket, client_id: str) -> None:
         """Accept and register a WebSocket connection"""
         await websocket.accept()
         if client_id not in self.active_connections:
             self.active_connections[client_id] = []
         self.active_connections[client_id].append(websocket)
     
-    def disconnect(self, websocket: WebSocket, client_id: str):
+    def disconnect(self, websocket: WebSocket, client_id: str) -> None:
         """Remove a WebSocket connection"""
         if client_id in self.active_connections:
             self.active_connections[client_id].remove(websocket)
             if not self.active_connections[client_id]:
                 del self.active_connections[client_id]
     
-    async def send_supervisor_event(self, supervisor_type: str, event: SupervisorWebSocketEvent):
+    async def send_supervisor_event(self, supervisor_type: str, event: SupervisorWebSocketEvent) -> None:
         """Send event to all clients subscribed to a supervisor"""
         if supervisor_type in self.supervisor_subscriptions:
             for connection in self.supervisor_subscriptions[supervisor_type]:
@@ -88,7 +88,7 @@ class SupervisorConnectionManager:
                 except Exception as e:
                     logger.error(f"Error sending event to client: {e}")
     
-    async def broadcast_event(self, event: dict):
+    async def broadcast_event(self, event: dict) -> None:
         """Broadcast event to all connected clients"""
         for client_connections in self.active_connections.values():
             for connection in client_connections:
@@ -462,7 +462,7 @@ async def supervisor_websocket(
     websocket: WebSocket,
     supervisor_type: SupervisorType,
     client_id: Optional[str] = Query(None)
-):
+) -> None:
     """
     WebSocket endpoint for real-time supervisor updates.
     
@@ -529,7 +529,7 @@ async def supervisor_websocket(
 async def coordination_progress_websocket(
     websocket: WebSocket,
     coordination_id: Optional[str] = Query(None)
-):
+) -> None:
     """
     WebSocket endpoint for real-time worker coordination progress updates.
     
@@ -589,7 +589,7 @@ async def coordination_progress_websocket(
 # Error Handlers
 
 @router.exception_handler(ValueError)
-async def value_error_handler(request, exc: ValueError):
+async def value_error_handler(request, exc: ValueError) -> JSONResponse:
     """Handle ValueError exceptions"""
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -602,7 +602,7 @@ async def value_error_handler(request, exc: ValueError):
 
 
 @router.exception_handler(Exception)
-async def general_exception_handler(request, exc: Exception):
+async def general_exception_handler(request, exc: Exception) -> JSONResponse:
     """Handle general exceptions"""
     logger.error(f"Unhandled exception: {exc}")
     return JSONResponse(

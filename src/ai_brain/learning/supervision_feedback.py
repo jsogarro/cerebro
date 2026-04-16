@@ -726,9 +726,9 @@ class SupervisionFeedbackLearner:
             "learning_confidence": self._calculate_learning_confidence(),
         }
     
-    async def save_learning_state(self, file_path: str):
+    async def save_learning_state(self, file_path: str) -> None:
         """Save learning state to file."""
-        
+
         state = {
             "feedback_events": [asdict(event) for event in self.feedback_events],
             "strategy_metrics": {k: asdict(v) for k, v in self.strategy_analyzer.strategy_metrics.items()},
@@ -744,9 +744,9 @@ class SupervisionFeedbackLearner:
         
         logger.info(f"Saved learning state to {file_path}")
     
-    async def load_learning_state(self, file_path: str):
+    async def load_learning_state(self, file_path: str) -> None:
         """Load learning state from file."""
-        
+
         try:
             with open(file_path, 'rb') as f:
                 state = pickle.load(f)

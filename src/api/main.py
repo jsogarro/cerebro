@@ -99,7 +99,7 @@ app.include_router(websocket.router, tags=["websocket"])
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
+async def global_exception_handler(request, exc) -> JSONResponse:
     """Global exception handler."""
     logger.error(
         "Unhandled exception",

@@ -124,11 +124,11 @@ class AdaptiveAllocationEngine:
         self.update_interval = self.config.get("update_interval_seconds", 300)
     
     async def register_experiment(
-        self, 
+        self,
         experiment_id: str,
         variants: List[str],
         allocation_config: AllocationConfig
-    ):
+    ) -> None:
         """
         Register experiment for adaptive allocation.
         
@@ -397,7 +397,7 @@ class AdaptiveAllocationEngine:
         variant_id: str,
         reward: float,
         context: Optional[Dict[str, Any]] = None
-    ):
+    ) -> None:
         """
         Record experiment outcome for bandit learning.
         
@@ -432,7 +432,7 @@ class AdaptiveAllocationEngine:
         
         logger.debug(f"Recorded outcome for {experiment_id}: {variant_id} = {reward}")
     
-    async def update_allocations(self):
+    async def update_allocations(self) -> List[str]:
         """Update all active experiment allocations based on performance."""
         
         updated_experiments = []
@@ -558,7 +558,7 @@ class AdaptiveAllocationEngine:
         
         return mapping.get(strategy, BanditAlgorithm.EPSILON_GREEDY)
     
-    async def start_adaptive_updates(self):
+    async def start_adaptive_updates(self) -> None:
         """Start background task for adaptive allocation updates."""
         
         if self.update_task and not self.update_task.done():
@@ -568,7 +568,7 @@ class AdaptiveAllocationEngine:
         self.update_task = asyncio.create_task(self._adaptive_update_loop())
         logger.info("Started adaptive allocation updates")
     
-    async def stop_adaptive_updates(self):
+    async def stop_adaptive_updates(self) -> None:
         """Stop background adaptive updates."""
         
         if self.update_task and not self.update_task.done():
@@ -580,7 +580,7 @@ class AdaptiveAllocationEngine:
         
         logger.info("Stopped adaptive allocation updates")
     
-    async def _adaptive_update_loop(self):
+    async def _adaptive_update_loop(self) -> None:
         """Background loop for updating allocations."""
         
         while True:

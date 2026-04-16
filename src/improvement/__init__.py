@@ -96,6 +96,6 @@ class MetaLearner:
 class ContinuousImprovementPipeline:
     """Automated self-improvement pipeline."""
     
-    async def run_daily_cycle(self):
+    async def run_daily_cycle(self) -> None:
         """Run improvement cycle."""
         pass

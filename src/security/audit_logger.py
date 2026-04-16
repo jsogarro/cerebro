@@ -81,13 +81,13 @@ class AuditLogger:
             "xss_attempt": 1,  # Alert immediately
         }
 
-    async def start(self):
+    async def start(self) -> None:
         """Start the audit logger background tasks."""
         if not self.flush_task:
             self.flush_task = asyncio.create_task(self._periodic_flush())
             self.logger.info("Audit logger started")
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the audit logger and flush remaining logs."""
         if self.flush_task:
             self.flush_task.cancel()
@@ -199,7 +199,7 @@ class AuditLogger:
         event_id = f"{event_type.value}_{datetime.utcnow().timestamp()}"
         return event_id
 
-    async def flush_buffer(self):
+    async def flush_buffer(self) -> None:
         """Flush log buffer to database."""
         if not self.db_session:
             return
@@ -231,7 +231,7 @@ class AuditLogger:
             with self.buffer_lock:
                 self.log_buffer.extend(logs_to_flush)
 
-    async def _periodic_flush(self):
+    async def _periodic_flush(self) -> None:
         """Periodically flush log buffer."""
         while True:
             try:
@@ -242,7 +242,7 @@ class AuditLogger:
             except Exception as e:
                 self.logger.error(f"Error in periodic flush: {e!s}")
 
-    async def _check_alert_conditions(self, log_entry: dict[str, Any]):
+    async def _check_alert_conditions(self, log_entry: dict[str, Any]) -> None:
         """
         Check if log entry should trigger an alert.
 
@@ -347,7 +347,7 @@ class AuditLogger:
         log_entry: dict[str, Any],
         severity: AlertSeverity,
         alert_type: AlertType | None = None,
-    ):
+    ) -> None:
         """
         Generate a security alert from audit log.
 

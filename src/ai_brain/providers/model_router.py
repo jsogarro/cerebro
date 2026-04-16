@@ -9,7 +9,7 @@ from the MASR system.
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any, Type
+from typing import Dict, List, Optional, Any, Type, AsyncGenerator
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
@@ -369,7 +369,7 @@ class ModelRouter:
 
     async def stream_response(
         self, request: ModelRequest, routing_decision: Optional[Dict] = None
-    ):
+    ) -> AsyncGenerator[str, None]:
         """Stream response using optimal provider."""
 
         try:
@@ -434,7 +434,7 @@ class ModelRouter:
 
             logger.info(f"Removed provider: {provider_name}")
 
-    async def close(self):
+    async def close(self) -> None:
         """Clean up all provider resources."""
 
         for provider in self.registry.providers.values():

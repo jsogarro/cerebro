@@ -74,7 +74,7 @@ class SystemExperimentRegistry:
                                 component: SystemComponent,
                                 handler: Callable,
                                 capabilities: Optional[Dict[str, Any]] = None,
-                                health_check: Optional[Callable] = None):
+                                health_check: Optional[Callable] = None) -> None:
         """
         Register a system component for experimentation.
         
@@ -99,7 +99,7 @@ class SystemExperimentRegistry:
             if not is_healthy:
                 raise RuntimeError(f"Component {component.value} failed health check")
     
-    async def register_experiment(self, experiment: SystemExperiment):
+    async def register_experiment(self, experiment: SystemExperiment) -> None:
         """
         Register a new experiment with affected components.
         
@@ -134,7 +134,7 @@ class SystemExperimentRegistry:
             )
         )
     
-    async def start_experiment(self, experiment_id: str):
+    async def start_experiment(self, experiment_id: str) -> None:
         """
         Start an experiment across all affected components.
         
@@ -175,7 +175,7 @@ class SystemExperimentRegistry:
     
     async def update_experiment_allocation(self,
                                          experiment_id: str,
-                                         new_allocations: Dict[str, float]):
+                                         new_allocations: Dict[str, float]) -> None:
         """
         Update variant allocations (for adaptive experiments).
         
@@ -196,7 +196,7 @@ class SystemExperimentRegistry:
     
     async def stop_experiment(self,
                             experiment_id: str,
-                            reason: str = "completed"):
+                            reason: str = "completed") -> None:
         """
         Stop an experiment across all components.
         
@@ -236,7 +236,7 @@ class SystemExperimentRegistry:
     
     async def promote_winner(self,
                            experiment_id: str,
-                           winning_variant: ExperimentVariant):
+                           winning_variant: ExperimentVariant) -> None:
         """
         Promote winning variant configuration to production.
         
@@ -315,7 +315,7 @@ class SystemExperimentRegistry:
     async def record_variant_assignment(self,
                                       experiment_id: str,
                                       variant_id: str,
-                                      context: Dict[str, Any]):
+                                      context: Dict[str, Any]) -> None:
         """
         Record a variant assignment event.
         
@@ -341,7 +341,7 @@ class SystemExperimentRegistry:
                           metric_name: str,
                           value: float,
                           variant_id: Optional[str] = None,
-                          component: Optional[SystemComponent] = None):
+                          component: Optional[SystemComponent] = None) -> None:
         """
         Record a metric value for an experiment.
         
@@ -416,7 +416,7 @@ class SystemExperimentRegistry:
     
     # Private helper methods
     
-    async def _record_event(self, event: ExperimentEvent):
+    async def _record_event(self, event: ExperimentEvent) -> None:
         """Record an event and notify handlers."""
         self.event_history.append(event)
         
@@ -437,7 +437,7 @@ class SystemExperimentRegistry:
     
     async def _rollback_experiment_start(self,
                                        experiment_id: str,
-                                       errors: List[Exception]):
+                                       errors: List[Exception]) -> None:
         """Rollback a failed experiment start."""
         affected_components = self.experiment_components[experiment_id]
         

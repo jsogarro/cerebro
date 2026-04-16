@@ -24,6 +24,8 @@ from enum import Enum
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolExecutor
 
+from src.core.types import SupervisionStatsDict
+
 from ..base import BaseAgent
 from ..models import AgentTask, AgentResult
 from ..communication.communication_protocol import (
@@ -540,7 +542,7 @@ class BaseSupervisor(BaseAgent, ABC):
 
         return state
 
-    async def get_supervision_stats(self) -> Dict[str, Any]:
+    async def get_supervision_stats(self) -> SupervisionStatsDict:
         """Get supervisor performance statistics."""
 
         success_rate = self.successful_supervisions / max(self.supervised_tasks, 1)
@@ -565,7 +567,7 @@ class BaseSupervisor(BaseAgent, ABC):
     def _create_langgraph_node(self, node_name: str, node_func: callable):
         """Create LangGraph node with error handling."""
 
-        async def wrapped_node(state):
+        async def wrapped_node(state: dict[str, Any]) -> dict[str, Any]:
             try:
                 return await node_func(state)
             except Exception as e:
@@ -577,7 +579,7 @@ class BaseSupervisor(BaseAgent, ABC):
 
         return wrapped_node
 
-    async def close(self):
+    async def close(self) -> None:
         """Close supervisor and cleanup resources."""
 
         # Close active workers

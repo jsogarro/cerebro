@@ -53,11 +53,11 @@ class CLIWebSocketClient:
         self._shutdown = False
         self._connected = False
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "WebSocketClient":
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit."""
         await self.disconnect()
 
@@ -120,7 +120,7 @@ class CLIWebSocketClient:
                 print_error("Connection failed. Use --verbose for details.")
             return False
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         """Disconnect from WebSocket."""
         self._shutdown = True
         self._connected = False
@@ -134,7 +134,7 @@ class CLIWebSocketClient:
             finally:
                 self.websocket = None
 
-    async def send_heartbeat_response(self):
+    async def send_heartbeat_response(self) -> None:
         """Send heartbeat response to server."""
         if self.websocket and self._connected:
             try:
@@ -151,7 +151,7 @@ class CLIWebSocketClient:
         project_id: UUID,
         formatter: OutputFormatter,
         message_handler: Callable[[WSMessage], None] | None = None,
-    ):
+    ) -> bool:
         """
         Stream real-time progress updates for a project.
 
@@ -323,7 +323,7 @@ class CLIWebSocketClient:
         self,
         project_id: UUID,
         log_level: str = "INFO",
-    ):
+    ) -> bool:
         """
         Stream real-time logs for a project.
 

@@ -399,7 +399,7 @@ class WorkflowCheckpointer:
         # Also checkpoint on phase transitions and errors
         return state.should_checkpoint()
 
-    async def _cleanup_old_checkpoints(self, workflow_id: str):
+    async def _cleanup_old_checkpoints(self, workflow_id: str) -> None:
         """
         Clean up old checkpoints to maintain storage limits.
 
@@ -420,7 +420,7 @@ class WorkflowCheckpointer:
         except Exception as e:
             logger.error(f"Failed to cleanup checkpoints: {e}")
 
-    async def cleanup_workflow(self, workflow_id: str):
+    async def cleanup_workflow(self, workflow_id: str) -> None:
         """
         Clean up all checkpoints for a workflow.
 

@@ -222,7 +222,7 @@ class ServiceRegistry:
 
         return instance
 
-    async def deregister(self, service_name: str, instance_id: str):
+    async def deregister(self, service_name: str, instance_id: str) -> None:
         """
         Deregister a service instance.
 
@@ -245,7 +245,7 @@ class ServiceRegistry:
 
         logger.info(f"Deregistered service: {service_name}/{instance_id}")
 
-    async def heartbeat(self, service_name: str, instance_id: str):
+    async def heartbeat(self, service_name: str, instance_id: str) -> None:
         """
         Update service heartbeat.
 
@@ -269,7 +269,7 @@ class ServiceRegistry:
 
     async def update_status(
         self, service_name: str, instance_id: str, status: ServiceStatus
-    ):
+    ) -> None:
         """
         Update service status.
 
@@ -381,7 +381,7 @@ class ServiceRegistry:
         all_instances = await self.get_all_instances(service_name)
         return [i for i in all_instances if i.is_available()]
 
-    async def cleanup_expired(self):
+    async def cleanup_expired(self) -> None:
         """Clean up expired service registrations."""
         current_time = datetime.utcnow()
         expired = []
@@ -689,7 +689,7 @@ _global_registry: ServiceRegistry | None = None
 _global_discovery: ServiceDiscovery | None = None
 
 
-async def initialize_service_registry(redis_client: redis.Redis | None = None):
+async def initialize_service_registry(redis_client: redis.Redis | None = None) -> None:
     """Initialize global service registry."""
     global _global_registry, _global_discovery
 

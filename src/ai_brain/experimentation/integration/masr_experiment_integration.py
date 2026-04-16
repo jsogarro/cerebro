@@ -106,7 +106,7 @@ class MASRExperimentalRouter(MASRouter):
         # Experiment results buffer
         self.results_buffer: List[MASRExperimentResult] = []
         
-    async def initialize_experiments(self):
+    async def initialize_experiments(self) -> None:
         """Initialize default MASR experiments."""
         # Routing strategy experiment
         routing_experiment = MASRExperimentConfig(
@@ -448,7 +448,7 @@ class MASRExperimentalRouter(MASRouter):
             # Balanced approach
             return await self.route(query, context)
     
-    async def _report_metrics(self, result: MASRExperimentResult):
+    async def _report_metrics(self, result: MASRExperimentResult) -> None:
         """Report experiment metrics to the experiment manager."""
         metrics = {
             "routing_latency_ms": result.execution_time_ms,

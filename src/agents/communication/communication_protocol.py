@@ -21,6 +21,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable
 from enum import Enum
 
+from src.core.types import ProtocolStatsDict
+
 from .talkhier_message import (
     TalkHierMessage,
     TalkHierContent,
@@ -657,7 +659,7 @@ class CommunicationProtocol:
 
         return responses
 
-    async def get_protocol_stats(self) -> Dict[str, Any]:
+    async def get_protocol_stats(self) -> ProtocolStatsDict:
         """Get communication protocol performance statistics."""
 
         success_rate = self.successful_consensus / max(self.total_conversations, 1)

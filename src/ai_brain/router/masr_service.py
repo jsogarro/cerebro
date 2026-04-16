@@ -17,6 +17,7 @@ import os
 import signal
 from datetime import datetime
 from typing import Dict, Any, Optional
+from starlette.responses import Response
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends
@@ -121,7 +122,7 @@ class MASRService:
         
         # Request/response logging middleware
         @self.app.middleware("http")
-        async def logging_middleware(request, call_next):
+        async def logging_middleware(request, call_next) -> Response:
             start_time = datetime.now()
             response = await call_next(request)
             process_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -138,9 +139,9 @@ class MASRService:
         """Setup FastAPI routes."""
         
         @self.app.get("/health", response_model=HealthResponse)
-        async def health_check():
+        async def health_check() -> HealthResponse:
             """Health check endpoint."""
-            
+
             components_health = {
                 "masr_router": "healthy" if self.masr_router else "unavailable",
                 "redis": "healthy" if self.redis_client else "unavailable",
@@ -174,9 +175,9 @@ class MASRService:
             )
         
         @self.app.post("/route", response_model=RoutingResponse)
-        async def route_query(request: RoutingRequest):
+        async def route_query(request: RoutingRequest) -> RoutingResponse:
             """Route a query using MASR intelligence."""
-            
+
             if not self.masr_router:
                 raise HTTPException(status_code=503, detail="MASR router not available")
             
@@ -237,9 +238,9 @@ class MASRService:
                 raise HTTPException(status_code=500, detail=f"Routing failed: {str(e)}")
         
         @self.app.get("/metrics")
-        async def get_metrics():
+        async def get_metrics() -> Dict[str, Any]:
             """Get service metrics."""
-            
+
             metrics = self.service_stats.copy()
             
             if self.masr_router:
@@ -249,9 +250,9 @@ class MASRService:
             return metrics
         
         @self.app.get("/stats")
-        async def get_detailed_stats():
+        async def get_detailed_stats() -> Dict[str, Any]:
             """Get detailed service statistics."""
-            
+
             stats = {
                 "service": self.service_stats.copy(),
                 "environment": self.environment,
@@ -270,18 +271,18 @@ class MASRService:
         """Setup graceful shutdown handlers."""
         
         @self.app.on_event("startup")
-        async def startup_event():
+        async def startup_event() -> None:
             """Initialize service components on startup."""
             await self._initialize_components()
         
         @self.app.on_event("shutdown")
-        async def shutdown_event():
+        async def shutdown_event() -> None:
             """Cleanup on service shutdown."""
             await self._cleanup_components()
     
-    async def _initialize_components(self):
+    async def _initialize_components(self) -> None:
         """Initialize MASR service components."""
-        
+
         logger.info("Initializing MASR service components...")
         
         try:
@@ -316,9 +317,9 @@ class MASRService:
             logger.error(f"Failed to initialize MASR service components: {e}")
             raise
     
-    async def _cleanup_components(self):
+    async def _cleanup_components(self) -> None:
         """Cleanup service components."""
-        
+
         logger.info("Cleaning up MASR service components...")
         
         if self.redis_client:
@@ -377,9 +378,9 @@ masr_service = MASRService()
 
 
 # Entry point for module execution
-async def main():
+async def main() -> None:
     """Main entry point for MASR service."""
-    
+
     logger.info("Cerebro MASR Service Starting...")
     logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
     logger.info(f"Port: {os.getenv('MASR_PORT', '9100')}")

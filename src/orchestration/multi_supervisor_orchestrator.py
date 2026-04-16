@@ -21,6 +21,8 @@ from enum import Enum
 from typing import Dict, List, Optional, Any, Set, Tuple
 import uuid
 
+from src.core.types import HealthCheckDict
+
 from langgraph.graph import StateGraph, END
 
 from src.core.constants import HIGH_ESTIMATED_TOKENS
@@ -706,7 +708,7 @@ class MultiSupervisorOrchestrator:
             },
         }
     
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> HealthCheckDict:
         """Perform comprehensive health check."""
         
         base_health = await self.base_orchestrator.health_check()

@@ -29,6 +29,7 @@ from src.cli.utils import (
     validate_uuid,
 )
 from src.cli.websocket_client import stream_project_progress, test_websocket_connection
+from src.models.research_project import ResearchProgress, ResearchProject
 
 
 @click.group(name="projects")
@@ -68,7 +69,7 @@ def create_project(
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
 
-    async def _create_single_project(project_data):
+    async def _create_single_project(project_data) -> ResearchProject:
         """Create a single project."""
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
@@ -93,7 +94,7 @@ def create_project(
                 print_error(f"Failed to create project: {e.detail}")
                 raise click.Exit(1)
 
-    async def _create_projects():
+    async def _create_projects() -> None:
         """Create projects based on input."""
         # Capture outer variables
         nonlocal title, query, domains, user_id, depth, scope, interactive, file
@@ -160,7 +161,7 @@ def get_project(ctx, project_id: UUID):
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
 
-    async def _get_project():
+    async def _get_project() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
                 with create_spinner(f"Fetching project {project_id}..."):
@@ -197,7 +198,7 @@ def list_projects(
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
 
-    async def _list_projects():
+    async def _list_projects() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
                 with create_spinner("Fetching projects..."):
@@ -249,7 +250,7 @@ def get_progress(ctx, project_id: UUID, watch: bool, stream: bool, interval: int
         print_error("Cannot use both --watch and --stream options. Choose one.")
         raise click.Exit(1)
 
-    async def _get_progress_once():
+    async def _get_progress_once() -> ResearchProgress:
         """Get progress once."""
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
@@ -265,7 +266,7 @@ def get_progress(ctx, project_id: UUID, watch: bool, stream: bool, interval: int
                     print_error(f"Failed to fetch progress: {e.detail}")
                 raise click.Exit(1)
 
-    async def _stream_progress():
+    async def _stream_progress() -> None:
         """Stream progress via WebSocket."""
         try:
             # Test WebSocket connection first
@@ -302,7 +303,7 @@ def get_progress(ctx, project_id: UUID, watch: bool, stream: bool, interval: int
             print_warning("Falling back to polling mode")
             await _watch_progress()
 
-    async def _watch_progress():
+    async def _watch_progress() -> None:
         """Watch progress in real-time (polling mode)."""
         async with ResearchAPIClient(verbose=verbose) as client:
             print_info(f"Watching progress for project {project_id} (Ctrl+C to stop)")
@@ -364,7 +365,7 @@ def cancel_project(ctx, project_id: UUID, force: bool):
             print_info("Cancelled")
             return
 
-    async def _cancel_project():
+    async def _cancel_project() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
                 with create_spinner(f"Cancelling project {project_id}..."):
@@ -391,7 +392,7 @@ def get_results(ctx, project_id: UUID, output: str | None):
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
 
-    async def _get_results():
+    async def _get_results() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
                 with create_spinner(f"Fetching results for project {project_id}..."):
@@ -450,7 +451,7 @@ def refine_scope(
         print_error("No scope parameters provided")
         raise click.Exit(1)
 
-    async def _refine_scope():
+    async def _refine_scope() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
                 with create_spinner(f"Refining scope for project {project_id}..."):

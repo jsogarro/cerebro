@@ -332,7 +332,7 @@ class PromptVersionManager:
 
     async def _update_ab_tests(
         self, template_name: str, version: str, success: bool, quality_score: float
-    ):
+    ) -> None:
         """Update A/B tests with new usage data."""
 
         # Find relevant A/B tests
@@ -347,7 +347,7 @@ class PromptVersionManager:
 
     async def _evaluate_ab_test_progress(
         self, test_name: str, test_config: ABTestConfig
-    ):
+    ) -> None:
         """Evaluate A/B test progress and determine if test should end."""
 
         champion_key = f"{test_config.test_name}:{test_config.champion_version}"
@@ -387,7 +387,7 @@ class PromptVersionManager:
         test_config: ABTestConfig,
         champion_perf: VersionPerformance,
         challenger_perf: VersionPerformance,
-    ):
+    ) -> None:
         """Complete A/B test and determine winner."""
 
         # Compare performance
@@ -436,7 +436,7 @@ class PromptVersionManager:
         logger.info(f"A/B test completed: {test_name}")
         logger.info(f"Winner: {winner}, Recommendation: {recommendation}")
 
-    async def _promote_challenger(self, test_config: ABTestConfig):
+    async def _promote_challenger(self, test_config: ABTestConfig) -> None:
         """Promote challenger to champion status."""
 
         template_name = test_config.test_name.split("_")[0]  # Extract template name

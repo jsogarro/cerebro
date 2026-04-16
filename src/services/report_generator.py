@@ -28,7 +28,6 @@ from src.models.report import (
     Visualization,
 )
 from src.services.report_config import (
-from src.utils.serialization import serialize_to_str, serialize
     ReportFormatConfig,
     ReportQualityConfig,
     ReportSettings,

@@ -124,13 +124,13 @@ class RealTimeDashboard:
         asyncio.create_task(self._update_dashboard_periodically())
         asyncio.create_task(self._clean_old_data_periodically())
     
-    async def _update_dashboard_periodically(self):
+    async def _update_dashboard_periodically(self) -> None:
         """Periodically update dashboard with latest data."""
         while True:
             await asyncio.sleep(self.config.update_interval_seconds)
             await self._update_all_experiments()
     
-    async def _clean_old_data_periodically(self):
+    async def _clean_old_data_periodically(self) -> None:
         """Clean old data from history."""
         while True:
             await asyncio.sleep(600)  # Every 10 minutes
@@ -142,7 +142,7 @@ class RealTimeDashboard:
         self,
         experiment_id: str,
         experiment_config: Dict[str, Any]
-    ):
+    ) -> None:
         """Register a new experiment for monitoring."""
         self.active_experiments.add(experiment_id)
         self.experiment_history[experiment_id] = []
@@ -163,7 +163,7 @@ class RealTimeDashboard:
         variant_metrics: Dict[str, Dict[str, float]],
         sample_sizes: Dict[str, int],
         statistical_analysis: Optional[Dict[str, Any]] = None
-    ):
+    ) -> None:
         """Update metrics for an experiment."""
         if experiment_id not in self.active_experiments:
             return
@@ -193,14 +193,14 @@ class RealTimeDashboard:
         update = await self._generate_dashboard_update(experiment_id, snapshot)
         await self._broadcast_to_dashboard(update)
     
-    async def _update_all_experiments(self):
+    async def _update_all_experiments(self) -> None:
         """Update all active experiments."""
         for experiment_id in self.active_experiments:
             # Get latest metrics (would integrate with experimentor here)
             # For now, using mock data
             await self._update_experiment_with_mock_data(experiment_id)
     
-    async def _update_experiment_with_mock_data(self, experiment_id: str):
+    async def _update_experiment_with_mock_data(self, experiment_id: str) -> None:
         """Update experiment with mock data for testing."""
         # This would be replaced with actual data from AgentFrameworkExperimentor
         import random
@@ -461,7 +461,7 @@ class RealTimeDashboard:
             winning = statistical_analysis.get("winning_variant", "unknown")
             return f"Ready to conclude - {winning} is winning with significant effect"
         
-        if p_value < 0.05 but effect_size and abs(effect_size) < 0.05:
+        if p_value < 0.05 and effect_size and abs(effect_size) < 0.05:
             return "Statistical significance reached but effect size is small"
         
         if sample_size < 1000:
@@ -474,7 +474,7 @@ class RealTimeDashboard:
     
     # ==================== WebSocket Communication ====================
     
-    async def connect_dashboard_client(self, client_id: str, websocket):
+    async def connect_dashboard_client(self, client_id: str, websocket) -> None:
         """Connect a new dashboard client."""
         self.dashboard_clients.add(client_id)
         await self.connection_manager.connect(websocket, client_id)
@@ -485,14 +485,14 @@ class RealTimeDashboard:
         
         logger.info(f"Dashboard client {client_id} connected")
     
-    async def disconnect_dashboard_client(self, client_id: str):
+    async def disconnect_dashboard_client(self, client_id: str) -> None:
         """Disconnect a dashboard client."""
         self.dashboard_clients.discard(client_id)
         self.connection_manager.disconnect(client_id)
         
         logger.info(f"Dashboard client {client_id} disconnected")
     
-    async def _broadcast_to_dashboard(self, message: Dict[str, Any]):
+    async def _broadcast_to_dashboard(self, message: Dict[str, Any]) -> None:
         """Broadcast message to all dashboard clients."""
         for client_id in self.dashboard_clients:
             await self.event_publisher.publish_event(
@@ -530,7 +530,7 @@ class RealTimeDashboard:
     
     # ==================== Data Management ====================
     
-    async def _clean_old_history(self):
+    async def _clean_old_history(self) -> None:
         """Remove old data from history."""
         cutoff_time = datetime.utcnow() - timedelta(
             minutes=self.config.history_window_minutes

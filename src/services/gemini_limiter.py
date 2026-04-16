@@ -6,7 +6,9 @@ Implements token bucket algorithm for rate limiting following functional princip
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 
 class RateLimiter:
@@ -87,7 +89,7 @@ class RateLimiter:
                 await asyncio.sleep(wait_time)
 
     @asynccontextmanager
-    async def acquire(self):
+    async def acquire(self) -> AsyncIterator[None]:
         """
         Context manager for rate-limited operations.
 
@@ -178,7 +180,7 @@ class CircuitBreaker:
 
         return (time.time() - self._last_failure_time) >= self.recovery_timeout
 
-    async def call(self, func, *args, **kwargs):
+    async def call(self, func, *args, **kwargs) -> Any:
         """
         Call function with circuit breaker protection.
 

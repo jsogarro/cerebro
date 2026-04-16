@@ -531,7 +531,7 @@ def register_health_endpoints(app: FastAPI):
     """Register health check endpoints with FastAPI application."""
 
     @app.get("/health/live", tags=["health"])
-    async def liveness_probe(response: Response):
+    async def liveness_probe(response: Response) -> dict[str, Any]:
         """
         Liveness probe endpoint.
 
@@ -547,7 +547,7 @@ def register_health_endpoints(app: FastAPI):
             return {"status": "unhealthy", "details": result.to_dict()}
 
     @app.get("/health/ready", tags=["health"])
-    async def readiness_probe(response: Response):
+    async def readiness_probe(response: Response) -> dict[str, Any]:
         """
         Readiness probe endpoint.
 
@@ -563,7 +563,7 @@ def register_health_endpoints(app: FastAPI):
             return result.to_dict()
 
     @app.get("/health/startup", tags=["health"])
-    async def startup_probe(response: Response):
+    async def startup_probe(response: Response) -> dict[str, Any]:
         """
         Startup probe endpoint.
 
@@ -579,7 +579,7 @@ def register_health_endpoints(app: FastAPI):
             return result.to_dict()
 
     @app.get("/health", tags=["health"])
-    async def health_check(response: Response):
+    async def health_check(response: Response) -> dict[str, Any]:
         """
         Comprehensive health check endpoint.
 
@@ -597,7 +597,7 @@ def register_health_endpoints(app: FastAPI):
             return result.to_dict()
 
     @app.get("/health/{component}", tags=["health"])
-    async def component_health_check(component: str, response: Response):
+    async def component_health_check(component: str, response: Response) -> dict[str, Any]:
         """
         Check health of a specific component.
 

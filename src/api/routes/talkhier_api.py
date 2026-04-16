@@ -548,7 +548,7 @@ async def get_protocol_analytics(
 async def websocket_session_updates(
     websocket: WebSocket,
     session_id: str
-):
+) -> None:
     """
     WebSocket endpoint for real-time session updates
     
@@ -619,7 +619,7 @@ async def websocket_session_updates(
 
 
 @router.websocket("/interactive")
-async def websocket_interactive_session(websocket: WebSocket):
+async def websocket_interactive_session(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for interactive TalkHier dialogue
     
@@ -716,7 +716,7 @@ async def websocket_interactive_session(websocket: WebSocket):
 
 
 @router.websocket("/coordination")
-async def websocket_coordination_monitoring(websocket: WebSocket):
+async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for multi-session coordination monitoring
     

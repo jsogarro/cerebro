@@ -164,7 +164,7 @@ class BaseAgent(ABC):
             },
         )
 
-    async def communicate(self, other_agent: "BaseAgent", message: AgentMessage):
+    async def communicate(self, other_agent: "BaseAgent", message: AgentMessage) -> None:
         """
         Send a message to another agent.
 
@@ -177,7 +177,7 @@ class BaseAgent(ABC):
             f"Sent message to {other_agent.get_agent_type()}: {message.message_type}"
         )
 
-    async def receive_message(self, message: AgentMessage):
+    async def receive_message(self, message: AgentMessage) -> None:
         """
         Receive a message from another agent.
 
@@ -316,7 +316,7 @@ class BaseAgent(ABC):
         """
         return {"raw_response": response}
 
-    async def cache_result(self, key: str, result: AgentResult, ttl: int = 3600):
+    async def cache_result(self, key: str, result: AgentResult, ttl: int = 3600) -> None:
         """
         Cache a result if cache client is available.
 

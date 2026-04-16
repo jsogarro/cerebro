@@ -394,7 +394,7 @@ class AgentExecutionService:
             # Execute agents in parallel (with concurrency limit)
             semaphore = asyncio.Semaphore(request.max_parallel)
             
-            async def execute_with_limit(agent_type, task):
+            async def execute_with_limit(agent_type, task) -> AgentExecutionResponse:
                 async with semaphore:
                     return await task
             
@@ -776,11 +776,11 @@ class AgentExecutionService:
         )
     
     async def _update_agent_metrics(
-        self, 
-        agent_type: AgentType, 
+        self,
+        agent_type: AgentType,
         response: AgentExecutionResponse,
         success: bool
-    ):
+    ) -> None:
         """Update performance metrics for agent type."""
         
         if not self.enable_performance_tracking:

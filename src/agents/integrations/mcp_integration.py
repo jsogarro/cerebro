@@ -8,7 +8,7 @@ enabling agents to use real external services in production.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, AsyncIterator
 
 from src.mcp.client import MCPClient
 from src.mcp.server import MCPServerConfig
@@ -52,7 +52,7 @@ class MCPIntegration:
 
         logger.info("MCP Integration initialized")
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the MCP client if not already done."""
         if self._initialized:
             return
@@ -79,7 +79,7 @@ class MCPIntegration:
                 raise
 
     @asynccontextmanager
-    async def _circuit_breaker(self):
+    async def _circuit_breaker(self) -> AsyncIterator[None]:
         """Circuit breaker pattern for tool execution."""
         import time
 

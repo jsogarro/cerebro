@@ -58,15 +58,15 @@ class ResearchAPIClient:
         elif config.api_key:
             self.client.headers["X-API-Key"] = config.api_key
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "APIClient":
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit."""
         await self.close()
 
-    async def close(self):
+    async def close(self) -> None:
         """Close HTTP client."""
         await self.client.aclose()
 

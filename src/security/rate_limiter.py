@@ -13,6 +13,7 @@ from typing import Any
 import redis.asyncio as redis
 from fastapi import HTTPException, Request, status
 from redis.asyncio import Redis
+from starlette.responses import Response
 
 from src.models.db.audit_log import AuditEventType, AuditSeverity
 
@@ -554,7 +555,7 @@ class RateLimitMiddleware:
         self.redis_client = None
         self.rate_limiter = None
 
-    async def __call__(self, request: Request, call_next):
+    async def __call__(self, request: Request, call_next) -> Response:
         """Process request with rate limiting."""
         # Initialize Redis client if needed
         if not self.redis_client:

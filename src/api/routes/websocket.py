@@ -33,7 +33,7 @@ router = APIRouter()
 async def websocket_endpoint(
     websocket: WebSocket,
     token: str | None = Query(None, description="JWT authentication token"),
-):
+) -> None:
     """
     General purpose WebSocket endpoint for real-time updates.
 
@@ -146,7 +146,7 @@ async def project_websocket_endpoint(
     websocket: WebSocket,
     project_id: UUID,
     token: str | None = Query(None, description="JWT authentication token"),
-):
+) -> None:
     """
     Project-specific WebSocket endpoint for real-time project updates.
 
@@ -267,7 +267,7 @@ async def cli_websocket_endpoint(
     project_id: UUID,
     token: str | None = Query(None, description="JWT authentication token"),
     format: str = Query("text", description="Output format for CLI"),
-):
+) -> None:
     """
     CLI-optimized WebSocket endpoint for command-line tools.
 
@@ -377,7 +377,7 @@ async def cli_websocket_endpoint(
 
 # Health endpoint for WebSocket service
 @router.get("/ws/health")
-async def websocket_health():
+async def websocket_health() -> dict[str, str | dict]:
     """Get WebSocket service health and statistics."""
     stats = websocket_manager.get_stats()
 

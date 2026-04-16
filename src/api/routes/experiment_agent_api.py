@@ -457,7 +457,7 @@ async def approve_optimization(
 # ==================== WebSocket Dashboard Endpoint ====================
 
 @router.websocket("/dashboard")
-async def dashboard_websocket(websocket: WebSocket):
+async def dashboard_websocket(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for real-time experiment dashboard.
     

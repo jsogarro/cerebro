@@ -123,7 +123,7 @@ class ExperimentAllocationStrategy(ABC):
     @abstractmethod
     async def update_allocation(self,
                                experiment: SystemExperiment,
-                               performance_data: Dict[str, Any]):
+                               performance_data: Dict[str, Any]) -> None:
         """Update allocation based on performance (for adaptive strategies)."""
         pass
 
@@ -151,7 +151,7 @@ class RandomAllocationStrategy(ExperimentAllocationStrategy):
     
     async def update_allocation(self,
                                experiment: SystemExperiment,
-                               performance_data: Dict[str, Any]):
+                               performance_data: Dict[str, Any]) -> None:
         """No updates for random allocation."""
         pass
 
@@ -184,7 +184,7 @@ class DeterministicAllocationStrategy(ExperimentAllocationStrategy):
     
     async def update_allocation(self,
                                experiment: SystemExperiment,
-                               performance_data: Dict[str, Any]):
+                               performance_data: Dict[str, Any]) -> None:
         """No updates for deterministic allocation."""
         pass
 
@@ -251,7 +251,7 @@ class UnifiedExperimentManager:
         
         return experiment
     
-    async def start_experiment(self, experiment_id: str):
+    async def start_experiment(self, experiment_id: str) -> None:
         """Start running an experiment."""
         if experiment_id not in self.active_experiments:
             raise ValueError(f"Experiment {experiment_id} not found")
@@ -302,7 +302,7 @@ class UnifiedExperimentManager:
     async def track_assignment(self,
                               experiment_id: str,
                               context: Dict[str, Any],
-                              variant: ExperimentVariant):
+                              variant: ExperimentVariant) -> None:
         """Track that a user/session was assigned to a variant."""
         # This would integrate with the metrics collection system
         # For now, we'll just log it
@@ -319,7 +319,7 @@ class UnifiedExperimentManager:
                           variant_id: str,
                           metric_name: str,
                           value: float,
-                          context: Optional[Dict[str, Any]] = None):
+                          context: Optional[Dict[str, Any]] = None) -> None:
         """Track a metric value for an experiment variant."""
         metric_event = {
             'experiment_id': experiment_id,
@@ -352,7 +352,7 @@ class UnifiedExperimentManager:
     
     async def stop_experiment(self,
                             experiment_id: str,
-                            reason: str = "manual_stop"):
+                            reason: str = "manual_stop") -> None:
         """Stop a running experiment."""
         if experiment_id not in self.active_experiments:
             raise ValueError(f"Experiment {experiment_id} not found")
@@ -376,7 +376,7 @@ class UnifiedExperimentManager:
     
     async def promote_winner(self,
                            experiment_id: str,
-                           winning_variant_id: str):
+                           winning_variant_id: str) -> None:
         """Promote the winning variant to production."""
         # Find experiment in history
         experiment = None
@@ -469,7 +469,7 @@ class UnifiedExperimentManager:
         identifier = context.get('user_id') or context.get('session_id', 'unknown')
         return f"{experiment_id}:{identifier}"
     
-    async def _initialize_component_tracking(self, experiment: SystemExperiment):
+    async def _initialize_component_tracking(self, experiment: SystemExperiment) -> None:
         """Initialize tracking for experiment components."""
         # This would set up hooks in each component system
         # For now, placeholder implementation
@@ -487,7 +487,7 @@ class UnifiedExperimentManager:
     
     async def _apply_variant_configuration(self,
                                          experiment: SystemExperiment,
-                                         variant: ExperimentVariant):
+                                         variant: ExperimentVariant) -> None:
         """Apply winning variant configuration to production."""
         for component in experiment.components:
             if component == SystemComponent.MASR_ROUTING:

@@ -323,7 +323,7 @@ async def refine_research_scope(
 async def get_research_results(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
-):
+) -> dict[str, Any]:
     """Get the results of a completed research project."""
     # Check project exists
     db_project = await repo.get_with_results(project_id)

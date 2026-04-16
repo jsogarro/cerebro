@@ -20,6 +20,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 import uuid
 
+from src.core.types import HealthCheckDict
+
 from src.core.constants import (
     DEFAULT_RETRY_ATTEMPTS,
     MAX_RETRY_ATTEMPTS,
@@ -621,7 +623,7 @@ class MASRouter:
         """Get current routing metrics."""
         return self.metrics_collector.get_metrics()
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> HealthCheckDict:
         """Perform health check on MASR components."""
         metrics = self.metrics_collector.get_metrics()
         health = {

@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.get("/health", status_code=status.HTTP_200_OK)
-async def health_check():
+async def health_check() -> JSONResponse:
     """Basic health check endpoint."""
     return JSONResponse(
         content={"status": "healthy", "service": "research-platform-api"}
@@ -17,7 +17,7 @@ async def health_check():
 
 
 @router.get("/ready", status_code=status.HTTP_200_OK)
-async def readiness_check():
+async def readiness_check() -> JSONResponse:
     """Readiness check endpoint for Kubernetes."""
     # TODO: Check database connection
     # TODO: Check Redis connection
@@ -37,6 +37,6 @@ async def readiness_check():
 
 
 @router.get("/live", status_code=status.HTTP_200_OK)
-async def liveness_check():
+async def liveness_check() -> JSONResponse:
     """Liveness check endpoint for Kubernetes."""
     return JSONResponse(content={"status": "alive"})

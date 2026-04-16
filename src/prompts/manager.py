@@ -94,7 +94,7 @@ class PromptFileWatcher:
 
         self._debounce_task = asyncio.create_task(self._debounced_reload())
 
-    async def _debounced_reload(self):
+    async def _debounced_reload(self) -> None:
         """Reload templates after debounce delay."""
         await asyncio.sleep(self.debounce_delay)
 
@@ -191,7 +191,7 @@ class PromptManager:
         # Change notifications
         self._change_listeners: List[Callable[[PromptChangeEvent], None]] = []
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the prompt manager."""
         logger.info("Initializing advanced prompt manager...")
 
@@ -427,7 +427,7 @@ class PromptManager:
             },
         }
 
-    async def _load_all_templates(self):
+    async def _load_all_templates(self) -> None:
         """Load all template files from directory."""
 
         if not self.templates_dir.exists():
@@ -447,7 +447,7 @@ class PromptManager:
         self.load_count += 1
         logger.info(f"Loaded {len(self._templates)} prompt templates")
 
-    async def _load_template_file(self, template_path: Path):
+    async def _load_template_file(self, template_path: Path) -> None:
         """Load a single template file."""
 
         # Read YAML file
@@ -681,7 +681,7 @@ class PromptManager:
 
     async def _validate_variables(
         self, template: PromptTemplate, variables: Dict[str, Any]
-    ):
+    ) -> None:
         """Validate that required variables are provided."""
 
         for var_def in template.variables:
@@ -744,7 +744,7 @@ class PromptManager:
         key_string = str(key_data)
         return hashlib.md5(key_string.encode()).hexdigest()[:16]
 
-    async def _update_usage_stats(self, template_name: str, success: bool):
+    async def _update_usage_stats(self, template_name: str, success: bool) -> None:
         """Update usage statistics for template."""
 
         if template_name not in self.usage_stats:
@@ -760,7 +760,7 @@ class PromptManager:
             stats["successful_uses"] += 1
         stats["last_used"] = datetime.now().isoformat()
 
-    async def _start_file_watcher(self):
+    async def _start_file_watcher(self) -> None:
         """Start file watcher for hot-reload."""
 
         try:
@@ -777,7 +777,7 @@ class PromptManager:
         except Exception as e:
             logger.error(f"Failed to start prompt file watcher: {e}")
 
-    async def _reload_templates(self):
+    async def _reload_templates(self) -> None:
         """Reload templates from files."""
 
         try:
@@ -806,7 +806,7 @@ class PromptManager:
         template_name: str,
         old_template: Optional[PromptTemplate],
         new_template: Optional[PromptTemplate],
-    ):
+    ) -> None:
         """Notify change listeners."""
 
         event = PromptChangeEvent(
@@ -826,7 +826,7 @@ class PromptManager:
         """Add listener for prompt changes."""
         self._change_listeners.append(listener)
 
-    async def close(self):
+    async def close(self) -> None:
         """Close prompt manager and cleanup resources."""
 
         if self._observer:

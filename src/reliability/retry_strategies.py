@@ -177,7 +177,7 @@ class CircuitBreaker:
         """Get current circuit state."""
         return self._state
 
-    async def _transition_to(self, new_state: CircuitState):
+    async def _transition_to(self, new_state: CircuitState) -> None:
         """
         Transition to a new state.
 
@@ -261,7 +261,7 @@ class CircuitBreaker:
                 await self._on_failure()
             raise
 
-    async def _on_success(self):
+    async def _on_success(self) -> None:
         """Handle successful call."""
         async with self._lock:
             self._metrics.successful_calls += 1
@@ -272,7 +272,7 @@ class CircuitBreaker:
                 if self._metrics.consecutive_successes >= self.config.success_threshold:
                     await self._transition_to(CircuitState.CLOSED)
 
-    async def _on_failure(self):
+    async def _on_failure(self) -> None:
         """Handle failed call."""
         async with self._lock:
             self._metrics.failed_calls += 1
@@ -290,7 +290,7 @@ class CircuitBreaker:
         """Get circuit breaker metrics."""
         return self._metrics
 
-    async def reset(self):
+    async def reset(self) -> None:
         """Manually reset circuit breaker."""
         async with self._lock:
             await self._transition_to(CircuitState.CLOSED)
@@ -509,7 +509,7 @@ class RetryBudget:
 
             return False
 
-    async def _refill(self):
+    async def _refill(self) -> None:
         """Refill tokens based on time elapsed."""
         current_time = time.time()
         time_elapsed = current_time - self._last_refill
@@ -538,7 +538,7 @@ def with_retry(policy: RetryPolicy | None = None):
         backoff = ExponentialBackoff(policy)
 
         @wraps(func)
-        async def async_wrapper(*args, **kwargs):
+        async def async_wrapper(*args, **kwargs) -> Any:
             return await backoff.execute(func, *args, **kwargs)
 
         @wraps(func)
@@ -566,7 +566,7 @@ def with_circuit_breaker(name: str, config: CircuitBreakerConfig | None = None):
 
     def decorator(func):
         @wraps(func)
-        async def async_wrapper(*args, **kwargs):
+        async def async_wrapper(*args, **kwargs) -> Any:
             return await circuit_breaker.call(func, *args, **kwargs)
 
         @wraps(func)
@@ -594,7 +594,7 @@ def with_bulkhead(name: str, config: BulkheadConfig | None = None):
 
     def decorator(func):
         @wraps(func)
-        async def async_wrapper(*args, **kwargs):
+        async def async_wrapper(*args, **kwargs) -> Any:
             return await bulkhead.execute(func, *args, **kwargs)
 
         @wraps(func)

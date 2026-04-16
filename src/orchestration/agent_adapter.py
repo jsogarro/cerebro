@@ -142,7 +142,7 @@ class AgentAdapter:
         results = {}
         semaphore = asyncio.Semaphore(max_parallel)
 
-        async def execute_with_semaphore(task: AgentTaskState):
+        async def execute_with_semaphore(task: AgentTaskState) -> AgentResult:
             async with semaphore:
                 return await self.execute_agent(task, research_state)
 
@@ -294,7 +294,7 @@ class AgentAdapter:
             return self._agent_metrics.get(agent_type, {})
         return self._agent_metrics
 
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """Clean up agent instances and resources."""
         for agent_type, agent in self._agent_instances.items():
             if hasattr(agent, "cleanup"):

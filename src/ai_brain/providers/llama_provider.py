@@ -13,7 +13,6 @@ import httpx
 from datetime import datetime
 
 from .base_provider import (
-from src.utils.serialization import deserialize
     BaseProvider,
     ModelRequest,
     ModelResponse,
@@ -93,7 +92,7 @@ class LlamaProvider(BaseProvider):
         """Legacy hard-coded models for backward compatibility."""
         return list(self._legacy_model_specs.keys())
 
-    async def load_configuration(self):
+    async def load_configuration(self) -> None:
         """Load Llama-specific configuration."""
 
         # Load base configuration
@@ -287,7 +286,7 @@ class LlamaProvider(BaseProvider):
             "User-Agent": "Cerebro-AI-Brain/2.0",
         }
 
-    async def _ensure_model_available(self, model_name: str):
+    async def _ensure_model_available(self, model_name: str) -> None:
         """Ensure the model is available in Ollama, pull if needed."""
 
         try:
@@ -306,7 +305,7 @@ class LlamaProvider(BaseProvider):
             logger.warning(f"Failed to check model availability: {e}")
             # Continue anyway, let the generation request handle the error
 
-    async def _pull_model(self, model_name: str):
+    async def _pull_model(self, model_name: str) -> None:
         """Pull a model from Ollama registry."""
 
         pull_payload = {"name": model_name}
@@ -549,7 +548,7 @@ class LlamaProvider(BaseProvider):
             "deployment": "local_ollama",
         }
 
-    async def close(self):
+    async def close(self) -> None:
         """Clean up resources."""
         await self.client.aclose()
 

@@ -164,7 +164,7 @@ class ConnectionManager:
 
         return client_id
 
-    async def disconnect(self, client_id: str):
+    async def disconnect(self, client_id: str) -> None:
         """Disconnect and clean up a WebSocket connection."""
         if client_id not in self.connections:
             return
@@ -274,7 +274,7 @@ class ConnectionManager:
                 message="Invalid subscription request",
             )
 
-    async def broadcast_to_project(self, project_id: UUID, message: WSMessage):
+    async def broadcast_to_project(self, project_id: UUID, message: WSMessage) -> None:
         """Broadcast a message to all clients subscribed to a project."""
         if project_id not in self.project_subscriptions:
             return
@@ -301,7 +301,7 @@ class ConnectionManager:
         for client_id in failed_clients:
             await self.disconnect(client_id)
 
-    async def broadcast_to_user(self, user_id: str, message: WSMessage):
+    async def broadcast_to_user(self, user_id: str, message: WSMessage) -> None:
         """Broadcast a message to all connections for a user."""
         if user_id not in self.user_subscriptions:
             return
@@ -327,7 +327,7 @@ class ConnectionManager:
         for client_id in failed_clients:
             await self.disconnect(client_id)
 
-    async def broadcast_to_all(self, message: WSMessage):
+    async def broadcast_to_all(self, message: WSMessage) -> None:
         """Broadcast a message to all connected clients."""
         client_ids = list(self.connections.keys())
 
@@ -382,7 +382,7 @@ class ConnectionManager:
             "active_projects": list(self.project_subscriptions.keys()),
         }
 
-    async def _heartbeat_monitor(self):
+    async def _heartbeat_monitor(self) -> None:
         """Background task to monitor connection health."""
         while not self._shutdown:
             try:
@@ -413,7 +413,7 @@ class ConnectionManager:
                 )
                 await asyncio.sleep(10)  # Wait before retrying
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
         """Shutdown the connection manager."""
         self._shutdown = True
 

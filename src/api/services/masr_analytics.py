@@ -173,7 +173,7 @@ class MASRAnalyticsService:
         estimated_cost: float,
         estimated_latency_ms: float,
         supervisor_count: int
-    ):
+    ) -> None:
         """
         Record a routing decision for analytics.
         
@@ -208,7 +208,7 @@ class MASRAnalyticsService:
         actual_latency_ms: float,
         quality_score: float,
         error_occurred: bool = False
-    ):
+    ) -> None:
         """
         Record feedback from completed routing.
         

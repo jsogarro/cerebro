@@ -13,7 +13,6 @@ import httpx
 from datetime import datetime
 
 from .base_provider import (
-from src.utils.serialization import deserialize
     BaseProvider,
     ModelRequest,
     ModelResponse,
@@ -92,7 +91,7 @@ class DeepSeekProvider(BaseProvider):
         """Legacy hard-coded models for backward compatibility."""
         return list(self._legacy_model_specs.keys())
 
-    async def load_configuration(self):
+    async def load_configuration(self) -> None:
         """Load DeepSeek-specific configuration."""
 
         # Load base configuration
@@ -480,7 +479,7 @@ class DeepSeekProvider(BaseProvider):
             ],
         }
 
-    async def close(self):
+    async def close(self) -> None:
         """Clean up resources."""
         await self.client.aclose()
 

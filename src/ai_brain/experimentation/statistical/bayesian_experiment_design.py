@@ -262,7 +262,7 @@ class BayesianExperimentDesigner:
             gp_model=self.gp_model
         )
     
-    async def _initial_sampling(self, objective_function: Callable, n_points: int):
+    async def _initial_sampling(self, objective_function: Callable, n_points: int) -> None:
         """Generate initial samples from prior distributions."""
         for _ in range(n_points):
             # Sample from priors

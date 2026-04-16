@@ -200,7 +200,7 @@ class EpisodicMemoryManager:
         self.write_count = 0
         self.read_count = 0
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the episodic memory system."""
 
         if self.database_url and AsyncSession:
@@ -500,7 +500,7 @@ class EpisodicMemoryManager:
 
         return stats
 
-    async def _store_episode_db(self, episode: Episode):
+    async def _store_episode_db(self, episode: Episode) -> None:
         """Store episode in PostgreSQL database."""
 
         async with self.session_factory() as session:
@@ -684,7 +684,7 @@ class EpisodicMemoryManager:
 
         return min(similarity, 1.0)
 
-    async def close(self):
+    async def close(self) -> None:
         """Close episodic memory manager and cleanup resources."""
         if self.engine:
             await self.engine.dispose()

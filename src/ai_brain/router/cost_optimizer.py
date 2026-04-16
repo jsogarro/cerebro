@@ -175,7 +175,7 @@ class CostOptimizer:
             self._models_loaded = True
             return False
 
-    async def reload_models(self):
+    async def reload_models(self) -> None:
         """Reload models from configuration (for hot-reload support)."""
         self._models_loaded = False
         await self.load_models()
@@ -267,7 +267,7 @@ class CostOptimizer:
 
         return models
 
-    async def ensure_models_loaded(self):
+    async def ensure_models_loaded(self) -> None:
         """Ensure model specifications are loaded."""
         if not self._models_loaded:
             await self.load_models()

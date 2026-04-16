@@ -168,13 +168,13 @@ class AgentFrameworkExperimentor:
         asyncio.create_task(self._flush_results_periodically())
         asyncio.create_task(self._update_allocations_periodically())
     
-    async def _flush_results_periodically(self):
+    async def _flush_results_periodically(self) -> None:
         """Periodically flush experiment results to database."""
         while True:
             await asyncio.sleep(self.buffer_flush_interval)
             await self._flush_results()
     
-    async def _update_allocations_periodically(self):
+    async def _update_allocations_periodically(self) -> None:
         """Update variant allocations based on performance."""
         while True:
             await asyncio.sleep(300)  # Every 5 minutes
@@ -561,7 +561,7 @@ class AgentFrameworkExperimentor:
     
     # ==================== Results Analysis ====================
     
-    async def _flush_results(self):
+    async def _flush_results(self) -> None:
         """Flush buffered experiment results to database."""
         if not self.results_buffer:
             return
@@ -602,7 +602,7 @@ class AgentFrameworkExperimentor:
         # Save to database (would implement actual DB save here)
         logger.info(f"Flushed {len(results_to_save)} experiment results")
     
-    async def _update_allocations(self):
+    async def _update_allocations(self) -> None:
         """Update variant allocations based on performance."""
         for exp_id, config in self.active_experiments.items():
             if exp_id not in self.variant_performance:

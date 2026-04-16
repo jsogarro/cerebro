@@ -137,7 +137,7 @@ def health_check(ctx):
 
     verbose = ctx.obj["verbose"]
 
-    async def _check_health():
+    async def _check_health() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
                 # Check health

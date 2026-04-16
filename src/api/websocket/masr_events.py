@@ -142,7 +142,7 @@ class MASRWebSocketManager:
         websocket: WebSocket,
         channel: str = "global",
         routing_id: Optional[str] = None
-    ):
+    ) -> None:
         """
         Connect a WebSocket client to MASR events.
         
@@ -201,7 +201,7 @@ class MASRWebSocketManager:
         routing_id: str,
         stage: str,
         progress_data: Dict[str, Any]
-    ):
+    ) -> None:
         """
         Broadcast routing progress to subscribed clients.
         
@@ -232,7 +232,7 @@ class MASRWebSocketManager:
         original_cost: float,
         optimized_cost: float,
         optimization_details: Dict[str, Any]
-    ):
+    ) -> None:
         """
         Broadcast cost optimization updates.
         
@@ -264,7 +264,7 @@ class MASRWebSocketManager:
         strategies: List[str],
         current_best: str,
         evaluation_data: Dict[str, Any]
-    ):
+    ) -> None:
         """
         Broadcast strategy evaluation progress.
         
@@ -290,7 +290,7 @@ class MASRWebSocketManager:
         self,
         feedback_stats: Dict[str, Any],
         improvements: Dict[str, float]
-    ):
+    ) -> None:
         """
         Broadcast learning system updates.
         
@@ -320,7 +320,7 @@ class MASRWebSocketManager:
         current_value: float,
         threshold: float,
         alert_level: str = "info"
-    ):
+    ) -> None:
         """
         Broadcast performance alerts.
         
@@ -367,7 +367,7 @@ class MASRWebSocketManager:
         self,
         routing_id: str,
         decision: RoutingDecisionResponse
-    ):
+    ) -> None:
         """
         Send routing completion notification.
         
@@ -400,7 +400,7 @@ class MASRWebSocketManager:
         routing_id: Optional[str],
         error: str,
         details: Optional[Dict[str, Any]] = None
-    ):
+    ) -> None:
         """
         Send routing error notification.
         
@@ -425,7 +425,7 @@ class MASRWebSocketManager:
             for ws in self.routing_sessions[routing_id]["websockets"]:
                 await self._send_event(ws, event)
     
-    async def _broadcast_to_channel(self, channel: str, event: MASREvent):
+    async def _broadcast_to_channel(self, channel: str, event: MASREvent) -> None:
         """
         Broadcast event to all clients in a channel.
         
@@ -453,7 +453,7 @@ class MASRWebSocketManager:
         for ws in disconnected:
             self.disconnect(ws)
     
-    async def _send_event(self, websocket: WebSocket, event: MASREvent):
+    async def _send_event(self, websocket: WebSocket, event: MASREvent) -> None:
         """
         Send event to a specific WebSocket client.
         

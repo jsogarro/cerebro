@@ -19,6 +19,8 @@ from enum import Enum
 from typing import Dict, List, Optional, Any, Type, Union
 import uuid
 
+from src.core.types import BridgeStatsDict, HealthCheckDict
+
 from ...agents.supervisors.base_supervisor import BaseSupervisor, SupervisionState
 from ...agents.models import AgentTask, AgentResult
 from ..router.masr import RoutingDecision, CollaborationMode, RoutingStrategy
@@ -317,9 +319,9 @@ class ResourcePool:
         
         return supervisor
     
-    async def return_supervisor(self, supervisor: BaseSupervisor):
+    async def return_supervisor(self, supervisor: BaseSupervisor) -> None:
         """Return supervisor to pool for reuse."""
-        
+
         supervisor_type = supervisor.supervisor_type
         
         # Initialize pool if needed
@@ -350,7 +352,7 @@ class ResourcePool:
             }
         }
     
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """Cleanup idle supervisors from pools."""
         total_evicted = 0
         
@@ -644,7 +646,7 @@ class MASRSupervisorBridge:
             "executor": await self.executor.get_stats(),
         }
     
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> HealthCheckDict:
         """Perform health check on bridge components."""
         return {
             "status": "healthy",
@@ -656,7 +658,7 @@ class MASRSupervisorBridge:
             "stats": await self.get_bridge_stats(),
         }
     
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """Cleanup bridge resources."""
         await self.resource_pool.cleanup()
         logger.info("MASR-Supervisor bridge cleanup completed")

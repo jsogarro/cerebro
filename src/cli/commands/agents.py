@@ -35,7 +35,7 @@ def query_command(ctx, query_text: str, domains: tuple, type: str):
     client_verbose = ctx.obj["verbose"]
     console = ctx.obj["console"]
 
-    async def _query():
+    async def _query() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
                 endpoint = f"/api/v1/query/{type}"
@@ -72,7 +72,7 @@ def route_command(ctx, query_text: str, strategy: str):
     client_verbose = ctx.obj["verbose"]
     console = ctx.obj["console"]
 
-    async def _route():
+    async def _route() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
                 payload = {"query": query_text, "strategy": strategy}
@@ -109,7 +109,7 @@ def estimate_command(ctx, query_text: str, domains: tuple):
     client_verbose = ctx.obj["verbose"]
     console = ctx.obj["console"]
 
-    async def _estimate():
+    async def _estimate() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
                 payload = {"query": query_text}
@@ -148,7 +148,7 @@ def execute_command(ctx, agent_type: str, query_text: str, max_sources: Optional
     client_verbose = ctx.obj["verbose"]
     console = ctx.obj["console"]
 
-    async def _execute():
+    async def _execute() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
                 endpoint = f"/api/v1/agents/{agent_type}/execute"
@@ -179,7 +179,7 @@ def chain_command(ctx, query_text: str, agents: tuple):
     client_verbose = ctx.obj["verbose"]
     console = ctx.obj["console"]
 
-    async def _chain():
+    async def _chain() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
                 payload = {"query": query_text, "agent_chain": list(agents)}
@@ -205,7 +205,7 @@ def status_command(ctx):
     client_verbose = ctx.obj["verbose"]
     console = ctx.obj["console"]
 
-    async def _status():
+    async def _status() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
                 result = await client.get("/api/v1/masr/status")

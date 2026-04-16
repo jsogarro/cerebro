@@ -165,10 +165,10 @@ class DirectExecutionService:
     )
     async def _execute_research_workflow(
         self,
-        project: ResearchProject, 
+        project: ResearchProject,
         execution_status: ExecutionStatus,
         context: Optional[Dict[str, Any]] = None
-    ):
+    ) -> None:
         """
         Execute research workflow with retry logic.
         
@@ -358,7 +358,7 @@ class DirectExecutionService:
             if execution.status in ["pending", "running"]
         ]
     
-    async def cleanup_completed_executions(self, max_age_hours: int = 24):
+    async def cleanup_completed_executions(self, max_age_hours: int = 24) -> int:
         """Clean up old completed executions."""
         
         cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
@@ -376,7 +376,7 @@ class DirectExecutionService:
         
         return len(executions_to_remove)
     
-    async def _publish_progress_update(self, execution_status: ExecutionStatus):
+    async def _publish_progress_update(self, execution_status: ExecutionStatus) -> None:
         """Publish progress update via WebSocket."""
         
         if not self.event_publisher:

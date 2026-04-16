@@ -115,7 +115,7 @@ class FeedbackLoopOptimizer:
         asyncio.create_task(self._optimization_cycle())
         asyncio.create_task(self._monitor_performance())
     
-    async def _optimization_cycle(self):
+    async def _optimization_cycle(self) -> None:
         """Main optimization cycle that evaluates and applies learnings."""
         while True:
             await asyncio.sleep(self.config.evaluation_interval_hours * 3600)
@@ -134,7 +134,7 @@ class FeedbackLoopOptimizer:
             except Exception as e:
                 logger.error(f"Error in optimization cycle: {e}")
     
-    async def _monitor_performance(self):
+    async def _monitor_performance(self) -> None:
         """Monitor performance and trigger rollbacks if needed."""
         while True:
             await asyncio.sleep(300)  # Check every 5 minutes
@@ -144,7 +144,7 @@ class FeedbackLoopOptimizer:
     
     # ==================== Experiment Evaluation ====================
     
-    async def _evaluate_experiments(self):
+    async def _evaluate_experiments(self) -> None:
         """Evaluate all active experiments for optimization opportunities."""
         active_experiments = await self.experimentor.get_active_experiments()
         
@@ -183,7 +183,7 @@ class FeedbackLoopOptimizer:
         experiment_id: str,
         experiment_type: str,
         results: Dict[str, Any]
-    ):
+    ) -> None:
         """Process experiment results and extract learnings."""
         stats = results.get("statistical_analysis", {})
         winning_variant = stats.get("winning_variant")
@@ -210,7 +210,7 @@ class FeedbackLoopOptimizer:
         self,
         winning_config: Dict[str, Any],
         stats: Dict[str, Any]
-    ):
+    ) -> None:
         """Process learnings from routing strategy experiments."""
         strategy = winning_config.get("routing_strategy")
         parameters = winning_config.get("parameters", {})
@@ -229,7 +229,7 @@ class FeedbackLoopOptimizer:
         self,
         winning_config: Dict[str, Any],
         stats: Dict[str, Any]
-    ):
+    ) -> None:
         """Process learnings from API pattern experiments."""
         primary_weight = winning_config.get("primary_weight", 0.9)
         switch_threshold = winning_config.get("switch_threshold", "medium")
@@ -247,7 +247,7 @@ class FeedbackLoopOptimizer:
         self,
         winning_config: Dict[str, Any],
         stats: Dict[str, Any]
-    ):
+    ) -> None:
         """Process learnings from TalkHier protocol experiments."""
         max_rounds = winning_config.get("max_rounds", 3)
         consensus_threshold = winning_config.get("consensus_threshold", 0.8)
@@ -372,7 +372,7 @@ class FeedbackLoopOptimizer:
     
     # ==================== Optimization Application ====================
     
-    async def _apply_optimization(self, decision: OptimizationDecision):
+    async def _apply_optimization(self, decision: OptimizationDecision) -> None:
         """Apply an optimization decision to the system."""
         # Check confidence threshold
         if decision.confidence < self.config.min_confidence_for_recommendation:
@@ -388,7 +388,7 @@ class FeedbackLoopOptimizer:
         else:
             await self._recommend_optimization(decision)
     
-    async def _auto_apply_optimization(self, decision: OptimizationDecision):
+    async def _auto_apply_optimization(self, decision: OptimizationDecision) -> None:
         """Automatically apply high-confidence optimizations."""
         logger.info(f"Auto-applying optimization: {decision.target.value}")
         
@@ -403,7 +403,7 @@ class FeedbackLoopOptimizer:
         self.active_optimizations[decision.target.value] = decision
         self.optimization_history.append(decision)
     
-    async def _recommend_optimization(self, decision: OptimizationDecision):
+    async def _recommend_optimization(self, decision: OptimizationDecision) -> None:
         """Recommend optimization for manual review."""
         logger.info(f"Recommending optimization: {decision.target.value}")
         
@@ -417,7 +417,7 @@ class FeedbackLoopOptimizer:
         # Would send to dashboard or notification system
         logger.info(f"Optimization recommendation: {recommendation}")
     
-    async def _gradual_rollout(self, decision: OptimizationDecision):
+    async def _gradual_rollout(self, decision: OptimizationDecision) -> None:
         """Gradually roll out optimization with increasing traffic."""
         rollout_percentage = self.config.initial_rollout_percentage
         
@@ -440,7 +440,7 @@ class FeedbackLoopOptimizer:
         
         logger.info(f"Successful gradual rollout of {decision.target.value}")
     
-    async def _direct_apply(self, decision: OptimizationDecision):
+    async def _direct_apply(self, decision: OptimizationDecision) -> None:
         """Directly apply optimization to all traffic."""
         if decision.target == OptimizationTarget.ROUTING_WEIGHTS:
             await self._apply_routing_weights(decision.recommended_value)
@@ -456,7 +456,7 @@ class FeedbackLoopOptimizer:
     
     # ==================== Rollback and Safety ====================
     
-    async def _check_for_degradation(self):
+    async def _check_for_degradation(self) -> None:
         """Check if any optimizations are causing performance degradation."""
         for target, decision in self.active_optimizations.items():
             current_perf = await self._get_current_performance(target)
@@ -469,7 +469,7 @@ class FeedbackLoopOptimizer:
                     logger.warning(f"Performance degradation detected for {target}: {degradation:.1%}")
                     await self._rollback_optimization(decision)
     
-    async def _rollback_optimization(self, decision: OptimizationDecision):
+    async def _rollback_optimization(self, decision: OptimizationDecision) -> None:
         """Rollback an optimization to previous state."""
         logger.info(f"Rolling back optimization: {decision.target.value}")
         
@@ -538,7 +538,7 @@ class FeedbackLoopOptimizer:
         self,
         decision: OptimizationDecision,
         percentage: float
-    ):
+    ) -> None:
         """Apply optimization to a percentage of traffic."""
         logger.info(f"Applying {decision.target.value} to {percentage}% of traffic")
         # Would implement traffic splitting logic
@@ -553,22 +553,22 @@ class FeedbackLoopOptimizer:
         # Would get from monitoring system
         return np.random.uniform(0.7, 0.95)
     
-    async def _apply_routing_weights(self, weights: Dict[str, float]):
+    async def _apply_routing_weights(self, weights: Dict[str, float]) -> None:
         """Apply new routing weights to MASR."""
         logger.info(f"Applying routing weights: {weights}")
         # Would update MASR configuration
     
-    async def _apply_supervisor_config(self, config: Dict[str, Any]):
+    async def _apply_supervisor_config(self, config: Dict[str, Any]) -> None:
         """Apply new supervisor configuration."""
         logger.info(f"Applying supervisor config: {config}")
         # Would update supervisor factory
     
-    async def _apply_talkhier_params(self, params: Dict[str, Any]):
+    async def _apply_talkhier_params(self, params: Dict[str, Any]) -> None:
         """Apply new TalkHier parameters."""
         logger.info(f"Applying TalkHier params: {params}")
         # Would update TalkHier service
     
-    async def _apply_quality_threshold(self, threshold: float):
+    async def _apply_quality_threshold(self, threshold: float) -> None:
         """Apply new quality threshold."""
         logger.info(f"Applying quality threshold: {threshold}")
         # Would update quality control system

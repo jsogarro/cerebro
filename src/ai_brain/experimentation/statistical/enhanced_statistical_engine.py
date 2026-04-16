@@ -596,11 +596,11 @@ class MultiBanditOptimizer:
         self.arm_values = []
     
     async def initialize_bandit(
-        self, 
+        self,
         num_arms: int,
         algorithm: BanditAlgorithm,
         context_features: Optional[List[str]] = None
-    ):
+    ) -> None:
         """Initialize bandit algorithm with specified number of arms."""
         
         self.num_arms = num_arms
@@ -735,7 +735,7 @@ class MultiBanditOptimizer:
             exploration_rate=np.sqrt(np.log(total_counts) / max(1, total_counts)),
         )
     
-    async def update_bandit(self, arm: int, reward: float):
+    async def update_bandit(self, arm: int, reward: float) -> None:
         """Update bandit with observed reward."""
         
         self.arm_counts[arm] += 1

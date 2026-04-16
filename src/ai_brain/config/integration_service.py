@@ -56,7 +56,7 @@ class ConfigurationIntegrationService:
         self.last_update = None
         self.update_count = 0
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize all configuration-dependent components."""
 
         logger.info("Initializing configuration integration service...")
@@ -102,7 +102,7 @@ class ConfigurationIntegrationService:
             logger.error(f"Failed to initialize configuration integration service: {e}")
             raise
 
-    async def _on_configuration_change(self, event: ConfigurationChangeEvent):
+    async def _on_configuration_change(self, event: ConfigurationChangeEvent) -> None:
         """Handle configuration change events."""
 
         logger.info(f"Configuration change detected: {event.change_type}")
@@ -119,7 +119,7 @@ class ConfigurationIntegrationService:
         except Exception as e:
             logger.error(f"Failed to handle configuration change: {e}")
 
-    async def _update_components(self, event: ConfigurationChangeEvent):
+    async def _update_components(self, event: ConfigurationChangeEvent) -> None:
         """Update components after configuration change."""
 
         # Update MASR router
@@ -143,7 +143,7 @@ class ConfigurationIntegrationService:
         ):
             await self._update_model_router(event)
 
-    async def _update_masr_router(self, event: ConfigurationChangeEvent):
+    async def _update_masr_router(self, event: ConfigurationChangeEvent) -> None:
         """Update MASR router with new configuration."""
 
         try:
@@ -157,7 +157,7 @@ class ConfigurationIntegrationService:
         except Exception as e:
             logger.error(f"Failed to update MASR router: {e}")
 
-    async def _update_cost_optimizer(self, event: ConfigurationChangeEvent):
+    async def _update_cost_optimizer(self, event: ConfigurationChangeEvent) -> None:
         """Update cost optimizer with new model specifications."""
 
         try:
@@ -171,7 +171,7 @@ class ConfigurationIntegrationService:
         except Exception as e:
             logger.error(f"Failed to update cost optimizer: {e}")
 
-    async def _update_model_router(self, event: ConfigurationChangeEvent):
+    async def _update_model_router(self, event: ConfigurationChangeEvent) -> None:
         """Update model router with new provider configurations."""
 
         try:
@@ -331,7 +331,7 @@ class ConfigurationIntegrationService:
 
         return stats
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the integration service and all components."""
 
         logger.info("Closing configuration integration service...")

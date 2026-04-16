@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import logging
 import time
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -97,7 +98,7 @@ class DatabasePoolManager:
         self._last_health_check = datetime.utcnow()
         self._connection_semaphore: asyncio.Semaphore | None = None
 
-    async def initialize(self, config_override: dict[str, Any] | None = None):
+    async def initialize(self, config_override: dict[str, Any] | None = None) -> None:
         """
         Initialize database connection pool.
 
@@ -160,7 +161,7 @@ class DatabasePoolManager:
             raise
 
     @asynccontextmanager
-    async def get_session(self):
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
         """
         Get a database session from the pool.
 
@@ -202,7 +203,7 @@ class DatabasePoolManager:
                 ) / self._metrics.total_requests
 
     @asynccontextmanager
-    async def acquire_connection(self):
+    async def acquire_connection(self) -> AsyncGenerator[asyncpg.Connection, None]:
         """
         Acquire a direct database connection from asyncpg pool.
 
@@ -233,7 +234,7 @@ class DatabasePoolManager:
         finally:
             self._metrics.active_connections -= 1
 
-    async def execute_query(self, query: str, *args, timeout: float | None = None):
+    async def execute_query(self, query: str, *args, timeout: float | None = None) -> list[Any]:
         """
         Execute a query with automatic retry and timeout.
 
@@ -278,7 +279,7 @@ class DatabasePoolManager:
         self._last_health_check = datetime.utcnow()
         return self._status
 
-    async def close(self):
+    async def close(self) -> None:
         """Close database connection pool."""
         if self._pool:
             await self._pool.close()
@@ -311,7 +312,7 @@ class RedisPoolManager:
         self._metrics = PoolMetrics()
         self._status = PoolStatus.UNHEALTHY
 
-    async def initialize(self, config_override: dict[str, Any] | None = None):
+    async def initialize(self, config_override: dict[str, Any] | None = None) -> None:
         """
         Initialize Redis connection pool.
 
@@ -369,7 +370,7 @@ class RedisPoolManager:
         self._metrics.total_requests += 1
         return self._client
 
-    async def execute_command(self, command: str, *args, **kwargs):
+    async def execute_command(self, command: str, *args, **kwargs) -> Any:
         """
         Execute Redis command with retry.
 
@@ -448,7 +449,7 @@ class RedisPoolManager:
 
         return self._status
 
-    async def close(self):
+    async def close(self) -> None:
         """Close Redis connection pool."""
         # Close pub/sub clients
         for pubsub in self._pubsub_clients.values():
@@ -524,11 +525,11 @@ class HTTPPoolManager:
 
         return self._clients[client_key]
 
-    async def _log_request(self, request: httpx.Request):
+    async def _log_request(self, request: httpx.Request) -> None:
         """Log HTTP request."""
         logger.debug(f"HTTP Request: {request.method} {request.url}")
 
-    async def _log_response(self, response: httpx.Response):
+    async def _log_response(self, response: httpx.Response) -> None:
         """Log HTTP response."""
         logger.debug(f"HTTP Response: {response.status_code} from {response.url}")
 
@@ -572,7 +573,7 @@ class HTTPPoolManager:
         finally:
             metrics.active_connections -= 1
 
-    async def close_all(self):
+    async def close_all(self) -> None:
         """Close all HTTP clients."""
         for client in self._clients.values():
             await client.aclose()
@@ -605,7 +606,7 @@ class TemporalPoolManager:
         self._max_workers = config.temporal.worker_concurrency
         self._max_workflow_clients = 10
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize Temporal connection pools."""
         try:
             # Import temporal modules dynamically to avoid circular imports
@@ -626,7 +627,7 @@ class TemporalPoolManager:
             logger.error(f"Failed to initialize Temporal pool: {e}")
             raise
 
-    async def get_workflow_client(self):
+    async def get_workflow_client(self) -> Any:
         """
         Get a workflow client from the pool.
 
@@ -671,7 +672,7 @@ http_pool = HTTPPoolManager()
 temporal_pool = TemporalPoolManager()
 
 
-async def initialize_pools():
+async def initialize_pools() -> None:
     """Initialize all connection pools."""
     logger.info("Initializing connection pools...")
 
@@ -686,7 +687,7 @@ async def initialize_pools():
     logger.info("All connection pools initialized")
 
 
-async def close_pools():
+async def close_pools() -> None:
     """Close all connection pools."""
     logger.info("Closing connection pools...")
 

@@ -97,7 +97,7 @@ class WorkingMemoryManager:
         # Background cleanup task
         self._cleanup_task = None
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the working memory system."""
         if self.redis_client:
             try:
@@ -457,7 +457,7 @@ class WorkingMemoryManager:
         """Make Redis key with prefix."""
         return f"{self.key_prefix}{key}"
 
-    async def _store_redis(self, key: str, item: WorkingMemoryItem, ttl: int):
+    async def _store_redis(self, key: str, item: WorkingMemoryItem, ttl: int) -> None:
         """Store item in Redis."""
         redis_key = self._make_key(key)
         item_data = {
@@ -523,7 +523,7 @@ class WorkingMemoryManager:
 
         return item
 
-    async def _update_access_stats(self, key: str, item: WorkingMemoryItem):
+    async def _update_access_stats(self, key: str, item: WorkingMemoryItem) -> None:
         """Update access statistics for an item."""
         try:
             if self.redis_client:
@@ -536,7 +536,7 @@ class WorkingMemoryManager:
         except Exception as e:
             logger.debug(f"Failed to update access stats for {key}: {e}")
 
-    async def _cleanup_loop(self):
+    async def _cleanup_loop(self) -> None:
         """Background cleanup loop."""
         while True:
             try:
@@ -547,7 +547,7 @@ class WorkingMemoryManager:
             except Exception as e:
                 logger.error(f"Cleanup loop error: {e}")
 
-    async def close(self):
+    async def close(self) -> None:
         """Close working memory manager and cleanup resources."""
         if self._cleanup_task:
             self._cleanup_task.cancel()

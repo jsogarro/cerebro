@@ -7,6 +7,7 @@ Provides utilities for managing database connections and sessions.
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
@@ -198,7 +199,7 @@ async def get_transaction() -> AsyncGenerator[AsyncSession, None]:
                 raise
 
 
-async def execute_in_transaction(func, *args, **kwargs):
+async def execute_in_transaction(func, *args, **kwargs) -> Any:
     """
     Execute function in transaction.
 

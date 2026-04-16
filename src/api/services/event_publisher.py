@@ -16,7 +16,6 @@ from structlog import get_logger
 from src.api.websocket.connection_manager import websocket_manager
 from src.core.config import settings
 from src.models.websocket_messages import (
-from src.utils.serialization import serialize_for_cache, deserialize_from_cache
     AgentUpdate,
     ProgressUpdate,
     WorkflowPhaseUpdate,
@@ -41,7 +40,7 @@ class EventPublisher:
         self.subscription_task: asyncio.Task | None = None
         self._shutdown = False
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize Redis connections and start subscription."""
         try:
             # Initialize Redis clients
@@ -65,7 +64,7 @@ class EventPublisher:
             self.redis_client = None
             self.redis_subscriber = None
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
         """Shutdown the event publisher."""
         self._shutdown = True
 
@@ -90,7 +89,7 @@ class EventPublisher:
         project_id: UUID,
         progress: ProgressUpdate,
         include_cli_format: bool = True,
-    ):
+    ) -> None:
         """Publish a progress update event."""
         message = WSMessage(
             type=WSMessageType.PROGRESS,
@@ -110,7 +109,7 @@ class EventPublisher:
         self,
         project_id: UUID,
         agent_update: AgentUpdate,
-    ):
+    ) -> None:
         """Publish an agent started event."""
         message = WSMessage(
             type=WSMessageType.AGENT_STARTED,
@@ -130,7 +129,7 @@ class EventPublisher:
         self,
         project_id: UUID,
         agent_update: AgentUpdate,
-    ):
+    ) -> None:
         """Publish an agent progress event."""
         message = WSMessage(
             type=WSMessageType.AGENT_PROGRESS,
@@ -151,7 +150,7 @@ class EventPublisher:
         self,
         project_id: UUID,
         agent_update: AgentUpdate,
-    ):
+    ) -> None:
         """Publish an agent completed event."""
         message = WSMessage(
             type=WSMessageType.AGENT_COMPLETED,
@@ -171,7 +170,7 @@ class EventPublisher:
         self,
         project_id: UUID,
         agent_update: AgentUpdate,
-    ):
+    ) -> None:
         """Publish an agent failed event."""
         message = WSMessage(
             type=WSMessageType.AGENT_FAILED,
@@ -192,7 +191,7 @@ class EventPublisher:
         self,
         project_id: UUID,
         phase_update: WorkflowPhaseUpdate,
-    ):
+    ) -> None:
         """Publish a workflow phase started event."""
         message = WSMessage(
             type=WSMessageType.WORKFLOW_PHASE_STARTED,
@@ -212,7 +211,7 @@ class EventPublisher:
         self,
         project_id: UUID,
         phase_update: WorkflowPhaseUpdate,
-    ):
+    ) -> None:
         """Publish a workflow phase completed event."""
         message = WSMessage(
             type=WSMessageType.WORKFLOW_PHASE_COMPLETED,
@@ -228,7 +227,7 @@ class EventPublisher:
             phase=phase_update.phase_name,
         )
 
-    async def publish_project_started(self, project_id: UUID):
+    async def publish_project_started(self, project_id: UUID) -> None:
         """Publish a project started event."""
         message = WSMessage(
             type=WSMessageType.PROJECT_STARTED,
@@ -247,7 +246,7 @@ class EventPublisher:
         self,
         project_id: UUID,
         results_summary: str | None = None,
-    ):
+    ) -> None:
         """Publish a project completed event."""
         message = WSMessage(
             type=WSMessageType.PROJECT_COMPLETED,
@@ -269,7 +268,7 @@ class EventPublisher:
         self,
         project_id: UUID,
         error_message: str,
-    ):
+    ) -> None:
         """Publish a project failed event."""
         message = WSMessage(
             type=WSMessageType.PROJECT_FAILED,
@@ -288,7 +287,7 @@ class EventPublisher:
             error=error_message,
         )
 
-    async def publish_project_cancelled(self, project_id: UUID):
+    async def publish_project_cancelled(self, project_id: UUID) -> None:
         """Publish a project cancelled event."""
         message = WSMessage(
             type=WSMessageType.PROJECT_CANCELLED,
@@ -308,7 +307,7 @@ class EventPublisher:
         project_id: UUID | None,
         error_message: str,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Publish an error event."""
         message = WSMessage(
             type=WSMessageType.ERROR,
@@ -332,7 +331,7 @@ class EventPublisher:
         project_id: UUID | None,
         warning_message: str,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Publish a warning event."""
         message = WSMessage(
             type=WSMessageType.WARNING,
@@ -356,7 +355,7 @@ class EventPublisher:
         project_id: UUID | None,
         info_message: str,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Publish an info event."""
         message = WSMessage(
             type=WSMessageType.INFO,
@@ -375,7 +374,7 @@ class EventPublisher:
             message=info_message,
         )
 
-    async def _publish_event(self, message: WSMessage):
+    async def _publish_event(self, message: WSMessage) -> None:
         """
         Publish an event both locally and to Redis.
 
@@ -402,7 +401,7 @@ class EventPublisher:
                     message_type=message.type,
                 )
 
-    async def _redis_subscriber(self):
+    async def _redis_subscriber(self) -> None:
         """Background task to handle Redis pub/sub events from other instances."""
         if not self.redis_subscriber:
             return

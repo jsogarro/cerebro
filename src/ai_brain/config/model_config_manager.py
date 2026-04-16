@@ -95,7 +95,7 @@ class ConfigFileWatcher:
 
         self._debounce_task = asyncio.create_task(self._debounced_reload())
 
-    async def _debounced_reload(self):
+    async def _debounced_reload(self) -> None:
         """Reload configurations after debounce delay."""
 
         await asyncio.sleep(self.debounce_delay)
@@ -145,7 +145,7 @@ class ModelConfigManager:
         self.reload_count = 0
         self.error_count = 0
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the configuration manager."""
 
         logger.info("Initializing model configuration manager...")
@@ -393,7 +393,7 @@ class ModelConfigManager:
 
         return merged
 
-    async def _start_file_watcher(self):
+    async def _start_file_watcher(self) -> None:
         """Start file system watcher for hot-reload."""
 
         if not WATCHDOG_AVAILABLE:
@@ -416,7 +416,7 @@ class ModelConfigManager:
             logger.error(f"Failed to start file watcher: {e}")
             self._observer = None
 
-    async def _reload_configurations(self):
+    async def _reload_configurations(self) -> None:
         """Reload configurations from files."""
 
         try:
@@ -434,7 +434,7 @@ class ModelConfigManager:
         change_type: str,
         old_config: Optional[ModelConfiguration],
         new_config: Optional[ModelConfiguration],
-    ):
+    ) -> None:
         """Notify all change listeners of configuration updates."""
 
         event = ConfigurationChangeEvent(
@@ -453,7 +453,7 @@ class ModelConfigManager:
             except Exception as e:
                 logger.error(f"Configuration change listener failed: {e}")
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the configuration manager and cleanup resources."""
 
         if self._observer:

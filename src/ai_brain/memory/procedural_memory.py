@@ -121,7 +121,7 @@ class ProceduralMemoryManager:
         self.retrieve_count = 0
         self.learn_count = 0
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the procedural memory system."""
 
         try:
@@ -487,7 +487,7 @@ class ProceduralMemoryManager:
         confidence = base_confidence * performance_factor * success_factor
         return min(max(confidence, 0.1), 0.9)  # Clamp between 0.1 and 0.9
 
-    async def _load_procedures(self):
+    async def _load_procedures(self) -> None:
         """Load procedures from persistent storage."""
 
         if self.storage_backend == "json_file":
@@ -518,7 +518,7 @@ class ProceduralMemoryManager:
             except Exception as e:
                 logger.error(f"Failed to load procedures from {self.storage_path}: {e}")
 
-    async def _persist_procedures(self):
+    async def _persist_procedures(self) -> None:
         """Persist procedures to storage."""
 
         if self.storage_backend == "json_file":

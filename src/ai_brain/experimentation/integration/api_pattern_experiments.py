@@ -512,7 +512,7 @@ class APIPatternExperimentor:
     
     async def _report_metrics(self,
                              result: APIExecutionResult,
-                             experiment_id: str):
+                             experiment_id: str) -> None:
         """Report execution metrics to experiment manager."""
         metrics = {
             "latency_ms": result.latency_ms,

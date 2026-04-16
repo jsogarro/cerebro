@@ -112,7 +112,7 @@ class MultiTierMemorySystem:
         # Background tasks
         self._consolidation_task = None
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize all memory tiers."""
 
         logger.info("Initializing multi-tier memory system...")
@@ -785,7 +785,7 @@ class MultiTierMemorySystem:
             recall_reasoning=reasoning,
         )
 
-    async def _consolidation_loop(self):
+    async def _consolidation_loop(self) -> None:
         """Background memory consolidation loop."""
 
         while True:
@@ -797,7 +797,7 @@ class MultiTierMemorySystem:
             except Exception as e:
                 logger.error(f"Memory consolidation error: {e}")
 
-    async def close(self):
+    async def close(self) -> None:
         """Close memory system and cleanup resources."""
 
         if self._consolidation_task:

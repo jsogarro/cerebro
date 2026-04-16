@@ -113,7 +113,7 @@ class RoutingMetricsCollector:
 
         return RoutingStrategy(best_strategy)
 
-    async def adapt_from_decision(self, decision: "RoutingDecision"):
+    async def adapt_from_decision(self, decision: "RoutingDecision") -> None:
         """
         Adapt routing parameters based on decision outcomes.
 

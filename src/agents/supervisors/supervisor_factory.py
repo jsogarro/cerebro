@@ -21,6 +21,8 @@ from enum import Enum
 from typing import Dict, List, Optional, Any, Type, Set
 import uuid
 
+from src.core.types import FactoryStatsDict, HealthCheckDict, HealthReportDict
+
 from .base_supervisor import BaseSupervisor, SupervisionMode, WorkerAllocation
 from .research_supervisor import ResearchSupervisor
 from ..models import AgentTask
@@ -201,7 +203,7 @@ class SupervisorHealthMonitor:
             if self.is_supervisor_healthy(supervisor_type)
         ]
     
-    async def get_health_report(self) -> Dict[str, Any]:
+    async def get_health_report(self) -> HealthReportDict:
         """Get comprehensive health report."""
         report = {
             "total_supervisors": len(self.supervisor_health),
@@ -577,7 +579,7 @@ class SupervisorFactory:
         """Record execution result for health monitoring."""
         self.health_monitor.record_execution(supervisor_type, success, execution_time_ms)
     
-    async def get_factory_stats(self) -> Dict[str, Any]:
+    async def get_factory_stats(self) -> FactoryStatsDict:
         """Get factory statistics and health report."""
         return {
             "factory_stats": self.factory_stats.copy(),
@@ -588,7 +590,7 @@ class SupervisorFactory:
             "health_report": await self.health_monitor.get_health_report(),
         }
     
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> HealthCheckDict:
         """Perform factory health check."""
         health_report = await self.health_monitor.get_health_report()
         

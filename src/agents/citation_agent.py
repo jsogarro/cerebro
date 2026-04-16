@@ -562,9 +562,9 @@ class CitationAgent(BaseAgent):
             if journal:
                 citation += f" {journal}."
         elif style.upper() == "MLA":
-            citation = f"{author}. \\"{title}.\\" {journal}, {year}."
+            citation = f'{author}. "{title}." {journal}, {year}.'
         elif style.upper() == "CHICAGO":
-            citation = f"{author}. \\"{title}.\\" {journal} ({year})."
+            citation = f'{author}. "{title}." {journal} ({year}).'
         else:
             citation = f"{author}. {title}. {year}."
         

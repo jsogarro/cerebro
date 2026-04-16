@@ -212,7 +212,7 @@ class BaseProvider(ABC):
         """Return the name of this provider."""
         pass
 
-    async def load_configuration(self):
+    async def load_configuration(self) -> None:
         """Load model configurations for this provider."""
 
         if not self.model_config_manager:
@@ -441,13 +441,13 @@ class BaseProvider(ABC):
         """Get provider configuration."""
         return self._provider_config
 
-    async def ensure_configuration_loaded(self):
+    async def ensure_configuration_loaded(self) -> None:
         """Ensure configuration is loaded before operations."""
 
         if not self._config_loaded:
             await self.load_configuration()
 
-    async def reload_configuration(self):
+    async def reload_configuration(self) -> None:
         """Reload configuration from the manager."""
 
         self._config_loaded = False
