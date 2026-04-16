@@ -6,7 +6,6 @@ for microservices architecture with health-aware routing.
 """
 
 import asyncio
-import json
 import logging
 import random
 from dataclasses import dataclass, field
@@ -15,6 +14,7 @@ from enum import Enum
 from typing import Any
 
 import redis.asyncio as redis
+from src.utils.serialization import serialize_for_cache, deserialize_from_cache
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +213,7 @@ class ServiceRegistry:
         if self._redis_client:
             key = f"{self._registry_prefix}{service.name}:{service.instance_id}"
             await self._redis_client.setex(
-                key, ttl or self._ttl, json.dumps(instance.to_dict())
+                key, ttl or self._ttl, serialize_for_cache(instance.to_dict().decode("utf-8"))
             )
 
         logger.info(
@@ -264,7 +264,7 @@ class ServiceRegistry:
             if self._redis_client:
                 key = f"{self._registry_prefix}{service_name}:{instance_id}"
                 await self._redis_client.setex(
-                    key, self._ttl, json.dumps(instance.to_dict())
+                    key, self._ttl, serialize_for_cache(instance.to_dict().decode("utf-8"))
                 )
 
     async def update_status(
@@ -289,7 +289,7 @@ class ServiceRegistry:
             if self._redis_client:
                 key = f"{self._registry_prefix}{service_name}:{instance_id}"
                 await self._redis_client.setex(
-                    key, self._ttl, json.dumps(instance.to_dict())
+                    key, self._ttl, serialize_for_cache(instance.to_dict().decode("utf-8"))
                 )
 
             logger.info(
@@ -322,7 +322,7 @@ class ServiceRegistry:
             data = await self._redis_client.get(key)
 
             if data:
-                instance = ServiceInstance.from_dict(json.loads(data))
+                instance = ServiceInstance.from_dict(deserialize_from_cache(data))
 
                 # Cache in memory
                 if service_name not in self._services:
@@ -357,7 +357,7 @@ class ServiceRegistry:
             for key in keys:
                 data = await self._redis_client.get(key)
                 if data:
-                    instance = ServiceInstance.from_dict(json.loads(data))
+                    instance = ServiceInstance.from_dict(deserialize_from_cache(data))
 
                     # Check if not already in list
                     if not any(

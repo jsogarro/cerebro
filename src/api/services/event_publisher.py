@@ -7,7 +7,6 @@ across multiple server instances.
 """
 
 import asyncio
-import json
 from typing import Any
 from uuid import UUID
 
@@ -17,6 +16,7 @@ from structlog import get_logger
 from src.api.websocket.connection_manager import websocket_manager
 from src.core.config import settings
 from src.models.websocket_messages import (
+from src.utils.serialization import serialize_for_cache, deserialize_from_cache
     AgentUpdate,
     ProgressUpdate,
     WorkflowPhaseUpdate,
@@ -420,7 +420,7 @@ class EventPublisher:
 
                     if message and message["type"] == "message":
                         # Parse and handle event
-                        event_data = json.loads(message["data"])
+                        event_data = deserialize_from_cache(message["data"])
                         ws_message = WSMessage(**event_data)
 
                         # Broadcast to local WebSocket connections

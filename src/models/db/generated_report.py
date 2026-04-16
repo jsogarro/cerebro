@@ -5,7 +5,6 @@ This module defines the SQLAlchemy model for storing generated research reports,
 following the repository pattern established in the codebase.
 """
 
-import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4

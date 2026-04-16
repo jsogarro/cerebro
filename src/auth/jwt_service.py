@@ -4,7 +4,6 @@ JWT Token Service for authentication.
 Handles token generation, validation, and management using RS256 algorithm.
 """
 
-import json
 import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -19,6 +18,7 @@ from jose import JWTError, jwt
 
 from src.auth.models import TokenPair, TokenPayload
 from src.core.config import settings
+from src.utils.serialization import serialize_for_cache, deserialize_from_cache
 
 logger = structlog.get_logger(__name__)
 
@@ -209,7 +209,7 @@ class JWTService:
             await self.redis_client.setex(
                 refresh_key,
                 timedelta(days=self.refresh_token_expire_days),
-                json.dumps(refresh_data),
+                serialize_for_cache(refresh_data).decode("utf-8"),
             )
 
         logger.info(
@@ -403,7 +403,7 @@ class JWTService:
                 data = await self.redis_client.get(key)
                 if data:
                     try:
-                        token_data = json.loads(data)
+                        token_data = deserialize_from_cache(data)
                         if token_data.get("user_id") == user_id:
                             await self.redis_client.delete(key)
                             count += 1
@@ -458,7 +458,7 @@ class JWTService:
                 data = await self.redis_client.get(key)
                 if data:
                     try:
-                        token_data = json.loads(data)
+                        token_data = deserialize_from_cache(data)
                         if token_data.get("user_id") == user_id:
                             sessions.append(
                                 {

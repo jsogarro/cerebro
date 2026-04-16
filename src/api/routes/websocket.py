@@ -6,9 +6,9 @@ to various clients including web browsers and CLI tools.
 """
 
 import asyncio
-import json
 from uuid import UUID
 
+import orjson
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from structlog import get_logger
 
@@ -23,6 +23,7 @@ from src.models.websocket_messages import (
     WSMessage,
     WSMessageType,
 )
+from src.utils.serialization import deserialize
 
 logger = get_logger()
 router = APIRouter()
@@ -70,7 +71,7 @@ async def websocket_endpoint(
             try:
                 # Receive message from client
                 data = await websocket.receive_text()
-                message_data = json.loads(data)
+                message_data = deserialize(data)
 
                 # Handle subscription requests
                 if message_data.get("type") == "subscription":
@@ -101,7 +102,7 @@ async def websocket_endpoint(
                         message_type=message_data.get("type"),
                     )
 
-            except json.JSONDecodeError:
+            except orjson.JSONDecodeError:
                 logger.warning(
                     "Invalid JSON received from WebSocket client",
                     client_id=client_id,
@@ -193,7 +194,7 @@ async def project_websocket_endpoint(
         while True:
             try:
                 data = await websocket.receive_text()
-                message_data = json.loads(data)
+                message_data = deserialize(data)
 
                 # Handle heartbeat responses
                 if message_data.get("type") == "heartbeat_response":
@@ -216,7 +217,7 @@ async def project_websocket_endpoint(
                         response_message
                     )
 
-            except json.JSONDecodeError:
+            except orjson.JSONDecodeError:
                 logger.warning(
                     "Invalid JSON received from project WebSocket client",
                     client_id=client_id,
@@ -320,7 +321,7 @@ async def cli_websocket_endpoint(
             try:
                 # Set a timeout for CLI connections to be more responsive
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
-                message_data = json.loads(data)
+                message_data = deserialize(data)
 
                 # Handle heartbeat responses
                 if message_data.get("type") == "heartbeat_response":
@@ -330,7 +331,7 @@ async def cli_websocket_endpoint(
                 # Timeout is expected for CLI connections
                 continue
 
-            except json.JSONDecodeError:
+            except orjson.JSONDecodeError:
                 logger.warning(
                     "Invalid JSON received from CLI WebSocket client",
                     client_id=client_id,

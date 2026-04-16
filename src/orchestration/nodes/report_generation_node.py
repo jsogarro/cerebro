@@ -7,7 +7,6 @@ with the advanced report generation system.
 """
 
 import asyncio
-import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -22,6 +21,7 @@ from src.models.report import (
 from src.orchestration.state import ResearchState, WorkflowPhase
 from src.services.report_generator import ReportGenerator
 from src.services.report_config import create_report_settings
+from src.utils.serialization import serialize_to_str, serialize
 
 logger = logging.getLogger(__name__)
 
@@ -302,7 +302,7 @@ async def _fallback_legacy_generation(state: ResearchState) -> ResearchState:
 
     # Generate basic outputs
     outputs = {
-        "json": json.dumps(report, indent=2, default=str),
+        "json": serialize_to_str(report, indent=2, default=str),
         "markdown": generate_markdown_report(report),
     }
 

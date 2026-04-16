@@ -6,13 +6,13 @@ various caching strategies, compression, and batch operations.
 """
 
 import gzip
-import json
 import logging
 from typing import Any
 
 from redis import asyncio as aioredis
 
 from src.services.cache.cache_strategies import CacheStrategy, TTLStrategy
+from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 logger = logging.getLogger(__name__)
 
@@ -127,12 +127,12 @@ class CacheManager:
             # Check if value is compressed
             compressed = False
             if meta_bytes:
-                meta = json.loads(meta_bytes)
+                meta = deserialize_from_cache(meta_bytes)
                 compressed = meta.get("compressed", False)
 
             # Decompress and parse
             value_str = self._decompress_value(value_bytes, compressed)
-            value = json.loads(value_str)
+            value = deserialize_from_cache(value_str)
 
             # Update strategy (for LRU, etc.)
             await self.strategy.on_get(full_key, self.redis)
@@ -169,7 +169,7 @@ class CacheManager:
 
         try:
             # Serialize value
-            value_str = json.dumps(value)
+            value_str = serialize_for_cache(value).decode("utf-8")
             value_bytes, compressed = self._compress_value(value_str)
 
             # Prepare metadata
@@ -182,7 +182,7 @@ class CacheManager:
             # Set value and metadata
             pipe = self.redis.pipeline()
             pipe.set(full_key, value_bytes)
-            pipe.set(f"{full_key}:meta", json.dumps(meta))
+            pipe.set(f"{full_key}:meta", serialize_for_cache(meta))
 
             # Apply strategy
             await self.strategy.on_set(full_key, self.redis, ttl, dependencies)
@@ -273,12 +273,12 @@ class CacheManager:
                     # Check compression
                     compressed = False
                     if meta_bytes:
-                        meta = json.loads(meta_bytes)
+                        meta = deserialize_from_cache(meta_bytes)
                         compressed = meta.get("compressed", False)
 
                     # Decompress and parse
                     value_str = self._decompress_value(value_bytes, compressed)
-                    results[key] = json.loads(value_str)
+                    results[key] = deserialize_from_cache(value_str)
                     self.metrics["hits"] += 1
 
             return results
@@ -313,7 +313,7 @@ class CacheManager:
                 full_key = self._make_key(key)
 
                 # Serialize and compress
-                value_str = json.dumps(value)
+                value_str = serialize_for_cache(value).decode("utf-8")
                 value_bytes, compressed = self._compress_value(value_str)
 
                 # Metadata
@@ -324,7 +324,7 @@ class CacheManager:
 
                 # Add to pipeline
                 pipe.set(full_key, value_bytes)
-                pipe.set(f"{full_key}:meta", json.dumps(meta))
+                pipe.set(f"{full_key}:meta", serialize_for_cache(meta))
 
                 # Apply TTL if specified
                 if ttl:

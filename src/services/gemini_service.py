@@ -5,7 +5,6 @@ This service integrates with Google's Gemini API following functional programmin
 """
 
 import hashlib
-import json
 import logging
 from typing import Any
 
@@ -24,6 +23,7 @@ from src.services.gemini_config import (
     get_safety_settings,
 )
 from src.services.gemini_limiter import RateLimiter
+from src.utils.serialization import serialize_for_cache, deserialize_from_cache
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ class GeminiService:
         """
         # Create deterministic string representation
         if isinstance(data, dict):
-            data_str = json.dumps(data, sort_keys=True)
+            data_str = serialize_for_cache(data, sort_keys=True).decode("utf-8")
         else:
             data_str = str(data)
 
@@ -139,7 +139,7 @@ class GeminiService:
             cached = await self.cache_client.get(cache_key)
             if cached:
                 logger.debug(f"Cache hit for key: {cache_key}")
-                return json.loads(cached)
+                return deserialize_from_cache(cached)
         except Exception as e:
             logger.warning(f"Cache read error: {e}")
 
@@ -156,7 +156,7 @@ class GeminiService:
 
         try:
             await self.cache_client.set(
-                cache_key, json.dumps(data), ex=self.config.cache_ttl
+                cache_key, serialize_for_cache(data).decode("utf-8"), ex=self.config.cache_ttl
             )
             logger.debug(f"Cached response for key: {cache_key}")
         except Exception as e:

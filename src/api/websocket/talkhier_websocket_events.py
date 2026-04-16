@@ -6,7 +6,6 @@ including live updates, interactive dialogue, and multi-session coordination.
 """
 
 import asyncio
-import json
 from typing import Dict, List, Set, Optional, Any
 from datetime import datetime
 from fastapi import WebSocket

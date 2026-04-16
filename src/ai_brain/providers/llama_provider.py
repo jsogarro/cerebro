@@ -7,13 +7,13 @@ where cost efficiency is important.
 """
 
 import asyncio
-import json
 import logging
 from typing import Dict, List, Optional, Any, AsyncGenerator
 import httpx
 from datetime import datetime
 
 from .base_provider import (
+from src.utils.serialization import deserialize
     BaseProvider,
     ModelRequest,
     ModelResponse,
@@ -214,7 +214,7 @@ class LlamaProvider(BaseProvider):
                 async for line in response.aiter_lines():
                     if line.strip():
                         try:
-                            chunk = json.loads(line)
+                            chunk = deserialize(line)
                             content = chunk.get("response", "")
 
                             if content:
@@ -322,7 +322,7 @@ class LlamaProvider(BaseProvider):
             async for line in response.aiter_lines():
                 if line.strip():
                     try:
-                        progress = json.loads(line)
+                        progress = deserialize(line)
                         status = progress.get("status", "")
                         if "error" in progress:
                             raise Exception(f"Model pull error: {progress['error']}")

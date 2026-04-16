@@ -13,12 +13,12 @@ Working memory stores:
 """
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Union
 import uuid
+from src.utils.serialization import serialize_for_cache, deserialize_from_cache
 
 try:
     import redis.asyncio as redis
@@ -365,7 +365,7 @@ class WorkingMemoryManager:
                     try:
                         data = await self.redis_client.get(key)
                         if data:
-                            item_data = json.loads(data)
+                            item_data = deserialize_from_cache(data)
                             item_tags = item_data.get("tags", [])
 
                             # Check if any of the specified tags match
@@ -472,7 +472,7 @@ class WorkingMemoryManager:
         }
 
         await self.redis_client.setex(
-            redis_key, ttl, json.dumps(item_data, default=str)
+            redis_key, ttl, serialize_for_cache(item_data, default=str).decode("utf-8")
         )
 
     async def _retrieve_redis(self, key: str) -> Optional[WorkingMemoryItem]:
@@ -482,7 +482,7 @@ class WorkingMemoryManager:
 
         if data:
             try:
-                item_data = json.loads(data)
+                item_data = deserialize_from_cache(data)
 
                 # Reconstruct datetime objects
                 created_at = datetime.fromisoformat(item_data["created_at"])

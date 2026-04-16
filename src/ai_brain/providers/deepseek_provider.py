@@ -7,13 +7,13 @@ strong at complex reasoning and analysis tasks.
 """
 
 import asyncio
-import json
 import logging
 from typing import Dict, List, Optional, Any, AsyncGenerator
 import httpx
 from datetime import datetime
 
 from .base_provider import (
+from src.utils.serialization import deserialize
     BaseProvider,
     ModelRequest,
     ModelResponse,
@@ -217,7 +217,7 @@ class DeepSeekProvider(BaseProvider):
                             break
 
                         try:
-                            chunk = json.loads(data)
+                            chunk = deserialize(data)
                             delta = chunk.get("choices", [{}])[0].get("delta", {})
                             content = delta.get("content", "")
 
@@ -336,7 +336,7 @@ class DeepSeekProvider(BaseProvider):
         structured_content = None
         if request.response_format == ResponseFormat.JSON:
             try:
-                structured_content = json.loads(content)
+                structured_content = deserialize(content)
             except json.JSONDecodeError:
                 logger.warning("Failed to parse JSON response")
 

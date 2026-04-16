@@ -5,13 +5,13 @@ This agent specializes in formatting citations and verifying sources.
 """
 
 import hashlib
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.services.parsers.json_parser import parse_json_response
+from src.utils.serialization import serialize_to_str, serialize
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +171,7 @@ class CitationAgent(BaseAgent):
         style = task.input_data.get("style", "APA")
         
         # Create a stable hash from sources
-        source_str = json.dumps(sources, sort_keys=True)
+        source_str = serialize_to_str(sources, sort_keys=True)
         key_parts = [
             self.get_agent_type(),
             style,
@@ -182,7 +182,7 @@ class CitationAgent(BaseAgent):
     
     def _build_prompt(self, sources: List[Dict[str, Any]], style: str) -> str:
         """Build prompt for Gemini."""
-        sources_text = json.dumps(sources, indent=2)
+        sources_text = serialize_to_str(sources, indent=2)
         return f"""Format the following sources according to {style} citation style:
         
         {sources_text}
@@ -522,7 +522,7 @@ class CitationAgent(BaseAgent):
     def _export_to_json(self, citations: List[Any]) -> str:
         """Export citations to JSON format."""
         import json
-        return json.dumps(citations, indent=2, ensure_ascii=False)
+        return serialize_to_str(citations, indent=2, ensure_ascii=False)
     
     def _export_to_csv(self, citations: List[Any]) -> str:
         """Export citations to CSV format."""

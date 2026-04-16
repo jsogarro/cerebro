@@ -5,11 +5,11 @@ This module provides various caching strategies including TTL, LRU,
 and dependency-based invalidation.
 """
 
-import json
 import time
 from abc import ABC, abstractmethod
 
 from redis import asyncio as aioredis
+from src.utils.serialization import serialize_for_cache, deserialize_from_cache
 
 
 class CacheStrategy(ABC):
@@ -318,9 +318,9 @@ class VersionedCacheStrategy(CacheStrategy):
         meta_key = f"{key}:meta"
         meta = await redis.get(meta_key)
         if meta:
-            meta_dict = json.loads(meta)
+            meta_dict = deserialize_from_cache(meta)
             meta_dict["version"] = version
-            await redis.set(meta_key, json.dumps(meta_dict))
+            await redis.set(meta_key, serialize_for_cache(meta_dict).decode("utf-8"))
 
         # Set TTL
         expiry = ttl or self.ttl

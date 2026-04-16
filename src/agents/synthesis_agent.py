@@ -5,13 +5,13 @@ This agent specializes in integrating outputs from multiple agents into coherent
 """
 
 import hashlib
-import json
 import logging
 from typing import Any
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.services.parsers.json_parser import parse_json_response
+from src.utils.serialization import serialize_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -154,11 +154,11 @@ class SynthesisAgent(BaseAgent):
 
     def _build_prompt(self, agent_outputs: dict[str, Any]) -> str:
         """Build prompt for Gemini."""
-        outputs_text = json.dumps(agent_outputs, indent=2)
+        outputs_text = serialize_to_str(agent_outputs)
         return f"""Synthesize the following outputs from multiple research agents:
-        
+
         {outputs_text}
-        
+
         Create an integrated synthesis in JSON format."""
 
     def _generate_mock_synthesis(self, agent_outputs: dict[str, Any]) -> dict[str, Any]:

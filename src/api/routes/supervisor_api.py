@@ -11,7 +11,6 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, status
 from fastapi.responses import JSONResponse
 import asyncio
-import json
 import logging
 
 from src.models.supervisor_api_models import (

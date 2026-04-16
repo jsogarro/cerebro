@@ -6,7 +6,6 @@ real-time updates instead of polling the API.
 """
 
 import asyncio
-import json
 import logging
 from collections.abc import Callable
 from datetime import datetime
@@ -28,6 +27,7 @@ from src.cli.formatters import (
     print_warning,
 )
 from src.models.websocket_messages import WSMessage, WSMessageType
+from src.utils.serialization import deserialize, serialize_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ class CLIWebSocketClient:
                     "type": "heartbeat_response",
                     "timestamp": datetime.utcnow().isoformat(),
                 }
-                await self.websocket.send(json.dumps(heartbeat_msg))
+                await self.websocket.send(serialize_to_str(heartbeat_msg))
             except Exception as e:
                 self._log(f"Failed to send heartbeat: {e}")
 
@@ -183,7 +183,7 @@ class CLIWebSocketClient:
 
                     try:
                         # Parse message
-                        message_data = json.loads(message)
+                        message_data = deserialize(message)
                         ws_message = WSMessage(**message_data)
 
                         # Handle heartbeat
@@ -345,7 +345,7 @@ class CLIWebSocketClient:
                     break
 
                 try:
-                    message_data = json.loads(message)
+                    message_data = deserialize(message)
                     ws_message = WSMessage(**message_data)
 
                     # Handle heartbeat
@@ -395,7 +395,7 @@ class CLIWebSocketClient:
                     "type": "test",
                     "timestamp": datetime.utcnow().isoformat(),
                 }
-                await websocket.send(json.dumps(test_msg))
+                await websocket.send(serialize_to_str(test_msg))
 
                 # Wait for response (with timeout)
                 try:

@@ -9,7 +9,6 @@ Based on "MasRouter: Learning to Route LLMs" research patterns.
 """
 
 import asyncio
-import json
 from typing import Dict, List, Optional, Any, Set
 from datetime import datetime
 from enum import Enum

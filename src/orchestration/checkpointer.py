@@ -5,7 +5,6 @@ This module provides mechanisms for saving and restoring workflow state,
 enabling recovery from failures and resumption of long-running workflows.
 """
 
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +12,7 @@ from pathlib import Path
 import redis.asyncio as redis
 
 from src.orchestration.state import ResearchState, StateCheckpoint, WorkflowPhase
+from src.utils.serialization import serialize_for_cache, deserialize_from_cache
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +178,7 @@ class RedisCheckpointStorage(CheckpointStorage):
             key = self._get_key(checkpoint_id)
 
             # Serialize checkpoint
-            checkpoint_data = json.dumps(checkpoint.to_dict(), default=str)
+            checkpoint_data = serialize_for_cache(checkpoint.to_dict().decode("utf-8"), default=str)
 
             # Save with TTL
             await self.redis_client.setex(key, self.ttl, checkpoint_data)
@@ -207,7 +207,7 @@ class RedisCheckpointStorage(CheckpointStorage):
                 return None
 
             # Deserialize
-            data = json.loads(checkpoint_data)
+            data = deserialize_from_cache(checkpoint_data)
 
             # Reconstruct StateCheckpoint
             return StateCheckpoint(

@@ -7,7 +7,6 @@ following functional programming principles with pure transformation functions.
 
 import asyncio
 import hashlib
-import json
 import logging
 import os
 import time
@@ -29,6 +28,7 @@ from src.models.report import (
     Visualization,
 )
 from src.services.report_config import (
+from src.utils.serialization import serialize_to_str, serialize
     ReportFormatConfig,
     ReportQualityConfig,
     ReportSettings,
@@ -827,7 +827,7 @@ class ReportGenerator:
         """Generate JSON report output."""
         # Convert report to dictionary, handling datetime serialization
         report_dict = report.dict()
-        json_content = json.dumps(report_dict, indent=2, default=str)
+        json_content = serialize_to_str(report_dict, indent=2, default=str)
         
         return ReportOutput(
             format=ReportFormat.JSON,

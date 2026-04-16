@@ -7,7 +7,6 @@ service in the research platform.
 """
 
 import asyncio
-import json
 import logging
 from typing import Dict, List, Optional, Any, AsyncGenerator
 from datetime import datetime

@@ -11,7 +11,6 @@ import logging
 from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-import json
 from enum import Enum
 
 # Import WebSocket components
