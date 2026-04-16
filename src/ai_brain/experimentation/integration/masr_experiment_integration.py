@@ -13,9 +13,20 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from src.core.constants import (
+    NO_RETRY,
+    MIN_RETRY_ATTEMPTS,
+    MAX_RETRY_ATTEMPTS,
+    SPEED_TEST_TIMEOUT,
+    DEFAULT_AGENT_TIMEOUT,
+    EXTENDED_TIMEOUT,
+    DIRECT_MODE_PARALLELISM,
+    HIGH_PARALLELISM,
+    MAX_PARALLELISM,
+)
 from ...router.masr import (
-    MASRouter, 
-    RoutingStrategy, 
+    MASRouter,
+    RoutingStrategy,
     CollaborationMode,
     RoutingDecision,
     AgentAllocation
@@ -329,9 +340,9 @@ class MASRExperimentalRouter(MASRouter):
             supervisor_type="cost_efficient_supervisor",
             worker_count=1,  # Minimal workers
             worker_types=["basic_worker"],
-            max_parallel=1,
-            timeout_seconds=600,  # Longer timeout for cheaper models
-            retry_attempts=1
+            max_parallel=DIRECT_MODE_PARALLELISM,
+            timeout_seconds=EXTENDED_TIMEOUT,  # Longer timeout for cheaper models
+            retry_attempts=MIN_RETRY_ATTEMPTS
         )
         
         return RoutingDecision(
@@ -361,9 +372,9 @@ class MASRExperimentalRouter(MASRouter):
             supervisor_type="expert_supervisor",
             worker_count=5,  # More workers for quality
             worker_types=["expert_worker", "specialist_worker"],
-            max_parallel=5,
-            timeout_seconds=300,
-            retry_attempts=3
+            max_parallel=HIGH_PARALLELISM,
+            timeout_seconds=DEFAULT_AGENT_TIMEOUT,
+            retry_attempts=MAX_RETRY_ATTEMPTS
         )
         
         return RoutingDecision(
@@ -393,9 +404,9 @@ class MASRExperimentalRouter(MASRouter):
             supervisor_type="fast_supervisor",
             worker_count=3,
             worker_types=["fast_worker"],
-            max_parallel=10,  # High parallelism
-            timeout_seconds=30,  # Short timeout
-            retry_attempts=0  # No retries for speed
+            max_parallel=MAX_PARALLELISM,  # High parallelism
+            timeout_seconds=SPEED_TEST_TIMEOUT,  # Short timeout
+            retry_attempts=NO_RETRY  # No retries for speed
         )
         
         return RoutingDecision(

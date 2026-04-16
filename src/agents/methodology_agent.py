@@ -8,6 +8,7 @@ import hashlib
 import logging
 from typing import Any
 
+from src.core.constants import LONG_TERM_CACHE_TTL
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.services.parsers.json_parser import parse_json_response
@@ -89,7 +90,7 @@ class MethodologyAgent(BaseAgent):
             )
 
             # Cache the result
-            await self.cache_result(cache_key, result, ttl=86400)
+            await self.cache_result(cache_key, result, ttl=LONG_TERM_CACHE_TTL)
 
             return result
 

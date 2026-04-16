@@ -22,6 +22,7 @@ from dataclasses import dataclass, asdict
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from ...ai_brain.router.masr import MASRouter
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
@@ -104,9 +105,9 @@ class DirectExecutionService:
         
         # Service configuration
         self.max_concurrent_executions = 50
-        self.default_timeout_seconds = 300  # 5 minutes
+        self.default_timeout_seconds = DEFAULT_AGENT_TIMEOUT
         self.enable_retry = True
-        self.max_retries = 3
+        self.max_retries = MAX_RETRY_ATTEMPTS
         
         # Performance metrics
         self.execution_stats = {

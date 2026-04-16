@@ -23,6 +23,7 @@ import uuid
 
 from langgraph.graph import StateGraph, END
 
+from src.core.constants import HIGH_ESTIMATED_TOKENS
 from .research_orchestrator import ResearchOrchestrator, OrchestratorConfig, WorkflowResult
 from .state import ResearchState, WorkflowPhase, WorkflowMetadata
 from .query_decomposer import QueryDecomposer
@@ -586,7 +587,7 @@ class MultiSupervisorOrchestrator:
                     uncertainty=0.3,
                     reasoning_types=[],
                     recommended_agents={supervisor_type: 1},
-                    estimated_tokens=2000,
+                    estimated_tokens=HIGH_ESTIMATED_TOKENS,
                 ),
                 optimization_result=None,  # Would be populated in real implementation
                 collaboration_mode=CollaborationMode.HIERARCHICAL,

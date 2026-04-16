@@ -9,6 +9,7 @@ import hashlib
 import logging
 from typing import Any
 
+from src.core.constants import LONG_TERM_CACHE_TTL
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.models.research_project import ResearchDepth
@@ -130,7 +131,7 @@ class LiteratureReviewAgent(BaseAgent):
             )
 
             # Cache the result
-            await self.cache_result(cache_key, result, ttl=86400)  # 24 hours
+            await self.cache_result(cache_key, result, ttl=LONG_TERM_CACHE_TTL)  # 24 hours
 
             return result
 

@@ -20,6 +20,18 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 import uuid
 
+from src.core.constants import (
+    DEFAULT_RETRY_ATTEMPTS,
+    MAX_RETRY_ATTEMPTS,
+    MIN_RETRY_ATTEMPTS,
+    SHORT_TIMEOUT,
+    MEDIUM_TIMEOUT,
+    LONG_TIMEOUT,
+    DIRECT_MODE_PARALLELISM,
+    LOW_PARALLELISM,
+    HIGH_PARALLELISM,
+    DEFAULT_ESTIMATED_TOKENS,
+)
 from .query_analyzer import QueryComplexityAnalyzer, ComplexityAnalysis, ComplexityLevel
 from .cost_optimizer import CostOptimizer, OptimizationResult, OptimizationStrategy
 from .routing_cache import RoutingCacheManager
@@ -317,9 +329,9 @@ class MASRouter:
                 supervisor_type=primary_supervisor,
                 worker_count=1,
                 worker_types=self._get_domain_worker_types(complexity_analysis.domains),
-                max_parallel=1,
-                timeout_seconds=60,
-                retry_attempts=1,
+                max_parallel=DIRECT_MODE_PARALLELISM,
+                timeout_seconds=SHORT_TIMEOUT,
+                retry_attempts=MIN_RETRY_ATTEMPTS,
             )
 
         elif collaboration_mode == CollaborationMode.PARALLEL:
@@ -331,8 +343,8 @@ class MASRouter:
                 worker_count=worker_count,
                 worker_types=self._get_domain_worker_types(complexity_analysis.domains),
                 max_parallel=worker_count,
-                timeout_seconds=180,
-                retry_attempts=2,
+                timeout_seconds=MEDIUM_TIMEOUT,
+                retry_attempts=DEFAULT_RETRY_ATTEMPTS,
             )
 
         elif collaboration_mode == CollaborationMode.HIERARCHICAL:
@@ -343,9 +355,9 @@ class MASRouter:
                 supervisor_type=primary_supervisor,
                 worker_count=worker_count,
                 worker_types=self._get_specialized_worker_types(complexity_analysis),
-                max_parallel=min(worker_count, 3),
-                timeout_seconds=300,
-                retry_attempts=3,
+                max_parallel=min(worker_count, LOW_PARALLELISM),
+                timeout_seconds=DEFAULT_AGENT_TIMEOUT,
+                retry_attempts=MAX_RETRY_ATTEMPTS,
             )
 
         elif collaboration_mode == CollaborationMode.DEBATE:
@@ -353,9 +365,9 @@ class MASRouter:
                 supervisor_type=primary_supervisor,
                 worker_count=3,  # Typical debate size
                 worker_types=["analyst", "critic", "synthesizer"],
-                max_parallel=3,
-                timeout_seconds=240,
-                retry_attempts=2,
+                max_parallel=LOW_PARALLELISM,
+                timeout_seconds=LONG_TIMEOUT,
+                retry_attempts=DEFAULT_RETRY_ATTEMPTS,
             )
 
         else:  # ENSEMBLE
@@ -363,9 +375,9 @@ class MASRouter:
                 supervisor_type=primary_supervisor,
                 worker_count=5,
                 worker_types=self._get_domain_worker_types(complexity_analysis.domains),
-                max_parallel=5,
-                timeout_seconds=180,
-                retry_attempts=1,
+                max_parallel=HIGH_PARALLELISM,
+                timeout_seconds=MEDIUM_TIMEOUT,
+                retry_attempts=MIN_RETRY_ATTEMPTS,
             )
 
     def _get_domain_supervisor_types(self, domains) -> List[str]:
@@ -550,7 +562,7 @@ class MASRouter:
             uncertainty=0.8,
             reasoning_types=[],
             recommended_agents={"general": 1},
-            estimated_tokens=1000,
+            estimated_tokens=DEFAULT_ESTIMATED_TOKENS,
         )
 
         # Simple fallback optimization

@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Optional, Any, Callable, Awaitable
 
+from src.core.constants import HIGH_CONSENSUS_THRESHOLD
 from ..ai_brain.integration.masr_supervisor_bridge import SupervisorExecutionResult
 
 logger = logging.getLogger(__name__)
@@ -189,11 +190,10 @@ class CrossDomainSynthesizer:
             synthesized["consensus_score"] = sum(consensus_scores) / len(consensus_scores)
 
         # Identify high-consensus areas
-        high_consensus_threshold = 0.8
         high_consensus_results = [
             (supervisor, result)
             for supervisor, result in supervisor_results.items()
-            if result.consensus_score >= high_consensus_threshold
+            if result.consensus_score >= HIGH_CONSENSUS_THRESHOLD
         ]
 
         synthesized["consensus_areas"] = [
