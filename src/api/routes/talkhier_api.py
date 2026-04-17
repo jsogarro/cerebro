@@ -128,10 +128,10 @@ async def create_refinement_session(
         )
         
         return session_response
-        
+
     except Exception as e:
         logger.error(f"Failed to create TalkHier session: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/sessions/{session_id}", response_model=SessionStatusResponse)
@@ -169,10 +169,10 @@ async def get_session_status(
         return status_response
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from None
     except Exception as e:
         logger.error(f"Failed to get session status: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/sessions/{session_id}/round", response_model=RefinementRoundResponse)
@@ -246,12 +246,12 @@ async def execute_refinement_round(
         )
         
         return round_response
-        
+
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from None
     except Exception as e:
         logger.error(f"Failed to execute refinement round: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/sessions/{session_id}/consensus", response_model=ConsensusResult)
@@ -310,12 +310,12 @@ async def check_consensus_status(
         )
         
         return consensus_result
-        
+
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from None
     except Exception as e:
         logger.error(f"Failed to check consensus: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/sessions/{session_id}/close", response_model=SessionCloseResponse)
@@ -364,8 +364,17 @@ async def close_session(
 
         # Close WebSocket connections for all clients in this session
         if session_id in websocket_handler.session_connections:
+            disconnect_errors: list[str] = []
             for connection_id in list(websocket_handler.session_connections[session_id]):
-                await connection_manager.disconnect(connection_id)
+                try:
+                    await connection_manager.disconnect(connection_id)
+                except Exception as disconnect_err:
+                    disconnect_errors.append(f"{connection_id}: {disconnect_err}")
+            if disconnect_errors:
+                logger.warning(
+                    f"Failed to disconnect {len(disconnect_errors)} connection(s) "
+                    f"for session {session_id}: {disconnect_errors}"
+                )
         
         # Log analytics
         await _log_session_analytics(
@@ -380,12 +389,12 @@ async def close_session(
         )
         
         return close_response
-        
+
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from None
     except Exception as e:
         logger.error(f"Failed to close session: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ================================
@@ -496,10 +505,10 @@ async def validate_communication_structure(
                    f"(detected: {validation_response.protocol_detected})")
         
         return validation_response
-        
+
     except Exception as e:
         logger.error(f"Protocol validation failed: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ================================
@@ -548,10 +557,10 @@ async def get_protocol_analytics(
             )
         
         return AnalyticsResponse(**analytics)
-        
+
     except Exception as e:
         logger.error(f"Failed to get analytics: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ================================
@@ -783,13 +792,12 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
-            elif data.get("type") == "get_status":
-                if coordination_id is not None:
-                    status = await session_manager.get_coordination_status(coordination_id)
-                    await websocket.send_json({
-                        "type": "status_update",
-                        "data": status.dict()
-                    })
+            elif data.get("type") == "get_status" and coordination_id is not None:
+                status = await session_manager.get_coordination_status(coordination_id)
+                await websocket.send_json({
+                    "type": "status_update",
+                    "data": status.dict()
+                })
 
     except WebSocketDisconnect:
         if coordination_id:
@@ -844,12 +852,12 @@ async def coordinate_multiple_sessions(
                    f"for {len(request.session_ids)} sessions")
         
         return coordination_status
-        
+
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from None
     except Exception as e:
         logger.error(f"Failed to coordinate sessions: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ================================

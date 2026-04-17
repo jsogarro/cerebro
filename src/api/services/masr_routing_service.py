@@ -43,6 +43,7 @@ from src.models.masr_api_models import (
     StrategyEvaluationResponse,
     SupervisorAllocation,
 )
+from src.utils.type_coercion import coerce_float
 
 settings = get_settings()
 
@@ -217,7 +218,7 @@ class MASRRoutingService:
             breakdown=breakdown,
             confidence_score=decision.confidence_score,
             cost_factors={
-                "query_complexity": float(complexity_value) if isinstance(complexity_value, (int, float)) else 0.5,
+                "query_complexity": coerce_float(complexity_value, 0.5),
                 "model_tier": float(model_tier_map.get(model_tier, 2.0)),
                 "supervisor_count": 1.0,
                 "total_workers": float(worker_count),
@@ -468,7 +469,7 @@ class MASRRoutingService:
             models=models,
             tiers=tiers,
             total_count=len(models),
-            providers=list(set(m.provider for m in models))
+            providers=list({m.provider for m in models})
         )
         
         return response
@@ -482,13 +483,13 @@ class MASRRoutingService:
         """
         # Calculate uptime
         uptime = (datetime.utcnow() - self.start_time).total_seconds()
-        
+
         # Calculate total routes
-        total_routes = sum(
-            m["total_requests"] 
+        _total_routes = sum(
+            m["total_requests"]
             for m in self.performance_metrics.values()
         )
-        
+
         # Calculate average latency
         latencies = [
             m["average_latency_ms"] 

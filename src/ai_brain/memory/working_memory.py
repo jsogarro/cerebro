@@ -93,6 +93,9 @@ class WorkingMemoryManager:
             logger.warning("Redis not available, using in-memory fallback")
             self._memory_fallback: dict[str, Any] = {}
 
+        # Background tasks
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
         # Performance tracking
         self.hit_count = 0
         self.miss_count = 0
@@ -191,7 +194,9 @@ class WorkingMemoryManager:
 
                 # Re-store with updated stats (async to avoid blocking)
                 if self.redis_client:
-                    asyncio.create_task(self._update_access_stats(key, item))
+                    task = asyncio.create_task(self._update_access_stats(key, item))
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
                 return item.value
             else:
@@ -275,9 +280,9 @@ class WorkingMemoryManager:
             return False
 
         # Apply updates
-        for field, value in updates.items():
-            if hasattr(context, field):
-                setattr(context, field, value)
+        for attr, value in updates.items():
+            if hasattr(context, attr):
+                setattr(context, attr, value)
 
         # Store updated context
         return await self.store_conversation_context(context)
@@ -346,7 +351,7 @@ class WorkingMemoryManager:
 
                 return [
                     key
-                    for key in self._memory_fallback.keys()
+                    for key in self._memory_fallback
                     if fnmatch.fnmatch(key, pattern)
                 ]
 
@@ -407,9 +412,8 @@ class WorkingMemoryManager:
                 expired_keys = []
 
                 for key, item in self._memory_fallback.items():
-                    if hasattr(item, "expires_at") and item.expires_at:
-                        if now > item.expires_at:
-                            expired_keys.append(key)
+                    if hasattr(item, "expires_at") and item.expires_at and now > item.expires_at:
+                        expired_keys.append(key)
 
                 for key in expired_keys:
                     del self._memory_fallback[key]

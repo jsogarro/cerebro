@@ -389,10 +389,10 @@ async def submit_routing_feedback(
     This feedback is used to improve the MASR router's learning
     algorithms and optimize future routing decisions.
     """
-    masr = get_masr_router()
-    
+    _masr = get_masr_router()
+
     # Process feedback (simplified - real implementation would update learning model)
-    feedback_data = {
+    _feedback_data = {
         "routing_id": feedback.routing_id,
         "actual_cost_usd": feedback.actual_cost_usd,
         "actual_latency_ms": feedback.actual_latency_ms,
@@ -425,8 +425,8 @@ async def get_router_status(
     Returns current router configuration, performance metrics,
     and recent optimization activities.
     """
-    masr = get_masr_router()
-    
+    _masr = get_masr_router()
+
     # Gather status information
     performance_metrics = {
         "total_routings": 1247,  # Example metrics

@@ -11,11 +11,14 @@ from src.utils.serialization import (
     serialize_for_cache,
     serialize_to_str,
 )
+from src.utils.type_coercion import coerce_float, coerce_int
 
 __all__ = [
-    "serialize",
+    "coerce_float",
+    "coerce_int",
     "deserialize",
-    "serialize_to_str",
-    "serialize_for_cache",
     "deserialize_from_cache",
+    "serialize",
+    "serialize_for_cache",
+    "serialize_to_str",
 ]

@@ -688,14 +688,18 @@ class TalkHierSessionService:
             SupervisorConfiguration,
         )
 
+        domains = routing_decision.complexity_analysis.domains
+        domain = domains[0].value if domains else "research"
+        allocation = routing_decision.agent_allocation
+
         config = SupervisorConfiguration(
             supervisor_type=supervisor_type,
-            domain="research",
-            worker_allocation=[],
-            quality_threshold=0.85,
-            max_refinement_rounds=3,
-            timeout_seconds=routing_decision.agent_allocation.timeout_seconds,
-            max_workers=routing_decision.agent_allocation.worker_count
+            domain=domain,
+            worker_allocation=allocation.worker_types,
+            quality_threshold=routing_decision.estimated_quality or 0.85,
+            max_refinement_rounds=allocation.retry_attempts or 3,
+            timeout_seconds=allocation.timeout_seconds,
+            max_workers=allocation.worker_count,
         )
 
         return await self.supervisor_factory.create_supervisor_from_config(config)
@@ -900,9 +904,8 @@ class TalkHierSessionService:
             return True
         
         # Check quality threshold
-        if session.current_quality >= session.quality_threshold:
-            if session.current_consensus >= session.consensus_threshold:
-                return False
+        if session.current_quality >= session.quality_threshold and session.current_consensus >= session.consensus_threshold:
+            return False
         
         # Check improvement trend
         if len(session.rounds) >= 2:

@@ -362,7 +362,7 @@ class ModelRouter:
 
         health_results = {}
 
-        for provider_name in self.registry.providers.keys():
+        for provider_name in self.registry.providers:
             health_results[provider_name] = await self._get_provider_health(
                 provider_name
             )

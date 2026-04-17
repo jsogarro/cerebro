@@ -526,7 +526,7 @@ class SupervisionFeedbackLearner:
                 improvements["routing"] = len(strategy_analysis)
             
             # 2. Optimize cost prediction factors
-            cost_factors = self.cost_optimizer.optimize_cost_factors()
+            self.cost_optimizer.optimize_cost_factors()
             cost_metrics = self.cost_optimizer.get_cost_accuracy_metrics()
             if cost_metrics["sample_size"] > 0:
                 logger.info(f"Cost prediction accuracy: {cost_metrics['accuracy']:.3f}")

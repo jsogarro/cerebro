@@ -130,6 +130,7 @@ class AgentFrameworkExperimentor:
         self.results_buffer: list[AgentExperimentResult] = []
         self.buffer_flush_interval = 60
         self.variant_performance: dict[str, dict[str, Any]] = {}
+        self.variant_samples: dict[str, dict[str, dict[str, list[float]]]] = {}
         self._start_background_tasks()
 
     def _start_background_tasks(self) -> None:
@@ -569,6 +570,21 @@ class AgentFrameworkExperimentor:
             perf["total_latency"] = float(perf["total_latency"]) + result.latency_ms
             perf["count"] = int(perf["count"]) + 1
 
+            if exp_id not in self.variant_samples:
+                self.variant_samples[exp_id] = {}
+            if variant_id not in self.variant_samples[exp_id]:
+                self.variant_samples[exp_id][variant_id] = {
+                    "quality": [],
+                    "latency": [],
+                    "cost": [],
+                    "success": [],
+                }
+            samples = self.variant_samples[exp_id][variant_id]
+            samples["quality"].append(result.quality_score)
+            samples["latency"].append(result.latency_ms)
+            samples["cost"].append(result.total_cost)
+            samples["success"].append(1.0 if result.success else 0.0)
+
         logger.info(f"Flushed {len(results_to_save)} experiment results")
     
     async def _update_allocations(self) -> None:
@@ -639,18 +655,16 @@ class AgentFrameworkExperimentor:
                 }
 
         if include_statistical_analysis and len(results["variants"]) > 1:
-            # Transform variant data to format expected by comprehensive_analysis
             experiment_data: dict[str, list[float]] = {}
-            for variant_id, data in results["variants"].items():
-                # Use the primary metric for analysis
-                if config.primary_metric == "quality_score":
-                    experiment_data[variant_id] = [data["avg_quality"]]
-                elif config.primary_metric == "latency_ms":
-                    experiment_data[variant_id] = [data["avg_latency"]]
-                elif config.primary_metric == "total_cost":
-                    experiment_data[variant_id] = [data["avg_cost"]]
-                else:
-                    experiment_data[variant_id] = [data["success_rate"]]
+            samples: dict[str, dict[str, list[float]]] = self.variant_samples.get(experiment_id, {})
+            metric_key = {
+                "quality_score": "quality",
+                "latency_ms": "latency",
+                "total_cost": "cost",
+            }.get(config.primary_metric, "success")
+            for variant_id in results["variants"]:
+                variant_samples: dict[str, list[float]] = samples.get(variant_id, {})
+                experiment_data[variant_id] = variant_samples.get(metric_key, [])
 
             analysis = await self.statistical_engine.comprehensive_analysis(
                 experiment_data=experiment_data

@@ -375,11 +375,9 @@ class CostOptimizer:
                 and model.avg_latency_ms <= max_latency
                 and model.quality_score >= min_quality
                 and model.context_window >= required_context
+                and self._is_domain_compatible(model, complexity_analysis.domains)
             ):
-
-                # Check domain compatibility
-                if self._is_domain_compatible(model, complexity_analysis.domains):
-                    candidates.append(model)
+                candidates.append(model)
 
         return candidates
 
@@ -493,7 +491,7 @@ class CostOptimizer:
         else:  # BALANCED
             # Select model with best cost-quality-latency balance
             def score_model(item: tuple[ModelSpec, CostEstimate]) -> float:
-                model, estimate = item
+                _model, estimate = item
                 # Normalize factors (0-1 scale)
                 cost_score = 1 - min(
                     estimate.cost_per_request / self.max_cost_per_request, 1.0

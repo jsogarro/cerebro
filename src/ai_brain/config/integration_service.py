@@ -47,6 +47,9 @@ class ConfigurationIntegrationService:
         self.cost_optimizer: CostOptimizer | None = None
         self.model_router: ModelRouter | None = None
 
+        # Background tasks
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
         # Component registry
         self._components: dict[str, Any] = {}
         self._configuration_dependent_components: set[str] = set()
@@ -71,7 +74,9 @@ class ConfigurationIntegrationService:
 
             # Register for configuration change notifications
             def listener(event: "ConfigurationChangeEvent") -> None:
-                asyncio.create_task(self._on_configuration_change(event))
+                task = asyncio.create_task(self._on_configuration_change(event))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
             self.model_config_manager.add_change_listener(listener)
 
             # Initialize MASR with configuration manager

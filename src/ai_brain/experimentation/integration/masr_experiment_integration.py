@@ -151,7 +151,7 @@ class MASRExperimentalRouter(MASRouter):
         """
         try:
             # Register with experiment manager
-            experiment_spec = {
+            _experiment_spec = {
                 "id": experiment_id,
                 "type": config.experiment_type.value,
                 "variants": config.variants,

@@ -358,7 +358,7 @@ class ResourcePool:
         """Cleanup idle supervisors from pools."""
         total_evicted = 0
         
-        for supervisor_type, pool in self.supervisor_pools.items():
+        for _supervisor_type, pool in self.supervisor_pools.items():
             # For simplicity, clear idle supervisors
             # In production, this would check last_used timestamps
             while pool:
@@ -650,7 +650,7 @@ class MASRSupervisorBridge:
     
     async def health_check(self) -> HealthCheckDict:
         """Perform health check on bridge components."""
-        stats = await self.get_bridge_stats()
+        await self.get_bridge_stats()
         health_dict: HealthCheckDict = {
             "status": "healthy",
             "metrics": {

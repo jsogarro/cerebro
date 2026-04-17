@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Any
 
 from ...agents.supervisors.base_supervisor import SupervisionMode, WorkerAllocation
+from ...utils.type_coercion import coerce_float, coerce_int
 from ..router.masr import CollaborationMode, RoutingStrategy
 from ..router.query_analyzer import ComplexityLevel
 
@@ -145,9 +146,9 @@ class ComplexityToWorkerMapper:
         base_min_val = base_allocation.get("min_workers", 1)
         base_optimal_val = base_allocation.get("optimal_workers", 3)
         base_max_val = base_allocation.get("max_workers", 5)
-        base_min = int(base_min_val) if isinstance(base_min_val, (int, float)) else 1
-        base_optimal = int(base_optimal_val) if isinstance(base_optimal_val, (int, float)) else 3
-        base_max = int(base_max_val) if isinstance(base_max_val, (int, float)) else 5
+        base_min = coerce_int(base_min_val, 1)
+        base_optimal = coerce_int(base_optimal_val, 3)
+        base_max = coerce_int(base_max_val, 5)
         min_workers = max(1, int(base_min * worker_multiplier))
         optimal_workers = int(base_optimal * worker_multiplier)
         max_workers = int(base_max * worker_multiplier)
@@ -251,8 +252,8 @@ class QualityThresholdCalculator:
 
         quality_threshold_val = base_config.get("quality_threshold", 0.8)
         consensus_threshold_val = base_config.get("consensus_threshold", 0.85)
-        quality_threshold = float(quality_threshold_val) if isinstance(quality_threshold_val, (int, float)) else 0.8
-        consensus_threshold = float(consensus_threshold_val) if isinstance(consensus_threshold_val, (int, float)) else 0.85
+        quality_threshold = coerce_float(quality_threshold_val, 0.8)
+        consensus_threshold = coerce_float(consensus_threshold_val, 0.85)
         quality_focus = base_config.get("quality_focus", QualityFocusLevel.STANDARD.value)
 
         # Apply complexity adjustments
@@ -508,8 +509,7 @@ class SupervisorConfigurationManager:
         """
         
         primary_domain = domains[0] if domains else "research"
-        context = additional_context or {}
-        
+
         # Calculate worker allocation
         worker_config = self.worker_mapper.calculate_worker_allocation(
             complexity_level, primary_domain, subtask_count, uncertainty

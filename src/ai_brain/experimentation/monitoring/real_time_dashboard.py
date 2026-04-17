@@ -114,14 +114,21 @@ class RealTimeDashboard:
         
         # Connected clients
         self.dashboard_clients: set[str] = set()
-        
+
+        # Background tasks
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
         # Start background tasks
         self._start_background_tasks()
 
     def _start_background_tasks(self) -> None:
         """Start background tasks for dashboard updates."""
-        asyncio.create_task(self._update_dashboard_periodically())
-        asyncio.create_task(self._clean_old_data_periodically())
+        update_task = asyncio.create_task(self._update_dashboard_periodically())
+        clean_task = asyncio.create_task(self._clean_old_data_periodically())
+        self._background_tasks.add(update_task)
+        self._background_tasks.add(clean_task)
+        update_task.add_done_callback(self._background_tasks.discard)
+        clean_task.add_done_callback(self._background_tasks.discard)
     
     async def _update_dashboard_periodically(self) -> None:
         """Periodically update dashboard with latest data."""
@@ -386,8 +393,8 @@ class RealTimeDashboard:
             "error_y": {
                 "type": "data",
                 "symmetric": False,
-                "array": [ci[1] - imp for ci, imp in zip(confidence_intervals, improvements)],
-                "arrayminus": [imp - ci[0] for ci, imp in zip(confidence_intervals, improvements)]
+                "array": [ci[1] - imp for ci, imp in zip(confidence_intervals, improvements, strict=True)],
+                "arrayminus": [imp - ci[0] for ci, imp in zip(confidence_intervals, improvements, strict=True)]
             },
             "type": "bar",
             "name": "Relative Improvement %"
@@ -429,21 +436,19 @@ class RealTimeDashboard:
                 })
         
         # Check statistical significance
-        if snapshot.p_value is not None:
-            if snapshot.p_value < self.config.max_p_value_alert:
-                alerts.append({
-                    "type": "info",
-                    "message": f"Statistical significance reached (p={snapshot.p_value:.4f})",
-                    "variant": snapshot.winning_variant or "unknown"
-                })
-        
+        if snapshot.p_value is not None and snapshot.p_value < self.config.max_p_value_alert:
+            alerts.append({
+                "type": "info",
+                "message": f"Statistical significance reached (p={snapshot.p_value:.4f})",
+                "variant": snapshot.winning_variant or "unknown"
+            })
+
         # Check effect size
-        if snapshot.effect_size is not None:
-            if abs(snapshot.effect_size) < self.config.min_effect_size_alert:
-                alerts.append({
-                    "type": "warning",
-                    "message": f"Small effect size detected: {snapshot.effect_size:.4f}"
-                })
+        if snapshot.effect_size is not None and abs(snapshot.effect_size) < self.config.min_effect_size_alert:
+            alerts.append({
+                "type": "warning",
+                "message": f"Small effect size detected: {snapshot.effect_size:.4f}"
+            })
         
         return alerts
     
