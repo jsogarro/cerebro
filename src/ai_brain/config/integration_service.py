@@ -12,11 +12,11 @@ This service acts as the glue between:
 - Memory System (configuration for different memory tiers)
 """
 
-import asyncio
 import logging
 from datetime import datetime
 from typing import Any
 
+from ...utils.async_helpers import BackgroundTaskTracker
 from ..providers.model_router import ModelRouter
 from ..router.cost_optimizer import CostOptimizer
 from ..router.masr import MASRouter
@@ -48,7 +48,7 @@ class ConfigurationIntegrationService:
         self.model_router: ModelRouter | None = None
 
         # Background tasks
-        self._background_tasks: set[asyncio.Task[None]] = set()
+        self._bg_tasks = BackgroundTaskTracker()
 
         # Component registry
         self._components: dict[str, Any] = {}
@@ -74,9 +74,7 @@ class ConfigurationIntegrationService:
 
             # Register for configuration change notifications
             def listener(event: "ConfigurationChangeEvent") -> None:
-                task = asyncio.create_task(self._on_configuration_change(event))
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
+                self._bg_tasks.create_task(self._on_configuration_change(event))
             self.model_config_manager.add_change_listener(listener)
 
             # Initialize MASR with configuration manager

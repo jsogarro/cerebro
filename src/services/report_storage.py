@@ -50,7 +50,7 @@ class ReportStorageService:
             os.makedirs(self.settings.report_storage_path, exist_ok=True)
         except OSError as e:
             logger.error(f"Failed to create storage directory: {e}")
-            raise ReportStorageError(f"Storage setup failed: {e}")
+            raise ReportStorageError(f"Storage setup failed: {e}") from e
     
     async def store_report(
         self,
@@ -108,7 +108,7 @@ class ReportStorageService:
             
         except Exception as e:
             logger.error(f"Failed to store report {report.id}: {e}")
-            raise ReportStorageError(f"Storage failed: {e}")
+            raise ReportStorageError(f"Storage failed: {e}") from e
     
     def _create_report_directory(self, report_id: str) -> str:
         """Create directory for storing report files."""
@@ -347,10 +347,9 @@ class ReportStorageService:
                 return False
             
             # Delete files if requested
-            if delete_files and report.storage_path:
-                if os.path.exists(report.storage_path):
-                    shutil.rmtree(report.storage_path)
-                    logger.info(f"Deleted files for report {report_id}")
+            if delete_files and report.storage_path and os.path.exists(report.storage_path):
+                shutil.rmtree(report.storage_path)
+                logger.info(f"Deleted files for report {report_id}")
             
             # Delete database records (formats will be cascade deleted)
             await self.report_repo.delete(report_id)
@@ -360,7 +359,7 @@ class ReportStorageService:
             
         except Exception as e:
             logger.error(f"Failed to delete report {report_id}: {e}")
-            raise ReportStorageError(f"Deletion failed: {e}")
+            raise ReportStorageError(f"Deletion failed: {e}") from e
     
     async def update_report_access(self, report_id: UUID) -> None:
         """Update access statistics for a report."""
@@ -390,7 +389,7 @@ class ReportStorageService:
         total_files = 0
         
         if os.path.exists(self.settings.report_storage_path):
-            for root, dirs, files in os.walk(self.settings.report_storage_path):
+            for root, _dirs, files in os.walk(self.settings.report_storage_path):
                 for file in files:
                     file_path = os.path.join(root, file)
                     try:

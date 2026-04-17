@@ -6,6 +6,7 @@ and provides message broadcasting capabilities.
 """
 
 import asyncio
+import contextlib
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -365,7 +366,7 @@ class ConnectionManager:
                         if c.client_type == client_type
                     ]
                 )
-                for client_type in set(c.client_type for c in self.connections.values())
+                for client_type in {c.client_type for c in self.connections.values()}
             }),
             "total_project_subscriptions": len(self.project_subscriptions),
             "total_user_subscriptions": len(self.user_subscriptions),
@@ -410,10 +411,8 @@ class ConnectionManager:
         # Cancel heartbeat task
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._heartbeat_task
-            except asyncio.CancelledError:
-                pass
 
         # Close all connections
         client_ids = list(self.connections.keys())

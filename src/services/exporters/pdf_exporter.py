@@ -113,7 +113,7 @@ class PDFExporter:
             
         except Exception as e:
             logger.error(f"PDF export failed: {e}")
-            raise PDFExportError(f"Failed to generate PDF: {e}")
+            raise PDFExportError(f"Failed to generate PDF: {e}") from e
     
     def _build_css_styles(
         self,
@@ -439,7 +439,7 @@ class PDFExporter:
                     
         except Exception as e:
             logger.error(f"PDF generation failed: {e}")
-            raise PDFExportError(f"WeasyPrint failed: {e}")
+            raise PDFExportError(f"WeasyPrint failed: {e}") from e
     
     def export_to_pdf_stream(
         self,

@@ -105,7 +105,7 @@ async def create_research_project(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create research project",
-        )
+        ) from e
 
 
 @router.get("/projects/{project_id}", response_model=ResearchProject)

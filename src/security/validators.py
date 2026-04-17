@@ -274,7 +274,7 @@ class SecurityValidator:
             validated = email_validator.validate_email(email)
             return validated.email
         except email_validator.EmailNotValidError as e:
-            raise ValueError(f"Invalid email address: {e!s}")
+            raise ValueError(f"Invalid email address: {e!s}") from e
 
     @classmethod
     def validate_ip_address(cls, ip: str, allow_private: bool = False) -> str:
@@ -302,7 +302,7 @@ class SecurityValidator:
 
             return str(ip_obj)
         except ValueError as e:
-            raise ValueError(f"Invalid IP address: {e!s}")
+            raise ValueError(f"Invalid IP address: {e!s}") from e
 
     @classmethod
     def validate_input(

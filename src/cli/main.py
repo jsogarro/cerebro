@@ -121,7 +121,7 @@ def config_command(ctx: Context, action: str, key: str | None, value: str | None
             click.echo(f"Set {key} = {value_to_set}")
         except Exception as e:
             click.echo(f"Error setting configuration: {e}")
-            raise Exit(1)
+            raise Exit(1) from e
 
     elif action == "save":
         # Save configuration to file
@@ -130,7 +130,7 @@ def config_command(ctx: Context, action: str, key: str | None, value: str | None
             click.echo("Configuration saved to ~/.research-cli.env")
         except Exception as e:
             click.echo(f"Error saving configuration: {e}")
-            raise Exit(1)
+            raise Exit(1) from e
 
 
 @cli.command(name="health")
@@ -163,10 +163,10 @@ def health_check(ctx: Context) -> None:
 
             except APIError as e:
                 print_error(f"API health check failed: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
             except Exception as e:
                 print_error(f"Failed to connect to API: {e}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_check_health())
 

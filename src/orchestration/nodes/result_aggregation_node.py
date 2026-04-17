@@ -237,7 +237,7 @@ def aggregate_citations(agent_results: dict[str, Any]) -> list[dict[str, Any]]:
     all_citations = []
     citation_keys = set()
 
-    for agent_type, result in agent_results.items():
+    for _agent_type, result in agent_results.items():
         citations = result.data.get("citations", [])
 
         for citation in citations:

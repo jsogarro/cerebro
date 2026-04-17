@@ -273,7 +273,7 @@ class CommunicationProtocol:
 
             # Send messages to agents and collect responses
             response_tasks = []
-            for agent, message in zip(agents, initial_messages):
+            for agent, message in zip(agents, initial_messages, strict=False):
                 response_tasks.append(self._send_message_to_agent(agent, message))
 
             # Wait for all responses
@@ -361,7 +361,7 @@ class CommunicationProtocol:
 
             # Send validation requests and collect responses
             response_tasks = []
-            for agent, message in zip(agents, validation_messages):
+            for agent, message in zip(agents, validation_messages, strict=False):
                 response_tasks.append(self._send_message_to_agent(agent, message))
 
             responses = await asyncio.gather(*response_tasks, return_exceptions=True)
@@ -605,7 +605,7 @@ class CommunicationProtocol:
         )
 
         # Create synthesized content
-        all_contents = [msg.talkhier_content.content for msg in final_messages]
+        _all_contents = [msg.talkhier_content.content for msg in final_messages]
         all_evidence = []
         for msg in final_messages:
             all_evidence.extend(msg.talkhier_content.evidence)

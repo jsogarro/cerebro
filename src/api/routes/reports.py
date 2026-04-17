@@ -199,7 +199,7 @@ async def generate_report(
     with a report ID. The actual generation happens in the background.
     """
     try:
-        generator, storage_service, report_repo, format_repo = get_report_services()
+        generator, storage_service, _report_repo, _format_repo = get_report_services()
 
         if not generator:
             raise HTTPException(
@@ -286,7 +286,7 @@ async def generate_report(
 async def get_report(report_id: UUID) -> ReportResponse:
     """Get report details by ID."""
     try:
-        generator, storage_service, report_repo, format_repo = get_report_services()
+        _generator, storage_service, _report_repo, _format_repo = get_report_services()
 
         if not storage_service:
             raise HTTPException(
@@ -321,7 +321,7 @@ async def get_report(report_id: UUID) -> ReportResponse:
 async def download_report(report_id: UUID, format_type: str) -> StreamingResponse:
     """Download report in specific format."""
     try:
-        generator, storage_service, report_repo, format_repo = get_report_services()
+        _generator, storage_service, _report_repo, _format_repo = get_report_services()
 
         if not storage_service:
             raise HTTPException(
@@ -383,7 +383,7 @@ async def list_reports(
 ) -> ReportListResponse:
     """List reports with filtering and pagination."""
     try:
-        generator, storage_service, report_repo, format_repo = get_report_services()
+        _generator, storage_service, _report_repo, _format_repo = get_report_services()
 
         if not storage_service:
             raise HTTPException(
@@ -427,7 +427,7 @@ async def list_reports(
 async def search_reports(request: ReportSearchRequest) -> ReportListResponse:
     """Search reports by text and filters."""
     try:
-        generator, storage_service, report_repo, format_repo = get_report_services()
+        _generator, storage_service, _report_repo, _format_repo = get_report_services()
 
         if not storage_service:
             raise HTTPException(
@@ -479,7 +479,7 @@ async def get_report_statistics(
 ) -> ReportStatisticsResponse:
     """Get report generation statistics."""
     try:
-        generator, storage_service, report_repo, format_repo = get_report_services()
+        _generator, storage_service, _report_repo, _format_repo = get_report_services()
 
         if not storage_service:
             raise HTTPException(
@@ -520,7 +520,7 @@ async def delete_report(
 ) -> None:
     """Delete a report and optionally its files."""
     try:
-        generator, storage_service, report_repo, format_repo = get_report_services()
+        _generator, storage_service, _report_repo, _format_repo = get_report_services()
 
         if not storage_service:
             raise HTTPException(
@@ -552,7 +552,7 @@ async def delete_report(
 async def verify_report_integrity(report_id: UUID) -> dict[str, Any]:
     """Verify the integrity of a report and its files."""
     try:
-        generator, storage_service, report_repo, format_repo = get_report_services()
+        _generator, storage_service, _report_repo, _format_repo = get_report_services()
 
         if not storage_service:
             raise HTTPException(

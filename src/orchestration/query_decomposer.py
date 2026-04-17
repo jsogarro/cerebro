@@ -7,13 +7,13 @@ domains, create domain-specific sub-queries, and identify cross-domain
 dependencies.
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 
 class QueryDecomposer:
     """Decomposes complex queries into domain-specific sub-queries."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize query decomposer."""
         self.config = config or {}
 
@@ -25,7 +25,7 @@ class QueryDecomposer:
             "service": ["support", "help", "customer", "assistance", "service"],
         }
 
-    def decompose_query(self, query: str) -> Dict[str, Any]:
+    def decompose_query(self, query: str) -> dict[str, Any]:
         """
         Decompose complex query into domain-specific components.
 

@@ -197,7 +197,7 @@ class SupervisorHealthMonitor:
         """Get list of healthy supervisor types."""
         return [
             supervisor_type
-            for supervisor_type in self.supervisor_health.keys()
+            for supervisor_type in self.supervisor_health
             if self.is_supervisor_healthy(supervisor_type)
         ]
     

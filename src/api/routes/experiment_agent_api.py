@@ -159,7 +159,7 @@ async def create_routing_experiment(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/api-pattern", response_model=dict[str, str])
@@ -199,7 +199,7 @@ async def create_api_pattern_experiment(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/talkhier", response_model=dict[str, str])
@@ -241,7 +241,7 @@ async def create_talkhier_experiment(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/supervisor", response_model=dict[str, str])
@@ -255,7 +255,7 @@ async def create_supervisor_experiment(
     Tests different supervisor execution modes and worker allocations
     to optimize hierarchical coordination.
     """
-    experimentor = get_experimentor()
+    _experimentor = get_experimentor()
     
     try:
         # Create supervisor experiment (would implement in experimentor)
@@ -281,7 +281,7 @@ async def create_supervisor_experiment(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==================== Experiment Execution Endpoints ====================
@@ -309,7 +309,7 @@ async def execute_with_experiments(
         return result
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==================== Experiment Monitoring Endpoints ====================
@@ -331,7 +331,7 @@ async def get_active_experiments(
         return experiments
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/{experiment_id}/results", response_model=dict[str, Any])
@@ -356,7 +356,7 @@ async def get_experiment_results(
         return results
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/{experiment_id}/stop", response_model=dict[str, Any])
@@ -381,7 +381,7 @@ async def stop_experiment(
         return final_results
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==================== Optimization Endpoints ====================
@@ -429,7 +429,7 @@ async def approve_optimization(
     Applies the optimization either immediately or through
     gradual rollout based on the approval settings.
     """
-    optimizer = get_feedback_optimizer()
+    _optimizer = get_feedback_optimizer()
     
     try:
         # Apply optimization (would implement approval logic)
@@ -441,7 +441,7 @@ async def approve_optimization(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==================== WebSocket Dashboard Endpoint ====================

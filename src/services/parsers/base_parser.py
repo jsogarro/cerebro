@@ -108,10 +108,7 @@ def validate_length(
     if min_length is not None and text_length < min_length:
         return False
 
-    if max_length is not None and text_length > max_length:
-        return False
-
-    return True
+    return not (max_length is not None and text_length > max_length)
 
 
 def detect_language(text: str) -> str:
@@ -160,11 +157,10 @@ def detect_language(text: str) -> str:
         " une ",
     ]
     french_count = sum(1 for word in french_words if word in text.lower())
-    if french_count >= 2 or re.search(
+    if (french_count >= 2 or re.search(
         r"[àâäáåãæçèéêëíîïñóôöøùúûüýÀÂÄÁÅÃÆÇÈÉÊËÍÎÏÑÓÔÖØÙÚÛÜÝ]", text
-    ):
-        if french_count >= 2:
-            languages_detected.append("fr")
+    )) and french_count >= 2:
+        languages_detected.append("fr")
 
     # Check for Spanish indicators
     spanish_words = [
@@ -274,10 +270,7 @@ def is_valid_json_key(key: str) -> bool:
         return False
 
     # Check for control characters
-    if any(ord(char) < 32 for char in key):
-        return False
-
-    return True
+    return not any(ord(char) < 32 for char in key)
 
 
 def normalize_quotes(text: str) -> str:

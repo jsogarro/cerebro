@@ -138,7 +138,7 @@ class VisualizationGenerator:
                 
         except Exception as e:
             logger.error(f"Visualization generation failed: {e}")
-            raise VisualizationGenerationError(f"Failed to generate {viz_spec.type}: {e}")
+            raise VisualizationGenerationError(f"Failed to generate {viz_spec.type}: {e}") from e
     
     def _generate_bar_chart(
         self,
@@ -214,7 +214,7 @@ class VisualizationGenerator:
                     y=series.get('y', []),
                     mode='lines+markers',
                     name=series.get('name', f'Series {i+1}'),
-                    line=dict(color=colors[i % len(colors)]),
+                    line={'color': colors[i % len(colors)]},
                 ))
         else:
             # Single series
@@ -223,7 +223,7 @@ class VisualizationGenerator:
                 y=data.get('y', []),
                 mode='lines+markers',
                 name=viz_spec.title,
-                line=dict(color=self.color_schemes['professional'][0]),
+                line={'color': self.color_schemes['professional'][0]},
             ))
         
         # Update layout
@@ -292,12 +292,12 @@ class VisualizationGenerator:
             x=data.get('x', []),
             y=data.get('y', []),
             mode='markers',
-            marker=dict(
-                size=data.get('size', 8),
-                color=data.get('color', self.color_schemes['professional'][0]),
-                colorscale='Viridis' if 'color' in data else None,
-                showscale=True if 'color' in data else False,
-            ),
+            marker={
+                'size': data.get('size', 8),
+                'color': data.get('color', self.color_schemes['professional'][0]),
+                'colorscale': 'Viridis' if 'color' in data else None,
+                'showscale': 'color' in data,
+            },
             text=data.get('text', None),
             hovertemplate='<b>%{text}</b><br>X: %{x}<br>Y: %{y}<extra></extra>' if 'text' in data else None,
         ))
@@ -337,37 +337,37 @@ class VisualizationGenerator:
             for i, series in enumerate(data['series']):
                 values = series.get('values', [])
                 # Close the radar chart
-                values_closed = values + [values[0]] if values else []
-                categories_closed = categories + [categories[0]] if categories else []
+                values_closed = [*values, values[0]] if values else []
+                categories_closed = [*categories, categories[0]] if categories else []
                 
                 fig.add_trace(go.Scatterpolar(
                     r=values_closed,
                     theta=categories_closed,
                     fill='toself',
                     name=series.get('name', f'Series {i+1}'),
-                    line=dict(color=colors[i % len(colors)]),
+                    line={'color': colors[i % len(colors)]},
                 ))
         else:
             # Single series
             values = data.get('values', [])
-            values_closed = values + [values[0]] if values else []
-            categories_closed = categories + [categories[0]] if categories else []
+            values_closed = [*values, values[0]] if values else []
+            categories_closed = [*categories, categories[0]] if categories else []
             
             fig.add_trace(go.Scatterpolar(
                 r=values_closed,
                 theta=categories_closed,
                 fill='toself',
                 name=viz_spec.title,
-                line=dict(color=self.color_schemes['professional'][0]),
+                line={'color': self.color_schemes['professional'][0]},
             ))
         
         # Update layout
         fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, max(data.get('values', [1])) * 1.1] if 'values' in data else [0, 1]
-                )),
+            polar={
+                'radialaxis': {
+                    'visible': True,
+                    'range': [0, max(data.get('values', [1])) * 1.1] if 'values' in data else [0, 1]
+                }},
             title=viz_spec.title,
             template=theme,
             width=viz_spec.width or self.default_width,
@@ -486,7 +486,7 @@ class VisualizationGenerator:
         # Create edge trace
         edge_trace = go.Scatter(
             x=edge_x, y=edge_y,
-            line=dict(width=0.5, color='#888'),
+            line={'width': 0.5, 'color': '#888'},
             hoverinfo='none',
             mode='lines'
         )
@@ -514,19 +514,19 @@ class VisualizationGenerator:
             text=node_text,
             hovertext=node_info,
             textposition="middle center",
-            marker=dict(
-                showscale=True,
-                colorscale='YlGnBu',
-                reversescale=True,
-                color=[],
-                size=10,
-                colorbar=dict(
-                    thickness=15,
-                    len=0.5,
-                    x=1.01
-                ),
-                line=dict(width=2, color='black')
-            )
+            marker={
+                'showscale': True,
+                'colorscale': 'YlGnBu',
+                'reversescale': True,
+                'color': [],
+                'size': 10,
+                'colorbar': {
+                    'thickness': 15,
+                    'len': 0.5,
+                    'x': 1.01
+                },
+                'line': {'width': 2, 'color': 'black'}
+            }
         )
         
         # Color nodes by degree
@@ -543,17 +543,17 @@ class VisualizationGenerator:
                             titlefont_size=16,
                             showlegend=False,
                             hovermode='closest',
-                            margin=dict(b=20,l=5,r=5,t=40),
-                            annotations=[ dict(
-                                text="Network visualization showing node connections",
-                                showarrow=False,
-                                xref="paper", yref="paper",
-                                x=0.005, y=-0.002,
-                                xanchor='left', yanchor='bottom',
-                                font=dict(size=12)
-                            )],
-                            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                            margin={'b': 20,'l': 5,'r': 5,'t': 40},
+                            annotations=[ {
+                                'text': "Network visualization showing node connections",
+                                'showarrow': False,
+                                'xref': "paper", 'yref': "paper",
+                                'x': 0.005, 'y': -0.002,
+                                'xanchor': 'left', 'yanchor': 'bottom',
+                                'font': {'size': 12}
+                            }],
+                            xaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
+                            yaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
                             width=viz_spec.width or self.default_width,
                             height=viz_spec.height or self.default_height,
                             template=theme

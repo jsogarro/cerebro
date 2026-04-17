@@ -218,7 +218,7 @@ class MASRRoutingService:
             breakdown=breakdown,
             confidence_score=decision.confidence_score,
             cost_factors={
-                "query_complexity": coerce_float(complexity_value, 0.5),
+                "query_complexity": coerce_float(complexity_value, 0.5, min_val=0.0, max_val=1.0),
                 "model_tier": float(model_tier_map.get(model_tier, 2.0)),
                 "supervisor_count": 1.0,
                 "total_workers": float(worker_count),

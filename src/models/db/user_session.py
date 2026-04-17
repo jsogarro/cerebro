@@ -330,7 +330,7 @@ class UserSession(BaseModel):
             session.query(cls)
             .filter(
                 cls.user_id == user_id,
-                cls.is_active == True,
+                cls.is_active,
                 cls.expires_at > datetime.utcnow(),
                 cls.revoked_at.is_(None),
             )

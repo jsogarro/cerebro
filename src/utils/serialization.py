@@ -7,7 +7,7 @@ common Python types.
 """
 
 from datetime import date, datetime
-from typing import Any, Optional, Union
+from typing import Any
 from uuid import UUID
 
 import orjson
@@ -68,7 +68,7 @@ def serialize(data: Any) -> bytes:
     )
 
 
-def deserialize(data: Union[bytes, str]) -> Any:
+def deserialize(data: bytes | str) -> Any:
     """
     Deserialize JSON bytes or string to Python object using orjson.
 
@@ -129,7 +129,7 @@ def serialize_for_cache(data: Any) -> bytes:
     )
 
 
-def deserialize_from_cache(data: Union[bytes, str, None]) -> Any:
+def deserialize_from_cache(data: bytes | str | None) -> Any:
     """
     Deserialize data from Redis cache using orjson.
 

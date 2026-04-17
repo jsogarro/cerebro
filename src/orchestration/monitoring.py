@@ -322,7 +322,7 @@ class OrchestrationMonitor:
 
         # Create OpenTelemetry span for node
         if self.enable_tracing and workflow_id in self._spans:
-            parent_span = self._spans[workflow_id]
+            _parent_span = self._spans[workflow_id]
 
             with tracer.start_as_current_span(
                 f"node_{node_name}"

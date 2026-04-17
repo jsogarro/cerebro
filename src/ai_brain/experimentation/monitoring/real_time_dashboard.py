@@ -15,30 +15,23 @@ from typing import Any
 
 import pandas as pd
 from fastapi import WebSocket
-
-# Import visualization components
 from src.api.websocket.event_publisher import EventPublisher
 
-# Import WebSocket components
 from src.api.websocket.connection_manager import ConnectionManager
+from src.utils.async_helpers import BackgroundTaskTracker
 
 logger = logging.getLogger(__name__)
 
 
 class DashboardMetric(Enum):
     """Metrics displayed on the dashboard."""
-    
-    # Performance metrics
+
     QUALITY_SCORE = "quality_score"
     LATENCY = "latency_ms"
     COST = "total_cost"
     SUCCESS_RATE = "success_rate"
-    
-    # Volume metrics
     REQUEST_COUNT = "request_count"
     TOKEN_USAGE = "token_usage"
-    
-    # Statistical metrics
     P_VALUE = "p_value"
     CONFIDENCE_INTERVAL = "confidence_interval"
     EFFECT_SIZE = "effect_size"
@@ -48,19 +41,15 @@ class DashboardMetric(Enum):
 @dataclass
 class ExperimentSnapshot:
     """Point-in-time snapshot of experiment metrics."""
-    
+
     experiment_id: str
     timestamp: datetime
-    variants: dict[str, dict[str, float]]  # variant_id -> metrics
+    variants: dict[str, dict[str, float]]
     sample_sizes: dict[str, int]
-    
-    # Statistical analysis
     winning_variant: str | None = None
     confidence_level: float = 0.0
     p_value: float | None = None
     effect_size: float | None = None
-    
-    # Recommendations
     recommendation: str = "Continue experiment"
     estimated_completion: datetime | None = None
 
@@ -68,20 +57,14 @@ class ExperimentSnapshot:
 @dataclass
 class DashboardConfig:
     """Configuration for the real-time dashboard."""
-    
+
     update_interval_seconds: int = 5
     history_window_minutes: int = 60
-    
-    # Chart settings
     show_confidence_bands: bool = True
     show_statistical_significance: bool = True
-    
-    # Alert thresholds
     min_sample_size_alert: int = 50
     max_p_value_alert: float = 0.05
     min_effect_size_alert: float = 0.05
-    
-    # Display options
     metrics_to_show: list[DashboardMetric] = field(
         default_factory=lambda: [
             DashboardMetric.QUALITY_SCORE,
@@ -95,40 +78,36 @@ class DashboardConfig:
 class RealTimeDashboard:
     """
     Real-time monitoring dashboard for A/B testing experiments.
-    
+
     Provides live updates on experiment performance, statistical analysis,
     and recommendations through WebSocket connections.
     """
-    
+
     def __init__(self, config: DashboardConfig | None = None):
         """Initialize the real-time dashboard."""
         self.config = config or DashboardConfig()
-        
+
         # WebSocket components
         self.connection_manager = ConnectionManager()
         self.event_publisher = EventPublisher()
-        
+
         # Data storage
         self.experiment_history: dict[str, list[ExperimentSnapshot]] = {}
         self.active_experiments: set[str] = set()
-        
+
         # Connected clients
         self.dashboard_clients: set[str] = set()
 
         # Background tasks
-        self._background_tasks: set[asyncio.Task[None]] = set()
+        self._bg_tasks = BackgroundTaskTracker()
 
         # Start background tasks
         self._start_background_tasks()
 
     def _start_background_tasks(self) -> None:
         """Start background tasks for dashboard updates."""
-        update_task = asyncio.create_task(self._update_dashboard_periodically())
-        clean_task = asyncio.create_task(self._clean_old_data_periodically())
-        self._background_tasks.add(update_task)
-        self._background_tasks.add(clean_task)
-        update_task.add_done_callback(self._background_tasks.discard)
-        clean_task.add_done_callback(self._background_tasks.discard)
+        self._bg_tasks.create_task(self._update_dashboard_periodically())
+        self._bg_tasks.create_task(self._clean_old_data_periodically())
     
     async def _update_dashboard_periodically(self) -> None:
         """Periodically update dashboard with latest data."""

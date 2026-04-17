@@ -320,7 +320,7 @@ class MultiVariateAnalyzer:
         front_idx = 0
         while front_idx < len(fronts) and fronts[front_idx]:
             next_front: list[ParetoSolution] = []
-            for sol in fronts[front_idx]:
+            for _sol in fronts[front_idx]:
                 # Process dominated solutions
                 pass  # Simplified for brevity
 
@@ -341,7 +341,7 @@ class MultiVariateAnalyzer:
             sol.crowding_distance = 0.0
         
         # For each metric
-        for metric_name in self.metrics.keys():
+        for metric_name in self.metrics:
             # Sort by metric value
             front.sort(key=lambda x: x.metrics.get(metric_name, 0))
             
@@ -515,7 +515,7 @@ class MultiVariateAnalyzer:
                 n_samples
             )
             
-            for metric_name in self.metrics.keys():
+            for metric_name in self.metrics:
                 sensitivities = []
                 
                 for perturbed_value in perturbations:

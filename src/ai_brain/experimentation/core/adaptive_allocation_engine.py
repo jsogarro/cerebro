@@ -14,6 +14,7 @@ Features:
 """
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -463,7 +464,7 @@ class AdaptiveAllocationEngine:
                 # Log significant changes
                 max_change = max(
                     abs(safe_allocation[variant] - old_allocation.get(variant, 0))
-                    for variant in safe_allocation.keys()
+                    for variant in safe_allocation
                 )
                 
                 if max_change > 0.1:  # 10% change threshold
@@ -499,7 +500,7 @@ class AdaptiveAllocationEngine:
         elif config.strategy == AllocationStrategy.CONTEXTUAL_BANDIT:
             # Use confidence-weighted allocation
             confidences = [count / max(sum(arm_counts), 1) for count in arm_counts]
-            weighted_values = [val * conf for val, conf in zip(arm_values, confidences)]
+            weighted_values = [val * conf for val, conf in zip(arm_values, confidences, strict=False)]
             
             exp_values = np.exp(np.array(weighted_values) * 2)
             probabilities = exp_values / np.sum(exp_values)
@@ -573,10 +574,8 @@ class AdaptiveAllocationEngine:
         
         if self.update_task and not self.update_task.done():
             self.update_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self.update_task
-            except asyncio.CancelledError:
-                pass
         
         logger.info("Stopped adaptive allocation updates")
     

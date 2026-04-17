@@ -128,7 +128,7 @@ class TemplateRenderer:
             
         except Exception as e:
             logger.error(f"Template rendering failed: {e}")
-            raise TemplateRenderingError(f"Failed to render template: {e}")
+            raise TemplateRenderingError(f"Failed to render template: {e}") from e
     
     def _get_template_for_report_type(self, report_type: ReportType) -> str:
         """Get the appropriate template file for a report type."""
@@ -172,7 +172,7 @@ class TemplateRenderer:
                 logger.info("Using base template as fallback")
                 return template
             except jinja2.TemplateNotFound:
-                raise TemplateRenderingError("No templates found (including base.html.j2)")
+                raise TemplateRenderingError("No templates found (including base.html.j2)") from None
     
     def _build_template_context(self, report: Report) -> dict[str, Any]:
         """Build the context dictionary for template rendering."""

@@ -256,12 +256,11 @@ class KnowledgeGraphTool(BaseMCPTool):
         }
 
         # Path analysis
-        if self.graph.number_of_nodes() > 1:
-            if nx.is_connected(self.graph):
-                metrics["paths"] = {
-                    "diameter": nx.diameter(self.graph),
-                    "average_path_length": nx.average_shortest_path_length(self.graph),
-                }
+        if self.graph.number_of_nodes() > 1 and nx.is_connected(self.graph):
+            metrics["paths"] = {
+                "diameter": nx.diameter(self.graph),
+                "average_path_length": nx.average_shortest_path_length(self.graph),
+            }
 
         return {"success": True, "metrics": metrics}
 
@@ -299,7 +298,7 @@ class KnowledgeGraphTool(BaseMCPTool):
         edge_trace = go.Scatter(
             x=edge_x,
             y=edge_y,
-            line=dict(width=0.5, color="#888"),
+            line={"width": 0.5, "color": "#888"},
             hoverinfo="none",
             mode="lines",
         )
@@ -311,17 +310,17 @@ class KnowledgeGraphTool(BaseMCPTool):
             text=node_text,
             textposition="top center",
             hoverinfo="text",
-            marker=dict(
-                showscale=True,
-                colorscale="YlGnBu",
-                size=10,
-                colorbar=dict(
-                    thickness=15,
-                    title="Node Connections",
-                    xanchor="left",
-                    titleside="right",
-                ),
-            ),
+            marker={
+                "showscale": True,
+                "colorscale": "YlGnBu",
+                "size": 10,
+                "colorbar": {
+                    "thickness": 15,
+                    "title": "Node Connections",
+                    "xanchor": "left",
+                    "titleside": "right",
+                },
+            },
         )
 
         # Color nodes by degree
@@ -338,9 +337,9 @@ class KnowledgeGraphTool(BaseMCPTool):
                 title="Knowledge Graph Visualization",
                 showlegend=False,
                 hovermode="closest",
-                margin=dict(b=20, l=5, r=5, t=40),
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                margin={"b": 20, "l": 5, "r": 5, "t": 40},
+                xaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
+                yaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
             ),
         )
 

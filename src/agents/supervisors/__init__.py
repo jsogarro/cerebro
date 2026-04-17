@@ -16,14 +16,14 @@ Integration:
 - MASR: Intelligent routing and resource allocation
 """
 
-from .base_supervisor import BaseSupervisor
-from .research_supervisor import ResearchSupervisor
-from .content_supervisor import ContentSupervisor
 from .analytics_supervisor import AnalyticsSupervisor
+from .base_supervisor import BaseSupervisor
+from .content_supervisor import ContentSupervisor
+from .research_supervisor import ResearchSupervisor
 
 __all__ = [
-    "BaseSupervisor",
-    "ResearchSupervisor",
-    "ContentSupervisor",
     "AnalyticsSupervisor",
+    "BaseSupervisor",
+    "ContentSupervisor",
+    "ResearchSupervisor",
 ]

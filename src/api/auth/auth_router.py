@@ -246,7 +246,7 @@ async def refresh_tokens(
         logger.warning("Token refresh failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        ) from e
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -501,7 +501,7 @@ async def revoke_session(
             # Extract token ID from key and revoke
             key = session.get("key", "")
             if key.startswith("refresh:token:"):
-                jti = key.replace("refresh:token:", "")
+                _jti = key.replace("refresh:token:", "")
                 # Would need to revoke associated tokens
                 logger.info(
                     "Session revoked", user_id=str(current_user.id), device_id=device_id

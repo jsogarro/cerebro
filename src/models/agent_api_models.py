@@ -421,30 +421,27 @@ class AgentHealthStatus(BaseModel):
 
 
 __all__ = [
-    # Enums
-    "AgentType",
-    "ExecutionMode", 
     "AgentCapability",
-    
+    "AgentContribution",
+    "AgentError",
     # Request models
     "AgentExecutionRequest",
-    "ChainOfAgentsRequest",
-    "MixtureOfAgentsRequest",
-    "AgentValidationRequest",
-    
     # Response models
     "AgentExecutionResponse",
-    "ChainOfAgentsResponse", 
-    "MixtureOfAgentsResponse",
-    "AgentValidationResponse",
-    "AgentMetricsResponse",
-    "AgentListResponse",
+    "AgentHealthStatus",
     "AgentInfo",
-    
+    "AgentListResponse",
+    "AgentMetricsResponse",
+    # Enums
+    "AgentType",
+    "AgentValidationRequest",
+    "AgentValidationResponse",
+    "ChainOfAgentsRequest",
+    "ChainOfAgentsResponse",
+    "ChainStep",
+    "ExecutionMode",
     # Utility models
     "ExecutionProgress",
-    "AgentError",
-    "ChainStep",
-    "AgentContribution",
-    "AgentHealthStatus",
+    "MixtureOfAgentsRequest",
+    "MixtureOfAgentsResponse",
 ]

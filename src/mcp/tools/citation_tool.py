@@ -183,10 +183,7 @@ class CitationTool(BaseMCPTool):
         year = source.get("year", "")
 
         # Format authors
-        if authors:
-            author_str = ", ".join(authors)
-        else:
-            author_str = "Unknown"
+        author_str = ", ".join(authors) if authors else "Unknown"
 
         # Build citation
         citation = f'{author_str}. "{title}."'

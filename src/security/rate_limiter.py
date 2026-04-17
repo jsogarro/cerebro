@@ -462,7 +462,7 @@ class RateLimiter:
 
             for key in keys:
                 # Parse key to get endpoint and scope
-                key_parts = key.decode().split(":")
+                _key_parts = key.decode().split(":")
 
                 # Get current count/status based on key type
                 if "window" in key:
@@ -510,7 +510,7 @@ class RateLimiter:
         # For now, we'll just prepare the log entry
         ip_address = request.client.host if request.client else "unknown"
 
-        audit_entry = {
+        _audit_entry = {
             "event_type": AuditEventType.RATE_LIMIT_EXCEEDED,
             "severity": AuditSeverity.WARNING,
             "action": "rate_limit_check",

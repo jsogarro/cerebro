@@ -155,7 +155,7 @@ class OutputFormatter:
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress_bar:
-            task = progress_bar.add_task(
+            _task = progress_bar.add_task(
                 f"Research Progress: {progress.progress_percentage:.1f}%",
                 total=progress.total_tasks,
                 completed=progress.completed_tasks,

@@ -180,7 +180,7 @@ class APIPatternExperimentor:
         
         # Find applicable experiment
         experiment_config = None
-        for exp_id, config in self.active_experiments.items():
+        for _exp_id, config in self.active_experiments.items():
             if query_type in config.query_types:
                 experiment_config = config
                 break
@@ -417,7 +417,7 @@ class APIPatternExperimentor:
         total_cost = 0.0
         total_tokens = 0
 
-        for stage in stages:
+        for _stage in stages:
             # Simulate stage execution
             await asyncio.sleep(0.1)  # Simulate processing
             total_cost += 0.001
@@ -441,7 +441,7 @@ class APIPatternExperimentor:
         sequential_tasks = 2
         
         # Parallel phase
-        parallel_results = await asyncio.gather(*[
+        _parallel_results = await asyncio.gather(*[
             asyncio.sleep(0.05) for _ in range(parallel_tasks)
         ])
         
@@ -519,7 +519,7 @@ class APIPatternExperimentor:
                              result: APIExecutionResult,
                              experiment_id: str) -> None:
         """Report execution metrics to experiment manager."""
-        metrics = {
+        _metrics = {
             "latency_ms": result.latency_ms,
             "total_cost": result.cost,
             "quality_score": result.quality_score,
@@ -528,7 +528,7 @@ class APIPatternExperimentor:
             "error_rate": 0.0 if result.success else 1.0
         }
 
-        variant_id = f"{result.pattern.value}_{result.execution_mode.value}"
+        _variant_id = f"{result.pattern.value}_{result.execution_mode.value}"
 
         # Note: record_metrics may not exist on UnifiedExperimentManager
         # Commenting out until interface is verified

@@ -171,10 +171,8 @@ class UserRepository(BaseRepository[User]):
             user = await self.get_by_username(email_or_username)
 
         # Verify password
-        if user and user.verify_password(password):
-            # Check if account is active
-            if user.is_active:
-                return user
+        if user and user.verify_password(password) and user.is_active:
+            return user
 
         return None
 
@@ -243,21 +241,21 @@ class UserRepository(BaseRepository[User]):
 
         # Active users
         active_query = select(func.count(User.id)).where(
-            and_(User.deleted_at.is_(None), User.is_active == True)
+            and_(User.deleted_at.is_(None), User.is_active)
         )
         result = await self.session.execute(active_query)
         active = result.scalar() or 0
 
         # Verified users
         verified_query = select(func.count(User.id)).where(
-            and_(User.deleted_at.is_(None), User.is_verified == True)
+            and_(User.deleted_at.is_(None), User.is_verified)
         )
         result = await self.session.execute(verified_query)
         verified = result.scalar() or 0
 
         # Superusers
         super_query = select(func.count(User.id)).where(
-            and_(User.deleted_at.is_(None), User.is_superuser == True)
+            and_(User.deleted_at.is_(None), User.is_superuser)
         )
         result = await self.session.execute(super_query)
         superusers = result.scalar() or 0

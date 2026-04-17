@@ -106,7 +106,7 @@ def identify_ready_agents(state: ResearchState) -> list[AgentTaskState]:
         state.research_plan.get("dependencies", {}) if state.research_plan else {}
     )
 
-    for task_id, task in state.agent_tasks.items():
+    for _task_id, task in state.agent_tasks.items():
         # Skip if not pending
         if task.status != AgentExecutionStatus.PENDING:
             continue

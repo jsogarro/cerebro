@@ -274,7 +274,7 @@ def run_migration_command(args: list[str]) -> int:
     Returns:
         Exit code
     """
-    cmd = ["alembic"] + args
+    cmd = ["alembic", *args]
     logger.info(f"Running command: {' '.join(cmd)}")
 
     result = subprocess.run(cmd, capture_output=True, text=True)

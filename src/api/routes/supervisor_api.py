@@ -148,13 +148,13 @@ async def execute_supervisor_task(
         return response
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error executing supervisor task: {e}")
         raise HTTPException(
             status_code=500,
             detail="Internal error during supervisor execution"
-        )
+        ) from e
 
 
 @router.get("", response_model=SupervisorListResponse)
@@ -183,7 +183,7 @@ async def list_supervisors() -> SupervisorListResponse:
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor list"
-        )
+        ) from e
 
 
 @router.get("/{supervisor_type}", response_model=SupervisorInfo)
@@ -194,13 +194,13 @@ async def get_supervisor_info(supervisor_type: SupervisorType) -> SupervisorInfo
     try:
         return await supervisor_service.get_supervisor_info(supervisor_type.value)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error getting supervisor info: {e}")
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor information"
-        )
+        ) from e
 
 
 @router.get("/{supervisor_type}/workers", response_model=WorkerListResponse)
@@ -223,13 +223,13 @@ async def get_supervisor_workers(supervisor_type: SupervisorType) -> WorkerListR
         )
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error getting supervisor workers: {e}")
         raise HTTPException(
             status_code=500,
             detail="Error retrieving worker information"
-        )
+        ) from e
 
 
 @router.post("/{supervisor_type}/coordinate", response_model=WorkerCoordinationResponse)
@@ -263,13 +263,13 @@ async def coordinate_workers(
         return response
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error coordinating workers: {e}")
         raise HTTPException(
             status_code=500,
             detail="Error during worker coordination"
-        )
+        ) from e
 
 
 @router.post("/multi/orchestrate", response_model=MultiSupervisorOrchestrationResponse)
@@ -302,7 +302,7 @@ async def orchestrate_multi_supervisor(
         raise HTTPException(
             status_code=500,
             detail="Error during multi-supervisor orchestration"
-        )
+        ) from e
 
 
 @router.get("/{supervisor_type}/stats", response_model=SupervisorStatsResponse)
@@ -316,13 +316,13 @@ async def get_supervisor_stats(supervisor_type: SupervisorType) -> SupervisorSta
     try:
         return await supervisor_service.get_supervisor_stats(supervisor_type.value)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error getting supervisor stats: {e}")
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor statistics"
-        )
+        ) from e
 
 
 @router.get("/{supervisor_type}/health", response_model=SupervisorHealthResponse)
@@ -335,13 +335,13 @@ async def get_supervisor_health(supervisor_type: SupervisorType) -> SupervisorHe
     try:
         return await supervisor_service.get_supervisor_health(supervisor_type.value)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error getting supervisor health: {e}")
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor health status"
-        )
+        ) from e
 
 
 # Advanced Coordination Endpoints
@@ -363,7 +363,7 @@ async def optimize_worker_allocation(
         raise HTTPException(
             status_code=500,
             detail="Error during allocation optimization"
-        )
+        ) from e
 
 
 @router.post("/resolve-conflicts", response_model=ConflictResolutionResponse)
@@ -400,7 +400,7 @@ async def resolve_conflicts(
         raise HTTPException(
             status_code=500,
             detail="Error during conflict resolution"
-        )
+        ) from e
 
 
 @router.get("/performance/compare", response_model=SupervisorComparisonResponse)
@@ -424,7 +424,7 @@ async def compare_supervisor_performance(
         raise HTTPException(
             status_code=500,
             detail="Error during performance comparison"
-        )
+        ) from e
 
 
 @router.post("/experiment", response_model=ExperimentResponse)
@@ -456,7 +456,7 @@ async def run_coordination_experiment(
         raise HTTPException(
             status_code=500,
             detail="Error during coordination experiment"
-        )
+        ) from e
 
 
 # WebSocket Endpoints
@@ -524,9 +524,9 @@ async def supervisor_websocket(
         logger.error(f"WebSocket connection error: {e}")
     finally:
         connection_manager.disconnect(websocket, client_id)
-        if supervisor_type.value in connection_manager.supervisor_subscriptions:
-            if websocket in connection_manager.supervisor_subscriptions[supervisor_type.value]:
-                connection_manager.supervisor_subscriptions[supervisor_type.value].remove(websocket)
+        if (supervisor_type.value in connection_manager.supervisor_subscriptions and
+            websocket in connection_manager.supervisor_subscriptions[supervisor_type.value]):
+            connection_manager.supervisor_subscriptions[supervisor_type.value].remove(websocket)
 
 
 @router.websocket("/coordination/ws")

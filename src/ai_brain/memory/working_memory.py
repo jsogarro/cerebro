@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+from src.utils.async_helpers import BackgroundTaskTracker
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 try:
@@ -94,7 +95,7 @@ class WorkingMemoryManager:
             self._memory_fallback: dict[str, Any] = {}
 
         # Background tasks
-        self._background_tasks: set[asyncio.Task[None]] = set()
+        self._bg_tasks = BackgroundTaskTracker()
 
         # Performance tracking
         self.hit_count = 0
@@ -113,7 +114,7 @@ class WorkingMemoryManager:
                 logger.info("Working memory initialized with Redis")
 
                 # Start background cleanup
-                self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+                self._cleanup_task = self._bg_tasks.create_task(self._cleanup_loop())
 
             except Exception as e:
                 logger.error(f"Failed to connect to Redis: {e}")
@@ -194,9 +195,7 @@ class WorkingMemoryManager:
 
                 # Re-store with updated stats (async to avoid blocking)
                 if self.redis_client:
-                    task = asyncio.create_task(self._update_access_stats(key, item))
-                    self._background_tasks.add(task)
-                    task.add_done_callback(self._background_tasks.discard)
+                    self._bg_tasks.create_task(self._update_access_stats(key, item))
 
                 return item.value
             else:

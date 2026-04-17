@@ -305,7 +305,7 @@ class UnifiedExperimentManager:
         """Track that a user/session was assigned to a variant."""
         # This would integrate with the metrics collection system
         # For now, we'll just log it
-        assignment_event = {
+        _assignment_event = {
             'experiment_id': experiment_id,
             'variant_id': variant.id,
             'timestamp': datetime.utcnow().isoformat(),
@@ -320,7 +320,7 @@ class UnifiedExperimentManager:
                           value: float,
                           context: dict[str, Any] | None = None) -> None:
         """Track a metric value for an experiment variant."""
-        metric_event = {
+        _metric_event = {
             'experiment_id': experiment_id,
             'variant_id': variant_id,
             'metric_name': metric_name,

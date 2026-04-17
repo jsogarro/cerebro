@@ -11,16 +11,16 @@ Key Components:
 - ConsensusBuilder: Aggregation and validation of agent responses
 """
 
-from .talkhier_message import TalkHierMessage, MessageType, ConsensusRequirement
 from .communication_protocol import CommunicationProtocol, RefinementResult
 from .consensus_builder import ConsensusBuilder, ConsensusScore
+from .talkhier_message import ConsensusRequirement, MessageType, TalkHierMessage
 
 __all__ = [
-    "TalkHierMessage",
-    "MessageType",
-    "ConsensusRequirement",
     "CommunicationProtocol",
-    "RefinementResult",
     "ConsensusBuilder",
+    "ConsensusRequirement",
     "ConsensusScore",
+    "MessageType",
+    "RefinementResult",
+    "TalkHierMessage",
 ]

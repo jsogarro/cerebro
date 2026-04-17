@@ -6,6 +6,7 @@ Manages experiment lifecycle, coordination, and integration with existing system
 """
 
 import asyncio
+import contextlib
 import logging
 from collections import defaultdict
 from collections.abc import Callable
@@ -475,9 +476,7 @@ class SystemExperimentRegistry:
                 # Extract components from event data
                 component_names = event.data.get('components', [])
                 for name in component_names:
-                    try:
+                    with contextlib.suppress(ValueError):
                         components.add(SystemComponent(name))
-                    except ValueError:
-                        pass
         
         return components

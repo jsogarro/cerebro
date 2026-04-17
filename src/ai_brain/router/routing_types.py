@@ -7,7 +7,6 @@ Shared dataclasses and enums used across the routing system.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Any
 
 
 class CollaborationMode(Enum):
@@ -36,7 +35,7 @@ class AgentAllocation:
 
     supervisor_type: str
     worker_count: int = 1
-    worker_types: List[str] = field(default_factory=list)
+    worker_types: list[str] = field(default_factory=list)
     max_parallel: int = 5
     timeout_seconds: int = 300
     retry_attempts: int = 2
@@ -55,16 +54,16 @@ class RoutingMetrics:
     fallback_usage_rate: float = 0.0
 
     # Strategy effectiveness
-    strategy_performance: Dict[str, float] = field(default_factory=dict)
-    model_performance: Dict[str, float] = field(default_factory=dict)
+    strategy_performance: dict[str, float] = field(default_factory=dict)
+    model_performance: dict[str, float] = field(default_factory=dict)
 
     # Time-based metrics
     last_updated: datetime = field(default_factory=datetime.now)
 
 
 __all__ = [
-    "CollaborationMode",
-    "RoutingStrategy",
     "AgentAllocation",
+    "CollaborationMode",
     "RoutingMetrics",
+    "RoutingStrategy",
 ]

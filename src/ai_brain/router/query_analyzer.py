@@ -390,7 +390,7 @@ class QueryComplexityAnalyzer:
 
         # Context-based timing
         if context and context.get("deadline"):
-            deadline = context["deadline"]
+            _deadline = context["deadline"]
             # Would implement deadline parsing logic here
             time_sensitivity = max(time_sensitivity, 0.5)
 

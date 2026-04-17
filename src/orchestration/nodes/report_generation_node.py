@@ -590,7 +590,7 @@ def create_key_findings_section(results: dict[str, Any]) -> dict[str, Any]:
 
     # Get top findings from each category
     top_findings = []
-    for category, finding_list in findings.items():
+    for _category, finding_list in findings.items():
         for finding in finding_list[:2]:  # Top 2 from each category
             top_findings.append(finding.get("text", ""))
 

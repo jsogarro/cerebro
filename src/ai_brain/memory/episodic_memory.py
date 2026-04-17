@@ -416,9 +416,8 @@ class EpisodicMemoryManager:
             event_counts[event_type] = event_counts.get(event_type, 0) + 1
 
             # Success rate
-            if episode.success is not None:
-                if episode.success:
-                    successful_events += 1
+            if episode.success is not None and episode.success:
+                successful_events += 1
 
             # Quality scores
             if episode.quality_score is not None:

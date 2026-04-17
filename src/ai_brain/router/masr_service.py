@@ -187,7 +187,7 @@ class MASRService:
                         raise HTTPException(
                             status_code=400, 
                             detail=f"Invalid routing strategy: {request.strategy}"
-                        )
+                        ) from None
                 
                 # Get routing decision
                 routing_decision = await self.masr_router.route(
@@ -227,7 +227,7 @@ class MASRService:
             except Exception as e:
                 logger.error(f"Routing failed for query '{request.query[:100]}...': {e}")
                 self.service_stats["requests_failed"] = int(self.service_stats["requests_failed"]) + 1
-                raise HTTPException(status_code=500, detail=f"Routing failed: {e!s}")
+                raise HTTPException(status_code=500, detail=f"Routing failed: {e!s}") from e
         
         @self.app.get("/metrics")
         async def get_metrics() -> dict[str, Any]:

@@ -328,9 +328,9 @@ class AuditLog(BaseModel):
     ) -> bool:
         """Determine if event is suspicious."""
         # Failed login attempts
-        if event_type == AuditEventType.LOGIN_FAILED and result == "failure":
-            if metadata and metadata.get("attempt_count", 0) > 3:
-                return True
+        if (event_type == AuditEventType.LOGIN_FAILED and result == "failure" and
+            metadata and metadata.get("attempt_count", 0) > 3):
+            return True
 
         # Suspicious activity events are always suspicious
         if event_type in [
@@ -341,11 +341,8 @@ class AuditLog(BaseModel):
             return True
 
         # Multiple MFA failures
-        if event_type == AuditEventType.MFA_FAILED and result == "failure":
-            if metadata and metadata.get("attempt_count", 0) > 2:
-                return True
-
-        return False
+        return (event_type == AuditEventType.MFA_FAILED and result == "failure" and
+                metadata is not None and metadata.get("attempt_count", 0) > 2)
 
     @classmethod
     def get_user_events(
@@ -396,7 +393,7 @@ class AuditLog(BaseModel):
         if not session:
             return []
 
-        query = session.query(cls).filter(cls.is_suspicious == True)
+        query = session.query(cls).filter(cls.is_suspicious)
 
         if unreviewed_only:
             query = query.filter(cls.reviewed_at.is_(None))

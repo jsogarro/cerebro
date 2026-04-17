@@ -282,7 +282,7 @@ class JWTService:
             raise
         except Exception as e:
             logger.error("Unexpected error during token validation", error=str(e))
-            raise JWTError(f"Token validation failed: {e!s}")
+            raise JWTError(f"Token validation failed: {e!s}") from e
 
     async def refresh_tokens(
         self,

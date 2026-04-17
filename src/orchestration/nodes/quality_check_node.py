@@ -332,7 +332,7 @@ def check_coherence(
     # Check synthesis quality
     if coherence_criteria.get("synthesis_quality_check"):
         insights = results.get("insights", [])
-        recommendations = results.get("recommendations", [])
+        _recommendations = results.get("recommendations", [])
 
         # Check if insights are supported by evidence
         unsupported_insights = [i for i in insights if not i.get("supporting_evidence")]

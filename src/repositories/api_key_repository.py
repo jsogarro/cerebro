@@ -63,7 +63,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
         query = self.build_query().where(APIKey.user_id == user_id)
 
         if active_only:
-            query = query.where(APIKey.is_active == True)
+            query = query.where(APIKey.is_active)
 
         if not include_expired:
             query = query.where(
@@ -333,7 +333,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
 
         # Active keys
         active_query = select(func.count(APIKey.id)).where(
-            and_(APIKey.deleted_at.is_(None), APIKey.is_active == True)
+            and_(APIKey.deleted_at.is_(None), APIKey.is_active)
         )
         result = await self.session.execute(active_query)
         active = result.scalar() or 0

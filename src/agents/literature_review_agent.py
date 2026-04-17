@@ -174,10 +174,7 @@ class LiteratureReviewAgent(BaseAgent):
 
         # Research gaps should be identified
         gaps = output.get("research_gaps", [])
-        if not isinstance(gaps, list) or len(gaps) == 0:
-            return False
-
-        return True
+        return not (not isinstance(gaps, list) or len(gaps) == 0)
 
     def _rank_sources_by_relevance(
         self, sources: list[dict[str, Any]]
@@ -224,7 +221,7 @@ class LiteratureReviewAgent(BaseAgent):
             entities = knowledge_graph.get("entities", [])
             analysis["knowledge_graph_insights"] = {
                 "entities_identified": len(entities),
-                "entity_types": list(set(e.get("type", "unknown") for e in entities)),
+                "entity_types": list({e.get("type", "unknown") for e in entities}),
                 "research_coverage": self._assess_kg_coverage(entities, gaps),
             }
 

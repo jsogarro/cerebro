@@ -269,9 +269,9 @@ class CircuitBreaker:
             self._metrics.consecutive_successes += 1
             self._metrics.consecutive_failures = 0
 
-            if self._state == CircuitState.HALF_OPEN:
-                if self._metrics.consecutive_successes >= self.config.success_threshold:
-                    await self._transition_to(CircuitState.CLOSED)
+            if (self._state == CircuitState.HALF_OPEN and
+                self._metrics.consecutive_successes >= self.config.success_threshold):
+                await self._transition_to(CircuitState.CLOSED)
 
     async def _on_failure(self) -> None:
         """Handle failed call."""
@@ -450,7 +450,7 @@ class BulkheadExecutor:
 
                 except TimeoutError:
                     self._total_timeout += 1
-                    raise Exception(f"Bulkhead '{self.name}' execution timeout")
+                    raise Exception(f"Bulkhead '{self.name}' execution timeout") from None
                 finally:
                     self._active_tasks -= 1
         finally:

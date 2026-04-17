@@ -819,7 +819,7 @@ class SupervisorCoordinationService:
         
         # Analyze task requirements
         complexity = request.task_requirements.get("complexity", 0.5)
-        domains = request.task_requirements.get("domains", [])
+        _domains = request.task_requirements.get("domains", [])
         quality_target = request.task_requirements.get("quality_target", 0.8)
         
         # Determine optimal allocation based on optimization goal
@@ -1057,7 +1057,7 @@ class SupervisorCoordinationService:
                 start_time = time.time()
                 
                 # Create test request
-                test_request = SupervisorExecuteRequest(
+                _test_request = SupervisorExecuteRequest(
                     query=request.query,
                     supervision_strategy=strategy,
                     coordination_mode=CoordinationMode.HIERARCHICAL,

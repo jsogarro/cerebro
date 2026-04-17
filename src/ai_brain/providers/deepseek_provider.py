@@ -263,10 +263,7 @@ class DeepSeekProvider(BaseProvider):
             legacy_max_obj = self._legacy_model_specs.get(model_name, {}).get(
                 "max_output_tokens", 8000
             )
-            if isinstance(legacy_max_obj, int):
-                legacy_max = legacy_max_obj
-            else:
-                legacy_max = 8000
+            legacy_max = legacy_max_obj if isinstance(legacy_max_obj, int) else 8000
             max_tokens = min(request.max_tokens, legacy_max)
 
         # Build payload
@@ -462,10 +459,7 @@ class DeepSeekProvider(BaseProvider):
 
         # Check context window usage
         estimated_tokens = len((request.prompt or "").split()) * 1.3
-        if estimated_tokens > 200000:  # DeepSeek context limit
-            return False
-
-        return True
+        return estimated_tokens <= 200000  # DeepSeek context limit
 
     def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get DeepSeek model information."""

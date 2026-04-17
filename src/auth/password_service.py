@@ -68,7 +68,7 @@ class PasswordService:
         # HTTP client for breach checking
         self.http_client: httpx.AsyncClient | None = None
 
-    async def __aenter__(self) -> "PasswordService":
+    async def __aenter__(self) -> PasswordService:
         """Async context manager entry."""
         if self.check_breaches:
             self.http_client = httpx.AsyncClient(timeout=5.0)

@@ -492,18 +492,18 @@ class BayesianAnalyzer:
         
         try:
             # Create Bayesian model
-            with pm.Model() as model:
+            with pm.Model() as _model:
                 # Priors
                 mu_control = pm.Normal("mu_control", mu=np.mean(control_data), sigma=prior_std)
                 mu_treatment = pm.Normal("mu_treatment", mu=np.mean(treatment_data), sigma=prior_std)
                 sigma = pm.HalfNormal("sigma", sigma=1.0)
                 
                 # Likelihood
-                control_obs = pm.Normal("control_obs", mu=mu_control, sigma=sigma, observed=control_data)
-                treatment_obs = pm.Normal("treatment_obs", mu=mu_treatment, sigma=sigma, observed=treatment_data)
+                _control_obs = pm.Normal("control_obs", mu=mu_control, sigma=sigma, observed=control_data)
+                _treatment_obs = pm.Normal("treatment_obs", mu=mu_treatment, sigma=sigma, observed=treatment_data)
                 
                 # Difference (effect size)
-                diff = pm.Deterministic("diff", mu_treatment - mu_control)
+                _diff = pm.Deterministic("diff", mu_treatment - mu_control)
                 
                 # Sample posterior
                 trace = pm.sample(2000, tune=1000, return_inferencedata=True, progressbar=False)
@@ -684,7 +684,7 @@ class MultiBanditOptimizer:
             selected_arm=selected_arm,
             expected_reward=expected_reward,
             confidence=confidence,
-            arm_probabilities=[a/(a+b) for a, b in zip(self.alpha_params, self.beta_params)],
+            arm_probabilities=[a/(a+b) for a, b in zip(self.alpha_params, self.beta_params, strict=False)],
             arm_rewards=self.arm_values.copy(),
             arm_counts=self.arm_counts.copy(),
             regret=self._calculate_regret(),
@@ -761,7 +761,7 @@ class MultiBanditOptimizer:
         best_arm_value = max(self.arm_values)
         total_regret = 0.0
         
-        for arm_idx, rewards in enumerate(self.arm_rewards):
+        for _arm_idx, rewards in enumerate(self.arm_rewards):
             arm_regret = sum(best_arm_value - reward for reward in rewards)
             total_regret += arm_regret
         
@@ -857,7 +857,7 @@ class EnhancedStatisticalEngine:
             adjusted_p_values = correction_func(p_values)
             
             # Update results with adjusted p-values
-            for i, (comparison_name, result) in enumerate(results.items()):
+            for i, (_comparison_name, result) in enumerate(results.items()):
                 result.adjusted_p_value = adjusted_p_values[i]
                 result.correction_method = multiple_comparison
                 result.is_significant = adjusted_p_values[i] < result.significance_level
@@ -900,7 +900,7 @@ class EnhancedStatisticalEngine:
         try:
             if self.bayesian:
                 # Use Bayesian analysis for early stopping
-                control_data = list(experiment_data.values())[0]
+                control_data = next(iter(experiment_data.values()))
                 treatment_data = list(experiment_data.values())[1]
                 
                 result = await self.bayesian.analyze_bayesian_ab_test(control_data, treatment_data)

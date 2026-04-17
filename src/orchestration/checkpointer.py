@@ -56,7 +56,7 @@ class MemoryCheckpointStorage(CheckpointStorage):
 
     async def list_checkpoints(self, workflow_id: str) -> list[str]:
         """List checkpoints for workflow."""
-        return [cid for cid in self.checkpoints.keys() if cid.startswith(workflow_id)]
+        return [cid for cid in self.checkpoints if cid.startswith(workflow_id)]
 
     async def delete(self, checkpoint_id: str) -> bool:
         """Delete checkpoint from memory."""

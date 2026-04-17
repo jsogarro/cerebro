@@ -302,7 +302,7 @@ class BaseSupervisor(BaseAgent, ABC):
 
             # Ensure at least one worker
             if not required_workers and self.worker_definitions:
-                required_workers = [list(self.worker_definitions.keys())[0]]
+                required_workers = [next(iter(self.worker_definitions.keys()))]
 
             return required_workers
 

@@ -39,7 +39,7 @@ def parse_markdown_sections(text: str) -> dict[str, str]:
                 sections[current_section] = "\n".join(current_content).strip()
 
             # Start new section
-            level = len(header_match.group(1))
+            _level = len(header_match.group(1))
             current_section = header_match.group(2).strip()
             current_content = []
         elif stripped_line:  # Only add non-empty lines

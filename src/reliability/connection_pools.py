@@ -219,7 +219,7 @@ class DatabasePoolManager:
         if not self._pool:
             raise RuntimeError("Database pool not initialized")
 
-        start_time = time.time()
+        _start_time = time.time()
         self._metrics.total_requests += 1
 
         try:
@@ -439,7 +439,7 @@ class RedisPoolManager:
             await client.ping()
 
             # Get pool stats
-            pool_conn_kwargs = self._pool.connection_kwargs if self._pool else {}
+            _pool_conn_kwargs = self._pool.connection_kwargs if self._pool else {}
             info = await client.info()
 
             self._metrics.total_connections = info.get("connected_clients", 0)
@@ -658,7 +658,7 @@ class TemporalPoolManager:
         """
         try:
             # Check if we can connect to Temporal
-            client = await self.get_workflow_client()
+            _client = await self.get_workflow_client()
             # Would normally check client health here
             self._status = PoolStatus.HEALTHY
         except Exception as e:

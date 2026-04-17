@@ -252,13 +252,13 @@ class CrossDomainSynthesizer:
                 if isinstance(quality_weights, dict):
                     quality_weights[supervisor] = weight
 
-                if result.agent_result and result.agent_result.output:
-                    if isinstance(weighted_results, dict):
-                        weighted_results[supervisor] = {
-                            "output": result.agent_result.output,
-                            "weight": weight,
-                            "quality_score": result.quality_score,
-                        }
+                if (result.agent_result and result.agent_result.output and
+                    isinstance(weighted_results, dict)):
+                    weighted_results[supervisor] = {
+                        "output": result.agent_result.output,
+                        "weight": weight,
+                        "quality_score": result.quality_score,
+                    }
 
             # Calculate overall weighted score
             if isinstance(quality_weights, dict):

@@ -389,10 +389,7 @@ class DatabaseManager:
         Args:
             table_name: Specific table or None for all
         """
-        if table_name:
-            query = f"VACUUM ANALYZE {table_name}"
-        else:
-            query = "VACUUM ANALYZE"
+        query = f"VACUUM ANALYZE {table_name}" if table_name else "VACUUM ANALYZE"
 
         async with self.engine.begin() as conn:
             await conn.execute(text(query))

@@ -247,9 +247,8 @@ class ResearchGraphBuilder:
                 if edge.condition:
                     # Add with condition
                     def conditional_target(state: ResearchState) -> str:
-                        if edge.condition and edge.condition(state):
-                            if isinstance(edge.target, str):
-                                return edge.target
+                        if edge.condition and edge.condition(state) and isinstance(edge.target, str):
+                            return edge.target
                         return END
 
                     self._graph.add_conditional_edges(edge.source, conditional_target)
@@ -262,7 +261,7 @@ class ResearchGraphBuilder:
             self._graph.set_entry_point("initialization")
         elif self.nodes:
             # Use first node as entry point
-            first_node = list(self.nodes.keys())[0]
+            first_node = next(iter(self.nodes.keys()))
             self._graph.set_entry_point(first_node)
 
         logger.info(
@@ -397,7 +396,7 @@ class ResearchGraphBuilder:
             "conditional_edges": sum(
                 1 for edge in self.edges if callable(edge.target) or edge.condition
             ),
-            "phases_covered": len(set(node.phase for node in self.nodes.values())),
+            "phases_covered": len({node.phase for node in self.nodes.values()}),
         }
 
 

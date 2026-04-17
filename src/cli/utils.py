@@ -20,7 +20,7 @@ def validate_uuid(ctx: Any, param: Any, value: Any) -> UUID | None:
     try:
         return UUID(value)
     except ValueError:
-        raise click.BadParameter(f"Invalid UUID: {value}")
+        raise click.BadParameter(f"Invalid UUID: {value}") from None
 
 
 def validate_domains(domains_str: str) -> list[str]:
@@ -40,7 +40,7 @@ def validate_domains(domains_str: str) -> list[str]:
 
 def prompt_for_project_details() -> dict[str, Any]:
     """Interactive prompt for project details."""
-    console = click.get_current_context().obj.get("console")
+    _console = click.get_current_context().obj.get("console")
 
     title = Prompt.ask("Project title")
     if not title:

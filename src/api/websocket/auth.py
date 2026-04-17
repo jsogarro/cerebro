@@ -74,14 +74,14 @@ async def verify_websocket_token(token: str | None) -> str | None:
             "WebSocket JWT authentication failed",
             error=str(e),
         )
-        raise WebSocketAuthError("Invalid authentication token")
+        raise WebSocketAuthError("Invalid authentication token") from e
 
     except Exception as e:
         logger.error(
             "WebSocket authentication error",
             error=str(e),
         )
-        raise WebSocketAuthError("Authentication failed")
+        raise WebSocketAuthError("Authentication failed") from e
 
 
 async def verify_project_access(user_id: str | None, project_id: str) -> bool:

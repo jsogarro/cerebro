@@ -234,12 +234,11 @@ class ServiceRegistry:
             instance_id: Instance ID
         """
         # Remove from memory
-        if service_name in self._services:
-            if instance_id in self._services[service_name]:
-                del self._services[service_name][instance_id]
+        if service_name in self._services and instance_id in self._services[service_name]:
+            del self._services[service_name][instance_id]
 
-                if not self._services[service_name]:
-                    del self._services[service_name]
+            if not self._services[service_name]:
+                del self._services[service_name]
 
         # Remove from Redis
         if self._redis_client:
@@ -676,15 +675,14 @@ class LoadBalancer:
             i for i in instances if i.metadata.instance_id not in self._failed_instances
         ]
 
-        if not available:
+        if not available and instances:
             # If all failed, try to recover one
-            if instances:
-                # Reset the least recently failed
-                instance_id = next(iter(self._failed_instances))
-                self._failed_instances.remove(instance_id)
-                self._failure_counts[instance_id] = 0
-                logger.info(f"Attempting to recover failed instance: {instance_id}")
-                available = instances[:1]
+            # Reset the least recently failed
+            instance_id = next(iter(self._failed_instances))
+            self._failed_instances.remove(instance_id)
+            self._failure_counts[instance_id] = 0
+            logger.info(f"Attempting to recover failed instance: {instance_id}")
+            available = instances[:1]
 
         return available[0] if available else None
 

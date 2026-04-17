@@ -333,7 +333,7 @@ class ModelConfigManager:
                 provider: len(models)
                 for provider, models in {
                     name: config.get_models_for_provider(name)
-                    for name in config.providers.keys()
+                    for name in config.providers
                 }.items()
             },
         }
@@ -439,8 +439,8 @@ class ModelConfigManager:
         """Reload configurations from files."""
 
         try:
-            old_config = self._current_config
-            new_config = await self.load_configuration()
+            _old_config = self._current_config
+            _new_config = await self.load_configuration()
 
             self.reload_count += 1
             logger.info("Configuration hot-reloaded successfully")

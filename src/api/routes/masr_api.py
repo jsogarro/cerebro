@@ -5,24 +5,25 @@ REST API endpoints for MASR routing intelligence, following
 "MasRouter: Learning to Route LLMs" research patterns.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
-from typing import Dict, Any
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, status
 
 from src.api.services.masr_routing_service import MASRRoutingService
 from src.models.masr_api_models import (
-    RoutingRequest,
-    CostEstimationRequest,
-    StrategyEvaluationRequest,
     ComplexityAnalysisRequest,
-    RoutingFeedback,
-    RoutingDecisionResponse,
-    CostEstimationResponse,
-    StrategyEvaluationResponse,
     ComplexityAnalysisResponse,
-    StrategiesListResponse,
+    CostEstimationRequest,
+    CostEstimationResponse,
+    MASRErrorResponse,
     ModelsListResponse,
     RouterStatus,
-    MASRErrorResponse
+    RoutingDecisionResponse,
+    RoutingFeedback,
+    RoutingRequest,
+    StrategiesListResponse,
+    StrategyEvaluationRequest,
+    StrategyEvaluationResponse,
 )
 
 # Create router with prefix and tags
@@ -77,7 +78,7 @@ async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionRespon
                 details={"request": request.dict()},
                 suggestions=["Check query format", "Verify strategy is valid"]
             ).dict()
-        )
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -87,7 +88,7 @@ async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionRespon
                 details={"error": str(e)},
                 suggestions=["Retry request", "Contact support if issue persists"]
             ).dict()
-        )
+        ) from e
 
 
 @router.post(
@@ -122,7 +123,7 @@ async def estimate_cost(request: CostEstimationRequest) -> CostEstimationRespons
                 details={"error": str(e)},
                 suggestions=["Try simpler query", "Check strategy selection"]
             ).dict()
-        )
+        ) from e
 
 
 @router.post(
@@ -158,7 +159,7 @@ async def evaluate_strategies(
                 details={"error": str(e)},
                 suggestions=["Reduce number of strategies", "Simplify query"]
             ).dict()
-        )
+        ) from e
 
 
 @router.post(
@@ -194,7 +195,7 @@ async def analyze_complexity(
                 details={"error": str(e)},
                 suggestions=["Simplify query", "Break into sub-queries"]
             ).dict()
-        )
+        ) from e
 
 
 @router.get(
@@ -225,7 +226,7 @@ async def get_strategies() -> StrategiesListResponse:
                 details={"error": str(e)},
                 suggestions=["Retry request"]
             ).dict()
-        )
+        ) from e
 
 
 @router.get(
@@ -256,19 +257,19 @@ async def get_models() -> ModelsListResponse:
                 details={"error": str(e)},
                 suggestions=["Retry request"]
             ).dict()
-        )
+        ) from e
 
 
 @router.post(
     "/feedback",
-    response_model=Dict[str, Any],
+    response_model=dict[str, Any],
     summary="Submit routing feedback",
     description=(
         "Submit feedback on routing decision performance. "
         "Used for continuous learning and optimization."
     )
 )
-async def submit_feedback(feedback: RoutingFeedback) -> Dict[str, Any]:
+async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
     """
     Submit feedback for routing learning.
     
@@ -290,7 +291,7 @@ async def submit_feedback(feedback: RoutingFeedback) -> Dict[str, Any]:
                 details={"feedback": feedback.dict()},
                 suggestions=["Verify routing_id exists", "Check feedback format"]
             ).dict()
-        )
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -300,7 +301,7 @@ async def submit_feedback(feedback: RoutingFeedback) -> Dict[str, Any]:
                 details={"error": str(e)},
                 suggestions=["Retry submission"]
             ).dict()
-        )
+        ) from e
 
 
 @router.get(
@@ -335,7 +336,7 @@ async def get_status() -> RouterStatus:
                 details={"error": str(e)},
                 suggestions=["Check service health"]
             ).dict()
-        )
+        ) from e
 
 
 # WebSocket endpoint for real-time routing updates (future enhancement)

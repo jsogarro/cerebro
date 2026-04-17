@@ -513,10 +513,7 @@ class BaseProvider(ABC):
         if request.max_tokens <= 0:
             return False
 
-        if request.temperature < 0 or request.temperature > 2:
-            return False
-
-        return True
+        return not (request.temperature < 0 or request.temperature > 2)
 
     def get_metrics(self) -> dict[str, Any]:
         """Get provider performance metrics."""

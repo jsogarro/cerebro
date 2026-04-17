@@ -130,7 +130,7 @@ class HealthChecker:
             )
 
             # Run simple query
-            result = await conn.fetchval("SELECT 1")
+            _result = await conn.fetchval("SELECT 1")
 
             # Check connection pool stats
             pool_info = {
@@ -439,7 +439,7 @@ class HealthChecker:
 
         # Check all components
         check_tasks = []
-        for name, check_func in self.health_checks.items():
+        for _name, check_func in self.health_checks.items():
             check_tasks.append(check_func())
 
         results = await asyncio.gather(*check_tasks, return_exceptions=True)
@@ -481,7 +481,7 @@ class HealthChecker:
 
         # Check all components
         check_tasks = []
-        for name, check_func in {
+        for _name, check_func in {
             **self.health_checks,
             **self.dependency_checks,
         }.items():

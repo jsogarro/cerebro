@@ -102,7 +102,7 @@ class DOCXExporter:
             
         except Exception as e:
             logger.error(f"DOCX export failed: {e}")
-            raise DOCXExportError(f"Failed to generate DOCX: {e}")
+            raise DOCXExportError(f"Failed to generate DOCX: {e}") from e
     
     def _setup_document_styles(self, doc: DocxDocument) -> None:
         """Set up custom document styles."""

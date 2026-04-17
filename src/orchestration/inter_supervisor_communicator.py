@@ -8,13 +8,13 @@ message history for cross-supervisor collaboration.
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from ..agents.communication.talkhier_message import (
-    TalkHierMessage,
-    TalkHierContent,
-    MessageType,
     HierarchyMetadata,
+    MessageType,
+    TalkHierContent,
+    TalkHierMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,16 +23,16 @@ logger = logging.getLogger(__name__)
 class InterSupervisorCommunicator:
     """Manages communication between supervisors."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize inter-supervisor communicator."""
         self.config = config or {}
 
         # Communication tracking
-        self.message_history: List[TalkHierMessage] = []
-        self.active_conversations: Dict[str, List[TalkHierMessage]] = {}
+        self.message_history: list[TalkHierMessage] = []
+        self.active_conversations: dict[str, list[TalkHierMessage]] = {}
 
     async def coordinate_supervisor_handoff(
-        self, from_supervisor: str, to_supervisor: str, handoff_data: Dict[str, Any]
+        self, from_supervisor: str, to_supervisor: str, handoff_data: dict[str, Any]
     ) -> bool:
         """Coordinate data handoff between supervisors."""
 
@@ -72,8 +72,8 @@ class InterSupervisorCommunicator:
             return False
 
     async def broadcast_coordination_message(
-        self, supervisors: List[str], coordination_data: Dict[str, Any]
-    ) -> List[TalkHierMessage]:
+        self, supervisors: list[str], coordination_data: dict[str, Any]
+    ) -> list[TalkHierMessage]:
         """Broadcast coordination message to multiple supervisors."""
 
         messages = []

@@ -185,11 +185,7 @@ class PasswordHistory(BaseModel):
         )
 
         # Check if password matches any recent password
-        for entry in recent_passwords:
-            if entry.verify_password(password):
-                return True
-
-        return False
+        return any(entry.verify_password(password) for entry in recent_passwords)
 
     @classmethod
     def get_last_change(cls, user_id: str, session: Session | None = None) -> PasswordHistory | None:

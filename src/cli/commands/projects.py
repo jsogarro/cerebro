@@ -96,7 +96,7 @@ def create_project(
 
             except APIError as e:
                 print_error(f"Failed to create project: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     async def _create_projects() -> None:
         """Create projects based on input."""
@@ -180,7 +180,7 @@ def get_project(ctx: Context, project_id: UUID) -> None:
                     print_error(f"Project not found: {project_id}")
                 else:
                     print_error(f"Failed to fetch project: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_get_project())
 
@@ -226,7 +226,7 @@ def list_projects(
 
             except APIError as e:
                 print_error(f"Failed to list projects: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_list_projects())
 
@@ -268,7 +268,7 @@ def get_progress(ctx: Context, project_id: UUID, watch: bool, stream: bool, inte
                     print_error(f"Project not found: {project_id}")
                 else:
                     print_error(f"Failed to fetch progress: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     async def _stream_progress() -> None:
         """Stream progress via WebSocket."""
@@ -364,10 +364,9 @@ def cancel_project(ctx: Context, project_id: UUID, force: bool) -> None:
     """Cancel a research project."""
     verbose = ctx.obj["verbose"]
 
-    if not force:
-        if not click.confirm(f"Are you sure you want to cancel project {project_id}?"):
-            print_info("Cancelled")
-            return
+    if not force and not click.confirm(f"Are you sure you want to cancel project {project_id}?"):
+        print_info("Cancelled")
+        return
 
     async def _cancel_project() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:
@@ -382,7 +381,7 @@ def cancel_project(ctx: Context, project_id: UUID, force: bool) -> None:
                     print_error(f"Project not found: {project_id}")
                 else:
                     print_error(f"Failed to cancel project: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_cancel_project())
 
@@ -420,7 +419,7 @@ def get_results(ctx: Context, project_id: UUID, output: str | None) -> None:
                     print_error(f"Results not found for project: {project_id}")
                 else:
                     print_error(f"Failed to fetch results: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_get_results())
 
@@ -468,6 +467,6 @@ def refine_scope(
 
             except APIError as e:
                 print_error(f"Failed to refine scope: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_refine_scope())

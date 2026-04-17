@@ -190,7 +190,7 @@ class ToolRegistry:
         tags = set()
         for metadata in self._metadata.values():
             tags.update(metadata.tags)
-        return sorted(list(tags))
+        return sorted(tags)
 
     def clear(self) -> None:
         """Clear all registered tools."""

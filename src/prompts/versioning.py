@@ -302,7 +302,7 @@ class PromptVersionManager:
             return None
 
         # Find champion version
-        for version, template in self.versions[template_name].items():
+        for version, _template in self.versions[template_name].items():
             version_key = f"{template_name}:{version}"
             if self.version_status.get(version_key) == VersionStatus.CHAMPION:
                 return version
@@ -317,7 +317,7 @@ class PromptVersionManager:
         """Get version to use based on A/B test configuration."""
 
         # Check if template is in active A/B test
-        for test_name, test_config in self.active_ab_tests.items():
+        for _test_name, test_config in self.active_ab_tests.items():
             if template_name in test_config.test_name:
                 # Random assignment based on traffic split
                 import random
@@ -338,13 +338,12 @@ class PromptVersionManager:
 
         # Find relevant A/B tests
         for test_name, test_config in self.active_ab_tests.items():
-            if template_name in test_config.test_name:
-                # Check if this version is part of the test
-                if version in [
+            if (template_name in test_config.test_name and
+                version in [
                     test_config.champion_version,
                     test_config.challenger_version,
-                ]:
-                    await self._evaluate_ab_test_progress(test_name, test_config)
+                ]):
+                await self._evaluate_ab_test_progress(test_name, test_config)
 
     async def _evaluate_ab_test_progress(
         self, test_name: str, test_config: ABTestConfig
@@ -485,7 +484,7 @@ class PromptVersionManager:
         for status in VersionStatus:
             status_counts[status.value] = 0
 
-        for version_key, status in self.version_status.items():
+        for _version_key, status in self.version_status.items():
             status_counts[status.value] += 1
 
         stats["version_breakdown"] = status_counts

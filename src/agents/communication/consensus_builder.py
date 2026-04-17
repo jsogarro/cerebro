@@ -348,7 +348,7 @@ class ConsensusBuilder:
         # Simple keyword-based agreement detection
         # In production, this would use more sophisticated NLP
 
-        all_contents = [r.content.lower() for r in responses]
+        _all_contents = [r.content.lower() for r in responses]
 
         # Find common keywords/phrases
         agreement_areas = []
@@ -395,7 +395,7 @@ class ConsensusBuilder:
 
         similarities = []
         for i, response1 in enumerate(responses):
-            for j, response2 in enumerate(responses[i + 1 :], i + 1):
+            for _j, response2 in enumerate(responses[i + 1 :], i + 1):
                 # Simple word overlap similarity
                 words1 = set(response1.content.lower().split())
                 words2 = set(response2.content.lower().split())
@@ -459,7 +459,7 @@ class ConsensusBuilder:
             return 0.0
 
         # Consensus based on similar evidence quality levels
-        mean_evidence = statistics.mean(evidence_scores)
+        _mean_evidence = statistics.mean(evidence_scores)
         variance_evidence = (
             statistics.variance(evidence_scores) if len(evidence_scores) > 1 else 0.0
         )

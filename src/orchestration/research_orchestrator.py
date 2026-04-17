@@ -560,14 +560,13 @@ class ResearchOrchestrator:
             if task.status == AgentExecutionStatus.PENDING
         ]
 
-        if pending_ready:
+        if pending_ready and state.research_plan is not None:
             # Check dependencies
-            if state.research_plan is not None:
-                dependencies = state.research_plan.get("dependencies", {})
-                for task in pending_ready:
-                    deps = dependencies.get(task.agent_type, [])
-                    if all(dep in state.completed_agents for dep in deps):
-                        return "more_agents"
+            dependencies = state.research_plan.get("dependencies", {})
+            for task in pending_ready:
+                deps = dependencies.get(task.agent_type, [])
+                if all(dep in state.completed_agents for dep in deps):
+                    return "more_agents"
 
         # All agents executed or blocked
         if state.completed_agents:

@@ -382,7 +382,7 @@ class OAuthAccount(BaseModel):
         )
 
         if active_only:
-            query = query.filter(cls.is_active == True)
+            query = query.filter(cls.is_active)
 
         result: OAuthAccount | None = query.first()
         return result

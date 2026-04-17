@@ -138,7 +138,7 @@ class PromptCache:
         """Invalidate cache entries."""
         with self._lock:
             if pattern:
-                keys_to_remove = [k for k in self._cache.keys() if pattern in k]
+                keys_to_remove = [k for k in self._cache if pattern in k]
                 for key in keys_to_remove:
                     self._cache.pop(key, None)
                     self._timestamps.pop(key, None)
@@ -503,13 +503,13 @@ class PromptManager:
 
         # Try role-based matching
         if role:
-            for name, template in self._templates.items():
+            for _name, template in self._templates.items():
                 if template.metadata.role == role:
                     return template
 
         # Try domain-based matching
         if domain:
-            for name, template in self._templates.items():
+            for _name, template in self._templates.items():
                 if template.metadata.domain == domain:
                     return template
 
@@ -787,7 +787,7 @@ class PromptManager:
         try:
             # Clear current templates
             with self._lock:
-                old_templates = self._templates.copy()
+                _old_templates = self._templates.copy()
                 self._templates.clear()
                 self._collections.clear()
 

@@ -80,13 +80,13 @@ class EdgeConditions:
         parallel_agents = []
 
         # After literature review, we can run multiple agents
-        if state.current_phase == WorkflowPhase.LITERATURE_REVIEW:
-            if "literature_review" in state.completed_agents:
-                # These agents can run in parallel after literature review
-                if "comparative_analysis" not in state.completed_agents:
-                    parallel_agents.append("comparative_analysis")
-                if "methodology" not in state.completed_agents:
-                    parallel_agents.append("methodology")
+        if (state.current_phase == WorkflowPhase.LITERATURE_REVIEW and
+            "literature_review" in state.completed_agents):
+            # These agents can run in parallel after literature review
+            if "comparative_analysis" not in state.completed_agents:
+                parallel_agents.append("comparative_analysis")
+            if "methodology" not in state.completed_agents:
+                parallel_agents.append("methodology")
 
         return parallel_agents
 
@@ -126,7 +126,7 @@ class EdgeConditions:
             Action to take for failed agent
         """
         # Check retry count for failed agents
-        for task_id, task in state.agent_tasks.items():
+        for _task_id, task in state.agent_tasks.items():
             if task.status == AgentExecutionStatus.FAILED:
                 if task.retry_count < 3:
                     return "retry"

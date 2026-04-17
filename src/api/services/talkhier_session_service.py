@@ -689,7 +689,7 @@ class TalkHierSessionService:
         )
 
         domains = routing_decision.complexity_analysis.domains
-        domain = domains[0].value if domains else "research"
+        domain = domains[0].value if domains and hasattr(domains[0], "value") else "research"
         allocation = routing_decision.agent_allocation
 
         config = SupervisorConfiguration(

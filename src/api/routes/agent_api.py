@@ -60,9 +60,9 @@ async def list_agents(
         response = AgentListResponse(
             agents=agents,
             total_agents=len(agents),
-            total_capabilities=len(set(cap for agent in agents for cap in agent.capabilities)),
-            supported_domains=list(set(domain for agent in agents for domain in agent.optimal_domains)),
-            supported_execution_modes=[mode for mode in ExecutionMode],
+            total_capabilities=len({cap for agent in agents for cap in agent.capabilities}),
+            supported_domains=list({domain for agent in agents for domain in agent.optimal_domains}),
+            supported_execution_modes=list(ExecutionMode),
             system_health=system_health,
             total_system_executions=sum(
                 metrics["total_executions"] 
@@ -78,7 +78,7 @@ async def list_agents(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve agent list"
-        )
+        ) from e
 
 
 @router.get("/{agent_type}", response_model=AgentInfo)
@@ -109,7 +109,7 @@ async def get_agent_info(agent_type: AgentType) -> AgentInfo:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve agent information"
-        )
+        ) from e
 
 
 @router.post("/{agent_type}/execute", response_model=AgentExecutionResponse)
@@ -148,7 +148,7 @@ async def execute_agent(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Agent execution failed: {e!s}"
-        )
+        ) from e
 
 
 @router.post("/chain", response_model=ChainOfAgentsResponse)
@@ -186,7 +186,7 @@ async def execute_chain_of_agents(request: ChainOfAgentsRequest) -> ChainOfAgent
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chain execution failed: {e!s}"
-        )
+        ) from e
 
 
 @router.post("/mixture", response_model=MixtureOfAgentsResponse)
@@ -224,7 +224,7 @@ async def execute_mixture_of_agents(request: MixtureOfAgentsRequest) -> MixtureO
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Mixture execution failed: {e!s}"
-        )
+        ) from e
 
 
 @router.post("/{agent_type}/validate", response_model=AgentValidationResponse)
@@ -281,7 +281,7 @@ async def validate_agent_input(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Validation failed"
-        )
+        ) from e
 
 
 @router.get("/{agent_type}/metrics", response_model=AgentMetricsResponse)
@@ -305,7 +305,7 @@ async def get_agent_metrics(agent_type: AgentType) -> AgentMetricsResponse:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve agent metrics"
-        )
+        ) from e
 
 
 @router.get("/{agent_type}/health", response_model=AgentHealthStatus)
@@ -329,7 +329,7 @@ async def get_agent_health(agent_type: AgentType) -> AgentHealthStatus:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve agent health"
-        )
+        ) from e
 
 
 @router.get("/system/stats")
@@ -351,7 +351,7 @@ async def get_system_stats() -> dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve system statistics"
-        )
+        ) from e
 
 
 @router.get("/executions/active")
@@ -388,7 +388,7 @@ async def get_active_executions() -> dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve active executions"
-        )
+        ) from e
 
 
 # Agent-specific optimized endpoints
@@ -576,7 +576,7 @@ async def get_agents_health_summary() -> dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve health summary"
-        )
+        ) from e
 
 
 # Performance analysis endpoints
@@ -643,7 +643,7 @@ async def compare_agent_performance(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Performance comparison failed"
-        )
+        ) from e
 
 
 __all__ = ["router"]

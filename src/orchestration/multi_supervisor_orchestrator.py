@@ -362,7 +362,7 @@ class MultiSupervisorOrchestrator:
                 "success": False,
                 "supervisor_results": supervisor_results,
                 "coordination_mode": coordination_mode.value,
-                "errors": execution_errors + [str(e)],
+                "errors": [*execution_errors, str(e)],
             }
     
     async def _execute_parallel_supervision(
@@ -374,7 +374,7 @@ class MultiSupervisorOrchestrator:
 
         allocation = multi_state.supervisor_allocation
         assert allocation is not None
-        all_supervisors = [allocation.primary_supervisor] + allocation.supporting_supervisors
+        all_supervisors = [allocation.primary_supervisor, *allocation.supporting_supervisors]
         
         # Create tasks for all supervisors
         supervisor_tasks = {}
@@ -398,7 +398,7 @@ class MultiSupervisorOrchestrator:
         
         # Process results
         supervisor_results = {}
-        for i, (supervisor_type, result) in enumerate(zip(supervisor_tasks.keys(), results)):
+        for _i, (supervisor_type, result) in enumerate(zip(supervisor_tasks.keys(), results, strict=False)):
             if isinstance(result, Exception):
                 logger.error(f"Supervisor {supervisor_type} failed: {result}")
                 # Create failed result
@@ -428,7 +428,7 @@ class MultiSupervisorOrchestrator:
         if allocation is None:
             return {}
 
-        all_supervisors = [allocation.primary_supervisor] + allocation.supporting_supervisors
+        all_supervisors = [allocation.primary_supervisor, *allocation.supporting_supervisors]
 
         supervisor_results: dict[str, SupervisorExecutionResult] = {}
         accumulated_context: dict[str, Any] = {}
@@ -475,7 +475,7 @@ class MultiSupervisorOrchestrator:
 
         # Build execution order based on dependencies
         execution_order = self._build_execution_order(
-            [allocation.primary_supervisor] + allocation.supporting_supervisors,
+            [allocation.primary_supervisor, *allocation.supporting_supervisors],
             dependencies
         )
 
@@ -536,7 +536,7 @@ class MultiSupervisorOrchestrator:
                 return_exceptions=True
             )
             
-            for i, (supervisor_type, result) in enumerate(zip(supporting_tasks.keys(), results)):
+            for _i, (supervisor_type, result) in enumerate(zip(supporting_tasks.keys(), results, strict=False)):
                 if not isinstance(result, Exception) and isinstance(result, SupervisorExecutionResult):
                     supporting_results[supervisor_type] = result
         

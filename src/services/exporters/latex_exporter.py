@@ -108,7 +108,7 @@ class LaTeXExporter:
                 
         except Exception as e:
             logger.error(f"LaTeX export failed: {e}")
-            raise LaTeXExportError(f"Failed to generate LaTeX: {e}")
+            raise LaTeXExportError(f"Failed to generate LaTeX: {e}") from e
     
     def _generate_latex_document(
         self,
@@ -543,7 +543,7 @@ class LaTeXExporter:
                         raise LaTeXExportError(f"pdflatex failed: {result.stderr}")
                         
                 except subprocess.TimeoutExpired:
-                    raise LaTeXExportError("pdflatex compilation timed out")
+                    raise LaTeXExportError("pdflatex compilation timed out") from None
             
             # Read generated PDF
             pdf_file = os.path.join(temp_dir, "document.pdf")

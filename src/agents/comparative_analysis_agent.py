@@ -228,10 +228,7 @@ class ComparativeAnalysisAgent(BaseAgent):
 
         # Validate items compared
         items = output.get("items_compared", [])
-        if not isinstance(items, list) or len(items) < 2:
-            return False
-
-        return True
+        return not (not isinstance(items, list) or len(items) < 2)
 
     def _normalize_comparison_matrix(
         self, matrix: dict[str, dict[str, float]]
@@ -988,7 +985,7 @@ class ComparativeAnalysisAgent(BaseAgent):
                 "entities_identified": len(entities),
                 "relationships_found": len(relationships),
                 "relationship_types": list(
-                    set(r.get("type", "unknown") for r in relationships)
+                    {r.get("type", "unknown") for r in relationships}
                 ),
             }
 

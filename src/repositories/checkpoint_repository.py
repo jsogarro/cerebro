@@ -141,7 +141,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             .where(
                 and_(
                     WorkflowCheckpoint.project_id == project_id,
-                    WorkflowCheckpoint.is_recoverable == True,
+                    WorkflowCheckpoint.is_recoverable,
                 )
             )
             .order_by(WorkflowCheckpoint.created_at.desc())
@@ -339,7 +339,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         recoverable_query = select(func.count(WorkflowCheckpoint.id)).where(
             and_(
                 WorkflowCheckpoint.deleted_at.is_(None),
-                WorkflowCheckpoint.is_recoverable == True,
+                WorkflowCheckpoint.is_recoverable,
             )
         )
 

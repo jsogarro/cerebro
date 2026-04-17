@@ -175,7 +175,7 @@ class WorkflowMetadata:
 
     def with_node_execution(self, node_name: str) -> "WorkflowMetadata":
         """Update metadata after node execution."""
-        new_path = self.execution_path + [node_name]
+        new_path = [*self.execution_path, node_name]
         return WorkflowMetadata(
             workflow_id=self.workflow_id,
             started_at=self.started_at,

@@ -360,10 +360,7 @@ class GeminiProvider(BaseProvider):
 
         # Check context window usage
         estimated_tokens = len((request.prompt or "").split()) * 1.3
-        if estimated_tokens > 100000:  # Gemini context limit
-            return False
-
-        return True
+        return estimated_tokens <= 100000  # Gemini context limit
 
     def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get Gemini model information."""

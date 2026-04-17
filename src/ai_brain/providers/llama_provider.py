@@ -532,10 +532,7 @@ class LlamaProvider(BaseProvider):
 
         # Check context window usage
         estimated_tokens = len((request.prompt or "").split()) * 1.3
-        if estimated_tokens > 128000:  # Llama context limit
-            return False
-
-        return True
+        return estimated_tokens <= 128000  # Llama context limit
 
     def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get Llama model information."""

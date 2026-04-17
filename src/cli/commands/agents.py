@@ -53,7 +53,7 @@ def query_command(ctx: Context, query_text: str, domains: tuple[str, ...], type:
 
             except APIError as e:
                 print_error(f"Query failed: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_query())
 
@@ -96,7 +96,7 @@ def route_command(ctx: Context, query_text: str, strategy: str) -> None:
 
             except APIError as e:
                 print_error(f"Routing failed: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_route())
 
@@ -134,7 +134,7 @@ def estimate_command(ctx: Context, query_text: str, domains: tuple[str, ...]) ->
 
             except APIError as e:
                 print_error(f"Estimation failed: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_estimate())
 
@@ -166,7 +166,7 @@ def execute_command(ctx: Context, agent_type: str, query_text: str, max_sources:
 
             except APIError as e:
                 print_error(f"Agent execution failed: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_execute())
 
@@ -194,7 +194,7 @@ def chain_command(ctx: Context, query_text: str, agents: tuple[str, ...]) -> Non
 
             except APIError as e:
                 print_error(f"Chain execution failed: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_chain())
 
@@ -226,6 +226,6 @@ def status_command(ctx: Context) -> None:
 
             except APIError as e:
                 print_error(f"Status check failed: {e.detail}")
-                raise Exit(1)
+                raise Exit(1) from e
 
     asyncio.run(_status())

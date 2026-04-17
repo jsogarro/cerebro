@@ -230,7 +230,7 @@ class BayesianExperimentDesigner:
                 results = [await self._evaluate_async(obj_func, next_points[0])]
             
             # Update observations
-            for point, value in zip(next_points, results):
+            for point, value in zip(next_points, results, strict=False):
                 self.X_observed.append(point)
                 self.y_observed.append(value)
                 self.optimization_history.append({
@@ -274,7 +274,7 @@ class BayesianExperimentDesigner:
         for _ in range(n_points):
             # Sample from priors
             point_list = []
-            for name, prior in self.parameter_priors.items():
+            for _name, prior in self.parameter_priors.items():
                 value = prior.sample(1)[0]
                 point_list.append(value)
 
@@ -291,7 +291,7 @@ class BayesianExperimentDesigner:
             points: list[np.ndarray] = []
             for _ in range(n_points):
                 point_list = []
-                for name, prior in self.parameter_priors.items():
+                for _name, prior in self.parameter_priors.items():
                     value = prior.sample(1)[0]
                     point_list.append(value)
                 points.append(np.array(point_list))
@@ -309,7 +309,7 @@ class BayesianExperimentDesigner:
         """Optimize acquisition function to get next point."""
         # Define bounds for optimization
         bounds = []
-        for name, prior in self.parameter_priors.items():
+        for _name, prior in self.parameter_priors.items():
             bounds.append(prior.bounds)
 
         # Multiple random starts for optimization
@@ -319,7 +319,7 @@ class BayesianExperimentDesigner:
         for _ in range(10):
             # Random starting point
             x0_list = []
-            for name, prior in self.parameter_priors.items():
+            for _name, prior in self.parameter_priors.items():
                 value = prior.sample(1)[0]
                 x0_list.append(value)
             x0 = np.array(x0_list)
@@ -414,7 +414,7 @@ class BayesianExperimentDesigner:
 
         # Create grid for sampling
         bounds = []
-        for name, prior in self.parameter_priors.items():
+        for _name, prior in self.parameter_priors.items():
             bounds.append(prior.bounds)
 
         # Sample from posterior
@@ -451,7 +451,7 @@ class BayesianExperimentDesigner:
             Dictionary with posterior samples and diagnostics
         """
         # Build PyMC model
-        with model_builder(data, self.parameter_priors) as model:
+        with model_builder(data, self.parameter_priors) as _model:
             # Sample from posterior
             trace = pm.sample(
                 n_samples,
@@ -480,7 +480,7 @@ class BayesianExperimentDesigner:
         
         # Find best parameters (MAP estimate)
         posterior_means = {}
-        for param in self.parameter_priors.keys():
+        for param in self.parameter_priors:
             if param in trace.posterior:
                 posterior_means[param] = float(
                     trace.posterior[param].mean().values
@@ -502,7 +502,7 @@ class BayesianExperimentDesigner:
         for params, value in new_observations:
             # Convert dict to array
             point_list = []
-            for name in self.parameter_priors.keys():
+            for name in self.parameter_priors:
                 point_list.append(params[name])
 
             self.X_observed.append(np.array(point_list))
@@ -534,7 +534,7 @@ class BayesianExperimentDesigner:
         # Compute confidence intervals from GP predictions
         intervals = {}
         for i, name in enumerate(self.parameter_priors.keys()):
-            values = [x[i] for x in self.X_observed]
+            _values = [x[i] for x in self.X_observed]
             
             # Use GP to predict over parameter range
             param_range = np.linspace(
@@ -556,7 +556,7 @@ class BayesianExperimentDesigner:
             # Compute confidence interval
             z_score = norm.ppf((1 + confidence_level) / 2)
             lower = mu - z_score * sigma
-            upper = mu + z_score * sigma
+            _upper = mu + z_score * sigma
             
             # Find parameter values at confidence bounds
             best_idx = np.argmax(mu)

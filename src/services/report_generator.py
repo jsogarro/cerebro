@@ -75,7 +75,7 @@ class ReportGenerator:
             os.makedirs(self.settings.report_storage_path, exist_ok=True)
         except OSError as e:
             logger.error(f"Failed to create storage directory: {e}")
-            raise ReportGenerationError(f"Storage setup failed: {e}")
+            raise ReportGenerationError(f"Storage setup failed: {e}") from e
     
     async def generate_report(
         self,
@@ -568,7 +568,7 @@ class ReportGenerator:
         
         # Get top findings from each category
         top_findings = []
-        for category, finding_list in findings.items():
+        for _category, finding_list in findings.items():
             for finding in finding_list[:2]:  # Top 2 from each category
                 if isinstance(finding, dict):
                     top_findings.append(finding.get("text", ""))
@@ -757,7 +757,7 @@ class ReportGenerator:
             tasks = [self._generate_single_format(report, fmt) for fmt in formats]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for fmt, result in zip(formats, results):
+            for fmt, result in zip(formats, results, strict=False):
                 if isinstance(result, Exception):
                     logger.error(f"Failed to generate {fmt}: {result}")
                 elif isinstance(result, ReportOutput):
@@ -777,7 +777,7 @@ class ReportGenerator:
         self, report: Report, format: ReportFormat
     ) -> ReportOutput:
         """Generate report output in a single format."""
-        format_config = self.format_config.get_format_config(format)
+        _format_config = self.format_config.get_format_config(format)
         
         if format == ReportFormat.HTML:
             return await self._generate_html(report)
@@ -863,7 +863,7 @@ class ReportGenerator:
     async def _generate_pdf(self, report: Report) -> ReportOutput:
         """Generate PDF report output (placeholder - will be implemented with WeasyPrint)."""
         # For now, generate HTML and convert to PDF
-        html_output = await self._generate_html(report)
+        _html_output = await self._generate_html(report)
         
         # This will be replaced with actual PDF generation
         pdf_content = f"PDF version of: {report.title}".encode()

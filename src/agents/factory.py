@@ -100,7 +100,7 @@ class AgentFactory:
         config = config or {}
         agents = []
 
-        for agent_type in cls._agent_registry.keys():
+        for agent_type in cls._agent_registry:
             try:
                 agent = cls.create_agent(agent_type, config)
                 agents.append(agent)

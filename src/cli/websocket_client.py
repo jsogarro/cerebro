@@ -174,8 +174,8 @@ class CLIWebSocketClient:
         print_info(f"🔗 Streaming updates for project {project_id} (Ctrl+C to stop)")
 
         # Initialize progress tracking
-        progress = Progress()
-        progress_task: TaskID | None = None
+        _progress = Progress()
+        _progress_task: TaskID | None = None
 
         try:
             with Live(console=self.console, refresh_per_second=2) as live:

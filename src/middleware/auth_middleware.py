@@ -163,7 +163,7 @@ async def get_current_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
 
 async def get_current_user(
@@ -407,10 +407,7 @@ class RateLimitMiddleware:
         if current_user:
             identifier = f"user:{current_user.id}"
             # Use user-specific limits if configured
-            if current_user.api_rate_limit:
-                limit = current_user.api_rate_limit
-            else:
-                limit = self.requests_per_hour
+            limit = current_user.api_rate_limit or self.requests_per_hour
         else:
             # Use IP address for anonymous users
             client_ip = request.client.host if request.client else "unknown"

@@ -7,6 +7,7 @@ across multiple server instances.
 """
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 from uuid import UUID
@@ -72,10 +73,8 @@ class EventPublisher:
         # Cancel subscription task
         if self.subscription_task:
             self.subscription_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self.subscription_task
-            except asyncio.CancelledError:
-                pass
 
         if self.redis_client:
             await self.redis_client.close()

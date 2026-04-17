@@ -6,6 +6,7 @@ and system activities with async database persistence.
 """
 
 import asyncio
+import contextlib
 import threading
 from datetime import datetime, timedelta
 from typing import Any
@@ -91,10 +92,8 @@ class AuditLogger:
         """Stop the audit logger and flush remaining logs."""
         if self.flush_task:
             self.flush_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self.flush_task
-            except asyncio.CancelledError:
-                pass
 
         # Final flush
         await self.flush_buffer()
@@ -250,7 +249,7 @@ class AuditLogger:
             log_entry: Audit log entry
         """
         event_type = log_entry.get("event_type")
-        severity = log_entry.get("severity")
+        _severity = log_entry.get("severity")
         user_id = log_entry.get("user_id")
 
         # Check for immediate alert conditions

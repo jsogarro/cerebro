@@ -533,10 +533,10 @@ def get_direct_execution_service() -> DirectExecutionService:
 
 __all__ = [
     "DirectExecutionService",
-    "ExecutionStatus", 
-    "get_direct_execution_service",
+    "ExecutionStatus",
+    "aggregate_results",
     # Legacy compatibility exports
     "create_research_plan",
-    "execute_agent_task", 
-    "aggregate_results",
+    "execute_agent_task",
+    "get_direct_execution_service",
 ]

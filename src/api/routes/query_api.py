@@ -201,7 +201,7 @@ async def intelligent_research_query(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Query execution failed: {e!s}"
-        )
+        ) from e
 
 
 @router.post("/analyze", response_model=IntelligentQueryResponse)
@@ -244,7 +244,7 @@ async def intelligent_analysis_query(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Analysis query failed: {e!s}"
-        )
+        ) from e
 
 
 @router.post("/synthesize", response_model=IntelligentQueryResponse)
@@ -286,7 +286,7 @@ async def intelligent_synthesis_query(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Synthesis query failed: {e!s}"
-        )
+        ) from e
 
 
 @router.get("/execution/{execution_id}/status")
@@ -327,7 +327,7 @@ async def get_execution_status(execution_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve execution status"
-        )
+        ) from e
 
 
 @router.get("/execution/{execution_id}/results")
@@ -353,7 +353,7 @@ async def get_execution_results(execution_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve execution results"
-        )
+        ) from e
 
 
 # Convenience endpoints that route through MASR
@@ -560,7 +560,7 @@ async def get_routing_recommendation(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate routing recommendation"
-        )
+        ) from e
 
 
 __all__ = ["router"]
