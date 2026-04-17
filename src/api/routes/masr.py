@@ -175,28 +175,31 @@ async def get_routing_decision(
         constraints=constraints
     )
     
-    # Format response
+    # Format response - map from RoutingDecision dataclass attributes
+    # Build allocated_agents from worker_types
+    allocated_agents = [
+        {
+            "type": worker_type,
+            "model": decision.optimization_result.primary_model.name,
+            "tier": decision.optimization_result.primary_model.tier.value,
+            "estimated_tokens": decision.complexity_analysis.estimated_tokens // max(decision.agent_allocation.worker_count, 1)
+        }
+        for worker_type in decision.agent_allocation.worker_types
+    ]
+
     return RoutingResponse(
-        routing_id=decision.routing_id,
-        query_complexity=decision.query_complexity,
-        query_domain=decision.query_domain,
-        selected_strategy=decision.selected_strategy,
-        supervisor_type=decision.supervisor_type,
-        allocated_agents=[
-            {
-                "type": agent.agent_type,
-                "model": agent.model,
-                "tier": agent.tier.value,
-                "estimated_tokens": agent.estimated_tokens
-            }
-            for agent in decision.allocated_agents
-        ],
+        routing_id=decision.query_id,
+        query_complexity=decision.complexity_analysis.level,
+        query_domain=decision.complexity_analysis.domains[0] if decision.complexity_analysis.domains else QueryDomain.GENERAL,
+        selected_strategy=request.strategy_override or RoutingStrategy.BALANCED,
+        supervisor_type=decision.agent_allocation.supervisor_type,
+        allocated_agents=allocated_agents,
         collaboration_mode=decision.collaboration_mode,
-        model_recommendations=decision.model_recommendations,
-        estimated_cost_usd=decision.estimated_cost_usd,
+        model_recommendations=dict.fromkeys(decision.agent_allocation.worker_types, decision.optimization_result.primary_model.name),
+        estimated_cost_usd=decision.estimated_cost,
         estimated_latency_ms=decision.estimated_latency_ms,
         confidence_score=decision.confidence_score,
-        reasoning=decision.reasoning
+        reasoning=decision.optimization_result.reasoning
     )
 
 
@@ -264,20 +267,17 @@ async def evaluate_strategies(
     based on cost, quality, and latency trade-offs.
     """
     masr = get_masr_router()
-    
-    # Analyze query
-    complexity = masr._analyze_query_complexity(request.query)
-    domain = masr._determine_domain(request.query)
-    
-    # Evaluate strategies
+
+    # Get base routing decision to extract complexity and domain
+    base_decision = await masr.route(query=request.query)
+    complexity = base_decision.complexity_analysis.level
+    domain = base_decision.complexity_analysis.domains[0] if base_decision.complexity_analysis.domains else QueryDomain.GENERAL
+
+    # Evaluate strategies by routing with each
     strategy_scores = {}
     for strategy in RoutingStrategy:
-        cost = masr.cost_optimizer.calculate_cost(
-            complexity,
-            domain,
-            strategy,
-            masr._get_domain_worker_types(domain)
-        )
+        decision = await masr.route(query=request.query, strategy=strategy)
+        cost = decision.estimated_cost
         
         # Calculate quality and latency scores (simplified)
         if strategy == RoutingStrategy.QUALITY_FOCUSED:
@@ -331,10 +331,11 @@ async def analyze_complexity(
     routing decisions and cost optimization.
     """
     masr = get_masr_router()
-    
-    # Analyze query
-    complexity = masr._analyze_query_complexity(request.query)
-    domain = masr._determine_domain(request.query)
+
+    # Analyze query through routing
+    decision = await masr.route(query=request.query)
+    complexity = decision.complexity_analysis.level
+    domain = decision.complexity_analysis.domains[0] if decision.complexity_analysis.domains else QueryDomain.GENERAL
     
     # Extract features
     features = {

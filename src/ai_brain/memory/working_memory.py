@@ -25,8 +25,8 @@ try:
     from redis.asyncio import Redis as RedisType
     REDIS_AVAILABLE = True
 except ImportError:
-    redis_module = None
-    RedisType = type(None)
+    redis_module = None  # type: ignore[assignment]
+    RedisType = type(None)  # type: ignore[assignment, misc]
     REDIS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)

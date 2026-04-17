@@ -6,6 +6,7 @@ to various clients including web browsers and CLI tools.
 """
 
 import asyncio
+from typing import Any
 from uuid import UUID
 
 import orjson
@@ -379,7 +380,7 @@ async def cli_websocket_endpoint(
 
 # Health endpoint for WebSocket service
 @router.get("/ws/health")
-async def websocket_health() -> dict[str, str | dict[str, int]]:
+async def websocket_health() -> dict[str, Any]:
     """Get WebSocket service health and statistics."""
     stats = websocket_manager.get_stats()
 

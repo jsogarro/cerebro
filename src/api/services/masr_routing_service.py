@@ -18,6 +18,11 @@ from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.learning.supervision_feedback import SupervisionFeedbackLearner
 from src.ai_brain.router.hierarchical_cost_model import HierarchicalCostOptimizer
 from src.ai_brain.router.masr import MASRouter, RoutingDecision
+from src.ai_brain.router.query_analyzer import (
+    ComplexityAnalysis,
+    ComplexityLevel,
+    QueryDomain,
+)
 from src.models.masr_api_models import (
     AvailableStrategy,
     ComplexityAnalysisRequest,
@@ -212,8 +217,8 @@ class MASRRoutingService:
             breakdown=breakdown,
             confidence_score=decision.confidence_score,
             cost_factors={
-                "query_complexity": complexity_value,
-                "model_tier": model_tier_map.get(model_tier, 2.0),
+                "query_complexity": float(complexity_value) if isinstance(complexity_value, (int, float)) else 0.5,
+                "model_tier": float(model_tier_map.get(model_tier, 2.0)),
                 "supervisor_count": 1.0,
                 "total_workers": float(worker_count),
                 "refinement_rounds": 1.0
@@ -430,12 +435,12 @@ class MASRRoutingService:
     async def get_available_models(self) -> ModelsListResponse:
         """
         Get list of available models and tiers.
-        
+
         Returns:
             ModelsListResponse with model information
         """
         models = []
-        tiers = {}
+        tiers: dict[str, list[str]] = {}
         
         # Get model configurations from settings
         model_configs = self._get_model_configurations()
@@ -534,10 +539,10 @@ class MASRRoutingService:
             performance_metrics={
                 strategy: {
                     "requests": int(metrics["total_requests"]),
-                    "success_rate": metrics["success_rate"],
-                    "avg_cost": metrics["average_cost"],
-                    "avg_latency_ms": metrics["average_latency_ms"],
-                    "avg_quality": metrics["average_quality"]
+                    "success_rate": float(metrics["success_rate"]),
+                    "avg_cost": float(metrics["average_cost"]),
+                    "avg_latency_ms": float(metrics["average_latency_ms"]),
+                    "avg_quality": float(metrics["average_quality"])
                 }
                 for strategy, metrics in self.performance_metrics.items()
             },
@@ -651,7 +656,7 @@ class MASRRoutingService:
     
     def _get_model_configurations(self) -> list[dict[str, Any]]:
         """Get model configurations"""
-        return [
+        configs: list[dict[str, Any]] = [
             {
                 "provider": "deepseek",
                 "model_id": "deepseek-v3",
@@ -683,6 +688,7 @@ class MASRRoutingService:
                 "quality_score": 0.90
             }
         ]
+        return configs
     
     def _generate_cost_recommendations(
         self,
@@ -697,7 +703,6 @@ class MASRRoutingService:
             )
 
         complexity = decision.complexity_analysis.level if hasattr(decision.complexity_analysis, 'level') else None
-        from src.ai_brain.router.query_analyzer import ComplexityLevel
         if complexity == ComplexityLevel.SIMPLE:
             recommendations.append(
                 "Simple queries can use budget tier models effectively"
@@ -714,7 +719,7 @@ class MASRRoutingService:
     def _estimate_quality(
         self,
         strategy: RoutingStrategy,
-        analysis: QueryAnalysis
+        analysis: ComplexityAnalysis
     ) -> float:
         """Estimate quality for a strategy"""
         base_quality = {
@@ -723,11 +728,11 @@ class MASRRoutingService:
             RoutingStrategy.BALANCED: 0.85,
             RoutingStrategy.SPEED_OPTIMIZED: 0.80
         }.get(strategy, 0.85)
-        
+
         # Adjust for complexity
-        if analysis.complexity == QueryComplexity.COMPLEX:
+        if hasattr(analysis, 'level') and analysis.level == ComplexityLevel.COMPLEX:
             base_quality *= 0.9
-        
+
         return min(base_quality, 1.0)
     
     def _get_strategy_pros(self, strategy: RoutingStrategy) -> list[str]:
@@ -868,12 +873,11 @@ class MASRRoutingService:
     def _calculate_complexity_score(self, analysis: Any) -> float:
         """Calculate normalized complexity score"""
         if hasattr(analysis, 'score'):
-            return analysis.score
+            return float(analysis.score)
         return 0.5
     
     def _estimate_reasoning_depth(self, analysis: Any) -> int:
         """Estimate reasoning depth required"""
-        from src.ai_brain.router.query_analyzer import ComplexityLevel
         if hasattr(analysis, 'level'):
             level = analysis.level
             if level == ComplexityLevel.SIMPLE:
@@ -882,8 +886,6 @@ class MASRRoutingService:
                 return 2
             elif level == ComplexityLevel.COMPLEX:
                 return 3
-            else:
-                return 4
         return 2
     
     def _identify_data_requirements(self, query: str) -> list[str]:
@@ -907,7 +909,6 @@ class MASRRoutingService:
     
     def _identify_coordination_needs(self, analysis: Any) -> str:
         """Identify coordination requirements"""
-        from src.ai_brain.router.query_analyzer import ComplexityLevel
         if hasattr(analysis, 'level'):
             level = analysis.level
             if level == ComplexityLevel.SIMPLE:
@@ -922,7 +923,6 @@ class MASRRoutingService:
     
     def _recommend_approach(self, analysis: Any) -> str:
         """Recommend execution approach based on analysis"""
-        from src.ai_brain.router.query_analyzer import ComplexityLevel
         if hasattr(analysis, 'level'):
             level = analysis.level
             if level == ComplexityLevel.SIMPLE:
@@ -942,7 +942,6 @@ class MASRRoutingService:
         """Generate routing recommendations based on analysis"""
         recommendations = []
 
-        from src.ai_brain.router.query_analyzer import ComplexityLevel, QueryDomain
 
         # Complexity-based recommendations
         if hasattr(analysis, 'level'):
@@ -950,7 +949,7 @@ class MASRRoutingService:
             if level == ComplexityLevel.SIMPLE:
                 recommendations.append("Use speed-optimized routing for quick response")
                 recommendations.append("Single supervisor allocation is sufficient")
-            elif level in [ComplexityLevel.COMPLEX, ComplexityLevel.VERY_COMPLEX]:
+            elif level == ComplexityLevel.COMPLEX:
                 recommendations.append("Consider quality-focused strategy for best results")
                 recommendations.append("Multiple refinement rounds recommended")
 

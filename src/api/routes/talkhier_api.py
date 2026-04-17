@@ -8,31 +8,43 @@ The API provides structured dialogue management, multi-round refinement,
 consensus building, and real-time communication capabilities.
 """
 
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect, Query, Path
-from fastapi.responses import JSONResponse
-
-from src.models.talkhier_api_models import (
-    TalkHierSessionRequest, TalkHierSessionResponse,
-    RefinementRoundRequest, RefinementRoundResponse,
-    ConsensusCheckRequest, ConsensusResult,
-    SessionCloseRequest, SessionCloseResponse,
-    SessionStatusResponse, ProtocolListResponse,
-    ProtocolValidationRequest, ValidationResponse,
-    AnalyticsResponse, ProtocolType,
-    InteractiveMessage, InteractiveCommand,
-    CoordinationRequest, CoordinationStatus,
-    TalkHierWebSocketEvent, RoundStartedEvent,
-    MessageExchangeEvent, ConsensusUpdateEvent,
-    QualityUpdateEvent, SessionCompletedEvent
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Path,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
 )
-from src.api.services.talkhier_session_service import TalkHierSessionService
+
 from src.api.services.talkhier_session_manager import TalkHierSessionManager
-from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
+from src.api.services.talkhier_session_service import TalkHierSessionService
 from src.api.websocket.connection_manager import ConnectionManager
+from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
+from src.models.talkhier_api_models import (
+    AnalyticsResponse,
+    ConsensusCheckRequest,
+    ConsensusResult,
+    CoordinationRequest,
+    CoordinationStatus,
+    InteractiveCommand,
+    InteractiveMessage,
+    ProtocolListResponse,
+    ProtocolType,
+    ProtocolValidationRequest,
+    RefinementRoundRequest,
+    RefinementRoundResponse,
+    SessionCloseRequest,
+    SessionCloseResponse,
+    SessionStatusResponse,
+    TalkHierSessionRequest,
+    TalkHierSessionResponse,
+    ValidationResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +130,7 @@ async def create_refinement_session(
         return session_response
         
     except Exception as e:
-        logger.error(f"Failed to create TalkHier session: {str(e)}")
+        logger.error(f"Failed to create TalkHier session: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -159,7 +171,7 @@ async def get_session_status(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to get session status: {str(e)}")
+        logger.error(f"Failed to get session status: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -238,7 +250,7 @@ async def execute_refinement_round(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to execute refinement round: {str(e)}")
+        logger.error(f"Failed to execute refinement round: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -302,14 +314,14 @@ async def check_consensus_status(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to check consensus: {str(e)}")
+        logger.error(f"Failed to check consensus: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/sessions/{session_id}/close", response_model=SessionCloseResponse)
 async def close_session(
     session_id: str,
-    request: SessionCloseRequest = SessionCloseRequest()
+    request: SessionCloseRequest = SessionCloseRequest(reason=None, save_transcript=True, generate_summary=True)
 ) -> SessionCloseResponse:
     """
     Close a TalkHier session
@@ -349,9 +361,11 @@ async def close_session(
             session_id,
             close_response
         )
-        
-        # Close WebSocket connections
-        await connection_manager.disconnect_session(session_id)
+
+        # Close WebSocket connections for all clients in this session
+        if session_id in websocket_handler.session_connections:
+            for connection_id in list(websocket_handler.session_connections[session_id]):
+                await connection_manager.disconnect(connection_id)
         
         # Log analytics
         await _log_session_analytics(
@@ -370,7 +384,7 @@ async def close_session(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to close session: {str(e)}")
+        logger.error(f"Failed to close session: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -484,7 +498,7 @@ async def validate_communication_structure(
         return validation_response
         
     except Exception as e:
-        logger.error(f"Protocol validation failed: {str(e)}")
+        logger.error(f"Protocol validation failed: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -494,9 +508,9 @@ async def validate_communication_structure(
 
 @router.get("/analytics", response_model=AnalyticsResponse)
 async def get_protocol_analytics(
-    time_range: Optional[str] = Query("24h", description="Time range (1h, 24h, 7d, 30d)"),
-    protocol_type: Optional[ProtocolType] = Query(None, description="Filter by protocol type"),
-    min_quality: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum quality filter")
+    time_range: str | None = Query("24h", description="Time range (1h, 24h, 7d, 30d)"),
+    protocol_type: ProtocolType | None = Query(None, description="Filter by protocol type"),
+    min_quality: float | None = Query(None, ge=0.0, le=1.0, description="Minimum quality filter")
 ) -> AnalyticsResponse:
     """
     Get TalkHier protocol performance analytics
@@ -521,7 +535,7 @@ async def get_protocol_analytics(
     try:
         # Get analytics from session manager
         analytics = await session_manager.get_analytics(
-            time_range=time_range,
+            time_range=time_range or "24h",
             protocol_type=protocol_type,
             min_quality=min_quality
         )
@@ -536,7 +550,7 @@ async def get_protocol_analytics(
         return AnalyticsResponse(**analytics)
         
     except Exception as e:
-        logger.error(f"Failed to get analytics: {str(e)}")
+        logger.error(f"Failed to get analytics: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -568,9 +582,8 @@ async def websocket_session_updates(
         };
         ```
     """
-    await connection_manager.connect(websocket)
-    connection_id = connection_manager.get_connection_id(websocket)
-    
+    connection_id = await connection_manager.connect(websocket)
+
     try:
         # Register connection for session
         await websocket_handler.register_session_connection(
@@ -612,9 +625,9 @@ async def websocket_session_updates(
             session_id,
             connection_id
         )
-        connection_manager.disconnect(websocket)
+        await connection_manager.disconnect(connection_id)
     except Exception as e:
-        logger.error(f"WebSocket error for session {session_id}: {str(e)}")
+        logger.error(f"WebSocket error for session {session_id}: {e!s}")
         await websocket.close(code=1011, reason=str(e))
 
 
@@ -645,9 +658,8 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
         }));
         ```
     """
-    await connection_manager.connect(websocket)
-    connection_id = connection_manager.get_connection_id(websocket)
-    session_id = None
+    connection_id = await connection_manager.connect(websocket)
+    session_id: str | None = None
     
     try:
         # Wait for session initialization
@@ -688,20 +700,22 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
             if data.get("type") == "message":
                 # Handle interactive message
                 message = InteractiveMessage(**data)
-                await websocket_handler.handle_interactive_message(
-                    session_id,
-                    connection_id,
-                    message
-                )
-                
+                if session_id is not None:
+                    await websocket_handler.handle_interactive_message(
+                        session_id,
+                        connection_id,
+                        message
+                    )
+
             elif data.get("type") == "command":
                 # Handle interactive command
                 command = InteractiveCommand(**data)
-                await websocket_handler.handle_interactive_command(
-                    session_id,
-                    connection_id,
-                    command
-                )
+                if session_id is not None:
+                    await websocket_handler.handle_interactive_command(
+                        session_id,
+                        connection_id,
+                        command
+                    )
                 
     except WebSocketDisconnect:
         if session_id:
@@ -709,9 +723,9 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                 session_id,
                 connection_id
             )
-        connection_manager.disconnect(websocket)
+        await connection_manager.disconnect(connection_id)
     except Exception as e:
-        logger.error(f"Interactive session error: {str(e)}")
+        logger.error(f"Interactive session error: {e!s}")
         await websocket.close(code=1011, reason=str(e))
 
 
@@ -738,26 +752,26 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
         };
         ```
     """
-    await connection_manager.connect(websocket)
-    connection_id = connection_manager.get_connection_id(websocket)
-    coordination_id = None
-    
+    connection_id = await connection_manager.connect(websocket)
+    coordination_id: str | None = None
+
     try:
         # Wait for coordination monitoring request
         init_data = await websocket.receive_json()
-        
+
         if init_data.get("type") == "monitor":
             coordination_id = init_data["coordination_id"]
-            
+
             # Register for coordination updates
             await websocket_handler.register_coordination_monitor(
                 coordination_id,
                 connection_id,
                 websocket
             )
-            
+
             # Send initial status
-            status = await session_manager.get_coordination_status(coordination_id)
+            if coordination_id is not None:
+                status = await session_manager.get_coordination_status(coordination_id)
             await websocket.send_json({
                 "type": "coordination_status",
                 "data": status.dict()
@@ -770,21 +784,22 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
             elif data.get("type") == "get_status":
-                status = await session_manager.get_coordination_status(coordination_id)
-                await websocket.send_json({
-                    "type": "status_update",
-                    "data": status.dict()
-                })
-                
+                if coordination_id is not None:
+                    status = await session_manager.get_coordination_status(coordination_id)
+                    await websocket.send_json({
+                        "type": "status_update",
+                        "data": status.dict()
+                    })
+
     except WebSocketDisconnect:
         if coordination_id:
             await websocket_handler.unregister_coordination_monitor(
                 coordination_id,
                 connection_id
             )
-        connection_manager.disconnect(websocket)
+        await connection_manager.disconnect(connection_id)
     except Exception as e:
-        logger.error(f"Coordination monitoring error: {str(e)}")
+        logger.error(f"Coordination monitoring error: {e!s}")
         await websocket.close(code=1011, reason=str(e))
 
 
@@ -833,7 +848,7 @@ async def coordinate_multiple_sessions(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to coordinate sessions: {str(e)}")
+        logger.error(f"Failed to coordinate sessions: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -844,7 +859,7 @@ async def coordinate_multiple_sessions(
 async def _log_session_analytics(
     event_type: str,
     session_id: str,
-    metrics: Dict[str, Any]
+    metrics: dict[str, Any]
 ) -> None:
     """Log session analytics for monitoring"""
     try:
@@ -855,13 +870,13 @@ async def _log_session_analytics(
             timestamp=datetime.utcnow()
         )
     except Exception as e:
-        logger.warning(f"Failed to log analytics: {str(e)}")
+        logger.warning(f"Failed to log analytics: {e!s}")
 
 
 async def _get_protocol_insights(
     protocol_type: ProtocolType,
-    analytics: Dict[str, Any]
-) -> List[str]:
+    analytics: dict[str, Any]
+) -> list[str]:
     """Generate protocol-specific insights from analytics"""
     insights = []
     
@@ -888,7 +903,7 @@ async def _get_protocol_insights(
 # ================================
 
 @router.get("/health")
-async def talkhier_health_check() -> Dict[str, Any]:
+async def talkhier_health_check() -> dict[str, Any]:
     """
     Health check for TalkHier Protocol API
     

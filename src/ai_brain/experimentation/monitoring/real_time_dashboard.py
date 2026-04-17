@@ -8,20 +8,19 @@ infrastructure for live updates and provides comprehensive analytics.
 
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from typing import Any
+
+import pandas as pd
+from fastapi import WebSocket
+
+# Import visualization components
+from src.api.websocket.event_publisher import EventPublisher
 
 # Import WebSocket components
 from src.api.websocket.connection_manager import ConnectionManager
-from src.api.websocket.event_publisher import EventPublisher
-
-# Import visualization components
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import pandas as pd
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -52,18 +51,18 @@ class ExperimentSnapshot:
     
     experiment_id: str
     timestamp: datetime
-    variants: Dict[str, Dict[str, float]]  # variant_id -> metrics
-    sample_sizes: Dict[str, int]
+    variants: dict[str, dict[str, float]]  # variant_id -> metrics
+    sample_sizes: dict[str, int]
     
     # Statistical analysis
-    winning_variant: Optional[str] = None
+    winning_variant: str | None = None
     confidence_level: float = 0.0
-    p_value: Optional[float] = None
-    effect_size: Optional[float] = None
+    p_value: float | None = None
+    effect_size: float | None = None
     
     # Recommendations
     recommendation: str = "Continue experiment"
-    estimated_completion: Optional[datetime] = None
+    estimated_completion: datetime | None = None
 
 
 @dataclass
@@ -83,7 +82,7 @@ class DashboardConfig:
     min_effect_size_alert: float = 0.05
     
     # Display options
-    metrics_to_show: List[DashboardMetric] = field(
+    metrics_to_show: list[DashboardMetric] = field(
         default_factory=lambda: [
             DashboardMetric.QUALITY_SCORE,
             DashboardMetric.LATENCY,
@@ -101,7 +100,7 @@ class RealTimeDashboard:
     and recommendations through WebSocket connections.
     """
     
-    def __init__(self, config: Optional[DashboardConfig] = None):
+    def __init__(self, config: DashboardConfig | None = None):
         """Initialize the real-time dashboard."""
         self.config = config or DashboardConfig()
         
@@ -110,16 +109,16 @@ class RealTimeDashboard:
         self.event_publisher = EventPublisher()
         
         # Data storage
-        self.experiment_history: Dict[str, List[ExperimentSnapshot]] = {}
-        self.active_experiments: Set[str] = set()
+        self.experiment_history: dict[str, list[ExperimentSnapshot]] = {}
+        self.active_experiments: set[str] = set()
         
         # Connected clients
-        self.dashboard_clients: Set[str] = set()
+        self.dashboard_clients: set[str] = set()
         
         # Start background tasks
         self._start_background_tasks()
-    
-    def _start_background_tasks(self):
+
+    def _start_background_tasks(self) -> None:
         """Start background tasks for dashboard updates."""
         asyncio.create_task(self._update_dashboard_periodically())
         asyncio.create_task(self._clean_old_data_periodically())
@@ -141,7 +140,7 @@ class RealTimeDashboard:
     async def register_experiment(
         self,
         experiment_id: str,
-        experiment_config: Dict[str, Any]
+        experiment_config: dict[str, Any]
     ) -> None:
         """Register a new experiment for monitoring."""
         self.active_experiments.add(experiment_id)
@@ -160,9 +159,9 @@ class RealTimeDashboard:
     async def update_experiment_metrics(
         self,
         experiment_id: str,
-        variant_metrics: Dict[str, Dict[str, float]],
-        sample_sizes: Dict[str, int],
-        statistical_analysis: Optional[Dict[str, Any]] = None
+        variant_metrics: dict[str, dict[str, float]],
+        sample_sizes: dict[str, int],
+        statistical_analysis: dict[str, Any] | None = None
     ) -> None:
         """Update metrics for an experiment."""
         if experiment_id not in self.active_experiments:
@@ -230,9 +229,9 @@ class RealTimeDashboard:
         self,
         experiment_id: str,
         snapshot: ExperimentSnapshot
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate dashboard update with visualizations."""
-        update = {
+        update: dict[str, Any] = {
             "event": "experiment_update",
             "experiment_id": experiment_id,
             "timestamp": snapshot.timestamp.isoformat(),
@@ -276,8 +275,8 @@ class RealTimeDashboard:
     
     def _generate_time_series_chart(
         self,
-        history: List[ExperimentSnapshot]
-    ) -> Dict[str, Any]:
+        history: list[ExperimentSnapshot]
+    ) -> dict[str, Any]:
         """Generate time series chart data."""
         if not history:
             return {}
@@ -318,7 +317,7 @@ class RealTimeDashboard:
     def _generate_distribution_chart(
         self,
         snapshot: ExperimentSnapshot
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate distribution comparison chart."""
         variants = list(snapshot.variants.keys())
         
@@ -353,7 +352,7 @@ class RealTimeDashboard:
     def _generate_statistical_chart(
         self,
         snapshot: ExperimentSnapshot
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate statistical significance visualization."""
         variants = list(snapshot.variants.keys())
         
@@ -416,7 +415,7 @@ class RealTimeDashboard:
     
     # ==================== Alert Generation ====================
     
-    def _check_for_alerts(self, snapshot: ExperimentSnapshot) -> List[Dict[str, Any]]:
+    def _check_for_alerts(self, snapshot: ExperimentSnapshot) -> list[dict[str, Any]]:
         """Check for conditions that should trigger alerts."""
         alerts = []
         
@@ -435,7 +434,7 @@ class RealTimeDashboard:
                 alerts.append({
                     "type": "info",
                     "message": f"Statistical significance reached (p={snapshot.p_value:.4f})",
-                    "variant": snapshot.winning_variant
+                    "variant": snapshot.winning_variant or "unknown"
                 })
         
         # Check effect size
@@ -448,7 +447,7 @@ class RealTimeDashboard:
         
         return alerts
     
-    def _generate_recommendation(self, statistical_analysis: Dict[str, Any]) -> str:
+    def _generate_recommendation(self, statistical_analysis: dict[str, Any]) -> str:
         """Generate recommendation based on statistical analysis."""
         p_value = statistical_analysis.get("p_value")
         effect_size = statistical_analysis.get("effect_size")
@@ -474,25 +473,33 @@ class RealTimeDashboard:
     
     # ==================== WebSocket Communication ====================
     
-    async def connect_dashboard_client(self, client_id: str, websocket) -> None:
+    async def connect_dashboard_client(self, client_id: str, websocket: WebSocket) -> None:
         """Connect a new dashboard client."""
         self.dashboard_clients.add(client_id)
         await self.connection_manager.connect(websocket, client_id)
-        
+
         # Send initial state
         initial_state = await self._get_dashboard_state()
-        await self.connection_manager.send_json(websocket, initial_state)
-        
+        if client_id in self.connection_manager.connections:
+            connection = self.connection_manager.connections[client_id]
+            from src.models.websocket_messages import WSMessage, WSMessageType
+            message = WSMessage(
+                type=WSMessageType.INFO,
+                project_id=None,
+                data=initial_state
+            )
+            await connection.send_message(message)
+
         logger.info(f"Dashboard client {client_id} connected")
-    
+
     async def disconnect_dashboard_client(self, client_id: str) -> None:
         """Disconnect a dashboard client."""
         self.dashboard_clients.discard(client_id)
-        self.connection_manager.disconnect(client_id)
-        
+        await self.connection_manager.disconnect(client_id)
+
         logger.info(f"Dashboard client {client_id} disconnected")
     
-    async def _broadcast_to_dashboard(self, message: Dict[str, Any]) -> None:
+    async def _broadcast_to_dashboard(self, message: dict[str, Any]) -> None:
         """Broadcast message to all dashboard clients."""
         for client_id in self.dashboard_clients:
             await self.event_publisher.publish_event(
@@ -501,9 +508,9 @@ class RealTimeDashboard:
                 target_clients=[client_id]
             )
     
-    async def _get_dashboard_state(self) -> Dict[str, Any]:
+    async def _get_dashboard_state(self) -> dict[str, Any]:
         """Get current dashboard state for new clients."""
-        state = {
+        state: dict[str, Any] = {
             "event": "dashboard_state",
             "timestamp": datetime.utcnow().isoformat(),
             "active_experiments": list(self.active_experiments),

@@ -682,14 +682,20 @@ class TalkHierSessionService:
         requested_type: str | None
     ) -> BaseSupervisor | None:
         """Create supervisor based on routing decision"""
-        from src.agents.supervisors.supervisor_factory import SupervisorConfiguration
-
         supervisor_type = requested_type or routing_decision.agent_allocation.supervisor_type
+
+        from src.ai_brain.integration.masr_supervisor_bridge import (
+            SupervisorConfiguration,
+        )
 
         config = SupervisorConfiguration(
             supervisor_type=supervisor_type,
-            max_workers=routing_decision.agent_allocation.worker_count,
-            timeout_seconds=routing_decision.agent_allocation.timeout_seconds
+            domain="research",
+            worker_allocation=[],
+            quality_threshold=0.85,
+            max_refinement_rounds=3,
+            timeout_seconds=routing_decision.agent_allocation.timeout_seconds,
+            max_workers=routing_decision.agent_allocation.worker_count
         )
 
         return await self.supervisor_factory.create_supervisor_from_config(config)

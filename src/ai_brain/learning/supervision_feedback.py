@@ -415,16 +415,16 @@ class SupervisionFeedbackLearner:
         self.auto_optimization_enabled = self.config.get("auto_optimization", True)
         
         # Performance tracking
-        self.learning_stats = {
+        self.learning_stats: dict[str, int | str] = {
             "total_feedback_events": 0,
             "learning_cycles_completed": 0,
-            "last_learning_cycle": None,
+            "last_learning_cycle": "",
             "routing_improvements": 0,
             "cost_improvements": 0,
         }
         
         # Scheduled learning task
-        self._learning_task: asyncio.Task | None = None
+        self._learning_task: asyncio.Task[None] | None = None
     
     def record_execution_feedback(
         self,
@@ -484,7 +484,8 @@ class SupervisionFeedbackLearner:
         
         # Store feedback event
         self.feedback_events.append(feedback_event)
-        self.learning_stats["total_feedback_events"] += 1
+        current_count = self.learning_stats["total_feedback_events"]
+        self.learning_stats["total_feedback_events"] = int(current_count) + 1 if isinstance(current_count, int) else 1
         
         # Update component learners
         routing_strategy_value = routing_decision.__dict__.get("routing_strategy", "balanced")
@@ -497,9 +498,11 @@ class SupervisionFeedbackLearner:
 
         # Update supervisor performance
         supervisor_metrics = self.supervisor_performance[execution_result.supervisor_type]
-        supervisor_metrics.total_executions = supervisor_metrics.total_executions + 1
+        current_total = supervisor_metrics.total_executions if supervisor_metrics.total_executions is not None else 0
+        supervisor_metrics.total_executions = current_total + 1
         if execution_result.status.value == "completed":
-            supervisor_metrics.successful_executions = supervisor_metrics.successful_executions + 1
+            current_success = supervisor_metrics.successful_executions if supervisor_metrics.successful_executions is not None else 0
+            supervisor_metrics.successful_executions = current_success + 1
         supervisor_metrics.success_rate = (
             supervisor_metrics.successful_executions / supervisor_metrics.total_executions
         )
@@ -535,15 +538,12 @@ class SupervisionFeedbackLearner:
             
             # Update learning stats
             cycles_count = self.learning_stats.get("learning_cycles_completed", 0)
-            if isinstance(cycles_count, int):
-                self.learning_stats["learning_cycles_completed"] = cycles_count + 1
+            self.learning_stats["learning_cycles_completed"] = (int(cycles_count) + 1) if isinstance(cycles_count, int) else 1
             self.learning_stats["last_learning_cycle"] = datetime.now().isoformat()
             routing_impr = self.learning_stats.get("routing_improvements", 0)
-            if isinstance(routing_impr, int):
-                self.learning_stats["routing_improvements"] = routing_impr + improvements["routing"]
+            self.learning_stats["routing_improvements"] = int(routing_impr) + improvements["routing"] if isinstance(routing_impr, int) else improvements["routing"]
             cost_impr = self.learning_stats.get("cost_improvements", 0)
-            if isinstance(cost_impr, int):
-                self.learning_stats["cost_improvements"] = cost_impr + improvements["cost"]
+            self.learning_stats["cost_improvements"] = int(cost_impr) + improvements["cost"] if isinstance(cost_impr, int) else improvements["cost"]
             
             learning_duration = (datetime.now() - learning_start).total_seconds()
             

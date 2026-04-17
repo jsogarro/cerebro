@@ -6,35 +6,35 @@ This module integrates experimentation capabilities directly into the MASR
 collaboration modes, and resource allocation decisions.
 """
 
-import asyncio
 import logging
-from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from src.core.constants import (
-    NO_RETRY,
-    MIN_RETRY_ATTEMPTS,
-    MAX_RETRY_ATTEMPTS,
-    SPEED_TEST_TIMEOUT,
     DEFAULT_AGENT_TIMEOUT,
-    EXTENDED_TIMEOUT,
     DIRECT_MODE_PARALLELISM,
+    EXTENDED_TIMEOUT,
     HIGH_PARALLELISM,
     MAX_PARALLELISM,
+    MAX_RETRY_ATTEMPTS,
+    MIN_RETRY_ATTEMPTS,
+    NO_RETRY,
+    SPEED_TEST_TIMEOUT,
 )
+
+from ...router.cost_optimizer import OptimizationStrategy
 from ...router.masr import (
-    MASRouter,
-    RoutingStrategy,
+    AgentAllocation,
     CollaborationMode,
+    MASRouter,
     RoutingDecision,
-    AgentAllocation
+    RoutingStrategy,
 )
-from ...router.query_analyzer import ComplexityLevel
-from ..core.unified_experiment_manager import UnifiedExperimentManager
 from ..core.adaptive_allocation_engine import AdaptiveAllocationEngine
 from ..core.system_experiment_registry import SystemExperimentRegistry
+from ..core.unified_experiment_manager import UnifiedExperimentManager
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +55,8 @@ class MASRExperimentConfig:
     """Configuration for MASR experiments."""
     
     experiment_type: MASRExperimentType
-    variants: Dict[str, Dict[str, Any]]
-    metrics_to_track: List[str] = field(default_factory=lambda: [
+    variants: dict[str, dict[str, Any]]
+    metrics_to_track: list[str] = field(default_factory=lambda: [
         "routing_latency_ms",
         "total_cost",
         "response_quality",
@@ -80,7 +80,7 @@ class MASRExperimentResult:
     quality_score: float
     error_occurred: bool = False
     fallback_used: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class MASRExperimentalRouter(MASRouter):
@@ -91,7 +91,7 @@ class MASRExperimentalRouter(MASRouter):
     for routing decisions, collaboration modes, and optimization strategies.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize experimental router."""
         super().__init__(*args, **kwargs)
         
@@ -101,10 +101,10 @@ class MASRExperimentalRouter(MASRouter):
         self.registry = SystemExperimentRegistry()
         
         # Active experiments
-        self.active_experiments: Dict[str, MASRExperimentConfig] = {}
+        self.active_experiments: dict[str, MASRExperimentConfig] = {}
         
         # Experiment results buffer
-        self.results_buffer: List[MASRExperimentResult] = []
+        self.results_buffer: list[MASRExperimentResult] = []
         
     async def initialize_experiments(self) -> None:
         """Initialize default MASR experiments."""
@@ -164,23 +164,76 @@ class MASRExperimentalRouter(MASRouter):
                 "created_at": datetime.now()
             }
             
-            await self.experiment_manager.create_experiment(
-                experiment_id=experiment_id,
-                experiment_type="masr_routing",
-                variants=list(config.variants.keys()),
-                allocation_strategy=config.allocation_strategy,
-                metrics=config.metrics_to_track
-            )
+            experiment_config_dict: dict[str, Any] = {
+                "name": experiment_id,
+                "description": f"MASR {config.experiment_type.value} experiment",
+                "type": "ab_test",
+                "components": ["masr_routing"],
+                "variants": [
+                    {
+                        "name": variant_name,
+                        "allocation": 1.0 / len(config.variants),
+                        "configuration": variant_config
+                    }
+                    for variant_name, variant_config in config.variants.items()
+                ],
+                "metrics": {
+                    "primary": config.metrics_to_track,
+                    "secondary": [],
+                    "guardrail": []
+                }
+            }
+            await self.experiment_manager.create_experiment(experiment_config_dict)
             
             # Store locally
             self.active_experiments[experiment_id] = config
             
             # Register with system registry
-            await self.registry.register_experiment(
-                experiment_id=experiment_id,
-                component="masr_router",
-                experiment_spec=experiment_spec
+            from ..core.unified_experiment_manager import (
+                ExperimentMetrics,
+                ExperimentStatus,
+                ExperimentType,
+                ExperimentVariant,
+                StatisticalConfig,
+                SystemComponent,
+                SystemExperiment,
             )
+
+            # Create proper ExperimentVariant objects
+            variants_list = [
+                ExperimentVariant(
+                    id=variant["name"],
+                    name=variant["name"],
+                    description=f"Variant {variant['name']}",
+                    allocation=variant["allocation"],
+                    configuration=variant["configuration"]
+                )
+                for variant in experiment_config_dict["variants"]
+            ]
+
+            # Create proper ExperimentMetrics object
+            metrics_obj = ExperimentMetrics(
+                primary_metrics=experiment_config_dict["metrics"]["primary"],
+                secondary_metrics=experiment_config_dict["metrics"]["secondary"],
+                guardrail_metrics=experiment_config_dict["metrics"]["guardrail"]
+            )
+
+            # Create proper StatisticalConfig object
+            statistical_config_obj = StatisticalConfig()
+
+            sys_exp = SystemExperiment(
+                id=experiment_id,
+                name=experiment_id,
+                description=f"MASR {config.experiment_type.value} experiment",
+                type=ExperimentType.AB_TEST,
+                components=[SystemComponent.MASR_ROUTING],
+                variants=variants_list,
+                metrics=metrics_obj,
+                statistical_config=statistical_config_obj,
+                success_criteria=[],
+                status=ExperimentStatus.CREATED
+            )
+            await self.registry.register_experiment(sys_exp)
             
             logger.info(f"Registered MASR experiment: {experiment_id}")
             return True
@@ -191,7 +244,7 @@ class MASRExperimentalRouter(MASRouter):
     
     async def route_with_experiment(self,
                                    query: str,
-                                   context: Optional[Dict[str, Any]] = None) -> RoutingDecision:
+                                   context: dict[str, Any] | None = None) -> RoutingDecision:
         """
         Route query with experimental variant selection.
         
@@ -208,7 +261,7 @@ class MASRExperimentalRouter(MASRouter):
         context = context or {}
         
         # Analyze query complexity first
-        complexity_analysis = await self.query_analyzer.analyze(query, context)
+        complexity_analysis = await self.complexity_analyzer.analyze(query, context)
         
         # Check for active routing strategy experiment
         routing_decision = None
@@ -220,7 +273,7 @@ class MASRExperimentalRouter(MASRouter):
             allocation = await self.allocation_engine.allocate_variant(
                 experiment_id="routing_strategy_test",
                 user_context={
-                    "complexity": complexity_analysis.complexity_level.value,
+                    "complexity": complexity_analysis.level.value,
                     "query_length": len(query),
                     "has_context": bool(context)
                 }
@@ -242,7 +295,7 @@ class MASRExperimentalRouter(MASRouter):
             allocation = await self.allocation_engine.allocate_variant(
                 experiment_id="collaboration_mode_test",
                 user_context={
-                    "complexity": complexity_analysis.complexity_level.value,
+                    "complexity": complexity_analysis.level.value,
                     "estimated_cost": routing_decision.estimated_cost
                 }
             )
@@ -283,7 +336,7 @@ class MASRExperimentalRouter(MASRouter):
     
     async def _route_with_strategy(self,
                                   query: str,
-                                  context: Dict[str, Any],
+                                  context: dict[str, Any],
                                   complexity_analysis: Any,
                                   strategy: RoutingStrategy) -> RoutingDecision:
         """
@@ -332,7 +385,7 @@ class MASRExperimentalRouter(MASRouter):
     
     async def _cost_efficient_routing(self,
                                     query: str,
-                                    context: Dict[str, Any],
+                                    context: dict[str, Any],
                                     complexity_analysis: Any) -> RoutingDecision:
         """Cost-optimized routing strategy."""
         # Prefer cheaper models and minimal agent allocation
@@ -351,7 +404,7 @@ class MASRExperimentalRouter(MASRouter):
             complexity_analysis=complexity_analysis,
             optimization_result=await self.cost_optimizer.optimize(
                 complexity_analysis,
-                {"prefer_cost": True}
+                OptimizationStrategy.COST_MINIMIZED
             ),
             collaboration_mode=CollaborationMode.DIRECT,
             agent_allocation=allocation,
@@ -364,7 +417,7 @@ class MASRExperimentalRouter(MASRouter):
     
     async def _quality_focused_routing(self,
                                       query: str,
-                                      context: Dict[str, Any],
+                                      context: dict[str, Any],
                                       complexity_analysis: Any) -> RoutingDecision:
         """Quality-optimized routing strategy."""
         # Use best models and comprehensive agent teams
@@ -383,7 +436,7 @@ class MASRExperimentalRouter(MASRouter):
             complexity_analysis=complexity_analysis,
             optimization_result=await self.cost_optimizer.optimize(
                 complexity_analysis,
-                {"prefer_quality": True}
+                OptimizationStrategy.PERFORMANCE_OPTIMIZED
             ),
             collaboration_mode=CollaborationMode.ENSEMBLE,
             agent_allocation=allocation,
@@ -396,7 +449,7 @@ class MASRExperimentalRouter(MASRouter):
     
     async def _speed_first_routing(self,
                                   query: str,
-                                  context: Dict[str, Any],
+                                  context: dict[str, Any],
                                   complexity_analysis: Any) -> RoutingDecision:
         """Speed-optimized routing strategy."""
         # Minimize latency with fast models and parallel processing
@@ -415,7 +468,7 @@ class MASRExperimentalRouter(MASRouter):
             complexity_analysis=complexity_analysis,
             optimization_result=await self.cost_optimizer.optimize(
                 complexity_analysis,
-                {"prefer_speed": True}
+                OptimizationStrategy.LATENCY_OPTIMIZED
             ),
             collaboration_mode=CollaborationMode.PARALLEL,
             agent_allocation=allocation,
@@ -428,7 +481,7 @@ class MASRExperimentalRouter(MASRouter):
     
     async def _adaptive_routing(self,
                                query: str,
-                               context: Dict[str, Any],
+                               context: dict[str, Any],
                                complexity_analysis: Any) -> RoutingDecision:
         """Adaptive routing based on historical performance."""
         # Analyze recent performance metrics
@@ -457,20 +510,22 @@ class MASRExperimentalRouter(MASRouter):
             "success_rate": 1.0 if not result.error_occurred else 0.0,
             "fallback_triggered": 1.0 if result.fallback_used else 0.0
         }
-        
+
         # Report to experiment manager
         for experiment_id in self.active_experiments:
-            await self.experiment_manager.record_metrics(
-                experiment_id=experiment_id,
-                variant_id=result.variant_id,
-                metrics=metrics,
-                context={
-                    "query_id": result.query_id,
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
+            for metric_name, metric_value in metrics.items():
+                await self.experiment_manager.track_metric(
+                    experiment_id=experiment_id,
+                    variant_id=result.variant_id,
+                    metric_name=metric_name,
+                    value=metric_value,
+                    context={
+                        "query_id": result.query_id,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
     
-    async def _get_recent_performance_metrics(self) -> Dict[str, float]:
+    async def _get_recent_performance_metrics(self) -> dict[str, float]:
         """Get recent performance metrics for adaptive routing."""
         if not self.results_buffer:
             return {}
@@ -489,7 +544,7 @@ class MASRExperimentalRouter(MASRouter):
         return metrics
     
     async def get_experiment_results(self, 
-                                    experiment_id: str) -> Dict[str, Any]:
+                                    experiment_id: str) -> dict[str, Any]:
         """
         Get results for a specific experiment.
         
@@ -501,13 +556,14 @@ class MASRExperimentalRouter(MASRouter):
         """
         if experiment_id not in self.active_experiments:
             return {"error": f"Experiment {experiment_id} not found"}
-        
-        # Get results from experiment manager
-        results = await self.experiment_manager.get_experiment_results(experiment_id)
-        
+
+        # Get experiment from manager
+        experiment = await self.experiment_manager.get_experiment(experiment_id)
+        results: dict[str, Any] = {"experiment": experiment.__dict__ if experiment else {}}
+
         # Add MASR-specific analysis
         config = self.active_experiments[experiment_id]
-        variant_results = {}
+        variant_results: dict[str, Any] = {}
         
         for variant_id in config.variants:
             variant_data = [r for r in self.results_buffer 
@@ -543,17 +599,14 @@ class MASRExperimentalRouter(MASRouter):
         
         try:
             # Stop in experiment manager
-            await self.experiment_manager.stop_experiment(experiment_id)
-            
+            await self.experiment_manager.stop_experiment(experiment_id, reason="manual_stop")
+
+            # Stop in registry
+            await self.registry.stop_experiment(experiment_id, reason="manual")
+
             # Remove from active experiments
             del self.active_experiments[experiment_id]
-            
-            # Update registry
-            await self.registry.update_experiment_status(
-                experiment_id=experiment_id,
-                status="stopped"
-            )
-            
+
             logger.info(f"Stopped MASR experiment: {experiment_id}")
             return True
             
@@ -562,7 +615,7 @@ class MASRExperimentalRouter(MASRouter):
             return False
     
     async def optimize_routing_parameters(self,
-                                         optimization_goals: Dict[str, float]) -> Dict[str, Any]:
+                                         optimization_goals: dict[str, float]) -> dict[str, Any]:
         """
         Optimize routing parameters based on experiment results.
         

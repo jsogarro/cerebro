@@ -182,12 +182,12 @@ async def create_experiment(
     
     return ExperimentResponse(
         id=db_experiment.id,
-        name=cast(str, db_experiment.name),
-        description=cast(str | None, db_experiment.description),
+        name=db_experiment.name,
+        description=db_experiment.description,
         experiment_type=db_experiment.experiment_type,
         status=db_experiment.status,
         allocation_strategy=db_experiment.allocation_strategy,
-        traffic_percentage=cast(float, db_experiment.traffic_percentage),
+        traffic_percentage=db_experiment.traffic_percentage,
         variants=[{
             "id": v.id,
             "name": v.name,
@@ -195,10 +195,10 @@ async def create_experiment(
             "allocation_percentage": v.allocation_percentage,
             "parameters": v.parameters
         } for v in db_experiment.variants],
-        metrics=cast(list[str], db_experiment.metrics),
-        success_criteria=cast(dict[str, Any], db_experiment.success_criteria),
-        start_date=cast(datetime | None, db_experiment.start_date),
-        end_date=cast(datetime | None, db_experiment.end_date),
+        metrics=db_experiment.metrics,
+        success_criteria=db_experiment.success_criteria,
+        start_date=db_experiment.start_date,
+        end_date=db_experiment.end_date,
         created_at=db_experiment.created_at,
         updated_at=db_experiment.updated_at
     )
@@ -244,10 +244,10 @@ async def list_experiments(
                 "allocation_percentage": v.allocation_percentage,
                 "parameters": v.parameters
             } for v in exp.variants],
-            metrics=cast(list[str], exp.metrics),
-            success_criteria=cast(dict[str, Any], exp.success_criteria),
-            start_date=cast(datetime | None, exp.start_date),
-            end_date=cast(datetime | None, exp.end_date),
+            metrics=exp.metrics,
+            success_criteria=exp.success_criteria,
+            start_date=exp.start_date,
+            end_date=exp.end_date,
             created_at=exp.created_at,
             updated_at=exp.updated_at
         )
@@ -291,10 +291,10 @@ async def get_experiment(
             "allocation_percentage": v.allocation_percentage,
             "parameters": v.parameters
         } for v in experiment.variants],
-        metrics=cast(list[str], experiment.metrics),
-        success_criteria=cast(dict[str, Any], experiment.success_criteria),
-        start_date=cast(datetime | None, experiment.start_date),
-        end_date=cast(datetime | None, experiment.end_date),
+        metrics=experiment.metrics,
+        success_criteria=experiment.success_criteria,
+        start_date=experiment.start_date,
+        end_date=experiment.end_date,
         created_at=experiment.created_at,
         updated_at=experiment.updated_at
     )
@@ -353,10 +353,10 @@ async def update_experiment(
             "allocation_percentage": v.allocation_percentage,
             "parameters": v.parameters
         } for v in experiment.variants],
-        metrics=cast(list[str], experiment.metrics),
-        success_criteria=cast(dict[str, Any], experiment.success_criteria),
-        start_date=cast(datetime | None, experiment.start_date),
-        end_date=cast(datetime | None, experiment.end_date),
+        metrics=experiment.metrics,
+        success_criteria=experiment.success_criteria,
+        start_date=experiment.start_date,
+        end_date=experiment.end_date,
         created_at=experiment.created_at,
         updated_at=experiment.updated_at
     )

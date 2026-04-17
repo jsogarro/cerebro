@@ -8,21 +8,20 @@ improve its performance through experimental optimization.
 
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+from typing import Any
+
 import numpy as np
 
 # Import Agent Framework components
-from src.ai_brain.router.masr import MASRouter, RoutingStrategy
-from src.agents.supervisors.supervisor_factory import SupervisorFactory
-from src.ai_brain.learning.supervision_feedback import SupervisionFeedbackSystem
+from src.ai_brain.learning.supervision_feedback import SupervisionFeedbackLearner
 
 # Import A/B Testing components
 from ..integration.agent_framework_integration import (
+    AgentExperimentType,
     AgentFrameworkExperimentor,
-    AgentExperimentType
 )
 from ..statistical.enhanced_statistical_engine import EnhancedStatisticalEngine
 
@@ -51,7 +50,7 @@ class OptimizationDecision:
     expected_improvement: float  # Expected % improvement
     risk_level: str  # "low", "medium", "high"
     rationale: str
-    experiment_evidence: List[str]  # Experiment IDs supporting this decision
+    experiment_evidence: list[str]  # Experiment IDs supporting this decision
 
 
 @dataclass
@@ -89,31 +88,35 @@ class FeedbackLoopOptimizer:
     learnings to improve the Agent Framework's performance over time.
     """
     
-    def __init__(self, config: Optional[FeedbackLoopConfig] = None):
+    def __init__(self, config: FeedbackLoopConfig | None = None):
         """Initialize the feedback loop optimizer."""
         self.config = config or FeedbackLoopConfig()
         
         # Components
         self.experimentor = AgentFrameworkExperimentor()
         self.statistical_engine = EnhancedStatisticalEngine()
-        self.feedback_system = SupervisionFeedbackSystem()
+        self.feedback_system = SupervisionFeedbackLearner()
         
         # State tracking
-        self.active_optimizations: Dict[str, OptimizationDecision] = {}
-        self.optimization_history: List[OptimizationDecision] = []
-        self.rollback_states: Dict[str, Any] = {}  # For rollback capability
+        self.active_optimizations: dict[str, OptimizationDecision] = {}
+        self.optimization_history: list[OptimizationDecision] = []
+        self.rollback_states: dict[str, Any] = {}  # For rollback capability
         
         # Performance tracking
-        self.baseline_performance: Dict[str, float] = {}
-        self.current_performance: Dict[str, float] = {}
-        
+        self.baseline_performance: dict[str, Any] = {}
+        self.current_performance: dict[str, float] = {}
+
+        # Optimization tasks
+        self._optimization_task: asyncio.Task[None] | None = None
+        self._monitoring_task: asyncio.Task[None] | None = None
+
         # Start optimization loop
         self._start_optimization_loop()
-    
-    def _start_optimization_loop(self):
+
+    def _start_optimization_loop(self) -> None:
         """Start the continuous optimization loop."""
-        asyncio.create_task(self._optimization_cycle())
-        asyncio.create_task(self._monitor_performance())
+        self._optimization_task = asyncio.create_task(self._optimization_cycle())
+        self._monitoring_task = asyncio.create_task(self._monitor_performance())
     
     async def _optimization_cycle(self) -> None:
         """Main optimization cycle that evaluates and applies learnings."""
@@ -162,7 +165,7 @@ class FeedbackLoopOptimizer:
             if await self._is_experiment_ready(results):
                 await self._process_experiment_results(exp_id, exp_type, results)
     
-    async def _is_experiment_ready(self, results: Dict[str, Any]) -> bool:
+    async def _is_experiment_ready(self, results: dict[str, Any]) -> bool:
         """Check if experiment has enough data for reliable conclusions."""
         # Check sample sizes
         for variant_data in results.get("variants", {}).values():
@@ -172,17 +175,14 @@ class FeedbackLoopOptimizer:
         # Check statistical significance
         stats = results.get("statistical_analysis", {})
         p_value = stats.get("p_value")
-        
-        if p_value is None or p_value > 0.1:
-            return False
-        
-        return True
+
+        return not (p_value is None or p_value > 0.1)
     
     async def _process_experiment_results(
         self,
         experiment_id: str,
         experiment_type: str,
-        results: Dict[str, Any]
+        results: dict[str, Any]
     ) -> None:
         """Process experiment results and extract learnings."""
         stats = results.get("statistical_analysis", {})
@@ -208,27 +208,31 @@ class FeedbackLoopOptimizer:
     
     async def _process_routing_learnings(
         self,
-        winning_config: Dict[str, Any],
-        stats: Dict[str, Any]
+        winning_config: dict[str, Any],
+        stats: dict[str, Any]
     ) -> None:
         """Process learnings from routing strategy experiments."""
         strategy = winning_config.get("routing_strategy")
         parameters = winning_config.get("parameters", {})
-        
-        # Update MASR router preferences
-        await self.feedback_system.record_routing_performance(
-            strategy=strategy,
-            success_rate=stats.get("success_rate", 0),
-            avg_cost=stats.get("avg_cost", 0),
-            avg_quality=stats.get("avg_quality", 0)
-        )
-        
+
+        # Store routing strategy performance
+        # Note: SupervisionFeedbackLearner uses record_execution_feedback()
+        # which requires routing_decision and execution_result objects.
+        # For now, we'll just log and store in baseline_performance
         logger.info(f"Learned optimal routing strategy: {strategy} with params {parameters}")
+
+        self.baseline_performance["routing"] = {
+            "strategy": strategy,
+            "parameters": parameters,
+            "success_rate": stats.get("success_rate", 0),
+            "avg_cost": stats.get("avg_cost", 0),
+            "avg_quality": stats.get("avg_quality", 0)
+        }
     
     async def _process_api_pattern_learnings(
         self,
-        winning_config: Dict[str, Any],
-        stats: Dict[str, Any]
+        winning_config: dict[str, Any],
+        stats: dict[str, Any]
     ) -> None:
         """Process learnings from API pattern experiments."""
         primary_weight = winning_config.get("primary_weight", 0.9)
@@ -245,8 +249,8 @@ class FeedbackLoopOptimizer:
     
     async def _process_talkhier_learnings(
         self,
-        winning_config: Dict[str, Any],
-        stats: Dict[str, Any]
+        winning_config: dict[str, Any],
+        stats: dict[str, Any]
     ) -> None:
         """Process learnings from TalkHier protocol experiments."""
         max_rounds = winning_config.get("max_rounds", 3)
@@ -263,7 +267,7 @@ class FeedbackLoopOptimizer:
     
     # ==================== Optimization Decision Generation ====================
     
-    async def _generate_optimization_decisions(self) -> List[OptimizationDecision]:
+    async def _generate_optimization_decisions(self) -> list[OptimizationDecision]:
         """Generate optimization decisions based on accumulated learnings."""
         decisions = []
         
@@ -284,11 +288,20 @@ class FeedbackLoopOptimizer:
         
         return decisions
     
-    async def _generate_routing_optimization(self) -> Optional[OptimizationDecision]:
+    async def _generate_routing_optimization(self) -> OptimizationDecision | None:
         """Generate routing strategy optimization decision."""
         # Get current and recommended strategies from feedback system
         current_weights = await self._get_current_routing_weights()
-        recommended_weights = await self.feedback_system.get_optimal_routing_weights()
+
+        # Get routing recommendations from feedback system
+        context = {"domain": "research", "complexity": "moderate"}
+        recommendations = self.feedback_system.get_routing_recommendations(context)
+
+        # For now, we'll use the strategy info to derive weights
+        # In a full implementation, weights would be derived from the strategy
+        # Using recommendations for logging purposes
+        logger.debug(f"Routing recommendations: {recommendations}")
+        recommended_weights = current_weights  # Placeholder
         
         if not recommended_weights:
             return None
@@ -313,22 +326,26 @@ class FeedbackLoopOptimizer:
             experiment_evidence=["routing_exp_001", "routing_exp_002"]  # Would get actual IDs
         )
     
-    async def _generate_supervisor_optimization(self) -> Optional[OptimizationDecision]:
+    async def _generate_supervisor_optimization(self) -> OptimizationDecision | None:
         """Generate supervisor configuration optimization decision."""
         # Analyze supervisor performance across experiments
-        supervisor_data = self.baseline_performance.get("supervisor", {})
+        supervisor_data: dict[str, Any] = self.baseline_performance.get("supervisor", {})
         
         if not supervisor_data:
             return None
         
         current_config = await self._get_current_supervisor_config()
-        
+
         # Generate optimized configuration
-        optimized_config = {
-            "execution_mode": supervisor_data.get("best_mode", "adaptive"),
-            "max_workers": supervisor_data.get("optimal_workers", 3),
-            "quality_threshold": supervisor_data.get("quality_threshold", 0.8)
-        }
+        if isinstance(supervisor_data, dict):
+            optimized_config = {
+                "execution_mode": supervisor_data.get("best_mode", "adaptive"),
+                "max_workers": supervisor_data.get("optimal_workers", 3),
+                "quality_threshold": supervisor_data.get("quality_threshold", 0.8)
+            }
+        else:
+            # supervisor_data is a float, not a dict with config
+            return None
         
         # Check if changes are significant
         if current_config == optimized_config:
@@ -345,7 +362,7 @@ class FeedbackLoopOptimizer:
             experiment_evidence=["supervisor_exp_001"]
         )
     
-    async def _generate_quality_optimization(self) -> Optional[OptimizationDecision]:
+    async def _generate_quality_optimization(self) -> OptimizationDecision | None:
         """Generate quality threshold optimization decision."""
         # Analyze quality vs speed trade-offs
         quality_data = await self._analyze_quality_tradeoffs()
@@ -366,7 +383,7 @@ class FeedbackLoopOptimizer:
             confidence=0.82,
             expected_improvement=3.0,
             risk_level="medium",
-            rationale=f"Optimal quality threshold balances speed and accuracy",
+            rationale="Optimal quality threshold balances speed and accuracy",
             experiment_evidence=["quality_exp_001"]
         )
     
@@ -431,7 +448,7 @@ class FeedbackLoopOptimizer:
             # Check performance
             degradation = await self._check_rollout_performance(decision)
             if degradation:
-                logger.warning(f"Degradation detected during rollout, rolling back")
+                logger.warning("Degradation detected during rollout, rolling back")
                 await self._rollback_optimization(decision)
                 return
             
@@ -460,11 +477,17 @@ class FeedbackLoopOptimizer:
         """Check if any optimizations are causing performance degradation."""
         for target, decision in self.active_optimizations.items():
             current_perf = await self._get_current_performance(target)
-            baseline_perf = self.baseline_performance.get(target, {}).get("performance", 0)
-            
+            baseline_value = self.baseline_performance.get(target, {})
+
+            # baseline_value could be float or dict
+            if isinstance(baseline_value, dict):
+                baseline_perf = baseline_value.get("performance", 0)
+            else:
+                baseline_perf = baseline_value
+
             if baseline_perf > 0:
                 degradation = (baseline_perf - current_perf) / baseline_perf
-                
+
                 if degradation > self.config.performance_degradation_threshold:
                     logger.warning(f"Performance degradation detected for {target}: {degradation:.1%}")
                     await self._rollback_optimization(decision)
@@ -493,7 +516,7 @@ class FeedbackLoopOptimizer:
     
     # ==================== Helper Methods ====================
     
-    async def _get_current_routing_weights(self) -> Dict[str, float]:
+    async def _get_current_routing_weights(self) -> dict[str, float]:
         """Get current MASR routing weights."""
         # Would integrate with actual MASR router
         return {
@@ -502,7 +525,7 @@ class FeedbackLoopOptimizer:
             "speed_weight": 0.0
         }
     
-    async def _get_current_supervisor_config(self) -> Dict[str, Any]:
+    async def _get_current_supervisor_config(self) -> dict[str, Any]:
         """Get current supervisor configuration."""
         # Would integrate with supervisor factory
         return {
@@ -515,12 +538,12 @@ class FeedbackLoopOptimizer:
         """Get current quality threshold."""
         return 0.85
     
-    async def _estimate_performance(self, config: Dict[str, Any]) -> float:
+    async def _estimate_performance(self, config: dict[str, Any]) -> float:
         """Estimate performance for a given configuration."""
         # Would use historical data and ML models
         return np.random.uniform(0.7, 0.95)
     
-    async def _analyze_quality_tradeoffs(self) -> Dict[str, Any]:
+    async def _analyze_quality_tradeoffs(self) -> dict[str, Any]:
         """Analyze quality vs speed trade-offs from experiments."""
         # Would analyze experiment data
         return {
@@ -529,7 +552,7 @@ class FeedbackLoopOptimizer:
             "quality_impact": 10   # % better
         }
     
-    async def _get_variant_config(self, experiment_id: str, variant_id: str) -> Dict[str, Any]:
+    async def _get_variant_config(self, experiment_id: str, variant_id: str) -> dict[str, Any]:
         """Get configuration for a specific variant."""
         # Would retrieve from experiment manager
         return {}
@@ -553,17 +576,17 @@ class FeedbackLoopOptimizer:
         # Would get from monitoring system
         return np.random.uniform(0.7, 0.95)
     
-    async def _apply_routing_weights(self, weights: Dict[str, float]) -> None:
+    async def _apply_routing_weights(self, weights: dict[str, float]) -> None:
         """Apply new routing weights to MASR."""
         logger.info(f"Applying routing weights: {weights}")
         # Would update MASR configuration
     
-    async def _apply_supervisor_config(self, config: Dict[str, Any]) -> None:
+    async def _apply_supervisor_config(self, config: dict[str, Any]) -> None:
         """Apply new supervisor configuration."""
         logger.info(f"Applying supervisor config: {config}")
         # Would update supervisor factory
     
-    async def _apply_talkhier_params(self, params: Dict[str, Any]) -> None:
+    async def _apply_talkhier_params(self, params: dict[str, Any]) -> None:
         """Apply new TalkHier parameters."""
         logger.info(f"Applying TalkHier params: {params}")
         # Would update TalkHier service

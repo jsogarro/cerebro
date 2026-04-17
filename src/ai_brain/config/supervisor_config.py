@@ -133,18 +133,21 @@ class ComplexityToWorkerMapper:
         
         # Get base allocation for complexity level
         base_allocation = self.complexity_worker_map.get(
-            complexity_level, 
+            complexity_level,
             self.complexity_worker_map[ComplexityLevel.MODERATE]
         )
-        
+
         # Apply domain adjustments
         domain_adj = self.domain_adjustments.get(domain, {"worker_multiplier": 1.0, "quality_bonus": 0.0})
-        worker_multiplier: float = domain_adj.get("worker_multiplier", 1.0)
+        worker_multiplier = float(domain_adj.get("worker_multiplier", 1.0))
 
-        # Calculate worker counts
-        base_min = base_allocation.get("min_workers", 1)
-        base_optimal = base_allocation.get("optimal_workers", 3)
-        base_max = base_allocation.get("max_workers", 5)
+        # Calculate worker counts - explicitly handle mixed dict types
+        base_min_val = base_allocation.get("min_workers", 1)
+        base_optimal_val = base_allocation.get("optimal_workers", 3)
+        base_max_val = base_allocation.get("max_workers", 5)
+        base_min = int(base_min_val) if isinstance(base_min_val, (int, float)) else 1
+        base_optimal = int(base_optimal_val) if isinstance(base_optimal_val, (int, float)) else 3
+        base_max = int(base_max_val) if isinstance(base_max_val, (int, float)) else 5
         min_workers = max(1, int(base_min * worker_multiplier))
         optimal_workers = int(base_optimal * worker_multiplier)
         max_workers = int(base_max * worker_multiplier)
@@ -245,16 +248,18 @@ class QualityThresholdCalculator:
             routing_strategy,
             self.strategy_quality_map[RoutingStrategy.BALANCED]
         )
-        
-        quality_threshold: float = base_config.get("quality_threshold", 0.8)
-        consensus_threshold: float = base_config.get("consensus_threshold", 0.85)
+
+        quality_threshold_val = base_config.get("quality_threshold", 0.8)
+        consensus_threshold_val = base_config.get("consensus_threshold", 0.85)
+        quality_threshold = float(quality_threshold_val) if isinstance(quality_threshold_val, (int, float)) else 0.8
+        consensus_threshold = float(consensus_threshold_val) if isinstance(consensus_threshold_val, (int, float)) else 0.85
         quality_focus = base_config.get("quality_focus", QualityFocusLevel.STANDARD.value)
 
         # Apply complexity adjustments
         complexity_adj = self.complexity_adjustments.get(
             complexity_level, {"threshold_adjustment": 0.0}
         )
-        threshold_adj: float = complexity_adj.get("threshold_adjustment", 0.0)
+        threshold_adj = float(complexity_adj.get("threshold_adjustment", 0.0))
         quality_threshold = quality_threshold + threshold_adj
         consensus_threshold = consensus_threshold + threshold_adj
         

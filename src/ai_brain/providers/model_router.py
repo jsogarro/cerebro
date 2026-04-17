@@ -216,7 +216,7 @@ class ModelRouter:
             name
             for name, provider in self.registry.providers.items()
             if isinstance(self.registry.health_status.get(name), ProviderHealthStatus)
-            and self.registry.health_status.get(name, ProviderHealthStatus(healthy=False, avg_latency_ms=0, last_check=datetime.now(), error_rate=0.0)).healthy
+            and self.registry.health_status.get(name, ProviderHealthStatus(provider_name=name, healthy=False, avg_latency_ms=0, last_check=datetime.now(), error_rate=0.0)).healthy
         ]
 
         if not available_providers:
@@ -330,14 +330,15 @@ class ModelRouter:
     async def get_provider_metrics(self) -> dict[str, Any]:
         """Get metrics for all providers."""
 
-        metrics = {
+        providers_dict: dict[str, Any] = {}
+        metrics: dict[str, Any] = {
             "router": {
                 "total_requests": self.request_count,
                 "successful_requests": self.success_count,
                 "fallback_requests": self.fallback_count,
                 "success_rate": self.success_count / max(self.request_count, 1),
             },
-            "providers": {},
+            "providers": providers_dict,
         }
 
         for provider_name, provider in self.registry.providers.items():

@@ -31,6 +31,7 @@ from ..core.system_experiment_registry import SystemExperimentRegistry
 
 # Import A/B Testing components
 from ..core.unified_experiment_manager import UnifiedExperimentManager
+from ..statistical.bayesian_experiment_design import BayesianExperimentDesigner
 from ..statistical.enhanced_statistical_engine import EnhancedStatisticalEngine
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ class AgentFrameworkExperimentor:
         self.allocation_engine = AdaptiveAllocationEngine()
         self.registry = SystemExperimentRegistry()
         self.statistical_engine = EnhancedStatisticalEngine()
-        self.bayesian_design = BayesianExperimentDesigner()
+        self.bayesian_design: BayesianExperimentDesigner | None = None
         self.active_experiments: dict[str, AgentExperimentConfig] = {}
         self.results_buffer: list[AgentExperimentResult] = []
         self.buffer_flush_interval = 60
@@ -133,8 +134,8 @@ class AgentFrameworkExperimentor:
 
     def _start_background_tasks(self) -> None:
         """Start background tasks for result processing and optimization."""
-        asyncio.create_task(self._flush_results_periodically())
-        asyncio.create_task(self._update_allocations_periodically())
+        self._flush_task = asyncio.create_task(self._flush_results_periodically())
+        self._allocations_task = asyncio.create_task(self._update_allocations_periodically())
     
     async def _flush_results_periodically(self) -> None:
         """Periodically flush experiment results to database."""
@@ -192,10 +193,12 @@ class AgentFrameworkExperimentor:
         self.active_experiments[experiment_id] = config
 
         await self.experiment_manager.create_experiment(
-            experiment_id=experiment_id,
-            experiment_type="routing",
-            variants=list(variants.keys()),
-            config=config.__dict__
+            experiment_config={
+                "experiment_id": experiment_id,
+                "experiment_type": "routing",
+                "variants": list(variants.keys()),
+                "config": config.__dict__
+            }
         )
         
         logger.info(f"Created routing experiment {experiment_id} with strategies: {strategies}")
@@ -328,7 +331,7 @@ class AgentFrameworkExperimentor:
         )
 
         assignments: dict[str, str] = {}
-        for exp_id, config in applicable_experiments.items():
+        for exp_id in applicable_experiments:
             variant = await self._assign_variant(exp_id, user_id, context)
             assignments[exp_id] = variant
 
@@ -409,22 +412,16 @@ class AgentFrameworkExperimentor:
 
         config = self.active_experiments[experiment_id]
 
-        if config.allocation_strategy == "thompson_sampling":
-            variant = await self.allocation_engine.allocate(
+        if config.allocation_strategy == "thompson_sampling" or config.allocation_strategy == "epsilon_greedy":
+            allocation_decision = await self.allocation_engine.allocate_variant(
                 experiment_id=experiment_id,
-                variants=list(config.variants.keys()),
-                performance_history=self.variant_performance.get(experiment_id, {})
+                user_context=context
             )
-        elif config.allocation_strategy == "epsilon_greedy":
-            variant = await self.allocation_engine.allocate(
-                experiment_id=experiment_id,
-                variants=list(config.variants.keys()),
-                epsilon=config.initial_exploration_rate
-            )
+            variant = allocation_decision.variant_id
         else:
             variant = random.choice(list(config.variants.keys()))
 
-        return str(variant)
+        return variant
     
     async def _build_execution_config(
         self,
@@ -465,48 +462,73 @@ class AgentFrameworkExperimentor:
         api_pattern = str(config.get("api_pattern", "primary"))
 
         if api_pattern == "primary":
-            routing_result = await self.masr_service.route(
-                query=query,
-                strategy=str(config.get("routing_strategy", "balanced")),
-                parameters=dict(config.get("routing_params", {}))
+            from src.models.masr_api_models import RoutingRequest
+            from src.models.supervisor_api_models import (
+                CoordinationMode,
+                SupervisionStrategy,
+                SupervisorExecuteRequest,
             )
 
+            routing_request = RoutingRequest(
+                query=query,
+                strategy=config.get("routing_strategy", "balanced"),
+                context=dict(config.get("routing_params", {}))
+            )
+            routing_result = await self.masr_service.get_routing_decision(routing_request)
+
+            supervisor_request = SupervisorExecuteRequest(
+                query=query,
+                supervision_strategy=SupervisionStrategy.COLLABORATIVE,
+                coordination_mode=CoordinationMode.PARALLEL,
+                max_workers=5,
+                quality_threshold=float(config.get("consensus_threshold", 0.8)),
+                timeout_seconds=120
+            )
+            # Get primary supervisor from allocations
+            primary_supervisor = routing_result.supervisor_allocations[0].supervisor_type if routing_result.supervisor_allocations else "research"
             supervisor_result = await self.supervisor_service.execute_supervisor_task(
-                supervisor_type=str(routing_result.get("supervisor_type", "")),
-                task=query,
-                config={
-                    "max_rounds": int(config.get("max_refinement_rounds", 3)),
-                    "consensus_threshold": float(config.get("consensus_threshold", 0.8))
-                }
+                supervisor_type=primary_supervisor,
+                request=supervisor_request
             )
 
             return {
                 "success": True,
-                "routing_decision": routing_result,
-                "supervisor": routing_result.get("supervisor_type"),
-                "agents_used": routing_result.get("agents", []),
-                "quality_score": supervisor_result.get("quality_score", 0.0),
-                "total_cost": routing_result.get("estimated_cost", 0.0),
-                "token_usage": supervisor_result.get("token_usage", 0),
-                "result": supervisor_result.get("result")
+                "routing_decision": routing_result.model_dump(),
+                "supervisor": primary_supervisor,
+                "agents_used": [alloc.supervisor_type for alloc in routing_result.supervisor_allocations],
+                "quality_score": supervisor_result.quality_score or 0.0,
+                "total_cost": routing_result.estimated_cost,
+                "token_usage": 0,
+                "result": supervisor_result.result
             }
 
         else:
-            agents = context.get("agents", ["research"])
-            agent_result = await self.agent_service.execute(
-                agents=list(agents),
-                query=query
+            from src.models.base_models import AgentType
+
+            from src.models.agent_api_models import AgentExecutionRequest
+
+            agent_type = AgentType(config.get("agent_type", "RESEARCH"))
+            agent_request = AgentExecutionRequest(
+                query=query,
+                context=context,
+                parameters=dict(config.get("agent_params", {})),
+                user_id=None,
+                session_id=None
+            )
+            agent_result = await self.agent_service.execute_single_agent(
+                agent_type=agent_type,
+                request=agent_request
             )
 
             return {
                 "success": True,
                 "routing_decision": None,
                 "supervisor": None,
-                "agents_used": agents,
-                "quality_score": agent_result.get("quality_score", 0.0),
-                "total_cost": agent_result.get("cost", 0.0),
-                "token_usage": agent_result.get("token_usage", 0),
-                "result": agent_result.get("result")
+                "agents_used": [agent_type.value],
+                "quality_score": agent_result.quality_score,
+                "total_cost": agent_result.cost_estimate or 0.0,
+                "token_usage": agent_result.tokens_used or 0,
+                "result": agent_result.output
             }
     
     # ==================== Results Analysis ====================
@@ -573,10 +595,7 @@ class AgentFrameworkExperimentor:
                     variant_scores[variant_id] = score
 
             if variant_scores:
-                await self.allocation_engine.update(
-                    experiment_id=exp_id,
-                    variant_scores=variant_scores
-                )
+                await self.allocation_engine.update_allocations()
     
     async def get_experiment_results(
         self,
@@ -620,11 +639,21 @@ class AgentFrameworkExperimentor:
                 }
 
         if include_statistical_analysis and len(results["variants"]) > 1:
-            analysis = await self.statistical_engine.analyze(
-                experiment_id=experiment_id,
-                variant_data=results["variants"],
-                primary_metric=config.primary_metric,
-                confidence_level=config.confidence_level
+            # Transform variant data to format expected by comprehensive_analysis
+            experiment_data: dict[str, list[float]] = {}
+            for variant_id, data in results["variants"].items():
+                # Use the primary metric for analysis
+                if config.primary_metric == "quality_score":
+                    experiment_data[variant_id] = [data["avg_quality"]]
+                elif config.primary_metric == "latency_ms":
+                    experiment_data[variant_id] = [data["avg_latency"]]
+                elif config.primary_metric == "total_cost":
+                    experiment_data[variant_id] = [data["avg_cost"]]
+                else:
+                    experiment_data[variant_id] = [data["success_rate"]]
+
+            analysis = await self.statistical_engine.comprehensive_analysis(
+                experiment_data=experiment_data
             )
             results["statistical_analysis"] = analysis
 
@@ -698,7 +727,7 @@ class AgentFrameworkExperimentor:
         experiments: list[dict[str, Any]] = []
         for exp_id, config in self.active_experiments.items():
             sample_sizes: dict[str, int] = {}
-            for v in config.variants.keys():
+            for v in config.variants:
                 perf = self.variant_performance.get(exp_id, {}).get(v, {})
                 sample_sizes[v] = int(perf.get("count", 0))
 

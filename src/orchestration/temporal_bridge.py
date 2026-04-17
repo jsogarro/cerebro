@@ -92,7 +92,7 @@ class TemporalBridge:
             Temporal activity function
         """
 
-        @activity.defn(name=f"{node_func.__name__}_activity")
+        @activity.defn(name=f"{node_func.__name__}_activity")  # type: ignore[untyped-decorator]
         async def temporal_activity(state_dict: dict[str, Any]) -> dict[str, Any]:
             """Execute LangGraph node as Temporal activity."""
             try:
@@ -369,7 +369,7 @@ class LangGraphTemporalWorkflow:
     while leveraging LangGraph for intelligent agent coordination.
     """
 
-    @workflow.run
+    @workflow.run  # type: ignore[untyped-decorator]
     async def run(self, project_data: dict[str, Any]) -> dict[str, Any]:
         """
         Execute LangGraph orchestration within Temporal.
@@ -402,7 +402,7 @@ class LangGraphTemporalWorkflow:
         return cast(dict[str, Any], result)
 
 
-@activity.defn(name="langgraph_orchestration_activity")
+@activity.defn(name="langgraph_orchestration_activity")  # type: ignore[untyped-decorator]
 async def langgraph_orchestration_activity(
     project_data: dict[str, Any],
 ) -> dict[str, Any]:

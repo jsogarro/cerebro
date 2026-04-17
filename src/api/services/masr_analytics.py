@@ -7,23 +7,18 @@ Provides real-time metrics, trend analysis, and optimization recommendations.
 Based on "MasRouter: Learning to Route LLMs" research patterns.
 """
 
-import asyncio
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from collections import defaultdict, deque
 import statistics
-import numpy as np
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any
 
-from src.ai_brain.models.masr import (
-    QueryDomain,
-    QueryComplexity,
-    RoutingStrategy,
-    ModelTier
-)
-from src.ai_brain.router.masr import MASRouter
-from src.ai_brain.learning.supervision_feedback import SupervisionFeedbackLearner
+import numpy as np
+from src.ai_brain.models.masr import QueryComplexity, QueryDomain, RoutingStrategy
 from src.config import get_settings
+
+from src.ai_brain.learning.supervision_feedback import SupervisionFeedbackLearner
+from src.ai_brain.router.masr import MASRouter
 
 settings = get_settings()
 
@@ -39,9 +34,9 @@ class PerformanceMetric:
     std_deviation: float
     trend: str  # "increasing", "decreasing", "stable"
     samples: int
-    window: deque = field(default_factory=lambda: deque(maxlen=1000))
-    
-    def update(self, value: float):
+    window: deque[float] = field(default_factory=lambda: deque(maxlen=1000))
+
+    def update(self, value: float) -> None:
         """Update metric with new value"""
         self.window.append(value)
         self.current_value = value
@@ -73,7 +68,7 @@ class StrategyPerformance:
     failed_routes: int = 0
     total_cost: float = 0
     total_latency_ms: float = 0
-    quality_scores: List[float] = field(default_factory=list)
+    quality_scores: list[float] = field(default_factory=list)
     cost_accuracy: float = 0.95  # Predicted vs actual
     latency_accuracy: float = 0.90
     
@@ -102,8 +97,8 @@ class StrategyPerformance:
     def average_quality(self) -> float:
         """Calculate average quality score"""
         if not self.quality_scores:
-            return 0
-        return statistics.mean(self.quality_scores)
+            return 0.0
+        return float(statistics.mean(self.quality_scores))
 
 
 class MASRAnalyticsService:
@@ -119,19 +114,19 @@ class MASRAnalyticsService:
     - Anomaly detection
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize analytics service"""
         self.router = MASRouter()
         self.feedback_learner = SupervisionFeedbackLearner()
-        
+
         # Performance tracking
-        self.strategy_performance: Dict[RoutingStrategy, StrategyPerformance] = {
+        self.strategy_performance: dict[RoutingStrategy, StrategyPerformance] = {
             strategy: StrategyPerformance(strategy)
             for strategy in RoutingStrategy
         }
         
         # Metrics tracking
-        self.metrics: Dict[str, PerformanceMetric] = {
+        self.metrics: dict[str, PerformanceMetric] = {
             "routing_latency_ms": PerformanceMetric("routing_latency_ms", 0, 0, 0, 0, 0, "stable", 0),
             "cost_per_query": PerformanceMetric("cost_per_query", 0, 0, 0, 0, 0, "stable", 0),
             "quality_score": PerformanceMetric("quality_score", 0, 0, 0, 0, 0, "stable", 0),
@@ -141,11 +136,11 @@ class MASRAnalyticsService:
         }
         
         # Time-series data for trend analysis
-        self.hourly_stats: Dict[datetime, Dict[str, float]] = defaultdict(dict)
-        self.daily_stats: Dict[datetime, Dict[str, float]] = defaultdict(dict)
-        
+        self.hourly_stats: dict[datetime, dict[str, float]] = defaultdict(dict)
+        self.daily_stats: dict[datetime, dict[str, float]] = defaultdict(dict)
+
         # Model performance tracking
-        self.model_performance: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+        self.model_performance: dict[str, dict[str, Any]] = defaultdict(lambda: {
             "requests": 0,
             "errors": 0,
             "total_latency_ms": 0,
@@ -241,7 +236,7 @@ class MASRAnalyticsService:
             if len(perf.quality_scores) > 100:
                 perf.quality_scores = perf.quality_scores[-100:]
     
-    async def get_performance_summary(self) -> Dict[str, Any]:
+    async def get_performance_summary(self) -> dict[str, Any]:
         """
         Get comprehensive performance summary.
         
@@ -306,7 +301,7 @@ class MASRAnalyticsService:
             "trends": await self._analyze_trends()
         }
     
-    async def get_cost_analysis(self) -> Dict[str, Any]:
+    async def get_cost_analysis(self) -> dict[str, Any]:
         """
         Get detailed cost analysis and optimization opportunities.
         
@@ -370,8 +365,8 @@ class MASRAnalyticsService:
         self,
         complexity: QueryComplexity,
         domain: QueryDomain,
-        constraints: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        constraints: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """
         Get strategy recommendations for specific query characteristics.
         
@@ -439,7 +434,7 @@ class MASRAnalyticsService:
             }
         }
     
-    async def get_model_performance(self) -> Dict[str, Any]:
+    async def get_model_performance(self) -> dict[str, Any]:
         """
         Get model-specific performance metrics.
         
@@ -471,7 +466,7 @@ class MASRAnalyticsService:
             "recommendations": self._generate_model_recommendations(model_stats)
         }
     
-    async def _generate_recommendations(self) -> List[str]:
+    async def _generate_recommendations(self) -> list[str]:
         """Generate performance recommendations"""
         recommendations = []
         
@@ -512,7 +507,7 @@ class MASRAnalyticsService:
         
         return recommendations
     
-    def _detect_anomalies(self) -> List[Dict[str, Any]]:
+    def _detect_anomalies(self) -> list[dict[str, Any]]:
         """Detect performance anomalies"""
         anomalies = []
         
@@ -544,7 +539,7 @@ class MASRAnalyticsService:
         
         return anomalies
     
-    async def _analyze_trends(self) -> Dict[str, Any]:
+    async def _analyze_trends(self) -> dict[str, Any]:
         """Analyze performance trends"""
         trends = {}
         
@@ -572,7 +567,7 @@ class MASRAnalyticsService:
         
         return trends
     
-    async def _get_hourly_costs(self) -> List[Dict[str, Any]]:
+    async def _get_hourly_costs(self) -> list[dict[str, Any]]:
         """Get hourly cost breakdown"""
         hourly_costs = []
         
@@ -593,7 +588,7 @@ class MASRAnalyticsService:
         
         return hourly_costs
     
-    async def _calculate_cost_trend(self, days: int) -> Dict[str, float]:
+    async def _calculate_cost_trend(self, days: int) -> dict[str, float | str]:
         """Calculate cost trend over specified days"""
         # This would query historical data in production
         # For now, return estimated trend
@@ -607,7 +602,7 @@ class MASRAnalyticsService:
         self,
         complexity: QueryComplexity,
         domain: QueryDomain
-    ) -> Dict[RoutingStrategy, Dict[str, float]]:
+    ) -> dict[RoutingStrategy, dict[str, float]]:
         """Get historical performance for query characteristics"""
         # In production, this would query a database
         # For now, return current strategy performance
@@ -626,17 +621,15 @@ class MASRAnalyticsService:
         strategy: RoutingStrategy,
         complexity: QueryComplexity,
         domain: QueryDomain,
-        historical_performance: Dict[RoutingStrategy, Dict[str, float]],
-        constraints: Dict[str, Any]
+        historical_performance: dict[RoutingStrategy, dict[str, float]],
+        constraints: dict[str, Any]
     ) -> float:
         """Score a strategy for given characteristics"""
         base_score = 0.5
         perf = historical_performance.get(strategy, {})
         
         # Adjust for complexity match
-        if complexity == QueryComplexity.SIMPLE and strategy == RoutingStrategy.COST_EFFICIENT:
-            base_score += 0.2
-        elif complexity == QueryComplexity.COMPLEX and strategy == RoutingStrategy.QUALITY_FOCUSED:
+        if (complexity == QueryComplexity.SIMPLE and strategy == RoutingStrategy.COST_EFFICIENT) or (complexity == QueryComplexity.COMPLEX and strategy == RoutingStrategy.QUALITY_FOCUSED):
             base_score += 0.2
         elif strategy == RoutingStrategy.BALANCED:
             base_score += 0.1
@@ -681,7 +674,7 @@ class MASRAnalyticsService:
         
         return reasoning
     
-    def _generate_model_recommendations(self, model_stats: List[Dict[str, Any]]) -> List[str]:
+    def _generate_model_recommendations(self, model_stats: list[dict[str, Any]]) -> list[str]:
         """Generate model-specific recommendations"""
         recommendations = []
         

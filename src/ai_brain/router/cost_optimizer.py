@@ -492,7 +492,7 @@ class CostOptimizer:
 
         else:  # BALANCED
             # Select model with best cost-quality-latency balance
-            def score_model(item: tuple[str, CostEstimate]) -> float:
+            def score_model(item: tuple[ModelSpec, CostEstimate]) -> float:
                 model, estimate = item
                 # Normalize factors (0-1 scale)
                 cost_score = 1 - min(
@@ -508,10 +508,10 @@ class CostOptimizer:
                     "balance_weights", {"cost": 0.4, "quality": 0.4, "latency": 0.2}
                 )
 
-                total_score = (
-                    cost_score * weights["cost"]
-                    + quality_score * weights["quality"]
-                    + latency_score * weights["latency"]
+                total_score = float(
+                    cost_score * float(weights["cost"])
+                    + quality_score * float(weights["quality"])
+                    + latency_score * float(weights["latency"])
                 )
 
                 return total_score

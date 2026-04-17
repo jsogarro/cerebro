@@ -53,7 +53,7 @@ class ConfigurationIntegrationService:
 
         # Status tracking
         self.initialized = False
-        self.last_update = None
+        self.last_update: datetime | None = None
         self.update_count = 0
 
     async def initialize(self) -> None:
@@ -96,7 +96,7 @@ class ConfigurationIntegrationService:
             self._configuration_dependent_components.add("model_router")
 
             self.initialized = True
-            self.last_update: datetime | None = datetime.now()
+            self.last_update = datetime.now()
 
             logger.info("Configuration integration service initialized successfully")
 

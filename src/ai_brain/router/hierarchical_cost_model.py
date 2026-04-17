@@ -492,7 +492,7 @@ class HierarchicalCostOptimizer:
         self.efficiency_calculator = EfficiencySavingsCalculator(self.cost_factors)
         
         # Performance tracking
-        self.cost_predictions: list[dict[str, Any]] = []
+        self.cost_predictions: list[HierarchicalCostEstimate] = []
         self.accuracy_metrics = {
             "total_predictions": 0,
             "accurate_predictions": 0,

@@ -278,7 +278,7 @@ class ResourcePool:
         }
         
         # Cleanup task
-        self._cleanup_task: asyncio.Task | None = None
+        self._cleanup_task: asyncio.Task[None] | None = None
         
     async def get_supervisor(
         self, 
@@ -650,14 +650,19 @@ class MASRSupervisorBridge:
     
     async def health_check(self) -> HealthCheckDict:
         """Perform health check on bridge components."""
+        stats = await self.get_bridge_stats()
         health_dict: HealthCheckDict = {
             "status": "healthy",
             "metrics": {
-                "active_executions": len(self.active_executions),
                 "total_requests": self.bridge_stats["total_requests"],
+                "active_executions": len(self.executor.active_executions),
             },
-            "stats": await self.get_bridge_stats(),
+            "components": {
+                "bridge": "active",
+                "executor": "active",
+            },
         }
+        return health_dict
     
     async def cleanup(self) -> None:
         """Cleanup bridge resources."""

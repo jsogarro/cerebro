@@ -63,29 +63,29 @@ class Experiment(BaseModel):
 
     __tablename__ = "experiments"
 
-    name = Column(String(255), nullable=False, unique=True)
-    description = Column(Text)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     experiment_type: Mapped[ExperimentType] = mapped_column(Enum(ExperimentType), nullable=False)
     status: Mapped[ExperimentStatus] = mapped_column(Enum(ExperimentStatus), default=ExperimentStatus.DRAFT)
 
     allocation_strategy: Mapped[AllocationStrategy] = mapped_column(Enum(AllocationStrategy), default=AllocationStrategy.RANDOM)
-    traffic_percentage = Column(Float, default=100.0)  # % of traffic to include
-    target_segments = Column(JSON, default=dict)  # User segments to target
-    
+    traffic_percentage: Mapped[float] = mapped_column(Float, default=100.0)  # % of traffic to include
+    target_segments: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # User segments to target
+
     # Scheduling
-    start_date = Column(DateTime)
-    end_date = Column(DateTime)
-    
+    start_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Configuration
-    config = Column(JSON, default=dict)  # Experiment-specific configuration
-    metrics = Column(JSON, default=list)  # Metrics to track
-    success_criteria = Column(JSON, default=dict)  # Success criteria
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # Experiment-specific configuration
+    metrics: Mapped[list[str]] = mapped_column(JSON, default=list)  # Metrics to track
+    success_criteria: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # Success criteria
     
     # Statistical Settings
-    min_sample_size = Column(Integer, default=1000)
-    confidence_level = Column(Float, default=0.95)
-    power = Column(Float, default=0.8)
-    expected_effect_size = Column(Float)
+    min_sample_size: Mapped[int] = mapped_column(Integer, default=1000)
+    confidence_level: Mapped[float] = mapped_column(Float, default=0.95)
+    power: Mapped[float] = mapped_column(Float, default=0.8)
+    expected_effect_size: Mapped[float | None] = mapped_column(Float, nullable=True)
     
     # Relationships
     variants = relationship("ExperimentVariant", back_populates="experiment", cascade="all, delete-orphan")
