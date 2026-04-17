@@ -684,7 +684,7 @@ class MultiBanditOptimizer:
             selected_arm=selected_arm,
             expected_reward=expected_reward,
             confidence=confidence,
-            arm_probabilities=[a/(a+b) for a, b in zip(self.alpha_params, self.beta_params, strict=False)],
+            arm_probabilities=[a/(a+b) for a, b in zip(self.alpha_params, self.beta_params, strict=True)],
             arm_rewards=self.arm_values.copy(),
             arm_counts=self.arm_counts.copy(),
             regret=self._calculate_regret(),

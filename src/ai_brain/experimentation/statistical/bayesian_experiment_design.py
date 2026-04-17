@@ -230,7 +230,7 @@ class BayesianExperimentDesigner:
                 results = [await self._evaluate_async(obj_func, next_points[0])]
             
             # Update observations
-            for point, value in zip(next_points, results, strict=False):
+            for point, value in zip(next_points, results, strict=True):
                 self.X_observed.append(point)
                 self.y_observed.append(value)
                 self.optimization_history.append({

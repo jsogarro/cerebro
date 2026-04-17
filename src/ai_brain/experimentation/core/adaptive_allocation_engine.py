@@ -500,7 +500,7 @@ class AdaptiveAllocationEngine:
         elif config.strategy == AllocationStrategy.CONTEXTUAL_BANDIT:
             # Use confidence-weighted allocation
             confidences = [count / max(sum(arm_counts), 1) for count in arm_counts]
-            weighted_values = [val * conf for val, conf in zip(arm_values, confidences, strict=False)]
+            weighted_values = [val * conf for val, conf in zip(arm_values, confidences, strict=True)]
             
             exp_values = np.exp(np.array(weighted_values) * 2)
             probabilities = exp_values / np.sum(exp_values)

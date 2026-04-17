@@ -185,7 +185,7 @@ async def execute_agents_parallel(
 
     # Process results
     execution_results: dict[str, Any] = {}
-    for task, result in zip(tasks, results, strict=False):
+    for task, result in zip(tasks, results, strict=True):
         agent_type = agent_map[task]
 
         if isinstance(result, Exception):

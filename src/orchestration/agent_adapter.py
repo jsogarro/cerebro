@@ -161,7 +161,7 @@ class AgentAdapter:
         agent_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Process results
-        for agent_task, result in zip(agent_tasks, agent_results, strict=False):
+        for agent_task, result in zip(agent_tasks, agent_results, strict=True):
             if isinstance(result, Exception):
                 logger.error(
                     f"Agent {agent_task.agent_type} failed with exception: {result}"

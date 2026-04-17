@@ -757,7 +757,7 @@ class ReportGenerator:
             tasks = [self._generate_single_format(report, fmt) for fmt in formats]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for fmt, result in zip(formats, results, strict=False):
+            for fmt, result in zip(formats, results, strict=True):
                 if isinstance(result, Exception):
                     logger.error(f"Failed to generate {fmt}: {result}")
                 elif isinstance(result, ReportOutput):

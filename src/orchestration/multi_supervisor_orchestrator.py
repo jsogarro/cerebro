@@ -398,7 +398,7 @@ class MultiSupervisorOrchestrator:
         
         # Process results
         supervisor_results = {}
-        for _i, (supervisor_type, result) in enumerate(zip(supervisor_tasks.keys(), results, strict=False)):
+        for _i, (supervisor_type, result) in enumerate(zip(supervisor_tasks.keys(), results, strict=True)):
             if isinstance(result, Exception):
                 logger.error(f"Supervisor {supervisor_type} failed: {result}")
                 # Create failed result
@@ -536,7 +536,7 @@ class MultiSupervisorOrchestrator:
                 return_exceptions=True
             )
             
-            for _i, (supervisor_type, result) in enumerate(zip(supporting_tasks.keys(), results, strict=False)):
+            for _i, (supervisor_type, result) in enumerate(zip(supporting_tasks.keys(), results, strict=True)):
                 if not isinstance(result, Exception) and isinstance(result, SupervisorExecutionResult):
                     supporting_results[supervisor_type] = result
         
