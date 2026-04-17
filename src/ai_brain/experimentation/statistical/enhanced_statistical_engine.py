@@ -34,7 +34,7 @@ except ImportError:
 
 # Bayesian libraries (optional imports)
 try:
-    import arviz as az
+    import arviz as az  # noqa: F401
     import pymc as pm
     BAYESIAN_AVAILABLE = True
 except ImportError:
@@ -43,7 +43,7 @@ except ImportError:
 
 # Multi-armed bandit libraries (optional imports)
 try:
-    from mabwiser.mab import MAB, LearningPolicy, NeighborhoodPolicy
+    from mabwiser.mab import MAB, LearningPolicy, NeighborhoodPolicy  # noqa: F401
     MAB_AVAILABLE = True
 except ImportError:
     MAB_AVAILABLE = False

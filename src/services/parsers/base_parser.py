@@ -291,6 +291,6 @@ def normalize_quotes(text: str) -> str:
     text = text.replace("«", '"').replace("»", '"')
 
     # Normalize dashes
-    text = text.replace("–", "-").replace("—", "-")
+    text = text.replace("–", "-").replace("—", "-")  # noqa: RUF001
 
     return text

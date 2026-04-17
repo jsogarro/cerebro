@@ -9,7 +9,7 @@ through structured communication between supervisors and workers.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # Enums and Constants
 # ================================
 
-class SessionStatus(str, Enum):
+class SessionStatus(StrEnum):
     """TalkHier session lifecycle states"""
     INITIALIZING = "initializing"
     ACTIVE = "active"
@@ -30,7 +30,7 @@ class SessionStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class RefinementStrategy(str, Enum):
+class RefinementStrategy(StrEnum):
     """Refinement strategies for multi-round dialogue"""
     QUALITY_FOCUSED = "quality_focused"      # Maximize quality through iterations
     CONSENSUS_DRIVEN = "consensus_driven"     # Focus on agreement between agents
@@ -39,7 +39,7 @@ class RefinementStrategy(str, Enum):
     RAPID_CONVERGENCE = "rapid_convergence"   # Minimize refinement rounds
 
 
-class ConsensusType(str, Enum):
+class ConsensusType(StrEnum):
     """Types of consensus mechanisms"""
     MAJORITY = "majority"              # Simple majority agreement
     WEIGHTED = "weighted"              # Confidence-weighted consensus
@@ -48,7 +48,7 @@ class ConsensusType(str, Enum):
     HIERARCHICAL = "hierarchical"      # Supervisor-weighted consensus
 
 
-class MessageRole(str, Enum):
+class MessageRole(StrEnum):
     """Roles in TalkHier communication"""
     SUPERVISOR = "supervisor"
     WORKER = "worker"
@@ -56,7 +56,7 @@ class MessageRole(str, Enum):
     OBSERVER = "observer"
 
 
-class ProtocolType(str, Enum):
+class ProtocolType(StrEnum):
     """Available TalkHier protocol variants"""
     STANDARD = "standard"              # Default multi-round refinement
     FAST_TRACK = "fast_track"         # Reduced rounds for simple tasks
@@ -110,7 +110,7 @@ class TalkHierSessionRequest(BaseModel):
     require_evidence: bool = Field(True, description="Require supporting evidence in responses")
     
     @field_validator('min_rounds')
-    def validate_min_rounds(cls, v: int, info: Any) -> int:
+    def validate_min_rounds(cls, v: int, info: Any) -> int:  # noqa: N805
         if 'max_rounds' in info.data and v > info.data['max_rounds']:
             raise ValueError("min_rounds cannot exceed max_rounds")
         return v

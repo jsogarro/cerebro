@@ -8,14 +8,14 @@ hierarchical agent coordination.
 
 import uuid
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 # Enums for Supervisor API
 
-class SupervisorType(str, Enum):
+class SupervisorType(StrEnum):
     """Available supervisor types based on domain specialization"""
     RESEARCH = "research"
     CONTENT = "content"
@@ -24,7 +24,7 @@ class SupervisorType(str, Enum):
     GENERAL = "general"
 
 
-class WorkerStatus(str, Enum):
+class WorkerStatus(StrEnum):
     """Worker agent status in supervisor coordination"""
     IDLE = "idle"
     ASSIGNED = "assigned"
@@ -33,7 +33,7 @@ class WorkerStatus(str, Enum):
     FAILED = "failed"
 
 
-class CoordinationMode(str, Enum):
+class CoordinationMode(StrEnum):
     """Coordination modes for supervisor-worker interaction"""
     SEQUENTIAL = "sequential"
     PARALLEL = "parallel"
@@ -42,7 +42,7 @@ class CoordinationMode(str, Enum):
     DEBATE = "debate"
 
 
-class SupervisionStrategy(str, Enum):
+class SupervisionStrategy(StrEnum):
     """Supervision strategies based on task requirements"""
     DIRECT = "direct"               # Simple direct supervision
     COLLABORATIVE = "collaborative" # Workers collaborate with supervisor guidance
@@ -51,7 +51,7 @@ class SupervisionStrategy(str, Enum):
     CONSENSUS = "consensus"        # Consensus-based decision making
 
 
-class ConflictResolutionStrategy(str, Enum):
+class ConflictResolutionStrategy(StrEnum):
     """Strategies for resolving conflicts between workers"""
     SUPERVISOR_OVERRIDE = "supervisor_override"
     MAJORITY_VOTE = "majority_vote"

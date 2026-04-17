@@ -18,7 +18,7 @@ try:
     from docx import Document
     from docx.enum.style import WD_STYLE_TYPE
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Inches, Pt
+    from docx.shared import Inches, Pt  # noqa: F401
     PYTHON_DOCX_AVAILABLE = True
 except ImportError:
     PYTHON_DOCX_AVAILABLE = False

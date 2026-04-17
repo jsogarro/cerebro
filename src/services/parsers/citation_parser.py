@@ -92,7 +92,7 @@ def parse_apa_citation(citation: str) -> dict[str, str]:
                 result["issue"] = issue_match.group(1)
 
             # Extract pages
-            pages_pattern = r"(\d+[-–]\d+|\d+)"
+            pages_pattern = r"(\d+[-–]\d+|\d+)"  # noqa: RUF001
             pages_matches = re.findall(pages_pattern, journal_part)
             if pages_matches:
                 result["pages"] = pages_matches[-1]  # Take last match
@@ -157,7 +157,7 @@ def parse_mla_citation(citation: str) -> dict[str, str]:
         result["year"] = year_match.group(1)
 
     # Extract pages
-    pages_pattern = r"pp?\.\s*(\d+[-–]\d+|\d+)"
+    pages_pattern = r"pp?\.\s*(\d+[-–]\d+|\d+)"  # noqa: RUF001
     pages_match = re.search(pages_pattern, citation)
     if pages_match:
         result["pages"] = pages_match.group(1)
@@ -214,7 +214,7 @@ def parse_chicago_citation(citation: str) -> dict[str, str]:
         result["year"] = year_match.group(1)
 
     # Extract pages (after colon)
-    pages_pattern = r":\s*(\d+[-–]\d+|\d+)"
+    pages_pattern = r":\s*(\d+[-–]\d+|\d+)"  # noqa: RUF001
     pages_match = re.search(pages_pattern, citation)
     if pages_match:
         result["pages"] = pages_match.group(1)
@@ -257,9 +257,9 @@ def auto_parse_citation(citation: str) -> dict[str, str]:
 
     # Pages (various formats)
     pages_patterns = [
-        r"pp?\.\s*(\d+[-–]\d+)",
-        r":\s*(\d+[-–]\d+)",
-        r",\s*(\d+[-–]\d+)[,.]?$",
+        r"pp?\.\s*(\d+[-–]\d+)",  # noqa: RUF001
+        r":\s*(\d+[-–]\d+)",  # noqa: RUF001
+        r",\s*(\d+[-–]\d+)[,.]?$",  # noqa: RUF001
     ]
     for pattern in pages_patterns:
         match = re.search(pattern, citation)

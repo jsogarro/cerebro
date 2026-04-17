@@ -4,7 +4,7 @@ Research Result database model.
 Stores research findings, sources, and citations.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import JSON, Float, ForeignKey, Index, String
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.db.base import BaseModel
 
 
-class ResultType(str, Enum):
+class ResultType(StrEnum):
     """Type of research result."""
 
     FINDING = "finding"

@@ -430,7 +430,7 @@ class VisualizationGenerator:
         config = viz_spec.config
         
         # Create network graph
-        G = nx.Graph()
+        G = nx.Graph()  # noqa: N806
         
         # Add nodes
         nodes = data.get('nodes', [])
@@ -467,7 +467,7 @@ class VisualizationGenerator:
     
     def _create_plotly_network(
         self,
-        G: Any,
+        G: Any,  # noqa: N803
         pos: dict[Any, Any],
         viz_spec: Visualization,
         format: str,
@@ -563,7 +563,7 @@ class VisualizationGenerator:
     
     def _create_matplotlib_network(
         self,
-        G: Any,
+        G: Any,  # noqa: N803
         pos: dict[Any, Any],
         viz_spec: Visualization,
         format: str

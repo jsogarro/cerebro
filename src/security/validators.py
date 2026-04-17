@@ -29,7 +29,7 @@ class SecurityValidator:
         r"(--|\||;|\/\*|\*\/|@@|@|xp_|sp_|0x)",
         r"(\bOR\b\s*\d+\s*=\s*\d+)",
         r"(\bAND\b\s*\d+\s*=\s*\d+)",
-        r"(\'|\"|`|´|'|'|\"|\")",
+        r"(\'|\"|`|´|'|'|\"|\")",  # noqa: RUF001
         r"(\bWHERE\b.*=.*)",
     ]
 
@@ -379,7 +379,7 @@ class SecurityValidator:
 # Pydantic models for request validation
 
 
-from typing import Annotated
+from typing import Annotated  # noqa: E402
 
 SecureStringField = Annotated[str, "SecureString"]
 
@@ -413,11 +413,11 @@ class LoginRequest(BaseModel):
     remember_me: bool = Field(False, description="Remember session")
 
     @validator("email")
-    def validate_email(cls, v: str) -> str:
+    def validate_email(cls, v: str) -> str:  # noqa: N805
         return SecurityValidator.validate_email(v)
 
     @validator("password")
-    def validate_password(cls, v: str) -> str:
+    def validate_password(cls, v: str) -> str:  # noqa: N805
         # Basic password validation - expand as needed
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters")
@@ -443,7 +443,7 @@ class RegisterRequest(BaseModel):
     terms_accepted: bool = Field(..., description="Terms acceptance")
 
     @validator("username")
-    def validate_username(cls, v: str) -> str:
+    def validate_username(cls, v: str) -> str:  # noqa: N805
         # Check for reserved usernames
         reserved = ["admin", "root", "system", "api", "test"]
         if v.lower() in reserved:
@@ -460,7 +460,7 @@ class ResearchProjectRequest(BaseModel):
     domains: list[SecureStringField] = Field(..., max_length=10)
 
     @validator("domains")
-    def validate_domains(cls, v: list[str]) -> list[str]:
+    def validate_domains(cls, v: list[str]) -> list[str]:  # noqa: N805
         # Ensure unique domains
         if len(v) != len(set(v)):
             raise ValueError("Duplicate domains not allowed")

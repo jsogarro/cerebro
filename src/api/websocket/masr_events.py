@@ -9,7 +9,7 @@ Based on "MasRouter: Learning to Route LLMs" research patterns.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -20,7 +20,7 @@ from src.api.websocket.models import MessageType, WebSocketMessage
 from src.models.masr_api_models import RoutingDecisionResponse
 
 
-class MASREventType(str, Enum):
+class MASREventType(StrEnum):
     """Types of MASR routing events"""
     ROUTING_STARTED = "routing_started"
     ROUTING_DECISION = "routing_decision"

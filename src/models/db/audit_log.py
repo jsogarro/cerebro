@@ -6,7 +6,7 @@ and authorization events in the system.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String, Text
@@ -16,7 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.db.base import BaseModel
 
 
-class AuditEventType(str, Enum):
+class AuditEventType(StrEnum):
     """Audit event types."""
 
     # Authentication events
@@ -85,7 +85,7 @@ class AuditEventType(str, Enum):
     DATA_EXPORTED = "data_exported"
 
 
-class AuditSeverity(str, Enum):
+class AuditSeverity(StrEnum):
     """Audit event severity levels."""
 
     INFO = "info"

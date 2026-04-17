@@ -38,15 +38,15 @@ try:
         Integer,
         String,
         Text,
-        and_,
+        and_,  # noqa: F401
         asc,
         desc,
-        or_,
+        or_,  # noqa: F401
     )
     from sqlalchemy.ext.asyncio import AsyncEngine as _AsyncEngine
     from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
     from sqlalchemy.ext.asyncio import create_async_engine
-    from sqlalchemy.orm import declarative_base, sessionmaker
+    from sqlalchemy.orm import declarative_base, sessionmaker  # noqa: F401
     from sqlalchemy.sql import text
 
     HAS_SQLALCHEMY = True

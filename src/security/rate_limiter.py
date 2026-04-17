@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import redis.asyncio as redis
@@ -20,7 +20,7 @@ from starlette.responses import Response
 from src.models.db.audit_log import AuditEventType, AuditSeverity
 
 
-class RateLimitStrategy(str, Enum):
+class RateLimitStrategy(StrEnum):
     """Rate limiting strategies."""
 
     SLIDING_WINDOW = "sliding_window"
@@ -29,7 +29,7 @@ class RateLimitStrategy(str, Enum):
     LEAKY_BUCKET = "leaky_bucket"
 
 
-class RateLimitScope(str, Enum):
+class RateLimitScope(StrEnum):
     """Rate limit scopes."""
 
     GLOBAL = "global"  # Global rate limit across all users

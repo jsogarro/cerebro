@@ -272,7 +272,7 @@ def extract_quotes(text: str) -> list[tuple[str, str | None]]:
     quotes = []
 
     # Pattern for quotes with attribution
-    attribution_pattern = r'"([^"]+)"\s*[-–—]\s*([^,\n]+)'
+    attribution_pattern = r'"([^"]+)"\s*[-–—]\s*([^,\n]+)'  # noqa: RUF001
     for match in re.finditer(attribution_pattern, text):
         quotes.append((match.group(1), match.group(2).strip()))
 
@@ -333,7 +333,7 @@ def clean_text(text: str) -> str:
     text = text.replace(""", "'").replace(""", "'")
 
     # Normalize dashes
-    text = text.replace("–", "-").replace("—", "-")
+    text = text.replace("–", "-").replace("—", "-")  # noqa: RUF001
 
     return text
 

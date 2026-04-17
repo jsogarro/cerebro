@@ -6,9 +6,9 @@ policy violations, and security incidents.
 """
 
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
-from uuid import UUID as PyUUID
+from uuid import UUID as PyUUID  # noqa: N811
 
 from sqlalchemy import (
     JSON,
@@ -26,7 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.db.base import BaseModel
 
 
-class AlertType(str, Enum):
+class AlertType(StrEnum):
     """Security alert types."""
 
     # Authentication alerts
@@ -70,7 +70,7 @@ class AlertType(str, Enum):
     SYSTEM_BREACH = "system_breach"
 
 
-class AlertSeverity(str, Enum):
+class AlertSeverity(StrEnum):
     """Alert severity levels."""
 
     LOW = "low"
@@ -79,7 +79,7 @@ class AlertSeverity(str, Enum):
     CRITICAL = "critical"
 
 
-class AlertStatus(str, Enum):
+class AlertStatus(StrEnum):
     """Alert status."""
 
     NEW = "new"

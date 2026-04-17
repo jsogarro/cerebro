@@ -4,14 +4,14 @@ Implements domain models following TDD principles.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
 
-class ResearchStatus(str, Enum):
+class ResearchStatus(StrEnum):
     """Research project status enumeration."""
 
     PENDING = "pending"
@@ -22,7 +22,7 @@ class ResearchStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class ResearchDepth(str, Enum):
+class ResearchDepth(StrEnum):
     """Research depth level enumeration."""
 
     SURVEY = "survey"

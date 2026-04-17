@@ -6,9 +6,9 @@ Manages MFA configuration including TOTP, SMS, email, and backup codes.
 
 import secrets
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
-from uuid import UUID as PyUUID
+from uuid import UUID as PyUUID  # noqa: N811
 
 import pyotp
 from passlib.context import CryptContext
@@ -30,7 +30,7 @@ from src.models.db.base import BaseModel
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-class MFAMethod(str, Enum):
+class MFAMethod(StrEnum):
     """Supported MFA methods."""
 
     TOTP = "totp"  # Time-based One-Time Password (Google Authenticator, etc.)

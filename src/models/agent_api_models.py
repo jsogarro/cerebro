@@ -7,13 +7,13 @@ Chain-of-Agents, and Mixture-of-Agents execution.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class AgentType(str, Enum):
+class AgentType(StrEnum):
     """Available agent types in Cerebro."""
     
     LITERATURE_REVIEW = "literature-review"
@@ -23,7 +23,7 @@ class AgentType(str, Enum):
     SYNTHESIS = "synthesis"
 
 
-class ExecutionMode(str, Enum):
+class ExecutionMode(StrEnum):
     """Agent execution modes following research patterns."""
     
     DIRECT = "direct"              # Single agent execution
@@ -32,7 +32,7 @@ class ExecutionMode(str, Enum):
     HIERARCHICAL = "hierarchical" # Supervisor-coordinated
 
 
-class AgentCapability(str, Enum):
+class AgentCapability(StrEnum):
     """Agent capabilities for discovery."""
     
     DATABASE_SEARCH = "database_search"

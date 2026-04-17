@@ -102,7 +102,7 @@ class RegisterRequest(BaseModel):
     accept_terms: bool = Field(..., description="Accept terms of service")
 
     @field_validator("username")
-    def validate_username(cls, v: str) -> str:
+    def validate_username(cls, v: str) -> str:  # noqa: N805
         """Validate username format."""
         if not re.match(r"^[a-zA-Z0-9_-]+$", v):
             raise ValueError(
@@ -111,7 +111,7 @@ class RegisterRequest(BaseModel):
         return v.lower()
 
     @field_validator("password")
-    def validate_password_strength(cls, v: str) -> str:
+    def validate_password_strength(cls, v: str) -> str:  # noqa: N805
         """Validate password strength."""
         if len(v) < 12:
             raise ValueError("Password must be at least 12 characters long")
@@ -139,7 +139,7 @@ class RegisterRequest(BaseModel):
         return v
 
     @field_validator("accept_terms")
-    def validate_terms_accepted(cls, v: bool) -> bool:
+    def validate_terms_accepted(cls, v: bool) -> bool:  # noqa: N805
         """Validate terms acceptance."""
         if not v:
             raise ValueError("You must accept the terms of service")
@@ -191,7 +191,7 @@ class PasswordResetConfirm(BaseModel):
     confirm_password: str = Field(..., description="Confirm new password")
 
     @field_validator("new_password")
-    def validate_password_strength(cls, v: str) -> str:
+    def validate_password_strength(cls, v: str) -> str:  # noqa: N805
         """Validate password strength."""
         if len(v) < 12:
             raise ValueError("Password must be at least 12 characters long")
@@ -235,7 +235,7 @@ class ChangePasswordRequest(BaseModel):
     confirm_password: str = Field(..., description="Confirm new password")
 
     @field_validator("new_password")
-    def validate_password_strength(cls, v: str) -> str:
+    def validate_password_strength(cls, v: str) -> str:  # noqa: N805
         """Validate password strength."""
         if len(v) < 12:
             raise ValueError("Password must be at least 12 characters long")

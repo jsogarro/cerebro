@@ -448,7 +448,7 @@ def refine_scope(
         scope_dict["max_sources"] = max_sources
 
     if languages:
-        scope_dict["languages"] = [l.strip() for l in languages.split(",")]
+        scope_dict["languages"] = [lang.strip() for lang in languages.split(",")]
 
     if not scope_dict:
         print_error("No scope parameters provided")

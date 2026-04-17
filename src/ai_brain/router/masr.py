@@ -147,6 +147,9 @@ class MASRouter:
         self.max_agents_per_query = self.config.get("max_agents", 10)
         self.max_parallel_workers = self.config.get("max_parallel", 5)
 
+        # Store background task references to prevent GC
+        self._background_tasks: set[asyncio.Task[Any]] = set()
+
         # Learning parameters for adaptive routing
         self.learning_enabled = self.config.get("enable_learning", True)
 
@@ -240,7 +243,9 @@ class MASRouter:
 
             # Trigger adaptive learning if enabled
             if self.learning_enabled:
-                asyncio.create_task(self.metrics_collector.adapt_from_decision(decision))
+                task = asyncio.create_task(self.metrics_collector.adapt_from_decision(decision))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
 
             processing_time = (datetime.now() - start_time).total_seconds() * 1000
             logger.info(

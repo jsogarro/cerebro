@@ -6,14 +6,14 @@ and their components following functional programming principles.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
 
 
-class ReportFormat(str, Enum):
+class ReportFormat(StrEnum):
     """Supported report output formats."""
     
     MARKDOWN = "markdown"
@@ -24,7 +24,7 @@ class ReportFormat(str, Enum):
     JSON = "json"
 
 
-class ReportType(str, Enum):
+class ReportType(StrEnum):
     """Different types of research reports."""
     
     COMPREHENSIVE = "comprehensive"
@@ -35,7 +35,7 @@ class ReportType(str, Enum):
     SYNTHESIS_REPORT = "synthesis"
 
 
-class CitationStyle(str, Enum):
+class CitationStyle(StrEnum):
     """Supported citation styles."""
     
     APA = "APA"
@@ -45,7 +45,7 @@ class CitationStyle(str, Enum):
     HARVARD = "Harvard"
 
 
-class VisualizationType(str, Enum):
+class VisualizationType(StrEnum):
     """Types of visualizations that can be generated."""
     
     BAR_CHART = "bar_chart"
@@ -74,7 +74,7 @@ class ReportSection(BaseModel):
     )
     
     @validator('level')
-    def validate_level(cls, v: int) -> int:
+    def validate_level(cls, v: int) -> int:  # noqa: N805
         """Ensure heading level is valid."""
         return max(1, min(6, v))
 
@@ -219,7 +219,7 @@ class ReportMetadata(BaseModel):
     version: str = Field(default="1.0", description="Report version")
     
     @validator('quality_score', 'confidence_score')
-    def validate_scores(cls, v: float) -> float:
+    def validate_scores(cls, v: float) -> float:  # noqa: N805
         """Ensure scores are between 0 and 1."""
         return max(0.0, min(1.0, v))
 

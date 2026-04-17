@@ -697,7 +697,7 @@ class MultiSupervisorOrchestrator:
         # Simple topological sort implementation
         in_degree = dict.fromkeys(supervisors, 0)
         
-        for dep_from, dep_to in dependencies:
+        for _dep_from, dep_to in dependencies:
             if dep_to in in_degree:
                 in_degree[dep_to] += 1
         

@@ -4,7 +4,7 @@ Research Project database model.
 Represents a research project in the system.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
@@ -24,7 +24,7 @@ from sqlalchemy.orm import Mapped, backref, mapped_column, relationship
 from src.models.db.base import BaseModel
 
 
-class ProjectStatus(str, Enum):
+class ProjectStatus(StrEnum):
     """Research project status."""
 
     DRAFT = "draft"

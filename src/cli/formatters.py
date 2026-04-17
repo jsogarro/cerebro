@@ -274,4 +274,4 @@ def print_warning(message: str) -> None:
 
 def print_info(message: str) -> None:
     """Print info message."""
-    console.print(f"[blue]ℹ[/blue] {message}")
+    console.print(f"[blue]ℹ[/blue] {message}")  # noqa: RUF001

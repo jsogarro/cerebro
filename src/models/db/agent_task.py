@@ -5,7 +5,7 @@ Represents agent tasks within research projects.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
@@ -26,7 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.db.base import BaseModel
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     """Agent task status."""
 
     PENDING = "pending"

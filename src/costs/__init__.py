@@ -1,9 +1,9 @@
 """Cost management and budgeting system."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -17,7 +17,7 @@ class CostTransaction:
     input_tokens: int
     output_tokens: int
     total_cost_cents: int
-    created_at: datetime = datetime.now()
+    created_at: datetime = field(default_factory=datetime.now)
 
 
 class CostTracker:

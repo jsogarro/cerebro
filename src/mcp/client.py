@@ -49,7 +49,7 @@ class MCPClient:
         logger.info(f"Registered {len(tools)} default tools")
 
     async def search_academic(
-        self, query: str, databases: list[str] = ["arxiv"], max_results: int = 10
+        self, query: str, databases: list[str] | None = None, max_results: int = 10
     ) -> dict[str, Any]:
         """
         Search academic databases.
@@ -62,6 +62,8 @@ class MCPClient:
         Returns:
             Search results
         """
+        if databases is None:
+            databases = ["arxiv"]
         return await self.server.execute_tool(
             "search_academic", query=query, databases=databases, max_results=max_results
         )

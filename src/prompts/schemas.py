@@ -6,13 +6,13 @@ type safety, and structured prompt management.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, validator
 
 
-class PromptType(str, Enum):
+class PromptType(StrEnum):
     """Types of prompts in the system."""
 
     AGENT = "agent"
@@ -24,7 +24,7 @@ class PromptType(str, Enum):
     DOMAIN = "domain"
 
 
-class PromptRole(str, Enum):
+class PromptRole(StrEnum):
     """Agent roles for prompts."""
 
     RESEARCH_SUPERVISOR = "research_supervisor"
@@ -54,7 +54,7 @@ class PromptRole(str, Enum):
     CONSENSUS_FACILITATOR = "consensus_facilitator"
 
 
-class VariableType(str, Enum):
+class VariableType(StrEnum):
     """Variable types for prompt templates."""
 
     STRING = "string"
@@ -170,13 +170,13 @@ class PromptTemplate(BaseModel):
     )
 
     @validator("metadata")
-    def validate_metadata_consistency(cls, v: PromptMetadata, values: dict[str, Any]) -> PromptMetadata:
+    def validate_metadata_consistency(cls, v: PromptMetadata, values: dict[str, Any]) -> PromptMetadata:  # noqa: N805
         """Ensure metadata is consistent with template content."""
         # Could add validation logic here
         return v
 
     @validator("temperature")
-    def validate_temperature_range(cls, v: float) -> float:
+    def validate_temperature_range(cls, v: float) -> float:  # noqa: N805
         """Validate temperature is in valid range."""
         if not 0.0 <= v <= 2.0:
             raise ValueError("Temperature must be between 0.0 and 2.0")

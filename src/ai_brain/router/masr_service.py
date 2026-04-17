@@ -90,6 +90,7 @@ class MASRService:
         self.environment = os.getenv("ENVIRONMENT", "development")
         self.masr_router: MASRouter | None = None
         self.redis_client: redis.Redis[bytes] | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self.service_stats: dict[str, Any] = {
             "requests_total": 0,
             "requests_successful": 0,
@@ -356,7 +357,9 @@ class MASRService:
         
         def signal_handler(signum: int, frame: Any) -> None:
             logger.info(f"Received signal {signum}, shutting down gracefully...")
-            asyncio.create_task(self._cleanup_components())
+            task = asyncio.create_task(self._cleanup_components())
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
         
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGINT, signal_handler)

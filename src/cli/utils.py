@@ -81,7 +81,7 @@ def prompt_for_project_details() -> dict[str, Any]:
             "Languages (comma-separated)",
             default="en",
         )
-        languages_list: list[str] = [l.strip() for l in languages_str.split(",")]
+        languages_list: list[str] = [lang.strip() for lang in languages_str.split(",")]
         scope["languages"] = languages_list
 
         geographic_scope_str = Prompt.ask(

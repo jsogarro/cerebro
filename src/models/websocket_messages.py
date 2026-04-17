@@ -6,14 +6,14 @@ the server and various clients (web, CLI, etc.).
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
-class WSMessageType(str, Enum):
+class WSMessageType(StrEnum):
     """WebSocket message types."""
 
     # Progress updates
@@ -155,7 +155,7 @@ class CLIWSMessage(WSMessage):
             return f"⚠️  Warning: {self.data.get('message', 'Warning')}"
 
         elif self.type == WSMessageType.INFO:
-            return f"ℹ️  Info: {self.data.get('message', 'Information')}"
+            return f"ℹ️  Info: {self.data.get('message', 'Information')}"  # noqa: RUF001
 
         else:
             return f"{self.type}: {self.data}"

@@ -103,7 +103,7 @@ class EdgeConditions:
         Returns:
             Next node based on quality score
         """
-        MIN_QUALITY_SCORE = 0.7
+        MIN_QUALITY_SCORE = 0.7  # noqa: N806
 
         if state.quality_score >= MIN_QUALITY_SCORE:
             return "report_generation"

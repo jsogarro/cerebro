@@ -1,8 +1,8 @@
 """Research replication and benchmarking system."""
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -44,7 +44,7 @@ class ReplicationPackage:
     query: str
     scope: dict[str, Any]
     agents: list[str]
-    created_at: datetime = datetime.now()
+    created_at: datetime = field(default_factory=datetime.now)
 
 
 class ResearchReplicationToolkit:

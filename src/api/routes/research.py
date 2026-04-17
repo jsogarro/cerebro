@@ -32,7 +32,7 @@ async def get_research_repo(
     return ResearchRepository(session)
 
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # noqa: E402
 
 
 class CreateResearchProjectRequest(BaseModel):

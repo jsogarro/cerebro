@@ -246,9 +246,9 @@ class ResearchGraphBuilder:
                 # Direct edge
                 if edge.condition:
                     # Add with condition
-                    def conditional_target(state: ResearchState) -> str:
-                        if edge.condition and edge.condition(state) and isinstance(edge.target, str):
-                            return edge.target
+                    def conditional_target(state: ResearchState, _edge: Any = edge) -> str:
+                        if _edge.condition and _edge.condition(state) and isinstance(_edge.target, str):
+                            return _edge.target
                         return END
 
                     self._graph.add_conditional_edges(edge.source, conditional_target)

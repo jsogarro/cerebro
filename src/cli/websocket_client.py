@@ -299,7 +299,7 @@ class CLIWebSocketClient:
                         elif ws_message.type == WSMessageType.INFO:
                             info_msg = ws_message.data.get("message", "Info")
                             if self.verbose:
-                                print_info(f"ℹ️ {info_msg}")
+                                print_info(f"ℹ️ {info_msg}")  # noqa: RUF001
 
                     except json.JSONDecodeError as e:
                         self._log(f"Invalid JSON received: {e}")

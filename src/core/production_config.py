@@ -6,7 +6,7 @@ that integrate with the main configuration system.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -66,7 +66,7 @@ class ProductionSettings:
     # Maintenance
     maintenance_mode: bool = False
     maintenance_message: str = "System is under maintenance. Please try again later."
-    maintenance_allowed_ips: list[str] = []
+    maintenance_allowed_ips: list[str] = field(default_factory=list)
 
     # Feature rollout
     feature_rollout_percentage: dict[str, int] | None = None

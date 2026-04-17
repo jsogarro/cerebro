@@ -98,6 +98,9 @@ class DirectExecutionService:
         self.enable_retry = True
         self.max_retries = MAX_RETRY_ATTEMPTS
         
+        # Store background task references to prevent GC
+        self._background_tasks: set[asyncio.Task[Any]] = set()
+
         # Performance metrics
         self.execution_stats = {
             "total_executions": 0,
@@ -142,7 +145,9 @@ class DirectExecutionService:
         self.execution_stats["concurrent_executions"] += 1
         
         # Start execution asynchronously
-        asyncio.create_task(self._execute_research_workflow(project, execution_status, context))
+        task = asyncio.create_task(self._execute_research_workflow(project, execution_status, context))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
         
         logger.info(f"Started direct execution {execution_id} for project {project.id}")
         

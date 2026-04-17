@@ -7,13 +7,13 @@ loaded from YAML files.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, validator
 
 
-class ModelTier(str, Enum):
+class ModelTier(StrEnum):
     """Model performance and cost tiers."""
 
     BASIC = "basic"
@@ -23,7 +23,7 @@ class ModelTier(str, Enum):
     TESTING = "testing"
 
 
-class ModelCapability(str, Enum):
+class ModelCapability(StrEnum):
     """Supported model capabilities."""
 
     TEXT_GENERATION = "text_generation"
@@ -39,7 +39,7 @@ class ModelCapability(str, Enum):
     TESTING = "testing"
 
 
-class RoutingStrategy(str, Enum):
+class RoutingStrategy(StrEnum):
     """Available routing strategies."""
 
     COST_EFFICIENT = "cost_efficient"
@@ -97,13 +97,13 @@ class ModelSpecification(BaseModel):
     )
 
     @validator("cost_per_1k_tokens")
-    def validate_reasonable_cost(cls, v: float) -> float:
+    def validate_reasonable_cost(cls, v: float) -> float:  # noqa: N805
         if v > 1.0:  # More than $1 per 1K tokens seems unreasonable
             raise ValueError("Cost per 1K tokens seems too high (> $1.00)")
         return v
 
     @validator("quality_score")
-    def validate_quality_score(cls, v: float) -> float:
+    def validate_quality_score(cls, v: float) -> float:  # noqa: N805
         if v < 0.1:  # Quality score too low to be useful
             raise ValueError("Quality score must be at least 0.1")
         return v
@@ -142,7 +142,7 @@ class ProviderConfiguration(BaseModel):
     )
 
     @validator("api_endpoint")
-    def validate_endpoint_format(cls, v: str) -> str:
+    def validate_endpoint_format(cls, v: str) -> str:  # noqa: N805
         if not (v.startswith("http://") or v.startswith("https://")):
             raise ValueError("API endpoint must be a valid HTTP/HTTPS URL")
         return v
@@ -273,7 +273,7 @@ class ModelConfiguration(BaseModel):
     disaster_recovery: dict[str, Any] | None = None
 
     @validator("models", always=True)
-    def validate_models_have_providers(cls, v: dict[str, ModelSpecification], values: dict[str, Any]) -> dict[str, ModelSpecification]:
+    def validate_models_have_providers(cls, v: dict[str, ModelSpecification], values: dict[str, Any]) -> dict[str, ModelSpecification]:  # noqa: N805
         """Ensure all models reference valid providers."""
         # Skip validation if providers haven't been processed yet
         providers = values.get("providers")

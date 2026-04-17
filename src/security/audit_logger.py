@@ -61,6 +61,7 @@ class AuditLogger:
 
         # Background task for periodic flushing
         self.flush_task: asyncio.Task[None] | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
         # Metrics
         self.metrics = {
@@ -179,7 +180,9 @@ class AuditLogger:
 
             # Flush if buffer is full
             if len(self.log_buffer) >= self.buffer_size:
-                asyncio.create_task(self.flush_buffer())
+                task = asyncio.create_task(self.flush_buffer())
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
 
         # Log to structured logger as well
         self.logger.info(
@@ -512,19 +515,19 @@ class AuditLogger:
 
             # Analyze logs for GDPR compliance
             report["summary"]["data_access_events"] = len(
-                [l for l in logs if l.event_type == AuditEventType.DATA_ACCESSED]
+                [entry for entry in logs if entry.event_type == AuditEventType.DATA_ACCESSED]
             )
             report["summary"]["data_modifications"] = len(
-                [l for l in logs if l.event_type == AuditEventType.DATA_MODIFIED]
+                [entry for entry in logs if entry.event_type == AuditEventType.DATA_MODIFIED]
             )
             report["summary"]["data_deletions"] = len(
-                [l for l in logs if l.event_type == AuditEventType.DATA_DELETED]
+                [entry for entry in logs if entry.event_type == AuditEventType.DATA_DELETED]
             )
             report["summary"]["data_exports"] = len(
-                [l for l in logs if l.event_type == AuditEventType.DATA_EXPORTED]
+                [entry for entry in logs if entry.event_type == AuditEventType.DATA_EXPORTED]
             )
             report["summary"]["account_deletions"] = len(
-                [l for l in logs if l.event_type == AuditEventType.ACCOUNT_DELETED]
+                [entry for entry in logs if entry.event_type == AuditEventType.ACCOUNT_DELETED]
             )
 
             # Check for violations

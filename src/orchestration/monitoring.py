@@ -529,7 +529,7 @@ class OrchestrationMonitor:
                 stats["max_duration"] = max(stats["max_duration"], duration)
 
         # Calculate averages
-        for phase, stats in phase_stats.items():
+        for _phase, stats in phase_stats.items():
             if stats["count"] > 0:
                 stats["average_duration"] = stats["total_duration"] / stats["count"]
 
@@ -563,7 +563,7 @@ class OrchestrationMonitor:
                             status_dist[status] = status_dist.get(status, 0) + count
 
         # Calculate success rates
-        for agent_type, stats in agent_stats.items():
+        for _agent_type, stats in agent_stats.items():
             if isinstance(stats, dict):
                 total = stats.get("total_executions", 0)
                 if isinstance(total, int) and total > 0:

@@ -40,7 +40,7 @@ except ImportError:
     WATCHDOG_AVAILABLE = False
     logger.warning("watchdog not available - file watching disabled")
 
-from .model_schemas import (
+from .model_schemas import (  # noqa: E402
     ModelCapability,
     ModelConfiguration,
     ModelSpecification,

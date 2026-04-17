@@ -261,7 +261,7 @@ class ResultRepository(BaseRepository[ResearchResult]):
         merged_count = 0
 
         # Merge duplicates by keeping highest confidence score
-        for key, duplicate_list in duplicates.items():
+        for _key, duplicate_list in duplicates.items():
             if len(duplicate_list) > 1:
                 # Sort by confidence score
                 duplicate_list.sort(key=lambda x: x.confidence_score or 0, reverse=True)

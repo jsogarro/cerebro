@@ -6,7 +6,7 @@ Manages OAuth provider connections for social authentication
 """
 
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
@@ -25,7 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.db.base import BaseModel
 
 
-class OAuthProvider(str, Enum):
+class OAuthProvider(StrEnum):
     """Supported OAuth providers."""
 
     GOOGLE = "google"

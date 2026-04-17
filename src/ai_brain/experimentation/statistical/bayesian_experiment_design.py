@@ -212,7 +212,7 @@ class BayesianExperimentDesigner:
         for iteration in range(n_iterations):
             # Fit GP model to observations
             if len(self.X_observed) > 0:
-                X = np.array(self.X_observed)
+                X = np.array(self.X_observed)  # noqa: N806
                 y = np.array(self.y_observed)
                 self.gp_model.fit(X, y)
             
@@ -510,7 +510,7 @@ class BayesianExperimentDesigner:
         
         # Refit GP model
         if len(self.X_observed) > 0:
-            X = np.array(self.X_observed)
+            X = np.array(self.X_observed)  # noqa: N806
             y = np.array(self.y_observed)
             self.gp_model.fit(X, y)
     
