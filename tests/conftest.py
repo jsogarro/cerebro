@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 os.environ["ENVIRONMENT"] = "test"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["REDIS_URL"] = "redis://localhost:6379/15"
-os.environ["SECRET_KEY"] = "test-secret-key"
+os.environ["SECRET_KEY"] = "test-secret-key-that-is-at-least-32-characters-long"
 
 
 @pytest.fixture(scope="session")
@@ -53,8 +53,12 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     # Create session factory
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # Create tables
-    from src.models.base import Base
+    # Create tables - import models to register them
+    import src.models.db.agent_task
+    import src.models.db.research_project
+    import src.models.db.research_result
+    import src.models.db.workflow_checkpoint  # noqa: F401
+    from src.models.db.base import Base
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
