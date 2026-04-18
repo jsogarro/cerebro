@@ -193,7 +193,8 @@ async def list_research_projects(
     import json as _json
 
     def _parse_query(q: Any) -> dict[str, Any]:
-        return _json.loads(q) if isinstance(q, str) else q
+        result: dict[str, Any] = _json.loads(q) if isinstance(q, str) else q
+        return result
 
     return [
         ResearchProject(

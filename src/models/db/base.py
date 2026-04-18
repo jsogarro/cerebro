@@ -15,7 +15,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import CHAR
 
 
-class PortableUUID(TypeDecorator):
+class PortableUUID(TypeDecorator[uuid.UUID]):
     """Platform-independent UUID type. Uses PostgreSQL UUID on Postgres, CHAR(36) elsewhere."""
 
     impl = CHAR
