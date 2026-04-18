@@ -56,7 +56,11 @@ class MethodologyAgent(BaseAgent):
                 prompt = self._build_prompt(task.input_data)
                 response = await self.gemini_service.generate_content(prompt)
                 parsed_response = parse_json_response(response)
-                analysis = parsed_response.get("methodology_analysis", {})
+                analysis = (
+                    parsed_response.get("methodology_analysis")
+                    or parsed_response.get("methodology")
+                    or parsed_response
+                )
             else:
                 # Fallback for testing without Gemini
                 analysis = self._generate_mock_analysis(task)

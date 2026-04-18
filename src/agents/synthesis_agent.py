@@ -59,7 +59,11 @@ class SynthesisAgent(BaseAgent):
                 prompt = self._build_prompt(agent_outputs)
                 response = await self.gemini_service.generate_content(prompt)
                 parsed_response = parse_json_response(response)
-                synthesis = parsed_response.get("synthesis_result", {})
+                synthesis = (
+                    parsed_response.get("synthesis_result")
+                    or parsed_response.get("synthesis")
+                    or parsed_response
+                )
             else:
                 # Fallback for testing without Gemini
                 synthesis = self._generate_mock_synthesis(agent_outputs)

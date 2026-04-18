@@ -73,6 +73,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Database initialization failed: {e}")
 
+    # Initialize Gemini service
+    gemini_service = None
+    if settings.GEMINI_API_KEY:
+        try:
+            from src.services.gemini_service import GeminiService
+
+            gemini_service = GeminiService(api_key=settings.GEMINI_API_KEY)
+            logger.info("Gemini service initialized", model=gemini_service.model_name)
+        except Exception as e:
+            logger.warning(f"Gemini service initialization failed: {e}")
+    else:
+        logger.warning("GEMINI_API_KEY not set — agents will use fallback responses")
+
+    # Pre-initialize the DirectExecutionService with Gemini
+    from src.api.services.direct_execution_service import get_direct_execution_service
+
+    get_direct_execution_service(gemini_service=gemini_service)
+
     yield
 
     # Shutdown

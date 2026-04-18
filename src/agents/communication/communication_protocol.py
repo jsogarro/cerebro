@@ -491,11 +491,17 @@ class CommunicationProtocol:
             from ..models import AgentTask
 
             msg_content = message.talkhier_content
-            task_input = {
-                "query": msg_content.content if hasattr(msg_content, "content") else str(msg_content),
+            query_text = msg_content.content if hasattr(msg_content, "content") else str(msg_content)
+            task_input: dict[str, Any] = {
+                "query": query_text,
+                # Aliases used by different agents
+                "research_question": query_text,
+                "text": query_text,
             }
             if hasattr(msg_content, "intermediate_outputs") and msg_content.intermediate_outputs:
                 task_input.update(msg_content.intermediate_outputs)
+            if message.context:
+                task_input.update(message.context)
 
             agent_task = AgentTask(
                 id=message.conversation_id or f"task_{agent.get_agent_type()}",

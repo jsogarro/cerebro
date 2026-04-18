@@ -256,10 +256,11 @@ class RoutingDecisionTranslator:
 
 class ResourcePool:
     """Resource pool for managing supervisor instances."""
-    
-    def __init__(self, config: dict[str, Any] | None = None):
+
+    def __init__(self, config: dict[str, Any] | None = None, gemini_service: Any | None = None):
         """Initialize resource pool."""
         self.config = config or {}
+        self.gemini_service = gemini_service
         
         # Pool configuration
         self.max_pool_size = self.config.get("max_pool_size", 10)
@@ -309,7 +310,7 @@ class ResourcePool:
         
         # Create new supervisor
         supervisor = supervisor_class(
-            gemini_service=None,
+            gemini_service=self.gemini_service,
             cache_client=None,
             config=self._create_supervisor_config(config),
         )
@@ -522,16 +523,20 @@ class MASRSupervisorBridge:
     and executing them via hierarchical supervisors with TalkHier protocol.
     """
     
-    def __init__(self, config: dict[str, Any] | None = None):
+    def __init__(self, config: dict[str, Any] | None = None, gemini_service: Any | None = None):
         """Initialize MASR-Supervisor bridge."""
         self.config = config or {}
-        
+        self.gemini_service = gemini_service
+
         # Initialize components
         self.translator = RoutingDecisionTranslator(self.config.get("translator", {}))
-        self.resource_pool = ResourcePool(self.config.get("resource_pool", {}))
+        self.resource_pool = ResourcePool(
+            self.config.get("resource_pool", {}),
+            gemini_service=gemini_service,
+        )
         self.executor = SupervisorExecutor(
-            self.resource_pool, 
-            self.config.get("executor", {})
+            self.resource_pool,
+            self.config.get("executor", {}),
         )
         
         # Bridge statistics

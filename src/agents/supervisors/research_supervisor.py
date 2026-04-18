@@ -394,12 +394,12 @@ class ResearchSupervisor(BaseSupervisor):
             # Prepare all agent outputs for synthesis
             agent_outputs = {}
             for worker_type, result in state.worker_results.items():
-                if result and hasattr(result, "content"):
-                    agent_outputs[worker_type] = {
-                        "findings": result.content,
-                        "confidence": result.confidence_score,
-                        "background": result.background,
-                    }
+                if result and hasattr(result, "intermediate_outputs"):
+                    agent_outputs[worker_type] = (
+                        result.intermediate_outputs
+                        if isinstance(result.intermediate_outputs, dict)
+                        else {"findings": result.content}
+                    )
 
             response = await self.send_talkhier_message(
                 "synthesis",
@@ -509,7 +509,7 @@ class ResearchSupervisor(BaseSupervisor):
         # Continue if consensus below threshold and rounds available
         if (
             state.consensus_score < self.quality_threshold
-            and state.refinement_round < 3
+            and state.refinement_round < 1
         ):
             logger.info(
                 f"Consensus {state.consensus_score:.3f} below threshold, continuing refinement"

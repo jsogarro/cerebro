@@ -825,7 +825,11 @@ class ComparativeAnalysisAgent(BaseAgent):
         try:
             response = await self.gemini_service.generate_content(prompt)
             parsed_response = parse_json_response(response)
-            analysis = parsed_response.get("comparative_analysis", {})
+            analysis = (
+                parsed_response.get("comparative_analysis")
+                or parsed_response.get("analysis")
+                or parsed_response
+            )
 
             # Enhance analysis with MCP insights
             analysis["mcp_enhanced"] = True

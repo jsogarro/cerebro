@@ -43,7 +43,7 @@ class GeminiService:
     def __init__(
         self,
         api_key: str | None = None,
-        model_name: str = "gemini-pro",
+        model_name: str = "gemini-2.0-flash",
         config: GeminiConfig | None = None,
         cache_client: aioredis.Redis[Any] | None = None,
         **kwargs: Any,
@@ -96,7 +96,7 @@ class GeminiService:
     @retry(
         retry=retry_if_exception_type(Exception),
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
+        wait=wait_exponential(multiplier=2, min=5, max=30),
     )
     async def _generate_content(self, prompt: str) -> str:
         """
@@ -111,6 +111,20 @@ class GeminiService:
             except Exception as e:
                 logger.error(f"Gemini API error: {e}")
                 raise
+
+    async def generate_content(self, prompt: str) -> str:
+        """
+        Public interface to generate content from Gemini.
+
+        Used by all agent implementations to call the LLM.
+
+        Args:
+            prompt: The prompt to send to Gemini.
+
+        Returns:
+            Generated text response.
+        """
+        return await self._generate_content(prompt)
 
     def _generate_cache_key(self, prefix: str, data: Any) -> str:
         """

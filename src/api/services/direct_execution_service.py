@@ -80,12 +80,16 @@ class DirectExecutionService:
         supervisor_bridge: MASRSupervisorBridge | None = None,
         supervisor_factory: SupervisorFactory | None = None,
         event_publisher: EventPublisher | None = None,
+        gemini_service: Any | None = None,
     ):
         """Initialize direct execution service."""
-        
+
         # Initialize components (would be injected in production)
+        self.gemini_service = gemini_service
         self.masr_router = masr_router or MASRouter()
-        self.supervisor_bridge = supervisor_bridge or MASRSupervisorBridge()
+        self.supervisor_bridge = supervisor_bridge or MASRSupervisorBridge(
+            gemini_service=gemini_service,
+        )
         self.supervisor_factory = supervisor_factory or SupervisorFactory()
         self.event_publisher = event_publisher
         
@@ -526,13 +530,13 @@ async def aggregate_results(results_data: dict[str, Any]) -> dict[str, Any]:
 _direct_execution_service: DirectExecutionService | None = None
 
 
-def get_direct_execution_service() -> DirectExecutionService:
+def get_direct_execution_service(gemini_service: Any | None = None) -> DirectExecutionService:
     """Get global direct execution service instance."""
     global _direct_execution_service
-    
+
     if _direct_execution_service is None:
-        _direct_execution_service = DirectExecutionService()
-    
+        _direct_execution_service = DirectExecutionService(gemini_service=gemini_service)
+
     return _direct_execution_service
 
 
