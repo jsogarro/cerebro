@@ -8,23 +8,19 @@ Tests the research-informed agent API endpoints including:
 - Intelligent query routing via MASR
 """
 
-import pytest
-import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from src.api.services.agent_execution_service import AgentExecutionService
 from src.models.agent_api_models import (
     AgentType,
-    AgentExecutionRequest, 
     ChainOfAgentsRequest,
     MixtureOfAgentsRequest,
-    ExecutionMode,
 )
-from src.api.services.agent_execution_service import AgentExecutionService
-from src.agents.models import AgentTask, AgentResult
 
 
 class TestAgentAPI:
@@ -403,7 +399,7 @@ class TestResearchPatternImplementation:
     async def test_chain_of_agents_pattern(self):
         """Test Chain-of-Agents pattern implementation."""
         
-        service = AgentExecutionService()
+        AgentExecutionService()
         
         request = ChainOfAgentsRequest(
             query="Test chain execution",
@@ -421,7 +417,7 @@ class TestResearchPatternImplementation:
     async def test_mixture_of_agents_pattern(self):
         """Test Mixture-of-Agents pattern implementation."""
         
-        service = AgentExecutionService()
+        AgentExecutionService()
         
         request = MixtureOfAgentsRequest(
             query="Test mixture execution",

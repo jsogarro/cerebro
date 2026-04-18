@@ -5,39 +5,36 @@ Tests all MASR routing intelligence endpoints based on
 "MasRouter: Learning to Route LLMs" research patterns.
 """
 
-import pytest
 from unittest.mock import AsyncMock, Mock, patch
-from datetime import datetime
 
-from src.api.services.masr_routing_service import MASRRoutingService
-from src.models.masr_api_models import (
-    RoutingRequest,
-    CostEstimationRequest,
-    StrategyEvaluationRequest,
-    ComplexityAnalysisRequest,
-    RoutingFeedback,
-    RoutingDecisionResponse,
-    CostEstimationResponse,
-    StrategyEvaluationResponse,
-    ComplexityAnalysisResponse,
-    StrategiesListResponse,
-    ModelsListResponse,
-    RouterStatus,
-    ModelInfo,
-    SupervisorAllocation,
-    CostBreakdown,
-    StrategyComparison,
-    ComplexityFeatures,
-    AvailableStrategy
-)
+import pytest
 from src.ai_brain.models.masr import (
-    QueryDomain,
-    QueryComplexity,
-    RoutingStrategy,
     CollaborationMode,
     ModelTier,
     QueryAnalysis,
-    RoutingDecision
+    QueryComplexity,
+    QueryDomain,
+    RoutingDecision,
+    RoutingStrategy,
+)
+
+from src.api.services.masr_routing_service import MASRRoutingService
+from src.models.masr_api_models import (
+    AvailableStrategy,
+    ComplexityAnalysisRequest,
+    ComplexityAnalysisResponse,
+    CostEstimationRequest,
+    CostEstimationResponse,
+    ModelInfo,
+    ModelsListResponse,
+    RouterStatus,
+    RoutingDecisionResponse,
+    RoutingFeedback,
+    RoutingRequest,
+    StrategiesListResponse,
+    StrategyComparison,
+    StrategyEvaluationRequest,
+    StrategyEvaluationResponse,
 )
 
 
@@ -98,53 +95,57 @@ class TestRoutingDecision:
     async def test_get_routing_decision_success(self, routing_service, mock_query_analysis, mock_routing_decision):
         """Test successful routing decision"""
         # Mock the router methods
-        with patch.object(routing_service.router, 'analyze_query', new_callable=AsyncMock) as mock_analyze:
-            with patch.object(routing_service.router, 'select_strategy', new_callable=AsyncMock) as mock_select:
-                with patch.object(routing_service.router, 'route', new_callable=AsyncMock) as mock_route:
-                    mock_analyze.return_value = mock_query_analysis
-                    mock_select.return_value = RoutingStrategy.BALANCED
-                    mock_route.return_value = mock_routing_decision
-                    
-                    request = RoutingRequest(
-                        query="How does climate change affect biodiversity?",
-                        context={"user_id": "test123"},
-                        max_cost=1.0,
-                        min_quality=0.8
-                    )
-                    
-                    response = await routing_service.get_routing_decision(request)
-                    
-                    assert isinstance(response, RoutingDecisionResponse)
-                    assert response.domain == QueryDomain.RESEARCH
-                    assert response.strategy == RoutingStrategy.BALANCED
-                    assert response.complexity == QueryComplexity.MODERATE
-                    assert len(response.supervisor_allocations) == 2
-                    assert response.estimated_cost == 0.15
-                    assert response.estimated_latency_ms == 2500
-                    assert 0 <= response.confidence_score <= 1
-                    assert response.routing_id is not None
-                    assert response.reasoning is not None
+        with (
+            patch.object(routing_service.router, 'analyze_query', new_callable=AsyncMock) as mock_analyze,
+            patch.object(routing_service.router, 'select_strategy', new_callable=AsyncMock) as mock_select,
+            patch.object(routing_service.router, 'route', new_callable=AsyncMock) as mock_route,
+        ):
+            mock_analyze.return_value = mock_query_analysis
+            mock_select.return_value = RoutingStrategy.BALANCED
+            mock_route.return_value = mock_routing_decision
+
+            request = RoutingRequest(
+                query="How does climate change affect biodiversity?",
+                context={"user_id": "test123"},
+                max_cost=1.0,
+                min_quality=0.8
+            )
+
+            response = await routing_service.get_routing_decision(request)
+
+            assert isinstance(response, RoutingDecisionResponse)
+            assert response.domain == QueryDomain.RESEARCH
+            assert response.strategy == RoutingStrategy.BALANCED
+            assert response.complexity == QueryComplexity.MODERATE
+            assert len(response.supervisor_allocations) == 2
+            assert response.estimated_cost == 0.15
+            assert response.estimated_latency_ms == 2500
+            assert 0 <= response.confidence_score <= 1
+            assert response.routing_id is not None
+            assert response.reasoning is not None
     
     @pytest.mark.asyncio
     async def test_get_routing_decision_with_strategy_override(self, routing_service, mock_query_analysis, mock_routing_decision):
         """Test routing decision with strategy override"""
         mock_routing_decision.strategy = RoutingStrategy.COST_EFFICIENT
         
-        with patch.object(routing_service.router, 'analyze_query', new_callable=AsyncMock) as mock_analyze:
-            with patch.object(routing_service.router, 'route', new_callable=AsyncMock) as mock_route:
-                mock_analyze.return_value = mock_query_analysis
-                mock_route.return_value = mock_routing_decision
-                
-                request = RoutingRequest(
-                    query="Simple query",
-                    strategy=RoutingStrategy.COST_EFFICIENT
-                )
-                
-                response = await routing_service.get_routing_decision(request)
-                
-                assert response.strategy == RoutingStrategy.COST_EFFICIENT
-                # Verify select_strategy was not called since we provided override
-                mock_route.assert_called_once()
+        with (
+            patch.object(routing_service.router, 'analyze_query', new_callable=AsyncMock) as mock_analyze,
+            patch.object(routing_service.router, 'route', new_callable=AsyncMock) as mock_route,
+        ):
+            mock_analyze.return_value = mock_query_analysis
+            mock_route.return_value = mock_routing_decision
+
+            request = RoutingRequest(
+                query="Simple query",
+                strategy=RoutingStrategy.COST_EFFICIENT
+            )
+
+            response = await routing_service.get_routing_decision(request)
+
+            assert response.strategy == RoutingStrategy.COST_EFFICIENT
+            # Verify select_strategy was not called since we provided override
+            mock_route.assert_called_once()
 
 
 class TestCostEstimation:
@@ -153,37 +154,39 @@ class TestCostEstimation:
     @pytest.mark.asyncio
     async def test_estimate_cost_with_breakdown(self, routing_service, mock_query_analysis, mock_routing_decision):
         """Test cost estimation with detailed breakdown"""
-        with patch.object(routing_service.router, 'analyze_query', new_callable=AsyncMock) as mock_analyze:
-            with patch.object(routing_service.router, 'select_strategy', new_callable=AsyncMock) as mock_select:
-                with patch.object(routing_service.router, 'route', new_callable=AsyncMock) as mock_route:
-                    with patch.object(routing_service.cost_optimizer, 'calculate_total_cost') as mock_cost:
-                        mock_analyze.return_value = mock_query_analysis
-                        mock_select.return_value = RoutingStrategy.BALANCED
-                        mock_route.return_value = mock_routing_decision
-                        mock_cost.return_value = {
-                            "model_cost": 0.10,
-                            "coordination_overhead": 0.03,
-                            "memory_cost": 0.02,
-                            "total_cost": 0.15
-                        }
-                        
-                        request = CostEstimationRequest(
-                            query="Test query",
-                            include_breakdown=True,
-                            include_confidence=True
-                        )
-                        
-                        response = await routing_service.estimate_cost(request)
-                        
-                        assert isinstance(response, CostEstimationResponse)
-                        assert response.estimated_cost == 0.15
-                        assert response.breakdown is not None
-                        assert response.breakdown.model_costs == 0.10
-                        assert response.breakdown.coordination_overhead == 0.03
-                        assert response.breakdown.memory_operations == 0.02
-                        assert response.breakdown.confidence_interval is not None
-                        assert len(response.recommendations) > 0
-                        assert response.confidence_score > 0
+        with (
+            patch.object(routing_service.router, 'analyze_query', new_callable=AsyncMock) as mock_analyze,
+            patch.object(routing_service.router, 'select_strategy', new_callable=AsyncMock) as mock_select,
+            patch.object(routing_service.router, 'route', new_callable=AsyncMock) as mock_route,
+            patch.object(routing_service.cost_optimizer, 'calculate_total_cost') as mock_cost,
+        ):
+            mock_analyze.return_value = mock_query_analysis
+            mock_select.return_value = RoutingStrategy.BALANCED
+            mock_route.return_value = mock_routing_decision
+            mock_cost.return_value = {
+                "model_cost": 0.10,
+                "coordination_overhead": 0.03,
+                "memory_cost": 0.02,
+                "total_cost": 0.15
+            }
+
+            request = CostEstimationRequest(
+                query="Test query",
+                include_breakdown=True,
+                include_confidence=True
+            )
+
+            response = await routing_service.estimate_cost(request)
+
+            assert isinstance(response, CostEstimationResponse)
+            assert response.estimated_cost == 0.15
+            assert response.breakdown is not None
+            assert response.breakdown.model_costs == 0.10
+            assert response.breakdown.coordination_overhead == 0.03
+            assert response.breakdown.memory_operations == 0.02
+            assert response.breakdown.confidence_interval is not None
+            assert len(response.recommendations) > 0
+            assert response.confidence_score > 0
 
 
 class TestStrategyEvaluation:
@@ -192,60 +195,62 @@ class TestStrategyEvaluation:
     @pytest.mark.asyncio
     async def test_evaluate_strategies(self, routing_service, mock_query_analysis, mock_routing_decision):
         """Test strategy evaluation and comparison"""
-        with patch.object(routing_service.router, 'analyze_query', new_callable=AsyncMock) as mock_analyze:
-            with patch.object(routing_service.router, 'route', new_callable=AsyncMock) as mock_route:
-                mock_analyze.return_value = mock_query_analysis
-                
-                # Mock different decisions for different strategies
-                def route_side_effect(query, strategy_override=None, **kwargs):
-                    decision = Mock(spec=RoutingDecision)
-                    decision.domain = QueryDomain.RESEARCH
-                    decision.strategy = strategy_override or RoutingStrategy.BALANCED
-                    decision.model_tier = ModelTier.STANDARD
-                    decision.collaboration_mode = CollaborationMode.HIERARCHICAL
-                    decision.agents = mock_routing_decision.agents
-                    
-                    if strategy_override == RoutingStrategy.COST_EFFICIENT:
-                        decision.estimated_cost = 0.05
-                        decision.estimated_latency = 3.0
-                    elif strategy_override == RoutingStrategy.QUALITY_FOCUSED:
-                        decision.estimated_cost = 0.30
-                        decision.estimated_latency = 4.0
-                    else:
-                        decision.estimated_cost = 0.15
-                        decision.estimated_latency = 2.5
-                    
-                    return decision
-                
-                mock_route.side_effect = route_side_effect
-                
-                request = StrategyEvaluationRequest(
-                    query="Test query",
-                    strategies=[
-                        RoutingStrategy.COST_EFFICIENT,
-                        RoutingStrategy.BALANCED,
-                        RoutingStrategy.QUALITY_FOCUSED
-                    ]
-                )
-                
-                response = await routing_service.evaluate_strategies(request)
-                
-                assert isinstance(response, StrategyEvaluationResponse)
-                assert len(response.comparisons) == 3
-                assert response.recommended_strategy is not None
-                assert response.reasoning is not None
-                assert response.trade_offs is not None
-                
-                # Check that comparisons have expected fields
-                for comparison in response.comparisons:
-                    assert isinstance(comparison, StrategyComparison)
-                    assert comparison.strategy in request.strategies
-                    assert comparison.estimated_cost > 0
-                    assert 0 <= comparison.estimated_quality <= 1
-                    assert comparison.estimated_latency_ms > 0
-                    assert len(comparison.pros) > 0
-                    assert len(comparison.cons) > 0
-                    assert 0 <= comparison.recommendation_score <= 1
+        with (
+            patch.object(routing_service.router, 'analyze_query', new_callable=AsyncMock) as mock_analyze,
+            patch.object(routing_service.router, 'route', new_callable=AsyncMock) as mock_route,
+        ):
+            mock_analyze.return_value = mock_query_analysis
+
+            # Mock different decisions for different strategies
+            def route_side_effect(query, strategy_override=None, **kwargs):
+                decision = Mock(spec=RoutingDecision)
+                decision.domain = QueryDomain.RESEARCH
+                decision.strategy = strategy_override or RoutingStrategy.BALANCED
+                decision.model_tier = ModelTier.STANDARD
+                decision.collaboration_mode = CollaborationMode.HIERARCHICAL
+                decision.agents = mock_routing_decision.agents
+
+                if strategy_override == RoutingStrategy.COST_EFFICIENT:
+                    decision.estimated_cost = 0.05
+                    decision.estimated_latency = 3.0
+                elif strategy_override == RoutingStrategy.QUALITY_FOCUSED:
+                    decision.estimated_cost = 0.30
+                    decision.estimated_latency = 4.0
+                else:
+                    decision.estimated_cost = 0.15
+                    decision.estimated_latency = 2.5
+
+                return decision
+
+            mock_route.side_effect = route_side_effect
+
+            request = StrategyEvaluationRequest(
+                query="Test query",
+                strategies=[
+                    RoutingStrategy.COST_EFFICIENT,
+                    RoutingStrategy.BALANCED,
+                    RoutingStrategy.QUALITY_FOCUSED
+                ]
+            )
+
+            response = await routing_service.evaluate_strategies(request)
+
+            assert isinstance(response, StrategyEvaluationResponse)
+            assert len(response.comparisons) == 3
+            assert response.recommended_strategy is not None
+            assert response.reasoning is not None
+            assert response.trade_offs is not None
+
+            # Check that comparisons have expected fields
+            for comparison in response.comparisons:
+                assert isinstance(comparison, StrategyComparison)
+                assert comparison.strategy in request.strategies
+                assert comparison.estimated_cost > 0
+                assert 0 <= comparison.estimated_quality <= 1
+                assert comparison.estimated_latency_ms > 0
+                assert len(comparison.pros) > 0
+                assert len(comparison.cons) > 0
+                assert 0 <= comparison.recommendation_score <= 1
 
 
 class TestComplexityAnalysis:

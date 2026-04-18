@@ -7,15 +7,13 @@ ENVIRONMENT variable.
 """
 
 import os
-from typing import Optional
 from functools import lru_cache
 
 from config.base import BaseConfig
 from config.development import DevelopmentConfig
-from config.staging import StagingConfig
 from config.production import ProductionConfig
+from config.staging import StagingConfig
 from config.testing import TestingConfig
-
 
 # Configuration class mapping
 CONFIG_CLASSES = {
@@ -30,7 +28,7 @@ CONFIG_CLASSES = {
 
 
 @lru_cache(maxsize=1)
-def get_config(environment: Optional[str] = None) -> BaseConfig:
+def get_config(environment: str | None = None) -> BaseConfig:
     """
     Get configuration for the specified environment.
     
@@ -74,12 +72,12 @@ config = get_config()
 
 # Export configuration classes for direct use if needed
 __all__ = [
+    "BaseConfig",
+    "DevelopmentConfig",
+    "ProductionConfig",
+    "StagingConfig",
+    "TestingConfig",
     "config",
     "get_config",
     "reload_config",
-    "BaseConfig",
-    "DevelopmentConfig",
-    "StagingConfig",
-    "ProductionConfig",
-    "TestingConfig",
 ]

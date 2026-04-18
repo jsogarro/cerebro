@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class ModelTier(StrEnum):
@@ -96,14 +96,16 @@ class ModelSpecification(BaseModel):
         default_factory=dict, description="Additional model metadata"
     )
 
-    @validator("cost_per_1k_tokens")
-    def validate_reasonable_cost(cls, v: float) -> float:  # noqa: N805
+    @field_validator("cost_per_1k_tokens")
+    @classmethod
+    def validate_reasonable_cost(cls, v: float) -> float:
         if v > 1.0:  # More than $1 per 1K tokens seems unreasonable
             raise ValueError("Cost per 1K tokens seems too high (> $1.00)")
         return v
 
-    @validator("quality_score")
-    def validate_quality_score(cls, v: float) -> float:  # noqa: N805
+    @field_validator("quality_score")
+    @classmethod
+    def validate_quality_score(cls, v: float) -> float:
         if v < 0.1:  # Quality score too low to be useful
             raise ValueError("Quality score must be at least 0.1")
         return v
@@ -141,8 +143,9 @@ class ProviderConfiguration(BaseModel):
         default_factory=dict, description="Provider-specific configuration"
     )
 
-    @validator("api_endpoint")
-    def validate_endpoint_format(cls, v: str) -> str:  # noqa: N805
+    @field_validator("api_endpoint")
+    @classmethod
+    def validate_endpoint_format(cls, v: str) -> str:
         if not (v.startswith("http://") or v.startswith("https://")):
             raise ValueError("API endpoint must be a valid HTTP/HTTPS URL")
         return v
@@ -272,11 +275,12 @@ class ModelConfiguration(BaseModel):
     security: dict[str, Any] | None = None
     disaster_recovery: dict[str, Any] | None = None
 
-    @validator("models", always=True)
-    def validate_models_have_providers(cls, v: dict[str, ModelSpecification], values: dict[str, Any]) -> dict[str, ModelSpecification]:  # noqa: N805
+    @field_validator("models")
+    @classmethod
+    def validate_models_have_providers(cls, v: dict[str, ModelSpecification], info: ValidationInfo) -> dict[str, ModelSpecification]:
         """Ensure all models reference valid providers."""
         # Skip validation if providers haven't been processed yet
-        providers = values.get("providers")
+        providers = info.data.get("providers")
         if not providers:
             return v
 

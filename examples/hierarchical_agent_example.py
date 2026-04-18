@@ -19,14 +19,9 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.prompts.manager import PromptManager
-from src.agents.communication.communication_protocol import CommunicationProtocol
-from src.agents.communication.talkhier_message import (
-    TalkHierMessage,
-    TalkHierContent,
-    MessageType,
-)
 from src.agents.base import BaseAgent
+from src.agents.communication.communication_protocol import CommunicationProtocol
+from src.prompts.manager import PromptManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

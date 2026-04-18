@@ -5,25 +5,26 @@ Tests the direct MASR routing and supervisor execution service that replaces
 the Temporal workflow system.
 """
 
-import pytest
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
+import pytest
+
+from src.agents.models import AgentResult
+from src.ai_brain.integration.masr_supervisor_bridge import SupervisorExecutionResult
+from src.ai_brain.router.masr import AgentAllocation, CollaborationMode, RoutingDecision
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
-    get_direct_execution_service
+    get_direct_execution_service,
 )
 from src.models.research_project import (
+    ResearchDepth,
     ResearchProject,
     ResearchQuery,
     ResearchScope,
-    ResearchDepth
 )
-from src.ai_brain.router.masr import RoutingDecision, CollaborationMode, AgentAllocation
-from src.ai_brain.integration.masr_supervisor_bridge import SupervisorExecutionResult
-from src.agents.models import AgentResult
 
 
 class TestDirectExecutionService:
@@ -205,8 +206,8 @@ class TestDirectExecutionService:
         execution_service.max_concurrent_executions = 2
         
         # Start maximum executions
-        execution_id_1 = await execution_service.start_research_execution(sample_project)
-        execution_id_2 = await execution_service.start_research_execution(sample_project)
+        await execution_service.start_research_execution(sample_project)
+        await execution_service.start_research_execution(sample_project)
         
         # Third execution should fail
         with pytest.raises(RuntimeError, match="Maximum concurrent executions"):
@@ -370,7 +371,7 @@ class TestDirectExecutionIntegration:
         
         execution_service = DirectExecutionService()
         
-        sample_project = ResearchProject(
+        ResearchProject(
             title="Integration Test Project",
             query=ResearchQuery(
                 question="Test query for integration",
@@ -417,7 +418,7 @@ class TestDirectExecutionPerformance:
         
         # Start multiple executions concurrently
         tasks = []
-        for i in range(5):
+        for _i in range(5):
             task = asyncio.create_task(
                 execution_service.start_research_execution(sample_project)
             )

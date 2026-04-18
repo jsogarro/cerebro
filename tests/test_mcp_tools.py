@@ -55,7 +55,7 @@ class TestAcademicSearchTool:
                 query="COVID-19 vaccines", databases=["pubmed"], max_results=10
             )
 
-            assert result["success"] == True
+            assert result["success"]
             assert "results" in result
             assert len(result["results"]) > 0
             assert result["source"] == "pubmed"
@@ -86,7 +86,7 @@ class TestAcademicSearchTool:
                 query="machine learning", databases=["arxiv"], max_results=5
             )
 
-            assert result["success"] == True
+            assert result["success"]
             assert "results" in result
             assert result["source"] == "arxiv"
 
@@ -103,7 +103,7 @@ class TestAcademicSearchTool:
             max_results=20,
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "results" in result
         assert "sources" in result
         assert len(result["sources"]) == 2
@@ -126,7 +126,7 @@ class TestAcademicSearchTool:
             max_results=10,
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "results" in result
 
     @pytest.mark.asyncio
@@ -140,7 +140,7 @@ class TestAcademicSearchTool:
             query="test", databases=["invalid_db"], max_results=5
         )
 
-        assert result["success"] == False
+        assert not result["success"]
         assert "error" in result
 
     @pytest.mark.asyncio
@@ -181,7 +181,7 @@ class TestCitationTool:
             style="APA",
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "citations" in result
         assert len(result["citations"]) == 1
         assert "Smith" in result["citations"][0]
@@ -207,7 +207,7 @@ class TestCitationTool:
             style="MLA",
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "citations" in result
         assert "Author" in result["citations"][0]
 
@@ -230,7 +230,7 @@ class TestCitationTool:
 
             result = await tool.execute(doi="10.1234/test", style="APA")
 
-            assert result["success"] == True
+            assert result["success"]
             assert "citation" in result
 
     @pytest.mark.asyncio
@@ -252,7 +252,7 @@ class TestCitationTool:
             format="bibtex",
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "bibtex" in result
         assert "@article" in result["bibtex"]
 
@@ -271,7 +271,7 @@ class TestStatisticsTool:
             operation="descriptive", data=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "mean" in result
         assert result["mean"] == 5.5
         assert "median" in result
@@ -288,7 +288,7 @@ class TestStatisticsTool:
             operation="t_test", group1=[1, 2, 3, 4, 5], group2=[6, 7, 8, 9, 10]
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "t_statistic" in result
         assert "p_value" in result
         assert result["p_value"] < 0.05  # Significant difference
@@ -304,7 +304,7 @@ class TestStatisticsTool:
             operation="correlation", x=[1, 2, 3, 4, 5], y=[2, 4, 6, 8, 10]
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "correlation" in result
         assert result["correlation"] > 0.99  # Perfect correlation
 
@@ -319,7 +319,7 @@ class TestStatisticsTool:
             operation="plot", plot_type="histogram", data=[1, 2, 2, 3, 3, 3, 4, 4, 5]
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "plot_html" in result or "plot_path" in result
 
 
@@ -338,7 +338,7 @@ class TestKnowledgeGraphTool:
             text="Apple Inc. was founded by Steve Jobs in Cupertino, California.",
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "entities" in result
         assert len(result["entities"]) > 0
         assert any(e["text"] == "Apple Inc." for e in result["entities"])
@@ -363,7 +363,7 @@ class TestKnowledgeGraphTool:
             ],
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "graph" in result
         assert result["graph"]["nodes"] == 3
         assert result["graph"]["edges"] == 2
@@ -392,7 +392,7 @@ class TestKnowledgeGraphTool:
 
         result = await tool.execute(operation="analyze_graph")
 
-        assert result["success"] == True
+        assert result["success"]
         assert "metrics" in result
         assert "centrality" in result["metrics"]
         assert "communities" in result["metrics"]
@@ -416,5 +416,5 @@ class TestKnowledgeGraphTool:
 
         result = await tool.execute(operation="visualize")
 
-        assert result["success"] == True
+        assert result["success"]
         assert "visualization" in result or "html" in result

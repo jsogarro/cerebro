@@ -28,7 +28,7 @@ class MockAgentResponseFactory:
             }
 
         papers = []
-        for i in range(num_papers):
+        for _i in range(num_papers):
             paper = {
                 "title": fake.catch_phrase(),
                 "authors": [fake.name() for _ in range(random.randint(1, 4))],
@@ -75,7 +75,7 @@ class MockAgentResponseFactory:
             }
 
         theories = []
-        for i in range(num_theories):
+        for _i in range(num_theories):
             theory = {
                 "name": f"Theory {fake.word().capitalize()}",
                 "proponents": [fake.name() for _ in range(2)],
@@ -254,7 +254,7 @@ class MockAgentResponseFactory:
         citation_styles = ["APA", "MLA", "Chicago", "Harvard", "IEEE"]
 
         citations = []
-        for i in range(num_citations):
+        for _i in range(num_citations):
             citation = {
                 "id": str(uuid.uuid4()),
                 "type": random.choice(
@@ -403,7 +403,7 @@ class MockMCPToolFactory:
     ) -> dict[str, Any]:
         """Create mock academic search tool response."""
         results = []
-        for i in range(max_results):
+        for _i in range(max_results):
             result = {
                 "title": fake.catch_phrase(),
                 "authors": [fake.name() for _ in range(random.randint(1, 3))],

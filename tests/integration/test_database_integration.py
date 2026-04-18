@@ -245,7 +245,7 @@ class TestComplexQueries:
     async def test_join_queries(self, db_session: AsyncSession):
         """Test complex join queries."""
         seeder = TestDataSeeder(db_session)
-        data = await seeder.seed_complete_dataset()
+        await seeder.seed_complete_dataset()
 
         # Join users with their projects
         result = await db_session.execute(
@@ -323,7 +323,7 @@ class TestComplexQueries:
             user_rankings[row.user_id].append(row.rank)
 
         # Each user's projects should have sequential rankings
-        for user_id, ranks in user_rankings.items():
+        for _user_id, ranks in user_rankings.items():
             assert sorted(ranks) == list(range(1, len(ranks) + 1))
 
 
@@ -340,7 +340,7 @@ class TestDatabaseConstraints:
         await db_session.commit()
 
         db_session.add(user2)
-        with pytest.raises(Exception):  # IntegrityError
+        with pytest.raises(Exception, match=""):  # IntegrityError
             await db_session.commit()
 
     @pytest.mark.asyncio
@@ -350,7 +350,7 @@ class TestDatabaseConstraints:
         project = ResearchProjectFactory(user_id=str(uuid.uuid4()))
 
         db_session.add(project)
-        with pytest.raises(Exception):  # IntegrityError
+        with pytest.raises(Exception, match=""):  # IntegrityError
             await db_session.commit()
 
     @pytest.mark.asyncio
@@ -440,14 +440,14 @@ class TestDatabasePerformance:
 
         # Query with indexed column (id)
         start = time.time()
-        result = await db_session.execute(
+        await db_session.execute(
             select(ResearchProject).where(ResearchProject.id == users[0].id)
         )
         indexed_time = time.time() - start
 
         # Query with non-indexed column (might be indexed depending on schema)
         start = time.time()
-        result = await db_session.execute(
+        await db_session.execute(
             select(ResearchProject).where(ResearchProject.description.like("%test%"))
         )
         non_indexed_time = time.time() - start
@@ -516,7 +516,7 @@ class TestDatabaseMigrations:
 
         # Check indexes
         user_indexes = inspector.get_indexes("users")
-        index_names = [idx["name"] for idx in user_indexes]
+        [idx["name"] for idx in user_indexes]
         # Verify expected indexes exist
 
     @pytest.mark.asyncio
@@ -540,6 +540,6 @@ class TestDatabaseMigrations:
         result = await db_session.execute(select(User))
         migrated_users = result.scalars().all()
 
-        for user in migrated_users:
+        for _user in migrated_users:
             # assert user.preferences is not None
             pass  # Would check new column values

@@ -7,8 +7,9 @@ enabled and less strict resource limits.
 """
 
 import os
-from config.production import ProductionConfig
+
 from config.base import MonitoringConfig, SecurityConfig
+from config.production import ProductionConfig
 
 
 class StagingConfig(ProductionConfig):

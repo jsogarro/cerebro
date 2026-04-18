@@ -61,7 +61,7 @@ class TestMCPServer:
             style="APA",
         )
 
-        assert result["success"] == True
+        assert result["success"]
 
     @pytest.mark.asyncio
     async def test_health_check(self):
@@ -117,7 +117,7 @@ class TestMCPClient:
             style="APA",
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "citations" in result
 
     @pytest.mark.asyncio
@@ -129,7 +129,7 @@ class TestMCPClient:
             operation="descriptive", data=[1, 2, 3, 4, 5]
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert "mean" in result
 
     @pytest.mark.asyncio
@@ -147,7 +147,7 @@ class TestMCPClient:
             entities=entities, relationships=relationships
         )
 
-        assert result["success"] == True
+        assert result["success"]
         assert result["graph"]["nodes"] == 2
         assert result["graph"]["edges"] == 1
 
@@ -187,7 +187,7 @@ class TestToolRegistry:
 
         # Unregister tool
         success = registry.unregister("search_academic")
-        assert success == True
+        assert success
         assert "search_academic" not in registry.list_tools()
 
     def test_registry_search(self):

@@ -12,7 +12,7 @@ import urllib.parse
 from typing import Any
 
 import email_validator
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class SecurityValidator:
@@ -412,12 +412,14 @@ class LoginRequest(BaseModel):
     mfa_code: Annotated[str, Field(pattern=r"^\d{6}$")] | None = Field(None, description="MFA code")
     remember_me: bool = Field(False, description="Remember session")
 
-    @validator("email")
-    def validate_email(cls, v: str) -> str:  # noqa: N805
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
         return SecurityValidator.validate_email(v)
 
-    @validator("password")
-    def validate_password(cls, v: str) -> str:  # noqa: N805
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
         # Basic password validation - expand as needed
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters")
@@ -442,8 +444,9 @@ class RegisterRequest(BaseModel):
     organization: SecureStringField | None = Field(None, max_length=255)
     terms_accepted: bool = Field(..., description="Terms acceptance")
 
-    @validator("username")
-    def validate_username(cls, v: str) -> str:  # noqa: N805
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
         # Check for reserved usernames
         reserved = ["admin", "root", "system", "api", "test"]
         if v.lower() in reserved:
@@ -459,8 +462,9 @@ class ResearchProjectRequest(BaseModel):
     query: SecureStringField = Field(..., max_length=1000)
     domains: list[SecureStringField] = Field(..., max_length=10)
 
-    @validator("domains")
-    def validate_domains(cls, v: list[str]) -> list[str]:  # noqa: N805
+    @field_validator("domains")
+    @classmethod
+    def validate_domains(cls, v: list[str]) -> list[str]:
         # Ensure unique domains
         if len(v) != len(set(v)):
             raise ValueError("Duplicate domains not allowed")

@@ -19,22 +19,23 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Core MASR-Supervisor integration components
-from src.ai_brain.router.masr import MASRouter, RoutingStrategy
-from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
-from src.agents.supervisors.supervisor_factory import SupervisorFactory
-from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
-from src.ai_brain.router.hierarchical_cost_model import HierarchicalCostOptimizer
-from src.orchestration.research_orchestrator import ResearchOrchestrator, OrchestratorConfig
-
 # Model and agent imports
 from src.agents.models import AgentTask
 from src.agents.supervisors.research_supervisor import ResearchSupervisor
+from src.agents.supervisors.supervisor_factory import SupervisorFactory
+from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
+from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
+from src.ai_brain.router.masr import MASRouter
+from src.orchestration.research_orchestrator import (
+    OrchestratorConfig,
+    ResearchOrchestrator,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -105,7 +106,7 @@ class MASRIntegrationTestSuite:
         
         print("\n🚀 Test suite setup completed successfully!\n")
     
-    async def test_simple_query_routing(self) -> Dict[str, Any]:
+    async def test_simple_query_routing(self) -> dict[str, Any]:
         """Test Case 1: Simple query with direct supervisor execution."""
         
         print("🧪 Test 1: Simple Query → Direct Supervisor Execution")
@@ -120,7 +121,7 @@ class MASRIntegrationTestSuite:
                 context={"domain": "research", "complexity": "simple"}
             )
             
-            print(f"📊 Routing Decision:")
+            print("📊 Routing Decision:")
             print(f"   - Supervisor Type: {routing_decision.agent_allocation.supervisor_type}")
             print(f"   - Collaboration Mode: {routing_decision.collaboration_mode.value}")
             print(f"   - Worker Count: {routing_decision.agent_allocation.worker_count}")
@@ -153,7 +154,7 @@ class MASRIntegrationTestSuite:
             )
             execution_time = (datetime.now() - start_time).total_seconds()
             
-            print(f"\n📋 Execution Result:")
+            print("\n📋 Execution Result:")
             print(f"   - Status: {execution_result.status.value}")
             print(f"   - Quality Score: {execution_result.quality_score:.3f}")
             print(f"   - Consensus Score: {execution_result.consensus_score:.3f}")
@@ -166,7 +167,7 @@ class MASRIntegrationTestSuite:
             actual_quality = execution_result.quality_score
             quality_accuracy = 1.0 - abs(predicted_quality - actual_quality)
             
-            print(f"\n📈 Performance Analysis:")
+            print("\n📈 Performance Analysis:")
             print(f"   - Quality Prediction Accuracy: {quality_accuracy:.3f}")
             print(f"   - Routing Accuracy: {execution_result.routing_accuracy or 'N/A'}")
             
@@ -187,7 +188,7 @@ class MASRIntegrationTestSuite:
                 "error": str(e),
             }
     
-    async def test_complex_query_routing(self) -> Dict[str, Any]:
+    async def test_complex_query_routing(self) -> dict[str, Any]:
         """Test Case 2: Complex query with multi-supervisor coordination."""
         
         print("\n🧪 Test 2: Complex Query → Multi-Supervisor Coordination")
@@ -211,7 +212,7 @@ class MASRIntegrationTestSuite:
                 }
             )
             
-            print(f"📊 Complex Query Routing:")
+            print("📊 Complex Query Routing:")
             print(f"   - Supervisor Type: {routing_decision.agent_allocation.supervisor_type}")
             print(f"   - Collaboration Mode: {routing_decision.collaboration_mode.value}")
             print(f"   - Worker Count: {routing_decision.agent_allocation.worker_count}")
@@ -222,7 +223,7 @@ class MASRIntegrationTestSuite:
             
             # Analyze complexity characteristics
             complexity = routing_decision.complexity_analysis
-            print(f"\n🔍 Complexity Analysis:")
+            print("\n🔍 Complexity Analysis:")
             print(f"   - Complexity Level: {complexity.level.value}")
             print(f"   - Complexity Score: {complexity.score:.3f}")
             print(f"   - Uncertainty: {complexity.uncertainty:.3f}")
@@ -255,7 +256,7 @@ class MASRIntegrationTestSuite:
             )
             execution_time = (datetime.now() - start_time).total_seconds()
             
-            print(f"\n📋 Complex Execution Result:")
+            print("\n📋 Complex Execution Result:")
             print(f"   - Status: {execution_result.status.value}")
             print(f"   - Quality Score: {execution_result.quality_score:.3f}")
             print(f"   - Consensus Score: {execution_result.consensus_score:.3f}")
@@ -292,7 +293,7 @@ class MASRIntegrationTestSuite:
                 "error": str(e),
             }
     
-    async def test_cost_prediction_accuracy(self) -> Dict[str, Any]:
+    async def test_cost_prediction_accuracy(self) -> dict[str, Any]:
         """Test Case 3: Cost prediction validation."""
         
         print("\n🧪 Test 3: Cost Prediction Validation")
@@ -356,7 +357,7 @@ class MASRIntegrationTestSuite:
                 "error": str(e),
             }
     
-    async def test_orchestrator_integration(self) -> Dict[str, Any]:
+    async def test_orchestrator_integration(self) -> dict[str, Any]:
         """Test Case 4: Full orchestrator integration."""
         
         print("\n🧪 Test 4: Full Orchestrator Integration")
@@ -365,13 +366,13 @@ class MASRIntegrationTestSuite:
         try:
             # Test orchestrator health check
             health_check = await self.orchestrator.health_check()
-            print(f"🏥 Orchestrator Health Check:")
+            print("🏥 Orchestrator Health Check:")
             for component, status in health_check["components"].items():
                 print(f"   - {component}: {status}")
             
             # Get MASR statistics
             masr_stats = await self.orchestrator.get_masr_stats()
-            print(f"\n📊 MASR Integration Statistics:")
+            print("\n📊 MASR Integration Statistics:")
             print(f"   - MASR Enabled: {masr_stats.get('masr_enabled', False)}")
             
             if masr_stats.get("masr_enabled"):
@@ -393,7 +394,7 @@ class MASRIntegrationTestSuite:
                 self.orchestrator._supervisor_factory is not None
             )
             
-            print(f"\n⚙️  Configuration Status:")
+            print("\n⚙️  Configuration Status:")
             print(f"   - MASR Router: {'✅ Available' if self.orchestrator._masr_router else '❌ Missing'}")
             print(f"   - Supervisor Bridge: {'✅ Available' if self.orchestrator._supervisor_bridge else '❌ Missing'}")
             print(f"   - Supervisor Factory: {'✅ Available' if self.orchestrator._supervisor_factory else '❌ Missing'}")
@@ -414,7 +415,7 @@ class MASRIntegrationTestSuite:
                 "error": str(e),
             }
     
-    async def test_supervisor_factory_capabilities(self) -> Dict[str, Any]:
+    async def test_supervisor_factory_capabilities(self) -> dict[str, Any]:
         """Test Case 5: Supervisor factory capabilities."""
         
         print("\n🧪 Test 5: Supervisor Factory Capabilities")
@@ -435,7 +436,7 @@ class MASRIntegrationTestSuite:
             
             # Test health monitoring
             factory_stats = await self.supervisor_factory.get_factory_stats()
-            print(f"\n📊 Factory Statistics:")
+            print("\n📊 Factory Statistics:")
             print(f"   - Total Created: {factory_stats['factory_stats']['total_created']}")
             print(f"   - Success Rate: {factory_stats['factory_stats']['successful_creations']} / {factory_stats['factory_stats']['total_created']}")
             print(f"   - Registry Size: {factory_stats['factory_stats']['registry_size']}")
@@ -459,7 +460,7 @@ class MASRIntegrationTestSuite:
                 "error": str(e),
             }
     
-    async def run_all_tests(self) -> Dict[str, Any]:
+    async def run_all_tests(self) -> dict[str, Any]:
         """Run complete test suite."""
         
         await self.setup()
@@ -494,14 +495,14 @@ class MASRIntegrationTestSuite:
         total_tests = len(results)
         success_rate = passed_tests / total_tests if total_tests > 0 else 0
         
-        print(f"\n" + "="*60)
-        print(f"🎯 MASR-Supervisor Integration Test Summary")
-        print(f"="*60)
+        print("\n" + "="*60)
+        print("🎯 MASR-Supervisor Integration Test Summary")
+        print("="*60)
         print(f"Total Tests: {total_tests}")
         print(f"Passed: {passed_tests}")
         print(f"Failed: {total_tests - passed_tests}")
         print(f"Success Rate: {success_rate:.1%}")
-        print(f"="*60)
+        print("="*60)
         
         # Print individual test results
         for result in results:

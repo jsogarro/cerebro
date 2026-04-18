@@ -111,7 +111,7 @@ class TestAuthManager:
         api_key = f"sk_test_{secrets.token_urlsafe(32)}"
 
         # Store hash for validation
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        hashlib.sha256(api_key.encode()).hexdigest()
 
         return api_key
 
@@ -315,11 +315,6 @@ class TestPermissionChecker:
         user_role: str, required_role: str, operation: str = "read"
     ) -> bool:
         """Check if a user role has permission for an operation."""
-        role_hierarchy = {
-            "admin": 3,
-            "researcher": 2,
-            "viewer": 1,
-        }
 
         operation_requirements = {
             "read": ["viewer", "researcher", "admin"],

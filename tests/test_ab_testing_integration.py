@@ -5,30 +5,26 @@ These tests verify that the A/B testing integration properly connects
 with the completed Agent Framework APIs and enables systematic optimization.
 """
 
+from datetime import datetime
+from unittest.mock import AsyncMock, patch
+
 import pytest
-import asyncio
-from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from typing import Dict, Any, List
 
 # Import components to test
 from src.ai_brain.experimentation.integration.agent_framework_integration import (
-    AgentFrameworkExperimentor,
     AgentExperimentType,
-    AgentExperimentConfig,
-    AgentExperimentResult
+    AgentFrameworkExperimentor,
 )
 from src.ai_brain.experimentation.monitoring.real_time_dashboard import (
-    RealTimeDashboard,
     DashboardConfig,
     ExperimentSnapshot,
-    DashboardMetric
+    RealTimeDashboard,
 )
 from src.ai_brain.experimentation.optimization.feedback_loop_optimizer import (
-    FeedbackLoopOptimizer,
     FeedbackLoopConfig,
+    FeedbackLoopOptimizer,
+    OptimizationDecision,
     OptimizationTarget,
-    OptimizationDecision
 )
 
 
@@ -38,11 +34,13 @@ class TestAgentFrameworkExperimentor:
     @pytest.fixture
     def experimentor(self):
         """Create an experimentor instance for testing."""
-        with patch('src.ai_brain.experimentation.integration.agent_framework_integration.AgentExecutionService'):
-            with patch('src.ai_brain.experimentation.integration.agent_framework_integration.MASRRoutingService'):
-                with patch('src.ai_brain.experimentation.integration.agent_framework_integration.SupervisorCoordinationService'):
-                    with patch('src.ai_brain.experimentation.integration.agent_framework_integration.TalkHierSessionService'):
-                        return AgentFrameworkExperimentor()
+        with (
+            patch('src.ai_brain.experimentation.integration.agent_framework_integration.AgentExecutionService'),
+            patch('src.ai_brain.experimentation.integration.agent_framework_integration.MASRRoutingService'),
+            patch('src.ai_brain.experimentation.integration.agent_framework_integration.SupervisorCoordinationService'),
+            patch('src.ai_brain.experimentation.integration.agent_framework_integration.TalkHierSessionService'),
+        ):
+            return AgentFrameworkExperimentor()
     
     @pytest.mark.asyncio
     async def test_create_routing_experiment(self, experimentor):
@@ -224,9 +222,11 @@ class TestRealTimeDashboard:
             update_interval_seconds=1,
             history_window_minutes=60
         )
-        with patch('src.ai_brain.experimentation.monitoring.real_time_dashboard.ConnectionManager'):
-            with patch('src.ai_brain.experimentation.monitoring.real_time_dashboard.EventPublisher'):
-                return RealTimeDashboard(config)
+        with (
+            patch('src.ai_brain.experimentation.monitoring.real_time_dashboard.ConnectionManager'),
+            patch('src.ai_brain.experimentation.monitoring.real_time_dashboard.EventPublisher'),
+        ):
+            return RealTimeDashboard(config)
     
     @pytest.mark.asyncio
     async def test_register_experiment(self, dashboard):
@@ -371,9 +371,11 @@ class TestFeedbackLoopOptimizer:
             min_confidence_for_recommendation=0.80,
             evaluation_interval_hours=1
         )
-        with patch('src.ai_brain.experimentation.optimization.feedback_loop_optimizer.AgentFrameworkExperimentor'):
-            with patch('src.ai_brain.experimentation.optimization.feedback_loop_optimizer.SupervisionFeedbackSystem'):
-                return FeedbackLoopOptimizer(config)
+        with (
+            patch('src.ai_brain.experimentation.optimization.feedback_loop_optimizer.AgentFrameworkExperimentor'),
+            patch('src.ai_brain.experimentation.optimization.feedback_loop_optimizer.SupervisionFeedbackSystem'),
+        ):
+            return FeedbackLoopOptimizer(config)
     
     @pytest.mark.asyncio
     async def test_generate_routing_optimization(self, optimizer):
@@ -540,9 +542,11 @@ class TestEndToEndIntegration:
     async def test_full_experiment_lifecycle(self):
         """Test complete experiment lifecycle from creation to optimization."""
         # Create all components
-        with patch('src.ai_brain.experimentation.integration.agent_framework_integration.AgentExecutionService'):
-            with patch('src.ai_brain.experimentation.integration.agent_framework_integration.MASRRoutingService'):
-                experimentor = AgentFrameworkExperimentor()
+        with (
+            patch('src.ai_brain.experimentation.integration.agent_framework_integration.AgentExecutionService'),
+            patch('src.ai_brain.experimentation.integration.agent_framework_integration.MASRRoutingService'),
+        ):
+            experimentor = AgentFrameworkExperimentor()
         
         dashboard = RealTimeDashboard()
         optimizer = FeedbackLoopOptimizer()
@@ -588,7 +592,7 @@ class TestEndToEndIntegration:
         
         # 5. Generate optimization decision
         optimizer.baseline_performance["routing"] = {"performance": 0.8}
-        decisions = await optimizer._generate_optimization_decisions()
+        await optimizer._generate_optimization_decisions()
         
         # Verify integration
         assert exp_id in experimentor.active_experiments

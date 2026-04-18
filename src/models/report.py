@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class ReportFormat(StrEnum):
@@ -73,8 +73,9 @@ class ReportSection(BaseModel):
         default_factory=dict, description="Additional section metadata"
     )
     
-    @validator('level')
-    def validate_level(cls, v: int) -> int:  # noqa: N805
+    @field_validator('level')
+    @classmethod
+    def validate_level(cls, v: int) -> int:
         """Ensure heading level is valid."""
         return max(1, min(6, v))
 
@@ -218,8 +219,9 @@ class ReportMetadata(BaseModel):
     page_count: int | None = Field(None, ge=1, description="Estimated page count")
     version: str = Field(default="1.0", description="Report version")
     
-    @validator('quality_score', 'confidence_score')
-    def validate_scores(cls, v: float) -> float:  # noqa: N805
+    @field_validator('quality_score', 'confidence_score')
+    @classmethod
+    def validate_scores(cls, v: float) -> float:
         """Ensure scores are between 0 and 1."""
         return max(0.0, min(1.0, v))
 

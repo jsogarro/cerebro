@@ -15,7 +15,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.ai_brain.config.model_config_manager import ModelConfigManager
-from src.ai_brain.config.model_schemas import ModelSpecification
 from src.ai_brain.router.cost_optimizer import CostOptimizer
 from src.ai_brain.router.masr import MASRouter
 
@@ -46,7 +45,7 @@ async def test_configuration_loading():
         print("⚙️  Loading model configuration...")
         config = await config_manager.get_configuration()
         
-        print(f"✅ Loaded configuration successfully!")
+        print("✅ Loaded configuration successfully!")
         print(f"   Version: {config.version}")
         print(f"   Environment: {config.metadata.environment}")
         print(f"   Total models: {len(config.models)}")
@@ -62,7 +61,7 @@ async def test_configuration_loading():
         
         # Test provider information
         print("\n🔗 Configured Providers:")
-        for provider_name, provider_config in config.get_enabled_providers().items():
+        for _provider_name, provider_config in config.get_enabled_providers().items():
             print(f"   • {provider_config.name} - {provider_config.api_endpoint}")
         
         # Test specific model lookup
@@ -147,7 +146,7 @@ async def test_masr_integration():
     try:
         routing_decision = await masr_router.route(test_query)
         
-        print(f"✅ Routing successful!")
+        print("✅ Routing successful!")
         print(f"   Query ID: {routing_decision.query_id}")
         print(f"   Complexity: {routing_decision.complexity_analysis.level.value}")
         print(f"   Selected Model: {routing_decision.optimization_result.primary_model.name}")

@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class PromptType(StrEnum):
@@ -169,14 +169,16 @@ class PromptTemplate(BaseModel):
         default_factory=list, description="Quality validation rules"
     )
 
-    @validator("metadata")
-    def validate_metadata_consistency(cls, v: PromptMetadata, values: dict[str, Any]) -> PromptMetadata:  # noqa: N805
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata_consistency(cls, v: PromptMetadata) -> PromptMetadata:
         """Ensure metadata is consistent with template content."""
         # Could add validation logic here
         return v
 
-    @validator("temperature")
-    def validate_temperature_range(cls, v: float) -> float:  # noqa: N805
+    @field_validator("temperature")
+    @classmethod
+    def validate_temperature_range(cls, v: float) -> float:
         """Validate temperature is in valid range."""
         if not 0.0 <= v <= 2.0:
             raise ValueError("Temperature must be between 0.0 and 2.0")

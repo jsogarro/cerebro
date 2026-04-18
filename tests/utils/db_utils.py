@@ -97,7 +97,7 @@ class TestDatabaseManager:
             raise RuntimeError("Database not initialized")
 
         async with self.session_factory() as session:
-            for model_name, records in data.items():
+            for _model_name, records in data.items():
                 for record in records:
                     session.add(record)
 
@@ -132,9 +132,8 @@ class TestDatabaseManager:
     @asynccontextmanager
     async def transaction(self):
         """Context manager for database transaction."""
-        async with self.session_factory() as session:
-            async with session.begin():
-                yield session
+        async with self.session_factory() as session, session.begin():
+            yield session
 
 
 class TestDataSeeder:

@@ -93,7 +93,7 @@ class TestMethodologyAgent:
             metadata={},
         )
 
-        assert await agent.validate_result(valid_result) == True
+        assert await agent.validate_result(valid_result)
 
 
 class TestSynthesisAgent:
@@ -176,7 +176,7 @@ class TestSynthesisAgent:
             metadata={},
         )
 
-        assert await agent.validate_result(valid_result) == True
+        assert await agent.validate_result(valid_result)
 
 
 class TestCitationAgent:
@@ -268,4 +268,4 @@ class TestCitationAgent:
             metadata={},
         )
 
-        assert await agent.validate_result(valid_result) == True
+        assert await agent.validate_result(valid_result)

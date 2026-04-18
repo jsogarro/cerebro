@@ -5,8 +5,6 @@ This module tests the visualization generation functionality including
 chart creation, network graphs, and word clouds.
 """
 
-import base64
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,11 +12,11 @@ import pytest
 from src.models.report import Visualization, VisualizationType
 from src.services.report_config import ReportSettings
 from src.services.visualization_generator import (
-    VisualizationGenerator,
     VisualizationGenerationError,
-    create_source_distribution_viz,
-    create_domain_coverage_viz,
+    VisualizationGenerator,
     create_confidence_radar_viz,
+    create_domain_coverage_viz,
+    create_source_distribution_viz,
 )
 
 

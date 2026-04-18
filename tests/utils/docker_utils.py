@@ -127,7 +127,7 @@ class DockerTestManager:
         self, container: Any, password: str, max_retries: int = 30, retry_delay: int = 1
     ):
         """Wait for PostgreSQL to be ready."""
-        for i in range(max_retries):
+        for _i in range(max_retries):
             try:
                 result = container.exec_run(
                     ["pg_isready", "-U", "test_user", "-d", "test_db"],
@@ -147,7 +147,7 @@ class DockerTestManager:
         self, container: Any, max_retries: int = 30, retry_delay: int = 1
     ):
         """Wait for Redis to be ready."""
-        for i in range(max_retries):
+        for _i in range(max_retries):
             try:
                 result = container.exec_run(["redis-cli", "ping"])
                 if b"PONG" in result.output:
@@ -164,7 +164,7 @@ class DockerTestManager:
         self, container: Any, max_retries: int = 60, retry_delay: int = 2
     ):
         """Wait for Temporal to be ready."""
-        for i in range(max_retries):
+        for _i in range(max_retries):
             try:
                 result = container.exec_run(
                     ["tctl", "--address", "localhost:7233", "namespace", "list"]
@@ -217,8 +217,10 @@ class DockerTestManager:
 
 
 @contextmanager
-def docker_test_environment(services: list[str] = ["postgres", "redis", "temporal"]):
+def docker_test_environment(services: list[str] | None = None):
     """Context manager for Docker test environment."""
+    if services is None:
+        services = ["postgres", "redis", "temporal"]
     manager = DockerTestManager()
 
     try:
@@ -313,7 +315,8 @@ class DockerComposeManager:
             "exec",
             "-T",
             service,
-        ] + command
+            *command,
+        ]
 
         os.system(" ".join(cmd))
 
@@ -325,7 +328,7 @@ class DockerComposeManager:
         retry_delay: int = 2,
     ):
         """Wait for a service to be ready."""
-        for i in range(max_retries):
+        for _i in range(max_retries):
             result = os.system(
                 f"docker-compose -f {self.compose_file} -p {self.project_name} "
                 f"exec -T {service} {' '.join(check_command)} > /dev/null 2>&1"

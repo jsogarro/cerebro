@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WSMessageType(StrEnum):
@@ -54,13 +54,10 @@ class WSMessage(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     data: dict[str, Any] = Field(default_factory=dict, description="Message payload")
 
-    class Config:
-        """Pydantic configuration."""
-
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-            UUID: lambda v: str(v),
-        }
+    model_config = ConfigDict(json_encoders={
+        datetime: lambda v: v.isoformat(),
+        UUID: lambda v: str(v),
+    })
 
 
 class ProgressUpdate(BaseModel):
@@ -201,9 +198,6 @@ class HeartbeatMessage(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     client_id: str
 
-    class Config:
-        """Pydantic configuration."""
-
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-        }
+    model_config = ConfigDict(json_encoders={
+        datetime: lambda v: v.isoformat(),
+    })

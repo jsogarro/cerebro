@@ -6,7 +6,15 @@ environment. It inherits from base configuration and overrides settings
 appropriate for local development.
 """
 
-from config.base import BaseConfig, MCPConfig, AgentConfig, DatabaseConfig, RedisConfig, MonitoringConfig, SecurityConfig
+from config.base import (
+    AgentConfig,
+    BaseConfig,
+    DatabaseConfig,
+    MCPConfig,
+    MonitoringConfig,
+    RedisConfig,
+    SecurityConfig,
+)
 
 
 class DevelopmentConfig(BaseConfig):

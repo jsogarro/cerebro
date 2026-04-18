@@ -5,7 +5,8 @@ This module contains the foundational configuration that all environments
 inherit from. Environment-specific configs override these defaults.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -26,7 +27,7 @@ class MCPConfig(BaseModel):
     circuit_breaker_enabled: bool = Field(default=True)
     circuit_breaker_failure_threshold: int = Field(default=5)
     circuit_breaker_recovery_timeout: int = Field(default=60)
-    circuit_breaker_expected_exception: Optional[str] = Field(default=None)
+    circuit_breaker_expected_exception: str | None = Field(default=None)
     
     # Connection pool settings
     connection_pool_size: int = Field(default=10)
@@ -35,7 +36,7 @@ class MCPConfig(BaseModel):
     connection_pool_recycle: int = Field(default=3600)
     
     # Tool-specific settings
-    tools: Dict[str, Dict[str, Any]] = Field(default_factory=lambda: {
+    tools: dict[str, dict[str, Any]] = Field(default_factory=lambda: {
         "academic_search": {
             "enabled": True,
             "max_results": 50,
@@ -88,7 +89,7 @@ class AgentConfig(BaseModel):
     mcp_fallback_enabled: bool = Field(default=True)
     
     # Agent-specific configurations
-    agents: Dict[str, Dict[str, Any]] = Field(default_factory=lambda: {
+    agents: dict[str, dict[str, Any]] = Field(default_factory=lambda: {
         "literature_review": {
             "max_sources": 100,
             "search_depth": "comprehensive",
@@ -157,7 +158,7 @@ class RedisConfig(BaseModel):
     host: str = Field(default="localhost")
     port: int = Field(default=6379)
     db: int = Field(default=0)
-    password: Optional[str] = Field(default=None)
+    password: str | None = Field(default=None)
     
     # Pool settings
     pool_size: int = Field(default=50)
@@ -223,7 +224,7 @@ class TemporalConfig(BaseModel):
 class GeminiConfig(BaseModel):
     """Gemini API configuration settings."""
     
-    api_key: Optional[str] = Field(default=None)
+    api_key: str | None = Field(default=None)
     model: str = Field(default="gemini-pro")
     
     # Rate limiting
@@ -269,7 +270,7 @@ class MonitoringConfig(BaseModel):
     log_level: str = Field(default="INFO")
     log_format: str = Field(default="json")
     log_output: str = Field(default="stdout")
-    log_file: Optional[str] = Field(default=None)
+    log_file: str | None = Field(default=None)
     log_rotation: bool = Field(default=True)
     log_retention_days: int = Field(default=30)
     
@@ -281,8 +282,8 @@ class MonitoringConfig(BaseModel):
     
     # Alerts
     alerting_enabled: bool = Field(default=False)
-    alert_webhook_url: Optional[str] = Field(default=None)
-    alert_email: Optional[str] = Field(default=None)
+    alert_webhook_url: str | None = Field(default=None)
+    alert_email: str | None = Field(default=None)
 
 
 class SecurityConfig(BaseModel):
@@ -312,8 +313,8 @@ class SecurityConfig(BaseModel):
     
     # Secrets management
     secrets_provider: str = Field(default="env", description="env, vault, aws_secrets")
-    vault_url: Optional[str] = Field(default=None)
-    vault_token: Optional[str] = Field(default=None)
+    vault_url: str | None = Field(default=None)
+    vault_token: str | None = Field(default=None)
     
     # Audit
     audit_logging_enabled: bool = Field(default=True)
@@ -346,7 +347,7 @@ class BaseConfig(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     
     # Feature flags
-    features: Dict[str, bool] = Field(default_factory=lambda: {
+    features: dict[str, bool] = Field(default_factory=lambda: {
         "mcp_tools": True,
         "agent_pooling": True,
         "caching": True,

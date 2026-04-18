@@ -5,27 +5,30 @@ Comprehensive tests for TalkHier session management, refinement rounds,
 consensus building, and WebSocket communication.
 """
 
-import pytest
-import asyncio
-import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi.testclient import TestClient
-from fastapi import WebSocket
 
-from src.models.talkhier_api_models import (
-    TalkHierSessionRequest, TalkHierSessionResponse,
-    RefinementRoundRequest, RefinementRoundResponse,
-    ConsensusCheckRequest, ConsensusResult,
-    SessionCloseRequest, SessionCloseResponse,
-    SessionStatus, RefinementStrategy, ConsensusType,
-    ProtocolType, MessageRole
-)
-from src.api.services.talkhier_session_service import (
-    TalkHierSessionService, TalkHierSession
-)
+import pytest
+from fastapi import WebSocket
+from fastapi.testclient import TestClient
+
 from src.api.services.talkhier_session_manager import TalkHierSessionManager
+from src.api.services.talkhier_session_service import (
+    TalkHierSession,
+    TalkHierSessionService,
+)
 from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
+from src.models.talkhier_api_models import (
+    ConsensusCheckRequest,
+    ConsensusType,
+    MessageRole,
+    ProtocolType,
+    RefinementRoundRequest,
+    RefinementStrategy,
+    SessionCloseRequest,
+    SessionStatus,
+    TalkHierSessionRequest,
+)
 
 
 class TestTalkHierSessionService:
@@ -242,7 +245,7 @@ class TestTalkHierSessionService:
         response = await session_service.validate_protocol(request)
         
         assert isinstance(response.is_valid, bool)
-        assert response.protocol_detected in [p for p in ProtocolType]
+        assert response.protocol_detected in list(ProtocolType)
         assert isinstance(response.structural_errors, list)
         assert isinstance(response.timing_errors, list)
         assert isinstance(response.role_errors, list)

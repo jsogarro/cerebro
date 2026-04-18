@@ -247,7 +247,7 @@ class TestLiteratureReviewAgent:
             context={},
         )
 
-        result = await agent.execute(task)
+        await agent.execute(task)
 
         # Should attempt to get from cache first
         mock_cache.get.assert_called_once()
@@ -353,7 +353,7 @@ class TestLiteratureReviewAgent:
             metadata={},
         )
 
-        assert await agent.validate_result(valid_result) == True
+        assert await agent.validate_result(valid_result)
 
         # Invalid result - missing required fields
         invalid_result = AgentResult(
@@ -365,7 +365,7 @@ class TestLiteratureReviewAgent:
             metadata={},
         )
 
-        assert await agent.validate_result(invalid_result) == False
+        assert not await agent.validate_result(invalid_result)
 
     @pytest.mark.asyncio
     async def test_gemini_error_handling(self):

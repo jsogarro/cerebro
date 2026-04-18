@@ -10,12 +10,6 @@ from alembic import context
 
 # Import our models
 from src.models.db.base import Base
-from src.models.db.user import User
-from src.models.db.research_project import ResearchProject
-from src.models.db.agent_task import AgentTask
-from src.models.db.research_result import ResearchResult
-from src.models.db.workflow_checkpoint import WorkflowCheckpoint
-from src.models.db.api_key import APIKey
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

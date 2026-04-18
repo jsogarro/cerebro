@@ -463,7 +463,7 @@ class TestComparativeAnalysisAgent:
             metadata={},
         )
 
-        assert await agent.validate_result(valid_result) == True
+        assert await agent.validate_result(valid_result)
 
         # Invalid result - missing required fields
         invalid_result = AgentResult(
@@ -475,7 +475,7 @@ class TestComparativeAnalysisAgent:
             metadata={},
         )
 
-        assert await agent.validate_result(invalid_result) == False
+        assert not await agent.validate_result(invalid_result)
 
     @pytest.mark.asyncio
     async def test_contextual_comparison(self):

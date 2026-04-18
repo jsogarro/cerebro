@@ -215,7 +215,7 @@ class TestConnectionManager:
 
         # Connect and subscribe multiple clients
         client_ids = []
-        for i in range(3):
+        for _i in range(3):
             websocket = AsyncMock()
             websocket.send_text = AsyncMock()
             websocket.accept = AsyncMock()
@@ -434,7 +434,7 @@ class TestCLIWebSocketIntegration:
         client.websocket = mock_websocket
         client._connected = True
 
-        formatter = OutputFormatter("table", color=True)
+        OutputFormatter("table", color=True)
 
         # This would normally run the streaming loop
         # For testing, we just verify the client is set up correctly
@@ -475,7 +475,7 @@ class TestPerformanceAndScaling:
         await connection_manager.broadcast_to_all(message)
 
         # Verify all connections received the message
-        for client_id, mock_websocket in connections:
+        for _client_id, mock_websocket in connections:
             mock_websocket.send_text.assert_called_once()
 
         # Clean up

@@ -119,7 +119,7 @@ class TestRateLimiter:
             b"1234567890.0",
         ]
 
-        allowed, metadata = await rate_limiter.check_rate_limit(
+        _allowed, metadata = await rate_limiter.check_rate_limit(
             mock_request, endpoint="/api/v1/research/execute"
         )
 

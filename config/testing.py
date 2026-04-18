@@ -7,9 +7,15 @@ dependencies.
 """
 
 from config.base import (
-    BaseConfig, MCPConfig, AgentConfig, DatabaseConfig,
-    RedisConfig, TemporalConfig, GeminiConfig,
-    MonitoringConfig, SecurityConfig
+    AgentConfig,
+    BaseConfig,
+    DatabaseConfig,
+    GeminiConfig,
+    MCPConfig,
+    MonitoringConfig,
+    RedisConfig,
+    SecurityConfig,
+    TemporalConfig,
 )
 
 

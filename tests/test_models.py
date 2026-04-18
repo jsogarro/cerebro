@@ -173,11 +173,11 @@ class TestResearchProjectModel:
         with pytest.raises(
             ValidationError, match="String should have at least 1 character"
         ):
-            query = ResearchQuery(text="", domains=["test"])
+            ResearchQuery(text="", domains=["test"])
 
         # Test invalid depth level
         with pytest.raises(ValidationError, match="Invalid depth level"):
-            query = ResearchQuery(
+            ResearchQuery(
                 text="Test query",
                 domains=["test"],
                 depth_level="invalid_level",
@@ -185,7 +185,7 @@ class TestResearchProjectModel:
 
         # Test empty domains
         with pytest.raises(ValidationError, match="List should have at least 1 item"):
-            query = ResearchQuery(text="Test query", domains=[])
+            ResearchQuery(text="Test query", domains=[])
 
     def test_agent_task_status_tracking(self):
         """Test agent task status tracking."""

@@ -5,15 +5,10 @@ This module tests the complete report generation pipeline including
 models, services, templates, and storage.
 """
 
-import json
 import os
 import tempfile
-from datetime import datetime
-from unittest.mock import MagicMock, patch
-from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.report import (
     Citation,
@@ -122,7 +117,7 @@ class TestReportModels:
         )
         
         # Add sections
-        intro_section = report.add_section(
+        report.add_section(
             "Introduction",
             "This research investigates...",
             level=1
@@ -631,7 +626,7 @@ class TestReportIntegration:
     
     def test_report_quality_validation(self, temp_environment):
         """Test report quality validation."""
-        generator = ReportGenerator(temp_environment)
+        ReportGenerator(temp_environment)
         
         # Create report with low quality metrics
         report = Report(

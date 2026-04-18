@@ -120,7 +120,7 @@ class TestAuthenticationFlow:
 
         # Reset password with token
         new_password = "NewSecurePass456!@#"
-        reset_response = await async_client.post(
+        await async_client.post(
             "/api/v1/auth/reset-password",
             json={"token": reset_token, "new_password": new_password},
         )
@@ -144,14 +144,14 @@ class TestAuthenticationFlow:
     ):
         """Test OAuth authentication flow."""
         # Initiate OAuth flow
-        oauth_response = await async_client.get("/api/v1/auth/oauth/google")
+        await async_client.get("/api/v1/auth/oauth/google")
 
         # Should redirect to OAuth provider
         # assert oauth_response.status_code == 302
         # assert "google.com" in oauth_response.headers.get("location", "")
 
         # Simulate OAuth callback
-        callback_response = await async_client.get(
+        await async_client.get(
             "/api/v1/auth/oauth/google/callback",
             params={"code": "mock-oauth-code", "state": "mock-state"},
         )
@@ -191,18 +191,18 @@ class TestAuthorizationAndRBAC:
         )
 
         # Test admin-only endpoint
-        admin_response = await async_client.get(
+        await async_client.get(
             "/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_token}"}
         )
         # assert admin_response.status_code == 200
 
-        researcher_response = await async_client.get(
+        await async_client.get(
             "/api/v1/admin/users",
             headers={"Authorization": f"Bearer {researcher_token}"},
         )
         # assert researcher_response.status_code == 403
 
-        viewer_response = await async_client.get(
+        await async_client.get(
             "/api/v1/admin/users", headers={"Authorization": f"Bearer {viewer_token}"}
         )
         # assert viewer_response.status_code == 403
@@ -243,7 +243,7 @@ class TestAuthorizationAndRBAC:
             user2.id, user2.email, "researcher"
         )
 
-        user2_response = await async_client.get(
+        await async_client.get(
             f"/api/v1/projects/{project.id}",
             headers={"Authorization": f"Bearer {user2_token}"},
         )
@@ -258,7 +258,7 @@ class TestAuthorizationAndRBAC:
             admin_user.id, admin_user.email, "admin"
         )
 
-        admin_response = await async_client.get(
+        await async_client.get(
             f"/api/v1/projects/{project.id}",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
@@ -472,7 +472,7 @@ class TestAPIErrorHandling:
         """Test API rate limiting."""
         # Make many requests quickly
         responses = []
-        for i in range(20):
+        for _i in range(20):
             response = await authenticated_client.get("/api/v1/projects")
             responses.append(response)
 
@@ -545,7 +545,7 @@ class TestAPIErrorHandling:
             },
         }
 
-        response = await authenticated_client.post(
+        await authenticated_client.post(
             "/api/v1/projects", json=project_data
         )
 

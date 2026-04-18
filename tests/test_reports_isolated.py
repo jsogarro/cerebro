@@ -5,14 +5,14 @@ This module tests the report API logic without importing the full application,
 avoiding SQLAlchemy model conflicts.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
 from src.api.routes.reports import (
     CreateReportRequest,
-    ReportListResponse, 
+    ReportListResponse,
     ReportResponse,
     ReportSearchRequest,
     ReportStatisticsResponse,

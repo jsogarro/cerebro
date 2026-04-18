@@ -6,29 +6,13 @@ multi-supervisor orchestration, and advanced features like conflict resolution
 and performance experimentation.
 """
 
-import pytest
-import asyncio
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from datetime import datetime
 import uuid
+from datetime import datetime
+from unittest.mock import AsyncMock, Mock, patch
 
-from fastapi.testclient import TestClient
+import pytest
 from fastapi import FastAPI
-import pytest_asyncio
-
-from src.models.supervisor_api_models import (
-    SupervisorType,
-    WorkerStatus,
-    CoordinationMode,
-    SupervisionStrategy,
-    ConflictResolutionStrategy,
-    SupervisorExecuteRequest,
-    WorkerCoordinationRequest,
-    MultiSupervisorOrchestrationRequest,
-    WorkerAllocationOptimizationRequest,
-    ConflictResolutionRequest,
-    ExperimentRequest,
-)
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -353,7 +337,7 @@ class TestMultiSupervisorOrchestration:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["consensus_achieved"] == True
+        assert data["consensus_achieved"]
         assert data["synthesized_result"] == "Combined analysis"
         assert data["quality_metrics"]["average_quality"] == 0.88
 
@@ -558,32 +542,30 @@ class TestWebSocketEndpoints:
         """Test WebSocket connection for supervisor updates"""
         from fastapi.testclient import TestClient
         
-        with TestClient(app) as client:
-            with client.websocket_connect(
-                "/api/v1/supervisors/research/ws?client_id=test-client"
-            ) as websocket:
-                # Receive initial connection message
-                data = websocket.receive_json()
-                assert data["event_type"] == "connection_established"
-                
-                # Send ping
-                websocket.send_json({"type": "ping"})
-                response = websocket.receive_json()
-                assert response["type"] == "pong"
+        with TestClient(app) as client, client.websocket_connect(
+            "/api/v1/supervisors/research/ws?client_id=test-client"
+        ) as websocket:
+            # Receive initial connection message
+            data = websocket.receive_json()
+            assert data["event_type"] == "connection_established"
+            
+            # Send ping
+            websocket.send_json({"type": "ping"})
+            response = websocket.receive_json()
+            assert response["type"] == "pong"
     
     @pytest.mark.asyncio
     async def test_coordination_progress_websocket(self, app):
         """Test WebSocket for coordination progress updates"""
         from fastapi.testclient import TestClient
         
-        with TestClient(app) as client:
-            with client.websocket_connect(
-                "/api/v1/supervisors/coordination/ws?coordination_id=test-coord"
-            ) as websocket:
-                # Receive initial connection message
-                data = websocket.receive_json()
-                assert data["event_type"] == "connection_established"
-                assert data["coordination_id"] == "test-coord"
+        with TestClient(app) as client, client.websocket_connect(
+            "/api/v1/supervisors/coordination/ws?coordination_id=test-coord"
+        ) as websocket:
+            # Receive initial connection message
+            data = websocket.receive_json()
+            assert data["event_type"] == "connection_established"
+            assert data["coordination_id"] == "test-coord"
 
 
 class TestErrorHandling:
