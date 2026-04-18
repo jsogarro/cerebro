@@ -116,7 +116,7 @@ class TestAppBoot:
             fn = getattr(report_config, fn_name)
             sig = inspect.signature(fn)
             # The first param 'settings' should accept None
-            param = list(sig.parameters.values())[0]
+            param = next(iter(sig.parameters.values()))
             assert param.default is None, f"{fn_name} settings param should default to None"
 
     @pytest.mark.asyncio
