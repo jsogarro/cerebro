@@ -487,19 +487,29 @@ class CommunicationProtocol:
         """Send TalkHier message to agent and get response."""
 
         try:
-            # Convert to legacy format for existing agents
-            legacy_message = message.to_legacy_message()
+            # Execute the agent with a real task built from the message
+            from ..models import AgentTask
 
-            # Send via existing agent communication
-            await agent.receive_message(legacy_message)
+            msg_content = message.talkhier_content
+            task_input = {
+                "query": msg_content.content if hasattr(msg_content, "content") else str(msg_content),
+            }
+            if hasattr(msg_content, "intermediate_outputs") and msg_content.intermediate_outputs:
+                task_input.update(msg_content.intermediate_outputs)
 
-            # For now, simulate agent response
-            # In full implementation, agents would process and respond
+            agent_task = AgentTask(
+                id=message.conversation_id or f"task_{agent.get_agent_type()}",
+                agent_type=agent.get_agent_type(),
+                input_data=task_input,
+            )
+
+            agent_result = await agent.execute(agent_task)
+
             response_content = TalkHierContent(
-                content=f"Processed by {agent.get_agent_type()}",
-                background=f"Agent {agent.get_agent_type()} processing",
-                intermediate_outputs={"processing_time": "simulated"},
-                confidence_score=0.8,
+                content=agent_result.output.get("summary", str(agent_result.output)[:500]) if isinstance(agent_result.output, dict) else str(agent_result.output)[:500],
+                background=f"Agent {agent.get_agent_type()} completed execution",
+                intermediate_outputs=agent_result.output if isinstance(agent_result.output, dict) else {"raw": str(agent_result.output)[:1000]},
+                confidence_score=agent_result.confidence,
             )
 
             response = TalkHierMessage(
