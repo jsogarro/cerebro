@@ -10,13 +10,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.ai_brain.models.masr import (
-    CollaborationMode,
-    ModelTier,
-    QueryComplexity,
-    QueryDomain,
-    RoutingStrategy,
-)
+from src.ai_brain.config.model_schemas import ModelTier
+from src.ai_brain.router.query_analyzer import ComplexityLevel as QueryComplexity
+from src.ai_brain.router.query_analyzer import QueryDomain
+from src.ai_brain.router.routing_types import CollaborationMode, RoutingStrategy
 
 # Request Models
 

@@ -11,7 +11,6 @@ from typing import Any
 from src.agents.base import BaseAgent
 from src.agents.citation_agent import CitationAgent
 from src.agents.comparative_analysis_agent import ComparativeAnalysisAgent
-from src.agents.integrations.mcp_integration import MCPIntegration
 from src.agents.literature_review_agent import LiteratureReviewAgent
 from src.agents.methodology_agent import MethodologyAgent
 from src.agents.synthesis_agent import SynthesisAgent
@@ -71,6 +70,8 @@ class AgentFactory:
         # Initialize MCP integration if configured
         mcp_config = config.get("mcp", {})
         if mcp_config and mcp_config.get("enabled", False):
+            from src.agents.integrations.mcp_integration import MCPIntegration
+
             mcp_integration = MCPIntegration(
                 config=mcp_config,
                 enable_fallback=mcp_config.get("enable_fallback", True),

@@ -16,10 +16,24 @@ Integration:
 - MASR: Intelligent routing and resource allocation
 """
 
-from .analytics_supervisor import AnalyticsSupervisor
 from .base_supervisor import BaseSupervisor
-from .content_supervisor import ContentSupervisor
 from .research_supervisor import ResearchSupervisor
+
+# AnalyticsSupervisor and ContentSupervisor are planned but not yet implemented.
+# Use lazy imports to avoid crashing when their modules don't exist.
+
+
+def __getattr__(name: str):
+    if name == "AnalyticsSupervisor":
+        from .analytics_supervisor import AnalyticsSupervisor
+
+        return AnalyticsSupervisor
+    if name == "ContentSupervisor":
+        from .content_supervisor import ContentSupervisor
+
+        return ContentSupervisor
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "AnalyticsSupervisor",

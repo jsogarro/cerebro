@@ -13,12 +13,9 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from src.ai_brain.models.routing import (
-    CollaborationMode,
-    QueryComplexity,
-    QueryDomain,
-    RoutingStrategy,
-)
+from src.ai_brain.router.query_analyzer import ComplexityLevel as QueryComplexity
+from src.ai_brain.router.query_analyzer import QueryDomain
+from src.ai_brain.router.routing_types import CollaborationMode, RoutingStrategy
 from src.auth.dependencies import get_current_user_optional
 from src.models.user import User
 

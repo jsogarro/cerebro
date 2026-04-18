@@ -14,13 +14,12 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
-from src.ai_brain.models.masr import QueryComplexity, QueryDomain, RoutingStrategy
-from src.config import get_settings
 
 from src.ai_brain.learning.supervision_feedback import SupervisionFeedbackLearner
 from src.ai_brain.router.masr import MASRouter
-
-settings = get_settings()
+from src.ai_brain.router.query_analyzer import ComplexityLevel as QueryComplexity
+from src.ai_brain.router.query_analyzer import QueryDomain
+from src.ai_brain.router.routing_types import RoutingStrategy
 
 
 @dataclass

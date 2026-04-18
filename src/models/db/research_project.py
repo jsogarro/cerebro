@@ -10,7 +10,6 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Float,
-    ForeignKey,
     Index,
     String,
     Text,
@@ -18,8 +17,7 @@ from sqlalchemy import (
 from sqlalchemy import (
     Enum as SQLEnum,
 )
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, backref, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import BaseModel
 
@@ -60,8 +58,8 @@ class ResearchProject(BaseModel):
         Float, nullable=True, comment="Overall quality score (0.0 to 1.0)"
     )
 
-    user_id: Mapped[Any] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    user_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True
     )
 
     workflow_id: Mapped[str | None] = mapped_column(
@@ -80,26 +78,24 @@ class ResearchProject(BaseModel):
     )
 
     # Relationships
-    user = relationship("User", backref=backref("research_projects", lazy="dynamic"))
-
     agent_tasks = relationship(
         "AgentTask",
         back_populates="project",
-        lazy="dynamic",
+        lazy="selectin",
         cascade="all, delete-orphan",
     )
 
     results = relationship(
         "ResearchResult",
         back_populates="project",
-        lazy="dynamic",
+        lazy="selectin",
         cascade="all, delete-orphan",
     )
 
     checkpoints = relationship(
         "WorkflowCheckpoint",
         back_populates="project",
-        lazy="dynamic",
+        lazy="selectin",
         cascade="all, delete-orphan",
     )
 

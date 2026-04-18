@@ -15,7 +15,7 @@ import statistics
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, status
 from structlog import get_logger
 
 from ...models.agent_api_models import (
@@ -420,8 +420,8 @@ async def literature_search(
 
 @router.post("/citation/format", response_model=AgentExecutionResponse)
 async def format_citations(
-    sources: list[str] = Query(..., min_items=1),
-    style: str = Query("APA", regex="^(APA|MLA|Chicago)$"),
+    sources: list[str] = Body(..., min_length=1),
+    style: str = Body("APA", pattern="^(APA|MLA|Chicago)$"),
 ) -> AgentExecutionResponse:
     """
     Optimized citation formatting endpoint.
@@ -443,8 +443,8 @@ async def format_citations(
 
 @router.post("/synthesis/combine", response_model=AgentExecutionResponse)
 async def synthesize_findings(
-    findings: list[dict[str, Any]] = Query(..., min_items=2),
-    synthesis_focus: str = Query("comprehensive", regex="^(comprehensive|comparative|thematic)$"),
+    findings: list[dict[str, Any]] = Body(..., min_length=2),
+    synthesis_focus: str = Body("comprehensive", pattern="^(comprehensive|comparative|thematic)$"),
 ) -> AgentExecutionResponse:
     """
     Optimized synthesis endpoint.
@@ -500,7 +500,7 @@ async def literature_analysis_workflow(
 async def comprehensive_research_workflow(
     query: str = Query(..., min_length=10),
     domains: list[str] = Query(default=[]),
-    analysis_depth: str = Query("comprehensive", regex="^(basic|comprehensive|exhaustive)$"),
+    analysis_depth: str = Query("comprehensive", pattern="^(basic|comprehensive|exhaustive)$"),
 ) -> MixtureOfAgentsResponse:
     """
     Convenience endpoint for comprehensive research workflow.
@@ -583,7 +583,7 @@ async def get_agents_health_summary() -> dict[str, Any]:
 
 @router.get("/performance/comparison")
 async def compare_agent_performance(
-    metric: str = Query("quality_score", regex="^(quality_score|execution_time|success_rate|cost_efficiency)$"),
+    metric: str = Query("quality_score", pattern="^(quality_score|execution_time|success_rate|cost_efficiency)$"),
     time_period_hours: int = Query(24, ge=1, le=168),  # 1 hour to 1 week
 ) -> dict[str, Any]:
     """

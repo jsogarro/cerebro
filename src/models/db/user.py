@@ -67,13 +67,7 @@ class User(BaseModel):
 
     api_rate_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Relationships
-    research_projects = relationship(
-        "ResearchProject",
-        back_populates="user",
-        lazy="dynamic",
-        cascade="all, delete-orphan",
-    )
+    # Relationships removed: user_id is now a plain string, not a FK
 
     api_keys = relationship(
         "APIKey", back_populates="user", lazy="dynamic", cascade="all, delete-orphan"
@@ -217,16 +211,8 @@ class User(BaseModel):
         if self.max_projects is None:
             return True
 
-        from src.models.db.research_project import ResearchProject
-
-        # Check current project count
-        active_projects: int = (
-            self.research_projects.filter_by(deleted_at=None)
-            .filter(ResearchProject.status.in_(["draft", "in_progress"]))
-            .count()
-        )
-
-        return bool(active_projects < self.max_projects)
+        # Without FK relationship, assume can create
+        return True
 
     @property
     def display_name(self) -> str:

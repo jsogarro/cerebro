@@ -53,20 +53,22 @@ async def create_research_project(
 ) -> ResearchProject:
     """Create a new research project."""
     try:
+        import json as _json
+
         # Create research project in database
         db_project = await repo.create(
             title=request.title,
-            query=request.query.dict(),
+            query=_json.dumps(request.query.model_dump()),
             user_id=request.user_id,
             domains=request.scope.domains if request.scope else [],
             status=ProjectStatus.DRAFT,
         )
 
-        from typing import cast
+        query_data = _json.loads(db_project.query) if isinstance(db_project.query, str) else db_project.query
         project = ResearchProject(
             id=db_project.id,
             title=db_project.title,
-            query=ResearchQuery(**cast(dict[str, Any], db_project.query)),
+            query=ResearchQuery(**query_data),
             user_id=db_project.user_id,
             scope=request.scope,
             status=ResearchStatus.PENDING,
@@ -123,11 +125,13 @@ async def get_research_project(
             detail=f"Research project {project_id} not found",
         )
 
-    from typing import Any, cast
+    import json as _json
+
+    query_data = _json.loads(db_project.query) if isinstance(db_project.query, str) else db_project.query
     project = ResearchProject(
         id=db_project.id,
         title=db_project.title,
-        query=ResearchQuery(**cast(dict[str, Any], db_project.query)),
+        query=ResearchQuery(**query_data),
         user_id=db_project.user_id,
         status=ResearchStatus(db_project.status.value),
         created_at=db_project.created_at,
@@ -186,12 +190,16 @@ async def list_research_projects(
         )
 
     # Convert to API models
-    from typing import Any, cast
+    import json as _json
+
+    def _parse_query(q: Any) -> dict[str, Any]:
+        return _json.loads(q) if isinstance(q, str) else q
+
     return [
         ResearchProject(
             id=p.id,
             title=p.title,
-            query=ResearchQuery(**cast(dict[str, Any], p.query)),
+            query=ResearchQuery(**_parse_query(p.query)),
             user_id=p.user_id,
             status=ResearchStatus(p.status.value),
             created_at=p.created_at,

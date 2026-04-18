@@ -8,10 +8,9 @@ import uuid
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, ForeignKey, Index, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.db.base import BaseModel
+from src.models.db.base import UUID, BaseModel
 
 
 class WorkflowCheckpoint(BaseModel):
@@ -33,7 +32,7 @@ class WorkflowCheckpoint(BaseModel):
 
     # Foreign key to research project
     project_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("research_projects.id"),
         nullable=False,
         index=True,

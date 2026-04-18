@@ -439,21 +439,21 @@ def create_report_settings() -> ReportSettings:
     return ReportSettings()
 
 
-def create_template_config(settings: ReportSettings | None[ReportSettings] = None) -> ReportTemplateConfig:
+def create_template_config(settings: ReportSettings | None = None) -> ReportTemplateConfig:
     """Factory function to create template configuration."""
     if settings is None:
         settings = create_report_settings()
     return ReportTemplateConfig(settings)
 
 
-def create_format_config(settings: ReportSettings | None[ReportSettings] = None) -> ReportFormatConfig:
+def create_format_config(settings: ReportSettings | None = None) -> ReportFormatConfig:
     """Factory function to create format configuration."""
     if settings is None:
         settings = create_report_settings()
     return ReportFormatConfig(settings)
 
 
-def create_quality_config(settings: ReportSettings | None[ReportSettings] = None) -> ReportQualityConfig:
+def create_quality_config(settings: ReportSettings | None = None) -> ReportQualityConfig:
     """Factory function to create quality configuration."""
     if settings is None:
         settings = create_report_settings()

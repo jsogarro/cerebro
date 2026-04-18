@@ -20,10 +20,9 @@ from sqlalchemy import (
 from sqlalchemy import (
     Enum as SQLEnum,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.db.base import BaseModel
+from src.models.db.base import UUID, BaseModel
 
 
 class TaskStatus(StrEnum):
@@ -49,7 +48,7 @@ class AgentTask(BaseModel):
     __tablename__ = "agent_tasks"
 
     project_id: Mapped[Any] = mapped_column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("research_projects.id"),
         nullable=False,
         index=True,

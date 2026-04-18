@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from src.ai_brain.models.masr import QueryComplexity
+from src.ai_brain.router.query_analyzer import ComplexityLevel as QueryComplexity
 from src.api.websocket.models import MessageType, WebSocketMessage
 from src.models.masr_api_models import RoutingDecisionResponse
 

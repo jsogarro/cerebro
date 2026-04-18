@@ -8,10 +8,9 @@ from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import JSON, Float, ForeignKey, Index, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.db.base import BaseModel
+from src.models.db.base import UUID, BaseModel
 
 
 class ResultType(StrEnum):
@@ -40,7 +39,7 @@ class ResearchResult(BaseModel):
     __tablename__ = "research_results"
 
     project_id: Mapped[Any] = mapped_column(
-        UUID(as_uuid=True),
+        UUID(),
         ForeignKey("research_projects.id"),
         nullable=False,
         index=True,

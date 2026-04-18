@@ -43,10 +43,35 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Failed to initialize event publisher: {e}")
 
-    # Initialize connections, etc.
-    # await init_database()
-    # await init_redis()
-    # await init_temporal()
+    # Initialize database
+    from src.models.db.session import init_db
+
+    try:
+        await init_db()
+        logger.info("Database initialized")
+
+        # Create tables if using SQLite (development)
+        if "sqlite" in settings.DATABASE_URL:
+            from src.models.db.agent_task import AgentTask
+            from src.models.db.base import Base
+            from src.models.db.research_project import ResearchProject as DBProject
+            from src.models.db.research_result import ResearchResult
+            from src.models.db.session import _engine
+            from src.models.db.workflow_checkpoint import WorkflowCheckpoint
+
+            tables = [
+                Base.metadata.tables[t.__tablename__]
+                for t in [DBProject, ResearchResult, AgentTask, WorkflowCheckpoint]
+                if t.__tablename__ in Base.metadata.tables
+            ]
+            if _engine is not None and tables:
+                async with _engine.begin() as conn:
+                    await conn.run_sync(
+                        Base.metadata.create_all, tables=tables
+                    )
+                logger.info("Database tables created")
+    except Exception as e:
+        logger.warning(f"Database initialization failed: {e}")
 
     yield
 

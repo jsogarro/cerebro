@@ -66,18 +66,21 @@ def create_engine(
     # Configure pool class
     poolclass = NullPool if use_null_pool else QueuePool
 
+    # Build engine kwargs
+    engine_kwargs: dict[str, Any] = {
+        "echo": echo,
+        "echo_pool": echo_pool,
+        "poolclass": poolclass,
+    }
+    if not use_null_pool:
+        engine_kwargs["pool_size"] = pool_size
+        engine_kwargs["max_overflow"] = max_overflow
+        engine_kwargs["pool_timeout"] = pool_timeout
+        engine_kwargs["pool_pre_ping"] = True
+        engine_kwargs["pool_recycle"] = 3600
+
     # Create engine
-    engine = create_async_engine(
-        database_url,
-        echo=echo,
-        echo_pool=echo_pool,
-        poolclass=poolclass,
-        pool_size=pool_size if not use_null_pool else None,
-        max_overflow=max_overflow if not use_null_pool else None,
-        pool_timeout=pool_timeout if not use_null_pool else None,
-        pool_pre_ping=True,  # Verify connections before using
-        pool_recycle=3600,  # Recycle connections after 1 hour
-    )
+    engine = create_async_engine(database_url, **engine_kwargs)
 
     # Add event listeners for debugging
     if echo_pool:
@@ -108,6 +111,11 @@ async def init_db(database_url: str | None = None, **engine_kwargs: Any) -> None
         return
 
     logger.info("Initializing database connection")
+
+    # Use NullPool for SQLite (QueuePool is incompatible with aiosqlite)
+    url = database_url or get_database_url()
+    if "sqlite" in url:
+        engine_kwargs.setdefault("use_null_pool", True)
 
     # Create engine
     _engine = create_engine(database_url, **engine_kwargs)

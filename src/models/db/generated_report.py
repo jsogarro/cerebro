@@ -82,8 +82,8 @@ class GeneratedReport(BaseModel):
     last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     
     # Relationships
-    project = relationship("ResearchProject", back_populates="generated_reports")
-    user = relationship("User", back_populates="generated_reports")
+    project = relationship("ResearchProject")
+    user = relationship("User")
     formats = relationship(
         "ReportFormat",
         back_populates="report",

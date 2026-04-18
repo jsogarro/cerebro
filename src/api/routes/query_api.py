@@ -391,7 +391,7 @@ async def intelligent_literature_query(
 @router.post("/methodology")
 async def intelligent_methodology_query(
     query: str = Query(..., min_length=10),
-    research_type: str = Query("mixed", regex="^(quantitative|qualitative|mixed)$"),
+    research_type: str = Query("mixed", pattern="^(quantitative|qualitative|mixed)$"),
     domains: list[str] = Query(default=[]),
 ) -> IntelligentQueryResponse:
     """
@@ -419,7 +419,7 @@ async def intelligent_methodology_query(
 @router.post("/comparison")
 async def intelligent_comparison_query(
     query: str = Query(..., min_length=10),
-    comparison_focus: str = Query("approaches", regex="^(approaches|theories|methods|findings)$"),
+    comparison_focus: str = Query("approaches", pattern="^(approaches|theories|methods|findings)$"),
     domains: list[str] = Query(default=[]),
 ) -> IntelligentQueryResponse:
     """
@@ -501,7 +501,7 @@ async def get_available_routing_strategies() -> dict[str, Any]:
 @router.get("/routing/recommend")
 async def get_routing_recommendation(
     query: str = Query(..., min_length=1),
-    context: dict[str, Any] = Query(default_factory=dict),
+    context: str = Query("", description="Optional JSON context string"),
 ) -> dict[str, Any]:
     """
     Get MASR routing recommendation without executing query.
@@ -509,9 +509,10 @@ async def get_routing_recommendation(
     Useful for cost estimation and strategy planning.
     """
     try:
-        # This would use MASR analysis to provide routing recommendation
-        # For now, simplified logic based on query characteristics
-        
+        import json as _json
+
+        parsed_context: dict[str, Any] = _json.loads(context) if context else {}
+
         query_length = len(query)
         complexity = "simple" if query_length < 100 else "moderate" if query_length < 500 else "complex"
         
@@ -544,7 +545,7 @@ async def get_routing_recommendation(
         return {
             "query_analysis": {
                 "complexity": complexity,
-                "estimated_domains": context.get("domains", []),
+                "estimated_domains": parsed_context.get("domains", []),
                 "confidence": 0.85,
             },
             "routing_recommendation": recommendation,

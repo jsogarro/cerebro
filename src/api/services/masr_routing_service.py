@@ -10,10 +10,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from src.ai_brain.models.masr import ModelTier, RoutingStrategy
-from src.ai_brain.supervisor_config_manager import SupervisorConfigurationManager
-from src.config import get_settings
-
+from src.ai_brain.config.model_schemas import ModelTier, RoutingStrategy
+from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.learning.supervision_feedback import SupervisionFeedbackLearner
 from src.ai_brain.router.hierarchical_cost_model import HierarchicalCostOptimizer
@@ -44,8 +42,6 @@ from src.models.masr_api_models import (
     SupervisorAllocation,
 )
 from src.utils.type_coercion import coerce_float
-
-settings = get_settings()
 
 
 class MASRRoutingService:
