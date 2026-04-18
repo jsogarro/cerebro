@@ -87,39 +87,3 @@ def get_generation_config(config: GeminiConfig) -> dict[str, Any]:
         "top_k": config.top_k,
         "max_output_tokens": config.max_output_tokens,
     }
-
-
-def get_safety_settings(config: GeminiConfig) -> list[Any]:
-    """
-    Get safety settings for Gemini model.
-
-    Pure function that transforms config to safety settings.
-    """
-    from google.generativeai.types import HarmBlockThreshold, HarmCategory
-
-    settings = []
-
-    # Map configuration to safety thresholds
-    threshold = HarmBlockThreshold.BLOCK_NONE
-    if config.block_few:
-        threshold = HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
-    elif config.block_some:
-        threshold = HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
-    elif config.block_most:
-        threshold = HarmBlockThreshold.BLOCK_ONLY_HIGH
-
-    # Apply threshold to all harm categories
-    for category in [
-        HarmCategory.HARM_CATEGORY_HARASSMENT,
-        HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-    ]:
-        settings.append(
-            {
-                "category": category,
-                "threshold": threshold,
-            }
-        )
-
-    return settings

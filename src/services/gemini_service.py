@@ -10,7 +10,7 @@ import hashlib
 import logging
 from typing import Any
 
-import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
 from redis import asyncio as aioredis
 from tenacity import (
     retry,
@@ -19,11 +19,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from src.services.gemini_config import (
-    GeminiConfig,
-    get_generation_config,
-    get_safety_settings,
-)
+from src.services.gemini_config import GeminiConfig
 from src.services.gemini_limiter import RateLimiter
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
@@ -70,14 +66,14 @@ class GeminiService:
         self.api_key = self.config.api_key
         self.model_name = self.config.model_name
 
-        # Initialize Gemini
-        genai.configure(api_key=self.config.api_key)  # type: ignore[attr-defined]
-
-        # Initialize model with configuration
-        self.model = genai.GenerativeModel(  # type: ignore[attr-defined]
-            model_name=self.config.model_name,
-            generation_config=get_generation_config(self.config),  # type: ignore[arg-type]
-            safety_settings=get_safety_settings(self.config),
+        # Initialize model with LangChain ChatGoogleGenerativeAI
+        self.model = ChatGoogleGenerativeAI(
+            model=self.config.model_name,
+            google_api_key=self.config.api_key,
+            temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            top_k=self.config.top_k,
+            max_output_tokens=self.config.max_output_tokens,
         )
 
         # Initialize rate limiter
@@ -106,8 +102,8 @@ class GeminiService:
         """
         async with self.rate_limiter.acquire():
             try:
-                response = await self.model.generate_content_async(prompt)
-                return str(response.text)
+                result = await self.model.ainvoke(prompt)
+                return str(result.content)
             except Exception as e:
                 logger.error(f"Gemini API error: {e}")
                 raise
