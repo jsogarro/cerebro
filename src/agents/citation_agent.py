@@ -261,35 +261,92 @@ class CitationAgent(BaseAgent):
         style: str
     ) -> dict[str, Any]:
         """
-        Format citations using MCP Citation Tool.
-        
+        Format citations using MCP Citation Tool or Gemini structured output.
+
         Args:
             sources: List of source dictionaries
             style: Citation style (APA, MLA, Chicago)
-            
+
         Returns:
             Citation formatting results
         """
         if not self.mcp_integration:
-            self.log_warning("MCP integration not available, using fallback")
-            return self._generate_mock_citations(sources, style)
-        
+            self.log_warning("MCP integration not available, using Gemini fallback")
+            return await self._format_citations_with_gemini(sources, style)
+
         try:
             result = await self.mcp_integration.format_citations(
                 sources=sources,
                 style=style
             )
-            
+
             if result.get("success"):
                 self.log_info(f"MCP citation formatting successful: {len(sources)} sources in {style} style")
                 return dict(result)
             else:
                 raise Exception(f"MCP citation formatting failed: {result.get('error', 'Unknown error')}")
-                
+
         except Exception as e:
             self.log_error(f"MCP citation formatting failed: {e}")
+            return await self._format_citations_with_gemini(sources, style)
+
+    async def _format_citations_with_gemini(
+        self,
+        sources: list[dict[str, Any]],
+        style: str
+    ) -> dict[str, Any]:
+        """
+        Format citations using Gemini structured output when MCP unavailable.
+
+        Args:
+            sources: List of source dictionaries
+            style: Citation style (APA, MLA, Chicago)
+
+        Returns:
+            Citation formatting results
+        """
+        if not self.gemini_service:
+            self.log_warning("Gemini service not available, using mock citations")
             return self._generate_mock_citations(sources, style)
-    
+
+        from src.agents.schemas import CitationSchema
+
+        prompt = f"""Format the following academic sources in {style} citation style:
+
+Sources:
+{orjson.dumps(sources, option=orjson.OPT_INDENT_2).decode()}
+
+Format each source as a complete {style} citation with proper formatting.
+Include all available metadata (authors, year, title, journal, DOI).
+
+Return formatted citations as structured JSON."""
+
+        try:
+            result = await self.gemini_service.generate_structured_content(
+                prompt, CitationSchema
+            )
+
+            # Convert Pydantic model to expected dict format
+            formatted_citations = [
+                {
+                    "citation": citation.citation_text,
+                    "source_id": citation.source_id or f"source_{i}"
+                }
+                for i, citation in enumerate(result.citations)
+            ]
+
+            return {
+                "success": True,
+                "formatted_citations": formatted_citations,
+                "verified_sources": len(sources),
+                "total_sources": result.total_sources or len(sources),
+                "citation_style": result.style,
+            }
+
+        except Exception as e:
+            self.log_error(f"Gemini citation formatting failed: {e}")
+            return self._generate_mock_citations(sources, style)
+
     async def _verify_sources_with_mcp(self, sources: list[dict[str, Any]]) -> dict[str, Any]:
         """
         Verify source credibility and resolve DOIs using MCP tools.

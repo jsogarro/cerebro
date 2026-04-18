@@ -54,13 +54,32 @@ class LiteratureReviewAgent(BaseAgent):
                 self.log_info(f"Using cached result for task {task.id}")
                 return cached_result
 
-            # Step 1: Search academic sources using MCP tools (production)
-            academic_sources = await self._search_academic_sources(task.input_data)
-
-            # Step 2: Extract key findings and analyze using Gemini
-            literature_analysis = await self._analyze_literature_with_gemini(
-                task.input_data, academic_sources
-            )
+            # Search and analyze using structured output (consolidates source search + analysis)
+            if self.gemini_service:
+                literature_analysis = await self._search_and_analyze_structured(task.input_data)
+                # Extract sources from structured response
+                academic_sources = {
+                    "success": True,
+                    "sources": [s.model_dump() for s in literature_analysis.sources],
+                    "total_found": len(literature_analysis.sources),
+                    "databases_searched": ["gemini_knowledge"],
+                    "search_strategy": "LLM-assisted structured source identification and analysis",
+                }
+            else:
+                # Fallback: Use original two-step process for testing
+                academic_sources = await self._search_academic_sources(task.input_data)
+                literature_analysis_dict = await self._analyze_literature_with_gemini(
+                    task.input_data, academic_sources
+                )
+                # Convert to structured format
+                from src.agents.schemas import LiteratureAnalysisSchema
+                literature_analysis = LiteratureAnalysisSchema(
+                    sources=[],
+                    key_findings=literature_analysis_dict.get("key_findings", []),
+                    research_gaps=literature_analysis_dict.get("research_gaps", []),
+                    methodologies_used=literature_analysis_dict.get("methodologies_used", []),
+                    quality_assessment=literature_analysis_dict.get("quality_assessment", ""),
+                )
 
             # Step 3: Build knowledge graph of relationships
             knowledge_graph = await self._build_literature_knowledge_graph(
@@ -75,7 +94,7 @@ class LiteratureReviewAgent(BaseAgent):
             ranked_sources = self._rank_sources_by_relevance(sources_list)
 
             # Analyze research gaps with enhanced analysis
-            gaps = literature_analysis.get("research_gaps", [])
+            gaps = literature_analysis.research_gaps
             gap_analysis = self._analyze_research_gaps(
                 gaps, ranked_sources, knowledge_graph
             )
@@ -83,19 +102,19 @@ class LiteratureReviewAgent(BaseAgent):
             # Calculate confidence score with MCP-enhanced data
             confidence = self._calculate_confidence(
                 sources=ranked_sources,
-                quality=literature_analysis.get("quality_assessment", ""),
-                findings=literature_analysis.get("key_findings", []),
+                quality=literature_analysis.quality_assessment,
+                findings=literature_analysis.key_findings,
                 mcp_data_quality=academic_sources.get("success", False),
             )
 
-            # Build enhanced output with MCP data
+            # Build enhanced output from Pydantic model
             output = {
                 "sources_found": ranked_sources,
-                "key_findings": literature_analysis.get("key_findings", []),
+                "key_findings": literature_analysis.key_findings,
                 "research_gaps": gaps,
                 "gap_analysis": gap_analysis,
-                "methodologies_used": literature_analysis.get("methodologies_used", []),
-                "quality_assessment": literature_analysis.get("quality_assessment", ""),
+                "methodologies_used": literature_analysis.methodologies_used,
+                "quality_assessment": literature_analysis.quality_assessment,
                 "search_strategy": academic_sources.get(
                     "search_strategy", "Multi-database academic search"
                 ),
@@ -642,6 +661,79 @@ class LiteratureReviewAgent(BaseAgent):
             sources_text.append(source_info)
 
         return "\\n\\n".join(sources_text)
+
+    async def _search_and_analyze_structured(
+        self, input_data: dict[str, Any]
+    ) -> Any:  # Returns LiteratureAnalysisSchema
+        """
+        Search for sources and analyze using structured output (single Gemini call).
+
+        Consolidates the two-step process into one comprehensive structured call.
+
+        Args:
+            input_data: Task input data
+
+        Returns:
+            LiteratureAnalysisSchema instance with sources and analysis
+        """
+        from src.agents.schemas import LiteratureAnalysisSchema
+
+        if not self.gemini_service:
+            # Should not reach here, but provide fallback
+            return LiteratureAnalysisSchema(
+                sources=[],
+                key_findings=["Gemini service unavailable"],
+                research_gaps=[],
+                methodologies_used=[],
+                quality_assessment="Unable to assess without Gemini",
+            )
+
+        query = input_data.get("query", "")
+        domains = input_data.get("domains", [])
+        max_sources = input_data.get("max_sources", 10)
+
+        domains_str = ", ".join(domains) if domains else "general research"
+
+        prompt = f"""You are an expert academic research librarian and analyst.
+
+Research Question: "{query}"
+Domains: {domains_str}
+Maximum Sources: {max_sources}
+
+Your task:
+1. Identify {max_sources} real, published academic papers highly relevant to this research question
+2. Extract key findings from these papers
+3. Identify research gaps
+4. List methodologies used across the papers
+5. Provide a quality assessment of the literature
+
+Requirements for sources:
+- Only include papers you are confident actually exist
+- Prioritize influential, highly-cited papers from top venues
+- Include a mix of recent (2022-2025) and foundational papers
+- Sort by relevance_score (highest first)
+- Provide accurate metadata (title, authors, year, journal, DOI if known)
+- Include 2-3 sentence abstracts summarizing the paper's contribution
+
+Return your analysis as structured JSON."""
+
+        try:
+            self.log_info(f"Searching and analyzing sources via Gemini: {query[:80]}...")
+            result = await self.gemini_service.generate_structured_content(
+                prompt, LiteratureAnalysisSchema
+            )
+            self.log_info(f"Gemini returned {len(result.sources)} sources with analysis")
+            return result
+        except Exception as e:
+            self.log_error(f"Structured source search failed: {e}")
+            # Return empty but valid schema
+            return LiteratureAnalysisSchema(
+                sources=[],
+                key_findings=[f"Analysis failed: {e!s}"],
+                research_gaps=["Unable to identify gaps due to analysis failure"],
+                methodologies_used=[],
+                quality_assessment="Analysis could not be completed",
+            )
 
     async def _fallback_academic_search(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """

@@ -11,8 +11,6 @@ from typing import Any
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
-from src.services.parsers.json_parser import parse_json_response
-from src.utils.serialization import serialize_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -54,16 +52,16 @@ class SynthesisAgent(BaseAgent):
                 self.log_info(f"Using cached result for task {task.id}")
                 return cached_result
 
-            # Generate synthesis
+            # Generate synthesis using structured output
             if self.gemini_service:
+                from src.agents.schemas import SynthesisSchema
+
                 prompt = self._build_prompt(agent_outputs)
-                response = await self.gemini_service.generate_content(prompt)
-                parsed_response = parse_json_response(response)
-                synthesis = (
-                    parsed_response.get("synthesis_result")
-                    or parsed_response.get("synthesis")
-                    or parsed_response
+                schema_result = await self.gemini_service.generate_structured_content(
+                    prompt, SynthesisSchema
                 )
+                # Convert Pydantic model to dict for compatibility
+                synthesis = schema_result.model_dump()
             else:
                 # Fallback for testing without Gemini
                 synthesis = self._generate_mock_synthesis(agent_outputs)
@@ -159,12 +157,31 @@ class SynthesisAgent(BaseAgent):
 
     def _build_prompt(self, agent_outputs: dict[str, Any]) -> str:
         """Build prompt for Gemini."""
-        outputs_text = serialize_to_str(agent_outputs)
+        # Format agent outputs clearly for synthesis
+        formatted_outputs = []
+        for agent_type, output_data in agent_outputs.items():
+            formatted_outputs.append(f"\n=== {agent_type.upper()} ===")
+            if isinstance(output_data, dict):
+                for key, value in output_data.items():
+                    formatted_outputs.append(f"{key}: {value}")
+            else:
+                formatted_outputs.append(str(output_data))
+
+        outputs_text = "\n".join(formatted_outputs)
+
         return f"""Synthesize the following outputs from multiple research agents:
 
-        {outputs_text}
+{outputs_text}
 
-        Create an integrated synthesis in JSON format."""
+Your task:
+1. Integrate findings from all agents into coherent integrated_findings
+2. Identify cross_agent_patterns across different agent outputs
+3. Resolve any conflict_resolutions between agent findings
+4. Extract meta_insights (higher-order insights from the synthesis)
+5. Create a comprehensive_narrative combining all outputs
+6. Provide a confidence_assessment of the synthesis quality
+
+Return your synthesis as structured JSON."""
 
     def _generate_mock_synthesis(self, agent_outputs: dict[str, Any]) -> dict[str, Any]:
         """Generate mock synthesis for testing."""

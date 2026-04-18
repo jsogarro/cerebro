@@ -401,6 +401,11 @@ class ResearchSupervisor(BaseSupervisor):
                         else {"findings": result.content}
                     )
 
+            logger.info(
+                f"Synthesis receiving outputs from {len(agent_outputs)} agents: "
+                f"{list(agent_outputs.keys())}"
+            )
+
             response = await self.send_talkhier_message(
                 "synthesis",
                 MessageType.SUPERVISOR_ASSIGNMENT,

@@ -11,7 +11,6 @@ from typing import Any
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
-from src.services.parsers.json_parser import parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +50,16 @@ class MethodologyAgent(BaseAgent):
                 self.log_info(f"Using cached result for task {task.id}")
                 return cached_result
 
-            # Generate prompt for Gemini
+            # Generate methodology using structured output
             if self.gemini_service:
+                from src.agents.schemas import MethodologySchema
+
                 prompt = self._build_prompt(task.input_data)
-                response = await self.gemini_service.generate_content(prompt)
-                parsed_response = parse_json_response(response)
-                analysis = (
-                    parsed_response.get("methodology_analysis")
-                    or parsed_response.get("methodology")
-                    or parsed_response
+                schema_result = await self.gemini_service.generate_structured_content(
+                    prompt, MethodologySchema
                 )
+                # Convert Pydantic model to dict for compatibility
+                analysis = schema_result.model_dump()
             else:
                 # Fallback for testing without Gemini
                 analysis = self._generate_mock_analysis(task)

@@ -122,6 +122,58 @@ class GeminiService:
         """
         return await self._generate_content(prompt)
 
+    async def generate_structured_content(
+        self, prompt: str, schema: type[Any], max_retries: int = 2
+    ) -> Any:
+        """
+        Generate structured content from Gemini using Pydantic schema validation.
+
+        Args:
+            prompt: The prompt to send to Gemini.
+            schema: Pydantic model class for output validation.
+            max_retries: Number of retry attempts on parse failure (default: 2).
+
+        Returns:
+            Validated Pydantic model instance.
+
+        Raises:
+            Exception: If parsing fails after all retries.
+        """
+        from langchain_core.output_parsers import PydanticOutputParser
+
+        # Create parser for the schema
+        parser = PydanticOutputParser(pydantic_object=schema)
+
+        # Enhance prompt with format instructions
+        format_instructions = parser.get_format_instructions()
+        enhanced_prompt = f"{prompt}\n\n{format_instructions}"
+
+        # Try to generate and parse with retries
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                # Generate content using existing retry logic
+                response = await self._generate_content(enhanced_prompt)
+
+                # Parse and validate response
+                parsed = parser.parse(response)
+                logger.debug(f"Successfully parsed structured output (attempt {attempt + 1})")
+                return parsed
+
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"Failed to parse structured output (attempt {attempt + 1}/{max_retries + 1}): {e}"
+                )
+                if attempt < max_retries:
+                    continue
+                else:
+                    logger.error(f"All parse attempts failed: {last_error}")
+                    raise
+
+        # Should never reach here, but for type safety
+        raise last_error if last_error else Exception("Unexpected parse failure")
+
     def _generate_cache_key(self, prefix: str, data: Any) -> str:
         """
         Generate cache key for data.
