@@ -19,6 +19,27 @@ class AcademicSource(BaseModel):
     )
 
 
+class SourceVerification(BaseModel):
+    """Schema for source verification results."""
+
+    title: str = Field(description="Paper title being verified")
+    exists: bool = Field(description="Whether this paper likely exists as described")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence that paper is real")
+    issues: list[str] = Field(default_factory=list, description="Any issues found")
+    corrected_title: str | None = Field(default=None, description="Corrected title if needed")
+    corrected_authors: list[str] | None = Field(default=None, description="Corrected authors if needed")
+    corrected_year: int | None = Field(default=None, description="Corrected year if needed")
+
+
+class SourceValidationResult(BaseModel):
+    """Schema for source validation results."""
+
+    verified_sources: list[SourceVerification] = Field(description="Verification results for each source")
+    total_verified: int = Field(description="Number of sources that passed verification")
+    total_rejected: int = Field(description="Number of sources rejected as likely hallucinated")
+    validation_notes: str = Field(default="", description="Overall validation notes")
+
+
 class LiteratureAnalysisSchema(BaseModel):
     """Schema for complete literature analysis output."""
 

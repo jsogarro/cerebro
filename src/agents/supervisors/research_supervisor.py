@@ -195,6 +195,11 @@ class ResearchSupervisor(BaseSupervisor):
         )
 
         self.workflow_graph.add_node(
+            "validate_sources",
+            self._create_langgraph_node("validate_sources", self._validate_sources_phase),
+        )
+
+        self.workflow_graph.add_node(
             "coordinate_citation",
             self._create_langgraph_node(
                 "coordinate_citation", self._coordinate_citation_phase
@@ -211,7 +216,8 @@ class ResearchSupervisor(BaseSupervisor):
         # Add edges for research workflow
         self.workflow_graph.set_entry_point("plan_research")
         self.workflow_graph.add_edge("plan_research", "coordinate_literature")
-        self.workflow_graph.add_edge("coordinate_literature", "coordinate_methodology")
+        self.workflow_graph.add_edge("coordinate_literature", "validate_sources")
+        self.workflow_graph.add_edge("validate_sources", "coordinate_methodology")
         self.workflow_graph.add_edge("coordinate_methodology", "coordinate_analysis")
         self.workflow_graph.add_edge("coordinate_analysis", "coordinate_synthesis")
         self.workflow_graph.add_edge("coordinate_synthesis", "coordinate_citation")
@@ -310,6 +316,107 @@ class ResearchSupervisor(BaseSupervisor):
 
             if response:
                 state.worker_results["literature_review"] = response.talkhier_content
+
+        langgraph_state["supervision_state"] = state
+        return langgraph_state
+
+    async def _validate_sources_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+        """Validate literature sources to catch hallucinated papers."""
+        state = langgraph_state["supervision_state"]
+        logger.info("Source validation phase")
+        state.current_phase = "source_validation"
+
+        # Get literature results
+        lit_result = state.worker_results.get("literature_review")
+        if not lit_result or not hasattr(lit_result, "intermediate_outputs"):
+            logger.warning("No literature results to validate")
+            langgraph_state["supervision_state"] = state
+            return langgraph_state
+
+        intermediate = lit_result.intermediate_outputs
+        sources = []
+        if isinstance(intermediate, dict):
+            sources = intermediate.get("sources_found", [])
+
+        if not sources or not self.gemini_service:
+            langgraph_state["supervision_state"] = state
+            return langgraph_state
+
+        # Build verification prompt
+        from src.agents.schemas.literature_review import SourceValidationResult
+
+        sources_text = "\n".join(
+            f"{i+1}. \"{s.get('title', 'N/A')}\" by {', '.join(s.get('authors', ['Unknown'])[:3])} ({s.get('year', 'N/A')}) in {s.get('journal', 'N/A')}"
+            for i, s in enumerate(sources[:10])
+        )
+
+        prompt = f"""You are an academic fact-checker. Verify whether each of these papers actually exists as described.
+
+For each paper, check:
+- Does a paper with this exact or very similar title exist?
+- Are the listed authors correct?
+- Is the publication year correct?
+- Is the venue/journal correct?
+
+Papers to verify:
+{sources_text}
+
+Be strict: if you are not confident a paper exists with these exact details, mark exists=false.
+If a paper exists but with slightly different details, mark exists=true and provide corrections."""
+
+        try:
+            validation = await self.gemini_service.generate_structured_content(
+                prompt, SourceValidationResult
+            )
+
+            # Filter sources based on validation
+            verified_sources = []
+            for i, source in enumerate(sources):
+                if i < len(validation.verified_sources):
+                    v = validation.verified_sources[i]
+                    if v.exists and v.confidence >= 0.7:
+                        # Apply corrections if any
+                        if v.corrected_title:
+                            source["title"] = v.corrected_title
+                        if v.corrected_authors:
+                            source["authors"] = v.corrected_authors
+                        if v.corrected_year:
+                            source["year"] = v.corrected_year
+                        source["verification_confidence"] = v.confidence
+                        verified_sources.append(source)
+                    else:
+                        logger.info(f"Rejected source: {source.get('title', 'N/A')} (confidence={v.confidence}, issues={v.issues})")
+                else:
+                    # Source wasn't verified (beyond validation list), keep it with lower confidence
+                    source["verification_confidence"] = 0.5
+                    verified_sources.append(source)
+
+            # Update the literature results with verified sources
+            if isinstance(intermediate, dict):
+                rejected_count = len(sources) - len(verified_sources)
+                intermediate["sources_found"] = verified_sources
+                intermediate["total_sources"] = len(verified_sources)
+                intermediate["validation"] = {
+                    "total_checked": len(sources),
+                    "verified": len(verified_sources),
+                    "rejected": rejected_count,
+                    "notes": validation.validation_notes,
+                }
+
+                # Rebuild the TalkHierContent with updated data
+                from src.agents.communication.talkhier_message import TalkHierContent
+                state.worker_results["literature_review"] = TalkHierContent(
+                    content=lit_result.content if hasattr(lit_result, "content") else "",
+                    background=lit_result.background if hasattr(lit_result, "background") else "",
+                    intermediate_outputs=intermediate,
+                    confidence_score=lit_result.confidence_score if hasattr(lit_result, "confidence_score") else 0.8,
+                )
+
+                logger.info(f"Source validation: {len(verified_sources)}/{len(sources)} sources verified, {rejected_count} rejected")
+
+        except Exception as e:
+            logger.error(f"Source validation failed: {e}")
+            # Don't modify sources on validation failure — keep originals
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
