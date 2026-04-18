@@ -343,11 +343,25 @@ async def get_research_results(
             detail=f"Research project {project_id} not found",
         )
 
-    # Return results from database
-    if not db_project.results:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Results for project {project_id} not available yet",
-        )
+    # Check DB results first
+    if db_project.results:
+        return {"project_id": str(project_id), "results": db_project.results}
 
-    return {"project_id": project_id, "results": db_project.results}
+    # Fall back to in-memory execution results
+    try:
+        execution_service = get_direct_execution_service()
+        for execution in execution_service.active_executions.values():
+            if execution.project_id == str(project_id) and execution.status == "completed":
+                return {
+                    "project_id": str(project_id),
+                    "results": execution.agent_results or execution.final_output or {},
+                    "quality_scores": execution.quality_scores,
+                    "execution_time_seconds": execution.execution_time_seconds,
+                }
+    except Exception as e:
+        logger.warning(f"Could not get execution results: {e}")
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Results for project {project_id} not available yet",
+    )

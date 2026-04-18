@@ -132,10 +132,12 @@ class BaseSupervisor(BaseAgent, ABC):
         config: dict[str, Any] | None = None,
     ):
         """Initialize base supervisor."""
-        super().__init__(gemini_service, cache_client, config)
-
+        # Set supervisor_type before super().__init__ because
+        # BaseAgent.__init__ calls get_agent_type() which needs it.
         self.supervisor_type = supervisor_type
         self.domain = domain
+
+        super().__init__(gemini_service, cache_client, config)
 
         # Worker management
         self.worker_definitions: dict[str, WorkerDefinition] = {}
@@ -203,6 +205,20 @@ class BaseSupervisor(BaseAgent, ABC):
         self.supervised_tasks += 1
 
         try:
+            # Instantiate workers from definitions if not already active
+            if not self.active_workers:
+                for worker_type, worker_def in self.worker_definitions.items():
+                    try:
+                        worker = worker_def.agent_class(
+                            gemini_service=self.gemini_service,
+                            cache_client=self.cache_client,
+                            config=self.config,
+                        )
+                        self.active_workers[worker_type] = worker
+                        logger.info(f"Instantiated worker: {worker_type}")
+                    except Exception as e:
+                        logger.warning(f"Failed to instantiate worker {worker_type}: {e}")
+
             # Initialize supervision state
             state = SupervisionState(
                 task_id=task.id,

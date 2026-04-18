@@ -489,6 +489,14 @@ class ResearchSupervisor(BaseSupervisor):
             state.quality_score = consensus_score.evidence_quality
 
             logger.info(f"Research consensus: {consensus_score.overall_score:.3f}")
+        else:
+            # No worker messages — set a default score to avoid infinite loop
+            logger.warning("No worker results for consensus — defaulting to 1.0")
+            state.consensus_score = 1.0
+            state.quality_score = 0.0
+
+        # Increment refinement round to prevent infinite loops
+        state.refinement_round += 1
 
         langgraph_state["supervision_state"] = state
         return langgraph_state

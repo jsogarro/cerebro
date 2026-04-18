@@ -309,11 +309,9 @@ class ResourcePool:
         
         # Create new supervisor
         supervisor = supervisor_class(
-            supervisor_type=config.supervisor_type,
-            domain=config.domain,
-            gemini_service=None,  # Will be injected by factory
-            cache_client=None,    # Will be injected by factory
-            config=self._create_supervisor_config(config)
+            gemini_service=None,
+            cache_client=None,
+            config=self._create_supervisor_config(config),
         )
         
         self.pool_stats["created"] += 1

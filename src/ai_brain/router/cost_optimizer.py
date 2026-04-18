@@ -60,6 +60,14 @@ class ModelSpec:
     supports_streaming: bool = False
     quality_score: float = 0.8  # Overall quality rating 0-1
 
+    def __hash__(self) -> int:
+        return hash((self.name, self.provider))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ModelSpec):
+            return NotImplemented
+        return self.name == other.name and self.provider == other.provider
+
 
 @dataclass
 class CostEstimate:
