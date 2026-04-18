@@ -190,43 +190,69 @@ class CitationAgent(BaseAgent):
 
         Provide formatted citations and bibliography in JSON format."""
     
+    def _format_author_list(self, source: dict[str, Any]) -> str:
+        """Format author list from source data."""
+        authors = source.get("authors", [])
+        if not authors:
+            author = source.get("author", "Unknown")
+            return str(author)
+        if len(authors) == 1:
+            return str(authors[0])
+        if len(authors) == 2:
+            return f"{authors[0]} & {authors[1]}"
+        return f"{authors[0]} et al."
+
     def _generate_mock_citations(
         self,
         sources: list[dict[str, Any]],
-        style: str
+        style: str,
     ) -> dict[str, Any]:
-        """Generate mock citations for testing."""
+        """Format citations from source data."""
         formatted_citations = []
         verification_status = []
-        
+
         for i, source in enumerate(sources):
-            author = source.get("author", "Unknown")
+            author_str = self._format_author_list(source)
             year = source.get("year", "n.d.")
             title = source.get("title", "Untitled")
             journal = source.get("journal", "")
-            
+            doi = source.get("doi")
+
             if style == "APA":
-                citation = f"{author} ({year}). {title}."
+                citation = f"{author_str} ({year}). {title}."
                 if journal:
-                    citation += f" {journal}."
-            else:
-                citation = f"{author}. {title}. {year}."
-            
+                    citation += f" *{journal}*."
+                if doi:
+                    citation += f" https://doi.org/{doi}"
+            elif style == "MLA":
+                citation = f'{author_str}. "{title}."'
+                if journal:
+                    citation += f" *{journal}*,"
+                citation += f" {year}."
+            else:  # Chicago
+                citation = f"{author_str}. {title}."
+                if journal:
+                    citation += f" {journal}"
+                citation += f" ({year})."
+
             formatted_citations.append(citation)
             verification_status.append({
                 "source_id": i,
-                "verified": True,
-                "issues": []
+                "title": title,
+                "verified": doi is not None,
+                "doi": doi,
+                "issues": [] if doi else ["DOI not available"],
             })
-        
-        # Sort bibliography alphabetically
+
         bibliography = sorted(formatted_citations)
-        
+
         return {
             "formatted_citations": formatted_citations,
             "bibliography": bibliography,
-            "verified_sources": len(sources),
-            "verification_status": verification_status
+            "verified_sources": sum(1 for v in verification_status if v["verified"]),
+            "total_sources": len(sources),
+            "citation_style": style,
+            "verification_status": verification_status,
         }
     
     async def _format_citations_with_mcp(

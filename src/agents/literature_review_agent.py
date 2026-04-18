@@ -425,8 +425,8 @@ class LiteratureReviewAgent(BaseAgent):
             Academic search results
         """
         if not self.mcp_integration:
-            self.log_warning("MCP integration not available, using fallback")
-            return self._fallback_academic_search(input_data)
+            self.log_warning("MCP integration not available, using Gemini source search")
+            return await self._fallback_academic_search(input_data)
 
         query = input_data.get("query", "")
         domains = input_data.get("domains", [])
@@ -457,7 +457,7 @@ class LiteratureReviewAgent(BaseAgent):
 
         except Exception as e:
             self.log_error(f"MCP academic search failed: {e}")
-            return self._fallback_academic_search(input_data)
+            return await self._fallback_academic_search(input_data)
 
     async def _analyze_literature_with_gemini(
         self, input_data: dict[str, Any], academic_sources: dict[str, Any]
@@ -643,41 +643,101 @@ class LiteratureReviewAgent(BaseAgent):
 
         return "\\n\\n".join(sources_text)
 
-    def _fallback_academic_search(self, input_data: dict[str, Any]) -> dict[str, Any]:
+    async def _fallback_academic_search(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """
-        Fallback academic search when MCP tools are unavailable.
+        Fallback academic search using Gemini when MCP tools are unavailable.
+
+        Uses the LLM's training knowledge to identify real, published academic
+        papers relevant to the query.
 
         Args:
             input_data: Task input data
 
         Returns:
-            Mock search results
+            Search results with real academic sources identified by Gemini
         """
         query = input_data.get("query", "")
         domains = input_data.get("domains", [])
-        max_sources = input_data.get("max_sources", 20)
+        max_sources = input_data.get("max_sources", 10)
 
-        # Generate mock sources
-        mock_sources = []
-        for i in range(min(max_sources, 10)):
-            mock_sources.append(
-                {
-                    "title": f"Research Study {i+1}: {query}",
-                    "authors": [f"Author {i+1}", f"Co-Author {i+1}"],
-                    "year": 2024 - i,
-                    "journal": f"Journal of {domains[0] if domains else 'Research'}",
-                    "abstract": f"This study investigates {query} using systematic methodology...",
-                    "doi": f"10.1000/mock.{i+1}",
-                    "relevance_score": 0.9 - (i * 0.05),
+        if not self.gemini_service:
+            return self._static_fallback_sources(query, domains)
+
+        domains_str = ", ".join(domains) if domains else "general research"
+        prompt = f"""You are an academic research librarian. Identify {max_sources} real, published academic papers
+relevant to this research question:
+
+"{query}"
+
+Domains: {domains_str}
+
+Return ONLY valid JSON (no markdown fences) with this exact structure:
+{{
+  "sources": [
+    {{
+      "title": "exact paper title",
+      "authors": ["First Author", "Second Author"],
+      "year": 2023,
+      "journal": "journal or conference name",
+      "abstract": "2-3 sentence summary of the paper's contribution",
+      "doi": "DOI if known, otherwise null",
+      "relevance_score": 0.95
+    }}
+  ]
+}}
+
+Requirements:
+- Only include papers you are confident actually exist
+- Prioritize influential, highly-cited papers from top venues
+- Include a mix of recent (2022-2025) and foundational papers
+- Sort by relevance_score (highest first)
+- If you are not sure a paper exists, do not include it"""
+
+        try:
+            self.log_info(f"Searching for sources via Gemini: {query[:80]}...")
+            response = await self.gemini_service.generate_content(prompt)
+            self.log_info(f"Gemini source response: {len(response)} chars")
+            from src.services.parsers.json_parser import parse_json_response
+
+            parsed = parse_json_response(response)
+
+            # Handle various Gemini response formats
+            if "sources" in parsed:
+                sources = parsed["sources"]
+            elif isinstance(parsed, list):
+                sources = parsed
+            elif "title" in parsed and "authors" in parsed:
+                # Single source returned as top-level object
+                sources = [parsed]
+            else:
+                sources = []
+
+            if sources:
+                self.log_info(f"Gemini identified {len(sources)} academic sources")
+                return {
+                    "success": True,
+                    "sources": sources,
+                    "total_found": len(sources),
+                    "databases_searched": ["gemini_knowledge"],
+                    "search_strategy": "LLM-assisted source identification (Gemini)",
+                    "fallback": False,
                 }
-            )
+            self.log_warning(f"Gemini returned no sources. Parsed keys: {list(parsed.keys())}")
+        except Exception as e:
+            self.log_error(f"Gemini source search failed: {e}")
 
+        return self._static_fallback_sources(query, domains)
+
+    def _static_fallback_sources(
+        self, query: str, domains: list[str]
+    ) -> dict[str, Any]:
+        """Last-resort static fallback when both MCP and Gemini are unavailable."""
         return {
-            "success": True,
-            "sources": mock_sources,
-            "total_found": len(mock_sources),
-            "databases_searched": ["fallback"],
-            "search_strategy": "Fallback search (MCP tools unavailable)",
+            "success": False,
+            "sources": [],
+            "total_found": 0,
+            "databases_searched": [],
+            "search_strategy": "No source search available",
             "fallback": True,
         }
 

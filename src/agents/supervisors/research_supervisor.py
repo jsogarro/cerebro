@@ -429,12 +429,18 @@ class ResearchSupervisor(BaseSupervisor):
         state.current_phase = "citation"
 
         if "citation" in state.allocated_workers:
-            # Extract sources from literature review
+            # Extract sources from literature review results
             sources = []
             if "literature_review" in state.worker_results:
                 lit_result = state.worker_results["literature_review"]
-                if hasattr(lit_result, "intermediate_outputs"):
-                    sources = lit_result.intermediate_outputs.get("sources", [])
+                if hasattr(lit_result, "intermediate_outputs") and isinstance(
+                    lit_result.intermediate_outputs, dict
+                ):
+                    sources = (
+                        lit_result.intermediate_outputs.get("sources_found")
+                        or lit_result.intermediate_outputs.get("sources")
+                        or []
+                    )
 
             response = await self.send_talkhier_message(
                 "citation",
