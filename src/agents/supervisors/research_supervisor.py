@@ -785,9 +785,11 @@ For each section, provide:
 - Required changes (things that MUST be fixed)
 
 Also provide:
-- Overall score (1-10)
-- Whether the paper meets graduate-level standards (threshold: 7.0)
+- Overall score (1-10, where 9+ means publication-ready graduate quality)
+- Whether the paper meets graduate-level standards (threshold: 9.0)
 - Critical issues that must be addressed before acceptance
+
+Be rigorous. A score of 9+ means the paper could be submitted to a graduate seminar or academic workshop. Demand strong argumentation, proper evidence, critical analysis (not just summarization), and polished academic prose.
 """
 
         # Generate review using Gemini
@@ -872,8 +874,16 @@ CRITICAL ISSUES:
 REQUIRED CHANGES BY SECTION:
 {required_changes_text}
 
-Revise the paper addressing ALL reviewer feedback. Maintain academic prose style.
-Focus especially on the critical issues and required changes.
+Revise the paper addressing ALL reviewer feedback. The target is a score of 9/10 or higher.
+
+Requirements:
+- Address every critical issue and required change listed above
+- Strengthen argumentation with specific evidence and citations
+- Ensure critical analysis throughout (not just description or summary)
+- Write in polished academic prose with connected paragraphs
+- Every claim must be supported by evidence or citation
+- The discussion must engage deeply with implications, not just restate findings
+- Maintain formal third-person academic voice throughout
 """
 
         # Generate revised paper using Gemini
@@ -918,7 +928,6 @@ Focus especially on the critical issues and required changes.
             review = review_data.intermediate_outputs
             if isinstance(review, dict):
                 score = review.get("overall_score", 0)
-                meets_standard = review.get("meets_graduate_standard", False)
 
                 # Get current revision count
                 paper_data = state.worker_results.get("draft_paper")
@@ -930,10 +939,10 @@ Focus especially on the critical issues and required changes.
                 ):
                     revision_count = paper_data.intermediate_outputs.get("revision_count", 0)
 
-                if meets_standard or score >= 7.0:
-                    logger.info(f"Paper accepted: score={score}, meets_standard={meets_standard}")
+                if score >= 9.0:
+                    logger.info(f"Paper accepted: score={score}")
                     return "accept"
-                if revision_count >= 2:  # Max 2 revision rounds
+                if revision_count >= 5:
                     logger.warning(
                         f"Max revisions reached (score={score}, count={revision_count}), accepting"
                     )
