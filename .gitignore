@@ -29,6 +29,9 @@ GITHUB_ACTIONS_SETUP.md
 project_code_review_*.md
 cerebro_research_paper_*.md
 
+# Plans (AI-generated, stored in VAULT)
+plans/
+
 # AI-generated docs (plans, achievements, summaries)
 docs/agent-framework-apis-achievement.md
 docs/cerebro_academic_positioning.md
