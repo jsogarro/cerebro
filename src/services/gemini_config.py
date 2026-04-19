@@ -27,7 +27,7 @@ class GeminiConfig:
     temperature: float = 0.7
     top_p: float = 0.9
     top_k: int = 40
-    max_output_tokens: int = 4096
+    max_output_tokens: int = 8192
 
     # Rate limiting settings
     rate_limit: int = 10  # requests per period
@@ -66,7 +66,7 @@ class GeminiConfig:
             temperature=float(os.getenv("GEMINI_TEMPERATURE", "0.7")),
             top_p=float(os.getenv("GEMINI_TOP_P", "0.9")),
             top_k=int(os.getenv("GEMINI_TOP_K", "40")),
-            max_output_tokens=int(os.getenv("GEMINI_MAX_TOKENS", "4096")),
+            max_output_tokens=int(os.getenv("GEMINI_MAX_TOKENS", "8192")),
             rate_limit=int(os.getenv("GEMINI_RATE_LIMIT", "10")),
             rate_period=int(os.getenv("GEMINI_RATE_PERIOD", "60")),
             max_concurrent=int(os.getenv("GEMINI_MAX_CONCURRENT", "5")),

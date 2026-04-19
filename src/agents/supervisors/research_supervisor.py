@@ -602,7 +602,6 @@ If a paper exists but with slightly different details, mark exists=true and prov
 
     async def _draft_paper_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Draft a graduate-level research paper from all worker results."""
-        from ..schemas.research_paper import ResearchPaper
 
         state = langgraph_state["supervision_state"]
 
@@ -638,67 +637,30 @@ If a paper exists but with slightly different details, mark exists=true and prov
             synth_result = state.worker_results["synthesis"]
             synthesis_findings = synth_result.content if hasattr(synth_result, "content") else ""
 
-        # Build drafting prompt
-        prompt = f"""You are an academic researcher drafting a graduate-level research paper.
-
-Based on the following research components:
-
-LITERATURE REVIEW FINDINGS:
-{literature_findings}
-
-METHODOLOGY DESIGN:
-{methodology_design}
-
-SYNTHESIS OF FINDINGS:
-{synthesis_findings}
-
-CITATIONS:
-{", ".join(citations[:20])}
-
-Draft a complete research paper with these sections:
-- Title (concise and descriptive)
-- Abstract (150-300 words summarizing research question, methods, findings, implications)
-- Introduction (establish context, significance, research questions)
-- Literature Review (critical analysis, not just a list — synthesize themes, identify debates, show gaps)
-- Methodology (justify choices, explain design)
-- Findings (present evidence with analysis)
-- Discussion (interpret findings, implications, limitations, compare with existing literature)
-- Conclusion (contributions, future research)
-- References (properly formatted citations)
-
-IMPORTANT FORMATTING RULES:
-- Write in academic prose, NOT bullet points
-- Use formal academic language and third person
-- Each section should flow as connected paragraphs
-- Cite sources inline using (Author, Year) format
-- The literature review should critically engage with the sources, not just list them
-- The discussion should connect findings back to the research questions
-
-Research Query: {state.original_query}
-"""
-
-        # Generate paper using Gemini
+        # Generate paper section-by-section to avoid token limit truncation
         try:
             if self.gemini_service:
-                paper = await self.gemini_service.generate_structured_content(
-                    prompt, ResearchPaper
+                paper_dict = await self._generate_paper_sections(
+                    state.original_query,
+                    literature_findings,
+                    methodology_design,
+                    synthesis_findings,
+                    citations,
                 )
 
-                # Store paper in worker_results
                 state.worker_results["draft_paper"] = TalkHierContent(
-                    content=f"Graduate-level research paper: {paper.title}",
-                    background="Paper drafting from integrated research findings",
-                    intermediate_outputs=paper.model_dump(),
+                    content=f"Graduate-level research paper: {paper_dict.get('title', '')}",
+                    background="Paper drafted section-by-section from research findings",
+                    intermediate_outputs=paper_dict,
                     confidence_score=0.85,
                 )
 
-                logger.info(f"Drafted paper: {paper.title}")
+                logger.info(f"Drafted paper: {paper_dict.get('title', 'Untitled')}")
             else:
                 logger.warning("No Gemini service available for paper drafting")
 
         except Exception as e:
             logger.error(f"Paper drafting failed: {e}")
-            # Create minimal paper structure on failure
             state.worker_results["draft_paper"] = TalkHierContent(
                 content="Paper drafting incomplete",
                 background="Fallback due to drafting error",
@@ -712,6 +674,60 @@ Research Query: {state.original_query}
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
+
+    async def _generate_paper_sections(
+        self,
+        query: str,
+        literature_findings: str,
+        methodology_design: str,
+        synthesis_findings: str,
+        citations: list[str],
+    ) -> dict[str, Any]:
+        """Generate paper section-by-section to avoid output token truncation."""
+        context = f"""Research Question: {query}
+
+LITERATURE FINDINGS:
+{literature_findings[:3000]}
+
+METHODOLOGY:
+{methodology_design[:2000]}
+
+SYNTHESIS:
+{synthesis_findings[:2000]}
+
+REFERENCES:
+{chr(10).join(citations[:15])}"""
+
+        sections: dict[str, Any] = {"revision_count": 0, "references": citations[:15]}
+
+        section_prompts = [
+            ("title", "Write a concise, descriptive academic title for a research paper on this topic. Return ONLY the title text, nothing else."),
+            ("abstract", "Write a 200-300 word academic abstract. Include: research question, methodology, key findings, and implications. Write in formal academic prose. Return ONLY the abstract text."),
+            ("introduction", "Write a 3-4 paragraph introduction. Establish the significance of the research, provide context, state the research questions, and outline the paper structure. Use formal academic prose with (Author, Year) citations. Return ONLY the introduction text."),
+            ("literature_review", "Write a critical literature review of 5-7 paragraphs. Do NOT just list studies — synthesize themes, identify debates between researchers, show how studies relate to each other, and identify gaps. Use (Author, Year) citations throughout. Return ONLY the literature review text."),
+            ("methodology", "Write a detailed methodology section of 3-5 paragraphs. Justify the research design, explain data collection and analysis methods, address validity and ethical considerations. Return ONLY the methodology text."),
+            ("findings", "Write a findings section of 3-5 paragraphs. Present key findings with supporting evidence. Use specific data points and citations. Organize thematically. Return ONLY the findings text."),
+            ("discussion", "Write a discussion section of 4-6 paragraphs. Interpret findings in relation to the research questions and existing literature. Discuss implications, acknowledge limitations, and suggest future research. Return ONLY the discussion text."),
+            ("conclusion", "Write a 2-3 paragraph conclusion. Summarize key contributions, restate the significance of the findings, and suggest directions for future research. Return ONLY the conclusion text."),
+        ]
+
+        for section_name, instruction in section_prompts:
+            prompt = f"""{instruction}
+
+CONTEXT:
+{context}
+
+Write in formal, graduate-level academic prose. No bullet points. Connected paragraphs only."""
+
+            try:
+                text = await self.gemini_service.generate_content(prompt)
+                sections[section_name] = text.strip()
+                logger.info(f"Generated section: {section_name} ({len(text)} chars)")
+            except Exception as e:
+                logger.error(f"Failed to generate {section_name}: {e}")
+                sections[section_name] = f"[Section generation failed: {e}]"
+
+        return sections
 
     async def _graduate_review_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Graduate-level critical review of the drafted paper."""
@@ -822,7 +838,6 @@ Be rigorous. A score of 9+ means the paper could be submitted to a graduate semi
 
     async def _revise_paper_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Revise the paper based on reviewer feedback."""
-        from ..schemas.research_paper import ResearchPaper
 
         state = langgraph_state["supervision_state"]
 
@@ -856,59 +871,60 @@ Be rigorous. A score of 9+ means the paper could be submitted to a graduate semi
             for sr in section_reviews
         )
 
-        prompt = f"""You are an academic researcher revising a paper based on committee feedback.
-
-ORIGINAL PAPER SECTIONS:
-Title: {paper_dict.get('title', '')}
-Abstract: {paper_dict.get('abstract', '')}
-Introduction: {paper_dict.get('introduction', '')}
-Literature Review: {paper_dict.get('literature_review', '')}
-Methodology: {paper_dict.get('methodology', '')}
-Findings: {paper_dict.get('findings', '')}
-Discussion: {paper_dict.get('discussion', '')}
-Conclusion: {paper_dict.get('conclusion', '')}
-
-CRITICAL ISSUES:
-{chr(10).join(f"- {issue}" for issue in critical_issues)}
-
-REQUIRED CHANGES BY SECTION:
-{required_changes_text}
-
-Revise the paper addressing ALL reviewer feedback. The target is a score of 9/10 or higher.
-
-Requirements:
-- Address every critical issue and required change listed above
-- Strengthen argumentation with specific evidence and citations
-- Ensure critical analysis throughout (not just description or summary)
-- Write in polished academic prose with connected paragraphs
-- Every claim must be supported by evidence or citation
-- The discussion must engage deeply with implications, not just restate findings
-- Maintain formal third-person academic voice throughout
-"""
-
-        # Generate revised paper using Gemini
+        # Generate revised paper section-by-section
         try:
             if self.gemini_service:
-                revised_paper = await self.gemini_service.generate_structured_content(
-                    prompt, ResearchPaper
-                )
-
-                # Increment revision count
                 current_revision_count = paper_dict.get("revision_count", 0)
-                revised_dict = revised_paper.model_dump()
-                revised_dict["revision_count"] = current_revision_count + 1
+                revised_dict: dict[str, Any] = {
+                    "revision_count": current_revision_count + 1,
+                    "references": paper_dict.get("references", []),
+                }
 
-                # Store revised paper
+                feedback_context = f"""CRITICAL ISSUES:
+{chr(10).join(f'- {issue}' for issue in critical_issues)}
+
+REQUIRED CHANGES:
+{required_changes_text}"""
+
+                for section in ["title", "abstract", "introduction", "literature_review",
+                                "methodology", "findings", "discussion", "conclusion"]:
+                    original = paper_dict.get(section, "")
+                    # Find section-specific feedback
+                    section_feedback = ""
+                    for sr in section_reviews:
+                        if isinstance(sr, dict) and sr.get("section", "").lower().replace(" ", "_") == section:
+                            weaknesses = sr.get("weaknesses", [])
+                            changes = sr.get("required_changes", [])
+                            if weaknesses or changes:
+                                section_feedback = f"\nWeaknesses: {'; '.join(weaknesses)}\nRequired changes: {'; '.join(changes)}"
+
+                    revision_prompt = f"""Revise the following {section.replace('_', ' ')} section of an academic paper.
+Target quality: 9/10 (publication-ready graduate level).
+
+ORIGINAL {section.upper().replace('_', ' ')}:
+{original}
+
+REVIEWER FEEDBACK FOR THIS SECTION:{section_feedback}
+
+{feedback_context}
+
+Revise this section addressing all feedback. Strengthen argumentation, add evidence and citations, ensure critical analysis. Write in polished academic prose. Return ONLY the revised section text."""
+
+                    try:
+                        revised_text = await self.gemini_service.generate_content(revision_prompt)
+                        revised_dict[section] = revised_text.strip()
+                    except Exception as e:
+                        logger.warning(f"Failed to revise {section}: {e}")
+                        revised_dict[section] = original  # Keep original on failure
+
                 state.worker_results["draft_paper"] = TalkHierContent(
-                    content=f"Revised paper (round {current_revision_count + 1}): {revised_paper.title}",
+                    content=f"Revised paper (round {current_revision_count + 1}): {revised_dict.get('title', '')}",
                     background="Paper revision incorporating reviewer feedback",
                     intermediate_outputs=revised_dict,
                     confidence_score=0.90,
                 )
 
-                logger.info(
-                    f"Paper revised (round {current_revision_count + 1}): {revised_paper.title}"
-                )
+                logger.info(f"Paper revised (round {current_revision_count + 1})")
             else:
                 logger.warning("No Gemini service available for revision")
 
