@@ -12,6 +12,7 @@ from .literature_review import (
     SourceVerification,
 )
 from .methodology import MethodologySchema
+from .research_paper import PaperReview, ResearchPaper, ReviewFeedback
 from .synthesis import SynthesisSchema
 
 __all__ = [
@@ -19,6 +20,9 @@ __all__ = [
     "CitationSchema",
     "LiteratureAnalysisSchema",
     "MethodologySchema",
+    "PaperReview",
+    "ResearchPaper",
+    "ReviewFeedback",
     "SourceValidationResult",
     "SourceVerification",
     "SynthesisSchema",

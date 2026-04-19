@@ -207,6 +207,21 @@ class ResearchSupervisor(BaseSupervisor):
         )
 
         self.workflow_graph.add_node(
+            "draft_paper",
+            self._create_langgraph_node("draft_paper", self._draft_paper_phase),
+        )
+
+        self.workflow_graph.add_node(
+            "graduate_review",
+            self._create_langgraph_node("graduate_review", self._graduate_review_phase),
+        )
+
+        self.workflow_graph.add_node(
+            "revise_paper",
+            self._create_langgraph_node("revise_paper", self._revise_paper_phase),
+        )
+
+        self.workflow_graph.add_node(
             "evaluate_consensus",
             self._create_langgraph_node(
                 "evaluate_consensus", self._evaluate_consensus_phase
@@ -221,7 +236,19 @@ class ResearchSupervisor(BaseSupervisor):
         self.workflow_graph.add_edge("coordinate_methodology", "coordinate_analysis")
         self.workflow_graph.add_edge("coordinate_analysis", "coordinate_synthesis")
         self.workflow_graph.add_edge("coordinate_synthesis", "coordinate_citation")
-        self.workflow_graph.add_edge("coordinate_citation", "evaluate_consensus")
+        self.workflow_graph.add_edge("coordinate_citation", "draft_paper")
+        self.workflow_graph.add_edge("draft_paper", "graduate_review")
+
+        # Conditional edge: review passes → consensus, review fails → revise
+        self.workflow_graph.add_conditional_edges(
+            "graduate_review",
+            self._should_revise_paper,
+            {
+                "revise": "revise_paper",
+                "accept": "evaluate_consensus",
+            },
+        )
+        self.workflow_graph.add_edge("revise_paper", "graduate_review")  # Loop back to review
 
         # Conditional edge for refinement
         self.workflow_graph.add_conditional_edges(
@@ -573,6 +600,353 @@ If a paper exists but with slightly different details, mark exists=true and prov
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
+    async def _draft_paper_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+        """Draft a graduate-level research paper from all worker results."""
+        from ..schemas.research_paper import ResearchPaper
+
+        state = langgraph_state["supervision_state"]
+
+        logger.info("Paper drafting phase")
+        state.current_phase = "draft_paper"
+
+        # Collect all worker outputs
+        literature_findings = ""
+        methodology_design = ""
+        synthesis_findings = ""
+        citations = []
+
+        # Extract literature review findings
+        if "literature_review" in state.worker_results:
+            lit_result = state.worker_results["literature_review"]
+            if hasattr(lit_result, "intermediate_outputs"):
+                intermediate = lit_result.intermediate_outputs
+                if isinstance(intermediate, dict):
+                    sources = intermediate.get("sources_found", [])
+                    for source in sources:
+                        author_str = ", ".join(source.get("authors", ["Unknown"])[:2])
+                        year = source.get("year", "N/A")
+                        citations.append(f"{author_str}, {year}")
+                literature_findings = lit_result.content if hasattr(lit_result, "content") else ""
+
+        # Extract methodology design
+        if "methodology" in state.worker_results:
+            meth_result = state.worker_results["methodology"]
+            methodology_design = meth_result.content if hasattr(meth_result, "content") else ""
+
+        # Extract synthesis findings
+        if "synthesis" in state.worker_results:
+            synth_result = state.worker_results["synthesis"]
+            synthesis_findings = synth_result.content if hasattr(synth_result, "content") else ""
+
+        # Build drafting prompt
+        prompt = f"""You are an academic researcher drafting a graduate-level research paper.
+
+Based on the following research components:
+
+LITERATURE REVIEW FINDINGS:
+{literature_findings}
+
+METHODOLOGY DESIGN:
+{methodology_design}
+
+SYNTHESIS OF FINDINGS:
+{synthesis_findings}
+
+CITATIONS:
+{", ".join(citations[:20])}
+
+Draft a complete research paper with these sections:
+- Title (concise and descriptive)
+- Abstract (150-300 words summarizing research question, methods, findings, implications)
+- Introduction (establish context, significance, research questions)
+- Literature Review (critical analysis, not just a list — synthesize themes, identify debates, show gaps)
+- Methodology (justify choices, explain design)
+- Findings (present evidence with analysis)
+- Discussion (interpret findings, implications, limitations, compare with existing literature)
+- Conclusion (contributions, future research)
+- References (properly formatted citations)
+
+IMPORTANT FORMATTING RULES:
+- Write in academic prose, NOT bullet points
+- Use formal academic language and third person
+- Each section should flow as connected paragraphs
+- Cite sources inline using (Author, Year) format
+- The literature review should critically engage with the sources, not just list them
+- The discussion should connect findings back to the research questions
+
+Research Query: {state.original_query}
+"""
+
+        # Generate paper using Gemini
+        try:
+            if self.gemini_service:
+                paper = await self.gemini_service.generate_structured_content(
+                    prompt, ResearchPaper
+                )
+
+                # Store paper in worker_results
+                state.worker_results["draft_paper"] = TalkHierContent(
+                    content=f"Graduate-level research paper: {paper.title}",
+                    background="Paper drafting from integrated research findings",
+                    intermediate_outputs=paper.model_dump(),
+                    confidence_score=0.85,
+                )
+
+                logger.info(f"Drafted paper: {paper.title}")
+            else:
+                logger.warning("No Gemini service available for paper drafting")
+
+        except Exception as e:
+            logger.error(f"Paper drafting failed: {e}")
+            # Create minimal paper structure on failure
+            state.worker_results["draft_paper"] = TalkHierContent(
+                content="Paper drafting incomplete",
+                background="Fallback due to drafting error",
+                intermediate_outputs={
+                    "title": state.original_query,
+                    "abstract": "Error during paper generation",
+                    "error": str(e),
+                },
+                confidence_score=0.3,
+            )
+
+        langgraph_state["supervision_state"] = state
+        return langgraph_state
+
+    async def _graduate_review_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+        """Graduate-level critical review of the drafted paper."""
+        from ..schemas.research_paper import PaperReview
+
+        state = langgraph_state["supervision_state"]
+
+        logger.info("Graduate review phase")
+        state.current_phase = "graduate_review"
+
+        # Get drafted paper
+        paper_data = state.worker_results.get("draft_paper")
+        if not paper_data or not hasattr(paper_data, "intermediate_outputs"):
+            logger.warning("No paper to review")
+            langgraph_state["supervision_state"] = state
+            return langgraph_state
+
+        paper_dict = paper_data.intermediate_outputs
+        if not isinstance(paper_dict, dict):
+            logger.warning("Invalid paper format for review")
+            langgraph_state["supervision_state"] = state
+            return langgraph_state
+
+        # Build full paper text for review
+        paper_text = f"""
+TITLE: {paper_dict.get('title', 'N/A')}
+
+ABSTRACT:
+{paper_dict.get('abstract', '')}
+
+INTRODUCTION:
+{paper_dict.get('introduction', '')}
+
+LITERATURE REVIEW:
+{paper_dict.get('literature_review', '')}
+
+METHODOLOGY:
+{paper_dict.get('methodology', '')}
+
+FINDINGS:
+{paper_dict.get('findings', '')}
+
+DISCUSSION:
+{paper_dict.get('discussion', '')}
+
+CONCLUSION:
+{paper_dict.get('conclusion', '')}
+
+REFERENCES:
+{chr(10).join(paper_dict.get('references', []))}
+"""
+
+        # Build review prompt
+        prompt = f"""You are a graduate thesis committee member conducting a critical review of an academic paper.
+
+{paper_text}
+
+Evaluate this paper on:
+1. Academic rigor and depth of analysis
+2. Quality of literature review (critical engagement, not just summary)
+3. Methodology appropriateness and justification
+4. Strength of findings and evidence
+5. Quality of discussion and interpretation
+6. Writing quality (academic prose, flow, coherence)
+7. Proper citation and referencing
+
+For each section, provide:
+- Score (1-10)
+- Strengths
+- Weaknesses
+- Required changes (things that MUST be fixed)
+
+Also provide:
+- Overall score (1-10)
+- Whether the paper meets graduate-level standards (threshold: 7.0)
+- Critical issues that must be addressed before acceptance
+"""
+
+        # Generate review using Gemini
+        try:
+            if self.gemini_service:
+                review = await self.gemini_service.generate_structured_content(
+                    prompt, PaperReview
+                )
+
+                # Store review in worker_results
+                state.worker_results["graduate_review"] = TalkHierContent(
+                    content=f"Graduate review: Overall score {review.overall_score}/10",
+                    background="Critical review by graduate committee standards",
+                    intermediate_outputs=review.model_dump(),
+                    confidence_score=0.90,
+                )
+
+                logger.info(
+                    f"Review complete: score={review.overall_score}, "
+                    f"meets_standard={review.meets_graduate_standard}"
+                )
+            else:
+                logger.warning("No Gemini service available for review")
+
+        except Exception as e:
+            logger.error(f"Graduate review failed: {e}")
+
+        langgraph_state["supervision_state"] = state
+        return langgraph_state
+
+    async def _revise_paper_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+        """Revise the paper based on reviewer feedback."""
+        from ..schemas.research_paper import ResearchPaper
+
+        state = langgraph_state["supervision_state"]
+
+        logger.info("Paper revision phase")
+        state.current_phase = "revise_paper"
+
+        # Get paper and review
+        paper_data = state.worker_results.get("draft_paper")
+        review_data = state.worker_results.get("graduate_review")
+
+        if not paper_data or not review_data:
+            logger.warning("Missing paper or review for revision")
+            langgraph_state["supervision_state"] = state
+            return langgraph_state
+
+        paper_dict = paper_data.intermediate_outputs
+        review_dict = review_data.intermediate_outputs
+
+        if not isinstance(paper_dict, dict) or not isinstance(review_dict, dict):
+            logger.warning("Invalid data format for revision")
+            langgraph_state["supervision_state"] = state
+            return langgraph_state
+
+        # Build revision prompt
+        critical_issues = review_dict.get("critical_issues", [])
+        section_reviews = review_dict.get("section_reviews", [])
+
+        required_changes_text = "\n\n".join(
+            f"SECTION: {sr.get('section', 'N/A')}\nRequired changes:\n"
+            + "\n".join(f"- {change}" for change in sr.get("required_changes", []))
+            for sr in section_reviews
+        )
+
+        prompt = f"""You are an academic researcher revising a paper based on committee feedback.
+
+ORIGINAL PAPER SECTIONS:
+Title: {paper_dict.get('title', '')}
+Abstract: {paper_dict.get('abstract', '')}
+Introduction: {paper_dict.get('introduction', '')}
+Literature Review: {paper_dict.get('literature_review', '')}
+Methodology: {paper_dict.get('methodology', '')}
+Findings: {paper_dict.get('findings', '')}
+Discussion: {paper_dict.get('discussion', '')}
+Conclusion: {paper_dict.get('conclusion', '')}
+
+CRITICAL ISSUES:
+{chr(10).join(f"- {issue}" for issue in critical_issues)}
+
+REQUIRED CHANGES BY SECTION:
+{required_changes_text}
+
+Revise the paper addressing ALL reviewer feedback. Maintain academic prose style.
+Focus especially on the critical issues and required changes.
+"""
+
+        # Generate revised paper using Gemini
+        try:
+            if self.gemini_service:
+                revised_paper = await self.gemini_service.generate_structured_content(
+                    prompt, ResearchPaper
+                )
+
+                # Increment revision count
+                current_revision_count = paper_dict.get("revision_count", 0)
+                revised_dict = revised_paper.model_dump()
+                revised_dict["revision_count"] = current_revision_count + 1
+
+                # Store revised paper
+                state.worker_results["draft_paper"] = TalkHierContent(
+                    content=f"Revised paper (round {current_revision_count + 1}): {revised_paper.title}",
+                    background="Paper revision incorporating reviewer feedback",
+                    intermediate_outputs=revised_dict,
+                    confidence_score=0.90,
+                )
+
+                logger.info(
+                    f"Paper revised (round {current_revision_count + 1}): {revised_paper.title}"
+                )
+            else:
+                logger.warning("No Gemini service available for revision")
+
+        except Exception as e:
+            logger.error(f"Paper revision failed: {e}")
+
+        langgraph_state["supervision_state"] = state
+        return langgraph_state
+
+    def _should_revise_paper(self, langgraph_state: dict[str, Any]) -> str:
+        """Determine if the paper needs revision based on review."""
+        state = langgraph_state["supervision_state"]
+        review_data = state.worker_results.get("graduate_review")
+
+        # Extract review from intermediate_outputs
+        if review_data and hasattr(review_data, "intermediate_outputs"):
+            review = review_data.intermediate_outputs
+            if isinstance(review, dict):
+                score = review.get("overall_score", 0)
+                meets_standard = review.get("meets_graduate_standard", False)
+
+                # Get current revision count
+                paper_data = state.worker_results.get("draft_paper")
+                revision_count = 0
+                if (
+                    paper_data
+                    and hasattr(paper_data, "intermediate_outputs")
+                    and isinstance(paper_data.intermediate_outputs, dict)
+                ):
+                    revision_count = paper_data.intermediate_outputs.get("revision_count", 0)
+
+                if meets_standard or score >= 7.0:
+                    logger.info(f"Paper accepted: score={score}, meets_standard={meets_standard}")
+                    return "accept"
+                if revision_count >= 2:  # Max 2 revision rounds
+                    logger.warning(
+                        f"Max revisions reached (score={score}, count={revision_count}), accepting"
+                    )
+                    return "accept"
+
+                logger.info(
+                    f"Paper needs revision: score={score}, round={revision_count + 1}"
+                )
+                return "revise"
+
+        logger.warning("No valid review data, accepting paper")
+        return "accept"
+
     async def _evaluate_consensus_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Evaluate consensus across all workers."""
 
@@ -580,6 +954,12 @@ If a paper exists but with slightly different details, mark exists=true and prov
 
         logger.info("Consensus evaluation phase")
         state.current_phase = "consensus_evaluation"
+
+        # Store final paper in state if available
+        if "draft_paper" in state.worker_results:
+            paper_data = state.worker_results["draft_paper"]
+            if hasattr(paper_data, "intermediate_outputs"):
+                state.context["final_paper"] = paper_data.intermediate_outputs
 
         # Create messages from worker results for consensus evaluation
         worker_messages = []
