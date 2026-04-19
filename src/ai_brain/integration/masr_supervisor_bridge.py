@@ -573,10 +573,16 @@ class MASRSupervisorBridge:
             # Translate routing decision to supervisor configuration
             supervisor_config = self.translator.translate(routing_decision)
             
-            # Get supervisor class from registry
+            # Get supervisor class from registry, defaulting to "research"
             supervisor_class = supervisor_registry.get(supervisor_config.supervisor_type)
             if not supervisor_class:
-                raise ValueError(f"Supervisor type not found: {supervisor_config.supervisor_type}")
+                logger.warning(
+                    f"Supervisor '{supervisor_config.supervisor_type}' not found, "
+                    f"falling back to 'research'"
+                )
+                supervisor_class = supervisor_registry.get("research")
+                if not supervisor_class:
+                    raise ValueError("No supervisors available in registry")
             
             # Execute via supervisor
             result = await self.executor.execute(supervisor_class, supervisor_config, task)
