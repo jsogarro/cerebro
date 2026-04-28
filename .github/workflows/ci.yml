@@ -230,7 +230,7 @@ jobs:
       
       - name: Run safety check
         run: |
-          uv pip freeze | safety check --stdin --json || true
+          uv pip freeze | safety check --stdin --json
       
       - name: Run pip-audit
         run: |
