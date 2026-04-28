@@ -54,3 +54,8 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 cerebro_dev.db
+
+# Refactorit ephemeral artifacts
+/tmp/refactorit/
+.refactorit/
+*.refactorit.checkpoint

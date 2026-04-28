@@ -1,0 +1,48 @@
+# Python bytecode
+**/__pycache__
+**/*.pyc
+
+# Version control
+.git/
+
+# Virtual environments
+.venv/
+
+# Secrets and environment files
+.env
+.env.*
+
+# Coverage reports
+.coverage
+htmlcov/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+
+# CI / IDE / agent tooling
+.github/
+.vscode/
+.idea/
+.claude/
+
+# Documentation (not needed at runtime), but README.md is required by
+# pyproject.toml's `readme = "README.md"` and is COPY'd into the Python image
+# stages — keep it in the build context.
+# CAUTION: re-include order matters. Do not add broader patterns below
+# !README.md or it will be re-excluded.
+*.md
+!README.md
+
+# Misc
+*.log
+*.swp
+.DS_Store
+
+# Note: tests/ is NOT excluded — the Dockerfile development stage runs
+# `COPY tests/ ./tests/` for in-image pytest execution. Production stage
+# uses selective `COPY src/` so tests/ never reaches the runtime image.
