@@ -227,7 +227,7 @@ class TaskRepository(BaseRepository[AgentTask]):
             task.status = "pending"
             task.retry_count += 1
             task.error_details = None
-            task.scheduled_at = datetime.utcnow() + timedelta(
+            task.scheduled_at = datetime.now(UTC) + timedelta(
                 minutes=2 ** task.retry_count  # Exponential backoff
             )
         
@@ -322,7 +322,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
         # Calculate expiration
         expires_at = None
         if expires_in_days:
-            expires_at = datetime.utcnow() + timedelta(days=expires_in_days)
+            expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
         
         # Create key record
         api_key = await self.create(
@@ -686,7 +686,7 @@ class AuditedRepository(BaseRepository):
     async def create(self, **kwargs):
         # Add audit fields
         kwargs["created_by"] = get_current_user_id()
-        kwargs["created_at"] = datetime.utcnow()
+        kwargs["created_at"] = datetime.now(UTC)
         
         result = await super().create(**kwargs)
         
@@ -698,7 +698,7 @@ class AuditedRepository(BaseRepository):
     async def update(self, id, data, **kwargs):
         # Add audit fields
         data["updated_by"] = get_current_user_id()
-        data["updated_at"] = datetime.utcnow()
+        data["updated_at"] = datetime.now(UTC)
         
         # Get old values for comparison
         old = await self.get(id)
@@ -728,7 +728,7 @@ async def upsert_result(project_id: UUID, source_id: str, content: Dict):
             # Update existing
             return await repo.update(
                 existing.id,
-                {"content": content, "updated_at": datetime.utcnow()}
+                {"content": content, "updated_at": datetime.now(UTC)}
             )
         else:
             # Create new
