@@ -7,7 +7,7 @@ monitoring and session management.
 
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -190,7 +190,7 @@ class UserSession(BaseModel):
         """
         session_token = secrets.token_urlsafe(32)
         refresh_token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
+        expires_at = datetime.now(UTC) + timedelta(hours=duration_hours)
 
         session = cls(
             user_id=user_id,
@@ -234,7 +234,7 @@ class UserSession(BaseModel):
             ip_address: Current IP address
             extend_duration: Whether to extend session duration
         """
-        self.last_activity = datetime.utcnow()
+        self.last_activity = datetime.now(UTC)
         self.request_count += 1
 
         if ip_address:
@@ -247,7 +247,7 @@ class UserSession(BaseModel):
         # Extend session if requested and not expired
         if extend_duration and not self.is_expired:
             # Extend by original duration
-            self.expires_at = datetime.utcnow() + timedelta(hours=24)
+            self.expires_at = datetime.now(UTC) + timedelta(hours=24)
 
     def revoke(self, reason: str | None = None) -> None:
         """
@@ -257,7 +257,7 @@ class UserSession(BaseModel):
             reason: Reason for revocation
         """
         self.is_active = False
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(UTC)
         self.revoke_reason = reason
 
     def refresh(self, duration_hours: int = 24) -> str:
@@ -273,8 +273,8 @@ class UserSession(BaseModel):
         new_token = secrets.token_urlsafe(32)
         self.session_token = new_token
         self.refresh_token = secrets.token_urlsafe(32)
-        self.expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
-        self.last_activity = datetime.utcnow()
+        self.expires_at = datetime.now(UTC) + timedelta(hours=duration_hours)
+        self.last_activity = datetime.now(UTC)
 
         return new_token
 
@@ -294,7 +294,7 @@ class UserSession(BaseModel):
     @property
     def is_expired(self) -> bool:
         """Check if session has expired."""
-        return bool(datetime.utcnow() > self.expires_at)
+        return bool(datetime.now(UTC) > self.expires_at)
 
     @property
     def is_valid(self) -> bool:
@@ -309,7 +309,7 @@ class UserSession(BaseModel):
     @property
     def idle_time(self) -> timedelta:
         """Get time since last activity."""
-        return timedelta(seconds=(datetime.utcnow() - self.last_activity).total_seconds())
+        return timedelta(seconds=(datetime.now(UTC) - self.last_activity).total_seconds())
 
     @classmethod
     def get_active_sessions(cls, user_id: str, session: Any = None) -> list["UserSession"]:
@@ -331,7 +331,7 @@ class UserSession(BaseModel):
             .filter(
                 cls.user_id == user_id,
                 cls.is_active,
-                cls.expires_at > datetime.utcnow(),
+                cls.expires_at > datetime.now(UTC),
                 cls.revoked_at.is_(None),
             )
             .all()

@@ -11,7 +11,7 @@ import asyncio
 import logging
 import random
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -85,8 +85,8 @@ class ServiceInstance:
     metadata: ServiceMetadata
     status: ServiceStatus = ServiceStatus.STARTING
     health_check_url: str | None = None
-    registered_at: datetime = field(default_factory=datetime.utcnow)
-    last_heartbeat: datetime = field(default_factory=datetime.utcnow)
+    registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_heartbeat: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_health_check: datetime | None = None
     health_check_failures: int = 0
     active_connections: int = 0
@@ -121,10 +121,10 @@ class ServiceInstance:
         instance.status = ServiceStatus(data.get("status", "starting"))
         instance.health_check_url = data.get("health_check_url")
         instance.registered_at = datetime.fromisoformat(
-            data.get("registered_at", datetime.utcnow().isoformat())
+            data.get("registered_at", datetime.now(UTC).isoformat())
         )
         instance.last_heartbeat = datetime.fromisoformat(
-            data.get("last_heartbeat", datetime.utcnow().isoformat())
+            data.get("last_heartbeat", datetime.now(UTC).isoformat())
         )
 
         if data.get("last_health_check"):
@@ -153,7 +153,7 @@ class ServiceInstance:
         """Check if instance is available for requests."""
         return (
             self.status == ServiceStatus.HEALTHY
-            and (datetime.utcnow() - self.last_heartbeat).total_seconds() < 60
+            and (datetime.now(UTC) - self.last_heartbeat).total_seconds() < 60
         )
 
 
@@ -260,7 +260,7 @@ class ServiceRegistry:
             and instance_id in self._services[service_name]
         ):
             instance = self._services[service_name][instance_id]
-            instance.last_heartbeat = datetime.utcnow()
+            instance.last_heartbeat = datetime.now(UTC)
 
             # Update in Redis
             if self._redis_client:
@@ -385,7 +385,7 @@ class ServiceRegistry:
 
     async def cleanup_expired(self) -> None:
         """Clean up expired service registrations."""
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         expired = []
 
         for service_name, instances in self._services.items():

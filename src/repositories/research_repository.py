@@ -4,7 +4,7 @@ Research project repository.
 Specialized repository for research project operations.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -213,7 +213,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         Returns:
             Statistics dictionary
         """
-        since = datetime.utcnow() - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
 
         # Base query
         base_query = select(ResearchProject).where(
@@ -287,7 +287,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         Returns:
             Number of projects marked as failed
         """
-        cutoff = datetime.utcnow() - timedelta(days=days_old)
+        cutoff = datetime.now(UTC) - timedelta(days=days_old)
 
         query = select(ResearchProject).where(
             and_(

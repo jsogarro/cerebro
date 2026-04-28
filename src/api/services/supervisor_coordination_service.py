@@ -11,7 +11,7 @@ import random
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.models.supervisor_api_models import (
@@ -373,7 +373,7 @@ class SupervisorCoordinationService:
         
         metrics.total_execution_time_ms += execution_time_ms
         metrics.total_quality_score += quality_score
-        metrics.last_execution_time = datetime.utcnow()
+        metrics.last_execution_time = datetime.now(UTC)
         
         # Update worker utilization
         active_workers = sum(
@@ -434,7 +434,7 @@ class SupervisorCoordinationService:
             "request": request,
             "workers": assigned_workers,
             "plan": coordination_plan,
-            "started_at": datetime.utcnow()
+            "started_at": datetime.now(UTC)
         }
 
         # Estimate completion time
@@ -779,7 +779,7 @@ class SupervisorCoordinationService:
         
         # Check recent activity
         if metrics.last_execution_time:
-            time_since_last = datetime.utcnow() - metrics.last_execution_time
+            time_since_last = datetime.now(UTC) - metrics.last_execution_time
             if time_since_last > timedelta(hours=1):
                 issues.append(f"No recent activity for {time_since_last.total_seconds() / 3600:.1f} hours")
         
@@ -924,7 +924,7 @@ class SupervisorCoordinationService:
         # Store conflict for tracking
         self.conflict_resolutions[request.conflict_id] = {
             "request": request,
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(UTC)
         }
         
         # Resolve based on strategy
@@ -1043,7 +1043,7 @@ class SupervisorCoordinationService:
         # Store experiment
         self.experiments[experiment_id] = {
             "request": request,
-            "started_at": datetime.utcnow()
+            "started_at": datetime.now(UTC)
         }
         
         # Run tests for each strategy

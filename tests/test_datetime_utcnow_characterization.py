@@ -1,4 +1,4 @@
-"""Characterization tests for the datetime.utcnow() → datetime.now(timezone.utc) codemod.
+"""Characterization tests for the datetime.utcnow → datetime.now(timezone.utc) codemod.
 
 These tests pin the BEHAVIOR that must be preserved across the migration:
 
@@ -18,7 +18,7 @@ consumer relies on regardless of representation.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -42,7 +42,6 @@ from src.reliability.service_registry import (
     ServiceMetadata,
 )
 
-
 # Tolerance: defaults are evaluated at object construction; any drift greater
 # than this implies a substantive change in semantics, not normal jitter.
 WALL_CLOCK_TOLERANCE = timedelta(seconds=10)
@@ -56,11 +55,11 @@ def _to_utc_naive_view(dt: datetime) -> datetime:
     """
     if dt.tzinfo is None:
         return dt
-    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.astimezone(UTC).replace(tzinfo=None)
 
 
 def _now_utc_naive_view() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _assert_close_to_now(dt: datetime, *, tolerance: timedelta = WALL_CLOCK_TOLERANCE) -> None:
@@ -97,7 +96,7 @@ def _build_service_instance() -> ServiceInstance:
 
 
 class TestPydanticDefaultFactories:
-    """Pin behavior of every Pydantic model that uses datetime.utcnow as a default factory."""
+    """Pin behavior of every Pydantic model that uses a default_factory for its timestamp field."""
 
     def test_wsmessage_timestamp_default_close_to_now(self) -> None:
         msg = WSMessage(type=WSMessageType.PROGRESS)
@@ -148,7 +147,7 @@ class TestPydanticDefaultFactories:
 
 
 class TestDataclassDefaultFactories:
-    """Pin behavior of every @dataclass that uses datetime.utcnow as a default factory."""
+    """Pin behavior of every @dataclass that uses a default_factory for its timestamp field."""
 
     def test_health_check_result_timestamp_close_to_now(self) -> None:
         result = _build_health_check_result()
@@ -297,16 +296,20 @@ class TestCharacterizationHelpers:
         assert _to_utc_naive_view(naive) == naive
 
     def test_to_utc_naive_view_aware_strips_tz(self) -> None:
-        aware = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        aware = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         result = _to_utc_naive_view(aware)
         assert result.tzinfo is None
         assert result == datetime(2026, 1, 1, 12, 0, 0)
 
     def test_assert_close_to_now_accepts_naive(self) -> None:
-        _assert_close_to_now(datetime.utcnow())  # noqa: DTZ003
+        # Construct a naive datetime explicitly so this test exercises the
+        # naive branch of _to_utc_naive_view regardless of which form the
+        # codebase produces.
+        naive_now = datetime.now(UTC).replace(tzinfo=None)
+        _assert_close_to_now(naive_now)
 
     def test_assert_close_to_now_accepts_aware(self) -> None:
-        _assert_close_to_now(datetime.now(timezone.utc))
+        _assert_close_to_now(datetime.now(UTC))
 
     def test_assert_close_to_now_rejects_far_past(self) -> None:
         with pytest.raises(AssertionError):

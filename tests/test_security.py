@@ -5,7 +5,7 @@ Tests rate limiting, security headers, validators, audit logging,
 and authentication features.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -490,8 +490,8 @@ class TestAuditLogger:
         # Patch query_logs method
         with patch.object(logger, "query_logs", return_value=mock_logs):
             report = await logger.generate_compliance_report(
-                start_date=datetime.utcnow() - timedelta(days=30),
-                end_date=datetime.utcnow(),
+                start_date=datetime.now(UTC) - timedelta(days=30),
+                end_date=datetime.now(UTC),
                 compliance_type="gdpr",
             )
 

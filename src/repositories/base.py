@@ -5,7 +5,7 @@ Provides generic CRUD operations for all repositories.
 """
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 from uuid import UUID
 
@@ -185,7 +185,7 @@ class BaseRepository(Generic[ModelType]):
                 setattr(entity, key, value)
 
         # Set audit fields
-        entity.updated_at = datetime.utcnow()
+        entity.updated_at = datetime.now(UTC)
         if updated_by:
             entity.updated_by = updated_by
 
@@ -214,7 +214,7 @@ class BaseRepository(Generic[ModelType]):
 
         if soft:
             # Soft delete
-            entity.deleted_at = datetime.utcnow()
+            entity.deleted_at = datetime.now(UTC)
             if deleted_by:
                 entity.updated_by = deleted_by
             await self.session.flush()
@@ -256,7 +256,7 @@ class BaseRepository(Generic[ModelType]):
             return None
 
         entity.deleted_at = None
-        entity.updated_at = datetime.utcnow()
+        entity.updated_at = datetime.now(UTC)
         if restored_by:
             entity.updated_by = restored_by
 

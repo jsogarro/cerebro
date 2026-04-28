@@ -7,7 +7,7 @@ following the repository pattern established in the codebase.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -140,7 +140,7 @@ class GeneratedReport(BaseModel):
     def update_access_stats(self) -> None:
         """Update access statistics."""
         self.access_count += 1
-        self.last_accessed_at = datetime.utcnow()
+        self.last_accessed_at = datetime.now(UTC)
     
     def add_generation_error(self, error_message: str) -> None:
         """Add a generation error message."""
@@ -148,13 +148,13 @@ class GeneratedReport(BaseModel):
             self.generation_errors = []
         self.generation_errors.append({
             'message': error_message,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(UTC).isoformat()
         })
     
     def mark_generation_started(self) -> None:
         """Mark report generation as started."""
         self.generation_status = "generating"
-        self.generation_started_at = datetime.utcnow()
+        self.generation_started_at = datetime.now(UTC)
     
     def mark_generation_completed(
         self,
@@ -164,7 +164,7 @@ class GeneratedReport(BaseModel):
     ) -> None:
         """Mark report generation as completed."""
         self.generation_status = "completed"
-        self.generation_completed_at = datetime.utcnow()
+        self.generation_completed_at = datetime.now(UTC)
         self.formats_generated = formats
         self.file_sizes = file_sizes
         
@@ -177,7 +177,7 @@ class GeneratedReport(BaseModel):
     def mark_generation_failed(self, error_message: str) -> None:
         """Mark report generation as failed."""
         self.generation_status = "failed"
-        self.generation_completed_at = datetime.utcnow()
+        self.generation_completed_at = datetime.now(UTC)
         self.add_generation_error(error_message)
     
     def to_dict(self, include_content: bool = False) -> dict[str, Any]:
@@ -278,7 +278,7 @@ class ReportFormat(BaseModel):
     content_binary: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     # Generation information
-    generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
     generation_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     generator_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     

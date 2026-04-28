@@ -8,7 +8,7 @@ Handles multi-session coordination, performance tracking, and analytics aggregat
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.models.talkhier_api_models import (
@@ -75,7 +75,7 @@ class TalkHierSessionManager:
         self.sessions[session_id] = SessionMetrics(
             session_id=session_id,
             protocol_type=config.get("protocol_type"),
-            started_at=datetime.utcnow()
+            started_at=datetime.now(UTC)
         )
         
         # Update protocol stats
@@ -86,7 +86,7 @@ class TalkHierSessionManager:
         """Unregister a completed session"""
         if session_id in self.sessions:
             metrics = self.sessions[session_id]
-            metrics.completed_at = datetime.utcnow()
+            metrics.completed_at = datetime.now(UTC)
             
             # Update protocol stats
             if metrics.protocol_type:
@@ -117,14 +117,14 @@ class TalkHierSessionManager:
         request: CoordinationRequest
     ) -> CoordinationStatus:
         """Coordinate multiple sessions"""
-        coordination_id = f"coord_{datetime.utcnow().timestamp()}"
+        coordination_id = f"coord_{datetime.now(UTC).timestamp()}"
         
         # Create coordination group
         coordination = CoordinationGroup(
             coordination_id=coordination_id,
             session_ids=request.session_ids,
             coordination_type=request.coordination_type,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(UTC)
         )
         
         self.coordinations[coordination_id] = coordination
@@ -283,7 +283,7 @@ class TalkHierSessionManager:
     
     def _parse_time_range(self, time_range: str) -> datetime | None:
         """Parse time range string to datetime cutoff"""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         
         if time_range == "1h":
             return now - timedelta(hours=1)

@@ -10,7 +10,7 @@ Based on "MasRouter: Learning to Route LLMs" research patterns.
 import statistics
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import numpy as np
@@ -156,7 +156,7 @@ class MASRAnalyticsService:
         }
         
         # Analytics start time
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(UTC)
     
     async def record_routing_decision(
         self,
@@ -190,7 +190,7 @@ class MASRAnalyticsService:
         self.metrics["supervisor_utilization"].update(supervisor_count / 5.0)  # Normalize to 0-1
         
         # Record hourly stats
-        hour_key = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+        hour_key = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
         self.hourly_stats[hour_key]["requests"] = self.hourly_stats[hour_key].get("requests", 0) + 1
         self.hourly_stats[hour_key]["total_cost"] = self.hourly_stats[hour_key].get("total_cost", 0) + estimated_cost
     
@@ -263,7 +263,7 @@ class MASRAnalyticsService:
             "summary": {
                 "total_requests": total_requests,
                 "success_rate": overall_success_rate,
-                "uptime_hours": (datetime.utcnow() - self.start_time).total_seconds() / 3600,
+                "uptime_hours": (datetime.now(UTC) - self.start_time).total_seconds() / 3600,
                 "best_strategy": best_strategy.strategy.value,
                 "average_cost": statistics.mean(
                     [p.average_cost for p in self.strategy_performance.values() if p.total_requests > 0]
@@ -571,7 +571,7 @@ class MASRAnalyticsService:
         hourly_costs = []
         
         # Get last 24 hours
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         for i in range(24):
             hour = now - timedelta(hours=i)
             hour_key = hour.replace(minute=0, second=0, microsecond=0)

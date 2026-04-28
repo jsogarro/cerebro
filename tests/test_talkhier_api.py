@@ -5,7 +5,7 @@ Comprehensive tests for TalkHier session management, refinement rounds,
 consensus building, and WebSocket communication.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -86,7 +86,7 @@ class TestTalkHierSessionService:
             query="Test query",
             domains=["research"],
             status=SessionStatus.ACTIVE,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             protocol_type=ProtocolType.STANDARD,
             refinement_strategy=RefinementStrategy.QUALITY_FOCUSED,
             max_rounds=3,
@@ -96,7 +96,7 @@ class TestTalkHierSessionService:
             consensus_threshold=0.8,
             timeout_seconds=300,
             participants=[],
-            started_at=datetime.utcnow()
+            started_at=datetime.now(UTC)
         )
         session_service.sessions[session_id] = session
         
@@ -130,7 +130,7 @@ class TestTalkHierSessionService:
             query="Test query",
             domains=["research"],
             status=SessionStatus.ACTIVE,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             protocol_type=ProtocolType.STANDARD,
             refinement_strategy=RefinementStrategy.CONSENSUS_DRIVEN,
             max_rounds=3,
@@ -174,7 +174,7 @@ class TestTalkHierSessionService:
             query="Test query",
             domains=["research"],
             status=SessionStatus.ACTIVE,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             protocol_type=ProtocolType.STANDARD,
             refinement_strategy=RefinementStrategy.QUALITY_FOCUSED,
             max_rounds=3,
@@ -184,7 +184,7 @@ class TestTalkHierSessionService:
             consensus_threshold=0.8,
             timeout_seconds=300,
             participants=[],
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
             current_quality=0.87,
             current_consensus=0.85
         )

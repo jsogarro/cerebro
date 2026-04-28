@@ -11,7 +11,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from langgraph.graph import END, StateGraph
@@ -377,7 +377,7 @@ class ResearchOrchestrator:
         """
         logger.info(f"Starting research workflow for project {project_id}")
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
         workflow_id = f"workflow-{uuid.uuid4().hex[:8]}"
 
         try:
@@ -414,7 +414,7 @@ class ResearchOrchestrator:
             )
 
             # Calculate execution time
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(UTC) - start_time).total_seconds()
 
             # Create result
             result = WorkflowResult(

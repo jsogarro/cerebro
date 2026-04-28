@@ -4,7 +4,7 @@ Agent Task database model.
 Represents agent tasks within research projects.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -119,7 +119,7 @@ class AgentTask(BaseModel):
         """Mark task as started."""
 
         self.status = TaskStatus.IN_PROGRESS
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(UTC)
 
     def complete(self, output_data: dict[str, Any]) -> None:
         """
@@ -131,7 +131,7 @@ class AgentTask(BaseModel):
 
         self.status = TaskStatus.COMPLETED
         self.output_data = output_data
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(UTC)
 
         if self.started_at:
             delta = self.completed_at - self.started_at
@@ -147,7 +147,7 @@ class AgentTask(BaseModel):
 
         self.status = TaskStatus.FAILED
         self.error_message = error_message
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(UTC)
 
         if self.started_at:
             delta = self.completed_at - self.started_at
@@ -168,7 +168,7 @@ class AgentTask(BaseModel):
 
         self.status = TaskStatus.CANCELLED
         if not self.completed_at:
-            self.completed_at = datetime.utcnow()
+            self.completed_at = datetime.now(UTC)
 
     @property
     def is_pending(self) -> bool:

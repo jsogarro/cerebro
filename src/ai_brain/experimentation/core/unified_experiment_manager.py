@@ -10,7 +10,7 @@ import hashlib
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -257,7 +257,7 @@ class UnifiedExperimentManager:
         
         experiment = self.active_experiments[experiment_id]
         experiment.status = ExperimentStatus.RUNNING
-        experiment.start_time = datetime.utcnow()
+        experiment.start_time = datetime.now(UTC)
         
         # Initialize tracking for each component
         await self._initialize_component_tracking(experiment)
@@ -308,7 +308,7 @@ class UnifiedExperimentManager:
         _assignment_event = {
             'experiment_id': experiment_id,
             'variant_id': variant.id,
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
             'context': context
         }
         # TODO: Send to metrics pipeline
@@ -325,7 +325,7 @@ class UnifiedExperimentManager:
             'variant_id': variant_id,
             'metric_name': metric_name,
             'value': value,
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
             'context': context or {}
         }
         # TODO: Send to metrics pipeline
@@ -363,7 +363,7 @@ class UnifiedExperimentManager:
         else:
             experiment.status = ExperimentStatus.COMPLETED
         
-        experiment.end_time = datetime.utcnow()
+        experiment.end_time = datetime.now(UTC)
         
         # Move to history
         self.experiment_history.append(experiment)

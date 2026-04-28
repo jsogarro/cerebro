@@ -15,7 +15,7 @@ import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -100,7 +100,7 @@ class DatabasePoolManager:
         self._pool: asyncpg.Pool[Any] | None = None
         self._metrics = PoolMetrics()
         self._status = PoolStatus.UNHEALTHY
-        self._last_health_check = datetime.utcnow()
+        self._last_health_check = datetime.now(UTC)
         self._connection_semaphore: asyncio.Semaphore | None = None
 
     async def initialize(self, config_override: dict[str, Any] | None = None) -> None:
@@ -160,7 +160,7 @@ class DatabasePoolManager:
         except Exception as e:
             self._status = PoolStatus.UNHEALTHY
             self._metrics.last_error = str(e)
-            self._metrics.last_error_time = datetime.utcnow()
+            self._metrics.last_error_time = datetime.now(UTC)
             logger.error(f"Failed to initialize database pool: {e}")
             raise
 
@@ -196,7 +196,7 @@ class DatabasePoolManager:
             except Exception as e:
                 self._metrics.failed_requests += 1
                 self._metrics.last_error = str(e)
-                self._metrics.last_error_time = datetime.utcnow()
+                self._metrics.last_error_time = datetime.now(UTC)
                 logger.error(f"Database session error: {e}")
                 raise
             finally:
@@ -283,7 +283,7 @@ class DatabasePoolManager:
             self._status = PoolStatus.UNHEALTHY
             logger.error(f"Database health check failed: {e}")
 
-        self._last_health_check = datetime.utcnow()
+        self._last_health_check = datetime.now(UTC)
         return self._status
 
     async def close(self) -> None:
@@ -360,7 +360,7 @@ class RedisPoolManager:
         except Exception as e:
             self._status = PoolStatus.UNHEALTHY
             self._metrics.last_error = str(e)
-            self._metrics.last_error_time = datetime.utcnow()
+            self._metrics.last_error_time = datetime.now(UTC)
             logger.error(f"Failed to initialize Redis pool: {e}")
             raise
 
@@ -630,7 +630,7 @@ class TemporalPoolManager:
         except Exception as e:
             self._status = PoolStatus.UNHEALTHY
             self._metrics.last_error = str(e)
-            self._metrics.last_error_time = datetime.utcnow()
+            self._metrics.last_error_time = datetime.now(UTC)
             logger.error(f"Failed to initialize Temporal pool: {e}")
             raise
 

@@ -7,7 +7,7 @@ and performance experimentation.
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -379,7 +379,7 @@ class TestSupervisorMetrics:
             health_score=0.92,
             active_workers=3,
             queue_depth=2,
-            last_execution=datetime.utcnow(),
+            last_execution=datetime.now(UTC),
             issues=[],
             recommendations=[]
         )
@@ -651,7 +651,7 @@ class TestIntegrationScenarios:
                 health_score=0.95,
                 active_workers=2,
                 queue_depth=0,
-                last_execution=datetime.utcnow(),
+                last_execution=datetime.now(UTC),
                 issues=[],
                 recommendations=[]
             )

@@ -6,7 +6,7 @@ variants, assignments, and results across the Cerebro AI Brain platform.
 """
 
 import enum
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -155,7 +155,7 @@ class ExperimentAssignment(BaseModel):
     # e.g., {"query_complexity": "high", "domain": "research", "model": "gemini-pro"}
     
     # Timestamps
-    assigned_at = Column(DateTime, default=datetime.utcnow)
+    assigned_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
     exposed_at = Column(DateTime)  # When user was actually exposed to variant
     
     # Relationships
@@ -194,7 +194,7 @@ class ExperimentResult(BaseModel):
     # e.g., {"query": "...", "agent_used": "research", "model": "gemini-pro"}
     
     # Timestamps
-    recorded_at = Column(DateTime, default=datetime.utcnow)
+    recorded_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
     
     # Relationships
     experiment = relationship("Experiment", back_populates="results")
@@ -236,7 +236,7 @@ class ExperimentAnalysis(BaseModel):
     confidence_score = Column(Float)  # 0-1 confidence in recommendation
     
     # Metadata
-    analyzed_at = Column(DateTime, default=datetime.utcnow)
+    analyzed_at = Column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
     analyst = Column(String(100))  # System or user who ran analysis
     
     # Indexes

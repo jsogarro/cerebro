@@ -6,7 +6,7 @@ system, following immutable patterns for functional programming.
 """
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -77,7 +77,7 @@ class AgentTaskState:
             started_at=(
                 self.started_at
                 if status != AgentExecutionStatus.IN_PROGRESS
-                else datetime.utcnow()
+                else datetime.now(UTC)
             ),
             completed_at=self.completed_at,
         )
@@ -93,7 +93,7 @@ class AgentTaskState:
             error=self.error,
             retry_count=self.retry_count,
             started_at=self.started_at,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(UTC),
         )
 
     def with_error(self, error: str) -> "AgentTaskState":
@@ -107,7 +107,7 @@ class AgentTaskState:
             error=error,
             retry_count=self.retry_count + 1,
             started_at=self.started_at,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(UTC),
         )
 
 
@@ -179,7 +179,7 @@ class WorkflowMetadata:
         return WorkflowMetadata(
             workflow_id=self.workflow_id,
             started_at=self.started_at,
-            updated_at=datetime.utcnow(),
+            updated_at=datetime.now(UTC),
             total_nodes_executed=self.total_nodes_executed + 1,
             total_edges_traversed=self.total_edges_traversed,
             parallel_executions=self.parallel_executions,
@@ -245,8 +245,8 @@ class ResearchState:
         if self.metadata is None:
             self.metadata = WorkflowMetadata(
                 workflow_id=self.workflow_id,
-                started_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                started_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
 
     def transition_to_phase(self, new_phase: WorkflowPhase) -> None:
@@ -283,7 +283,7 @@ class ResearchState:
                     "task_id": task_id,
                     "agent_type": task.agent_type,
                     "error": error,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
 
@@ -292,7 +292,7 @@ class ResearchState:
         checkpoint = StateCheckpoint(
             checkpoint_id=f"{self.workflow_id}-{len(self.checkpoints)}",
             phase=self.current_phase,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             state_data={
                 "project_id": self.project_id,
                 "query": self.query,

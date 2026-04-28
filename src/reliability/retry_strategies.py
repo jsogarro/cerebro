@@ -12,7 +12,7 @@ import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from functools import wraps
 from typing import Any, Optional, TypeVar
@@ -170,7 +170,7 @@ class CircuitBreaker:
         self._metrics = CircuitBreakerMetrics()
         self._lock = asyncio.Lock()
         self._half_open_counter = 0
-        self._state_changed_at = datetime.utcnow()
+        self._state_changed_at = datetime.now(UTC)
 
     @property
     def state(self) -> CircuitState:
@@ -187,9 +187,9 @@ class CircuitBreaker:
         if self._state != new_state:
             old_state = self._state
             self._state = new_state
-            self._state_changed_at = datetime.utcnow()
+            self._state_changed_at = datetime.now(UTC)
             self._metrics.state_transitions.append(
-                (old_state, new_state, datetime.utcnow())
+                (old_state, new_state, datetime.now(UTC))
             )
 
             if new_state == CircuitState.HALF_OPEN:
@@ -203,7 +203,7 @@ class CircuitBreaker:
         """Check if circuit should attempt reset."""
         return (
             self._state == CircuitState.OPEN
-            and (datetime.utcnow() - self._state_changed_at).total_seconds()
+            and (datetime.now(UTC) - self._state_changed_at).total_seconds()
             >= self.config.timeout
         )
 
@@ -279,7 +279,7 @@ class CircuitBreaker:
             self._metrics.failed_calls += 1
             self._metrics.consecutive_failures += 1
             self._metrics.consecutive_successes = 0
-            self._metrics.last_failure_time = datetime.utcnow()
+            self._metrics.last_failure_time = datetime.now(UTC)
 
             if self._state == CircuitState.CLOSED:
                 if self._metrics.consecutive_failures >= self.config.failure_threshold:

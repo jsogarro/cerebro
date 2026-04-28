@@ -9,7 +9,7 @@ import hashlib
 import logging
 import os
 import shutil
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -437,7 +437,7 @@ class ReportStorageService:
             'format_files_deleted': format_deleted_count,
             'format_ids_deleted': format_deleted_ids,
             'dry_run': dry_run,
-            'cleanup_date': datetime.utcnow().isoformat(),
+            'cleanup_date': datetime.now(UTC).isoformat(),
         }
     
     async def verify_report_integrity(self, report_id: UUID) -> dict[str, Any]:
