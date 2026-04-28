@@ -8,6 +8,7 @@ inherit from. Environment-specific configs override these defaults.
 from typing import Any
 
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class MCPConfig(BaseModel):
@@ -127,7 +128,10 @@ class DatabaseConfig(BaseModel):
     port: int = Field(default=5432)
     database: str = Field(default="research_db")
     username: str = Field(default="research")
-    password: str = Field(default="research123")
+    # Password is required - no insecure default. Each environment must
+    # provide it explicitly (via env var in production, via test fixture in
+    # tests, via dev secret in development).
+    password: str = Field(..., description="Database password (required)")
     
     # Pool settings
     pool_size: int = Field(default=20)
@@ -290,7 +294,10 @@ class SecurityConfig(BaseModel):
     """Security configuration settings."""
     
     # Authentication
-    jwt_secret_key: str = Field(default="change-me-in-production")
+    # JWT secret is required - no insecure default. Each environment must
+    # supply this explicitly (env var in production/staging, dev secret
+    # in development, test secret in tests).
+    jwt_secret_key: str = Field(..., description="JWT secret key (required)")
     jwt_algorithm: str = Field(default="HS256")
     jwt_expiration_minutes: int = Field(default=60)
     refresh_token_expiration_days: int = Field(default=7)
@@ -321,31 +328,50 @@ class SecurityConfig(BaseModel):
     audit_log_file: str = Field(default="/var/log/research/audit.log")
 
 
-class BaseConfig(BaseModel):
-    """Base configuration for all environments."""
-    
+class BaseConfig(BaseSettings):
+    """Base configuration for all environments.
+
+    Subclasses BaseSettings so that values are automatically loaded from a
+    .env file and environment variables. Subclasses (Development /
+    Production / Staging / Testing) override defaults with environment-
+    specific values.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        validate_assignment=True,
+    )
+
     # Application settings
     app_name: str = Field(default="Research Platform")
     app_version: str = Field(default="1.0.0")
     environment: str = Field(default="development")
     debug: bool = Field(default=False)
-    
+
     # API settings
     api_host: str = Field(default="0.0.0.0")
     api_port: int = Field(default=8000)
     api_workers: int = Field(default=4)
     api_reload: bool = Field(default=False)
-    
-    # Component configurations
+
+    # Component configurations.
+    #
+    # ``database`` and ``security`` have no default factory because their
+    # nested DTOs require credentials (DB password, JWT secret) that have
+    # no safe fallback. Subclasses provide them explicitly — by class-level
+    # assignment, ``model_post_init``, or constructor kwargs.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     agents: AgentConfig = Field(default_factory=AgentConfig)
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    database: DatabaseConfig = Field(...)
     redis: RedisConfig = Field(default_factory=RedisConfig)
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     gemini: GeminiConfig = Field(default_factory=GeminiConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
-    security: SecurityConfig = Field(default_factory=SecurityConfig)
-    
+    security: SecurityConfig = Field(...)
+
     # Feature flags
     features: dict[str, bool] = Field(default_factory=lambda: {
         "mcp_tools": True,
@@ -355,10 +381,5 @@ class BaseConfig(BaseModel):
         "health_checks": True,
         "metrics": True,
         "tracing": True,
-        "audit_logging": True
+        "audit_logging": True,
     })
-    
-    class Config:
-        """Pydantic config."""
-        validate_assignment = True
-        extra = "forbid"
