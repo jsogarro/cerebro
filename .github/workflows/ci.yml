@@ -255,8 +255,14 @@ jobs:
       
       - name: Validate Dockerfile
         run: |
-          docker run --rm -i hadolint/hadolint < Dockerfile || true
-          docker run --rm -i hadolint/hadolint < docker/Dockerfile.worker || true
+          for dockerfile in Dockerfile docker/Dockerfile.worker; do
+            if [ -f "$dockerfile" ]; then
+              echo "Linting $dockerfile"
+              docker run --rm -i hadolint/hadolint < "$dockerfile"
+            else
+              echo "Skipping $dockerfile (not present in tree)"
+            fi
+          done
       
       - name: Build API image
         uses: docker/build-push-action@v5
