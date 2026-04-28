@@ -273,7 +273,6 @@ class TestCompleteAPIWorkflow:
         self,
         authenticated_client: AsyncClient,
         db_session: AsyncSession,
-        temporal_client,
     ):
         """Test complete research workflow through API."""
         # Step 1: Create research project
