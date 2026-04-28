@@ -148,5 +148,3 @@ class TestingConfig(BaseConfig):
     }
 
 
-# Create singleton instance
-testing_config = TestingConfig()

@@ -111,5 +111,3 @@ class DevelopmentConfig(BaseConfig):
     }
 
 
-# Create singleton instance
-development_config = DevelopmentConfig()
