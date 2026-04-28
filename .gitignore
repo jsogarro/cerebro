@@ -21,6 +21,8 @@ node_modules/
 .claude/
 .clinerules
 ai/
+.refactorit/
+*.refactorit.checkpoint
 CLAUDE.md
 PRD.md
 TODO.md
