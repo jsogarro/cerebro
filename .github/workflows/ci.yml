@@ -225,8 +225,7 @@ jobs:
       
       - name: Run bandit
         run: |
-          bandit -r src -f json -o bandit-report.json || true
-          bandit -r src
+          bandit -r src -f json -o bandit-report.json
       
       - name: Run safety check
         run: |
@@ -237,6 +236,7 @@ jobs:
           pip-audit
       
       - name: Upload security reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
