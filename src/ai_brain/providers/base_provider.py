@@ -9,7 +9,6 @@ Now supports dynamic model configuration loading from YAML files instead of
 hard-coded specifications.
 """
 
-import logging
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
@@ -18,11 +17,15 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
+from structlog import get_logger
+
+from src.core.observability import LLMCallMetrics, record_llm_call
+
 if TYPE_CHECKING:
     from ..config.model_config_manager import ModelConfigManager
     from ..config.model_schemas import ModelSpecification, ProviderConfiguration
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ModelCapability(Enum):
@@ -404,7 +407,7 @@ class BaseProvider(ABC):
 
         # Try to get from dynamic configuration first
         if self._config_loaded and model_name in self._model_specs:
-            return self._model_specs[model_name].context_window
+            return int(self._model_specs[model_name].context_window)
 
         # Fallback to legacy implementation
         return self._get_model_context_window_legacy(model_name)
@@ -414,7 +417,7 @@ class BaseProvider(ABC):
 
         # Try to get from dynamic configuration first
         if self._config_loaded and model_name in self._model_specs:
-            return self._model_specs[model_name].cost_per_1k_tokens
+            return float(self._model_specs[model_name].cost_per_1k_tokens)
 
         # Fallback to legacy implementation
         return self._get_model_cost_legacy(model_name)
@@ -478,6 +481,19 @@ class BaseProvider(ABC):
             self.health_status.avg_latency_ms = (
                 self.total_latency_ms / self.request_count
             )
+
+        record_llm_call(
+            LLMCallMetrics(
+                provider=response.provider or self.provider_name,
+                model=response.model_name,
+                prompt_tokens=response.prompt_tokens,
+                completion_tokens=response.completion_tokens,
+                latency_ms=response.latency_ms,
+                cost_usd=response.cost_estimate,
+                request_id=response.request_id,
+                success=response.success,
+            )
+        )
 
         return response
 
