@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.api.services.supervisor_registry import SupervisorMetrics, SupervisorRegistry
+from src.api.services.supervisor_worker_dispatcher import WorkerDispatcher
 from src.models.supervisor_api_models import (
     ConflictResolutionRequest,
     ConflictResolutionResponse,
@@ -54,6 +55,10 @@ class SupervisorCoordinationService:
         self.supervisors = self.registry.supervisors
         self.workers = self.registry.workers
         self.metrics = self.registry.metrics
+        self.worker_dispatcher = WorkerDispatcher(
+            self.workers,
+            self.registry.get_worker_capabilities,
+        )
         self.active_coordinations: dict[str, dict[str, Any]] = {}
         self.conflict_resolutions: dict[str, dict[str, Any]] = {}
         self.experiments: dict[str, dict[str, Any]] = {}
@@ -64,6 +69,10 @@ class SupervisorCoordinationService:
         self.supervisors = self.registry.supervisors
         self.workers = self.registry.workers
         self.metrics = self.registry.metrics
+        self.worker_dispatcher = WorkerDispatcher(
+            self.workers,
+            self.registry.get_worker_capabilities,
+        )
     
     def _get_supervisor_capabilities(self, supervisor_type: SupervisorType) -> list[str]:
         """Get capabilities for a supervisor type"""
@@ -170,32 +179,12 @@ class SupervisorCoordinationService:
         coordination_mode: CoordinationMode
     ) -> list[WorkerInfo]:
         """Assign workers for a task based on requirements"""
-        available_workers = [
-            w for w in self.workers[supervisor_type]
-            if w.status == WorkerStatus.IDLE
-        ]
-        
-        # Determine number of workers based on coordination mode
-        if coordination_mode == CoordinationMode.SEQUENTIAL:
-            num_workers = min(1, len(available_workers))
-        elif coordination_mode == CoordinationMode.PARALLEL:
-            num_workers = min(max_workers, len(available_workers))
-        else:  # HIERARCHICAL, ADAPTIVE, DEBATE
-            num_workers = min(max(3, max_workers // 2), len(available_workers))
-        
-        # Select workers based on performance scores
-        selected_workers = sorted(
-            available_workers,
-            key=lambda w: w.performance_score or 0,
-            reverse=True
-        )[:num_workers]
-        
-        # Update worker status
-        for worker in selected_workers:
-            worker.status = WorkerStatus.ASSIGNED
-            worker.current_task = task[:50]  # Truncate task description
-        
-        return selected_workers
+        return await self.worker_dispatcher.assign_workers_for_task(
+            supervisor_type,
+            task,
+            max_workers,
+            coordination_mode,
+        )
     
     async def _execute_with_workers(
         self,
@@ -208,34 +197,15 @@ class SupervisorCoordinationService:
         timeout_seconds: int
     ) -> Any | None:
         """Execute task with assigned workers"""
-        # Simulate execution based on strategy and coordination mode
-        await asyncio.sleep(0.5)  # Simulate processing time
-        
-        # Update worker status
-        for worker in workers:
-            worker.status = WorkerStatus.EXECUTING
-        
-        # Simulate execution results based on strategy
-        if strategy == SupervisionStrategy.DIRECT:
-            result = f"Direct execution result for: {task}"
-        elif strategy == SupervisionStrategy.COLLABORATIVE:
-            result = f"Collaborative result from {len(workers)} workers for: {task}"
-        elif strategy == SupervisionStrategy.ITERATIVE:
-            result = f"Iterative refinement result after multiple rounds for: {task}"
-        else:
-            result = f"Execution result for: {task}"
-        
-        # Update worker status
-        for worker in workers:
-            worker.status = WorkerStatus.COMPLETED
-            worker.current_task = None
-        
-        # Reset worker status after completion
-        await asyncio.sleep(0.1)
-        for worker in workers:
-            worker.status = WorkerStatus.IDLE
-        
-        return result
+        return await self.worker_dispatcher.execute_with_workers(
+            supervisor_type,
+            task,
+            workers,
+            strategy,
+            coordination_mode,
+            quality_threshold,
+            timeout_seconds,
+        )
     
     def _calculate_quality_score(self, result: Any, threshold: float) -> float:
         """Calculate quality score for execution result"""
@@ -356,33 +326,11 @@ class SupervisorCoordinationService:
         coordination_mode: CoordinationMode
     ) -> list[WorkerInfo]:
         """Assign specific worker types for coordination"""
-        assigned = []
-        available_workers = self.workers.get(supervisor_type, [])
-        
-        for worker_type in worker_types:
-            # Find workers matching the requested type
-            matching_workers = [
-                w for w in available_workers
-                if w.worker_type == worker_type and w.status == WorkerStatus.IDLE
-            ]
-            
-            if matching_workers:
-                worker = matching_workers[0]
-                worker.status = WorkerStatus.ASSIGNED
-                assigned.append(worker)
-            else:
-                # Create a placeholder worker if none available
-                worker = WorkerInfo(
-                    worker_id=f"{supervisor_type}-{worker_type}-temp",
-                    worker_type=worker_type,
-                    status=WorkerStatus.ASSIGNED,
-                    capabilities=self._get_worker_capabilities(worker_type),
-                    performance_score=0.85,
-                    current_task=None
-                )
-                assigned.append(worker)
-        
-        return assigned
+        return await self.worker_dispatcher.assign_workers_for_coordination(
+            supervisor_type,
+            worker_types,
+            coordination_mode,
+        )
     
     def _create_coordination_plan(
         self,
