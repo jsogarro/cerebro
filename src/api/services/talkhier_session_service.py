@@ -17,18 +17,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from src.agents.communication.consensus_builder import ConsensusBuilder
-from src.agents.communication.talkhier_message import (
-    MessageType,
-    TalkHierContent,
-    TalkHierMessage,
-)
+from src.agents.communication.talkhier_message import TalkHierMessage
 from src.agents.supervisors.base_supervisor import BaseSupervisor
 from src.agents.supervisors.supervisor_factory import (
     SupervisorFactory,
 )
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter, RoutingDecision
+from src.api.services.talkhier_consensus_evaluator import TalkHierConsensusEvaluator
 from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
 from src.api.services.talkhier_state_manager import TalkHierStateManager
 from src.models.talkhier_api_models import (
@@ -110,8 +106,9 @@ class TalkHierSessionService:
     def __init__(self) -> None:
         self.state_manager = TalkHierStateManager()
         self.round_executor = TalkHierRoundExecutor()
+        self.consensus_evaluator = TalkHierConsensusEvaluator()
         self.sessions: dict[str, TalkHierSession] = self.state_manager.sessions
-        self.consensus_builder = ConsensusBuilder()
+        self.consensus_builder = self.consensus_evaluator.consensus_builder
         self.supervisor_factory = SupervisorFactory()
         self.masr_bridge = MASRSupervisorBridge()
         self.masr_router = MASRouter()
@@ -339,83 +336,19 @@ class TalkHierSessionService:
             Consensus analysis result
         """
         session = self._get_session(session_id)
-        
-        # Update status
-        previous_status = session.status
-        session.status = SessionStatus.CONSENSUS_CHECKING
-        
-        # Build consensus using ConsensusBuilder
-        consensus_messages = []
-        for result in request.round_results:
-            msg = TalkHierMessage(
-                from_agent=result.get("agent", "unknown"),
-                to_agent="consensus_checker",
-                content=TalkHierContent(
-                    content=str(result.get("content", "")),
-                    confidence_score=result.get("confidence", 0.5)
-                ),
-                message_type=MessageType.RESPONSE
-            )
-            consensus_messages.append(msg)
-        
-        # Calculate consensus
-        consensus_result = await self.consensus_builder.evaluate_consensus(
-            consensus_messages,
-            threshold=session.consensus_threshold
+
+        result = await self.consensus_evaluator.check_consensus(
+            session_id,
+            session,
+            request,
         )
-        has_consensus = consensus_result.overall_score >= session.consensus_threshold
-        consensus_score = consensus_result.overall_score
-        
-        # Calculate agreement matrix
-        agreement_matrix = await self._calculate_agreement_matrix(
-            request.round_results
+
+        logger.info(
+            f"Consensus check for session {session_id}: "
+            f"{result.has_consensus} (score: {result.consensus_score:.2f})"
         )
-        
-        # Calculate quality scores
-        quality_scores = {}
-        for result in request.round_results:
-            agent_id = result.get("agent", "unknown")
-            quality_scores[agent_id] = result.get("confidence", 0.0)
-        
-        # Generate minority reports if requested
-        minority_reports = None
-        if request.include_minority_report and not has_consensus:
-            minority_reports = await self._generate_minority_reports(
-                request.round_results,
-                consensus_score
-            )
-        
-        # Determine recommendation
-        recommendation = self._generate_consensus_recommendation(
-            has_consensus,
-            consensus_score,
-            session
-        )
-        
-        # Generate reasoning
-        reasoning = self._generate_consensus_reasoning(
-            has_consensus,
-            consensus_score,
-            agreement_matrix,
-            session
-        )
-        
-        # Restore previous status
-        session.status = previous_status
-        session.last_update = datetime.now(UTC)
-        
-        logger.info(f"Consensus check for session {session_id}: {has_consensus} (score: {consensus_score:.2f})")
-        
-        return ConsensusResult(
-            has_consensus=has_consensus,
-            consensus_type=session.consensus_type,
-            consensus_score=consensus_score,
-            agreement_matrix=agreement_matrix,
-            quality_scores=quality_scores,
-            minority_reports=minority_reports,
-            recommendation=recommendation,
-            reasoning=reasoning
-        )
+
+        return result
     
     async def close_session(
         self,
@@ -760,25 +693,7 @@ class TalkHierSessionService:
         results: list[dict[str, Any]]
     ) -> dict[str, dict[str, float]]:
         """Calculate pairwise agreement between participants"""
-        matrix: dict[str, dict[str, float]] = {}
-        
-        for i, result1 in enumerate(results):
-            agent1 = result1.get("agent", f"agent_{i}")
-            matrix[agent1] = {}
-            
-            for j, result2 in enumerate(results):
-                agent2 = result2.get("agent", f"agent_{j}")
-                
-                if i == j:
-                    matrix[agent1][agent2] = 1.0
-                else:
-                    # Simple confidence-based agreement
-                    conf1 = result1.get("confidence", 0.5)
-                    conf2 = result2.get("confidence", 0.5)
-                    agreement = 1.0 - abs(conf1 - conf2)
-                    matrix[agent1][agent2] = agreement
-        
-        return matrix
+        return await self.consensus_evaluator.calculate_agreement_matrix(results)
     
     async def _generate_minority_reports(
         self,
@@ -786,23 +701,10 @@ class TalkHierSessionService:
         consensus_score: float
     ) -> list[dict[str, Any]]:
         """Generate minority opinion reports"""
-        minority_reports = []
-        
-        avg_confidence = sum(
-            r.get("confidence", 0) for r in results
-        ) / max(1, len(results))
-        
-        for result in results:
-            confidence = result.get("confidence", 0)
-            if abs(confidence - avg_confidence) > 0.2:
-                minority_reports.append({
-                    "agent": result.get("agent"),
-                    "position": result.get("content"),
-                    "confidence": confidence,
-                    "deviation": confidence - avg_confidence
-                })
-        
-        return minority_reports
+        return await self.consensus_evaluator.generate_minority_reports(
+            results,
+            consensus_score,
+        )
     
     def _generate_consensus_recommendation(
         self,
@@ -811,16 +713,11 @@ class TalkHierSessionService:
         session: TalkHierSession
     ) -> str:
         """Generate recommendation based on consensus status"""
-        if has_consensus:
-            return "Consensus achieved - proceed with final result"
-        
-        if consensus_score >= session.consensus_threshold * 0.9:
-            return "Near consensus - one more refinement round recommended"
-        
-        if consensus_score < 0.5:
-            return "Low consensus - consider debate mode or supervisor intervention"
-        
-        return "Continue refinement to improve consensus"
+        return self.consensus_evaluator.generate_consensus_recommendation(
+            has_consensus,
+            consensus_score,
+            session,
+        )
     
     def _generate_consensus_reasoning(
         self,
@@ -830,42 +727,12 @@ class TalkHierSessionService:
         session: TalkHierSession
     ) -> str:
         """Generate reasoning for consensus result"""
-        reasoning_parts = []
-        
-        if has_consensus:
-            reasoning_parts.append(
-                f"Consensus achieved with score {consensus_score:.2f} "
-                f"(threshold: {session.consensus_threshold:.2f})"
-            )
-        else:
-            reasoning_parts.append(
-                f"Consensus not reached - score {consensus_score:.2f} "
-                f"below threshold {session.consensus_threshold:.2f}"
-            )
-        
-        # Analyze agreement patterns
-        high_agreement_pairs = []
-        low_agreement_pairs = []
-        
-        for agent1, agreements in agreement_matrix.items():
-            for agent2, score in agreements.items():
-                if agent1 < agent2:  # Avoid duplicates
-                    if score >= 0.8:
-                        high_agreement_pairs.append((agent1, agent2))
-                    elif score < 0.5:
-                        low_agreement_pairs.append((agent1, agent2))
-        
-        if high_agreement_pairs:
-            reasoning_parts.append(
-                f"Strong agreement between: {', '.join([f'{a1}-{a2}' for a1, a2 in high_agreement_pairs[:3]])}"
-            )
-        
-        if low_agreement_pairs:
-            reasoning_parts.append(
-                f"Disagreement between: {', '.join([f'{a1}-{a2}' for a1, a2 in low_agreement_pairs[:3]])}"
-            )
-        
-        return " | ".join(reasoning_parts)
+        return self.consensus_evaluator.generate_consensus_reasoning(
+            has_consensus,
+            consensus_score,
+            agreement_matrix,
+            session,
+        )
     
     async def _save_session_transcript(
         self,

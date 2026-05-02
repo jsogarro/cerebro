@@ -12,6 +12,7 @@ import pytest
 from fastapi import WebSocket
 from fastapi.testclient import TestClient
 
+from src.api.services.talkhier_consensus_evaluator import TalkHierConsensusEvaluator
 from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
 from src.api.services.talkhier_session_manager import TalkHierSessionManager
 from src.api.services.talkhier_session_service import (
@@ -126,6 +127,38 @@ class TestTalkHierRoundExecutor:
         assert session.current_round == 1
         assert len(session.rounds) == 1
         assert state_manager.session_metrics["session-1"]["rounds_completed"] == 1
+
+
+class TestTalkHierConsensusEvaluator:
+    """Test TalkHier consensus evaluation helpers."""
+
+    @pytest.mark.asyncio
+    async def test_agreement_matrix_uses_confidence_distance(self):
+        """Test agreement matrix values are based on confidence distance."""
+        evaluator = TalkHierConsensusEvaluator()
+
+        matrix = await evaluator.calculate_agreement_matrix([
+            {"agent": "agent-1", "confidence": 0.9},
+            {"agent": "agent-2", "confidence": 0.6},
+        ])
+
+        assert matrix["agent-1"]["agent-1"] == 1.0
+        assert matrix["agent-1"]["agent-2"] == pytest.approx(0.7)
+
+    @pytest.mark.asyncio
+    async def test_minority_reports_include_confidence_outliers(self):
+        """Test minority report generation identifies confidence outliers."""
+        evaluator = TalkHierConsensusEvaluator()
+
+        reports = await evaluator.generate_minority_reports(
+            [
+                {"agent": "agent-1", "content": "majority", "confidence": 0.9},
+                {"agent": "agent-2", "content": "minority", "confidence": 0.2},
+            ],
+            consensus_score=0.4,
+        )
+
+        assert {report["agent"] for report in reports} == {"agent-1", "agent-2"}
 
 
 class TestTalkHierSessionService:
