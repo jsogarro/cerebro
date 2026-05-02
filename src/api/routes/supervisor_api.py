@@ -7,10 +7,8 @@ Provides comprehensive supervisor management, worker coordination, and
 cross-domain orchestration capabilities.
 """
 
-import asyncio
 import json
 import logging
-from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -23,6 +21,7 @@ from fastapi import (
 from src.api.services.supervisor_coordination_service import (
     SupervisorCoordinationService,
 )
+from src.api.services.supervisor_progress_tracker import SupervisorProgressTracker
 from src.models.supervisor_api_models import (
     ConflictResolutionRequest,
     ConflictResolutionResponse,
@@ -63,46 +62,8 @@ router = APIRouter(
 # Initialize service (in production, this would be dependency injected)
 supervisor_service = SupervisorCoordinationService()
 
-# WebSocket connection manager for real-time updates
-class SupervisorConnectionManager:
-
-    def __init__(self) -> None:
-        self.active_connections: dict[str, list[WebSocket]] = {}
-        self.supervisor_subscriptions: dict[str, list[WebSocket]] = {}
-    
-    async def connect(self, websocket: WebSocket, client_id: str) -> None:
-        """Accept and register a WebSocket connection"""
-        await websocket.accept()
-        if client_id not in self.active_connections:
-            self.active_connections[client_id] = []
-        self.active_connections[client_id].append(websocket)
-    
-    def disconnect(self, websocket: WebSocket, client_id: str) -> None:
-        """Remove a WebSocket connection"""
-        if client_id in self.active_connections:
-            self.active_connections[client_id].remove(websocket)
-            if not self.active_connections[client_id]:
-                del self.active_connections[client_id]
-    
-    async def send_supervisor_event(self, supervisor_type: str, event: SupervisorWebSocketEvent) -> None:
-        """Send event to all clients subscribed to a supervisor"""
-        if supervisor_type in self.supervisor_subscriptions:
-            for connection in self.supervisor_subscriptions[supervisor_type]:
-                try:
-                    await connection.send_json(event.model_dump())
-                except Exception as e:
-                    logger.error(f"Error sending event to client: {e}")
-    
-    async def broadcast_event(self, event: dict[str, Any]) -> None:
-        for client_connections in self.active_connections.values():
-            for connection in client_connections:
-                try:
-                    await connection.send_json(event)
-                except Exception as e:
-                    logger.error(f"Error broadcasting event: {e}")
-
 # Initialize connection manager
-connection_manager = SupervisorConnectionManager()
+connection_manager = SupervisorProgressTracker()
 
 
 # Primary Endpoints
@@ -479,9 +440,7 @@ async def supervisor_websocket(
         await connection_manager.connect(websocket, client_id)
         
         # Subscribe to supervisor events
-        if supervisor_type.value not in connection_manager.supervisor_subscriptions:
-            connection_manager.supervisor_subscriptions[supervisor_type.value] = []
-        connection_manager.supervisor_subscriptions[supervisor_type.value].append(websocket)
+        connection_manager.subscribe_supervisor(supervisor_type.value, websocket)
         
         # Send initial status
         supervisor_info = await supervisor_service.get_supervisor_info(supervisor_type.value)
@@ -524,9 +483,7 @@ async def supervisor_websocket(
         logger.error(f"WebSocket connection error: {e}")
     finally:
         connection_manager.disconnect(websocket, client_id)
-        if (supervisor_type.value in connection_manager.supervisor_subscriptions and
-            websocket in connection_manager.supervisor_subscriptions[supervisor_type.value]):
-            connection_manager.supervisor_subscriptions[supervisor_type.value].remove(websocket)
+        connection_manager.unsubscribe_supervisor(supervisor_type.value, websocket)
 
 
 @router.websocket("/coordination/ws")
@@ -554,21 +511,12 @@ async def coordination_progress_websocket(
         # Simulate progress updates if coordination_id provided
         if coordination_id:
             # In production, this would fetch real coordination status
-            for progress in [10, 30, 50, 70, 90, 100]:
-                await asyncio.sleep(1)  # Simulate processing
-                
-                event = WorkerCoordinationProgressEvent(
-                    coordination_id=coordination_id,
-                    event_type="progress",
-                    progress_percentage=float(progress),
-                    current_phase=f"Phase {progress // 25 + 1}",
-                    workers_active=5 - (progress // 25),
-                    estimated_remaining_seconds=max(0, 10 - progress // 10)
-                )
-                
+            async for event in connection_manager.iter_coordination_progress_events(
+                coordination_id
+            ):
                 await websocket.send_json(event.model_dump())
                 
-                if progress == 100:
+                if event.progress_percentage == 100:
                     await websocket.send_json({
                         "event_type": "completed",
                         "coordination_id": coordination_id,
