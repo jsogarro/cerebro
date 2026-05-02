@@ -34,6 +34,7 @@ from .base_supervisor import (
     SupervisionState,
     WorkerDefinition,
 )
+from .research_query_planner import ResearchQueryPlanner
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,11 @@ class ResearchSupervisor(BaseSupervisor):
         )
         self.max_sources = config.get("max_sources", 50) if config else 50
         self.citation_style = config.get("citation_style", "APA") if config else "APA"
+        self.query_planner = ResearchQueryPlanner(
+            self.research_depth,
+            self.max_sources,
+            self.citation_style,
+        )
 
     def _register_worker_types(self) -> None:
         """Register research worker types."""
@@ -273,13 +279,7 @@ class ResearchSupervisor(BaseSupervisor):
         state.allocated_workers = allocated_workers
 
         # Set research-specific context
-        state.context.update(
-            {
-                "research_depth": self.research_depth,
-                "max_sources": self.max_sources,
-                "citation_style": self.citation_style,
-            }
-        )
+        state.context.update(self.query_planner.build_research_context())
 
         return state
 
@@ -298,23 +298,10 @@ class ResearchSupervisor(BaseSupervisor):
         # Initialize worker tasks
         research_query = state.original_query
 
-        state.worker_tasks = {
-            "literature_review": {
-                "query": research_query,
-                "domains": task.input_data.get("domains", []),
-                "max_sources": self.max_sources,
-            },
-            "methodology": {
-                "research_question": research_query,
-                "type": task.input_data.get("research_type", "mixed"),
-            },
-            "comparative_analysis": {
-                "query": research_query,
-                "comparison_focus": "approaches_and_findings",
-            },
-            "synthesis": {"synthesis_focus": "comprehensive_integration"},
-            "citation": {"style": self.citation_style},
-        }
+        state.worker_tasks = self.query_planner.build_worker_tasks(
+            research_query,
+            task,
+        )
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
