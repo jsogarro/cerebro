@@ -7,7 +7,7 @@ determining which agents to use, in what order, and with what parameters.
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from src.orchestration.state import (
@@ -98,7 +98,7 @@ def create_research_plan(
     """
     plan = {
         "plan_id": str(uuid.uuid4()),
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "query": query,
         "domains": domains,
         "complexity": complexity,

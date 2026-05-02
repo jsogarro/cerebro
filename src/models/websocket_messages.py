@@ -5,7 +5,7 @@ These models define the structure for WebSocket messages sent between
 the server and various clients (web, CLI, etc.).
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -51,7 +51,7 @@ class WSMessage(BaseModel):
 
     type: WSMessageType = Field(..., description="Message type")
     project_id: UUID | None = Field(None, description="Associated project ID")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict, description="Message payload")
 
     model_config = ConfigDict(json_encoders={
@@ -72,7 +72,7 @@ class ProgressUpdate(BaseModel):
     estimated_time_remaining_seconds: int | None = None
     current_agent: str | None = None
     current_phase: str | None = None
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class AgentUpdate(BaseModel):
@@ -165,8 +165,8 @@ class ConnectionInfo(BaseModel):
     client_type: str = Field(..., description="Type of client (web, cli, etc.)")
     user_id: str | None = None
     project_subscriptions: list[UUID] = Field(default_factory=list)
-    connected_at: datetime = Field(default_factory=datetime.utcnow)
-    last_heartbeat: datetime = Field(default_factory=datetime.utcnow)
+    connected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_heartbeat: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class SubscriptionRequest(BaseModel):
@@ -195,7 +195,7 @@ class SubscriptionResponse(BaseModel):
 class HeartbeatMessage(BaseModel):
     """Heartbeat message for connection health."""
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     client_id: str
 
     model_config = ConfigDict(json_encoders={

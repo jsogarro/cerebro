@@ -5,7 +5,7 @@ These tests verify that the A/B testing integration properly connects
 with the completed Agent Framework APIs and enables systematic optimization.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -301,7 +301,7 @@ class TestRealTimeDashboard:
         # Create snapshot
         snapshot = ExperimentSnapshot(
             experiment_id="test_exp",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             variants={
                 "control": {"quality_score": 0.8},
                 "treatment": {"quality_score": 0.85}
@@ -326,7 +326,7 @@ class TestRealTimeDashboard:
         """Test alert generation for experiment conditions."""
         snapshot = ExperimentSnapshot(
             experiment_id="test_exp",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             variants={},
             sample_sizes={"control": 30, "treatment": 40},  # Low sample size
             p_value=0.03,  # Significant
@@ -348,7 +348,7 @@ class TestRealTimeDashboard:
         for i in range(3):
             snapshot = ExperimentSnapshot(
                 experiment_id="test_exp",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 variants={"control": {"score": 0.8}, "treatment": {"score": 0.85}},
                 sample_sizes={"control": 100 + i*50, "treatment": 100 + i*50}
             )

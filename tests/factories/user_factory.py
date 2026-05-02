@@ -3,7 +3,7 @@ User factory for generating test user data.
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from factory import Factory, LazyAttribute, LazyFunction, Sequence
@@ -37,7 +37,7 @@ class UserFactory(Factory):
     is_verified = True
     is_superuser = False
     created_at = FuzzyDateTime(
-        start_dt=datetime.utcnow() - timedelta(days=30), end_dt=datetime.utcnow()
+        start_dt=datetime.now(UTC) - timedelta(days=30), end_dt=datetime.now(UTC)
     )
     updated_at = LazyAttribute(lambda o: o.created_at + timedelta(hours=1))
     last_login = LazyAttribute(lambda o: o.created_at + timedelta(days=1))
@@ -130,20 +130,20 @@ class SessionFactory(Factory):
     user_id = LazyFunction(lambda: str(uuid.uuid4()))
     token = LazyFunction(lambda: fake.sha256())
     refresh_token = LazyFunction(lambda: fake.sha256())
-    expires_at = LazyFunction(lambda: datetime.utcnow() + timedelta(hours=24))
-    refresh_expires_at = LazyFunction(lambda: datetime.utcnow() + timedelta(days=7))
+    expires_at = LazyFunction(lambda: datetime.now(UTC) + timedelta(hours=24))
+    refresh_expires_at = LazyFunction(lambda: datetime.now(UTC) + timedelta(days=7))
     ip_address = LazyFunction(fake.ipv4)
     user_agent = LazyFunction(fake.user_agent)
     is_active = True
-    created_at = LazyFunction(datetime.utcnow)
-    last_activity = LazyFunction(datetime.utcnow)
+    created_at = LazyFunction(lambda: datetime.now(UTC))
+    last_activity = LazyFunction(lambda: datetime.now(UTC))
 
     @classmethod
     def create_expired(cls, **kwargs) -> Session:
         """Create an expired session."""
         defaults = {
-            "expires_at": datetime.utcnow() - timedelta(hours=1),
-            "refresh_expires_at": datetime.utcnow() - timedelta(hours=1),
+            "expires_at": datetime.now(UTC) - timedelta(hours=1),
+            "refresh_expires_at": datetime.now(UTC) - timedelta(hours=1),
             "is_active": False,
         }
         defaults.update(kwargs)
@@ -173,16 +173,16 @@ class APIKeyFactory(Factory):
             elements=["read", "write", "delete", "admin"], length=2, unique=True
         )
     )
-    expires_at = LazyFunction(lambda: datetime.utcnow() + timedelta(days=90))
+    expires_at = LazyFunction(lambda: datetime.now(UTC) + timedelta(days=90))
     is_active = True
     last_used_at = None
-    created_at = LazyFunction(datetime.utcnow)
+    created_at = LazyFunction(lambda: datetime.now(UTC))
 
     @classmethod
     def create_expired(cls, **kwargs) -> APIKey:
         """Create an expired API key."""
         defaults = {
-            "expires_at": datetime.utcnow() - timedelta(days=1),
+            "expires_at": datetime.now(UTC) - timedelta(days=1),
             "is_active": False,
         }
         defaults.update(kwargs)

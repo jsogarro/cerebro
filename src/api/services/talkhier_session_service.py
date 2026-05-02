@@ -14,7 +14,7 @@ Core responsibilities:
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from src.agents.communication.consensus_builder import ConsensusBuilder
@@ -91,7 +91,7 @@ class TalkHierSession:
     # Timing
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    last_update: datetime = field(default_factory=datetime.utcnow)
+    last_update: datetime = field(default_factory=lambda: datetime.now(UTC))
     
     # WebSocket
     websocket_connections: list[str] = field(default_factory=list)
@@ -200,7 +200,7 @@ class TalkHierSessionService:
             query=request.query,
             domains=request.domains,
             status=SessionStatus.INITIALIZING,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             protocol_type=request.protocol_type,
             refinement_strategy=request.refinement_strategy,
             max_rounds=request.max_rounds,
@@ -227,7 +227,7 @@ class TalkHierSessionService:
         
         # Update status to active
         session.status = SessionStatus.ACTIVE
-        session.started_at = datetime.utcnow()
+        session.started_at = datetime.now(UTC)
         
         # Calculate estimated duration
         estimated_duration = self._estimate_duration(
@@ -272,7 +272,7 @@ class TalkHierSessionService:
         remaining_seconds = None
         
         if session.started_at:
-            elapsed_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
+            elapsed_seconds = int((datetime.now(UTC) - session.started_at).total_seconds())
             remaining_seconds = max(0, session.timeout_seconds - elapsed_seconds)
         
         return SessionStatusResponse(
@@ -314,7 +314,7 @@ class TalkHierSessionService:
         session.current_round = request.round_number
         
         # Start round timing
-        round_start = datetime.utcnow()
+        round_start = datetime.now(UTC)
         
         # Create round record
         round_record = RefinementRound(
@@ -371,7 +371,7 @@ class TalkHierSessionService:
         improvement_delta = quality_score - previous_quality
         
         # Update round record
-        round_record.completed_at = datetime.utcnow()
+        round_record.completed_at = datetime.now(UTC)
         round_record.status = "completed"
         round_record.quality_score = quality_score
         round_record.consensus_score = consensus_score
@@ -386,7 +386,7 @@ class TalkHierSessionService:
         session.current_quality = quality_score
         session.current_consensus = consensus_score
         session.status = SessionStatus.ACTIVE
-        session.last_update = datetime.utcnow()
+        session.last_update = datetime.now(UTC)
         
         # Update metrics
         self.session_metrics[session_id]["rounds_completed"] += 1
@@ -406,7 +406,7 @@ class TalkHierSessionService:
             )
         
         # Calculate duration
-        duration_ms = int((datetime.utcnow() - round_start).total_seconds() * 1000)
+        duration_ms = int((datetime.now(UTC) - round_start).total_seconds() * 1000)
         
         logger.info(f"Completed refinement round {request.round_number} for session {session_id}")
         logger.info(f"Quality: {quality_score:.2f}, Consensus: {consensus_score:.2f}, Delta: {improvement_delta:+.2f}")
@@ -504,7 +504,7 @@ class TalkHierSessionService:
         
         # Restore previous status
         session.status = previous_status
-        session.last_update = datetime.utcnow()
+        session.last_update = datetime.now(UTC)
         
         logger.info(f"Consensus check for session {session_id}: {has_consensus} (score: {consensus_score:.2f})")
         
@@ -547,7 +547,7 @@ class TalkHierSessionService:
         
         # Update session
         session.status = final_status
-        session.completed_at = datetime.utcnow()
+        session.completed_at = datetime.now(UTC)
         
         # Calculate total duration
         total_duration = 0

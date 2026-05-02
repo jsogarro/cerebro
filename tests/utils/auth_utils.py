@@ -3,7 +3,7 @@ Authentication utilities for integration testing.
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -45,12 +45,12 @@ class TestAuthManager:
         }
 
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(UTC) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=30)
+            expire = datetime.now(UTC) + timedelta(minutes=30)
 
         data["exp"] = expire
-        data["iat"] = datetime.utcnow()
+        data["iat"] = datetime.now(UTC)
         data["jti"] = str(uuid.uuid4())  # JWT ID for revocation
 
         return jwt.encode(data, self.secret_key, algorithm=self.algorithm)
@@ -62,12 +62,12 @@ class TestAuthManager:
         data = {"sub": user_id, "type": "refresh"}
 
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(UTC) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(days=7)
+            expire = datetime.now(UTC) + timedelta(days=7)
 
         data["exp"] = expire
-        data["iat"] = datetime.utcnow()
+        data["iat"] = datetime.now(UTC)
         data["jti"] = str(uuid.uuid4())
 
         return jwt.encode(data, self.secret_key, algorithm=self.algorithm)
@@ -89,8 +89,8 @@ class TestAuthManager:
             "email": email,
             "role": role,
             "type": "access",
-            "exp": datetime.utcnow() + timedelta(minutes=30),
-            "iat": datetime.utcnow(),
+            "exp": datetime.now(UTC) + timedelta(minutes=30),
+            "iat": datetime.now(UTC),
             "jti": str(uuid.uuid4()),
         }
 

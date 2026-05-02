@@ -4,7 +4,7 @@ User database model.
 Represents users of the research platform.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from passlib.context import CryptContext
@@ -170,37 +170,37 @@ class User(BaseModel):
             new_password: New plain text password
         """
         self.hashed_password = pwd_context.hash(new_password)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def record_login(self) -> None:
         """Record a successful login."""
-        self.last_login = datetime.utcnow()
+        self.last_login = datetime.now(UTC)
         self.login_count += 1
 
     def activate(self) -> None:
         """Activate user account."""
         self.is_active = True
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def deactivate(self) -> None:
         """Deactivate user account."""
         self.is_active = False
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def verify_email(self) -> None:
         """Mark email as verified."""
         self.is_verified = True
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def grant_superuser(self) -> None:
         """Grant superuser privileges."""
         self.is_superuser = True
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def revoke_superuser(self) -> None:
         """Revoke superuser privileges."""
         self.is_superuser = False
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     @property
     def can_create_project(self) -> bool:

@@ -17,7 +17,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -51,7 +51,7 @@ class ExecutionStatus:
     final_output: dict[str, Any] | None = None
 
     # Timing
-    started_at: datetime = field(default_factory=datetime.utcnow)
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
     execution_time_seconds: float = 0.0
 

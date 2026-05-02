@@ -9,7 +9,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -178,8 +178,8 @@ async def authenticated_client(
         is_active=True,
         is_verified=True,
         role="researcher",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
     db_session.add(test_user)
@@ -217,8 +217,8 @@ async def admin_client(
         is_active=True,
         is_verified=True,
         role="admin",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
     db_session.add(admin_user)
@@ -330,8 +330,8 @@ async def seed_test_data(db_session: AsyncSession):
             is_active=True,
             is_verified=i % 2 == 0,  # Half verified, half not
             role=IntegrationTestConfig.TEST_ROLES[i % 3],
-            created_at=datetime.utcnow() - timedelta(days=i),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC) - timedelta(days=i),
+            updated_at=datetime.now(UTC),
         )
         users.append(user)
         db_session.add(user)
@@ -348,8 +348,8 @@ async def seed_test_data(db_session: AsyncSession):
             query_text=f"Research query {i}",
             domains=["AI", "ML", "Ethics"],
             depth_level="comprehensive",
-            created_at=datetime.utcnow() - timedelta(days=i),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC) - timedelta(days=i),
+            updated_at=datetime.now(UTC),
         )
         projects.append(project)
         db_session.add(project)
@@ -403,8 +403,8 @@ class TestDataFactory:
             "is_active": True,
             "is_verified": True,
             "role": "researcher",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": datetime.now(UTC),
+            "updated_at": datetime.now(UTC),
         }
         defaults.update(kwargs)
         return User(**defaults)
@@ -421,8 +421,8 @@ class TestDataFactory:
             "query_text": fake.paragraph(nb_sentences=3),
             "domains": ["AI", "ML", "Ethics"],
             "depth_level": "comprehensive",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": datetime.now(UTC),
+            "updated_at": datetime.now(UTC),
         }
         defaults.update(kwargs)
         return ResearchProject(**defaults)

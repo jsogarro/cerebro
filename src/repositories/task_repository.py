@@ -4,7 +4,7 @@ Task repository for agent task management.
 Provides specialized operations for agent task execution and monitoring.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -100,7 +100,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         Returns:
             List of retryable failed tasks
         """
-        since = datetime.utcnow() - timedelta(hours=since_hours)
+        since = datetime.now(UTC) - timedelta(hours=since_hours)
 
         query = self.build_query().where(
             and_(
@@ -150,7 +150,7 @@ class TaskRepository(BaseRepository[AgentTask]):
                 task.complete(output)
             else:
                 task.status = TaskStatus.COMPLETED
-                task.completed_at = datetime.utcnow()
+                task.completed_at = datetime.now(UTC)
         elif status == TaskStatus.FAILED:
             task.fail(error or "Unknown error")
         elif status == TaskStatus.RETRYING:
@@ -287,7 +287,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         stmt = (
             update(AgentTask)
             .where(and_(AgentTask.id.in_(task_ids), AgentTask.deleted_at.is_(None)))
-            .values(status=status, updated_at=datetime.utcnow())
+            .values(status=status, updated_at=datetime.now(UTC))
         )
 
         result = await self.session.execute(stmt)
@@ -339,7 +339,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         Returns:
             Number of tasks marked as failed
         """
-        cutoff = datetime.utcnow() - timedelta(hours=hours_old)
+        cutoff = datetime.now(UTC) - timedelta(hours=hours_old)
 
         stmt = (
             update(AgentTask)
@@ -353,7 +353,7 @@ class TaskRepository(BaseRepository[AgentTask]):
             .values(
                 status=TaskStatus.FAILED,
                 error_message="Task timed out",
-                updated_at=datetime.utcnow(),
+                updated_at=datetime.now(UTC),
             )
         )
 

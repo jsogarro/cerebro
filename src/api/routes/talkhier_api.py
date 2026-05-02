@@ -9,7 +9,7 @@ consensus building, and real-time communication capabilities.
 """
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import (
@@ -606,7 +606,7 @@ async def websocket_session_updates(
         await websocket.send_json({
             "event_type": "session_status",
             "session_id": session_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": {
                 "status": status.status.value,
                 "current_round": status.current_round,
@@ -875,7 +875,7 @@ async def _log_session_analytics(
             event_type=event_type,
             session_id=session_id,
             metrics=metrics,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
     except Exception as e:
         logger.warning(f"Failed to log analytics: {e!s}")
@@ -927,12 +927,12 @@ async def talkhier_health_check() -> dict[str, Any]:
             "service": "TalkHier Protocol API",
             "active_sessions": active_sessions,
             "session_manager": manager_status,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
     except Exception as e:
         return {
             "status": "unhealthy",
             "service": "TalkHier Protocol API",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }

@@ -8,7 +8,7 @@ and visualization for the orchestration system.
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -155,7 +155,7 @@ class OrchestrationMonitor:
 
         # Create metrics container
         metrics = WorkflowMetrics(
-            workflow_id=workflow_id, project_id=project_id, started_at=datetime.utcnow()
+            workflow_id=workflow_id, project_id=project_id, started_at=datetime.now(UTC)
         )
 
         self._active_workflows[workflow_id] = metrics
@@ -191,7 +191,7 @@ class OrchestrationMonitor:
             return
 
         metrics = self._active_workflows[workflow_id]
-        metrics.completed_at = datetime.utcnow()
+        metrics.completed_at = datetime.now(UTC)
         metrics.total_duration = (
             metrics.completed_at - metrics.started_at
         ).total_seconds()
@@ -302,7 +302,7 @@ class OrchestrationMonitor:
             "node_name": node_name,
             "duration": duration,
             "success": success,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         if error:
@@ -311,7 +311,7 @@ class OrchestrationMonitor:
                 {
                     "node": node_name,
                     "error": error,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
 

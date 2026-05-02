@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -145,7 +145,7 @@ class CLIWebSocketClient:
             try:
                 heartbeat_msg = {
                     "type": "heartbeat_response",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
                 await self.websocket.send(serialize_to_str(heartbeat_msg))
             except Exception as e:
@@ -402,7 +402,7 @@ class CLIWebSocketClient:
                 # Send a test message
                 test_msg = {
                     "type": "test",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
                 await websocket.send(serialize_to_str(test_msg))
 

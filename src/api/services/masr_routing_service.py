@@ -7,7 +7,7 @@ Based on "MasRouter: Learning to Route LLMs" research patterns.
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from src.ai_brain.config.model_schemas import ModelTier, RoutingStrategy
@@ -81,7 +81,7 @@ class MASRRoutingService:
         }
         
         # Service start time for uptime tracking
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(UTC)
         
     async def get_routing_decision(
         self,
@@ -478,7 +478,7 @@ class MASRRoutingService:
             RouterStatus with health and metrics
         """
         # Calculate uptime
-        uptime = (datetime.utcnow() - self.start_time).total_seconds()
+        uptime = (datetime.now(UTC) - self.start_time).total_seconds()
 
         # Calculate total routes
         _total_routes = sum(

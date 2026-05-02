@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -1007,7 +1007,7 @@ class ReportGenerator:
     
     def _generate_report_id(self) -> str:
         """Generate a unique report ID."""
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         random_suffix = hashlib.md5(str(uuid4()).encode()).hexdigest()[:8]
         return f"report_{timestamp}_{random_suffix}"
     

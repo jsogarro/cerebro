@@ -7,7 +7,7 @@ of routing strategies, execution patterns, and quality metrics.
 """
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket
@@ -259,7 +259,7 @@ async def create_supervisor_experiment(
     
     try:
         # Create supervisor experiment (would implement in experimentor)
-        experiment_id = f"supervisor_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        experiment_id = f"supervisor_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
         
         # Register with dashboard
         dashboard = get_dashboard()
@@ -455,7 +455,7 @@ async def dashboard_websocket(websocket: WebSocket) -> None:
     and optimization recommendations.
     """
     dashboard = get_dashboard()
-    client_id = f"dashboard_{datetime.utcnow().timestamp()}"
+    client_id = f"dashboard_{datetime.now(UTC).timestamp()}"
     
     try:
         await dashboard.connect_dashboard_client(client_id, websocket)
@@ -515,5 +515,5 @@ async def experiment_system_health() -> dict[str, Any]:
             "dashboard_clients": len(dashboard.dashboard_clients),
             "pending_optimizations": len(optimizer.active_optimizations)
         },
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(UTC).isoformat()
     }

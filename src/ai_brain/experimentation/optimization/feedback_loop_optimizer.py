@@ -9,7 +9,7 @@ improve its performance through experimental optimization.
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -426,7 +426,7 @@ class FeedbackLoopOptimizer:
         
         # Store recommendation for review
         recommendation = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "decision": decision,
             "requires_approval": True
         }

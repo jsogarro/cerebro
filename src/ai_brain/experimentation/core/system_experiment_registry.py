@@ -11,7 +11,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -130,7 +130,7 @@ class SystemExperimentRegistry:
             ExperimentEvent(
                 experiment_id=experiment.id,
                 event_type=ExperimentEventType.CREATED.value,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 data={'experiment': experiment.__dict__}
             )
         )
@@ -169,7 +169,7 @@ class SystemExperimentRegistry:
                 ExperimentEvent(
                     experiment_id=experiment_id,
                     event_type=ExperimentEventType.STARTED.value,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     data={'components': [c.value for c in affected_components]}
                 )
             )
@@ -230,7 +230,7 @@ class SystemExperimentRegistry:
                 ExperimentEvent(
                     experiment_id=experiment_id,
                     event_type=ExperimentEventType.STOPPED.value,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     data={'reason': reason}
                 )
             )
@@ -271,7 +271,7 @@ class SystemExperimentRegistry:
             ExperimentEvent(
                 experiment_id=experiment_id,
                 event_type=ExperimentEventType.WINNER_PROMOTED.value,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 data={'winning_variant': winning_variant.__dict__}
             )
         )
@@ -329,7 +329,7 @@ class SystemExperimentRegistry:
             ExperimentEvent(
                 experiment_id=experiment_id,
                 event_type=ExperimentEventType.VARIANT_ASSIGNED.value,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 data={
                     'variant_id': variant_id,
                     'context': context
@@ -357,7 +357,7 @@ class SystemExperimentRegistry:
             ExperimentEvent(
                 experiment_id=experiment_id,
                 event_type=ExperimentEventType.METRIC_RECORDED.value,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 data={
                     'metric_name': metric_name,
                     'value': value,
@@ -457,7 +457,7 @@ class SystemExperimentRegistry:
             ExperimentEvent(
                 experiment_id=experiment_id,
                 event_type=ExperimentEventType.ROLLBACK.value,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 data={'errors': [str(e) for e in errors]}
             )
         )

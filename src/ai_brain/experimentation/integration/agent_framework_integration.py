@@ -12,7 +12,7 @@ self-improving AI system through experimental optimization.
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -325,7 +325,7 @@ class AgentFrameworkExperimentor:
             Execution result with experiment metadata
         """
         request_id = str(uuid4())
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
 
         applicable_experiments = await self._get_applicable_experiments(
             query, context, experiment_ids
@@ -342,7 +342,7 @@ class AgentFrameworkExperimentor:
             query, context, execution_config
         )
 
-        end_time = datetime.utcnow()
+        end_time = datetime.now(UTC)
         latency_ms = (end_time - start_time).total_seconds() * 1000
 
         for exp_id, variant_id in assignments.items():
@@ -704,7 +704,7 @@ class AgentFrameworkExperimentor:
         logger.info(f"Stopped experiment {experiment_id}: {reason}")
 
         final_results["stop_reason"] = reason
-        final_results["stopped_at"] = datetime.utcnow().isoformat()
+        final_results["stopped_at"] = datetime.now(UTC).isoformat()
 
         return final_results
     

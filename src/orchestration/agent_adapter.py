@@ -7,7 +7,7 @@ the existing agent system with the LangGraph orchestration framework.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from src.agents.base import BaseAgent
@@ -68,7 +68,7 @@ class AgentAdapter:
         """
         logger.info(f"Executing agent: {agent_task_state.agent_type}")
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
 
         try:
             # Get or create agent instance
@@ -118,10 +118,10 @@ class AgentAdapter:
                 status="error",
                 output={},
                 confidence=0.0,
-                execution_time=(datetime.utcnow() - start_time).total_seconds(),
+                execution_time=(datetime.now(UTC) - start_time).total_seconds(),
                 metadata={
                     "error": str(e),
-                    "error_time": datetime.utcnow().isoformat(),
+                    "error_time": datetime.now(UTC).isoformat(),
                     "retry_count": agent_task_state.retry_count,
                 },
             )
@@ -276,7 +276,7 @@ class AgentAdapter:
             }
 
         metrics = self._agent_metrics[agent_type]
-        execution_time = (datetime.utcnow() - start_time).total_seconds()
+        execution_time = (datetime.now(UTC) - start_time).total_seconds()
 
         metrics["total_executions"] += 1
         if success:

@@ -6,7 +6,7 @@ as REST API endpoints for cost optimization, routing decisions, and
 learning-based LLM routing following MasRouter research patterns.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends
@@ -396,7 +396,7 @@ async def submit_routing_feedback(
         "quality_score": feedback.quality_score,
         "success": feedback.success,
         "feedback": feedback.feedback,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(UTC).isoformat()
     }
     
     # In production, this would update the learning model

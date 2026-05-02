@@ -7,7 +7,7 @@ and provides message broadcasting capabilities.
 
 import asyncio
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import WebSocket
@@ -41,8 +41,8 @@ class WebSocketConnection:
         self.client_type = client_type
         self.user_id = user_id
         self.project_subscriptions: set[UUID] = set()
-        self.connected_at = datetime.utcnow()
-        self.last_heartbeat = datetime.utcnow()
+        self.connected_at = datetime.now(UTC)
+        self.last_heartbeat = datetime.now(UTC)
         self.is_active = True
 
     async def send_message(self, message: WSMessage) -> bool:
@@ -75,14 +75,14 @@ class WebSocketConnection:
         return await self.send_message(heartbeat_message)
 
     def update_heartbeat(self) -> None:
-        self.last_heartbeat = datetime.utcnow()
+        self.last_heartbeat = datetime.now(UTC)
 
     def is_healthy(self, timeout_seconds: int = 60) -> bool:
         """Check if connection is healthy based on heartbeat."""
         if not self.is_active:
             return False
 
-        time_since_heartbeat = datetime.utcnow() - self.last_heartbeat
+        time_since_heartbeat = datetime.now(UTC) - self.last_heartbeat
         return time_since_heartbeat.total_seconds() < timeout_seconds
 
     def subscribe_to_project(self, project_id: UUID) -> None:
@@ -144,7 +144,7 @@ class ConnectionManager:
             data={
                 "client_id": client_id,
                 "message": "Connected to Research Platform WebSocket",
-                "server_time": datetime.utcnow().isoformat(),
+                "server_time": datetime.now(UTC).isoformat(),
             },
         )
         await connection.send_message(welcome_message)

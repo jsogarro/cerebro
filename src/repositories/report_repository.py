@@ -7,7 +7,7 @@ following the repository pattern with functional programming principles.
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
 
@@ -231,7 +231,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         Returns:
             Dictionary with statistics
         """
-        since_date = datetime.utcnow() - timedelta(days=days)
+        since_date = datetime.now(UTC) - timedelta(days=days)
         
         from sqlalchemy import select
 
@@ -317,7 +317,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         else:
             report.generation_status = status
             if status == "completed":
-                report.generation_completed_at = datetime.utcnow()
+                report.generation_completed_at = datetime.now(UTC)
 
         await self.update(report.id, {"generation_status": report.generation_status})
         return report
@@ -378,7 +378,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         Returns:
             Tuple of (deleted_count, deleted_ids)
         """
-        cutoff_date = datetime.utcnow() - timedelta(days=days_old)
+        cutoff_date = datetime.now(UTC) - timedelta(days=days_old)
         
         query = self.build_query().filter(GeneratedReport.created_at < cutoff_date)
         
