@@ -12,6 +12,7 @@ from typing import Any
 from src.agents.base import BaseAgent
 from src.agents.comparative_insight_synthesizer import ComparativeInsightSynthesizer
 from src.agents.comparative_matrix_builder import ComparisonMatrixBuilder
+from src.agents.comparative_theory_extractor import TheoryExtractor
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.services.parsers.json_parser import parse_json_response
@@ -33,6 +34,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         super().__init__(*args, **kwargs)
         self.matrix_builder = ComparisonMatrixBuilder()
         self.insight_synthesizer = ComparativeInsightSynthesizer()
+        self.theory_extractor = TheoryExtractor()
 
     def get_agent_type(self) -> str:
         """Return the agent type identifier."""
@@ -458,36 +460,13 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Comparative research results
         """
-        if not self.mcp_integration:
-            self.log_warning("MCP integration not available for research search")
-            return self._fallback_comparative_research(input_data)
-
-        items = input_data.get("items", [])
-        criteria = input_data.get("criteria", [])
-
-        # Build research query
-        items_text = " vs ".join(items[:3])  # Use first 3 items
-        criteria_text = " ".join(criteria[:3])  # Use first 3 criteria
-        query = f"comparative analysis {items_text} {criteria_text} comparison study"
-
-        try:
-            result = await self.mcp_integration.search_academic_sources(
-                query=query, databases=["arxiv", "pubmed"], max_results=10
-            )
-
-            if result.get("success"):
-                self.log_info(
-                    f"Found {result.get('total_found', 0)} comparative studies"
-                )
-                return dict(result)
-            else:
-                raise Exception(
-                    f"Comparative research search failed: {result.get('error')}"
-                )
-
-        except Exception as e:
-            self.log_error(f"MCP comparative research search failed: {e}")
-            return self._fallback_comparative_research(input_data)
+        return await self.theory_extractor.search_comparative_studies(
+            input_data,
+            self.mcp_integration,
+            self.log_info,
+            self.log_warning,
+            self.log_error,
+        )
 
     async def _perform_statistical_comparison(
         self, input_data: dict[str, Any]
@@ -822,6 +801,20 @@ class ComparativeAnalysisAgent(BaseAgent):
         """
         return self.insight_synthesizer.summarize_research_findings(research_data)
 
+    def _extract_theories_from_sources(
+        self, research_data: dict[str, Any]
+    ) -> list[dict[str, str]]:
+        """
+        Extract theory/framework hints from comparative research sources.
+
+        Args:
+            research_data: Research results from MCP
+
+        Returns:
+            Extracted theory metadata
+        """
+        return self.theory_extractor.extract_theories_from_sources(research_data)
+
     def _fallback_comparative_research(
         self, input_data: dict[str, Any]
     ) -> dict[str, Any]:
@@ -834,7 +827,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Mock research results
         """
-        return self.insight_synthesizer.fallback_comparative_research(input_data)
+        return self.theory_extractor.fallback_comparative_research(input_data)
 
     def _fallback_statistical_analysis(
         self, input_data: dict[str, Any]
