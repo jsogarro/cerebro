@@ -4,6 +4,7 @@ Agent Task database model.
 Represents agent tasks within research projects.
 """
 
+import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -52,6 +53,13 @@ class AgentTask(BaseModel):
         ForeignKey("research_projects.id"),
         nullable=False,
         index=True,
+    )
+
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(),
+        nullable=True,
+        index=True,
+        comment="Tenant organization boundary identifier",
     )
 
     agent_type: Mapped[str] = mapped_column(
@@ -109,6 +117,8 @@ class AgentTask(BaseModel):
 
     # Indexes
     __table_args__ = (
+        Index("idx_task_org_project_status", "organization_id", "project_id", "status"),
+        Index("idx_task_org_status", "organization_id", "status", "created_at"),
         Index("idx_task_project_status", "project_id", "status"),
         Index("idx_task_agent_status", "agent_type", "status"),
         Index("idx_task_priority", "priority", "status"),

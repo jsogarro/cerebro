@@ -4,6 +4,7 @@ User database model.
 Represents users of the research platform.
 """
 
+import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -11,6 +12,7 @@ from passlib.context import CryptContext
 from sqlalchemy import Boolean, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.models.db.base import UUID as DBUUID
 from src.models.db.base import BaseModel
 
 if TYPE_CHECKING:
@@ -41,6 +43,13 @@ class User(BaseModel):
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     organization: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        DBUUID(),
+        nullable=True,
+        index=True,
+        comment="Tenant organization boundary identifier",
+    )
 
     role: Mapped[str | None] = mapped_column(
         String(50), nullable=True
@@ -114,6 +123,7 @@ class User(BaseModel):
 
     # Indexes
     __table_args__ = (
+        Index("idx_user_org_active", "organization_id", "is_active"),
         Index("idx_user_active", "is_active", "is_verified"),
         Index("idx_user_login", "last_login", "is_active"),
     )
@@ -235,6 +245,9 @@ class User(BaseModel):
             "username": self.username,
             "full_name": self.full_name,
             "organization": self.organization,
+            "organization_id": str(self.organization_id)
+            if self.organization_id
+            else None,
             "role": self.role,
             "is_active": self.is_active,
             "is_verified": self.is_verified,
