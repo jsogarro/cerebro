@@ -29,6 +29,7 @@ from .base_supervisor import (
     SupervisionState,
 )
 from .research_agent_selector import ResearchAgentSelector
+from .research_execution_coordinator import ResearchExecutionCoordinator
 from .research_query_planner import ResearchQueryPlanner
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,10 @@ class ResearchSupervisor(BaseSupervisor):
         self.query_planner = ResearchQueryPlanner(
             self.research_depth,
             self.max_sources,
+            self.citation_style,
+        )
+        self.execution_coordinator = ResearchExecutionCoordinator(
+            self.send_talkhier_message,
             self.citation_style,
         )
 
@@ -230,31 +235,7 @@ class ResearchSupervisor(BaseSupervisor):
 
     async def _coordinate_literature_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate literature review worker."""
-
-        state = langgraph_state["supervision_state"]
-
-        logger.info("Literature review phase")
-        state.current_phase = "literature_review"
-
-        # Send task to literature worker if allocated
-        if "literature_review" in state.allocated_workers:
-            literature_task = state.worker_tasks["literature_review"]
-
-            response = await self.send_talkhier_message(
-                "literature_review",
-                MessageType.SUPERVISOR_ASSIGNMENT,
-                TalkHierContent(
-                    content="Conduct systematic literature review",
-                    background=f"Research supervision for: {state.original_query}",
-                    intermediate_outputs=literature_task,
-                ),
-            )
-
-            if response:
-                state.worker_results["literature_review"] = response.talkhier_content
-
-        langgraph_state["supervision_state"] = state
-        return langgraph_state
+        return await self.execution_coordinator.coordinate_literature(langgraph_state)
 
     async def _validate_sources_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Validate literature sources to catch hallucinated papers."""
@@ -359,155 +340,19 @@ If a paper exists but with slightly different details, mark exists=true and prov
 
     async def _coordinate_methodology_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate methodology worker."""
-
-        state = langgraph_state["supervision_state"]
-
-        logger.info("Methodology design phase")
-        state.current_phase = "methodology"
-
-        if "methodology" in state.allocated_workers:
-            methodology_task = state.worker_tasks["methodology"]
-
-            # Include literature results if available
-            if "literature_review" in state.worker_results:
-                methodology_task["literature_context"] = state.worker_results[
-                    "literature_review"
-                ]
-
-            response = await self.send_talkhier_message(
-                "methodology",
-                MessageType.SUPERVISOR_ASSIGNMENT,
-                TalkHierContent(
-                    content="Design appropriate research methodology",
-                    background=f"Methodology design for: {state.original_query}",
-                    intermediate_outputs=methodology_task,
-                ),
-            )
-
-            if response:
-                state.worker_results["methodology"] = response.talkhier_content
-
-        langgraph_state["supervision_state"] = state
-        return langgraph_state
+        return await self.execution_coordinator.coordinate_methodology(langgraph_state)
 
     async def _coordinate_analysis_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate comparative analysis worker."""
-
-        state = langgraph_state["supervision_state"]
-
-        logger.info("Comparative analysis phase")
-        state.current_phase = "comparative_analysis"
-
-        if "comparative_analysis" in state.allocated_workers:
-            analysis_task = state.worker_tasks["comparative_analysis"]
-
-            # Include previous results
-            analysis_task["literature_findings"] = state.worker_results.get(
-                "literature_review"
-            )
-            analysis_task["methodology_framework"] = state.worker_results.get(
-                "methodology"
-            )
-
-            response = await self.send_talkhier_message(
-                "comparative_analysis",
-                MessageType.SUPERVISOR_ASSIGNMENT,
-                TalkHierContent(
-                    content="Conduct comparative analysis of approaches",
-                    background=f"Analysis coordination for: {state.original_query}",
-                    intermediate_outputs=analysis_task,
-                ),
-            )
-
-            if response:
-                state.worker_results["comparative_analysis"] = response.talkhier_content
-
-        langgraph_state["supervision_state"] = state
-        return langgraph_state
+        return await self.execution_coordinator.coordinate_analysis(langgraph_state)
 
     async def _coordinate_synthesis_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate synthesis worker."""
-
-        state = langgraph_state["supervision_state"]
-
-        logger.info("Synthesis phase")
-        state.current_phase = "synthesis"
-
-        if "synthesis" in state.allocated_workers:
-            # Prepare all agent outputs for synthesis
-            agent_outputs = {}
-            for worker_type, result in state.worker_results.items():
-                if result and hasattr(result, "intermediate_outputs"):
-                    agent_outputs[worker_type] = (
-                        result.intermediate_outputs
-                        if isinstance(result.intermediate_outputs, dict)
-                        else {"findings": result.content}
-                    )
-
-            logger.info(
-                f"Synthesis receiving outputs from {len(agent_outputs)} agents: "
-                f"{list(agent_outputs.keys())}"
-            )
-
-            response = await self.send_talkhier_message(
-                "synthesis",
-                MessageType.SUPERVISOR_ASSIGNMENT,
-                TalkHierContent(
-                    content="Synthesize all research findings",
-                    background=f"Synthesis coordination for: {state.original_query}",
-                    intermediate_outputs={
-                        "agent_outputs": agent_outputs,
-                        "synthesis_focus": "comprehensive",
-                    },
-                ),
-            )
-
-            if response:
-                state.worker_results["synthesis"] = response.talkhier_content
-
-        langgraph_state["supervision_state"] = state
-        return langgraph_state
+        return await self.execution_coordinator.coordinate_synthesis(langgraph_state)
 
     async def _coordinate_citation_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Coordinate citation worker."""
-
-        state = langgraph_state["supervision_state"]
-
-        logger.info("Citation formatting phase")
-        state.current_phase = "citation"
-
-        if "citation" in state.allocated_workers:
-            # Extract sources from literature review results
-            sources = []
-            if "literature_review" in state.worker_results:
-                lit_result = state.worker_results["literature_review"]
-                if hasattr(lit_result, "intermediate_outputs") and isinstance(
-                    lit_result.intermediate_outputs, dict
-                ):
-                    sources = (
-                        lit_result.intermediate_outputs.get("sources_found")
-                        or lit_result.intermediate_outputs.get("sources")
-                        or []
-                    )
-
-            response = await self.send_talkhier_message(
-                "citation",
-                MessageType.SUPERVISOR_ASSIGNMENT,
-                TalkHierContent(
-                    content="Format citations and verify sources",
-                    background=f"Citation coordination for: {state.original_query}",
-                    intermediate_outputs={
-                        "sources": sources,
-                        "style": self.citation_style,
-                    },
-                ),
-            )
-
-            if response:
-                state.worker_results["citation"] = response.talkhier_content
-
-        langgraph_state["supervision_state"] = state
-        return langgraph_state
+        return await self.execution_coordinator.coordinate_citation(langgraph_state)
 
     async def _draft_paper_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
         """Draft a graduate-level research paper from all worker results."""
