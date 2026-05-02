@@ -97,7 +97,7 @@ class DevelopmentConfig(BaseConfig):
     )
     
     # Feature flags for development
-    features: dict = {
+    features: dict[str, bool] = {
         "mcp_tools": True,
         "agent_pooling": True,
         "caching": True,
@@ -109,5 +109,4 @@ class DevelopmentConfig(BaseConfig):
         "debug_endpoints": True,  # Enable debug endpoints
         "mock_external_services": True,  # Allow mocking external services
     }
-
 

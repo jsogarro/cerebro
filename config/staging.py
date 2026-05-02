@@ -8,9 +8,11 @@ and looser resource limits. Environment variables are loaded through
 direct ``os.getenv`` calls.
 """
 
+from typing import Any
+
 from pydantic_settings import BaseSettings
 
-from config.base import MonitoringConfig, SecurityConfig
+from config.base import DatabaseConfig, MonitoringConfig, SecurityConfig
 from config.production import ENV_SETTINGS_CONFIG, ProductionConfig
 
 
@@ -32,6 +34,15 @@ class StagingConfig(ProductionConfig):
 
     # API settings
     api_workers: int = 2  # Fewer workers than production
+
+    def __init__(
+        self,
+        *,
+        database: DatabaseConfig | None = None,
+        security: SecurityConfig | None = None,
+        **data: Any,
+    ) -> None:
+        super().__init__(database=database, security=security, **data)
 
     def model_post_init(self, __context: object) -> None:
         """Apply production overrides first, then staging-specific tweaks."""
@@ -100,5 +111,4 @@ class StagingConfig(ProductionConfig):
         if missing_vars:
             print(f"Warning: Missing environment variables: {', '.join(missing_vars)}")
             print("Using default values for staging environment")
-
 

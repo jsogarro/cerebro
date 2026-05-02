@@ -47,6 +47,66 @@ def validate_production_jwt_secret(value: str) -> None:
         )
 
 
+def _default_mcp_tools() -> dict[str, dict[str, Any]]:
+    return {
+        "academic_search": {
+            "enabled": True,
+            "max_results": 50,
+            "databases": ["arxiv", "pubmed"],
+            "cache_ttl": 3600,
+        },
+        "citation": {
+            "enabled": True,
+            "supported_styles": ["APA", "MLA", "Chicago"],
+            "doi_resolution": True,
+            "cache_ttl": 86400,
+        },
+        "statistics": {
+            "enabled": True,
+            "max_data_points": 10000,
+            "operations": ["descriptive", "correlation", "hypothesis"],
+            "cache_ttl": 1800,
+        },
+        "knowledge_graph": {
+            "enabled": True,
+            "max_entities": 1000,
+            "max_relationships": 5000,
+            "cache_ttl": 3600,
+        },
+    }
+
+
+def _default_agent_configs() -> dict[str, dict[str, Any]]:
+    return {
+        "literature_review": {
+            "max_sources": 100,
+            "search_depth": "comprehensive",
+            "enable_mcp": True,
+        },
+        "comparative_analysis": {
+            "max_items": 20,
+            "max_criteria": 15,
+            "enable_statistics": True,
+            "enable_mcp": True,
+        },
+        "methodology": {
+            "recommendation_count": 5,
+            "bias_detection": True,
+            "enable_mcp": True,
+        },
+        "synthesis": {
+            "max_input_size": 50000,
+            "coherence_check": True,
+            "enable_mcp": True,
+        },
+        "citation": {
+            "verification_enabled": True,
+            "plagiarism_check": False,
+            "enable_mcp": True,
+        },
+    }
+
+
 class MCPConfig(BaseModel):
     """MCP (Model Context Protocol) configuration."""
     
@@ -73,32 +133,7 @@ class MCPConfig(BaseModel):
     connection_pool_recycle: int = Field(default=3600)
     
     # Tool-specific settings
-    tools: dict[str, dict[str, Any]] = Field(default_factory=lambda: {
-        "academic_search": {
-            "enabled": True,
-            "max_results": 50,
-            "databases": ["arxiv", "pubmed"],
-            "cache_ttl": 3600
-        },
-        "citation": {
-            "enabled": True,
-            "supported_styles": ["APA", "MLA", "Chicago"],
-            "doi_resolution": True,
-            "cache_ttl": 86400
-        },
-        "statistics": {
-            "enabled": True,
-            "max_data_points": 10000,
-            "operations": ["descriptive", "correlation", "hypothesis"],
-            "cache_ttl": 1800
-        },
-        "knowledge_graph": {
-            "enabled": True,
-            "max_entities": 1000,
-            "max_relationships": 5000,
-            "cache_ttl": 3600
-        }
-    })
+    tools: dict[str, dict[str, Any]] = Field(default_factory=_default_mcp_tools)
 
 
 class AgentConfig(BaseModel):
@@ -126,34 +161,7 @@ class AgentConfig(BaseModel):
     mcp_fallback_enabled: bool = Field(default=True)
     
     # Agent-specific configurations
-    agents: dict[str, dict[str, Any]] = Field(default_factory=lambda: {
-        "literature_review": {
-            "max_sources": 100,
-            "search_depth": "comprehensive",
-            "enable_mcp": True
-        },
-        "comparative_analysis": {
-            "max_items": 20,
-            "max_criteria": 15,
-            "enable_statistics": True,
-            "enable_mcp": True
-        },
-        "methodology": {
-            "recommendation_count": 5,
-            "bias_detection": True,
-            "enable_mcp": True
-        },
-        "synthesis": {
-            "max_input_size": 50000,
-            "coherence_check": True,
-            "enable_mcp": True
-        },
-        "citation": {
-            "verification_enabled": True,
-            "plagiarism_check": False,
-            "enable_mcp": True
-        }
-    })
+    agents: dict[str, dict[str, Any]] = Field(default_factory=_default_agent_configs)
 
 
 class DatabaseConfig(BaseModel):
@@ -218,7 +226,7 @@ class RedisConfig(BaseModel):
     
     # Persistence settings
     persistence_enabled: bool = Field(default=True)
-    save_intervals: list = Field(default_factory=lambda: ["900 1", "300 10", "60 10000"])
+    save_intervals: list[str] = Field(default_factory=lambda: ["900 1", "300 10", "60 10000"])
     
     @property
     def url(self) -> str:
@@ -348,9 +356,9 @@ class SecurityConfig(BaseModel):
     
     # CORS
     cors_enabled: bool = Field(default=True)
-    cors_origins: list = Field(default_factory=lambda: ["http://localhost:3000"])
-    cors_methods: list = Field(default_factory=lambda: ["GET", "POST", "PUT", "DELETE"])
-    cors_headers: list = Field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    cors_methods: list[str] = Field(default_factory=lambda: ["GET", "POST", "PUT", "DELETE"])
+    cors_headers: list[str] = Field(default_factory=lambda: ["*"])
     
     # Security headers
     security_headers_enabled: bool = Field(default=True)

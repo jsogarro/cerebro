@@ -7,6 +7,7 @@ ENVIRONMENT variable.
 """
 
 import os
+from collections.abc import Callable
 from functools import lru_cache
 
 from config.base import BaseConfig
@@ -16,9 +17,9 @@ from config.staging import StagingConfig
 from config.testing import TestingConfig
 
 # Configuration class mapping
-CONFIG_CLASSES = {
+CONFIG_CLASSES: dict[str, Callable[[], BaseConfig]] = {
     "development": DevelopmentConfig,
-    "staging": StagingConfig,
+    "staging": lambda: StagingConfig(),
     "production": ProductionConfig,
     "testing": TestingConfig,
     "test": TestingConfig,  # Alias for testing
@@ -62,7 +63,7 @@ def get_config(environment: str | None = None) -> BaseConfig:
     return config
 
 
-def reload_config():
+def reload_config() -> None:
     """Clear the configuration cache to force reload."""
     get_config.cache_clear()
 

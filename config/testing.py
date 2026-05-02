@@ -133,7 +133,7 @@ class TestingConfig(BaseConfig):
     )
     
     # Feature flags for testing
-    features: dict = {
+    features: dict[str, bool] = {
         "mcp_tools": False,  # Use mocks
         "agent_pooling": False,
         "caching": False,
@@ -146,5 +146,4 @@ class TestingConfig(BaseConfig):
         "mock_external_services": True,  # Always mock external services
         "test_mode": True,  # Special flag for test-only features
     }
-
 
