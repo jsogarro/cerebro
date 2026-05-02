@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from src.agents.base import BaseAgent
+from src.agents.comparative_insight_synthesizer import ComparativeInsightSynthesizer
 from src.agents.comparative_matrix_builder import ComparisonMatrixBuilder
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
@@ -31,6 +32,7 @@ class ComparativeAnalysisAgent(BaseAgent):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.matrix_builder = ComparisonMatrixBuilder()
+        self.insight_synthesizer = ComparativeInsightSynthesizer()
 
     def get_agent_type(self) -> str:
         """Return the agent type identifier."""
@@ -281,13 +283,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Trade-off analysis
         """
-        analysis = {
-            "total_trade_offs": len(trade_offs),
-            "trade_off_categories": self._categorize_trade_offs(trade_offs),
-            "severity": self._assess_trade_off_severity(trade_offs, matrix),
-        }
-
-        return analysis
+        return self.insight_synthesizer.analyze_trade_offs(trade_offs, matrix)
 
     def _categorize_trade_offs(self, trade_offs: list[str]) -> dict[str, list[str]]:
         """
@@ -299,30 +295,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Categorized trade-offs
         """
-        categories: dict[str, list[str]] = {
-            "performance": [],
-            "cost": [],
-            "complexity": [],
-            "time": [],
-            "quality": [],
-            "other": [],
-        }
-
-        for trade_off in trade_offs:
-            trade_off_lower = trade_off.lower()
-            categorized = False
-
-            for category in ["performance", "cost", "complexity", "time", "quality"]:
-                if category in trade_off_lower:
-                    categories[category].append(trade_off)
-                    categorized = True
-                    break
-
-            if not categorized:
-                categories["other"].append(trade_off)
-
-        # Remove empty categories
-        return {k: v for k, v in categories.items() if v}
+        return self.insight_synthesizer.categorize_trade_offs(trade_offs)
 
     def _assess_trade_off_severity(
         self, trade_offs: list[str], matrix: dict[str, dict[str, float]]
@@ -337,32 +310,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Severity assessment
         """
-        if not trade_offs:
-            return "none"
-
-        # Calculate variance in scores to assess trade-off severity
-        if matrix:
-            all_scores: list[float] = []
-            for scores in matrix.values():
-                all_scores.extend(scores.values())
-
-            if all_scores:
-                variance = sum((s - 0.5) ** 2 for s in all_scores) / len(all_scores)
-
-                if variance > 0.2:
-                    return "high"
-                elif variance > 0.1:
-                    return "moderate"
-                else:
-                    return "low"
-
-        # Default based on count
-        if len(trade_offs) > 5:
-            return "high"
-        elif len(trade_offs) > 2:
-            return "moderate"
-        else:
-            return "low"
+        return self.insight_synthesizer.assess_trade_off_severity(trade_offs, matrix)
 
     def _assess_matrix_completeness(self, matrix: dict[str, dict[str, float]]) -> float:
         """
@@ -839,37 +787,9 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Enhanced trade-off analysis
         """
-        # Base trade-off analysis
-        analysis = self._analyze_trade_offs(trade_offs, matrix)
-
-        # Add relationship insights if available
-        if relationship_graph.get("success"):
-            entities = relationship_graph.get("entities", [])
-            relationships = relationship_graph.get("relationships", [])
-
-            analysis["relationship_insights"] = {
-                "entities_identified": len(entities),
-                "relationships_found": len(relationships),
-                "relationship_types": list(
-                    {r.get("type", "unknown") for r in relationships}
-                ),
-            }
-
-            # Analyze entity coverage in trade-offs
-            entity_texts = [e.get("text", "").lower() for e in entities]
-            trade_off_coverage = 0
-            for trade_off in trade_offs:
-                trade_off_lower = trade_off.lower()
-                for entity_text in entity_texts:
-                    if entity_text in trade_off_lower:
-                        trade_off_coverage += 1
-                        break
-
-            analysis["entity_coverage"] = (
-                trade_off_coverage / len(trade_offs) if trade_offs else 0
-            )
-
-        return analysis
+        return self.insight_synthesizer.analyze_trade_offs_with_relationships(
+            trade_offs, matrix, relationship_graph
+        )
 
     async def _cite_comparison_methodologies(
         self, research_data: dict[str, Any]
@@ -883,71 +803,12 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Formatted citations for methodologies
         """
-        if not self.mcp_integration or not research_data.get("success"):
-            return {"success": False, "citations": []}
-
-        sources = research_data.get("sources", [])
-        if not sources:
-            return {"success": True, "citations": []}
-
-        # Filter for methodology-focused papers
-        methodology_sources = []
-        for source in sources[:5]:  # Top 5 sources
-            title = source.get("title", "").lower()
-            abstract = source.get("abstract", "").lower()
-
-            methodology_keywords = [
-                "comparison",
-                "comparative",
-                "methodology",
-                "framework",
-                "approach",
-            ]
-            if any(
-                keyword in title or keyword in abstract
-                for keyword in methodology_keywords
-            ):
-                methodology_sources.append(source)
-
-        if not methodology_sources:
-            return {
-                "success": True,
-                "citations": [],
-                "note": "No methodology-specific sources found",
-            }
-
-        # Convert to citation format
-        citation_sources = []
-        for source in methodology_sources:
-            citation_source = {
-                "title": source.get("title", "Unknown Title"),
-                "authors": source.get("authors", ["Unknown Author"]),
-                "year": source.get("year", "n.d."),
-                "journal": source.get("journal", ""),
-                "doi": source.get("doi", ""),
-            }
-            citation_sources.append(citation_source)
-
-        try:
-            result = await self.mcp_integration.format_citations(
-                sources=citation_sources, style="APA"
-            )
-
-            if result.get("success"):
-                self.log_info(
-                    f"Generated {len(citation_sources)} methodology citations"
-                )
-                return {
-                    "success": True,
-                    "citations": result.get("formatted_citations", []),
-                    "methodology_count": len(citation_sources),
-                }
-            else:
-                raise Exception(f"Citation formatting failed: {result.get('error')}")
-
-        except Exception as e:
-            self.log_error(f"Methodology citation generation failed: {e}")
-            return {"success": False, "error": str(e)}
+        return await self.insight_synthesizer.cite_comparison_methodologies(
+            research_data,
+            self.mcp_integration,
+            self.log_info,
+            self.log_error,
+        )
 
     def _summarize_research_findings(self, research_data: dict[str, Any]) -> str:
         """
@@ -959,30 +820,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Summary text of research findings
         """
-        if not research_data.get("success"):
-            return "No research data available."
-
-        sources = research_data.get("sources", [])
-        if not sources:
-            return "No research sources found."
-
-        summary_parts = []
-        for i, source in enumerate(sources[:3], 1):  # Top 3 sources
-            title = source.get("title", "Unknown Title")
-            year = source.get("year", "n.d.")
-            abstract = source.get("abstract", "")
-
-            source_summary = f"{i}. {title} ({year})"
-            if abstract:
-                # Extract key phrases from abstract
-                abstract_snippet = (
-                    abstract[:150] + "..." if len(abstract) > 150 else abstract
-                )
-                source_summary += f": {abstract_snippet}"
-
-            summary_parts.append(source_summary)
-
-        return "\n".join(summary_parts)
+        return self.insight_synthesizer.summarize_research_findings(research_data)
 
     def _fallback_comparative_research(
         self, input_data: dict[str, Any]
@@ -996,29 +834,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Mock research results
         """
-        items = input_data.get("items", [])
-        criteria = input_data.get("criteria", [])
-
-        mock_sources = []
-        for i in range(3):
-            mock_sources.append(
-                {
-                    "title": f"Comparative Study {i+1}: {' vs '.join(items[:2])} Analysis",
-                    "authors": [f"Researcher {i+1}"],
-                    "year": 2024 - i,
-                    "journal": "Journal of Comparative Analysis",
-                    "abstract": f"This study compares {items[0]} and {items[1] if len(items) > 1 else 'alternatives'} across {criteria[0] if criteria else 'multiple criteria'}...",
-                    "source": "fallback",
-                }
-            )
-
-        return {
-            "success": True,
-            "sources": mock_sources,
-            "total_found": len(mock_sources),
-            "search_strategy": "Fallback comparative research",
-            "fallback": True,
-        }
+        return self.insight_synthesizer.fallback_comparative_research(input_data)
 
     def _fallback_statistical_analysis(
         self, input_data: dict[str, Any]
@@ -1032,17 +848,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Mock statistical analysis
         """
-        return {
-            "success": True,
-            "tests_performed": ["basic_comparison"],
-            "descriptive_stats": {
-                "mean": 0.5,
-                "std_dev": 0.2,
-                "count": len(input_data.get("items", [])),
-            },
-            "data_quality": "limited",
-            "fallback": True,
-        }
+        return self.insight_synthesizer.fallback_statistical_analysis(input_data)
 
     def _generate_mock_analysis_with_mcp(
         self,
@@ -1061,22 +867,17 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Enhanced mock analysis
         """
-        # Base mock analysis
-        fake_task = AgentTask(id="mock", agent_type="comparative", input_data=input_data, priority=1)
-        analysis = self._generate_mock_analysis(fake_task)
-
-        # Enhance with MCP insights
-        if research_data.get("success"):
-            analysis["research_informed"] = True
-            analysis["research_sources"] = research_data.get("total_found", 0)
-
-        if statistical_data.get("success"):
-            analysis["statistically_enhanced"] = True
-            analysis["statistical_tests"] = statistical_data.get("tests_performed", [])
-
-        analysis["mcp_enhanced"] = True
-
-        return analysis
+        fake_task = AgentTask(
+            id="mock",
+            agent_type="comparative",
+            input_data=input_data,
+            priority=1,
+        )
+        return self.insight_synthesizer.generate_mock_analysis_with_mcp(
+            self._generate_mock_analysis(fake_task),
+            research_data,
+            statistical_data,
+        )
 
     def _get_mcp_status(self) -> dict[str, Any]:
         """Get MCP integration status for comparative analysis."""
