@@ -29,7 +29,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
 
     async def get_by_user(
         self,
-        user_id: UUID,
+        user_id: str | UUID,
         status: ProjectStatus | None = None,
         limit: int | None = None,
         offset: int | None = None,
@@ -48,7 +48,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         Returns:
             List of projects
         """
-        filters: dict[str, Any] = {"user_id": user_id}
+        filters: dict[str, Any] = {"user_id": str(user_id)}
         if status:
             filters["status"] = status
 
@@ -61,6 +61,38 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             load_relationships=["agent_tasks", "results"],
             organization_id=organization_id,
         )
+
+    async def get_for_user(
+        self,
+        project_id: UUID,
+        user_id: str | UUID,
+        organization_id: str | UUID,
+        load_relationships: list[str] | None = None,
+    ) -> ResearchProject | None:
+        """
+        Get a project by ID within both user and organization boundaries.
+
+        Args:
+            project_id: Project ID
+            user_id: Authenticated user boundary
+            organization_id: Tenant organization boundary
+            load_relationships: List of relationships to eager load
+
+        Returns:
+            Project or None if outside the tenant/user boundary
+        """
+        query = self.build_query().where(
+            ResearchProject.id == project_id,
+            ResearchProject.user_id == str(user_id),
+        )
+        query = self.apply_organization_scope(query, organization_id)
+
+        if load_relationships:
+            for rel in load_relationships:
+                query = query.options(selectinload(getattr(ResearchProject, rel)))
+
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
 
     async def get_in_progress(
         self,

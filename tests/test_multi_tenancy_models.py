@@ -86,3 +86,20 @@ def test_tenant_boundary_migration_adds_columns_and_indexes() -> None:
         "idx_task_org_status",
     ):
         assert index_name in migration
+
+
+def test_tenant_rls_migration_adds_postgres_policies() -> None:
+    migration = (
+        REPO_ROOT
+        / "alembic"
+        / "versions"
+        / "b7a9c2d4e8f1_add_tenant_rls_policies.py"
+    ).read_text()
+
+    assert 'down_revision: str | Sequence[str] | None = "9d8c7b6a5e4f"' in migration
+    assert "ALTER TABLE research_projects ENABLE ROW LEVEL SECURITY" in migration
+    assert "ALTER TABLE agent_tasks ENABLE ROW LEVEL SECURITY" in migration
+    assert "tenant_isolation_research_projects" in migration
+    assert "tenant_isolation_agent_tasks" in migration
+    assert "current_setting('app.current_org_id', true)::uuid" in migration
+    assert "DROP POLICY IF EXISTS tenant_isolation_research_projects" in migration

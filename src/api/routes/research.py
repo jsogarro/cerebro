@@ -5,11 +5,13 @@ Research API endpoints for Research Platform.
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
 from src.api.services.direct_execution_service import get_direct_execution_service
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.research_project import ProjectStatus
 from src.models.db.session import get_session
 from src.models.research_project import (
@@ -45,21 +47,29 @@ class CreateResearchProjectRequest(BaseModel):
 
 
 @router.post(
-    "/projects", response_model=ResearchProject, status_code=status.HTTP_201_CREATED
+    "/projects", response_model=ResearchProject, status_code=http_status.HTTP_201_CREATED
 )
 async def create_research_project(
     request: CreateResearchProjectRequest,
     repo: ResearchRepository = Depends(get_research_repo),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ResearchProject:
     """Create a new research project."""
     try:
         import json as _json
 
+        if request.user_id != tenant_context.user_id:
+            raise HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail="Cannot create a project for another user",
+            )
+
         # Create research project in database
         db_project = await repo.create(
             title=request.title,
             query=_json.dumps(request.query.model_dump()),
-            user_id=request.user_id,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
             domains=request.scope.domains if request.scope else [],
             status=ProjectStatus.DRAFT,
         )
@@ -80,7 +90,11 @@ async def create_research_project(
         try:
             execution_service = get_direct_execution_service()
             execution_id = await execution_service.start_research_execution(project)
-            await repo.update_status(db_project.id, ProjectStatus.IN_PROGRESS)
+            await repo.update_status(
+                db_project.id,
+                ProjectStatus.IN_PROGRESS,
+                organization_id=tenant_context.organization_id,
+            )
             project.status = ResearchStatus.IN_PROGRESS
             logger.info(
                 "Started direct execution for research project",
@@ -98,14 +112,17 @@ async def create_research_project(
             "Created research project",
             project_id=str(project.id),
             title=request.title,
-            user_id=request.user_id,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
         )
 
         return project
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to create research project", exc_info=e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create research project",
         ) from e
 
@@ -114,14 +131,19 @@ async def create_research_project(
 async def get_research_project(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ResearchProject:
     """Get a research project by ID."""
     # Fetch from database
-    db_project = await repo.get(project_id)
+    db_project = await repo.get_for_user(
+        project_id,
+        user_id=tenant_context.user_id,
+        organization_id=tenant_context.organization_id,
+    )
 
     if not db_project:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Research project {project_id} not found",
         )
 
@@ -146,10 +168,18 @@ async def get_research_project(
             if execution.project_id == str(project_id):
                 if execution.status == "completed":
                     project.status = ResearchStatus.COMPLETED
-                    await repo.update_status(project_id, ProjectStatus.COMPLETED)
+                    await repo.update_status(
+                        project_id,
+                        ProjectStatus.COMPLETED,
+                        organization_id=tenant_context.organization_id,
+                    )
                 elif execution.status == "failed":
                     project.status = ResearchStatus.FAILED
-                    await repo.update_status(project_id, ProjectStatus.FAILED)
+                    await repo.update_status(
+                        project_id,
+                        ProjectStatus.FAILED,
+                        organization_id=tenant_context.organization_id,
+                    )
                 elif execution.status in ["running", "pending"]:
                     project.status = ResearchStatus.IN_PROGRESS
                 break
@@ -166,27 +196,24 @@ async def list_research_projects(
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
     repo: ResearchRepository = Depends(get_research_repo),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> list[ResearchProject]:
     """List research projects with filtering."""
+    if user_id and user_id != tenant_context.user_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Cannot list projects for another user",
+        )
+
     # Fetch from database with filters
-    if user_id:
+    effective_user_id = user_id or tenant_context.user_id
+    if effective_user_id:
         db_projects = await repo.get_by_user(
-            UUID(user_id),
+            effective_user_id,
             status=ProjectStatus(status) if status else None,
             limit=limit,
             offset=offset,
-        )
-    elif status:
-        filters = {"status": ProjectStatus(status)}
-        db_projects = await repo.get_many(
-            filters=filters,
-            limit=limit,
-            offset=offset,
-        )
-    else:
-        db_projects = await repo.get_many(
-            limit=limit,
-            offset=offset,
+            organization_id=tenant_context.organization_id,
         )
 
     # Convert to API models
@@ -214,13 +241,18 @@ async def list_research_projects(
 async def get_research_progress(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ResearchProgress:
     """Get real-time progress of a research project."""
     # Check project exists
-    db_project = await repo.get(project_id)
+    db_project = await repo.get_for_user(
+        project_id,
+        user_id=tenant_context.user_id,
+        organization_id=tenant_context.organization_id,
+    )
     if not db_project:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Research project {project_id} not found",
         )
 
@@ -279,17 +311,22 @@ async def get_research_progress(
         )
 
 
-@router.post("/projects/{project_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/projects/{project_id}/cancel", status_code=http_status.HTTP_204_NO_CONTENT)
 async def cancel_research_project(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> None:
     """Cancel a research project."""
     # Check project exists
-    db_project = await repo.get(project_id)
+    db_project = await repo.get_for_user(
+        project_id,
+        user_id=tenant_context.user_id,
+        organization_id=tenant_context.organization_id,
+    )
     if not db_project:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Research project {project_id} not found",
         )
 
@@ -305,11 +342,15 @@ async def cancel_research_project(
 
     if success:
         # Update project status in database
-        await repo.update_status(project_id, ProjectStatus.CANCELLED)
+        await repo.update_status(
+            project_id,
+            ProjectStatus.CANCELLED,
+            organization_id=tenant_context.organization_id,
+        )
         logger.info("Cancelled research project", project_id=str(project_id))
     else:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cancel research project",
         )
 
@@ -324,7 +365,7 @@ async def refine_research_scope(
     # TODO: Adjust Temporal workflow
 
     raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        status_code=http_status.HTTP_501_NOT_IMPLEMENTED,
         detail="Scope refinement not yet implemented",
     )
 
@@ -333,13 +374,19 @@ async def refine_research_scope(
 async def get_research_results(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     """Get the results of a completed research project."""
     # Check project exists
-    db_project = await repo.get_with_results(project_id)
+    db_project = await repo.get_for_user(
+        project_id,
+        user_id=tenant_context.user_id,
+        organization_id=tenant_context.organization_id,
+        load_relationships=["results", "agent_tasks", "checkpoints"],
+    )
     if not db_project:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Research project {project_id} not found",
         )
 
@@ -362,6 +409,6 @@ async def get_research_results(
         logger.warning(f"Could not get execution results: {e}")
 
     raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
+        status_code=http_status.HTTP_404_NOT_FOUND,
         detail=f"Results for project {project_id} not available yet",
     )
