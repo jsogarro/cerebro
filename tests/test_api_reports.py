@@ -132,7 +132,7 @@ class TestReportsAPI:
             response = client.get(f"/api/v1/reports/{report_id}")
 
             assert response.status_code == 404
-            assert "not found" in response.json()["detail"]
+            assert "not found" in response.json()["error"]["message"]
 
     def test_download_report_endpoint(self):
         """Test download report endpoint."""
@@ -162,7 +162,7 @@ class TestReportsAPI:
             response = client.get(f"/api/v1/reports/{report_id}/download/{format_type}")
 
             assert response.status_code == 200
-            assert response.headers["content-type"] == mock_mime_type
+            assert response.headers["content-type"].startswith(mock_mime_type)
             assert "attachment" in response.headers["content-disposition"]
 
     def test_download_report_not_found(self):
@@ -442,7 +442,7 @@ class TestReportsAPI:
             response = client.get("/api/v1/reports/statistics")
 
             assert response.status_code == 503
-            assert "not available" in response.json()["detail"]
+            assert "not available" in response.json()["error"]["message"]
 
     def test_validation_errors(self):
         """Test request validation errors."""

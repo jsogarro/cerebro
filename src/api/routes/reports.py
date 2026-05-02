@@ -282,6 +282,49 @@ async def generate_report(
         ) from e
 
 
+@router.get("/statistics", response_model=ReportStatisticsResponse)
+async def get_report_statistics(
+    user_id: UUID | None = Query(None, description="Filter by user ID"),
+    days: int = Query(30, ge=1, le=365, description="Days to look back"),
+) -> ReportStatisticsResponse:
+    """Get report generation statistics."""
+    try:
+        _generator, storage_service, _report_repo, _format_repo = get_report_services()
+
+        if not storage_service:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Report storage service not available",
+            )
+
+        # Get statistics from storage service
+        stats = await storage_service.get_storage_statistics()
+
+        return ReportStatisticsResponse(
+            total_reports=stats.get("total_reports", 0),
+            status_counts=stats.get("status_counts", {}),
+            type_counts=stats.get("type_counts", {}),
+            average_quality_score=stats.get("average_quality_score", 0.0),
+            average_confidence_score=stats.get("average_confidence_score", 0.0),
+            average_generation_time=stats.get("average_generation_time", 0.0),
+            average_word_count=stats.get("average_word_count", 0),
+            total_access_count=stats.get("total_access_count", 0),
+            storage_statistics={
+                "total_storage_mb": stats.get("total_storage_mb", 0),
+                "total_files": stats.get("total_files", 0),
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get report statistics", exc_info=e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get statistics",
+        ) from e
+
+
 @router.get("/{report_id}", response_model=ReportResponse)
 async def get_report(report_id: UUID) -> ReportResponse:
     """Get report details by ID."""
@@ -469,47 +512,6 @@ async def search_reports(request: ReportSearchRequest) -> ReportListResponse:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to search reports",
-        ) from e
-
-
-@router.get("/statistics", response_model=ReportStatisticsResponse)
-async def get_report_statistics(
-    user_id: UUID | None = Query(None, description="Filter by user ID"),
-    days: int = Query(30, ge=1, le=365, description="Days to look back"),
-) -> ReportStatisticsResponse:
-    """Get report generation statistics."""
-    try:
-        _generator, storage_service, _report_repo, _format_repo = get_report_services()
-
-        if not storage_service:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Report storage service not available",
-            )
-
-        # Get statistics from storage service
-        stats = await storage_service.get_storage_statistics()
-
-        return ReportStatisticsResponse(
-            total_reports=stats.get("total_reports", 0),
-            status_counts=stats.get("status_counts", {}),
-            type_counts=stats.get("type_counts", {}),
-            average_quality_score=stats.get("average_quality_score", 0.0),
-            average_confidence_score=stats.get("average_confidence_score", 0.0),
-            average_generation_time=stats.get("average_generation_time", 0.0),
-            average_word_count=stats.get("average_word_count", 0),
-            total_access_count=stats.get("total_access_count", 0),
-            storage_statistics={
-                "total_storage_mb": stats.get("total_storage_mb", 0),
-                "total_files": stats.get("total_files", 0),
-            },
-        )
-
-    except Exception as e:
-        logger.error("Failed to get report statistics", exc_info=e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get statistics",
         ) from e
 
 
