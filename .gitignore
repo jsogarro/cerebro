@@ -61,3 +61,8 @@ cerebro_dev.db
 /tmp/fixit/
 .fixit/
 *.fixit.checkpoint
+
+# Refactorit ephemeral artifacts
+/tmp/refactorit/
+.refactorit/
+*.refactorit.checkpoint
