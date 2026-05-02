@@ -98,7 +98,7 @@ class ReportResponse(BaseModel):
     quality_score: float
     confidence_score: float
     created_at: str
-    generation_time_seconds: float | None
+    generation_time_seconds: float | None = None
     download_urls: dict[str, str] = Field(default_factory=dict)
 
     @classmethod

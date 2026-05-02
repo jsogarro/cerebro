@@ -146,7 +146,7 @@ class Citation(BaseModel):
     
     def _format_mla(self, authors: str) -> str:
         """Format citation in MLA style."""
-        citation = f'{authors}. "{self.title}."'
+        citation = f'{authors.rstrip(".")}. "{self.title}."'
         if self.journal:
             citation += f" {self.journal}"
             if self.volume:

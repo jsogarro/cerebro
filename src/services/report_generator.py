@@ -28,6 +28,14 @@ from src.models.report import (
     Visualization,
     VisualizationType,
 )
+from src.services.exporters import (
+    DOCXExporter,
+    DOCXExportError,
+    LaTeXExporter,
+    LaTeXExportError,
+    PDFExporter,
+    PDFExportError,
+)
 from src.services.report_config import (
     ReportFormatConfig,
     ReportQualityConfig,
@@ -38,6 +46,8 @@ from src.services.report_config import (
     create_report_settings,
     create_template_config,
 )
+from src.services.template_renderer import TemplateRenderer, TemplateRenderingError
+from src.services.visualization_generator import VisualizationGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +75,12 @@ class ReportGenerator:
         
         # Initialize storage directory
         self._ensure_storage_directory()
-        
-        # Template cache for performance
-        self._template_cache: dict[str, Any] = {}
+
+        self.template_renderer = TemplateRenderer(self.settings, self.template_config)
+        self.visualization_generator = VisualizationGenerator(self.settings)
+        self._pdf_exporter: PDFExporter | None = None
+        self._latex_exporter: LaTeXExporter | None = None
+        self._docx_exporter: DOCXExporter | None = None
     
     def _ensure_storage_directory(self) -> None:
         """Ensure the report storage directory exists."""
@@ -796,8 +809,11 @@ class ReportGenerator:
     
     async def _generate_html(self, report: Report) -> ReportOutput:
         """Generate HTML report output."""
-        # This will be implemented with Jinja2 templates
-        html_content = self._generate_basic_html(report)
+        try:
+            html_content = self.template_renderer.render_report(report)
+        except TemplateRenderingError as e:
+            logger.warning(f"Template rendering unavailable, using basic HTML: {e}")
+            html_content = self._generate_basic_html(report)
 
         return ReportOutput(
             format=ReportFormat.HTML,
@@ -861,11 +877,15 @@ class ReportGenerator:
         )
     
     async def _generate_pdf(self, report: Report) -> ReportOutput:
-        """Generate PDF report output (placeholder - will be implemented with WeasyPrint)."""
-        # For now, generate HTML and convert to PDF
-        _html_output = await self._generate_html(report)
-        
-        # This will be replaced with actual PDF generation
+        """Generate PDF report output."""
+        if self.settings.enable_pdf_generation:
+            try:
+                html_output = await self._generate_html(report)
+                if isinstance(html_output.content, str):
+                    return self._get_pdf_exporter().export_to_pdf(html_output.content, report)
+            except (PDFExportError, ReportGenerationError) as e:
+                logger.warning(f"PDF export unavailable, using legacy placeholder: {e}")
+
         pdf_content = f"PDF version of: {report.title}".encode()
 
         return ReportOutput(
@@ -878,7 +898,13 @@ class ReportGenerator:
         )
     
     async def _generate_latex(self, report: Report) -> ReportOutput:
-        """Generate LaTeX report output (placeholder)."""
+        """Generate LaTeX report output."""
+        if self.settings.enable_latex_generation:
+            try:
+                return self._get_latex_exporter().export_to_latex(report)
+            except LaTeXExportError as e:
+                logger.warning(f"LaTeX export unavailable, using legacy placeholder: {e}")
+
         latex_content = f"""\\documentclass{{article}}
 \\title{{{report.title}}}
 \\author{{Research Platform}}
@@ -903,8 +929,12 @@ class ReportGenerator:
         )
     
     async def _generate_docx(self, report: Report) -> ReportOutput:
-        """Generate DOCX report output (placeholder)."""
-        # This will be implemented with python-docx
+        """Generate DOCX report output."""
+        try:
+            return self._get_docx_exporter().export_to_docx(report)
+        except DOCXExportError as e:
+            logger.warning(f"DOCX export unavailable, using legacy placeholder: {e}")
+
         docx_content = b"DOCX placeholder content"
 
         return ReportOutput(
@@ -915,6 +945,24 @@ class ReportGenerator:
             mime_type=self.format_config.get_mime_type(ReportFormat.DOCX),
             encoding="binary"
         )
+
+    def _get_pdf_exporter(self) -> PDFExporter:
+        """Lazily initialize the PDF exporter to avoid import-time system dependency failures."""
+        if self._pdf_exporter is None:
+            self._pdf_exporter = PDFExporter(self.settings)
+        return self._pdf_exporter
+
+    def _get_latex_exporter(self) -> LaTeXExporter:
+        """Lazily initialize the LaTeX exporter."""
+        if self._latex_exporter is None:
+            self._latex_exporter = LaTeXExporter(self.settings)
+        return self._latex_exporter
+
+    def _get_docx_exporter(self) -> DOCXExporter:
+        """Lazily initialize the DOCX exporter."""
+        if self._docx_exporter is None:
+            self._docx_exporter = DOCXExporter(self.settings)
+        return self._docx_exporter
     
     def _generate_basic_html(self, report: Report) -> str:
         """Generate basic HTML without templates (temporary implementation)."""

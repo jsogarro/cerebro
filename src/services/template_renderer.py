@@ -8,11 +8,18 @@ following functional programming principles.
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, cast
 
 import jinja2
-import markdown
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+try:
+    import markdown as markdown_module  # type: ignore[import-untyped]
+
+    MARKDOWN_AVAILABLE = True
+except ImportError:
+    markdown_module = None
+    MARKDOWN_AVAILABLE = False
 
 from src.models.report import Report, ReportType
 from src.services.report_config import ReportSettings, ReportTemplateConfig
@@ -198,8 +205,12 @@ class TemplateRenderer:
             return ""
         
         try:
+            if not MARKDOWN_AVAILABLE:
+                return self._basic_markdown_filter(text)
+
             # Configure markdown extensions
-            md = markdown.Markdown(
+            markdown_api = cast(Any, markdown_module)
+            md = markdown_api.Markdown(
                 extensions=[
                     'markdown.extensions.tables',
                     'markdown.extensions.fenced_code',
@@ -220,6 +231,12 @@ class TemplateRenderer:
             logger.warning(f"Markdown conversion failed: {e}")
             # Return plain text with line breaks converted
             return text.replace('\n', '<br>')
+
+    def _basic_markdown_filter(self, text: str) -> str:
+        """Render a small markdown subset when the optional package is unavailable."""
+        rendered = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+        rendered = re.sub(r"\*(.+?)\*", r"<em>\1</em>", rendered)
+        return rendered.replace("\n", "<br>")
     
     def _truncate_words_filter(self, text: str, length: int = 50, suffix: str = "...") -> str:
         """Truncate text to specified number of words."""

@@ -16,7 +16,7 @@ try:
     from weasyprint import CSS, HTML
     from weasyprint.text.fonts import FontConfiguration
     WEASYPRINT_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     WEASYPRINT_AVAILABLE = False
     weasyprint = None
     HTML = None
