@@ -33,6 +33,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         status: ProjectStatus | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        organization_id: str | UUID | None = None,
     ) -> list[ResearchProject]:
         """
         Get projects by user.
@@ -42,6 +43,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             status: Filter by status
             limit: Maximum results
             offset: Skip results
+            organization_id: Tenant organization boundary
 
         Returns:
             List of projects
@@ -57,16 +59,20 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             order_by="created_at",
             order_desc=True,
             load_relationships=["agent_tasks", "results"],
+            organization_id=organization_id,
         )
 
     async def get_in_progress(
-        self, user_id: UUID | None = None
+        self,
+        user_id: UUID | None = None,
+        organization_id: str | UUID | None = None,
     ) -> list[ResearchProject]:
         """
         Get all in-progress projects.
 
         Args:
             user_id: Filter by user (optional)
+            organization_id: Tenant organization boundary
 
         Returns:
             List of in-progress projects
@@ -74,6 +80,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         query = self.build_query().where(
             ResearchProject.status == ProjectStatus.IN_PROGRESS
         )
+        query = self.apply_organization_scope(query, organization_id)
 
         if user_id:
             query = query.where(ResearchProject.user_id == user_id)
@@ -87,7 +94,11 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         return list(result.scalars().all())
 
     async def update_status(
-        self, project_id: UUID, status: ProjectStatus, updated_by: str | None = None
+        self,
+        project_id: UUID,
+        status: ProjectStatus,
+        updated_by: str | None = None,
+        organization_id: str | UUID | None = None,
     ) -> ResearchProject | None:
         """
         Update project status.
@@ -96,14 +107,23 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             project_id: Project ID
             status: New status
             updated_by: User updating
+            organization_id: Tenant organization boundary
 
         Returns:
             Updated project
         """
-        return await self.update(project_id, {"status": status}, updated_by=updated_by)
+        return await self.update(
+            project_id,
+            {"status": status},
+            updated_by=updated_by,
+            organization_id=organization_id,
+        )
 
     async def update_quality_score(
-        self, project_id: UUID, score: float
+        self,
+        project_id: UUID,
+        score: float,
+        organization_id: str | UUID | None = None,
     ) -> ResearchProject | None:
         """
         Update project quality score.
@@ -111,6 +131,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         Args:
             project_id: Project ID
             score: Quality score (0.0 to 1.0)
+            organization_id: Tenant organization boundary
 
         Returns:
             Updated project
@@ -118,20 +139,29 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         if not 0.0 <= score <= 1.0:
             raise ValueError("Quality score must be between 0.0 and 1.0")
 
-        return await self.update(project_id, {"quality_score": score})
+        return await self.update(
+            project_id, {"quality_score": score}, organization_id=organization_id
+        )
 
-    async def get_with_results(self, project_id: UUID) -> ResearchProject | None:
+    async def get_with_results(
+        self,
+        project_id: UUID,
+        organization_id: str | UUID | None = None,
+    ) -> ResearchProject | None:
         """
         Get project with all results loaded.
 
         Args:
             project_id: Project ID
+            organization_id: Tenant organization boundary
 
         Returns:
             Project with results
         """
         return await self.get(
-            project_id, load_relationships=["results", "agent_tasks", "checkpoints"]
+            project_id,
+            load_relationships=["results", "agent_tasks", "checkpoints"],
+            organization_id=organization_id,
         )
 
     async def search_projects(
@@ -143,6 +173,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         min_quality: float | None = None,
         limit: int = 20,
         offset: int = 0,
+        organization_id: str | UUID | None = None,
     ) -> list[ResearchProject]:
         """
         Search research projects.
@@ -155,11 +186,13 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             min_quality: Minimum quality score
             limit: Maximum results
             offset: Skip results
+            organization_id: Tenant organization boundary
 
         Returns:
             List of matching projects
         """
         stmt = self.build_query()
+        stmt = self.apply_organization_scope(stmt, organization_id)
 
         # Text search in title and query
         if query:
@@ -201,7 +234,10 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         return list(result.scalars().all())
 
     async def get_statistics(
-        self, user_id: UUID | None = None, days: int = 30
+        self,
+        user_id: UUID | None = None,
+        days: int = 30,
+        organization_id: str | UUID | None = None,
     ) -> dict[str, Any]:
         """
         Get project statistics.
@@ -209,6 +245,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         Args:
             user_id: Filter by user
             days: Number of days to look back
+            organization_id: Tenant organization boundary
 
         Returns:
             Statistics dictionary
@@ -222,6 +259,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
                 ResearchProject.created_at >= since,
             )
         )
+        base_query = self.apply_organization_scope(base_query, organization_id)
 
         if user_id:
             base_query = base_query.where(ResearchProject.user_id == user_id)
@@ -236,6 +274,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
                     ResearchProject.created_at >= since,
                 )
             )
+            count_query = self.apply_organization_scope(count_query, organization_id)
             if user_id:
                 count_query = count_query.where(ResearchProject.user_id == user_id)
 
@@ -250,6 +289,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
                 ResearchProject.created_at >= since,
             )
         )
+        avg_query = self.apply_organization_scope(avg_query, organization_id)
         if user_id:
             avg_query = avg_query.where(ResearchProject.user_id == user_id)
 
@@ -263,6 +303,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
                 ResearchProject.created_at >= since,
             )
         )
+        total_query = self.apply_organization_scope(total_query, organization_id)
         if user_id:
             total_query = total_query.where(ResearchProject.user_id == user_id)
 

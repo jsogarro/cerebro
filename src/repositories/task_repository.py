@@ -35,6 +35,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         status: TaskStatus | None = None,
         agent_type: str | None = None,
         limit: int | None = None,
+        organization_id: str | UUID | None = None,
     ) -> list[AgentTask]:
         """
         Get all tasks for a project.
@@ -44,6 +45,7 @@ class TaskRepository(BaseRepository[AgentTask]):
             status: Filter by status
             agent_type: Filter by agent type
             limit: Maximum results
+            organization_id: Tenant organization boundary
 
         Returns:
             List of tasks
@@ -56,11 +58,18 @@ class TaskRepository(BaseRepository[AgentTask]):
             filters["agent_type"] = agent_type
 
         return await self.get_many(
-            filters=filters, limit=limit, order_by="created_at", order_desc=False
+            filters=filters,
+            limit=limit,
+            order_by="created_at",
+            order_desc=False,
+            organization_id=organization_id,
         )
 
     async def get_pending_tasks(
-        self, limit: int = 10, agent_type: str | None = None
+        self,
+        limit: int = 10,
+        agent_type: str | None = None,
+        organization_id: str | UUID | None = None,
     ) -> list[AgentTask]:
         """
         Get pending tasks ready for execution.
@@ -68,6 +77,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         Args:
             limit: Maximum tasks to return
             agent_type: Filter by agent type
+            organization_id: Tenant organization boundary
 
         Returns:
             List of pending tasks
@@ -75,6 +85,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         query = self.build_query().where(
             AgentTask.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED])
         )
+        query = self.apply_organization_scope(query, organization_id)
 
         if agent_type:
             query = query.where(AgentTask.agent_type == agent_type)
@@ -88,7 +99,10 @@ class TaskRepository(BaseRepository[AgentTask]):
         return list(result.scalars().all())
 
     async def get_failed_tasks(
-        self, max_retries: int = 3, since_hours: int = 24
+        self,
+        max_retries: int = 3,
+        since_hours: int = 24,
+        organization_id: str | UUID | None = None,
     ) -> list[AgentTask]:
         """
         Get failed tasks that can be retried.
@@ -96,6 +110,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         Args:
             max_retries: Maximum retry count
             since_hours: Hours to look back
+            organization_id: Tenant organization boundary
 
         Returns:
             List of retryable failed tasks
@@ -109,6 +124,7 @@ class TaskRepository(BaseRepository[AgentTask]):
                 AgentTask.updated_at >= since,
             )
         )
+        query = self.apply_organization_scope(query, organization_id)
 
         query = query.order_by(AgentTask.retry_count.asc())
 
@@ -121,6 +137,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         status: TaskStatus,
         output: dict[str, Any] | None = None,
         error: str | None = None,
+        organization_id: str | UUID | None = None,
     ) -> AgentTask | None:
         """
         Update task execution status.
@@ -130,11 +147,12 @@ class TaskRepository(BaseRepository[AgentTask]):
             status: New status
             output: Task output data
             error: Error message if failed
+            organization_id: Tenant organization boundary
 
         Returns:
             Updated task
         """
-        task = await self.get(task_id)
+        task = await self.get(task_id, organization_id=organization_id)
 
         if not task:
             return None
@@ -160,12 +178,17 @@ class TaskRepository(BaseRepository[AgentTask]):
         await self.session.refresh(task)
         return task
 
-    async def get_task_metrics(self, project_id: UUID) -> dict[str, Any]:
+    async def get_task_metrics(
+        self,
+        project_id: UUID,
+        organization_id: str | UUID | None = None,
+    ) -> dict[str, Any]:
         """
         Get task execution metrics for a project.
 
         Args:
             project_id: Project ID
+            organization_id: Tenant organization boundary
 
         Returns:
             Task metrics
@@ -180,6 +203,7 @@ class TaskRepository(BaseRepository[AgentTask]):
                     AgentTask.deleted_at.is_(None),
                 )
             )
+            count_query = self.apply_organization_scope(count_query, organization_id)
             result = await self.session.execute(count_query)
             status_counts[status.value] = result.scalar() or 0
 
@@ -192,6 +216,9 @@ class TaskRepository(BaseRepository[AgentTask]):
                 AgentTask.deleted_at.is_(None),
             )
         )
+        avg_time_query = self.apply_organization_scope(
+            avg_time_query, organization_id
+        )
         result = await self.session.execute(avg_time_query)
         avg_execution_time = result.scalar() or 0
 
@@ -203,6 +230,7 @@ class TaskRepository(BaseRepository[AgentTask]):
             )
             .group_by(AgentTask.agent_type)
         )
+        agent_query = self.apply_organization_scope(agent_query, organization_id)
 
         result = await self.session.execute(agent_query)
         agent_distribution = {row.agent_type: row.count for row in result}
@@ -251,17 +279,22 @@ class TaskRepository(BaseRepository[AgentTask]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def mark_for_retry(self, task_id: UUID) -> AgentTask | None:
+    async def mark_for_retry(
+        self,
+        task_id: UUID,
+        organization_id: str | UUID | None = None,
+    ) -> AgentTask | None:
         """
         Mark a failed task for retry.
 
         Args:
             task_id: Task ID
+            organization_id: Tenant organization boundary
 
         Returns:
             Updated task
         """
-        task = await self.get(task_id)
+        task = await self.get(task_id, organization_id=organization_id)
 
         if not task or task.status != TaskStatus.FAILED:
             return None
@@ -272,7 +305,10 @@ class TaskRepository(BaseRepository[AgentTask]):
         return task
 
     async def batch_update_status(
-        self, task_ids: list[UUID], status: TaskStatus
+        self,
+        task_ids: list[UUID],
+        status: TaskStatus,
+        organization_id: str | UUID | None = None,
     ) -> int:
         """
         Update status for multiple tasks.
@@ -280,6 +316,7 @@ class TaskRepository(BaseRepository[AgentTask]):
         Args:
             task_ids: List of task IDs
             status: New status
+            organization_id: Tenant organization boundary
 
         Returns:
             Number of updated tasks
@@ -289,6 +326,8 @@ class TaskRepository(BaseRepository[AgentTask]):
             .where(and_(AgentTask.id.in_(task_ids), AgentTask.deleted_at.is_(None)))
             .values(status=status, updated_at=datetime.now(UTC))
         )
+        if organization_id is not None:
+            stmt = stmt.where(AgentTask.organization_id == organization_id)
 
         result = await self.session.execute(stmt)
         await self.session.flush()
@@ -297,18 +336,27 @@ class TaskRepository(BaseRepository[AgentTask]):
             raise RuntimeError("SQLAlchemy Result missing rowcount attribute")
         return int(rowcount)
 
-    async def get_ready_tasks(self, project_id: UUID) -> list[AgentTask]:
+    async def get_ready_tasks(
+        self,
+        project_id: UUID,
+        organization_id: str | UUID | None = None,
+    ) -> list[AgentTask]:
         """
         Get tasks ready to execute (dependencies met).
 
         Args:
             project_id: Project ID
+            organization_id: Tenant organization boundary
 
         Returns:
             List of ready tasks
         """
         # Get all pending tasks
-        pending_tasks = await self.get_by_project(project_id, status=TaskStatus.PENDING)
+        pending_tasks = await self.get_by_project(
+            project_id,
+            status=TaskStatus.PENDING,
+            organization_id=organization_id,
+        )
 
         # Get completed task IDs
         completed_query = select(AgentTask.id).where(
@@ -317,6 +365,9 @@ class TaskRepository(BaseRepository[AgentTask]):
                 AgentTask.status == TaskStatus.COMPLETED,
                 AgentTask.deleted_at.is_(None),
             )
+        )
+        completed_query = self.apply_organization_scope(
+            completed_query, organization_id
         )
         result = await self.session.execute(completed_query)
         completed_ids = set(result.scalars().all())
