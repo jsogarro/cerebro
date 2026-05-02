@@ -294,7 +294,7 @@ class TestReportGenerator:
         
         assert intro_section is not None
         assert intro_section.title == "Introduction"
-        assert "How does AI affect education?" in intro_section.content
+        assert report.query in intro_section.content
         
         # Test findings section
         findings_section = await generator._build_findings_section(
