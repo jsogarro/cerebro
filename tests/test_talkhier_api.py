@@ -17,6 +17,7 @@ from src.api.services.talkhier_session_service import (
     TalkHierSession,
     TalkHierSessionService,
 )
+from src.api.services.talkhier_state_manager import TalkHierStateManager
 from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
 from src.models.talkhier_api_models import (
     ConsensusCheckRequest,
@@ -29,6 +30,37 @@ from src.models.talkhier_api_models import (
     SessionStatus,
     TalkHierSessionRequest,
 )
+
+
+class TestTalkHierStateManager:
+    """Test TalkHier state and metrics management."""
+
+    def test_store_and_get_session(self):
+        """Test storing and retrieving a session."""
+        manager = TalkHierStateManager()
+        session = object()
+
+        manager.store_session("session-1", session)
+
+        assert manager.get_session("session-1") is session
+
+    def test_get_missing_session_raises(self):
+        """Test missing session validation."""
+        manager = TalkHierStateManager()
+
+        with pytest.raises(ValueError, match="Session missing not found"):
+            manager.get_session("missing")
+
+    def test_record_round_initializes_missing_metrics(self):
+        """Test round metrics are initialized lazily for hand-built sessions."""
+        manager = TalkHierStateManager()
+
+        manager.record_round("session-1", quality_score=0.8, consensus_score=0.7)
+
+        metrics = manager.session_metrics["session-1"]
+        assert metrics["rounds_completed"] == 1
+        assert metrics["quality_progression"] == [0.8]
+        assert metrics["consensus_progression"] == [0.7]
 
 
 class TestTalkHierSessionService:

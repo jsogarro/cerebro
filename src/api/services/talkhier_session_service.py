@@ -29,6 +29,7 @@ from src.agents.supervisors.supervisor_factory import (
 )
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter, RoutingDecision
+from src.api.services.talkhier_state_manager import TalkHierStateManager
 from src.models.talkhier_api_models import (
     ConsensusCheckRequest,
     ConsensusResult,
@@ -106,7 +107,8 @@ class TalkHierSessionService:
     """
     
     def __init__(self) -> None:
-        self.sessions: dict[str, TalkHierSession] = {}
+        self.state_manager = TalkHierStateManager()
+        self.sessions: dict[str, TalkHierSession] = self.state_manager.sessions
         self.consensus_builder = ConsensusBuilder()
         self.supervisor_factory = SupervisorFactory()
         self.masr_bridge = MASRSupervisorBridge()
@@ -116,7 +118,7 @@ class TalkHierSessionService:
         self.protocol_configs = self._initialize_protocol_configs()
         
         # Performance tracking
-        self.session_metrics: dict[str, dict[str, Any]] = {}
+        self.session_metrics = self.state_manager.session_metrics
         
         # Background tasks
         self.cleanup_task = None
@@ -218,15 +220,10 @@ class TalkHierSessionService:
         )
         
         # Store session
-        self.sessions[session_id] = session
+        self.state_manager.store_session(session_id, session)
         
         # Initialize session metrics
-        self.session_metrics[session_id] = {
-            "rounds_completed": 0,
-            "quality_progression": [],
-            "consensus_progression": [],
-            "message_count": 0
-        }
+        self.state_manager.initialize_metrics(session_id)
         
         # Update status to active
         session.status = SessionStatus.ACTIVE
@@ -392,18 +389,7 @@ class TalkHierSessionService:
         session.last_update = datetime.now(UTC)
         
         # Update metrics
-        self.session_metrics.setdefault(
-            session_id,
-            {
-                "rounds_completed": 0,
-                "quality_progression": [],
-                "consensus_progression": [],
-                "message_count": 0,
-            },
-        )
-        self.session_metrics[session_id]["rounds_completed"] += 1
-        self.session_metrics[session_id]["quality_progression"].append(quality_score)
-        self.session_metrics[session_id]["consensus_progression"].append(consensus_score)
+        self.state_manager.record_round(session_id, quality_score, consensus_score)
         
         # Determine if refinement should continue
         continue_refinement = self._should_continue_refinement(session)
@@ -679,9 +665,10 @@ class TalkHierSessionService:
     
     def _get_session(self, session_id: str) -> TalkHierSession:
         """Get session by ID with validation"""
-        if session_id not in self.sessions:
-            raise ValueError(f"Session {session_id} not found")
-        return self.sessions[session_id]
+        session = self.state_manager.get_session(session_id)
+        if not isinstance(session, TalkHierSession):
+            raise ValueError(f"Session {session_id} has invalid state")
+        return session
     
     async def _get_routing_decision(
         self,
