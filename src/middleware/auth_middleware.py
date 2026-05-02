@@ -80,6 +80,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Endpoints can enforce authentication as needed
             request.state.user = None
             request.state.token_payload = None
+            request.state.organization_id = None
             response = await call_next(request)
             return response
 
@@ -100,11 +101,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Add to request state
             request.state.token_payload = token_payload
             request.state.user_id = token_payload.sub
+            request.state.organization_id = token_payload.organization_id
 
             # Log authenticated request
             logger.debug(
                 "Authenticated request",
                 user_id=token_payload.sub,
+                organization_id=token_payload.organization_id,
                 path=path,
                 method=request.method,
             )
@@ -114,6 +117,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Allow request to continue without user context
             request.state.user = None
             request.state.token_payload = None
+            request.state.organization_id = None
 
         response = await call_next(request)
         return response

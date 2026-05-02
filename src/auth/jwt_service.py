@@ -138,6 +138,7 @@ class JWTService:
         roles: list[str] | None = None,
         permissions: list[str] | None = None,
         device_id: str | None = None,
+        organization_id: str | None = None,
         additional_claims: dict[str, Any] | None = None,
     ) -> TokenPair:
         """
@@ -149,6 +150,7 @@ class JWTService:
             roles: User roles
             permissions: User permissions
             device_id: Device fingerprint
+            organization_id: Tenant organization identifier
             additional_claims: Additional JWT claims
 
         Returns:
@@ -166,6 +168,7 @@ class JWTService:
             "email": email,
             "roles": roles or [],
             "permissions": permissions or [],
+            "organization_id": organization_id,
             "jti": jti,
             "iat": now,
             "device_id": device_id,
@@ -190,6 +193,7 @@ class JWTService:
             "exp": now + timedelta(days=self.refresh_token_expire_days),
             "token_type": "refresh",
             "device_id": device_id,
+            "organization_id": organization_id,
         }
 
         # Generate tokens
@@ -207,6 +211,7 @@ class JWTService:
             refresh_data = {
                 "user_id": user_id,
                 "device_id": device_id,
+                "organization_id": organization_id,
                 "created_at": now.isoformat(),
             }
             await self.redis_client.setex(
@@ -271,6 +276,7 @@ class JWTService:
                 email=payload.get("email"),
                 roles=payload.get("roles", []),
                 permissions=payload.get("permissions", []),
+                organization_id=payload.get("organization_id"),
                 jti=payload["jti"],
                 iat=datetime.fromtimestamp(payload["iat"], tz=UTC),
                 exp=datetime.fromtimestamp(payload["exp"], tz=UTC),
@@ -332,6 +338,7 @@ class JWTService:
             roles=refresh_payload.roles,
             permissions=refresh_payload.permissions,
             device_id=device_id or refresh_payload.device_id,
+            organization_id=refresh_payload.organization_id,
         )
 
     async def revoke_token(self, token: str) -> bool:

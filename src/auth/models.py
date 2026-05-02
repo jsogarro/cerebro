@@ -19,6 +19,7 @@ class TokenPayload(BaseModel):
     email: str | None = Field(None, description="User email")
     roles: list[str] = Field(default_factory=list, description="User roles")
     permissions: list[str] = Field(default_factory=list, description="User permissions")
+    organization_id: str | None = Field(None, description="Tenant organization ID")
     jti: str = Field(..., description="JWT ID (unique token identifier)")
     iat: datetime = Field(..., description="Issued at timestamp")
     exp: datetime = Field(..., description="Expiration timestamp")
