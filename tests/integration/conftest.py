@@ -19,8 +19,6 @@ from faker import Faker
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from temporalio import Client as TemporalClient
-from temporalio.testing import WorkflowEnvironment
 from testcontainers.compose import DockerCompose
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
@@ -47,9 +45,6 @@ class IntegrationTestConfig:
 
     # Test Redis configuration
     TEST_REDIS_DB = 15
-
-    # Test Temporal configuration
-    TEST_TEMPORAL_NAMESPACE = "test-namespace"
 
     # Test user roles
     TEST_ROLES = ["admin", "researcher", "viewer"]
@@ -86,7 +81,6 @@ def docker_compose(docker_compose_file):
     compose.start()
     compose.wait_for("postgres")
     compose.wait_for("redis")
-    compose.wait_for("temporal")
     yield compose
     compose.stop()
 
@@ -165,20 +159,6 @@ async def redis_client(redis_container) -> AsyncGenerator:
     yield client
     await client.flushdb()
     await client.close()
-
-
-@pytest_asyncio.fixture
-async def temporal_env() -> AsyncGenerator[WorkflowEnvironment, None]:
-    """Create Temporal test environment."""
-    env = await WorkflowEnvironment.start_time_skipping()
-    yield env
-    await env.shutdown()
-
-
-@pytest_asyncio.fixture
-async def temporal_client(temporal_env) -> TemporalClient:
-    """Create Temporal client for testing."""
-    return temporal_env.client
 
 
 @pytest_asyncio.fixture

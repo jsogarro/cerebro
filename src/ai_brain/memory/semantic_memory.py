@@ -21,15 +21,14 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Optional vector-storage backend. Install with: pip install ".[vector]"
 try:
-    # Try to import sentence transformers for embeddings
     from sentence_transformers import SentenceTransformer
 except ImportError:
     SentenceTransformer = None
     logger.warning("sentence-transformers not available - using fallback embeddings")
 
 try:
-    # Try to import qdrant client for vector storage
     from qdrant_client import QdrantClient
     from qdrant_client.http import models
 except ImportError:
