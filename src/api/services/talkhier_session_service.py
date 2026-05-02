@@ -26,6 +26,7 @@ from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter, RoutingDecision
 from src.api.services.talkhier_consensus_evaluator import TalkHierConsensusEvaluator
 from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
+from src.api.services.talkhier_session_coordinator import TalkHierSessionCoordinator
 from src.api.services.talkhier_state_manager import TalkHierStateManager
 from src.models.talkhier_api_models import (
     ConsensusCheckRequest,
@@ -112,6 +113,11 @@ class TalkHierSessionService:
         self.supervisor_factory = SupervisorFactory()
         self.masr_bridge = MASRSupervisorBridge()
         self.masr_router = MASRouter()
+        self.session_coordinator = TalkHierSessionCoordinator(
+            self.supervisor_factory,
+            self.masr_bridge,
+            self.masr_router,
+        )
         
         # Protocol configurations
         self.protocol_configs = self._initialize_protocol_configs()
@@ -124,39 +130,7 @@ class TalkHierSessionService:
         
     def _initialize_protocol_configs(self) -> dict[ProtocolType, dict[str, Any]]:
         """Initialize protocol configurations"""
-        return {
-            ProtocolType.STANDARD: {
-                "default_rounds": 3,
-                "quality_weight": 0.6,
-                "consensus_weight": 0.4,
-                "timeout_multiplier": 1.0
-            },
-            ProtocolType.FAST_TRACK: {
-                "default_rounds": 2,
-                "quality_weight": 0.5,
-                "consensus_weight": 0.5,
-                "timeout_multiplier": 0.5
-            },
-            ProtocolType.DEEP_ANALYSIS: {
-                "default_rounds": 5,
-                "quality_weight": 0.7,
-                "consensus_weight": 0.3,
-                "timeout_multiplier": 2.0
-            },
-            ProtocolType.COLLABORATIVE: {
-                "default_rounds": 3,
-                "quality_weight": 0.4,
-                "consensus_weight": 0.6,
-                "timeout_multiplier": 1.0
-            },
-            ProtocolType.SUPERVISED: {
-                "default_rounds": 3,
-                "quality_weight": 0.5,
-                "consensus_weight": 0.5,
-                "timeout_multiplier": 1.0,
-                "supervisor_weight": 2.0
-            }
-        }
+        return self.session_coordinator.initialize_protocol_configs()
     
     async def create_session(
         self,
@@ -506,7 +480,7 @@ class TalkHierSessionService:
         domains: list[str]
     ) -> RoutingDecision:
         """Get routing decision from MASR"""
-        return await self.masr_router.route(query, context={"domains": domains})
+        return await self.session_coordinator.get_routing_decision(query, domains)
     
     async def _create_supervisor(
         self,
@@ -514,27 +488,10 @@ class TalkHierSessionService:
         requested_type: str | None
     ) -> BaseSupervisor | None:
         """Create supervisor based on routing decision"""
-        supervisor_type = self._resolve_supervisor_type(routing_decision, requested_type)
-
-        from src.ai_brain.integration.masr_supervisor_bridge import (
-            SupervisorConfiguration,
+        return await self.session_coordinator.create_supervisor(
+            routing_decision,
+            requested_type,
         )
-
-        domains = routing_decision.complexity_analysis.domains
-        domain = domains[0].value if domains and hasattr(domains[0], "value") else "research"
-        allocation = routing_decision.agent_allocation
-
-        config = SupervisorConfiguration(
-            supervisor_type=supervisor_type,
-            domain=domain,
-            worker_allocation=allocation.worker_types,
-            quality_threshold=routing_decision.estimated_quality or 0.85,
-            max_refinement_rounds=allocation.retry_attempts or 3,
-            timeout_seconds=allocation.timeout_seconds,
-            max_workers=allocation.worker_count,
-        )
-
-        return await self.supervisor_factory.create_supervisor_from_config(config)
 
     def _resolve_supervisor_type(
         self,
@@ -542,20 +499,10 @@ class TalkHierSessionService:
         requested_type: str | None,
     ) -> str:
         """Resolve a concrete supervisor type from routing output or test doubles."""
-        if requested_type:
-            return requested_type
-
-        allocation = getattr(routing_decision, "agent_allocation", None)
-        supervisor_type = getattr(allocation, "supervisor_type", None)
-        if isinstance(supervisor_type, str):
-            return supervisor_type
-
-        for supervisor_allocation in getattr(routing_decision, "supervisor_allocations", []):
-            supervisor_type = getattr(supervisor_allocation, "supervisor_type", None)
-            if isinstance(supervisor_type, str):
-                return supervisor_type
-
-        return "research"
+        return self.session_coordinator.resolve_supervisor_type(
+            routing_decision,
+            requested_type,
+        )
     
     async def _determine_participants(
         self,
@@ -564,43 +511,11 @@ class TalkHierSessionService:
         supervisor: BaseSupervisor | None
     ) -> list[ParticipantInfo]:
         """Determine session participants"""
-        participants = []
-        
-        # Use requested participants or routing decision
-        agent_ids = requested or []
-        
-        if not agent_ids and routing_decision.agent_allocation:
-            agent_ids = routing_decision.agent_allocation.worker_types
-            if not isinstance(agent_ids, list):
-                agent_ids = [
-                    agent.agent_type
-                    for agent in getattr(routing_decision.agent_allocation, "agents", [])
-                    if isinstance(getattr(agent, "agent_type", None), str)
-                ]
-        
-        # Create participant info
-        for agent_id in agent_ids:
-            participants.append(ParticipantInfo(
-                agent_id=agent_id,
-                agent_type=agent_id,
-                role=MessageRole.WORKER,
-                confidence=0.5,
-                rounds_participated=0,
-                quality_scores=[]
-            ))
-        
-        # Add supervisor if present
-        if supervisor:
-            participants.append(ParticipantInfo(
-                agent_id="supervisor",
-                agent_type=supervisor.__class__.__name__,
-                role=MessageRole.SUPERVISOR,
-                confidence=0.8,
-                rounds_participated=0,
-                quality_scores=[]
-            ))
-        
-        return participants
+        return await self.session_coordinator.determine_participants(
+            requested,
+            routing_decision,
+            supervisor,
+        )
     
     def _estimate_duration(
         self,
@@ -609,14 +524,11 @@ class TalkHierSessionService:
         protocol_config: dict[str, Any]
     ) -> int:
         """Estimate session duration in seconds"""
-        base_duration = 30  # Base time per round
-        participant_factor = participant_count * 10  # Time per participant
-        round_duration = base_duration + participant_factor
-        
-        total_duration = max_rounds * round_duration
-        timeout_multiplier = protocol_config.get("timeout_multiplier", 1.0)
-        
-        return int(total_duration * timeout_multiplier)
+        return self.session_coordinator.estimate_duration(
+            max_rounds,
+            participant_count,
+            protocol_config,
+        )
     
     async def _execute_supervisor_refinement(
         self,

@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from src.api.services.talkhier_consensus_evaluator import TalkHierConsensusEvaluator
 from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
+from src.api.services.talkhier_session_coordinator import TalkHierSessionCoordinator
 from src.api.services.talkhier_session_manager import TalkHierSessionManager
 from src.api.services.talkhier_session_service import (
     TalkHierSession,
@@ -159,6 +160,50 @@ class TestTalkHierConsensusEvaluator:
         )
 
         assert {report["agent"] for report in reports} == {"agent-1", "agent-2"}
+
+
+class TestTalkHierSessionCoordinator:
+    """Test TalkHier session coordination helpers."""
+
+    @pytest.fixture
+    def coordinator(self):
+        """Create coordinator with mocked dependencies."""
+        return TalkHierSessionCoordinator(
+            supervisor_factory=MagicMock(),
+            masr_bridge=MagicMock(),
+            masr_router=MagicMock(),
+        )
+
+    def test_estimate_duration_uses_protocol_multiplier(self, coordinator):
+        """Test duration estimate includes participant and protocol factors."""
+        duration = coordinator.estimate_duration(
+            max_rounds=3,
+            participant_count=2,
+            protocol_config={"timeout_multiplier": 2.0},
+        )
+
+        assert duration == 300
+
+    @pytest.mark.asyncio
+    async def test_determine_participants_uses_agent_allocation_agents(self, coordinator):
+        """Test participant fallback for routing decisions exposing agents."""
+        routing_decision = MagicMock()
+        routing_decision.agent_allocation.worker_types = MagicMock()
+        routing_decision.agent_allocation.agents = [
+            MagicMock(agent_type="literature-review"),
+            MagicMock(agent_type="synthesis"),
+        ]
+
+        participants = await coordinator.determine_participants(
+            requested=None,
+            routing_decision=routing_decision,
+            supervisor=None,
+        )
+
+        assert [participant.agent_id for participant in participants] == [
+            "literature-review",
+            "synthesis",
+        ]
 
 
 class TestTalkHierSessionService:
