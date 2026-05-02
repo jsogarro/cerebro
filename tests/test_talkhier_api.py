@@ -12,6 +12,7 @@ import pytest
 from fastapi import WebSocket
 from fastapi.testclient import TestClient
 
+from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
 from src.api.services.talkhier_session_manager import TalkHierSessionManager
 from src.api.services.talkhier_session_service import (
     TalkHierSession,
@@ -23,6 +24,7 @@ from src.models.talkhier_api_models import (
     ConsensusCheckRequest,
     ConsensusType,
     MessageRole,
+    ParticipantInfo,
     ProtocolType,
     RefinementRoundRequest,
     RefinementStrategy,
@@ -61,6 +63,69 @@ class TestTalkHierStateManager:
         assert metrics["rounds_completed"] == 1
         assert metrics["quality_progression"] == [0.8]
         assert metrics["consensus_progression"] == [0.7]
+
+
+class TestTalkHierRoundExecutor:
+    """Test TalkHier round execution."""
+
+    @pytest.mark.asyncio
+    async def test_quality_focused_aggregation_uses_highest_confidence(self):
+        """Test quality-focused aggregation selects the highest-confidence response."""
+        executor = TalkHierRoundExecutor()
+
+        result = await executor.aggregate_refinement_results(
+            {
+                "agent-low": {"content": "low", "confidence": 0.4},
+                "agent-high": {"content": "high", "confidence": 0.9},
+            },
+            RefinementStrategy.QUALITY_FOCUSED,
+        )
+
+        assert result["content"] == "high"
+
+    @pytest.mark.asyncio
+    async def test_execute_round_records_metrics(self):
+        """Test executing a round updates session state and metrics."""
+        executor = TalkHierRoundExecutor()
+        state_manager = TalkHierStateManager()
+        session = TalkHierSession(
+            session_id="session-1",
+            query="Test query",
+            domains=["research"],
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(UTC),
+            protocol_type=ProtocolType.STANDARD,
+            refinement_strategy=RefinementStrategy.QUALITY_FOCUSED,
+            max_rounds=3,
+            min_rounds=1,
+            quality_threshold=0.85,
+            consensus_type=ConsensusType.WEIGHTED,
+            consensus_threshold=0.8,
+            timeout_seconds=300,
+            participants=[
+                ParticipantInfo(
+                    agent_id="agent-1",
+                    agent_type="research",
+                    role=MessageRole.WORKER,
+                    confidence=0.5,
+                    rounds_participated=0,
+                    quality_scores=[],
+                )
+            ],
+            started_at=datetime.now(UTC),
+        )
+
+        response = await executor.execute_refinement_round(
+            "session-1",
+            session,
+            RefinementRoundRequest(round_number=1),
+            state_manager,
+        )
+
+        assert response.round_status == "completed"
+        assert session.current_round == 1
+        assert len(session.rounds) == 1
+        assert state_manager.session_metrics["session-1"]["rounds_completed"] == 1
 
 
 class TestTalkHierSessionService:
