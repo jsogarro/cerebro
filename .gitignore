@@ -34,6 +34,12 @@ cerebro_research_paper_*.md
 # Plans (AI-generated, stored in VAULT)
 plans/
 
+# Kubernetes secrets — never commit. Production secret values live in the
+# cluster's configured secret store (see k8s/external-secrets.yaml). A local
+# `k8s/secrets.yaml` is allowed only for transient debugging.
+k8s/secrets.yaml
+k8s/secrets.env
+
 # AI-generated docs (plans, achievements, summaries)
 docs/agent-framework-apis-achievement.md
 docs/cerebro_academic_positioning.md
@@ -62,7 +68,7 @@ cerebro_dev.db
 .fixit/
 *.fixit.checkpoint
 
-# Refactorit ephemeral artifacts
+# refactorit ephemeral artifacts (must never be committed)
 /tmp/refactorit/
 .refactorit/
 *.refactorit.checkpoint

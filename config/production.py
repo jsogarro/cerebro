@@ -227,9 +227,16 @@ class ProductionConfig(BaseConfig):
     def __init__(self, **kwargs):
         """Initialize production config with validation."""
         super().__init__(**kwargs)
-        # Only validate in actual production, not during development
-        if os.getenv("VALIDATE_ENV_VARS", "false").lower() == "true":
+        # In a real production environment ENVIRONMENT will be set to
+        # "production" or "prod"; in that case enforce required env vars and
+        # reject known weak/placeholder JWT secrets so the service crashes at
+        # startup rather than silently running with a guessable signing key.
+        env = os.getenv("ENVIRONMENT", "").lower()
+        force = os.getenv("VALIDATE_ENV_VARS", "false").lower() == "true"
+        if env in ("production", "prod") or force:
             self.validate_required_env_vars()
+            from config.base import validate_production_jwt_secret
+            validate_production_jwt_secret(self.security.jwt_secret_key)
 
 
 # Create singleton instance

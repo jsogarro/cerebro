@@ -9,6 +9,42 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# Values that must never be used as a JWT signing secret in production.
+# Includes the historical hardcoded fallback and the dev/test/staging
+# placeholder values that are checked into the repository.
+KNOWN_WEAK_JWT_SECRETS: frozenset[str] = frozenset(
+    {
+        "change-me-in-production",
+        "dev-secret-key",
+        "dev-secret-key-not-for-production",
+        "staging-secret-key",
+        "test-secret-key",
+    }
+)
+
+
+def validate_production_jwt_secret(value: str) -> None:
+    """Reject empty or known-weak JWT signing secrets.
+
+    Called from production startup to fail fast when the deployment is missing
+    a real ``JWT_SECRET_KEY`` env var or has accidentally inherited one of the
+    placeholder values used in dev/test/staging configs.
+
+    Raises:
+        ValueError: if ``value`` is empty or matches a known weak default.
+    """
+    if not value:
+        raise ValueError(
+            "JWT_SECRET_KEY is empty. Set a strong, randomly generated secret "
+            "in the production environment before starting the service."
+        )
+    if value in KNOWN_WEAK_JWT_SECRETS:
+        raise ValueError(
+            "JWT_SECRET_KEY is set to a known weak/default placeholder. "
+            "Generate a strong secret (e.g., `openssl rand -hex 32`) and set "
+            "it via the JWT_SECRET_KEY environment variable."
+        )
+
 
 class MCPConfig(BaseModel):
     """MCP (Model Context Protocol) configuration."""
@@ -290,7 +326,12 @@ class SecurityConfig(BaseModel):
     """Security configuration settings."""
     
     # Authentication
-    jwt_secret_key: str = Field(default="change-me-in-production")
+    # JWT signing secret is a REQUIRED field with no default. The previous
+    # ``"change-me-in-production"`` fallback allowed silent fall-through to a
+    # well-known value when the ``JWT_SECRET_KEY`` env var was unset.
+    # Production startup additionally validates this via
+    # ``validate_production_jwt_secret`` to reject placeholder values.
+    jwt_secret_key: str = Field(...)
     jwt_algorithm: str = Field(default="HS256")
     jwt_expiration_minutes: int = Field(default=60)
     refresh_token_expiration_days: int = Field(default=7)
