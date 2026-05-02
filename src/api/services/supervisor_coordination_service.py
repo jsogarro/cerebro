@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.api.services.supervisor_registry import SupervisorMetrics, SupervisorRegistry
+from src.api.services.supervisor_result_aggregator import ResultAggregator
 from src.api.services.supervisor_worker_dispatcher import WorkerDispatcher
 from src.models.supervisor_api_models import (
     ConflictResolutionRequest,
@@ -59,6 +60,7 @@ class SupervisorCoordinationService:
             self.workers,
             self.registry.get_worker_capabilities,
         )
+        self.result_aggregator = ResultAggregator()
         self.active_coordinations: dict[str, dict[str, Any]] = {}
         self.conflict_resolutions: dict[str, dict[str, Any]] = {}
         self.experiments: dict[str, dict[str, Any]] = {}
@@ -73,6 +75,7 @@ class SupervisorCoordinationService:
             self.workers,
             self.registry.get_worker_capabilities,
         )
+        self.result_aggregator = ResultAggregator()
     
     def _get_supervisor_capabilities(self, supervisor_type: SupervisorType) -> list[str]:
         """Get capabilities for a supervisor type"""
@@ -209,18 +212,7 @@ class SupervisorCoordinationService:
     
     def _calculate_quality_score(self, result: Any, threshold: float) -> float:
         """Calculate quality score for execution result"""
-        if not result:
-            return 0.0
-        
-        # Simulate quality calculation
-        base_score = random.uniform(0.7, 0.95)
-        
-        # Adjust based on result characteristics
-        if isinstance(result, str):
-            length_factor = min(1.0, len(result) / 100)
-            base_score = base_score * 0.8 + length_factor * 0.2
-        
-        return min(1.0, max(0.0, base_score))
+        return self.result_aggregator.calculate_quality_score(result, threshold)
     
     def _update_supervisor_metrics(
         self,
@@ -489,33 +481,14 @@ class SupervisorCoordinationService:
         priority_weights: dict[str, float]
     ) -> tuple[Any, bool]:
         """Synthesize results from multiple supervisors"""
-        # Simulate synthesis process
-        await asyncio.sleep(0.3)
-        
-        # Create synthesized result
-        synthesis_parts = []
-        for supervisor_type, result_data in results.items():
-            weight = priority_weights.get(supervisor_type, 1.0)
-            synthesis_parts.append(f"{supervisor_type} (weight={weight}): {result_data['result']}")
-        
-        synthesized = f"Synthesized result combining: {'; '.join(synthesis_parts)}"
-        
-        quality_scores = [r["quality_score"] for r in results.values()]
-        consensus = bool(all(abs(q - quality_scores[0]) < 0.1 for q in quality_scores))
-
-        return synthesized, consensus
+        return await self.result_aggregator.synthesize_results(
+            results,
+            priority_weights,
+        )
     
     def _calculate_consistency(self, results: dict[str, Any]) -> float:
         """Calculate consistency across supervisor results"""
-        if len(results) < 2:
-            return 1.0
-        
-        quality_scores = [r["quality_score"] for r in results.values()]
-        mean_score = sum(quality_scores) / len(quality_scores)
-        variance = sum((q - mean_score) ** 2 for q in quality_scores) / len(quality_scores)
-        
-        consistency = max(0.0, 1.0 - (variance * 10))
-        return float(consistency)
+        return self.result_aggregator.calculate_consistency(results)
     
     async def get_supervisor_stats(self, supervisor_type: str) -> SupervisorStatsResponse:
         """Get performance statistics for a supervisor"""
