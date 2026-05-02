@@ -211,7 +211,10 @@ class TalkHierSessionService:
             timeout_seconds=request.timeout_seconds or 300,
             participants=participants,
             supervisor=supervisor,
-            supervisor_type=routing_decision.agent_allocation.supervisor_type
+            supervisor_type=self._resolve_supervisor_type(
+                routing_decision,
+                request.supervisor_type,
+            ),
         )
         
         # Store session
@@ -389,6 +392,15 @@ class TalkHierSessionService:
         session.last_update = datetime.now(UTC)
         
         # Update metrics
+        self.session_metrics.setdefault(
+            session_id,
+            {
+                "rounds_completed": 0,
+                "quality_progression": [],
+                "consensus_progression": [],
+                "message_count": 0,
+            },
+        )
         self.session_metrics[session_id]["rounds_completed"] += 1
         self.session_metrics[session_id]["quality_progression"].append(quality_score)
         self.session_metrics[session_id]["consensus_progression"].append(consensus_score)
@@ -406,7 +418,10 @@ class TalkHierSessionService:
             )
         
         # Calculate duration
-        duration_ms = int((datetime.now(UTC) - round_start).total_seconds() * 1000)
+        duration_ms = max(
+            1,
+            int((datetime.now(UTC) - round_start).total_seconds() * 1000),
+        )
         
         logger.info(f"Completed refinement round {request.round_number} for session {session_id}")
         logger.info(f"Quality: {quality_score:.2f}, Consensus: {consensus_score:.2f}, Delta: {improvement_delta:+.2f}")
@@ -682,7 +697,7 @@ class TalkHierSessionService:
         requested_type: str | None
     ) -> BaseSupervisor | None:
         """Create supervisor based on routing decision"""
-        supervisor_type = requested_type or routing_decision.agent_allocation.supervisor_type
+        supervisor_type = self._resolve_supervisor_type(routing_decision, requested_type)
 
         from src.ai_brain.integration.masr_supervisor_bridge import (
             SupervisorConfiguration,
@@ -703,6 +718,27 @@ class TalkHierSessionService:
         )
 
         return await self.supervisor_factory.create_supervisor_from_config(config)
+
+    def _resolve_supervisor_type(
+        self,
+        routing_decision: RoutingDecision,
+        requested_type: str | None,
+    ) -> str:
+        """Resolve a concrete supervisor type from routing output or test doubles."""
+        if requested_type:
+            return requested_type
+
+        allocation = getattr(routing_decision, "agent_allocation", None)
+        supervisor_type = getattr(allocation, "supervisor_type", None)
+        if isinstance(supervisor_type, str):
+            return supervisor_type
+
+        for supervisor_allocation in getattr(routing_decision, "supervisor_allocations", []):
+            supervisor_type = getattr(supervisor_allocation, "supervisor_type", None)
+            if isinstance(supervisor_type, str):
+                return supervisor_type
+
+        return "research"
     
     async def _determine_participants(
         self,
@@ -718,6 +754,12 @@ class TalkHierSessionService:
         
         if not agent_ids and routing_decision.agent_allocation:
             agent_ids = routing_decision.agent_allocation.worker_types
+            if not isinstance(agent_ids, list):
+                agent_ids = [
+                    agent.agent_type
+                    for agent in getattr(routing_decision.agent_allocation, "agents", [])
+                    if isinstance(getattr(agent, "agent_type", None), str)
+                ]
         
         # Create participant info
         for agent_id in agent_ids:
@@ -807,6 +849,13 @@ class TalkHierSessionService:
         strategy: RefinementStrategy
     ) -> dict[str, Any]:
         """Aggregate participant responses based on strategy"""
+        if not responses:
+            return {
+                "content": "",
+                "confidence": 0.0,
+                "aggregation_method": "empty",
+            }
+
         if strategy == RefinementStrategy.QUALITY_FOCUSED:
             # Weight by confidence
             best_response = max(

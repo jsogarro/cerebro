@@ -20,6 +20,7 @@ from src.api.routes import (
     reports,
     research,
     supervisor_api,
+    talkhier_api,
     websocket,
 )
 from src.api.services.event_publisher import event_publisher
@@ -147,6 +148,7 @@ app.include_router(agent_api.router, tags=["direct-agents"])     # Bypass API - 
 app.include_router(masr_api.router, tags=["masr-routing"])       # MASR routing intelligence
 # Hierarchical Supervisor API (Week 3 - Talk Structurally, Act Hierarchically)
 app.include_router(supervisor_api.router, tags=["supervisors"])  # Supervisor coordination
+app.include_router(talkhier_api.router, tags=["talkhier"])
 app.include_router(websocket.router, tags=["websocket"])
 
 
