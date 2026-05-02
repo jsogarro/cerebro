@@ -21,6 +21,7 @@ node_modules/
 .claude/
 .clinerules
 ai/
+/tmp/refactorit/
 .refactorit/
 *.refactorit.checkpoint
 CLAUDE.md
