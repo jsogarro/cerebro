@@ -12,6 +12,7 @@ from typing import Any
 from src.agents.base import BaseAgent
 from src.agents.comparative_insight_synthesizer import ComparativeInsightSynthesizer
 from src.agents.comparative_matrix_builder import ComparisonMatrixBuilder
+from src.agents.comparative_similarity_analyzer import SimilarityAnalyzer
 from src.agents.comparative_theory_extractor import TheoryExtractor
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
@@ -34,6 +35,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         super().__init__(*args, **kwargs)
         self.matrix_builder = ComparisonMatrixBuilder()
         self.insight_synthesizer = ComparativeInsightSynthesizer()
+        self.similarity_analyzer = SimilarityAnalyzer()
         self.theory_extractor = TheoryExtractor()
 
     def get_agent_type(self) -> str:
@@ -347,47 +349,13 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Confidence score between 0.0 and 1.0
         """
-        confidence = 0.4  # Base confidence
-
-        # Factor 1: Number of items (max +0.15)
-        if items_count >= 4:
-            confidence += 0.15
-        elif items_count >= 3:
-            confidence += 0.10
-        elif items_count >= 2:
-            confidence += 0.05
-
-        # Factor 2: Number of criteria (max +0.15)
-        if criteria_count >= 4:
-            confidence += 0.15
-        elif criteria_count >= 3:
-            confidence += 0.10
-        elif criteria_count >= 2:
-            confidence += 0.05
-        elif criteria_count >= 1:
-            confidence += 0.02
-
-        # Factor 3: Matrix completeness (max +0.2)
-        confidence += matrix_completeness * 0.2
-
-        # Factor 4: Trade-offs identified (max +0.1)
-        if len(trade_offs) >= 3:
-            confidence += 0.1
-        elif len(trade_offs) >= 2:
-            confidence += 0.07
-        elif len(trade_offs) >= 1:
-            confidence += 0.04
-
-        # Factor 5: Recommendations provided (max +0.1)
-        if len(recommendations) >= 3:
-            confidence += 0.1
-        elif len(recommendations) >= 2:
-            confidence += 0.07
-        elif len(recommendations) >= 1:
-            confidence += 0.04
-
-        # Ensure confidence is within bounds
-        return min(max(confidence, 0.0), 1.0)
+        return self.similarity_analyzer.calculate_confidence(
+            items_count,
+            criteria_count,
+            matrix_completeness,
+            trade_offs,
+            recommendations,
+        )
 
     def _calculate_confidence_with_mcp(
         self,
@@ -412,26 +380,41 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Confidence score between 0.0 and 1.0
         """
-        # Base confidence from original method
-        confidence = self._calculate_confidence(
+        return self.similarity_analyzer.calculate_confidence_with_mcp(
             items_count,
             criteria_count,
             matrix_completeness,
             trade_offs,
             recommendations,
+            mcp_data_quality,
         )
 
-        # MCP enhancement bonuses (max +0.15)
-        mcp_bonus = 0.0
+    def _calculate_matrix_similarity(
+        self, matrix: dict[str, dict[str, float]]
+    ) -> dict[str, Any]:
+        """
+        Calculate pairwise similarity between compared matrix items.
 
-        if mcp_data_quality.get("research_quality"):
-            mcp_bonus += 0.05  # Research data available
-        if mcp_data_quality.get("statistical_quality"):
-            mcp_bonus += 0.05  # Statistical analysis available
-        if mcp_data_quality.get("graph_quality"):
-            mcp_bonus += 0.05  # Relationship data available
+        Args:
+            matrix: Comparison matrix
 
-        return min(confidence + mcp_bonus, 1.0)
+        Returns:
+            Pairwise similarity summary
+        """
+        return self.similarity_analyzer.calculate_matrix_similarity(matrix)
+
+    def _calculate_text_similarity(self, first: str, second: str) -> float:
+        """
+        Calculate text similarity using deterministic token overlap.
+
+        Args:
+            first: First text value
+            second: Second text value
+
+        Returns:
+            Similarity score between 0.0 and 1.0
+        """
+        return self.similarity_analyzer.calculate_text_similarity(first, second)
 
     def _generate_visual_data(
         self, matrix: dict[str, dict[str, float]], criteria: list[str]
