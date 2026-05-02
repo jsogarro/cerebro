@@ -88,7 +88,7 @@ class TestRootDockerfileContract:
     def test_healthcheck_curls_health_endpoint(self, content: str) -> None:
         healthchecks = _instruction_lines(content, "HEALTHCHECK")
         assert len(healthchecks) == 1
-        assert "/health" in content and "curl" in healthchecks[0].lower() or "curl" in content
+        assert ("/health" in content and "curl" in healthchecks[0].lower()) or "curl" in content
 
     def test_production_cmd_unchanged(self, content: str) -> None:
         # Production stage uvicorn launch with 4 workers
@@ -214,16 +214,23 @@ class TestWebDockerfileContract:
         assert "npm run build" in content
 
     def test_dist_copied_to_nginx_html(self, content: str) -> None:
-        assert "COPY --from=builder /app/dist /usr/share/nginx/html" in content
+        copy_lines = _copy_from_lines(content)
+        assert any(
+            "/app/dist /usr/share/nginx/html" in line for line in copy_lines
+        ), copy_lines
 
     def test_default_nginx_assets_removed(self, content: str) -> None:
         assert "rm -rf /usr/share/nginx/html/*" in content
 
     def test_nginx_conf_copied(self, content: str) -> None:
-        assert "COPY nginx.conf /etc/nginx/conf.d/default.conf" in content
+        copy_lines = _instruction_lines(content, "COPY")
+        assert any(
+            "nginx.conf /etc/nginx/conf.d/default.conf" in line
+            for line in copy_lines
+        ), copy_lines
 
-    def test_expose_80(self, content: str) -> None:
-        assert "EXPOSE 80" in content
+    def test_expose_non_privileged_port(self, content: str) -> None:
+        assert "EXPOSE 8080" in content
 
     def test_cmd_starts_nginx_in_foreground(self, content: str) -> None:
         assert 'CMD ["nginx", "-g", "daemon off;"]' in content
