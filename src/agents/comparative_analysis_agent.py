@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from src.agents.base import BaseAgent
+from src.agents.comparative_matrix_builder import ComparisonMatrixBuilder
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.services.parsers.json_parser import parse_json_response
@@ -26,6 +27,10 @@ class ComparativeAnalysisAgent(BaseAgent):
     creates comparison matrices, identifies trade-offs, and provides
     contextual recommendations.
     """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.matrix_builder = ComparisonMatrixBuilder()
 
     def get_agent_type(self) -> str:
         """Return the agent type identifier."""
@@ -84,14 +89,16 @@ class ComparativeAnalysisAgent(BaseAgent):
 
             # Process comparison matrix with MCP statistical enhancements
             matrix = analysis.get("comparison_matrix", {})
-            enhanced_matrix = await self._enhance_matrix_with_statistics(
+            enhanced_matrix = await self.matrix_builder.enhance_matrix_with_statistics(
                 matrix, statistical_analysis
             )
-            normalized_matrix = self._normalize_comparison_matrix(enhanced_matrix)
+            normalized_matrix = self.matrix_builder.normalize_comparison_matrix(
+                enhanced_matrix
+            )
 
             # Calculate rankings with statistical significance
-            rankings = self._calculate_rankings(normalized_matrix, criteria)
-            statistical_rankings = await self._calculate_statistical_rankings(
+            rankings = self.matrix_builder.calculate_rankings(normalized_matrix, criteria)
+            statistical_rankings = await self.matrix_builder.calculate_statistical_rankings(
                 normalized_matrix, statistical_analysis
             )
 
@@ -110,7 +117,9 @@ class ComparativeAnalysisAgent(BaseAgent):
             confidence = self._calculate_confidence_with_mcp(
                 items_count=len(items),
                 criteria_count=len(criteria),
-                matrix_completeness=self._assess_matrix_completeness(normalized_matrix),
+                matrix_completeness=self.matrix_builder.assess_matrix_completeness(
+                    normalized_matrix
+                ),
                 trade_offs=trade_offs,
                 recommendations=analysis.get("recommendations", []),
                 mcp_data_quality={
@@ -164,7 +173,7 @@ class ComparativeAnalysisAgent(BaseAgent):
 
             # Add visual data if requested
             if task.input_data.get("generate_visual"):
-                output["visual_data"] = self._generate_visual_data(
+                output["visual_data"] = self.matrix_builder.generate_visual_data(
                     normalized_matrix, criteria
                 )
 
@@ -242,40 +251,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Normalized matrix
         """
-        if not matrix:
-            return {}
-
-        # Find min and max values for each criterion
-        criteria_ranges = {}
-        for item_scores in matrix.values():
-            for criterion, score in item_scores.items():
-                if criterion not in criteria_ranges:
-                    criteria_ranges[criterion] = {"min": score, "max": score}
-                else:
-                    criteria_ranges[criterion]["min"] = min(
-                        criteria_ranges[criterion]["min"], score
-                    )
-                    criteria_ranges[criterion]["max"] = max(
-                        criteria_ranges[criterion]["max"], score
-                    )
-
-        # Normalize values
-        normalized: dict[str, dict[str, float]] = {}
-        for item, scores in matrix.items():
-            normalized[item] = {}
-            for criterion, score in scores.items():
-                range_val = (
-                    criteria_ranges[criterion]["max"]
-                    - criteria_ranges[criterion]["min"]
-                )
-                if range_val > 0:
-                    normalized[item][criterion] = (
-                        score - criteria_ranges[criterion]["min"]
-                    ) / range_val
-                else:
-                    normalized[item][criterion] = score
-
-        return normalized
+        return self.matrix_builder.normalize_comparison_matrix(matrix)
 
     def _calculate_rankings(
         self, matrix: dict[str, dict[str, float]], criteria: list[str]
@@ -290,30 +266,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Rankings dictionary
         """
-        if not matrix:
-            return {}
-
-        rankings = {}
-
-        # Rank by each criterion
-        for criterion in criteria:
-            criterion_scores = [
-                (item, item_scores.get(criterion, 0.0)) for item, item_scores in matrix.items()
-            ]
-            criterion_scores.sort(key=lambda x: x[1], reverse=True)
-            rankings[criterion] = [item for item, _ in criterion_scores]
-
-        # Calculate overall ranking (simple average)
-        overall_scores: dict[str, float] = {}
-        for item, item_scores in matrix.items():
-            overall_scores[item] = sum(item_scores.values()) / len(item_scores) if item_scores else 0.0
-
-        overall_ranking = sorted(
-            overall_scores.items(), key=lambda x: x[1], reverse=True
-        )
-        rankings["overall"] = [item for item, _ in overall_ranking]
-
-        return rankings
+        return self.matrix_builder.calculate_rankings(matrix, criteria)
 
     def _analyze_trade_offs(
         self, trade_offs: list[str], matrix: dict[str, dict[str, float]]
@@ -421,23 +374,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Completeness score (0-1)
         """
-        if not matrix:
-            return 0.0
-
-        # Check if all items have scores for all criteria
-        all_criteria: set[str] = set()
-        for scores in matrix.values():
-            all_criteria.update(scores.keys())
-
-        if not all_criteria:
-            return 0.0
-
-        completeness_scores = []
-        for scores in matrix.values():
-            item_completeness = len(scores) / len(all_criteria)
-            completeness_scores.append(item_completeness)
-
-        return sum(completeness_scores) / len(completeness_scores)
+        return self.matrix_builder.assess_matrix_completeness(matrix)
 
     def _calculate_confidence(
         self,
@@ -559,19 +496,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Visual data dictionary
         """
-        data_points: dict[str, list[float]] = {}
-        for item, scores in matrix.items():
-            data_points[item] = [
-                scores.get(criterion, 0.0) for criterion in criteria
-            ]
-
-        visual_data: dict[str, Any] = {
-            "chart_type": "radar",
-            "labels": criteria,
-            "data_points": data_points
-        }
-
-        return visual_data
+        return self.matrix_builder.generate_visual_data(matrix, criteria)
 
     async def _search_comparative_studies(
         self, input_data: dict[str, Any]
@@ -859,31 +784,9 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Enhanced matrix with statistical adjustments
         """
-        if not matrix or not statistical_data.get("success"):
-            return matrix
-
-        enhanced_matrix = matrix.copy()
-
-        # Apply statistical adjustments if descriptive stats available
-        descriptive_stats = statistical_data.get("descriptive_stats", {})
-        if descriptive_stats:
-            # Normalize scores based on statistical distribution
-            for item in enhanced_matrix:
-                for criterion in enhanced_matrix[item]:
-                    original_score = enhanced_matrix[item][criterion]
-                    # Apply statistical normalization (simplified)
-                    std_dev = descriptive_stats.get("std_dev", 1.0)
-                    mean_val = descriptive_stats.get("mean", 0.5)
-
-                    # Z-score normalization
-                    if std_dev > 0:
-                        z_score = (original_score - mean_val) / std_dev
-                        # Convert back to 0-1 range
-                        enhanced_matrix[item][criterion] = max(
-                            0, min(1, 0.5 + z_score * 0.2)
-                        )
-
-        return enhanced_matrix
+        return await self.matrix_builder.enhance_matrix_with_statistics(
+            matrix, statistical_data
+        )
 
     async def _calculate_statistical_rankings(
         self, matrix: dict[str, dict[str, float]], statistical_data: dict[str, Any]
@@ -898,38 +801,9 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Statistical rankings with confidence intervals
         """
-        if not statistical_data.get("success"):
-            return {"method": "basic", "note": "No statistical data available"}
-
-        # Calculate rankings with statistical significance
-        rankings: dict[str, Any] = {}
-
-        # Overall ranking with confidence scores
-        item_scores = {}
-        for item, scores in matrix.items():
-            mean_score = sum(scores.values()) / len(scores) if scores else 0.0
-            item_scores[item] = {
-                "score": mean_score,
-                "confidence": self._calculate_ranking_confidence(
-                    scores, statistical_data
-                ),
-            }
-
-        # Sort by score
-        sorted_items = sorted(
-            item_scores.items(), key=lambda x: x[1]["score"], reverse=True
+        return await self.matrix_builder.calculate_statistical_rankings(
+            matrix, statistical_data
         )
-
-        rankings_list: list[dict[str, str | float | int]] = [
-            {"item": item, "score": data["score"], "confidence": data["confidence"]}
-            for item, data in sorted_items
-        ]
-        rankings["overall_with_confidence"] = rankings_list
-
-        rankings["method"] = "statistical"
-        rankings["tests_used"] = statistical_data.get("tests_performed", [])
-
-        return rankings
 
     def _calculate_ranking_confidence(
         self, scores: dict[str, float], statistical_data: dict[str, Any]
@@ -944,21 +818,9 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Confidence score for ranking
         """
-        if not scores:
-            return 0.0
-
-        # Base confidence on score variance
-        score_values = list(scores.values())
-        variance = sum((s - 0.5) ** 2 for s in score_values) / len(score_values)
-
-        # Lower variance = higher confidence
-        base_confidence = max(0.5, 1.0 - variance * 2)
-
-        # Boost confidence if statistical data available
-        if statistical_data.get("data_quality") == "high":
-            base_confidence = min(1.0, base_confidence + 0.2)
-
-        return base_confidence
+        return self.matrix_builder.calculate_ranking_confidence(
+            scores, statistical_data
+        )
 
     def _analyze_trade_offs_with_relationships(
         self,
