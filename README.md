@@ -44,6 +44,12 @@ cd cerebro
 uv pip install -e ".[dev]"
 ```
 
+If `uv` is unavailable, use the pip/venv fallback:
+```bash
+./scripts/setup-python-env.sh
+. .venv/bin/activate
+```
+
 3. **Set up environment:**
 ```bash
 cp .env.example .env
