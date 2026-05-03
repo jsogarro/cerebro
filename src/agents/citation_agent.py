@@ -5,16 +5,16 @@ This agent specializes in formatting citations and verifying sources.
 """
 
 import hashlib
-import logging
 from typing import Any
 
 import orjson
+from structlog import get_logger
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CitationAgent(BaseAgent):

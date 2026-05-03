@@ -6,8 +6,9 @@ across multiple criteria to provide recommendations.
 """
 
 import hashlib
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 from src.agents.base import BaseAgent
 from src.agents.comparative_insight_synthesizer import ComparativeInsightSynthesizer
@@ -19,7 +20,7 @@ from src.core.constants import LONG_TERM_CACHE_TTL
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_comparative_agent_prompt
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ComparativeAnalysisAgent(BaseAgent):

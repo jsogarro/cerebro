@@ -100,6 +100,15 @@ API_ROUTE_MODULES = [
     SRC_DIR / "api" / "routes" / "supervisor_api.py",
     SRC_DIR / "api" / "routes" / "talkhier_api.py",
 ]
+AGENT_CORE_MODULES = [
+    SRC_DIR / "agents" / "base.py",
+    SRC_DIR / "agents" / "citation_agent.py",
+    SRC_DIR / "agents" / "comparative_analysis_agent.py",
+    SRC_DIR / "agents" / "factory.py",
+    SRC_DIR / "agents" / "literature_review_agent.py",
+    SRC_DIR / "agents" / "methodology_agent.py",
+    SRC_DIR / "agents" / "synthesis_agent.py",
+]
 
 
 class StubProvider(BaseProvider):  # type: ignore[misc]
@@ -268,6 +277,11 @@ def test_experimentation_modules_use_structlog_logger() -> None:
 
 def test_api_route_modules_use_structlog_logger() -> None:
     for module_path in API_ROUTE_MODULES:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_agent_core_modules_use_structlog_logger() -> None:
+    for module_path in AGENT_CORE_MODULES:
         assert_no_stdlib_logging_logger(module_path)
 
 

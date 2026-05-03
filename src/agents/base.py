@@ -6,11 +6,11 @@ must inherit from, following functional programming principles.
 """
 
 import asyncio
-import logging
 import time
 from abc import ABC, abstractmethod
 from typing import Any
 
+from structlog import get_logger
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -27,7 +27,7 @@ from src.agents.models import (
 )
 from src.services.prompts.agent_prompts import get_agent_prompt_version
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class BaseAgent(ABC):
@@ -70,7 +70,7 @@ class BaseAgent(ABC):
         self._message_queue: list[AgentMessage] = []
 
         # Logger specific to this agent
-        self._logger = logging.getLogger(f"{__name__}.{self.get_agent_type()}")
+        self._logger = get_logger(f"{__name__}.{self.get_agent_type()}")
 
     @abstractmethod
     async def execute(self, task: AgentTask) -> AgentResult:
@@ -118,15 +118,21 @@ class BaseAgent(ABC):
 
     def log_info(self, message: str, **kwargs: Any) -> None:
         """Log an info message with agent context."""
-        self._logger.info(f"[{self.get_agent_type()}] {message}", extra=kwargs)
+        fields = {"agent_type": self.get_agent_type(), "detail": message}
+        fields.update(kwargs)
+        self._logger.info("agent_info", **fields)
 
     def log_error(self, message: str, **kwargs: Any) -> None:
         """Log an error message with agent context."""
-        self._logger.error(f"[{self.get_agent_type()}] {message}", extra=kwargs)
+        fields = {"agent_type": self.get_agent_type(), "detail": message}
+        fields.update(kwargs)
+        self._logger.error("agent_error", **fields)
 
     def log_warning(self, message: str, **kwargs: Any) -> None:
         """Log a warning message with agent context."""
-        self._logger.warning(f"[{self.get_agent_type()}] {message}", extra=kwargs)
+        fields = {"agent_type": self.get_agent_type(), "detail": message}
+        fields.update(kwargs)
+        self._logger.warning("agent_warning", **fields)
 
     def record_metric(self, name: str, value: float) -> None:
         """

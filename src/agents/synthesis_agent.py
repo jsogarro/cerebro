@@ -5,14 +5,15 @@ This agent specializes in integrating outputs from multiple agents into coherent
 """
 
 import hashlib
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class SynthesisAgent(BaseAgent):

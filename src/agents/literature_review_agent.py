@@ -6,8 +6,9 @@ searching academic sources, and identifying research gaps.
 """
 
 import hashlib
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
@@ -16,7 +17,7 @@ from src.models.research_project import ResearchDepth
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_literature_agent_prompt
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class LiteratureReviewAgent(BaseAgent):
