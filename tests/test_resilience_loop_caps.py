@@ -2,9 +2,11 @@
 
 import asyncio
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 
+from src.ai_brain.router.masr import MASRouter
 from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
 from src.api.services.talkhier_session_service import TalkHierSession
 from src.api.services.talkhier_state_manager import TalkHierStateManager
@@ -21,6 +23,9 @@ from src.orchestration.state import (
     ResearchState,
     WorkflowPhase,
 )
+from src.reliability.connection_pools import PoolStatus, RedisPoolManager
+from src.reliability.retry_strategies import CircuitBreaker
+from src.services.gemini_service import GeminiService
 
 
 def build_state() -> ResearchState:
@@ -99,3 +104,23 @@ def test_talkhier_refinement_round_rejects_rounds_past_max_rounds() -> None:
 
     with pytest.raises(ValueError, match="exceeds max_rounds=1"):
         asyncio.run(execute_past_cap())
+
+
+def test_gemini_api_call_uses_tenacity_retry_policy() -> None:
+    assert hasattr(GeminiService._generate_content, "retry")
+
+
+def test_masr_router_exposes_routing_circuit_breaker() -> None:
+    router = MASRouter(config={"enable_learning": False})
+
+    assert isinstance(router.routing_circuit_breaker, CircuitBreaker)
+
+
+def test_redis_pool_health_check_marks_pool_unhealthy_on_ping_failure() -> None:
+    async def run_check() -> PoolStatus:
+        manager = RedisPoolManager()
+        manager._client = AsyncMock()
+        manager._client.ping.side_effect = ConnectionError("redis down")
+        return await manager.health_check()
+
+    assert asyncio.run(run_check()) == PoolStatus.UNHEALTHY
