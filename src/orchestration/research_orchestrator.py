@@ -64,6 +64,7 @@ class OrchestratorConfig:
     enable_human_in_loop: bool = False
     quality_threshold: float = 0.7
     max_workflow_errors: int = 3
+    max_iterations: int = 10
     timeout_seconds: int = 1800  # 30 minutes
     enable_monitoring: bool = True
     enable_visualization: bool = True
@@ -217,6 +218,7 @@ class ResearchOrchestrator:
             enable_checkpointing=self.config.enable_checkpointing,
             enable_parallel_execution=self.config.enable_parallel_execution,
             max_parallel_nodes=self.config.max_parallel_agents,
+            max_iterations=self.config.max_iterations,
             enable_visualization=self.config.enable_visualization,
             router_config=self._router.config,
         )
@@ -389,6 +391,7 @@ class ResearchOrchestrator:
                 domains=domains,
                 context=context or {},
                 max_errors=self.config.max_workflow_errors,
+                max_iterations=self.config.max_iterations,
                 metadata=WorkflowMetadata(
                     workflow_id=workflow_id,
                     started_at=start_time,
@@ -614,6 +617,7 @@ class ResearchOrchestrator:
             workflow_id=checkpoint.checkpoint_id.split("-")[0],
             query=checkpoint.state_data["query"],
             domains=checkpoint.state_data["domains"],
+            max_iterations=self.config.max_iterations,
         )
 
         # Restore from checkpoint

@@ -8,12 +8,12 @@ with nodes, edges, and conditional routing.
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph import END, StateGraph
 
 from src.orchestration.edges import RouterConfig, WorkflowRouter
-from src.orchestration.state import ResearchState, WorkflowPhase
+from src.orchestration.state import MaxIterationsExceeded, ResearchState, WorkflowPhase
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ class GraphConfig:
     enable_checkpointing: bool = True
     enable_parallel_execution: bool = True
     max_parallel_nodes: int = 3
+    max_iterations: int = 10
     enable_visualization: bool = True
     router_config: RouterConfig | None = None
 
@@ -177,7 +178,7 @@ class ResearchGraphBuilder:
             route = router(state)
             if route not in route_map:
                 logger.warning(f"Unknown route: {route}, defaulting to END")
-                return END
+                return cast(str, END)
             return route_map[route]
 
         self.add_edge(source, wrapped_router)
@@ -246,10 +247,10 @@ class ResearchGraphBuilder:
                 # Direct edge
                 if edge.condition:
                     # Add with condition
-                    def conditional_target(state: ResearchState, _edge: Any = edge) -> str:
+                    def conditional_target(state: ResearchState, _edge: EdgeConfig = edge) -> str:
                         if _edge.condition and _edge.condition(state) and isinstance(_edge.target, str):
                             return _edge.target
-                        return END
+                        return cast(str, END)
 
                     self._graph.add_conditional_edges(edge.source, conditional_target)
                 else:
@@ -307,6 +308,10 @@ class ResearchGraphBuilder:
         """
 
         def wrapped_handler(state: ResearchState) -> ResearchState:
+            state.increment_iteration(
+                max_iterations=self.config.max_iterations,
+                node_name=node_config.name,
+            )
             logger.info(f"Executing node: {node_config.name}")
 
             try:
@@ -323,6 +328,8 @@ class ResearchGraphBuilder:
                 logger.info(f"Node {node_config.name} completed successfully")
                 return result
 
+            except MaxIterationsExceeded:
+                raise
             except Exception as e:
                 logger.error(f"Error in node {node_config.name}: {e}")
                 state.error_count += 1
