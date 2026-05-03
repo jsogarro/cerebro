@@ -40,6 +40,7 @@ from src.api.routes import (
     research,
     supervisor_api,
     talkhier_api,
+    users,
     websocket,
 )
 from src.api.services.event_publisher import event_publisher
@@ -172,6 +173,7 @@ app.mount("/metrics", metrics_app)
 # Include routers
 app.include_router(health.router, tags=["health"])
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(users.router, prefix="/api/v1")
 app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
 # Agent Framework APIs (Research-Informed)

@@ -22,6 +22,7 @@ from enum import Enum
 from typing import Any
 
 from src.core.constants import HIGH_ESTIMATED_TOKENS
+from src.core.pii_redactor import redact_pii
 from src.core.types import HealthCheckDict
 
 from ..agents.communication.talkhier_message import (
@@ -178,7 +179,10 @@ class MultiSupervisorOrchestrator:
         query_id = str(uuid.uuid4())
         self.multi_supervisor_stats["total_multi_supervisor_queries"] += 1
         
-        logger.info(f"Starting multi-supervisor orchestration for query: {query[:100]}...")
+        logger.info(
+            "Starting multi-supervisor orchestration for query: %s...",
+            redact_pii(query)[:100],
+        )
         
         try:
             # Step 1: Decompose query into domain components

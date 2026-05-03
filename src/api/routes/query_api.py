@@ -222,7 +222,10 @@ async def intelligent_analysis_query(
     Always routes through MASR for optimal agent selection and cost efficiency.
     """
     try:
-        logger.info(f"Intelligent analysis query: {request.query[:100]}...")
+        logger.info(
+            "intelligent_analysis_query_started",
+            query_preview=redact_pii(request.query)[:100],
+        )
         
         intelligent_request = IntelligentQueryRequest(
             query=request.query,
@@ -265,7 +268,10 @@ async def intelligent_synthesis_query(
     MASR determines whether to use direct synthesis or full research pipeline.
     """
     try:
-        logger.info(f"Intelligent synthesis query: {request.query[:100]}...")
+        logger.info(
+            "intelligent_synthesis_query_started",
+            query_preview=redact_pii(request.query)[:100],
+        )
         
         intelligent_request = IntelligentQueryRequest(
             query=request.query,

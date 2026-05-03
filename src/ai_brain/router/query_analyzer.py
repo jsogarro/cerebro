@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from src.core.pii_redactor import redact_pii
+
 logger = logging.getLogger(__name__)
 
 
@@ -152,7 +154,7 @@ class QueryComplexityAnalyzer:
         Returns:
             ComplexityAnalysis with routing recommendations
         """
-        logger.info(f"Analyzing query complexity: {query[:100]}...")
+        logger.info("Analyzing query complexity: %s...", redact_pii(query)[:100])
 
         # Clean and prepare query
         cleaned_query = self._clean_query(query)

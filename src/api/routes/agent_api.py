@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, status
 from structlog import get_logger
 
+from ...core.pii_redactor import redact_pii
 from ...models.agent_api_models import (
     AgentExecutionRequest,
     AgentExecutionResponse,
@@ -125,7 +126,11 @@ async def execute_agent(
     Supports TalkHier refinement for quality assurance.
     """
     try:
-        logger.info(f"Executing {agent_type.value} agent with query: {request.query[:100]}...")
+        logger.info(
+            "executing_agent_with_query",
+            agent_type=agent_type.value,
+            query_preview=redact_pii(request.query)[:100],
+        )
         
         service = get_agent_execution_service()
         

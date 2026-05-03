@@ -8,6 +8,7 @@ identify research domains, and determine the appropriate research approach.
 import logging
 from typing import Any
 
+from src.core.pii_redactor import redact_pii
 from src.orchestration.state import ResearchState
 from src.services.gemini_service import GeminiService
 
@@ -30,7 +31,7 @@ async def query_analysis_node(state: ResearchState) -> ResearchState:
     Returns:
         Updated state with query analysis results
     """
-    logger.info(f"Analyzing query: {state.query}")
+    logger.info("Analyzing query: %s", redact_pii(state.query))
 
     try:
         # Extract key concepts from query

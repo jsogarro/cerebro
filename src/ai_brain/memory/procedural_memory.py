@@ -223,6 +223,20 @@ class ProceduralMemoryManager:
             logger.error(f"Failed to retrieve procedures: {e}")
             return []
 
+    async def delete_by_user_id(self, user_id: str) -> int:
+        """Delete procedures associated with a user."""
+
+        procedure_ids = [
+            procedure_id
+            for procedure_id, procedure in self.procedures.items()
+            if procedure.metadata.get("user_id") == user_id
+        ]
+        for procedure_id in procedure_ids:
+            del self.procedures[procedure_id]
+        if procedure_ids:
+            await self._persist_procedures()
+        return len(procedure_ids)
+
     async def learn_from_episode(
         self, episode_data: dict[str, Any], performance_score: float, success: bool
     ) -> str | None:

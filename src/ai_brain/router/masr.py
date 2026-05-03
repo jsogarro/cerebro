@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from src.core.pii_redactor import redact_pii
 from src.core.types import HealthCheckDict
 
 if TYPE_CHECKING:
@@ -189,7 +190,7 @@ class MASRouter:
         start_time = datetime.now()
         query_id = str(uuid.uuid4())
 
-        logger.info(f"Routing query {query_id}: {query[:100]}...")
+        logger.info("Routing query %s: %s...", query_id, redact_pii(query)[:100])
 
         try:
             await self._routing_circuit_breaker.call(lambda: None)

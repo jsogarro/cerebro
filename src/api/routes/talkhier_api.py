@@ -25,6 +25,7 @@ from src.api.services.talkhier_session_manager import TalkHierSessionManager
 from src.api.services.talkhier_session_service import TalkHierSessionService
 from src.api.websocket.connection_manager import ConnectionManager
 from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
+from src.core.pii_redactor import redact_pii
 from src.models.talkhier_api_models import (
     AnalyticsResponse,
     ConsensusCheckRequest,
@@ -100,7 +101,10 @@ async def create_refinement_session(
         ```
     """
     try:
-        logger.info(f"Creating TalkHier session for query: {request.query[:100]}...")
+        logger.info(
+            "Creating TalkHier session for query: %s...",
+            redact_pii(request.query)[:100],
+        )
         
         # Create session through service
         session_response = await session_service.create_session(request)

@@ -334,6 +334,21 @@ class SemanticMemoryManager:
             logger.error(f"Failed to delete semantic item {item_id}: {e}")
             return False
 
+    async def delete_by_user_id(self, user_id: str) -> int:
+        """Delete fallback semantic items associated with a user."""
+
+        if self.vector_client:
+            logger.warning("User-scoped semantic vector deletion is not implemented")
+            return 0
+
+        original_count = len(self._fallback_storage)
+        self._fallback_storage = [
+            item
+            for item in self._fallback_storage
+            if item.metadata.get("user_id") != user_id
+        ]
+        return original_count - len(self._fallback_storage)
+
     async def get_memory_stats(self) -> dict[str, Any]:
         """Get semantic memory statistics."""
 

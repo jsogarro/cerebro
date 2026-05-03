@@ -454,6 +454,20 @@ class MultiTierMemorySystem:
             "procedural_memory": procedural_stats,
         }
 
+    async def purge_user_data(self, user_id: str) -> dict[str, int]:
+        """Purge user-scoped data from memory tiers that store user interactions."""
+
+        working_deleted = await self.working_memory.delete_by_user_id(user_id)
+        episodic_deleted = await self.episodic_memory.delete_by_user_id(user_id)
+        semantic_deleted = await self.semantic_memory.delete_by_user_id(user_id)
+        procedural_deleted = await self.procedural_memory.delete_by_user_id(user_id)
+        return {
+            "working_memory": working_deleted,
+            "episodic_memory": episodic_deleted,
+            "semantic_memory": semantic_deleted,
+            "procedural_memory": procedural_deleted,
+        }
+
     async def _store_in_working_memory(
         self, context: MemoryContext, interaction_data: dict[str, Any]
     ) -> bool:

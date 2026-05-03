@@ -16,10 +16,12 @@ Episodic memory stores:
 
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
+
+from src.core.memory_encryption import MemoryEncryption
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +212,7 @@ class EpisodicMemoryManager:
         self.retention_days: int = config.get("retention_days", 7)
         self.max_size: int = config.get("max_size", 10000)
         self.cleanup_interval: int = config.get("cleanup_interval", 300)
+        self._encryption = MemoryEncryption(config.get("encryption_key"))
 
         # Database components
         self.engine: Any = None
@@ -529,23 +532,24 @@ class EpisodicMemoryManager:
         """Store episode in PostgreSQL database."""
 
         assert self.session_factory is not None
+        stored_episode = self._encrypt_episode_for_storage(episode)
         async with self.session_factory() as session:
             db_episode = EpisodicEvent(
-                id=episode.id,
-                session_id=episode.session_id,
-                user_id=episode.user_id,
-                agent_id=episode.agent_id,
-                event_type=episode.event_type.value,
-                event_data=episode.event_data,
-                context=episode.context,
-                timestamp=episode.timestamp,
-                duration_ms=episode.duration_ms,
-                sequence_number=episode.sequence_number,
-                success=episode.success,
-                quality_score=episode.quality_score,
-                user_feedback=episode.user_feedback,
-                tags=episode.tags,
-                event_metadata=episode.metadata,
+                id=stored_episode.id,
+                session_id=stored_episode.session_id,
+                user_id=stored_episode.user_id,
+                agent_id=stored_episode.agent_id,
+                event_type=stored_episode.event_type.value,
+                event_data=stored_episode.event_data,
+                context=stored_episode.context,
+                timestamp=stored_episode.timestamp,
+                duration_ms=stored_episode.duration_ms,
+                sequence_number=stored_episode.sequence_number,
+                success=stored_episode.success,
+                quality_score=stored_episode.quality_score,
+                user_feedback=stored_episode.user_feedback,
+                tags=stored_episode.tags,
+                event_metadata=stored_episode.metadata,
             )
 
             session.add(db_episode)
@@ -607,22 +611,40 @@ class EpisodicMemoryManager:
             # Convert to Episode objects
             episodes: list[Episode] = []
             for db_episode in db_episodes:
-                episode = Episode(
-                    id=str(db_episode.id),
-                    session_id=str(db_episode.session_id),
-                    user_id=str(db_episode.user_id) if db_episode.user_id else None,
-                    agent_id=str(db_episode.agent_id) if db_episode.agent_id else None,
-                    event_type=EventType(str(db_episode.event_type)),
-                    event_data=dict(db_episode.event_data) if db_episode.event_data else {},
-                    context=dict(db_episode.context) if db_episode.context else {},
-                    timestamp=db_episode.timestamp,
-                    duration_ms=int(db_episode.duration_ms) if db_episode.duration_ms else None,
-                    sequence_number=int(db_episode.sequence_number) if db_episode.sequence_number else None,
-                    success=bool(db_episode.success) if db_episode.success is not None else None,
-                    quality_score=float(db_episode.quality_score) if db_episode.quality_score else None,
-                    user_feedback=str(db_episode.user_feedback) if db_episode.user_feedback else None,
-                    tags=list(db_episode.tags) if db_episode.tags else [],
-                    metadata=dict(db_episode.event_metadata) if db_episode.event_metadata else {},
+                episode = self._decrypt_episode_from_storage(
+                    Episode(
+                        id=str(db_episode.id),
+                        session_id=str(db_episode.session_id),
+                        user_id=str(db_episode.user_id) if db_episode.user_id else None,
+                        agent_id=str(db_episode.agent_id)
+                        if db_episode.agent_id
+                        else None,
+                        event_type=EventType(str(db_episode.event_type)),
+                        event_data=dict(db_episode.event_data)
+                        if db_episode.event_data
+                        else {},
+                        context=dict(db_episode.context) if db_episode.context else {},
+                        timestamp=db_episode.timestamp,
+                        duration_ms=int(db_episode.duration_ms)
+                        if db_episode.duration_ms
+                        else None,
+                        sequence_number=int(db_episode.sequence_number)
+                        if db_episode.sequence_number
+                        else None,
+                        success=bool(db_episode.success)
+                        if db_episode.success is not None
+                        else None,
+                        quality_score=float(db_episode.quality_score)
+                        if db_episode.quality_score
+                        else None,
+                        user_feedback=str(db_episode.user_feedback)
+                        if db_episode.user_feedback
+                        else None,
+                        tags=list(db_episode.tags) if db_episode.tags else [],
+                        metadata=dict(db_episode.event_metadata)
+                        if db_episode.event_metadata
+                        else {},
+                    )
                 )
                 episodes.append(episode)
 
@@ -630,14 +652,14 @@ class EpisodicMemoryManager:
 
     def _store_episode_fallback(self, episode: Episode) -> None:
         """Store episode in fallback storage."""
-        self._fallback_storage.append(episode)
+        self._fallback_storage.append(self._encrypt_episode_for_storage(episode))
         self._fallback_accessed_at[episode.id] = datetime.now()
         self._evict_fallback_if_needed()
 
     def _retrieve_episodes_fallback(self, query: EpisodeQuery) -> list[Episode]:
         """Retrieve episodes from fallback storage."""
 
-        episodes = self._fallback_storage
+        episodes = list(self._fallback_storage)
 
         # Apply filters
         if query.session_id:
@@ -674,7 +696,74 @@ class EpisodicMemoryManager:
         now = datetime.now()
         for episode in selected:
             self._fallback_accessed_at[episode.id] = now
-        return selected
+        return [self._decrypt_episode_from_storage(episode) for episode in selected]
+
+    async def delete_by_user_id(self, user_id: str) -> int:
+        """Delete episodic memory associated with a user."""
+
+        try:
+            if self.engine and self.session_factory:
+                return await self._delete_by_user_id_db(user_id)
+            return self._delete_by_user_id_fallback(user_id)
+        except Exception as e:
+            logger.error(f"Failed to delete episodic memory for user {user_id}: {e}")
+            return 0
+
+    async def _delete_by_user_id_db(self, user_id: str) -> int:
+        """Delete episodic database rows for a user."""
+
+        assert self.session_factory is not None
+        async with self.session_factory() as session:
+            events = await session.execute(
+                text("DELETE FROM episodic_events WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            )
+            sessions = await session.execute(
+                text("DELETE FROM episodic_sessions WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            )
+            await session.commit()
+            return (events.rowcount or 0) + (sessions.rowcount or 0)
+
+    def _delete_by_user_id_fallback(self, user_id: str) -> int:
+        """Delete fallback episodes for a user."""
+
+        original_count = len(self._fallback_storage)
+        self._fallback_storage = [
+            episode for episode in self._fallback_storage if episode.user_id != user_id
+        ]
+        retained_ids = {episode.id for episode in self._fallback_storage}
+        self._fallback_accessed_at = {
+            episode_id: accessed_at
+            for episode_id, accessed_at in self._fallback_accessed_at.items()
+            if episode_id in retained_ids
+        }
+        return original_count - len(self._fallback_storage)
+
+    def _encrypt_episode_for_storage(self, episode: Episode) -> Episode:
+        """Return an episode copy with sensitive payload fields encrypted."""
+
+        return replace(
+            episode,
+            event_data=self._encryption.encrypt_data(episode.event_data),
+            context=self._encryption.encrypt_data(episode.context),
+            user_feedback=self._encryption.encrypt_text(episode.user_feedback),
+            metadata=self._encryption.encrypt_data(episode.metadata),
+        )
+
+    def _decrypt_episode_from_storage(self, episode: Episode) -> Episode:
+        """Return an episode copy with sensitive payload fields decrypted."""
+
+        event_data = self._encryption.decrypt_data(episode.event_data)
+        context = self._encryption.decrypt_data(episode.context)
+        metadata = self._encryption.decrypt_data(episode.metadata)
+        return replace(
+            episode,
+            event_data=event_data if isinstance(event_data, dict) else {},
+            context=context if isinstance(context, dict) else {},
+            user_feedback=self._encryption.decrypt_text(episode.user_feedback),
+            metadata=metadata if isinstance(metadata, dict) else {},
+        )
 
     def _evict_fallback_if_needed(self) -> None:
         """Evict least recently used fallback episodes over the configured cap."""
