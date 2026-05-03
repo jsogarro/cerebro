@@ -83,8 +83,10 @@ class WorkingMemoryManager:
 
         # Memory configuration
         self.default_ttl = config.get("default_ttl", 3600)  # 1 hour
+        self.max_size = config.get("max_size", 1000)
         self.max_memory_mb = config.get("max_memory_mb", 512)
         self.cleanup_interval = config.get("cleanup_interval", 300)  # 5 minutes
+        self._memory_fallback: dict[str, WorkingMemoryItem] = {}
 
         # Redis client
         self.redis_client = None
@@ -92,7 +94,6 @@ class WorkingMemoryManager:
             self.redis_client = redis_module.from_url(self.redis_url)
         else:
             logger.warning("Redis not available, using in-memory fallback")
-            self._memory_fallback: dict[str, Any] = {}
 
         # Background tasks
         self._bg_tasks = BackgroundTaskTracker()
@@ -150,14 +151,20 @@ class WorkingMemoryManager:
             item = WorkingMemoryItem(
                 key=key,
                 value=value,
-                expires_at=datetime.now() + timedelta(seconds=ttl or self.default_ttl),
+                expires_at=datetime.now() + timedelta(
+                    seconds=self.default_ttl if ttl is None else ttl
+                ),
                 tags=tags or [],
                 metadata=metadata or {},
             )
 
             # Store in Redis or fallback
             if self.redis_client:
-                await self._store_redis(key, item, ttl or self.default_ttl)
+                await self._store_redis(
+                    key,
+                    item,
+                    self.default_ttl if ttl is None else ttl,
+                )
             else:
                 self._store_fallback(key, item)
 
@@ -521,6 +528,7 @@ class WorkingMemoryManager:
     def _store_fallback(self, key: str, item: WorkingMemoryItem) -> None:
         """Store item in memory fallback."""
         self._memory_fallback[key] = item
+        self._evict_fallback_if_needed()
 
     def _retrieve_fallback(self, key: str) -> WorkingMemoryItem | None:
         """Retrieve item from memory fallback."""
@@ -532,6 +540,15 @@ class WorkingMemoryManager:
             return None
 
         return item
+
+    def _evict_fallback_if_needed(self) -> None:
+        """Evict least recently used fallback entries over the configured cap."""
+        while len(self._memory_fallback) > self.max_size:
+            lru_key = min(
+                self._memory_fallback,
+                key=lambda key: self._memory_fallback[key].last_accessed,
+            )
+            del self._memory_fallback[lru_key]
 
     async def _update_access_stats(self, key: str, item: WorkingMemoryItem) -> None:
         """Update access statistics for an item."""
