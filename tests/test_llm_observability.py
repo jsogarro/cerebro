@@ -95,6 +95,11 @@ EXPERIMENTATION_MODULES = [
     *(SRC_DIR / "ai_brain" / "experimentation" / "optimization").glob("*.py"),
     *(SRC_DIR / "ai_brain" / "experimentation" / "statistical").glob("*.py"),
 ]
+API_ROUTE_MODULES = [
+    SRC_DIR / "api" / "routes" / "experiment_agent_api.py",
+    SRC_DIR / "api" / "routes" / "supervisor_api.py",
+    SRC_DIR / "api" / "routes" / "talkhier_api.py",
+]
 
 
 class StubProvider(BaseProvider):  # type: ignore[misc]
@@ -258,6 +263,11 @@ def test_standalone_service_cli_modules_use_structlog_logger() -> None:
 
 def test_experimentation_modules_use_structlog_logger() -> None:
     for module_path in EXPERIMENTATION_MODULES:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_api_route_modules_use_structlog_logger() -> None:
+    for module_path in API_ROUTE_MODULES:
         assert_no_stdlib_logging_logger(module_path)
 
 

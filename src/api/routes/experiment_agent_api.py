@@ -6,12 +6,12 @@ experiments on the Agent Framework APIs, enabling systematic optimization
 of routing strategies, execution patterns, and quality metrics.
 """
 
-import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket
 from pydantic import BaseModel, Field
+from structlog import get_logger
 
 # Import A/B Testing Integration components
 from src.ai_brain.experimentation.integration.agent_framework_integration import (
@@ -26,7 +26,7 @@ from src.ai_brain.experimentation.optimization.feedback_loop_optimizer import (
 from src.auth.dependencies import get_current_user
 from src.models.user import User
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # ==================== Pydantic Models ====================
 
@@ -482,7 +482,7 @@ async def dashboard_websocket(websocket: WebSocket) -> None:
                 })
                 
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error("experiment_dashboard_websocket_error", error=str(e))
         
     finally:
         await dashboard.disconnect_dashboard_client(client_id)

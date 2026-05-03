@@ -8,7 +8,6 @@ cross-domain orchestration capabilities.
 """
 
 import json
-import logging
 
 from fastapi import (
     APIRouter,
@@ -17,6 +16,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from structlog import get_logger
 
 from src.api.services.supervisor_coordination_service import (
     SupervisorCoordinationService,
@@ -46,8 +46,7 @@ from src.models.supervisor_api_models import (
     WorkerListResponse,
 )
 
-# Configure logging
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # Create router with prefix and tags
 router = APIRouter(
@@ -111,7 +110,11 @@ async def execute_supervisor_task(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error executing supervisor task: {e}")
+        logger.error(
+            "supervisor_task_execution_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Internal error during supervisor execution"
@@ -140,7 +143,7 @@ async def list_supervisors() -> SupervisorListResponse:
         )
         
     except Exception as e:
-        logger.error(f"Error listing supervisors: {e}")
+        logger.error("supervisor_list_failed", error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor list"
@@ -157,7 +160,11 @@ async def get_supervisor_info(supervisor_type: SupervisorType) -> SupervisorInfo
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error getting supervisor info: {e}")
+        logger.error(
+            "supervisor_info_get_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor information"
@@ -186,7 +193,11 @@ async def get_supervisor_workers(supervisor_type: SupervisorType) -> WorkerListR
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error getting supervisor workers: {e}")
+        logger.error(
+            "supervisor_workers_get_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error retrieving worker information"
@@ -226,7 +237,11 @@ async def coordinate_workers(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error coordinating workers: {e}")
+        logger.error(
+            "supervisor_worker_coordination_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error during worker coordination"
@@ -259,7 +274,7 @@ async def orchestrate_multi_supervisor(
         return response
         
     except Exception as e:
-        logger.error(f"Error in multi-supervisor orchestration: {e}")
+        logger.error("multi_supervisor_orchestration_failed", error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Error during multi-supervisor orchestration"
@@ -279,7 +294,11 @@ async def get_supervisor_stats(supervisor_type: SupervisorType) -> SupervisorSta
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error getting supervisor stats: {e}")
+        logger.error(
+            "supervisor_stats_get_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor statistics"
@@ -298,7 +317,11 @@ async def get_supervisor_health(supervisor_type: SupervisorType) -> SupervisorHe
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error getting supervisor health: {e}")
+        logger.error(
+            "supervisor_health_get_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor health status"
@@ -320,7 +343,7 @@ async def optimize_worker_allocation(
     try:
         return await supervisor_service.optimize_worker_allocation(request)
     except Exception as e:
-        logger.error(f"Error optimizing worker allocation: {e}")
+        logger.error("supervisor_worker_allocation_optimization_failed", error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Error during allocation optimization"
@@ -357,7 +380,11 @@ async def resolve_conflicts(
         return response
         
     except Exception as e:
-        logger.error(f"Error resolving conflicts: {e}")
+        logger.error(
+            "supervisor_conflict_resolution_failed",
+            conflict_id=request.conflict_id,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error during conflict resolution"
@@ -381,7 +408,11 @@ async def compare_supervisor_performance(
         supervisor_types = [s.value for s in supervisors]
         return await supervisor_service.compare_supervisor_performance(supervisor_types)
     except Exception as e:
-        logger.error(f"Error comparing supervisor performance: {e}")
+        logger.error(
+            "supervisor_performance_comparison_failed",
+            supervisor_count=len(supervisors),
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error during performance comparison"
@@ -413,7 +444,7 @@ async def run_coordination_experiment(
         return response
         
     except Exception as e:
-        logger.error(f"Error running experiment: {e}")
+        logger.error("supervisor_coordination_experiment_failed", error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Error during coordination experiment"
@@ -474,13 +505,23 @@ async def supervisor_websocket(
                     "error": "Invalid JSON format"
                 })
             except Exception as e:
-                logger.error(f"WebSocket error: {e}")
+                logger.error(
+                    "supervisor_websocket_message_error",
+                    supervisor_type=supervisor_type.value,
+                    client_id=client_id,
+                    error=str(e),
+                )
                 await websocket.send_json({
                     "error": "Processing error"
                 })
                 
     except Exception as e:
-        logger.error(f"WebSocket connection error: {e}")
+        logger.error(
+            "supervisor_websocket_connection_error",
+            supervisor_type=supervisor_type.value,
+            client_id=client_id,
+            error=str(e),
+        )
     finally:
         connection_manager.disconnect(websocket, client_id)
         connection_manager.unsubscribe_supervisor(supervisor_type.value, websocket)
@@ -533,7 +574,12 @@ async def coordination_progress_websocket(
                 break
                 
     except Exception as e:
-        logger.error(f"Coordination WebSocket error: {e}")
+        logger.error(
+            "coordination_websocket_error",
+            coordination_id=coordination_id,
+            client_id=client_id,
+            error=str(e),
+        )
     finally:
         connection_manager.disconnect(websocket, client_id)
 

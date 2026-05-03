@@ -8,7 +8,6 @@ The API provides structured dialogue management, multi-round refinement,
 consensus building, and real-time communication capabilities.
 """
 
-import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,6 +19,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from structlog import get_logger
 
 from src.api.services.talkhier_session_manager import TalkHierSessionManager
 from src.api.services.talkhier_session_service import TalkHierSessionService
@@ -47,7 +47,7 @@ from src.models.talkhier_api_models import (
     ValidationResponse,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # Create router with prefix and tags
 router = APIRouter(
@@ -102,8 +102,8 @@ async def create_refinement_session(
     """
     try:
         logger.info(
-            "Creating TalkHier session for query: %s...",
-            redact_pii(request.query)[:100],
+            "talkhier_session_create_requested",
+            query_preview=redact_pii(request.query)[:100],
         )
         
         # Create session through service
@@ -134,7 +134,7 @@ async def create_refinement_session(
         return session_response
 
     except Exception as e:
-        logger.error(f"Failed to create TalkHier session: {e!s}")
+        logger.error("talkhier_session_create_failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -175,7 +175,11 @@ async def get_session_status(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from None
     except Exception as e:
-        logger.error(f"Failed to get session status: {e!s}")
+        logger.error(
+            "talkhier_session_status_get_failed",
+            session_id=session_id,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -212,7 +216,11 @@ async def execute_refinement_round(
         ```
     """
     try:
-        logger.info(f"Executing refinement round {request.round_number} for session {session_id}")
+        logger.info(
+            "talkhier_refinement_round_execute_requested",
+            session_id=session_id,
+            round_number=request.round_number,
+        )
         
         # Execute round
         round_response = await session_service.execute_refinement_round(
@@ -254,7 +262,12 @@ async def execute_refinement_round(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from None
     except Exception as e:
-        logger.error(f"Failed to execute refinement round: {e!s}")
+        logger.error(
+            "talkhier_refinement_round_execute_failed",
+            session_id=session_id,
+            round_number=request.round_number,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -318,7 +331,11 @@ async def check_consensus_status(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from None
     except Exception as e:
-        logger.error(f"Failed to check consensus: {e!s}")
+        logger.error(
+            "talkhier_consensus_check_failed",
+            session_id=session_id,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -376,8 +393,10 @@ async def close_session(
                     disconnect_errors.append(f"{connection_id}: {disconnect_err}")
             if disconnect_errors:
                 logger.warning(
-                    f"Failed to disconnect {len(disconnect_errors)} connection(s) "
-                    f"for session {session_id}: {disconnect_errors}"
+                    "talkhier_session_disconnect_failed",
+                    session_id=session_id,
+                    error_count=len(disconnect_errors),
+                    errors=disconnect_errors,
                 )
         
         # Log analytics
@@ -397,7 +416,11 @@ async def close_session(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from None
     except Exception as e:
-        logger.error(f"Failed to close session: {e!s}")
+        logger.error(
+            "talkhier_session_close_failed",
+            session_id=session_id,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -505,13 +528,16 @@ async def validate_communication_structure(
         validation_response = await session_service.validate_protocol(request)
         
         # Log validation
-        logger.info(f"Protocol validation: {validation_response.is_valid} "
-                   f"(detected: {validation_response.protocol_detected})")
+        logger.info(
+            "talkhier_protocol_validation_completed",
+            is_valid=validation_response.is_valid,
+            protocol_detected=validation_response.protocol_detected,
+        )
         
         return validation_response
 
     except Exception as e:
-        logger.error(f"Protocol validation failed: {e!s}")
+        logger.error("talkhier_protocol_validation_failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -563,7 +589,13 @@ async def get_protocol_analytics(
         return AnalyticsResponse(**analytics)
 
     except Exception as e:
-        logger.error(f"Failed to get analytics: {e!s}")
+        logger.error(
+            "talkhier_analytics_get_failed",
+            time_range=time_range,
+            protocol_type=protocol_type.value if protocol_type else None,
+            min_quality=min_quality,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -640,7 +672,11 @@ async def websocket_session_updates(
         )
         await connection_manager.disconnect(connection_id)
     except Exception as e:
-        logger.error(f"WebSocket error for session {session_id}: {e!s}")
+        logger.error(
+            "talkhier_session_websocket_error",
+            session_id=session_id,
+            error=str(e),
+        )
         await websocket.close(code=1011, reason=str(e))
 
 
@@ -738,7 +774,11 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
             )
         await connection_manager.disconnect(connection_id)
     except Exception as e:
-        logger.error(f"Interactive session error: {e!s}")
+        logger.error(
+            "talkhier_interactive_session_error",
+            session_id=session_id,
+            error=str(e),
+        )
         await websocket.close(code=1011, reason=str(e))
 
 
@@ -811,7 +851,11 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             )
         await connection_manager.disconnect(connection_id)
     except Exception as e:
-        logger.error(f"Coordination monitoring error: {e!s}")
+        logger.error(
+            "talkhier_coordination_monitoring_error",
+            coordination_id=coordination_id,
+            error=str(e),
+        )
         await websocket.close(code=1011, reason=str(e))
 
 
@@ -852,15 +896,22 @@ async def coordinate_multiple_sessions(
         coordination_status = await session_manager.coordinate_sessions(request)
         
         # Log coordination
-        logger.info(f"Created coordination {coordination_status.coordination_id} "
-                   f"for {len(request.session_ids)} sessions")
+        logger.info(
+            "talkhier_sessions_coordination_created",
+            coordination_id=coordination_status.coordination_id,
+            session_count=len(request.session_ids),
+        )
         
         return coordination_status
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
     except Exception as e:
-        logger.error(f"Failed to coordinate sessions: {e!s}")
+        logger.error(
+            "talkhier_sessions_coordination_failed",
+            session_count=len(request.session_ids),
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -882,7 +933,12 @@ async def _log_session_analytics(
             timestamp=datetime.now(UTC)
         )
     except Exception as e:
-        logger.warning(f"Failed to log analytics: {e!s}")
+        logger.warning(
+            "talkhier_session_analytics_log_failed",
+            event_type=event_type,
+            session_id=session_id,
+            error=str(e),
+        )
 
 
 async def _get_protocol_insights(
