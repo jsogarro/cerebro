@@ -5,7 +5,7 @@ Request and response models for MASR routing intelligence endpoints.
 Based on "MasRouter: Learning to Route LLMs" research patterns.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -253,4 +253,4 @@ class MASRErrorResponse(BaseModel):
     error_code: str = Field(description="Error code")
     details: dict[str, Any] | None = Field(default=None, description="Additional error details")
     suggestions: list[str] | None = Field(default=None, description="Suggestions to resolve")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Error timestamp")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Error timestamp")

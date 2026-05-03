@@ -4,8 +4,7 @@ Base repository implementation.
 Provides generic CRUD operations for all repositories.
 """
 
-import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 from uuid import UUID
 
@@ -13,10 +12,11 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import Select
+from structlog import get_logger
 
 from src.models.db.base import BaseModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # Type variable for model classes
 ModelType = TypeVar("ModelType", bound=BaseModel)
@@ -61,6 +61,7 @@ class BaseRepository(Generic[ModelType]):
         id: str | UUID,
         include_deleted: bool = False,
         load_relationships: list[str] | None = None,
+        organization_id: str | UUID | None = None,
     ) -> ModelType | None:
         """
         Get entity by ID.
@@ -69,11 +70,13 @@ class BaseRepository(Generic[ModelType]):
             id: Entity ID
             include_deleted: Include soft-deleted entities
             load_relationships: List of relationships to eager load
+            organization_id: Tenant organization boundary
 
         Returns:
             Entity or None if not found
         """
         query = select(self.model).where(self.model.id == id)
+        query = self.apply_organization_scope(query, organization_id)
 
         if not include_deleted:
             query = query.where(self.model.deleted_at.is_(None))
@@ -95,6 +98,7 @@ class BaseRepository(Generic[ModelType]):
         order_desc: bool = False,
         include_deleted: bool = False,
         load_relationships: list[str] | None = None,
+        organization_id: str | UUID | None = None,
     ) -> list[ModelType]:
         """
         Get multiple entities with filters.
@@ -107,11 +111,13 @@ class BaseRepository(Generic[ModelType]):
             order_desc: Order descending if True
             include_deleted: Include soft-deleted entities
             load_relationships: List of relationships to eager load
+            organization_id: Tenant organization boundary
 
         Returns:
             List of entities
         """
         query = select(self.model)
+        query = self.apply_organization_scope(query, organization_id)
 
         # Apply filters
         if filters:
@@ -162,6 +168,7 @@ class BaseRepository(Generic[ModelType]):
         id: str | UUID,
         data: dict[str, Any],
         updated_by: str | None = None,
+        organization_id: str | UUID | None = None,
     ) -> ModelType | None:
         """
         Update entity by ID.
@@ -170,11 +177,12 @@ class BaseRepository(Generic[ModelType]):
             id: Entity ID
             data: Update data
             updated_by: User performing the update
+            organization_id: Tenant organization boundary
 
         Returns:
             Updated entity or None if not found
         """
-        entity = await self.get(id)
+        entity = await self.get(id, organization_id=organization_id)
 
         if not entity:
             return None
@@ -185,7 +193,7 @@ class BaseRepository(Generic[ModelType]):
                 setattr(entity, key, value)
 
         # Set audit fields
-        entity.updated_at = datetime.utcnow()
+        entity.updated_at = datetime.now(UTC)
         if updated_by:
             entity.updated_by = updated_by
 
@@ -194,7 +202,11 @@ class BaseRepository(Generic[ModelType]):
         return entity
 
     async def delete(
-        self, id: str | UUID, soft: bool = True, deleted_by: str | None = None
+        self,
+        id: str | UUID,
+        soft: bool = True,
+        deleted_by: str | None = None,
+        organization_id: str | UUID | None = None,
     ) -> bool:
         """
         Delete entity by ID.
@@ -203,18 +215,19 @@ class BaseRepository(Generic[ModelType]):
             id: Entity ID
             soft: If True, perform soft delete
             deleted_by: User performing the delete
+            organization_id: Tenant organization boundary
 
         Returns:
             True if deleted, False if not found
         """
-        entity = await self.get(id)
+        entity = await self.get(id, organization_id=organization_id)
 
         if not entity:
             return False
 
         if soft:
             # Soft delete
-            entity.deleted_at = datetime.utcnow()
+            entity.deleted_at = datetime.now(UTC)
             if deleted_by:
                 entity.updated_by = deleted_by
             await self.session.flush()
@@ -256,7 +269,7 @@ class BaseRepository(Generic[ModelType]):
             return None
 
         entity.deleted_at = None
-        entity.updated_at = datetime.utcnow()
+        entity.updated_at = datetime.now(UTC)
         if restored_by:
             entity.updated_by = restored_by
 
@@ -269,6 +282,7 @@ class BaseRepository(Generic[ModelType]):
         id: str | UUID | None = None,
         filters: dict[str, Any] | None = None,
         include_deleted: bool = False,
+        organization_id: str | UUID | None = None,
     ) -> bool:
         """
         Check if entity exists.
@@ -277,11 +291,13 @@ class BaseRepository(Generic[ModelType]):
             id: Entity ID
             filters: Filter criteria
             include_deleted: Include soft-deleted entities
+            organization_id: Tenant organization boundary
 
         Returns:
             True if exists
         """
         query = select(func.count(self.model.id))
+        query = self.apply_organization_scope(query, organization_id)
 
         if id:
             query = query.where(self.model.id == id)
@@ -300,7 +316,10 @@ class BaseRepository(Generic[ModelType]):
         return count > 0
 
     async def count(
-        self, filters: dict[str, Any] | None = None, include_deleted: bool = False
+        self,
+        filters: dict[str, Any] | None = None,
+        include_deleted: bool = False,
+        organization_id: str | UUID | None = None,
     ) -> int:
         """
         Count entities.
@@ -308,11 +327,13 @@ class BaseRepository(Generic[ModelType]):
         Args:
             filters: Filter criteria
             include_deleted: Include soft-deleted entities
+            organization_id: Tenant organization boundary
 
         Returns:
             Entity count
         """
         query = select(func.count(self.model.id))
+        query = self.apply_organization_scope(query, organization_id)
 
         if filters:
             conditions = []
@@ -413,6 +434,7 @@ class BaseRepository(Generic[ModelType]):
         filters: dict[str, Any] | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        organization_id: str | UUID | None = None,
     ) -> list[ModelType]:
         """
         Search entities by text.
@@ -423,11 +445,13 @@ class BaseRepository(Generic[ModelType]):
             filters: Additional filters
             limit: Maximum results
             offset: Results to skip
+            organization_id: Tenant organization boundary
 
         Returns:
             List of matching entities
         """
         query = select(self.model)
+        query = self.apply_organization_scope(query, organization_id)
 
         # Build search conditions
         search_conditions = []
@@ -467,6 +491,35 @@ class BaseRepository(Generic[ModelType]):
             SQLAlchemy Select query
         """
         return select(self.model).where(self.model.deleted_at.is_(None))
+
+    def apply_organization_scope(
+        self,
+        query: Select[Any],
+        organization_id: str | UUID | None,
+    ) -> Select[Any]:
+        """
+        Apply tenant organization filtering when a scoped query is requested.
+
+        Repositories stay backward-compatible while API boundaries are migrated:
+        callers that have tenant context pass organization_id, and models without
+        tenant support fail closed instead of silently ignoring the scope.
+        """
+        if organization_id is None:
+            return query
+
+        if not hasattr(self.model, "organization_id"):
+            raise ValueError(
+                f"{self.model.__name__} does not support organization scoping"
+            )
+
+        model: Any = self.model
+        organization_column = model.organization_id
+
+        # Convert string to UUID if needed for comparison
+        # TenantContext returns strings but DB columns may be UUID type
+        org_id_value = organization_id if isinstance(organization_id, UUID) else UUID(organization_id)
+
+        return query.where(organization_column == org_id_value)
 
 
 __all__ = ["BaseRepository", "ModelType"]

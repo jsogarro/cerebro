@@ -17,7 +17,6 @@ Features:
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import threading
 from collections.abc import Callable
@@ -26,8 +25,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
+from structlog import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 try:
     from watchdog.events import FileSystemEventHandler
@@ -47,8 +47,6 @@ from .model_schemas import (  # noqa: E402
     ModelTier,
     ProviderConfiguration,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class ConfigurationChangeEvent:

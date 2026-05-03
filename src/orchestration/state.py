@@ -6,11 +6,15 @@ system, following immutable patterns for functional programming.
 """
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from src.agents.models import AgentResult
+
+
+class MaxIterationsExceeded(RuntimeError):  # noqa: N818
+    """Raised when a workflow exceeds its configured iteration budget."""
 
 
 def _agent_result_to_dict(result: AgentResult) -> dict[str, Any]:
@@ -77,7 +81,7 @@ class AgentTaskState:
             started_at=(
                 self.started_at
                 if status != AgentExecutionStatus.IN_PROGRESS
-                else datetime.utcnow()
+                else datetime.now(UTC)
             ),
             completed_at=self.completed_at,
         )
@@ -93,7 +97,7 @@ class AgentTaskState:
             error=self.error,
             retry_count=self.retry_count,
             started_at=self.started_at,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(UTC),
         )
 
     def with_error(self, error: str) -> "AgentTaskState":
@@ -107,7 +111,7 @@ class AgentTaskState:
             error=error,
             retry_count=self.retry_count + 1,
             started_at=self.started_at,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(UTC),
         )
 
 
@@ -179,7 +183,7 @@ class WorkflowMetadata:
         return WorkflowMetadata(
             workflow_id=self.workflow_id,
             started_at=self.started_at,
-            updated_at=datetime.utcnow(),
+            updated_at=datetime.now(UTC),
             total_nodes_executed=self.total_nodes_executed + 1,
             total_edges_traversed=self.total_edges_traversed,
             parallel_executions=self.parallel_executions,
@@ -234,6 +238,10 @@ class ResearchState:
     max_errors: int = 3
     error_history: list[dict[str, Any]] = field(default_factory=list)
 
+    # Resilience limits
+    iteration_count: int = 0
+    max_iterations: int = 10
+
     # Metadata
     metadata: WorkflowMetadata | None = None
 
@@ -245,8 +253,8 @@ class ResearchState:
         if self.metadata is None:
             self.metadata = WorkflowMetadata(
                 workflow_id=self.workflow_id,
-                started_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                started_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
 
     def transition_to_phase(self, new_phase: WorkflowPhase) -> None:
@@ -255,6 +263,22 @@ class ResearchState:
         self.current_phase = new_phase
         if self.metadata is not None:
             self.metadata = self.metadata.with_node_execution(new_phase.value)
+
+    def increment_iteration(
+        self,
+        *,
+        max_iterations: int | None = None,
+        node_name: str | None = None,
+    ) -> None:
+        """Record a workflow iteration and enforce the configured cap."""
+        effective_max = max_iterations or self.max_iterations
+        self.iteration_count += 1
+        if self.iteration_count > effective_max:
+            node_context = f" at node {node_name}" if node_name else ""
+            raise MaxIterationsExceeded(
+                f"Workflow {self.workflow_id} exceeded max_iterations={effective_max}"
+                f"{node_context}"
+            )
 
     def add_agent_task(self, task: AgentTaskState) -> None:
         """Add an agent task to the state."""
@@ -283,7 +307,7 @@ class ResearchState:
                     "task_id": task_id,
                     "agent_type": task.agent_type,
                     "error": error,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
 
@@ -292,7 +316,7 @@ class ResearchState:
         checkpoint = StateCheckpoint(
             checkpoint_id=f"{self.workflow_id}-{len(self.checkpoints)}",
             phase=self.current_phase,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             state_data={
                 "project_id": self.project_id,
                 "query": self.query,
@@ -300,6 +324,7 @@ class ResearchState:
                 "research_plan": self.research_plan,
                 "quality_score": self.quality_score,
                 "error_count": self.error_count,
+                "iteration_count": self.iteration_count,
             },
             agent_states=self.agent_tasks.copy(),
             metadata={
@@ -322,6 +347,7 @@ class ResearchState:
         self.research_plan = state_data.get("research_plan")
         self.quality_score = state_data.get("quality_score", 0.0)
         self.error_count = state_data.get("error_count", 0)
+        self.iteration_count = state_data.get("iteration_count", 0)
 
         # Restore agent sets
         metadata = checkpoint.metadata
@@ -376,6 +402,8 @@ class ResearchState:
             "conflicts": self.conflicts,
             "error_count": self.error_count,
             "error_history": self.error_history,
+            "iteration_count": self.iteration_count,
+            "max_iterations": self.max_iterations,
             "context": self.context,
         }
 
@@ -383,6 +411,7 @@ class ResearchState:
 __all__ = [
     "AgentExecutionStatus",
     "AgentTaskState",
+    "MaxIterationsExceeded",
     "ResearchState",
     "StateCheckpoint",
     "WorkflowMetadata",

@@ -7,7 +7,7 @@ hierarchical agent coordination.
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -350,7 +350,7 @@ class SupervisorWebSocketEvent(BaseModel):
     """WebSocket event for supervisor real-time updates"""
     event_type: Literal["status_update", "task_assigned", "task_completed", "worker_update", "performance_alert"]
     supervisor_type: SupervisorType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any]
     priority: Literal["low", "medium", "high"] = "medium"
 

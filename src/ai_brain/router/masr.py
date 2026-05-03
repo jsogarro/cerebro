@@ -16,12 +16,14 @@ decisions about how to handle each query most effectively.
 from __future__ import annotations
 
 import asyncio
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from structlog import get_logger
+
+from src.core.pii_redactor import redact_pii
 from src.core.types import HealthCheckDict
 
 if TYPE_CHECKING:
@@ -40,6 +42,7 @@ from src.core.constants import (
     MIN_RETRY_ATTEMPTS,
     SHORT_TIMEOUT,
 )
+from src.reliability.retry_strategies import CircuitBreaker, CircuitBreakerConfig
 
 from .cost_optimizer import CostOptimizer, OptimizationResult, OptimizationStrategy
 from .query_analyzer import ComplexityAnalysis, ComplexityLevel, QueryComplexityAnalyzer
@@ -52,7 +55,7 @@ from .routing_types import (
     RoutingStrategy,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass
@@ -152,6 +155,19 @@ class MASRouter:
 
         # Learning parameters for adaptive routing
         self.learning_enabled = self.config.get("enable_learning", True)
+        self._routing_circuit_breaker = CircuitBreaker(
+            "masr_router",
+            CircuitBreakerConfig(
+                failure_threshold=self.config.get("circuit_failure_threshold", 5),
+                success_threshold=self.config.get("circuit_success_threshold", 2),
+                timeout=self.config.get("circuit_timeout_seconds", 60.0),
+            ),
+        )
+
+    @property
+    def routing_circuit_breaker(self) -> CircuitBreaker:
+        """Circuit breaker guarding MASR routing analysis and optimization."""
+        return self._routing_circuit_breaker
 
     async def route(
         self,
@@ -175,13 +191,16 @@ class MASRouter:
         start_time = datetime.now()
         query_id = str(uuid.uuid4())
 
-        logger.info(f"Routing query {query_id}: {query[:100]}...")
+        logger.info("Routing query %s: %s...", query_id, redact_pii(query)[:100])
 
         try:
+            await self._routing_circuit_breaker.call(lambda: None)
+
             # Check cache first if enabled
             cached_decision = self.cache_manager.check_cache(query, context)
             if cached_decision:
                 logger.info(f"Using cached routing for {query_id}")
+                await self._routing_circuit_breaker._on_success()
                 return cached_decision
 
             # Step 1: Analyze query complexity
@@ -254,10 +273,12 @@ class MASRouter:
                 f"(processing: {processing_time:.1f}ms)"
             )
 
+            await self._routing_circuit_breaker._on_success()
             return decision
 
         except Exception as e:
             logger.error(f"Routing failed for {query_id}: {e}")
+            await self._routing_circuit_breaker._on_failure()
             # Return fallback routing decision
             return self._create_fallback_decision(query_id, query, e)
 

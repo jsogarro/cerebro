@@ -5,10 +5,20 @@ Tests all MASR routing intelligence endpoints based on
 "MasRouter: Learning to Route LLMs" research patterns.
 """
 
-from unittest.mock import AsyncMock, Mock, patch
-
 import pytest
-from src.ai_brain.models.masr import (
+
+pytest.skip(
+    "Stale: imports src.ai_brain.models.masr (never created) with symbols "
+    "QueryAnalysis/QueryComplexity that do not exist in the codebase. "
+    "Actual current symbols live at src.ai_brain.router.{masr,query_analyzer} "
+    "as ComplexityAnalysis/ComplexityLevel with different constructor "
+    "signatures. Needs full rewrite against current API.",
+    allow_module_level=True,
+)
+
+from unittest.mock import AsyncMock, Mock, patch  # noqa: E402
+
+from src.ai_brain.models.masr import (  # noqa: E402
     CollaborationMode,
     ModelTier,
     QueryAnalysis,
@@ -18,8 +28,8 @@ from src.ai_brain.models.masr import (
     RoutingStrategy,
 )
 
-from src.api.services.masr_routing_service import MASRRoutingService
-from src.models.masr_api_models import (
+from src.api.services.masr_routing_service import MASRRoutingService  # noqa: E402
+from src.models.masr_api_models import (  # noqa: E402
     AvailableStrategy,
     ComplexityAnalysisRequest,
     ComplexityAnalysisResponse,

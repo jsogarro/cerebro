@@ -13,15 +13,16 @@ Key Features:
 - Evidence-based decision making
 """
 
-import logging
 import statistics
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from structlog import get_logger
+
 from .talkhier_message import TalkHierContent, TalkHierMessage
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ConsensusMethod(Enum):
@@ -138,7 +139,7 @@ class ConsensusBuilder:
         if not messages:
             return ConsensusScore()
 
-        logger.info(f"Evaluating consensus across {len(messages)} agent responses")
+        logger.info("consensus_evaluation_started", message_count=len(messages))
 
         try:
             # Extract responses for analysis
@@ -199,14 +200,16 @@ class ConsensusBuilder:
                 self.successful_consensus += 1
 
             logger.info(
-                f"Consensus evaluation complete: {overall_score:.3f} "
-                f"(threshold: {threshold:.3f})"
+                "consensus_evaluation_completed",
+                overall_score=overall_score,
+                threshold=threshold,
+                message_count=len(messages),
             )
 
             return consensus_score
 
         except Exception as e:
-            logger.error(f"Consensus evaluation failed: {e}")
+            logger.error("consensus_evaluation_failed", error=str(e))
             return ConsensusScore()
 
     async def validate_response(
@@ -286,7 +289,7 @@ class ConsensusBuilder:
             )
 
         except Exception as e:
-            logger.error(f"Response validation failed: {e}")
+            logger.error("consensus_response_validation_failed", error=str(e))
             return ValidationResult(
                 is_valid=False,
                 quality_score=0.0,

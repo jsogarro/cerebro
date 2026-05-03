@@ -21,6 +21,9 @@ node_modules/
 .claude/
 .clinerules
 ai/
+/tmp/refactorit/
+.refactorit/
+*.refactorit.checkpoint
 CLAUDE.md
 PRD.md
 TODO.md
@@ -31,6 +34,12 @@ cerebro_research_paper_*.md
 
 # Plans (AI-generated, stored in VAULT)
 plans/
+
+# Kubernetes secrets — never commit. Production secret values live in the
+# cluster's configured secret store (see k8s/external-secrets.yaml). A local
+# `k8s/secrets.yaml` is allowed only for transient debugging.
+k8s/secrets.yaml
+k8s/secrets.env
 
 # AI-generated docs (plans, achievements, summaries)
 docs/agent-framework-apis-achievement.md
@@ -54,3 +63,13 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 cerebro_dev.db
+
+# /fixit and ai-artifact patterns
+/tmp/fixit/
+.fixit/
+*.fixit.checkpoint
+
+# refactorit ephemeral artifacts (must never be committed)
+/tmp/refactorit/
+.refactorit/
+*.refactorit.checkpoint

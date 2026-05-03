@@ -8,11 +8,10 @@ liveness probes, readiness probes, and dependency health checks.
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -20,10 +19,11 @@ import asyncpg
 import redis.asyncio as redis
 from fastapi import FastAPI, Response, status
 from httpx import AsyncClient
+from structlog import get_logger
 
 from config import config
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class HealthStatus(Enum):
@@ -56,7 +56,7 @@ class HealthCheckResult:
     latency_ms: float
     message: str = ""
     details: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -78,7 +78,7 @@ class SystemHealth:
     components: list[HealthCheckResult]
     version: str
     uptime_seconds: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""

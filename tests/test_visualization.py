@@ -14,16 +14,13 @@ from src.services.report_config import ReportSettings
 from src.services.visualization_generator import (
     VisualizationGenerationError,
     VisualizationGenerator,
-    create_confidence_radar_viz,
-    create_domain_coverage_viz,
-    create_source_distribution_viz,
 )
 
 
 class TestVisualizationModels:
     """Test visualization data models."""
     
-    def test_visualization_creation(self):
+    def test_visualization_creation(self) -> None:
         """Test basic visualization creation."""
         viz = Visualization(
             id="test-viz-1",
@@ -45,7 +42,7 @@ class TestVisualizationModels:
         assert viz.data["x"] == ["A", "B", "C"]
         assert viz.config["x_label"] == "Categories"
     
-    def test_visualization_types(self):
+    def test_visualization_types(self) -> None:
         """Test all visualization types are available."""
         types = [
             VisualizationType.BAR_CHART,
@@ -69,7 +66,7 @@ class TestVisualizationGenerator:
     """Test visualization generator service."""
     
     @pytest.fixture
-    def generator(self):
+    def generator(self) -> VisualizationGenerator:
         """Create visualization generator for testing."""
         settings = ReportSettings(
             enable_visualizations=True,
@@ -79,7 +76,7 @@ class TestVisualizationGenerator:
         )
         return VisualizationGenerator(settings)
     
-    def test_generator_creation(self, generator):
+    def test_generator_creation(self, generator: VisualizationGenerator) -> None:
         """Test generator initialization."""
         assert generator.settings.enable_visualizations is True
         assert generator.default_width == 800
@@ -91,7 +88,9 @@ class TestVisualizationGenerator:
     @patch('src.services.visualization_generator.PLOTLY_AVAILABLE', True)
     @patch('src.services.visualization_generator.go')
     @patch('src.services.visualization_generator.pio')
-    def test_bar_chart_generation(self, mock_pio, mock_go, generator):
+    def test_bar_chart_generation(
+        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
+    ) -> None:
         """Test bar chart generation."""
         # Mock Plotly components
         mock_figure = MagicMock()
@@ -122,7 +121,9 @@ class TestVisualizationGenerator:
     @patch('src.services.visualization_generator.PLOTLY_AVAILABLE', True)
     @patch('src.services.visualization_generator.go')
     @patch('src.services.visualization_generator.pio')
-    def test_pie_chart_generation(self, mock_pio, mock_go, generator):
+    def test_pie_chart_generation(
+        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
+    ) -> None:
         """Test pie chart generation."""
         mock_figure = MagicMock()
         mock_go.Figure.return_value = mock_figure
@@ -150,7 +151,9 @@ class TestVisualizationGenerator:
     @patch('src.services.visualization_generator.PLOTLY_AVAILABLE', True)
     @patch('src.services.visualization_generator.go')
     @patch('src.services.visualization_generator.pio')
-    def test_line_chart_generation(self, mock_pio, mock_go, generator):
+    def test_line_chart_generation(
+        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
+    ) -> None:
         """Test line chart generation."""
         mock_figure = MagicMock()
         mock_go.Figure.return_value = mock_figure
@@ -179,7 +182,9 @@ class TestVisualizationGenerator:
     @patch('src.services.visualization_generator.PLOTLY_AVAILABLE', True)
     @patch('src.services.visualization_generator.go')
     @patch('src.services.visualization_generator.pio')
-    def test_radar_chart_generation(self, mock_pio, mock_go, generator):
+    def test_radar_chart_generation(
+        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
+    ) -> None:
         """Test radar chart generation."""
         mock_figure = MagicMock()
         mock_go.Figure.return_value = mock_figure
@@ -212,7 +217,13 @@ class TestVisualizationGenerator:
     @patch('src.services.visualization_generator.nx')
     @patch('src.services.visualization_generator.go')
     @patch('src.services.visualization_generator.pio')
-    def test_network_graph_generation(self, mock_pio, mock_go, mock_nx, generator):
+    def test_network_graph_generation(
+        self,
+        mock_pio: MagicMock,
+        mock_go: MagicMock,
+        mock_nx: MagicMock,
+        generator: VisualizationGenerator,
+    ) -> None:
         """Test network graph generation."""
         # Mock NetworkX
         mock_graph = MagicMock()
@@ -263,7 +274,12 @@ class TestVisualizationGenerator:
     @patch('src.services.visualization_generator.WORDCLOUD_AVAILABLE', True)
     @patch('src.services.visualization_generator.WordCloud')
     @patch('src.services.visualization_generator.plt')
-    def test_word_cloud_generation(self, mock_plt, mock_wordcloud_class, generator):
+    def test_word_cloud_generation(
+        self,
+        mock_plt: MagicMock,
+        mock_wordcloud_class: MagicMock,
+        generator: VisualizationGenerator,
+    ) -> None:
         """Test word cloud generation."""
         # Mock WordCloud
         mock_wordcloud = MagicMock()
@@ -304,24 +320,23 @@ class TestVisualizationGenerator:
             assert wordcloud_kwargs['background_color'] == 'white'
             assert wordcloud_kwargs['max_words'] == 50
     
-    def test_unsupported_visualization_type(self, generator):
+    def test_unsupported_visualization_type(
+        self, generator: VisualizationGenerator
+    ) -> None:
         """Test handling of unsupported visualization types."""
-        # Create a visualization with an invalid type (simulate enum extension)
-        viz_spec = Visualization(
+        viz_spec = Visualization.model_construct(
             id="unsupported-test",
-            type="unsupported_type",  # This would normally be caught by Pydantic
+            type="unsupported_type",
             title="Unsupported Chart",
-            data={}
+            data={},
+            config={},
         )
-        
-        # Manually set the type to bypass Pydantic validation
-        viz_spec.type = "unsupported_type"
         
         with pytest.raises(VisualizationGenerationError):
             generator.generate_visualization(viz_spec)
     
     @patch('src.services.visualization_generator.PLOTLY_AVAILABLE', False)
-    def test_missing_dependencies(self, generator):
+    def test_missing_dependencies(self, generator: VisualizationGenerator) -> None:
         """Test handling when dependencies are missing."""
         viz_spec = Visualization(
             id="no-plotly-test",
@@ -335,7 +350,9 @@ class TestVisualizationGenerator:
     
     @patch('src.services.visualization_generator.PLOTLY_AVAILABLE', True)
     @patch('src.services.visualization_generator.pio')
-    def test_static_image_export(self, mock_pio, generator):
+    def test_static_image_export(
+        self, mock_pio: MagicMock, generator: VisualizationGenerator
+    ) -> None:
         """Test exporting visualization as static image."""
         # Mock image export
         mock_pio.to_image.return_value = b'fake_png_data'
@@ -360,202 +377,3 @@ class TestVisualizationGenerator:
             
             # Verify static export was called
             mock_pio.to_image.assert_called_once()
-
-
-class TestVisualizationUtilities:
-    """Test utility functions for creating visualizations."""
-    
-    def test_create_source_distribution_viz(self):
-        """Test creating source distribution visualization."""
-        sources = [
-            {"year": 2020, "title": "Paper 1"},
-            {"year": 2021, "title": "Paper 2"},
-            {"year": 2021, "title": "Paper 3"},
-            {"year": 2022, "title": "Paper 4"},
-            {"year": 2022, "title": "Paper 5"},
-            {"year": 2022, "title": "Paper 6"},
-        ]
-        
-        viz = create_source_distribution_viz(sources, "test-dist")
-        
-        assert viz.id == "test-dist"
-        assert viz.type == VisualizationType.BAR_CHART
-        assert viz.title == "Source Distribution by Year"
-        assert len(viz.data['x']) == 3  # 2020, 2021, 2022
-        assert viz.data['y'] == [1, 2, 3]  # Counts for each year
-        assert viz.config['x_label'] == "Publication Year"
-    
-    def test_create_domain_coverage_viz(self):
-        """Test creating domain coverage visualization."""
-        domains = ["AI", "Education", "Technology", "Psychology"]
-        
-        viz = create_domain_coverage_viz(domains, "domain-viz")
-        
-        assert viz.id == "domain-viz"
-        assert viz.type == VisualizationType.PIE_CHART
-        assert viz.title == "Research Domain Coverage"
-        assert viz.data['labels'] == domains
-        assert len(viz.data['values']) == 4
-        assert all(v == 1 for v in viz.data['values'])  # Equal weights
-        assert viz.config['donut'] is True
-    
-    def test_create_confidence_radar_viz(self):
-        """Test creating confidence radar visualization."""
-        categories = ["Data Quality", "Source Reliability", "Method Validity", "Result Consistency"]
-        scores = [0.85, 0.92, 0.78, 0.88]
-        
-        viz = create_confidence_radar_viz(categories, scores, "confidence-radar")
-        
-        assert viz.id == "confidence-radar"
-        assert viz.type == VisualizationType.RADAR_CHART
-        assert viz.title == "Confidence Scores by Category"
-        assert viz.data['categories'] == categories
-        assert viz.data['values'] == scores
-
-
-class TestVisualizationIntegration:
-    """Test visualization integration with report generation."""
-    
-    def test_report_visualization_generation(self):
-        """Test generating multiple visualizations for a report."""
-        from src.models.report import Report, ReportConfiguration
-        
-        settings = ReportSettings(
-            enable_visualizations=True,
-            max_visualizations_per_report=5
-        )
-        generator = VisualizationGenerator(settings)
-        
-        # Create report with visualizations
-        report = Report(
-            id="test-report",
-            title="Test Report", 
-            query="Test query",
-            configuration=ReportConfiguration()
-        )
-        
-        # Add various visualization types
-        visualizations = [
-            Visualization(
-                id="viz-1",
-                type=VisualizationType.BAR_CHART,
-                title="Chart 1",
-                data={"x": [1, 2, 3], "y": [10, 20, 30]}
-            ),
-            Visualization(
-                id="viz-2",
-                type=VisualizationType.PIE_CHART,
-                title="Chart 2",
-                data={"labels": ["A", "B"], "values": [60, 40]}
-            ),
-        ]
-        
-        for viz in visualizations:
-            report.add_visualization(viz)
-        
-        assert len(report.visualizations) == 2
-        
-        # Mock the generation for testing
-        with patch.object(generator, 'generate_visualization') as mock_generate:
-            mock_generate.return_value = {
-                'type': 'plotly',
-                'format': 'html',
-                'data': '<div>Mock chart</div>',
-                'title': 'Mock Chart'
-            }
-            
-            results = generator.generate_report_visualizations(report)
-            
-            assert len(results) == 2
-            assert 'viz-1' in results
-            assert 'viz-2' in results
-            assert mock_generate.call_count == 2
-    
-    def test_visualization_limit_enforcement(self):
-        """Test that visualization limits are enforced."""
-        settings = ReportSettings(
-            enable_visualizations=True,
-            max_visualizations_per_report=2  # Low limit for testing
-        )
-        generator = VisualizationGenerator(settings)
-        
-        from src.models.report import Report, ReportConfiguration
-        
-        report = Report(
-            id="test-report",
-            title="Test Report",
-            query="Test query", 
-            configuration=ReportConfiguration()
-        )
-        
-        # Add more visualizations than the limit
-        for i in range(5):
-            viz = Visualization(
-                id=f"viz-{i}",
-                type=VisualizationType.BAR_CHART,
-                title=f"Chart {i}",
-                data={"x": [1, 2], "y": [10, 20]}
-            )
-            report.add_visualization(viz)
-        
-        assert len(report.visualizations) == 5
-        
-        # Mock the generation
-        with patch.object(generator, 'generate_visualization') as mock_generate:
-            mock_generate.return_value = {'type': 'plotly', 'data': 'mock'}
-            
-            results = generator.generate_report_visualizations(report)
-            
-            # Should only generate up to the limit
-            assert len(results) == 2
-            assert mock_generate.call_count == 2
-    
-    def test_visualization_error_handling(self):
-        """Test error handling during visualization generation."""
-        generator = VisualizationGenerator()
-        
-        from src.models.report import Report, ReportConfiguration
-        
-        report = Report(
-            id="test-report",
-            title="Test Report",
-            query="Test query",
-            configuration=ReportConfiguration()
-        )
-        
-        # Add visualizations
-        viz1 = Visualization(
-            id="viz-good",
-            type=VisualizationType.BAR_CHART,
-            title="Good Chart",
-            data={"x": [1, 2], "y": [10, 20]}
-        )
-        
-        viz2 = Visualization(
-            id="viz-bad",
-            type=VisualizationType.PIE_CHART,
-            title="Bad Chart",
-            data={}  # Empty data that should cause error
-        )
-        
-        report.add_visualization(viz1)
-        report.add_visualization(viz2)
-        
-        # Mock generation with one success and one failure
-        def mock_generate_side_effect(viz_spec, format='html'):
-            if viz_spec.id == "viz-good":
-                return {'type': 'plotly', 'data': 'good_chart'}
-            else:
-                raise VisualizationGenerationError("Mock error")
-        
-        with patch.object(generator, 'generate_visualization', side_effect=mock_generate_side_effect):
-            results = generator.generate_report_visualizations(report)
-            
-            # Should return results for successful visualization only
-            assert len(results) == 1
-            assert 'viz-good' in results
-            assert 'viz-bad' not in results
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])

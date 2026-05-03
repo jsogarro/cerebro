@@ -10,10 +10,12 @@ import asyncio
 import random
 import time
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from src.api.services.supervisor_registry import SupervisorMetrics, SupervisorRegistry
+from src.api.services.supervisor_result_aggregator import ResultAggregator
+from src.api.services.supervisor_worker_dispatcher import WorkerDispatcher
 from src.models.supervisor_api_models import (
     ConflictResolutionRequest,
     ConflictResolutionResponse,
@@ -39,17 +41,7 @@ from src.models.supervisor_api_models import (
     WorkerStatus,
 )
 
-
-@dataclass
-class SupervisorMetrics:
-    """Metrics tracking for supervisor performance"""
-    total_executions: int = 0
-    successful_executions: int = 0
-    failed_executions: int = 0
-    total_execution_time_ms: float = 0.0
-    total_quality_score: float = 0.0
-    worker_utilization_samples: list[float] = field(default_factory=list)
-    last_execution_time: datetime | None = None
+__all__ = ["SupervisorCoordinationService", "SupervisorMetrics"]
 
 
 class SupervisorCoordinationService:
@@ -60,137 +52,54 @@ class SupervisorCoordinationService:
     
     def __init__(self) -> None:
         """Initialize the supervisor coordination service"""
-        self.supervisors: dict[str, SupervisorInfo] = {}
-        self.workers: dict[str, list[WorkerInfo]] = {}
-        self.metrics: dict[str, SupervisorMetrics] = {}
+        self.registry = SupervisorRegistry()
+        self.supervisors = self.registry.supervisors
+        self.workers = self.registry.workers
+        self.metrics = self.registry.metrics
+        self.worker_dispatcher = WorkerDispatcher(
+            self.workers,
+            self.registry.get_worker_capabilities,
+        )
+        self.result_aggregator = ResultAggregator()
         self.active_coordinations: dict[str, dict[str, Any]] = {}
         self.conflict_resolutions: dict[str, dict[str, Any]] = {}
         self.experiments: dict[str, dict[str, Any]] = {}
 
-        # Initialize supervisor registry
-        self._initialize_supervisors()
-
     def _initialize_supervisors(self) -> None:
         """Initialize available supervisors based on domains"""
-        for supervisor_type in SupervisorType:
-            supervisor_id = str(uuid.uuid4())
-            self.supervisors[supervisor_type.value] = SupervisorInfo(
-                supervisor_id=supervisor_id,
-                supervisor_type=supervisor_type,
-                status="active",
-                capabilities=self._get_supervisor_capabilities(supervisor_type),
-                worker_count=self._get_worker_count(supervisor_type),
-                active_tasks=0,
-                performance_metrics=self._get_initial_metrics(supervisor_type)
-            )
-            
-            # Initialize metrics tracking
-            self.metrics[supervisor_type.value] = SupervisorMetrics()
-            
-            # Initialize workers for this supervisor
-            self.workers[supervisor_type.value] = self._create_workers_for_supervisor(supervisor_type)
+        self.registry = SupervisorRegistry()
+        self.supervisors = self.registry.supervisors
+        self.workers = self.registry.workers
+        self.metrics = self.registry.metrics
+        self.worker_dispatcher = WorkerDispatcher(
+            self.workers,
+            self.registry.get_worker_capabilities,
+        )
+        self.result_aggregator = ResultAggregator()
     
     def _get_supervisor_capabilities(self, supervisor_type: SupervisorType) -> list[str]:
         """Get capabilities for a supervisor type"""
-        capabilities_map = {
-            SupervisorType.RESEARCH: [
-                "literature_review", "comparative_analysis", 
-                "methodology_design", "synthesis", "citation_management"
-            ],
-            SupervisorType.CONTENT: [
-                "content_creation", "editing", "optimization",
-                "seo", "formatting"
-            ],
-            SupervisorType.ANALYTICS: [
-                "data_analysis", "visualization", "statistical_modeling",
-                "prediction", "reporting"
-            ],
-            SupervisorType.SERVICE: [
-                "customer_support", "troubleshooting", "documentation",
-                "feedback_analysis", "escalation"
-            ],
-            SupervisorType.GENERAL: [
-                "task_coordination", "resource_allocation", "monitoring",
-                "quality_assurance", "reporting"
-            ]
-        }
-        return capabilities_map.get(supervisor_type, ["general_coordination"])
+        return self.registry.get_supervisor_capabilities(supervisor_type)
     
     def _get_worker_count(self, supervisor_type: SupervisorType) -> int:
         """Get initial worker count for supervisor type"""
-        worker_counts = {
-            SupervisorType.RESEARCH: 5,
-            SupervisorType.CONTENT: 4,
-            SupervisorType.ANALYTICS: 3,
-            SupervisorType.SERVICE: 3,
-            SupervisorType.GENERAL: 2
-        }
-        return worker_counts.get(supervisor_type, 2)
+        return self.registry.get_worker_count(supervisor_type)
     
     def _get_initial_metrics(self, supervisor_type: SupervisorType) -> dict[str, float]:
         """Get initial performance metrics for supervisor"""
-        return {
-            "success_rate": 0.95,
-            "average_quality": 0.88,
-            "average_latency_ms": 2500,
-            "cost_efficiency": 0.82,
-            "worker_satisfaction": 0.90
-        }
+        return self.registry.get_initial_metrics(supervisor_type)
     
     def _create_workers_for_supervisor(self, supervisor_type: SupervisorType) -> list[WorkerInfo]:
         """Create worker agents for a supervisor"""
-        workers = []
-        worker_types = self._get_worker_types_for_supervisor(supervisor_type)
-        
-        for i, worker_type in enumerate(worker_types):
-            worker = WorkerInfo(
-                worker_id=f"{supervisor_type.value}-worker-{i+1}",
-                worker_type=worker_type,
-                status=WorkerStatus.IDLE,
-                capabilities=self._get_worker_capabilities(worker_type),
-                performance_score=random.uniform(0.8, 0.95),
-                current_task=None
-            )
-            workers.append(worker)
-        
-        return workers
+        return self.registry.create_workers_for_supervisor(supervisor_type)
     
     def _get_worker_types_for_supervisor(self, supervisor_type: SupervisorType) -> list[str]:
         """Get worker types for a supervisor"""
-        worker_types_map = {
-            SupervisorType.RESEARCH: [
-                "literature_review", "comparative_analysis",
-                "methodology", "synthesis", "citation"
-            ],
-            SupervisorType.CONTENT: [
-                "writer", "editor", "optimizer", "formatter"
-            ],
-            SupervisorType.ANALYTICS: [
-                "data_analyst", "statistician", "visualizer"
-            ],
-            SupervisorType.SERVICE: [
-                "support_agent", "troubleshooter", "escalation_specialist"
-            ],
-            SupervisorType.GENERAL: [
-                "coordinator", "monitor"
-            ]
-        }
-        return worker_types_map.get(supervisor_type, ["general_worker"])
+        return self.registry.get_worker_types_for_supervisor(supervisor_type)
     
     def _get_worker_capabilities(self, worker_type: str) -> list[str]:
         """Get capabilities for a worker type"""
-        capabilities_map = {
-            "literature_review": ["search", "extract", "summarize", "evaluate"],
-            "comparative_analysis": ["compare", "contrast", "evaluate", "synthesize"],
-            "methodology": ["design", "validate", "recommend", "critique"],
-            "synthesis": ["integrate", "summarize", "conclude", "recommend"],
-            "citation": ["format", "validate", "cross_reference", "manage"],
-            "writer": ["create", "draft", "structure", "style"],
-            "editor": ["review", "correct", "improve", "polish"],
-            "data_analyst": ["analyze", "interpret", "model", "predict"],
-            "support_agent": ["respond", "assist", "resolve", "document"]
-        }
-        return capabilities_map.get(worker_type, ["execute", "report"])
+        return self.registry.get_worker_capabilities(worker_type)
     
     async def execute_supervisor_task(
         self,
@@ -273,32 +182,12 @@ class SupervisorCoordinationService:
         coordination_mode: CoordinationMode
     ) -> list[WorkerInfo]:
         """Assign workers for a task based on requirements"""
-        available_workers = [
-            w for w in self.workers[supervisor_type]
-            if w.status == WorkerStatus.IDLE
-        ]
-        
-        # Determine number of workers based on coordination mode
-        if coordination_mode == CoordinationMode.SEQUENTIAL:
-            num_workers = min(1, len(available_workers))
-        elif coordination_mode == CoordinationMode.PARALLEL:
-            num_workers = min(max_workers, len(available_workers))
-        else:  # HIERARCHICAL, ADAPTIVE, DEBATE
-            num_workers = min(max(3, max_workers // 2), len(available_workers))
-        
-        # Select workers based on performance scores
-        selected_workers = sorted(
-            available_workers,
-            key=lambda w: w.performance_score or 0,
-            reverse=True
-        )[:num_workers]
-        
-        # Update worker status
-        for worker in selected_workers:
-            worker.status = WorkerStatus.ASSIGNED
-            worker.current_task = task[:50]  # Truncate task description
-        
-        return selected_workers
+        return await self.worker_dispatcher.assign_workers_for_task(
+            supervisor_type,
+            task,
+            max_workers,
+            coordination_mode,
+        )
     
     async def _execute_with_workers(
         self,
@@ -311,49 +200,19 @@ class SupervisorCoordinationService:
         timeout_seconds: int
     ) -> Any | None:
         """Execute task with assigned workers"""
-        # Simulate execution based on strategy and coordination mode
-        await asyncio.sleep(0.5)  # Simulate processing time
-        
-        # Update worker status
-        for worker in workers:
-            worker.status = WorkerStatus.EXECUTING
-        
-        # Simulate execution results based on strategy
-        if strategy == SupervisionStrategy.DIRECT:
-            result = f"Direct execution result for: {task}"
-        elif strategy == SupervisionStrategy.COLLABORATIVE:
-            result = f"Collaborative result from {len(workers)} workers for: {task}"
-        elif strategy == SupervisionStrategy.ITERATIVE:
-            result = f"Iterative refinement result after multiple rounds for: {task}"
-        else:
-            result = f"Execution result for: {task}"
-        
-        # Update worker status
-        for worker in workers:
-            worker.status = WorkerStatus.COMPLETED
-            worker.current_task = None
-        
-        # Reset worker status after completion
-        await asyncio.sleep(0.1)
-        for worker in workers:
-            worker.status = WorkerStatus.IDLE
-        
-        return result
+        return await self.worker_dispatcher.execute_with_workers(
+            supervisor_type,
+            task,
+            workers,
+            strategy,
+            coordination_mode,
+            quality_threshold,
+            timeout_seconds,
+        )
     
     def _calculate_quality_score(self, result: Any, threshold: float) -> float:
         """Calculate quality score for execution result"""
-        if not result:
-            return 0.0
-        
-        # Simulate quality calculation
-        base_score = random.uniform(0.7, 0.95)
-        
-        # Adjust based on result characteristics
-        if isinstance(result, str):
-            length_factor = min(1.0, len(result) / 100)
-            base_score = base_score * 0.8 + length_factor * 0.2
-        
-        return min(1.0, max(0.0, base_score))
+        return self.result_aggregator.calculate_quality_score(result, threshold)
     
     def _update_supervisor_metrics(
         self,
@@ -373,7 +232,7 @@ class SupervisorCoordinationService:
         
         metrics.total_execution_time_ms += execution_time_ms
         metrics.total_quality_score += quality_score
-        metrics.last_execution_time = datetime.utcnow()
+        metrics.last_execution_time = datetime.now(UTC)
         
         # Update worker utilization
         active_workers = sum(
@@ -434,7 +293,7 @@ class SupervisorCoordinationService:
             "request": request,
             "workers": assigned_workers,
             "plan": coordination_plan,
-            "started_at": datetime.utcnow()
+            "started_at": datetime.now(UTC)
         }
 
         # Estimate completion time
@@ -459,33 +318,11 @@ class SupervisorCoordinationService:
         coordination_mode: CoordinationMode
     ) -> list[WorkerInfo]:
         """Assign specific worker types for coordination"""
-        assigned = []
-        available_workers = self.workers.get(supervisor_type, [])
-        
-        for worker_type in worker_types:
-            # Find workers matching the requested type
-            matching_workers = [
-                w for w in available_workers
-                if w.worker_type == worker_type and w.status == WorkerStatus.IDLE
-            ]
-            
-            if matching_workers:
-                worker = matching_workers[0]
-                worker.status = WorkerStatus.ASSIGNED
-                assigned.append(worker)
-            else:
-                # Create a placeholder worker if none available
-                worker = WorkerInfo(
-                    worker_id=f"{supervisor_type}-{worker_type}-temp",
-                    worker_type=worker_type,
-                    status=WorkerStatus.ASSIGNED,
-                    capabilities=self._get_worker_capabilities(worker_type),
-                    performance_score=0.85,
-                    current_task=None
-                )
-                assigned.append(worker)
-        
-        return assigned
+        return await self.worker_dispatcher.assign_workers_for_coordination(
+            supervisor_type,
+            worker_types,
+            coordination_mode,
+        )
     
     def _create_coordination_plan(
         self,
@@ -644,33 +481,14 @@ class SupervisorCoordinationService:
         priority_weights: dict[str, float]
     ) -> tuple[Any, bool]:
         """Synthesize results from multiple supervisors"""
-        # Simulate synthesis process
-        await asyncio.sleep(0.3)
-        
-        # Create synthesized result
-        synthesis_parts = []
-        for supervisor_type, result_data in results.items():
-            weight = priority_weights.get(supervisor_type, 1.0)
-            synthesis_parts.append(f"{supervisor_type} (weight={weight}): {result_data['result']}")
-        
-        synthesized = f"Synthesized result combining: {'; '.join(synthesis_parts)}"
-        
-        quality_scores = [r["quality_score"] for r in results.values()]
-        consensus = bool(all(abs(q - quality_scores[0]) < 0.1 for q in quality_scores))
-
-        return synthesized, consensus
+        return await self.result_aggregator.synthesize_results(
+            results,
+            priority_weights,
+        )
     
     def _calculate_consistency(self, results: dict[str, Any]) -> float:
         """Calculate consistency across supervisor results"""
-        if len(results) < 2:
-            return 1.0
-        
-        quality_scores = [r["quality_score"] for r in results.values()]
-        mean_score = sum(quality_scores) / len(quality_scores)
-        variance = sum((q - mean_score) ** 2 for q in quality_scores) / len(quality_scores)
-        
-        consistency = max(0.0, 1.0 - (variance * 10))
-        return float(consistency)
+        return self.result_aggregator.calculate_consistency(results)
     
     async def get_supervisor_stats(self, supervisor_type: str) -> SupervisorStatsResponse:
         """Get performance statistics for a supervisor"""
@@ -779,7 +597,7 @@ class SupervisorCoordinationService:
         
         # Check recent activity
         if metrics.last_execution_time:
-            time_since_last = datetime.utcnow() - metrics.last_execution_time
+            time_since_last = datetime.now(UTC) - metrics.last_execution_time
             if time_since_last > timedelta(hours=1):
                 issues.append(f"No recent activity for {time_since_last.total_seconds() / 3600:.1f} hours")
         
@@ -924,7 +742,7 @@ class SupervisorCoordinationService:
         # Store conflict for tracking
         self.conflict_resolutions[request.conflict_id] = {
             "request": request,
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(UTC)
         }
         
         # Resolve based on strategy
@@ -1043,7 +861,7 @@ class SupervisorCoordinationService:
         # Store experiment
         self.experiments[experiment_id] = {
             "request": request,
-            "started_at": datetime.utcnow()
+            "started_at": datetime.now(UTC)
         }
         
         # Run tests for each strategy

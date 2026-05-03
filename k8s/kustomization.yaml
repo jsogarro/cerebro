@@ -7,7 +7,11 @@ resources:
   - namespace.yaml
   - serviceaccount.yaml
   - configmap.yaml
-  - secrets.yaml
+  # The committed `secrets.yaml` is replaced by `external-secrets.yaml`,
+  # which projects values from a cloud secret manager via the External
+  # Secrets Operator. Deployments still reference the same Secret name
+  # (`research-platform-secrets`).
+  - external-secrets.yaml
   - deployment-api.yaml
   - deployment-worker.yaml
   - service.yaml
@@ -27,11 +31,10 @@ configMapGenerator:
     literals:
       - ENVIRONMENT=production
 
-secretGenerator:
-  - name: research-platform-secrets
-    behavior: merge
-    envs:
-      - secrets.env
+# secretGenerator removed: the Kubernetes Secret named
+# `research-platform-secrets` is now produced by the ExternalSecret in
+# `external-secrets.yaml`, which sources values from the cluster's
+# configured secret store rather than a committed `secrets.env` file.
 
 replicas:
   - name: research-api

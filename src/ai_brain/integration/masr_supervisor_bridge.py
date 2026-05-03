@@ -12,12 +12,13 @@ This bridge enables intelligent end-to-end query processing by connecting:
 """
 
 import asyncio
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.types import HealthCheckDict
 
@@ -26,7 +27,7 @@ from ...agents.supervisors.base_supervisor import BaseSupervisor
 from ..router.masr import CollaborationMode, RoutingDecision, RoutingStrategy
 from ..router.query_analyzer import ComplexityLevel
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class SupervisorExecutionStatus(Enum):
@@ -308,8 +309,12 @@ class ResourcePool:
                 logger.debug(f"Reused supervisor {supervisor_type} from pool")
                 return supervisor
         
-        # Create new supervisor
+        # Create new supervisor. ``BaseSupervisor.__init__`` requires
+        # ``supervisor_type`` and ``domain`` positionally; pull them off the
+        # config so subclasses inheriting the base signature collect.
         supervisor = supervisor_class(
+            supervisor_type=config.supervisor_type,
+            domain=config.domain,
             gemini_service=self.gemini_service,
             cache_client=None,
             config=self._create_supervisor_config(config),

@@ -5,7 +5,7 @@ Manages security alerts and notifications for suspicious activities,
 policy violations, and security incidents.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 from uuid import UUID as PyUUID  # noqa: N811
@@ -393,7 +393,7 @@ class SecurityAlert(BaseModel):
             acknowledged_by: Who is acknowledging
         """
         self.status = AlertStatus.ACKNOWLEDGED
-        self.acknowledged_at = datetime.utcnow()
+        self.acknowledged_at = datetime.now(UTC)
         self.acknowledged_by = acknowledged_by
 
     def investigate(self, investigated_by: str) -> None:
@@ -404,12 +404,12 @@ class SecurityAlert(BaseModel):
             investigated_by: Who is investigating
         """
         self.status = AlertStatus.INVESTIGATING
-        self.investigated_at = datetime.utcnow()
+        self.investigated_at = datetime.now(UTC)
         self.investigated_by = investigated_by
 
         # Auto-acknowledge if not already
         if not self.acknowledged_at:
-            self.acknowledged_at = datetime.utcnow()
+            self.acknowledged_at = datetime.now(UTC)
             self.acknowledged_by = investigated_by
 
     def resolve(
@@ -426,7 +426,7 @@ class SecurityAlert(BaseModel):
         self.status = (
             AlertStatus.FALSE_POSITIVE if is_false_positive else AlertStatus.RESOLVED
         )
-        self.resolved_at = datetime.utcnow()
+        self.resolved_at = datetime.now(UTC)
         self.resolved_by = resolved_by
         self.resolution_notes = resolution_notes
 
@@ -439,7 +439,7 @@ class SecurityAlert(BaseModel):
         """
         self.status = AlertStatus.ESCALATED
         self.escalated = True
-        self.escalated_at = datetime.utcnow()
+        self.escalated_at = datetime.now(UTC)
         self.escalated_to = escalated_to
 
     def add_evidence(self, evidence: dict[str, Any]) -> None:
@@ -468,7 +468,7 @@ class SecurityAlert(BaseModel):
         notification = {
             "channel": channel,
             "recipient": recipient,
-            "sent_at": datetime.utcnow().isoformat(),
+            "sent_at": datetime.now(UTC).isoformat(),
         }
 
         if self.notifications_sent:

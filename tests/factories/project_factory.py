@@ -4,7 +4,7 @@ Project factory for generating test research project data.
 
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from factory import DictFactory, Factory, LazyAttribute, LazyFunction
@@ -44,8 +44,8 @@ class ResearchQueryFactory(DictFactory):
     keywords = LazyFunction(lambda: [fake.word() for _ in range(fake.random_int(3, 8))])
     time_range = LazyFunction(
         lambda: {
-            "start": (datetime.utcnow() - timedelta(days=365 * 5)).isoformat(),
-            "end": datetime.utcnow().isoformat(),
+            "start": (datetime.now(UTC) - timedelta(days=365 * 5)).isoformat(),
+            "end": datetime.now(UTC).isoformat(),
         }
     )
     sources = LazyFunction(
@@ -82,7 +82,7 @@ class ResearchProjectFactory(Factory):
     workflow_id = LazyFunction(lambda: f"workflow-{uuid.uuid4()}")
     progress = FuzzyInteger(0, 100)
     created_at = FuzzyDateTime(
-        start_dt=datetime.utcnow() - timedelta(days=90), end_dt=datetime.utcnow()
+        start_dt=datetime.now(UTC) - timedelta(days=90), end_dt=datetime.now(UTC)
     )
     updated_at = LazyAttribute(lambda o: o.created_at + timedelta(hours=1))
     completed_at = LazyAttribute(
@@ -120,7 +120,7 @@ class ResearchProjectFactory(Factory):
     @classmethod
     def create_completed(cls, **kwargs) -> ResearchProject:
         """Create a completed research project."""
-        created = datetime.utcnow() - timedelta(days=fake.random_int(1, 30))
+        created = datetime.now(UTC) - timedelta(days=fake.random_int(1, 30))
         defaults = {
             "status": "completed",
             "progress": 100,
@@ -223,7 +223,7 @@ class ResearchResultFactory(Factory):
     )
     confidence_score = LazyFunction(lambda: round(fake.random.uniform(0.7, 1.0), 2))
     created_at = FuzzyDateTime(
-        start_dt=datetime.utcnow() - timedelta(days=30), end_dt=datetime.utcnow()
+        start_dt=datetime.now(UTC) - timedelta(days=30), end_dt=datetime.now(UTC)
     )
 
     @classmethod
@@ -324,7 +324,7 @@ class AgentTaskFactory(Factory):
     error_message = LazyAttribute(
         lambda o: fake.sentence() if o.status == "failed" else None
     )
-    started_at = LazyFunction(datetime.utcnow)
+    started_at = LazyFunction(lambda: datetime.now(UTC))
     completed_at = LazyAttribute(
         lambda o: (
             o.started_at + timedelta(seconds=fake.random_int(10, 300))
@@ -332,7 +332,7 @@ class AgentTaskFactory(Factory):
             else None
         )
     )
-    created_at = LazyFunction(datetime.utcnow)
+    created_at = LazyFunction(lambda: datetime.now(UTC))
 
     @classmethod
     def create_pending(cls, **kwargs) -> AgentTask:
@@ -351,7 +351,7 @@ class AgentTaskFactory(Factory):
         """Create a running agent task."""
         defaults = {
             "status": "running",
-            "started_at": datetime.utcnow(),
+            "started_at": datetime.now(UTC),
             "completed_at": None,
             "output_data": None,
         }
@@ -361,7 +361,7 @@ class AgentTaskFactory(Factory):
     @classmethod
     def create_completed(cls, **kwargs) -> AgentTask:
         """Create a completed agent task."""
-        started = datetime.utcnow() - timedelta(minutes=5)
+        started = datetime.now(UTC) - timedelta(minutes=5)
         defaults = {
             "status": "completed",
             "started_at": started,

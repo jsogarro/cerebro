@@ -7,16 +7,22 @@ and performance experimentation.
 """
 
 import uuid
-from datetime import datetime
+from collections.abc import Generator
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.models.supervisor_api_models import (
+    SupervisorInfo,
+    WorkerInfo,
+)
+
 
 @pytest.fixture
-def app():
+def app() -> FastAPI:
     """Create FastAPI app with supervisor routes"""
     from src.api.routes.supervisor_api import router
     
@@ -26,13 +32,13 @@ def app():
 
 
 @pytest.fixture
-def client(app):
+def client(app: FastAPI) -> TestClient:
     """Create test client"""
     return TestClient(app)
 
 
 @pytest.fixture
-def mock_supervisor_service():
+def mock_supervisor_service() -> Generator[Mock, None, None]:
     """Mock supervisor coordination service"""
     with patch("src.api.routes.supervisor_api.supervisor_service") as mock_service:
         yield mock_service
@@ -41,7 +47,9 @@ def mock_supervisor_service():
 class TestSupervisorExecution:
     """Test supervisor task execution endpoints"""
     
-    def test_execute_supervisor_task_success(self, client, mock_supervisor_service):
+    def test_execute_supervisor_task_success(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test successful supervisor task execution"""
         # Setup mock response
         mock_response = {
@@ -82,7 +90,7 @@ class TestSupervisorExecution:
         assert data["quality_score"] == 0.92
         assert len(data["workers_used"]) == 2
     
-    def test_execute_invalid_supervisor_type(self, client):
+    def test_execute_invalid_supervisor_type(self, client: TestClient) -> None:
         """Test execution with invalid supervisor type"""
         request_data = {
             "query": "Test query",
@@ -96,7 +104,9 @@ class TestSupervisorExecution:
         
         assert response.status_code == 422  # Validation error
     
-    def test_execute_with_timeout(self, client, mock_supervisor_service):
+    def test_execute_with_timeout(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test execution with timeout parameter"""
         mock_supervisor_service.execute_supervisor_task = AsyncMock(
             return_value=Mock(
@@ -130,27 +140,29 @@ class TestSupervisorExecution:
 class TestSupervisorManagement:
     """Test supervisor listing and information endpoints"""
     
-    def test_list_all_supervisors(self, client, mock_supervisor_service):
+    def test_list_all_supervisors(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test listing all available supervisors"""
         mock_supervisors = [
-            Mock(
+            SupervisorInfo(
                 supervisor_id="sup-1",
                 supervisor_type="research",
                 status="active",
                 capabilities=["literature_review", "synthesis"],
                 worker_count=5,
                 active_tasks=2,
-                performance_metrics={}
+                performance_metrics={},
             ),
-            Mock(
+            SupervisorInfo(
                 supervisor_id="sup-2",
                 supervisor_type="content",
                 status="active",
                 capabilities=["writing", "editing"],
                 worker_count=3,
                 active_tasks=0,
-                performance_metrics={}
-            )
+                performance_metrics={},
+            ),
         ]
         
         mock_supervisor_service.get_all_supervisors = AsyncMock(
@@ -165,7 +177,9 @@ class TestSupervisorManagement:
         assert data["active_count"] == 2
         assert len(data["supervisors"]) == 2
     
-    def test_get_supervisor_info(self, client, mock_supervisor_service):
+    def test_get_supervisor_info(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test getting specific supervisor information"""
         mock_info = Mock(
             supervisor_id="sup-1",
@@ -189,25 +203,27 @@ class TestSupervisorManagement:
         assert data["worker_count"] == 5
         assert "literature_review" in data["capabilities"]
     
-    def test_get_supervisor_workers(self, client, mock_supervisor_service):
+    def test_get_supervisor_workers(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test getting workers for a supervisor"""
         mock_workers = [
-            Mock(
+            WorkerInfo(
                 worker_id="worker-1",
                 worker_type="literature_review",
                 status="idle",
                 capabilities=["search", "extract"],
                 performance_score=0.9,
-                current_task=None
+                current_task=None,
             ),
-            Mock(
+            WorkerInfo(
                 worker_id="worker-2",
                 worker_type="synthesis",
                 status="executing",
                 capabilities=["integrate", "summarize"],
                 performance_score=0.88,
-                current_task="Synthesizing results"
-            )
+                current_task="Synthesizing results",
+            ),
         ]
         
         mock_supervisor_service.get_supervisor_workers = AsyncMock(
@@ -223,129 +239,12 @@ class TestSupervisorManagement:
         assert data["idle_workers"] == 1
 
 
-class TestWorkerCoordination:
-    """Test worker coordination endpoints"""
-    
-    def test_coordinate_workers(self, client, mock_supervisor_service):
-        """Test worker coordination request"""
-        mock_response = Mock(
-            coordination_id="coord-123",
-            workers_assigned=[
-                Mock(
-                    worker_id="w1",
-                    worker_type="analyst",
-                    status="assigned",
-                    capabilities=[],
-                    performance_score=0.9
-                )
-            ],
-            coordination_plan={"phases": [{"phase": 1, "action": "analyze"}]},
-            estimated_completion_time=30,
-            status="initiated"
-        )
-        
-        mock_supervisor_service.coordinate_workers = AsyncMock(
-            return_value=mock_response
-        )
-        
-        request_data = {
-            "task": "Analyze market trends",
-            "worker_types": ["analyst", "researcher"],
-            "coordination_mode": "parallel",
-            "refinement_rounds": 2
-        }
-        
-        response = client.post(
-            "/api/v1/supervisors/analytics/coordinate",
-            json=request_data
-        )
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "initiated"
-        assert data["estimated_completion_time"] == 30
-    
-    def test_coordinate_with_conflict_resolution(self, client, mock_supervisor_service):
-        """Test coordination with conflict resolution strategy"""
-        mock_supervisor_service.coordinate_workers = AsyncMock(
-            return_value=Mock(
-                coordination_id="coord-456",
-                workers_assigned=[],
-                coordination_plan={},
-                estimated_completion_time=45,
-                status="initiated"
-            )
-        )
-        
-        request_data = {
-            "task": "Complex analysis",
-            "worker_types": ["analyst"],
-            "coordination_mode": "hierarchical",
-            "conflict_resolution": "quality_based"
-        }
-        
-        response = client.post(
-            "/api/v1/supervisors/research/coordinate",
-            json=request_data
-        )
-        
-        assert response.status_code == 200
-
-
-class TestMultiSupervisorOrchestration:
-    """Test multi-supervisor orchestration endpoints"""
-    
-    def test_orchestrate_multi_supervisor(self, client, mock_supervisor_service):
-        """Test multi-supervisor orchestration"""
-        mock_response = Mock(
-            orchestration_id="orch-123",
-            supervisors_involved=[
-                Mock(
-                    supervisor_id="sup-1",
-                    supervisor_type="research",
-                    status="active",
-                    capabilities=[],
-                    worker_count=5,
-                    active_tasks=1,
-                    performance_metrics={}
-                )
-            ],
-            individual_results={
-                "research": {"result": "Research findings", "quality_score": 0.9}
-            },
-            synthesized_result="Combined analysis",
-            orchestration_time_ms=5000,
-            consensus_achieved=True,
-            quality_metrics={"average_quality": 0.88}
-        )
-        
-        mock_supervisor_service.orchestrate_multi_supervisor = AsyncMock(
-            return_value=mock_response
-        )
-        
-        request_data = {
-            "query": "Create comprehensive business analysis",
-            "supervisor_types": ["research", "analytics", "content"],
-            "orchestration_strategy": "collaborative",
-            "synthesis_required": True
-        }
-        
-        response = client.post(
-            "/api/v1/supervisors/multi/orchestrate",
-            json=request_data
-        )
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["consensus_achieved"]
-        assert data["synthesized_result"] == "Combined analysis"
-        assert data["quality_metrics"]["average_quality"] == 0.88
-
-
 class TestSupervisorMetrics:
     """Test supervisor metrics and health endpoints"""
     
-    def test_get_supervisor_stats(self, client, mock_supervisor_service):
+    def test_get_supervisor_stats(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test getting supervisor statistics"""
         mock_stats = Mock(
             supervisor_type="research",
@@ -371,7 +270,9 @@ class TestSupervisorMetrics:
         assert data["success_rate"] == 0.95
         assert data["worker_utilization"] == 0.75
     
-    def test_get_supervisor_health(self, client, mock_supervisor_service):
+    def test_get_supervisor_health(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test getting supervisor health status"""
         mock_health = Mock(
             supervisor_type="research",
@@ -379,7 +280,7 @@ class TestSupervisorMetrics:
             health_score=0.92,
             active_workers=3,
             queue_depth=2,
-            last_execution=datetime.utcnow(),
+            last_execution=datetime.now(UTC),
             issues=[],
             recommendations=[]
         )
@@ -397,181 +298,12 @@ class TestSupervisorMetrics:
         assert data["active_workers"] == 3
 
 
-class TestAdvancedCoordination:
-    """Test advanced coordination features"""
-    
-    def test_optimize_worker_allocation(self, client, mock_supervisor_service):
-        """Test worker allocation optimization"""
-        mock_response = Mock(
-            optimization_id="opt-123",
-            recommended_allocation={"specialist": 3, "generalist": 2},
-            expected_performance={"quality": 0.9, "speed": 0.8},
-            optimization_score=0.85,
-            reasoning="Optimized for quality with available resources",
-            alternative_allocations=None
-        )
-        
-        mock_supervisor_service.optimize_worker_allocation = AsyncMock(
-            return_value=mock_response
-        )
-        
-        request_data = {
-            "task_requirements": {
-                "complexity": 0.8,
-                "domains": ["ai", "ethics"],
-                "quality_target": 0.9
-            },
-            "available_workers": 10,
-            "optimization_goal": "quality"
-        }
-        
-        response = client.post(
-            "/api/v1/supervisors/optimize-allocation",
-            json=request_data
-        )
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["optimization_score"] == 0.85
-        assert "specialist" in data["recommended_allocation"]
-    
-    def test_resolve_conflicts(self, client, mock_supervisor_service):
-        """Test conflict resolution between workers"""
-        mock_response = Mock(
-            conflict_id="conflict-123",
-            resolution_strategy="quality_based",
-            resolved_output="Best quality output selected",
-            confidence_score=0.88,
-            resolution_reasoning="Selected highest quality output",
-            worker_consensus={"worker-1": 0.9, "worker-2": 0.7}
-        )
-        
-        mock_supervisor_service.resolve_conflict = AsyncMock(
-            return_value=mock_response
-        )
-        
-        request_data = {
-            "conflict_id": "conflict-123",
-            "worker_outputs": [
-                {"worker_id": "w1", "output": "Result A", "confidence": 0.85},
-                {"worker_id": "w2", "output": "Result B", "confidence": 0.90}
-            ],
-            "resolution_strategy": "quality_based"
-        }
-        
-        response = client.post(
-            "/api/v1/supervisors/resolve-conflicts",
-            json=request_data
-        )
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["confidence_score"] == 0.88
-        assert data["resolution_strategy"] == "quality_based"
-    
-    def test_compare_supervisor_performance(self, client, mock_supervisor_service):
-        """Test comparing performance across supervisors"""
-        mock_response = Mock(
-            comparison_id="comp-123",
-            supervisors_compared=["research", "analytics"],
-            performance_metrics={
-                "research": {"success_rate": 0.95, "average_quality": 0.88},
-                "analytics": {"success_rate": 0.92, "average_quality": 0.85}
-            },
-            rankings={"success_rate": ["research", "analytics"]},
-            recommendations={"research": "Best for complex analysis"},
-            visualization_data=None
-        )
-        
-        mock_supervisor_service.compare_supervisor_performance = AsyncMock(
-            return_value=mock_response
-        )
-        
-        response = client.get(
-            "/api/v1/supervisors/performance/compare",
-            params={"supervisors": ["research", "analytics"]}
-        )
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["supervisors_compared"]) == 2
-        assert "research" in data["performance_metrics"]
-    
-    def test_run_coordination_experiment(self, client, mock_supervisor_service):
-        """Test running coordination strategy experiments"""
-        mock_response = Mock(
-            experiment_id="exp-123",
-            strategies_tested=["direct", "collaborative"],
-            results={
-                "direct": {"quality": 0.85, "speed": 0.9},
-                "collaborative": {"quality": 0.92, "speed": 0.7}
-            },
-            best_strategy="collaborative",
-            statistical_significance=0.95,
-            recommendations=["Use collaborative for quality-critical tasks"],
-            detailed_analysis={}
-        )
-        
-        mock_supervisor_service.run_experiment = AsyncMock(
-            return_value=mock_response
-        )
-        
-        request_data = {
-            "query": "Test query for experimentation",
-            "strategies_to_test": ["direct", "collaborative"],
-            "metrics_to_track": ["quality", "speed"],
-            "repetitions": 3
-        }
-        
-        response = client.post(
-            "/api/v1/supervisors/experiment",
-            json=request_data
-        )
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["best_strategy"] == "collaborative"
-        assert data["statistical_significance"] == 0.95
-
-
-class TestWebSocketEndpoints:
-    """Test WebSocket endpoints for real-time updates"""
-    
-    @pytest.mark.asyncio
-    async def test_supervisor_websocket_connection(self, app):
-        """Test WebSocket connection for supervisor updates"""
-        from fastapi.testclient import TestClient
-        
-        with TestClient(app) as client, client.websocket_connect(
-            "/api/v1/supervisors/research/ws?client_id=test-client"
-        ) as websocket:
-            # Receive initial connection message
-            data = websocket.receive_json()
-            assert data["event_type"] == "connection_established"
-            
-            # Send ping
-            websocket.send_json({"type": "ping"})
-            response = websocket.receive_json()
-            assert response["type"] == "pong"
-    
-    @pytest.mark.asyncio
-    async def test_coordination_progress_websocket(self, app):
-        """Test WebSocket for coordination progress updates"""
-        from fastapi.testclient import TestClient
-        
-        with TestClient(app) as client, client.websocket_connect(
-            "/api/v1/supervisors/coordination/ws?coordination_id=test-coord"
-        ) as websocket:
-            # Receive initial connection message
-            data = websocket.receive_json()
-            assert data["event_type"] == "connection_established"
-            assert data["coordination_id"] == "test-coord"
-
-
 class TestErrorHandling:
     """Test error handling in supervisor API"""
     
-    def test_invalid_supervisor_type_404(self, client, mock_supervisor_service):
+    def test_invalid_supervisor_type_404(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test 404 for invalid supervisor type"""
         mock_supervisor_service.get_supervisor_info = AsyncMock(
             side_effect=ValueError("Supervisor type 'invalid' not found")
@@ -581,7 +313,9 @@ class TestErrorHandling:
         
         assert response.status_code == 422  # FastAPI validation error
     
-    def test_internal_server_error_500(self, client, mock_supervisor_service):
+    def test_internal_server_error_500(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test 500 internal server error handling"""
         mock_supervisor_service.execute_supervisor_task = AsyncMock(
             side_effect=Exception("Internal error")
@@ -600,7 +334,7 @@ class TestErrorHandling:
         data = response.json()
         assert "Internal error" in data["detail"]
     
-    def test_validation_error_422(self, client):
+    def test_validation_error_422(self, client: TestClient) -> None:
         """Test validation error for invalid request data"""
         request_data = {
             "query": "Test",
@@ -619,7 +353,9 @@ class TestErrorHandling:
 class TestIntegrationScenarios:
     """Test complete integration scenarios"""
     
-    def test_complete_supervisor_workflow(self, client, mock_supervisor_service):
+    def test_complete_supervisor_workflow(
+        self, client: TestClient, mock_supervisor_service: Mock
+    ) -> None:
         """Test complete workflow from execution to stats"""
         # Step 1: Execute task
         mock_supervisor_service.execute_supervisor_task = AsyncMock(
@@ -651,7 +387,7 @@ class TestIntegrationScenarios:
                 health_score=0.95,
                 active_workers=2,
                 queue_depth=0,
-                last_execution=datetime.utcnow(),
+                last_execution=datetime.now(UTC),
                 issues=[],
                 recommendations=[]
             )

@@ -97,7 +97,7 @@ class DevelopmentConfig(BaseConfig):
     )
     
     # Feature flags for development
-    features: dict = {
+    features: dict[str, bool] = {
         "mcp_tools": True,
         "agent_pooling": True,
         "caching": True,
@@ -110,6 +110,3 @@ class DevelopmentConfig(BaseConfig):
         "mock_external_services": True,  # Allow mocking external services
     }
 
-
-# Create singleton instance
-development_config = DevelopmentConfig()

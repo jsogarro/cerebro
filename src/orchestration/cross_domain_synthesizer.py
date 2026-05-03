@@ -6,16 +6,17 @@ Provides multiple synthesis strategies (comprehensive, prioritized, consensus-ba
 weighted average) and handles cross-domain conflict resolution.
 """
 
-import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.constants import HIGH_CONSENSUS_THRESHOLD
 
 from ..ai_brain.integration.masr_supervisor_bridge import SupervisorExecutionResult
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CrossDomainSynthesizer:

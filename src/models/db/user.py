@@ -4,13 +4,15 @@ User database model.
 Represents users of the research platform.
 """
 
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from passlib.context import CryptContext
 from sqlalchemy import Boolean, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.models.db.base import UUID as DBUUID
 from src.models.db.base import BaseModel
 
 if TYPE_CHECKING:
@@ -41,6 +43,13 @@ class User(BaseModel):
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     organization: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        DBUUID(),
+        nullable=True,
+        index=True,
+        comment="Tenant organization boundary identifier",
+    )
 
     role: Mapped[str | None] = mapped_column(
         String(50), nullable=True
@@ -114,6 +123,7 @@ class User(BaseModel):
 
     # Indexes
     __table_args__ = (
+        Index("idx_user_org_active", "organization_id", "is_active"),
         Index("idx_user_active", "is_active", "is_verified"),
         Index("idx_user_login", "last_login", "is_active"),
     )
@@ -170,37 +180,37 @@ class User(BaseModel):
             new_password: New plain text password
         """
         self.hashed_password = pwd_context.hash(new_password)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def record_login(self) -> None:
         """Record a successful login."""
-        self.last_login = datetime.utcnow()
+        self.last_login = datetime.now(UTC)
         self.login_count += 1
 
     def activate(self) -> None:
         """Activate user account."""
         self.is_active = True
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def deactivate(self) -> None:
         """Deactivate user account."""
         self.is_active = False
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def verify_email(self) -> None:
         """Mark email as verified."""
         self.is_verified = True
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def grant_superuser(self) -> None:
         """Grant superuser privileges."""
         self.is_superuser = True
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def revoke_superuser(self) -> None:
         """Revoke superuser privileges."""
         self.is_superuser = False
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     @property
     def can_create_project(self) -> bool:
@@ -235,6 +245,9 @@ class User(BaseModel):
             "username": self.username,
             "full_name": self.full_name,
             "organization": self.organization,
+            "organization_id": str(self.organization_id)
+            if self.organization_id
+            else None,
             "role": self.role,
             "is_active": self.is_active,
             "is_verified": self.is_verified,

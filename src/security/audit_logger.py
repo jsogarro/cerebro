@@ -8,7 +8,7 @@ and system activities with async database persistence.
 import asyncio
 import contextlib
 import threading
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -169,7 +169,7 @@ class AuditLogger:
             "user_agent": user_agent,
             "request_id": request_id,
             "metadata": metadata or {},
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(UTC),
             **kwargs,
         }
 
@@ -198,7 +198,7 @@ class AuditLogger:
         await self._check_alert_conditions(log_entry)
 
         # Generate and return event ID
-        event_id = f"{event_type.value}_{datetime.utcnow().timestamp()}"
+        event_id = f"{event_type.value}_{datetime.now(UTC).timestamp()}"
         return event_id
 
     async def flush_buffer(self) -> None:
@@ -323,7 +323,7 @@ class AuditLogger:
         if self.db_session:
             from sqlalchemy import func, select
 
-            since = datetime.utcnow() - timedelta(minutes=minutes)
+            since = datetime.now(UTC) - timedelta(minutes=minutes)
 
             query = select(func.count(AuditLog.id)).where(
                 AuditLog.event_type == event_type, AuditLog.created_at >= since

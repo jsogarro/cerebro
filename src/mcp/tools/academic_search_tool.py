@@ -4,15 +4,15 @@ Academic Search Tool for MCP.
 Provides search capabilities across multiple academic databases.
 """
 
-import logging
 from typing import Any
 from xml.etree import ElementTree as ET
 
 import httpx
+from structlog import get_logger
 
 from src.mcp.base import BaseMCPTool, ToolMetadata, ToolParameter
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class AcademicSearchTool(BaseMCPTool):

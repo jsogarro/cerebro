@@ -5,22 +5,20 @@ This module provides comprehensive fixtures and utilities for integration testin
 with real PostgreSQL, Redis, and Temporal instances using Docker containers.
 """
 
-import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
 from faker import Faker
+from fastapi import Depends
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from temporalio import Client as TemporalClient
-from temporalio.testing import WorkflowEnvironment
 from testcontainers.compose import DockerCompose
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
@@ -29,9 +27,15 @@ from src.api.main import app
 from src.auth.jwt_service import JWTService
 from src.auth.password_service import PasswordService
 from src.core.config import Settings
-from src.models.base import Base
+from src.middleware.auth_middleware import get_current_token
+
+# Import all models to ensure they're registered with Base.metadata
+from src.models.db.agent_task import AgentTask  # noqa: F401
+from src.models.db.base import Base
 from src.models.db.research_project import ResearchProject
+from src.models.db.research_result import ResearchResult  # noqa: F401
 from src.models.db.user import User
+from src.models.db.workflow_checkpoint import WorkflowCheckpoint  # noqa: F401
 
 # Initialize Faker for test data generation
 fake = Faker()
@@ -48,9 +52,6 @@ class IntegrationTestConfig:
     # Test Redis configuration
     TEST_REDIS_DB = 15
 
-    # Test Temporal configuration
-    TEST_TEMPORAL_NAMESPACE = "test-namespace"
-
     # Test user roles
     TEST_ROLES = ["admin", "researcher", "viewer"]
 
@@ -58,15 +59,10 @@ class IntegrationTestConfig:
     DEFAULT_TIMEOUT = 30  # seconds
     WORKFLOW_TIMEOUT = 60  # seconds
 
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield loop
-    loop.close()
+    # Predictable test user IDs for RLS + JWT auth
+    TEST_USER_ID = "00000000-0000-0000-0000-000000000001"
+    TEST_ADMIN_ID = "00000000-0000-0000-0000-000000000002"
+    TEST_ORG_ID = "00000000-0000-0000-0000-000000000100"
 
 
 @pytest.fixture(scope="session")
@@ -86,17 +82,16 @@ def docker_compose(docker_compose_file):
     compose.start()
     compose.wait_for("postgres")
     compose.wait_for("redis")
-    compose.wait_for("temporal")
     yield compose
     compose.stop()
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def postgres_container():
     """Start PostgreSQL container for integration tests."""
     container = PostgresContainer(
         image="postgres:16-alpine",
-        user=IntegrationTestConfig.TEST_DB_USER,
+        username=IntegrationTestConfig.TEST_DB_USER,
         password=IntegrationTestConfig.TEST_DB_PASSWORD,
         dbname=IntegrationTestConfig.TEST_DB_NAME,
     )
@@ -105,7 +100,7 @@ async def postgres_container():
     container.stop()
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def redis_container():
     """Start Redis container for integration tests."""
     container = RedisContainer(image="redis:7-alpine")
@@ -118,8 +113,8 @@ async def redis_container():
 async def test_engine(postgres_container) -> AsyncEngine:
     """Create test database engine."""
     connection_url = postgres_container.get_connection_url()
-    # Convert to async URL
-    async_url = connection_url.replace("postgresql://", "postgresql+asyncpg://")
+    # Convert to async URL (testcontainers returns postgresql+psycopg2://)
+    async_url = connection_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
 
     engine = create_async_engine(
         async_url,
@@ -157,58 +152,107 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest_asyncio.fixture
 async def redis_client(redis_container) -> AsyncGenerator:
     """Create Redis client for testing."""
+    host = redis_container.get_container_host_ip()
+    port = redis_container.get_exposed_port(6379)
+    redis_url = f"redis://{host}:{port}/{IntegrationTestConfig.TEST_REDIS_DB}"
+
     client = await redis.from_url(
-        redis_container.get_connection_url(),
+        redis_url,
         decode_responses=True,
-        db=IntegrationTestConfig.TEST_REDIS_DB,
     )
     yield client
     await client.flushdb()
-    await client.close()
+    await client.aclose()
 
 
 @pytest_asyncio.fixture
-async def temporal_env() -> AsyncGenerator[WorkflowEnvironment, None]:
-    """Create Temporal test environment."""
-    env = await WorkflowEnvironment.start_time_skipping()
-    yield env
-    await env.shutdown()
-
-
-@pytest_asyncio.fixture
-async def temporal_client(temporal_env) -> TemporalClient:
-    """Create Temporal client for testing."""
-    return temporal_env.client
+async def jwt_service(redis_client) -> JWTService:
+    """Create JWT service for testing with in-memory keys and test Redis."""
+    # Create JWT service with test Redis and in-memory keys (no file paths)
+    # This avoids the "/secrets" read-only filesystem issue
+    service = JWTService(
+        redis_client=redis_client,
+        private_key_path=None,  # Generate in-memory
+        public_key_path=None,   # Generate in-memory
+    )
+    return service
 
 
 @pytest_asyncio.fixture
 async def authenticated_client(
-    db_session: AsyncSession,
+    test_engine: AsyncEngine,
+    jwt_service: JWTService,
 ) -> AsyncGenerator[AsyncClient, None]:
     """Create authenticated HTTP client for testing."""
-    # Create test user
+    from src.middleware.auth_middleware import (
+        get_jwt_service as middleware_get_jwt_service,
+    )
+    from src.models.db.session import get_session
+
+    # Create session for user creation
+    async_session = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    # Create test user with predictable UUID for tests to reference
     password_service = PasswordService()
-    jwt_service = JWTService()
 
     test_user = User(
-        id=str(uuid.uuid4()),
+        id=IntegrationTestConfig.TEST_USER_ID,
         email="test@example.com",
         username="testuser",
-        hashed_password=password_service.hash_password("Test123!@#"),
+        hashed_password=password_service.hash_password("TestPass123!"),
         is_active=True,
         is_verified=True,
         role="researcher",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
-    db_session.add(test_user)
-    await db_session.commit()
+    async with async_session() as session:
+        session.add(test_user)
+        await session.commit()
 
-    # Generate JWT token
-    token = jwt_service.create_access_token(
-        data={"sub": test_user.id, "email": test_user.email, "role": test_user.role}
+    # Generate JWT token pair using the shared JWT service
+    # Include organization_id for RLS tenant context
+    token_pair = await jwt_service.generate_token_pair(
+        user_id=IntegrationTestConfig.TEST_USER_ID,
+        email=test_user.email,
+        roles=["researcher"],
+        organization_id=IntegrationTestConfig.TEST_ORG_ID,
     )
+    token = token_pair.access_token
+
+    # Override app's get_session dependency to use test engine
+    async def override_get_session() -> AsyncGenerator[AsyncSession, None]:
+        async with async_session() as session:
+            yield session
+
+    # Override JWT service dependency to use the shared test JWT service
+    # This ensures token validation uses the same in-memory keys and test Redis
+    async def override_get_jwt_service() -> JWTService:
+        return jwt_service
+
+    # Override tenant context to skip Postgres RLS setup in tests
+    from src.auth.models import TokenPayload
+    from src.middleware.tenant_context import TenantContext, get_tenant_context
+
+    async def override_get_tenant_context(
+        token_payload: TokenPayload = Depends(get_current_token),
+        session: AsyncSession = Depends(get_session),
+    ) -> TenantContext:
+        # Return tenant context without executing Postgres SET LOCAL command
+        # The test database doesn't have RLS policies configured
+        # We skip the Postgres RLS `SET LOCAL app.current_org_id` command since
+        # the test database doesn't have RLS policies configured
+        return TenantContext(
+            user_id=token_payload.sub,  # Use actual token user_id
+            organization_id=token_payload.organization_id or IntegrationTestConfig.TEST_ORG_ID,
+        )
+
+    app.dependency_overrides[get_session] = override_get_session
+    app.dependency_overrides[middleware_get_jwt_service] = override_get_jwt_service
+    app.dependency_overrides[get_tenant_context] = override_get_tenant_context
 
     # Create client with auth header
     transport = ASGITransport(app=app)
@@ -218,36 +262,79 @@ async def authenticated_client(
         headers={"Authorization": f"Bearer {token}"},
     ) as client:
         yield client
+
+    # Clear overrides
+    app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
 async def admin_client(
-    db_session: AsyncSession,
+    test_engine: AsyncEngine,
+    jwt_service: JWTService,
 ) -> AsyncGenerator[AsyncClient, None]:
     """Create admin HTTP client for testing."""
-    # Create admin user
+    from src.middleware.auth_middleware import (
+        get_jwt_service as middleware_get_jwt_service,
+    )
+    from src.models.db.session import get_session
+
+    # Create session for user creation
+    async_session = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    # Create admin user with predictable UUID for tests to reference
     password_service = PasswordService()
-    jwt_service = JWTService()
 
     admin_user = User(
-        id=str(uuid.uuid4()),
+        id=IntegrationTestConfig.TEST_ADMIN_ID,
         email="admin@example.com",
         username="admin",
-        hashed_password=password_service.hash_password("Admin123!@#"),
+        hashed_password=password_service.hash_password("AdminPass123!"),
         is_active=True,
         is_verified=True,
         role="admin",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
-    db_session.add(admin_user)
-    await db_session.commit()
+    async with async_session() as session:
+        session.add(admin_user)
+        await session.commit()
 
-    # Generate JWT token
-    token = jwt_service.create_access_token(
-        data={"sub": admin_user.id, "email": admin_user.email, "role": admin_user.role}
+    # Generate JWT token pair using the shared JWT service
+    # Include organization_id for RLS tenant context
+    token_pair = await jwt_service.generate_token_pair(
+        user_id=IntegrationTestConfig.TEST_ADMIN_ID,
+        email=admin_user.email,
+        roles=["admin"],
+        organization_id=IntegrationTestConfig.TEST_ORG_ID,
     )
+    token = token_pair.access_token
+
+    # Override app's get_session dependency to use test engine
+    async def override_get_session() -> AsyncGenerator[AsyncSession, None]:
+        async with async_session() as session:
+            yield session
+
+    # Override JWT service dependency to use the shared test JWT service
+    async def override_get_jwt_service() -> JWTService:
+        return jwt_service
+
+    # Override tenant context to skip Postgres RLS setup in tests
+    from src.middleware.tenant_context import TenantContext, get_tenant_context
+
+    async def override_get_tenant_context() -> TenantContext:
+        # Return tenant context without executing Postgres SET LOCAL command
+        # The test database doesn't have RLS policies configured
+        return TenantContext(
+            user_id=IntegrationTestConfig.TEST_ADMIN_ID,
+            organization_id=IntegrationTestConfig.TEST_ORG_ID,
+        )
+
+    app.dependency_overrides[get_session] = override_get_session
+    app.dependency_overrides[middleware_get_jwt_service] = override_get_jwt_service
+    app.dependency_overrides[get_tenant_context] = override_get_tenant_context
 
     # Create client with auth header
     transport = ASGITransport(app=app)
@@ -257,6 +344,9 @@ async def admin_client(
         headers={"Authorization": f"Bearer {token}"},
     ) as client:
         yield client
+
+    # Clear overrides
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -350,8 +440,8 @@ async def seed_test_data(db_session: AsyncSession):
             is_active=True,
             is_verified=i % 2 == 0,  # Half verified, half not
             role=IntegrationTestConfig.TEST_ROLES[i % 3],
-            created_at=datetime.utcnow() - timedelta(days=i),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC) - timedelta(days=i),
+            updated_at=datetime.now(UTC),
         )
         users.append(user)
         db_session.add(user)
@@ -368,8 +458,8 @@ async def seed_test_data(db_session: AsyncSession):
             query_text=f"Research query {i}",
             domains=["AI", "ML", "Ethics"],
             depth_level="comprehensive",
-            created_at=datetime.utcnow() - timedelta(days=i),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC) - timedelta(days=i),
+            updated_at=datetime.now(UTC),
         )
         projects.append(project)
         db_session.add(project)
@@ -423,8 +513,8 @@ class TestDataFactory:
             "is_active": True,
             "is_verified": True,
             "role": "researcher",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": datetime.now(UTC),
+            "updated_at": datetime.now(UTC),
         }
         defaults.update(kwargs)
         return User(**defaults)
@@ -441,8 +531,8 @@ class TestDataFactory:
             "query_text": fake.paragraph(nb_sentences=3),
             "domains": ["AI", "ML", "Ethics"],
             "depth_level": "comprehensive",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": datetime.now(UTC),
+            "updated_at": datetime.now(UTC),
         }
         defaults.update(kwargs)
         return ResearchProject(**defaults)

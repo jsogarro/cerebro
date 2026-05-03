@@ -12,18 +12,19 @@ This module extends the existing CostOptimizer to provide accurate cost
 predictions for hierarchical multi-agent systems.
 """
 
-import logging
 import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from ...agents.supervisors.base_supervisor import SupervisionMode
 from .cost_optimizer import CostOptimizer
 from .masr import RoutingStrategy
 from .query_analyzer import ComplexityAnalysis, ComplexityLevel
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ResourceType(Enum):

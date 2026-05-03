@@ -8,7 +8,7 @@ The API enables multi-round refinement sessions with consensus building and qual
 through structured communication between supervisors and workers.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -402,7 +402,7 @@ class TalkHierWebSocketEvent(BaseModel):
     
     event_type: str = Field(..., description="Type of event")
     session_id: str = Field(..., description="Session identifier")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Event timestamp")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Event timestamp")
     data: dict[str, Any] = Field(..., description="Event-specific data")
 
 

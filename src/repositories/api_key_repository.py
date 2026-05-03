@@ -4,7 +4,7 @@ API Key repository for authentication and authorization.
 Manages API keys for service accounts and programmatic access.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -67,7 +67,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
 
         if not include_expired:
             query = query.where(
-                or_(APIKey.expires_at.is_(None), APIKey.expires_at > datetime.utcnow())
+                or_(APIKey.expires_at.is_(None), APIKey.expires_at > datetime.now(UTC))
             )
 
         query = query.order_by(APIKey.created_at.desc())
@@ -106,7 +106,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
         # Calculate expiration
         expires_at = None
         if expires_in_days:
-            expires_at = datetime.utcnow() + timedelta(days=expires_in_days)
+            expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
 
         # Create API key
         api_key = await self.create(
@@ -217,11 +217,11 @@ class APIKeyRepository(BaseRepository[APIKey]):
             .where(
                 and_(
                     APIKey.expires_at.isnot(None),
-                    APIKey.expires_at < datetime.utcnow(),
+                    APIKey.expires_at < datetime.now(UTC),
                     APIKey.deleted_at.is_(None),
                 )
             )
-            .values(deleted_at=datetime.utcnow(), is_active=False)
+            .values(deleted_at=datetime.now(UTC), is_active=False)
         )
 
         result = await self.session.execute(stmt)
@@ -250,12 +250,12 @@ class APIKeyRepository(BaseRepository[APIKey]):
         if not api_key:
             return {}
 
-        since = datetime.utcnow() - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
 
         # Calculate usage rate
         usage_rate: float = 0.0
         if api_key.last_used_at and api_key.last_used_at >= since:
-            days_active = (datetime.utcnow() - since).days or 1
+            days_active = (datetime.now(UTC) - since).days or 1
             usage_rate = float(api_key.use_count) / float(days_active)
 
         return {
@@ -343,14 +343,14 @@ class APIKeyRepository(BaseRepository[APIKey]):
             and_(
                 APIKey.deleted_at.is_(None),
                 APIKey.expires_at.isnot(None),
-                APIKey.expires_at < datetime.utcnow(),
+                APIKey.expires_at < datetime.now(UTC),
             )
         )
         result = await self.session.execute(expired_query)
         expired = result.scalar() or 0
 
         # Recently used (last 7 days)
-        recent_cutoff = datetime.utcnow() - timedelta(days=7)
+        recent_cutoff = datetime.now(UTC) - timedelta(days=7)
         recent_query = select(func.count(APIKey.id)).where(
             and_(
                 APIKey.deleted_at.is_(None),

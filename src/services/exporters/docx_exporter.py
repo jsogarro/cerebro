@@ -6,8 +6,9 @@ following functional programming principles with pure transformation functions.
 """
 
 import io
-import logging
 from typing import TYPE_CHECKING, Any
+
+from structlog import get_logger
 
 if TYPE_CHECKING:
     from docx.document import Document as DocxDocument
@@ -27,7 +28,7 @@ except ImportError:
 from src.models.report import Report, ReportFormat, ReportOutput, ReportSection
 from src.services.report_config import ReportSettings
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class DOCXExportError(Exception):

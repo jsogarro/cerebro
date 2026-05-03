@@ -19,6 +19,8 @@ from pydantic import BaseModel, Field
 from structlog import get_logger
 
 from ...ai_brain.router.masr import RoutingStrategy
+from ...core.observability import set_llm_request_estimated_cost
+from ...core.pii_redactor import redact_pii
 from ...models.research_project import ResearchDepth, ResearchQuery
 from ..services.direct_execution_service import get_direct_execution_service
 
@@ -135,7 +137,10 @@ async def intelligent_research_query(
     Based on "MasRouter: Learning to Route LLMs" research.
     """
     try:
-        logger.info(f"Intelligent research query: {request.query[:100]}...")
+        logger.info(
+            "intelligent_research_query_started",
+            query_preview=redact_pii(request.query)[:100],
+        )
         
         # Use direct execution service which integrates MASR routing
         execution_service = get_direct_execution_service()
@@ -193,6 +198,7 @@ async def intelligent_research_query(
             supervisor_type=response.supervisor_type,
             estimated_cost=response.estimated_cost,
         )
+        set_llm_request_estimated_cost(response.estimated_cost)
         
         return response
         
@@ -216,7 +222,10 @@ async def intelligent_analysis_query(
     Always routes through MASR for optimal agent selection and cost efficiency.
     """
     try:
-        logger.info(f"Intelligent analysis query: {request.query[:100]}...")
+        logger.info(
+            "intelligent_analysis_query_started",
+            query_preview=redact_pii(request.query)[:100],
+        )
         
         intelligent_request = IntelligentQueryRequest(
             query=request.query,
@@ -259,7 +268,10 @@ async def intelligent_synthesis_query(
     MASR determines whether to use direct synthesis or full research pipeline.
     """
     try:
-        logger.info(f"Intelligent synthesis query: {request.query[:100]}...")
+        logger.info(
+            "intelligent_synthesis_query_started",
+            query_preview=redact_pii(request.query)[:100],
+        )
         
         intelligent_request = IntelligentQueryRequest(
             query=request.query,

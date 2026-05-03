@@ -139,7 +139,8 @@ class ReportSettings(BaseSettings):
 
     model_config = {
         "env_file": ".env",
-        "env_prefix": "RESEARCH_"
+        "env_prefix": "RESEARCH_",
+        "populate_by_name": True,
     }
 
 

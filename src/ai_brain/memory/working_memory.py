@@ -13,11 +13,13 @@ Working memory stores:
 """
 
 import asyncio
-import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+from structlog import get_logger
+
+from src.core.memory_encryption import MemoryEncryption
 from src.utils.async_helpers import BackgroundTaskTracker
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
@@ -30,7 +32,7 @@ except ImportError:
     RedisType = type(None)  # type: ignore[assignment, misc]
     REDIS_AVAILABLE = False
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass
@@ -83,8 +85,11 @@ class WorkingMemoryManager:
 
         # Memory configuration
         self.default_ttl = config.get("default_ttl", 3600)  # 1 hour
+        self.max_size = config.get("max_size", 1000)
         self.max_memory_mb = config.get("max_memory_mb", 512)
         self.cleanup_interval = config.get("cleanup_interval", 300)  # 5 minutes
+        self._memory_fallback: dict[str, WorkingMemoryItem] = {}
+        self._encryption = MemoryEncryption(config.get("encryption_key"))
 
         # Redis client
         self.redis_client = None
@@ -92,7 +97,6 @@ class WorkingMemoryManager:
             self.redis_client = redis_module.from_url(self.redis_url)
         else:
             logger.warning("Redis not available, using in-memory fallback")
-            self._memory_fallback: dict[str, Any] = {}
 
         # Background tasks
         self._bg_tasks = BackgroundTaskTracker()
@@ -150,14 +154,20 @@ class WorkingMemoryManager:
             item = WorkingMemoryItem(
                 key=key,
                 value=value,
-                expires_at=datetime.now() + timedelta(seconds=ttl or self.default_ttl),
+                expires_at=datetime.now() + timedelta(
+                    seconds=self.default_ttl if ttl is None else ttl
+                ),
                 tags=tags or [],
                 metadata=metadata or {},
             )
 
             # Store in Redis or fallback
             if self.redis_client:
-                await self._store_redis(key, item, ttl or self.default_ttl)
+                await self._store_redis(
+                    key,
+                    item,
+                    self.default_ttl if ttl is None else ttl,
+                )
             else:
                 self._store_fallback(key, item)
 
@@ -373,7 +383,7 @@ class WorkingMemoryManager:
                     try:
                         data = await self.redis_client.get(key)
                         if data:
-                            item_data = deserialize_from_cache(data)
+                            item_data = self._deserialize_stored_item(data)
                             item_tags = item_data.get("tags", [])
 
                             # Check if any of the specified tags match
@@ -395,6 +405,34 @@ class WorkingMemoryManager:
             logger.error(f"Failed to get keys by tags {tags}: {e}")
 
         return matching_keys
+
+    async def delete_by_user_id(self, user_id: str) -> int:
+        """Delete working-memory items associated with a user."""
+
+        deleted_count = 0
+
+        try:
+            if self.redis_client:
+                pattern = f"{self.key_prefix}*"
+                all_keys = await self.redis_client.keys(pattern)
+                for redis_key in all_keys:
+                    clean_key = redis_key.decode().replace(self.key_prefix, "")
+                    item = await self._retrieve_redis(clean_key)
+                    if item and self._item_belongs_to_user(item, user_id):
+                        deleted_count += 1 if await self.delete(clean_key) else 0
+            else:
+                keys_to_delete = [
+                    key
+                    for key, item in self._memory_fallback.items()
+                    if self._item_belongs_to_user(item, user_id)
+                ]
+                for key in keys_to_delete:
+                    del self._memory_fallback[key]
+                    deleted_count += 1
+        except Exception as e:
+            logger.error(f"Failed to delete working memory for user {user_id}: {e}")
+
+        return deleted_count
 
     async def cleanup_expired(self) -> int:
         """Clean up expired items from working memory."""
@@ -480,7 +518,11 @@ class WorkingMemoryManager:
 
         if self.redis_client is not None:
             await self.redis_client.setex(
-                redis_key, ttl, serialize_for_cache(item_data).decode("utf-8")
+                redis_key,
+                ttl,
+                serialize_for_cache(self._encryption.encrypt_data(item_data)).decode(
+                    "utf-8"
+                ),
             )
 
     async def _retrieve_redis(self, key: str) -> WorkingMemoryItem | None:
@@ -492,7 +534,7 @@ class WorkingMemoryManager:
 
         if data:
             try:
-                item_data = deserialize_from_cache(data)
+                item_data = self._deserialize_stored_item(data)
 
                 # Reconstruct datetime objects
                 created_at = datetime.fromisoformat(item_data["created_at"])
@@ -518,9 +560,19 @@ class WorkingMemoryManager:
 
         return None
 
+    def _deserialize_stored_item(self, data: bytes | str) -> dict[str, Any]:
+        """Deserialize and decrypt a stored working-memory payload."""
+
+        item_data = deserialize_from_cache(data)
+        decrypted = self._encryption.decrypt_data(item_data)
+        if not isinstance(decrypted, dict):
+            raise ValueError("Stored working memory item is not an object")
+        return decrypted
+
     def _store_fallback(self, key: str, item: WorkingMemoryItem) -> None:
         """Store item in memory fallback."""
         self._memory_fallback[key] = item
+        self._evict_fallback_if_needed()
 
     def _retrieve_fallback(self, key: str) -> WorkingMemoryItem | None:
         """Retrieve item from memory fallback."""
@@ -532,6 +584,23 @@ class WorkingMemoryManager:
             return None
 
         return item
+
+    def _evict_fallback_if_needed(self) -> None:
+        """Evict least recently used fallback entries over the configured cap."""
+        while len(self._memory_fallback) > self.max_size:
+            lru_key = min(
+                self._memory_fallback,
+                key=lambda key: self._memory_fallback[key].last_accessed,
+            )
+            del self._memory_fallback[lru_key]
+
+    @staticmethod
+    def _item_belongs_to_user(item: WorkingMemoryItem, user_id: str) -> bool:
+        """Check common working-memory user ownership locations."""
+
+        return item.metadata.get("user_id") == user_id or (
+            isinstance(item.value, dict) and item.value.get("user_id") == user_id
+        )
 
     async def _update_access_stats(self, key: str, item: WorkingMemoryItem) -> None:
         """Update access statistics for an item."""

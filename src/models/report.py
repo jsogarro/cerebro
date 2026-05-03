@@ -5,7 +5,7 @@ This module defines the Pydantic models for representing research reports
 and their components following functional programming principles.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -146,7 +146,7 @@ class Citation(BaseModel):
     
     def _format_mla(self, authors: str) -> str:
         """Format citation in MLA style."""
-        citation = f'{authors}. "{self.title}."'
+        citation = f'{authors.rstrip(".")}. "{self.title}."'
         if self.journal:
             citation += f" {self.journal}"
             if self.volume:
@@ -205,7 +205,7 @@ class Citation(BaseModel):
 class ReportMetadata(BaseModel):
     """Metadata for a research report."""
     
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     workflow_id: str | None = Field(None, description="Associated workflow ID")
     project_id: UUID | None = Field(None, description="Associated project ID")
     user_id: UUID | None = Field(None, description="Report creator ID")

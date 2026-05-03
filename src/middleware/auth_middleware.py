@@ -67,66 +67,44 @@ class AuthMiddleware(BaseHTTPMiddleware):
         Returns:
             Response from endpoint
         """
-        # Skip authentication for excluded paths
-        path = request.url.path
-        if any(path.startswith(excluded) for excluded in self.exclude_paths):
-            response: Response = await call_next(request)
-            return response
+        # NOTE: This middleware no longer performs JWT validation directly.
+        # JWT validation happens via the get_current_token dependency in endpoints.
+        # This allows test fixtures to override the JWT service via dependency_overrides.
+        # The middleware just ensures request.state attributes are initialized.
 
-        # Extract token from Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            # Allow request to continue without user context
-            # Endpoints can enforce authentication as needed
-            request.state.user = None
-            request.state.token_payload = None
-            response = await call_next(request)
-            return response
-
-        token = auth_header.replace("Bearer ", "")
-
-        try:
-            # Initialize JWT service
-            redis_client = await redis.from_url(settings.REDIS_URL)
-            jwt_service = JWTService(
-                redis_client=redis_client,
-                private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-                public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-            )
-
-            # Validate token
-            token_payload = await jwt_service.validate_token(token)
-
-            # Add to request state
-            request.state.token_payload = token_payload
-            request.state.user_id = token_payload.sub
-
-            # Log authenticated request
-            logger.debug(
-                "Authenticated request",
-                user_id=token_payload.sub,
-                path=path,
-                method=request.method,
-            )
-
-        except Exception as e:
-            logger.warning("Authentication failed", error=str(e), path=path)
-            # Allow request to continue without user context
-            request.state.user = None
-            request.state.token_payload = None
+        # Initialize request state (endpoints may set these via dependencies)
+        request.state.user = None
+        request.state.token_payload = None
+        request.state.organization_id = None
 
         response = await call_next(request)
         return response
 
 
+async def get_jwt_service() -> JWTService:
+    """
+    Get JWT service instance.
+
+    This is a dependency that can be overridden in tests.
+    """
+    redis_client = await redis.from_url(settings.REDIS_URL)
+    return JWTService(
+        redis_client=redis_client,
+        private_key_path=settings.JWT_PRIVATE_KEY_PATH,
+        public_key_path=settings.JWT_PUBLIC_KEY_PATH,
+    )
+
+
 async def get_current_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    jwt_service: JWTService = Depends(get_jwt_service),
 ) -> TokenPayload:
     """
     Get current token payload from request.
 
     Args:
         credentials: HTTP authorization credentials
+        jwt_service: JWT service for token validation
 
     Returns:
         Decoded token payload
@@ -144,17 +122,8 @@ async def get_current_token(
     token = credentials.credentials
 
     try:
-        # Initialize JWT service
-        redis_client = await redis.from_url(settings.REDIS_URL)
-        jwt_service = JWTService(
-            redis_client=redis_client,
-            private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-            public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-        )
-
-        # Validate token
+        # Validate token using injected JWT service
         token_payload = await jwt_service.validate_token(token)
-
         return token_payload
 
     except Exception as e:
@@ -337,21 +306,14 @@ def optional_user() -> Callable[..., Any]:
     async def optional_user_getter(
         credentials: HTTPAuthorizationCredentials | None = Depends(security),
         db: AsyncSession = Depends(get_session),
+        jwt_service: JWTService = Depends(get_jwt_service),
     ) -> User | None:
         """Get user if authenticated."""
         if not credentials:
             return None
 
         try:
-            # Initialize JWT service
-            redis_client = await redis.from_url(settings.REDIS_URL)
-            jwt_service = JWTService(
-                redis_client=redis_client,
-                private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-                public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-            )
-
-            # Validate token
+            # Validate token using injected JWT service
             token_payload = await jwt_service.validate_token(credentials.credentials)
 
             # Get user

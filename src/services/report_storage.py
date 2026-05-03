@@ -6,12 +6,13 @@ following functional programming principles with pure data operations.
 """
 
 import hashlib
-import logging
 import os
 import shutil
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
+
+from structlog import get_logger
 
 from src.models.db.generated_report import GeneratedReport, ReportFormat
 from src.models.report import Report, ReportOutput
@@ -19,7 +20,7 @@ from src.models.report import ReportFormat as ReportFormatEnum
 from src.repositories.report_repository import ReportFormatRepository, ReportRepository
 from src.services.report_config import ReportSettings
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ReportStorageError(Exception):
@@ -437,7 +438,7 @@ class ReportStorageService:
             'format_files_deleted': format_deleted_count,
             'format_ids_deleted': format_deleted_ids,
             'dry_run': dry_run,
-            'cleanup_date': datetime.utcnow().isoformat(),
+            'cleanup_date': datetime.now(UTC).isoformat(),
         }
     
     async def verify_report_integrity(self, report_id: UUID) -> dict[str, Any]:

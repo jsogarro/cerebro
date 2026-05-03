@@ -11,24 +11,24 @@ Core responsibilities:
 - Integration with existing TalkHier protocol
 """
 
-import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from src.agents.communication.consensus_builder import ConsensusBuilder
-from src.agents.communication.talkhier_message import (
-    MessageType,
-    TalkHierContent,
-    TalkHierMessage,
-)
+from structlog import get_logger
+
+from src.agents.communication.talkhier_message import TalkHierMessage
 from src.agents.supervisors.base_supervisor import BaseSupervisor
 from src.agents.supervisors.supervisor_factory import (
     SupervisorFactory,
 )
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter, RoutingDecision
+from src.api.services.talkhier_consensus_evaluator import TalkHierConsensusEvaluator
+from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
+from src.api.services.talkhier_session_coordinator import TalkHierSessionCoordinator
+from src.api.services.talkhier_state_manager import TalkHierStateManager
 from src.models.talkhier_api_models import (
     ConsensusCheckRequest,
     ConsensusResult,
@@ -50,7 +50,7 @@ from src.models.talkhier_api_models import (
     ValidationResponse,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass
@@ -91,7 +91,7 @@ class TalkHierSession:
     # Timing
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    last_update: datetime = field(default_factory=datetime.utcnow)
+    last_update: datetime = field(default_factory=lambda: datetime.now(UTC))
     
     # WebSocket
     websocket_connections: list[str] = field(default_factory=list)
@@ -106,56 +106,32 @@ class TalkHierSessionService:
     """
     
     def __init__(self) -> None:
-        self.sessions: dict[str, TalkHierSession] = {}
-        self.consensus_builder = ConsensusBuilder()
+        self.state_manager = TalkHierStateManager()
+        self.round_executor = TalkHierRoundExecutor()
+        self.consensus_evaluator = TalkHierConsensusEvaluator()
+        self.sessions: dict[str, TalkHierSession] = self.state_manager.sessions
+        self.consensus_builder = self.consensus_evaluator.consensus_builder
         self.supervisor_factory = SupervisorFactory()
         self.masr_bridge = MASRSupervisorBridge()
         self.masr_router = MASRouter()
+        self.session_coordinator = TalkHierSessionCoordinator(
+            self.supervisor_factory,
+            self.masr_bridge,
+            self.masr_router,
+        )
         
         # Protocol configurations
         self.protocol_configs = self._initialize_protocol_configs()
         
         # Performance tracking
-        self.session_metrics: dict[str, dict[str, Any]] = {}
+        self.session_metrics = self.state_manager.session_metrics
         
         # Background tasks
         self.cleanup_task = None
         
     def _initialize_protocol_configs(self) -> dict[ProtocolType, dict[str, Any]]:
         """Initialize protocol configurations"""
-        return {
-            ProtocolType.STANDARD: {
-                "default_rounds": 3,
-                "quality_weight": 0.6,
-                "consensus_weight": 0.4,
-                "timeout_multiplier": 1.0
-            },
-            ProtocolType.FAST_TRACK: {
-                "default_rounds": 2,
-                "quality_weight": 0.5,
-                "consensus_weight": 0.5,
-                "timeout_multiplier": 0.5
-            },
-            ProtocolType.DEEP_ANALYSIS: {
-                "default_rounds": 5,
-                "quality_weight": 0.7,
-                "consensus_weight": 0.3,
-                "timeout_multiplier": 2.0
-            },
-            ProtocolType.COLLABORATIVE: {
-                "default_rounds": 3,
-                "quality_weight": 0.4,
-                "consensus_weight": 0.6,
-                "timeout_multiplier": 1.0
-            },
-            ProtocolType.SUPERVISED: {
-                "default_rounds": 3,
-                "quality_weight": 0.5,
-                "consensus_weight": 0.5,
-                "timeout_multiplier": 1.0,
-                "supervisor_weight": 2.0
-            }
-        }
+        return self.session_coordinator.initialize_protocol_configs()
     
     async def create_session(
         self,
@@ -200,7 +176,7 @@ class TalkHierSessionService:
             query=request.query,
             domains=request.domains,
             status=SessionStatus.INITIALIZING,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             protocol_type=request.protocol_type,
             refinement_strategy=request.refinement_strategy,
             max_rounds=request.max_rounds,
@@ -211,23 +187,21 @@ class TalkHierSessionService:
             timeout_seconds=request.timeout_seconds or 300,
             participants=participants,
             supervisor=supervisor,
-            supervisor_type=routing_decision.agent_allocation.supervisor_type
+            supervisor_type=self._resolve_supervisor_type(
+                routing_decision,
+                request.supervisor_type,
+            ),
         )
         
         # Store session
-        self.sessions[session_id] = session
+        self.state_manager.store_session(session_id, session)
         
         # Initialize session metrics
-        self.session_metrics[session_id] = {
-            "rounds_completed": 0,
-            "quality_progression": [],
-            "consensus_progression": [],
-            "message_count": 0
-        }
+        self.state_manager.initialize_metrics(session_id)
         
         # Update status to active
         session.status = SessionStatus.ACTIVE
-        session.started_at = datetime.utcnow()
+        session.started_at = datetime.now(UTC)
         
         # Calculate estimated duration
         estimated_duration = self._estimate_duration(
@@ -272,7 +246,7 @@ class TalkHierSessionService:
         remaining_seconds = None
         
         if session.started_at:
-            elapsed_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
+            elapsed_seconds = int((datetime.now(UTC) - session.started_at).total_seconds())
             remaining_seconds = max(0, session.timeout_seconds - elapsed_seconds)
         
         return SessionStatusResponse(
@@ -304,126 +278,22 @@ class TalkHierSessionService:
             Round execution results
         """
         session = self._get_session(session_id)
-        
-        # Validate session state
-        if session.status != SessionStatus.ACTIVE:
-            raise ValueError(f"Session {session_id} is not active (status: {session.status})")
-        
-        # Update session status
-        session.status = SessionStatus.REFINING
-        session.current_round = request.round_number
-        
-        # Start round timing
-        round_start = datetime.utcnow()
-        
-        # Create round record
-        round_record = RefinementRound(
-            round_number=request.round_number,
-            status="in_progress",
-            started_at=round_start,
-            completed_at=None,
-            participants=[p.agent_id for p in session.participants],
-            messages=[],
-            quality_score=0.0,
-            consensus_score=0.0,
-            refinement_delta=0.0,
-            result=None
+
+        response = await self.round_executor.execute_refinement_round(
+            session_id,
+            session,
+            request,
+            self.state_manager,
         )
-        
-        # Execute refinement through supervisor
-        participant_responses = {}
-        
-        if session.supervisor:
-            # Use supervisor coordination
-            refinement_result = await self._execute_supervisor_refinement(
-                session,
-                request,
-                round_record
-            )
-            participant_responses = refinement_result["responses"]
-        else:
-            # Direct agent refinement (fallback)
-            participant_responses = await self._execute_direct_refinement(
-                session,
-                request,
-                round_record
-            )
-        
-        # Aggregate results
-        aggregated_result = await self._aggregate_refinement_results(
-            participant_responses,
-            session.refinement_strategy
-        )
-        
-        # Calculate quality and consensus scores
-        quality_score = await self._calculate_quality_score(
-            aggregated_result,
-            session.quality_threshold
-        )
-        
-        consensus_score = await self._calculate_consensus_score(
-            participant_responses,
-            session.consensus_type
-        )
-        
-        # Calculate improvement delta
-        previous_quality = session.rounds[-1].quality_score if session.rounds else 0.0
-        improvement_delta = quality_score - previous_quality
-        
-        # Update round record
-        round_record.completed_at = datetime.utcnow()
-        round_record.status = "completed"
-        round_record.quality_score = quality_score
-        round_record.consensus_score = consensus_score
-        round_record.refinement_delta = improvement_delta
-        round_record.result = aggregated_result
-        
-        # Add round to session
-        session.rounds.append(round_record)
-        
-        # Update session state
-        session.current_result = aggregated_result
-        session.current_quality = quality_score
-        session.current_consensus = consensus_score
-        session.status = SessionStatus.ACTIVE
-        session.last_update = datetime.utcnow()
-        
-        # Update metrics
-        self.session_metrics[session_id]["rounds_completed"] += 1
-        self.session_metrics[session_id]["quality_progression"].append(quality_score)
-        self.session_metrics[session_id]["consensus_progression"].append(consensus_score)
-        
-        # Determine if refinement should continue
-        continue_refinement = self._should_continue_refinement(session)
-        
-        # Generate refinement suggestion
-        refinement_suggestion = None
-        if continue_refinement:
-            refinement_suggestion = await self._generate_refinement_suggestion(
-                session,
-                participant_responses,
-                aggregated_result
-            )
-        
-        # Calculate duration
-        duration_ms = int((datetime.utcnow() - round_start).total_seconds() * 1000)
-        
+
         logger.info(f"Completed refinement round {request.round_number} for session {session_id}")
-        logger.info(f"Quality: {quality_score:.2f}, Consensus: {consensus_score:.2f}, Delta: {improvement_delta:+.2f}")
-        
-        return RefinementRoundResponse(
-            session_id=session_id,
-            round_number=request.round_number,
-            round_status="completed",
-            duration_ms=duration_ms,
-            participant_responses=participant_responses,
-            aggregated_result=aggregated_result,
-            quality_score=quality_score,
-            consensus_score=consensus_score,
-            improvement_delta=improvement_delta,
-            continue_refinement=continue_refinement,
-            refinement_suggestion=refinement_suggestion
+        logger.info(
+            f"Quality: {response.quality_score:.2f}, "
+            f"Consensus: {response.consensus_score:.2f}, "
+            f"Delta: {response.improvement_delta:+.2f}"
         )
+
+        return response
     
     async def check_consensus(
         self,
@@ -441,83 +311,19 @@ class TalkHierSessionService:
             Consensus analysis result
         """
         session = self._get_session(session_id)
-        
-        # Update status
-        previous_status = session.status
-        session.status = SessionStatus.CONSENSUS_CHECKING
-        
-        # Build consensus using ConsensusBuilder
-        consensus_messages = []
-        for result in request.round_results:
-            msg = TalkHierMessage(
-                from_agent=result.get("agent", "unknown"),
-                to_agent="consensus_checker",
-                content=TalkHierContent(
-                    content=str(result.get("content", "")),
-                    confidence_score=result.get("confidence", 0.5)
-                ),
-                message_type=MessageType.RESPONSE
-            )
-            consensus_messages.append(msg)
-        
-        # Calculate consensus
-        consensus_result = await self.consensus_builder.evaluate_consensus(
-            consensus_messages,
-            threshold=session.consensus_threshold
+
+        result = await self.consensus_evaluator.check_consensus(
+            session_id,
+            session,
+            request,
         )
-        has_consensus = consensus_result.overall_score >= session.consensus_threshold
-        consensus_score = consensus_result.overall_score
-        
-        # Calculate agreement matrix
-        agreement_matrix = await self._calculate_agreement_matrix(
-            request.round_results
+
+        logger.info(
+            f"Consensus check for session {session_id}: "
+            f"{result.has_consensus} (score: {result.consensus_score:.2f})"
         )
-        
-        # Calculate quality scores
-        quality_scores = {}
-        for result in request.round_results:
-            agent_id = result.get("agent", "unknown")
-            quality_scores[agent_id] = result.get("confidence", 0.0)
-        
-        # Generate minority reports if requested
-        minority_reports = None
-        if request.include_minority_report and not has_consensus:
-            minority_reports = await self._generate_minority_reports(
-                request.round_results,
-                consensus_score
-            )
-        
-        # Determine recommendation
-        recommendation = self._generate_consensus_recommendation(
-            has_consensus,
-            consensus_score,
-            session
-        )
-        
-        # Generate reasoning
-        reasoning = self._generate_consensus_reasoning(
-            has_consensus,
-            consensus_score,
-            agreement_matrix,
-            session
-        )
-        
-        # Restore previous status
-        session.status = previous_status
-        session.last_update = datetime.utcnow()
-        
-        logger.info(f"Consensus check for session {session_id}: {has_consensus} (score: {consensus_score:.2f})")
-        
-        return ConsensusResult(
-            has_consensus=has_consensus,
-            consensus_type=session.consensus_type,
-            consensus_score=consensus_score,
-            agreement_matrix=agreement_matrix,
-            quality_scores=quality_scores,
-            minority_reports=minority_reports,
-            recommendation=recommendation,
-            reasoning=reasoning
-        )
+
+        return result
     
     async def close_session(
         self,
@@ -547,7 +353,7 @@ class TalkHierSessionService:
         
         # Update session
         session.status = final_status
-        session.completed_at = datetime.utcnow()
+        session.completed_at = datetime.now(UTC)
         
         # Calculate total duration
         total_duration = 0
@@ -664,9 +470,10 @@ class TalkHierSessionService:
     
     def _get_session(self, session_id: str) -> TalkHierSession:
         """Get session by ID with validation"""
-        if session_id not in self.sessions:
-            raise ValueError(f"Session {session_id} not found")
-        return self.sessions[session_id]
+        session = self.state_manager.get_session(session_id)
+        if not isinstance(session, TalkHierSession):
+            raise ValueError(f"Session {session_id} has invalid state")
+        return session
     
     async def _get_routing_decision(
         self,
@@ -674,7 +481,7 @@ class TalkHierSessionService:
         domains: list[str]
     ) -> RoutingDecision:
         """Get routing decision from MASR"""
-        return await self.masr_router.route(query, context={"domains": domains})
+        return await self.session_coordinator.get_routing_decision(query, domains)
     
     async def _create_supervisor(
         self,
@@ -682,27 +489,21 @@ class TalkHierSessionService:
         requested_type: str | None
     ) -> BaseSupervisor | None:
         """Create supervisor based on routing decision"""
-        supervisor_type = requested_type or routing_decision.agent_allocation.supervisor_type
-
-        from src.ai_brain.integration.masr_supervisor_bridge import (
-            SupervisorConfiguration,
+        return await self.session_coordinator.create_supervisor(
+            routing_decision,
+            requested_type,
         )
 
-        domains = routing_decision.complexity_analysis.domains
-        domain = domains[0].value if domains and hasattr(domains[0], "value") else "research"
-        allocation = routing_decision.agent_allocation
-
-        config = SupervisorConfiguration(
-            supervisor_type=supervisor_type,
-            domain=domain,
-            worker_allocation=allocation.worker_types,
-            quality_threshold=routing_decision.estimated_quality or 0.85,
-            max_refinement_rounds=allocation.retry_attempts or 3,
-            timeout_seconds=allocation.timeout_seconds,
-            max_workers=allocation.worker_count,
+    def _resolve_supervisor_type(
+        self,
+        routing_decision: RoutingDecision,
+        requested_type: str | None,
+    ) -> str:
+        """Resolve a concrete supervisor type from routing output or test doubles."""
+        return self.session_coordinator.resolve_supervisor_type(
+            routing_decision,
+            requested_type,
         )
-
-        return await self.supervisor_factory.create_supervisor_from_config(config)
     
     async def _determine_participants(
         self,
@@ -711,37 +512,11 @@ class TalkHierSessionService:
         supervisor: BaseSupervisor | None
     ) -> list[ParticipantInfo]:
         """Determine session participants"""
-        participants = []
-        
-        # Use requested participants or routing decision
-        agent_ids = requested or []
-        
-        if not agent_ids and routing_decision.agent_allocation:
-            agent_ids = routing_decision.agent_allocation.worker_types
-        
-        # Create participant info
-        for agent_id in agent_ids:
-            participants.append(ParticipantInfo(
-                agent_id=agent_id,
-                agent_type=agent_id,
-                role=MessageRole.WORKER,
-                confidence=0.5,
-                rounds_participated=0,
-                quality_scores=[]
-            ))
-        
-        # Add supervisor if present
-        if supervisor:
-            participants.append(ParticipantInfo(
-                agent_id="supervisor",
-                agent_type=supervisor.__class__.__name__,
-                role=MessageRole.SUPERVISOR,
-                confidence=0.8,
-                rounds_participated=0,
-                quality_scores=[]
-            ))
-        
-        return participants
+        return await self.session_coordinator.determine_participants(
+            requested,
+            routing_decision,
+            supervisor,
+        )
     
     def _estimate_duration(
         self,
@@ -750,14 +525,11 @@ class TalkHierSessionService:
         protocol_config: dict[str, Any]
     ) -> int:
         """Estimate session duration in seconds"""
-        base_duration = 30  # Base time per round
-        participant_factor = participant_count * 10  # Time per participant
-        round_duration = base_duration + participant_factor
-        
-        total_duration = max_rounds * round_duration
-        timeout_multiplier = protocol_config.get("timeout_multiplier", 1.0)
-        
-        return int(total_duration * timeout_multiplier)
+        return self.session_coordinator.estimate_duration(
+            max_rounds,
+            participant_count,
+            protocol_config,
+        )
     
     async def _execute_supervisor_refinement(
         self,
@@ -766,20 +538,11 @@ class TalkHierSessionService:
         round_record: RefinementRound
     ) -> dict[str, Any]:
         """Execute refinement through supervisor"""
-        # Implementation would coordinate with supervisor
-        # This is a simplified version
-        responses = {}
-        
-        for participant in session.participants:
-            if participant.role == MessageRole.WORKER:
-                # Simulate worker response
-                responses[participant.agent_id] = {
-                    "content": f"Refined response from {participant.agent_id}",
-                    "confidence": 0.75 + (request.round_number * 0.05),
-                    "evidence": ["Evidence 1", "Evidence 2"]
-                }
-        
-        return {"responses": responses}
+        return await self.round_executor.execute_supervisor_refinement(
+            session,
+            request,
+            round_record,
+        )
     
     async def _execute_direct_refinement(
         self,
@@ -788,18 +551,11 @@ class TalkHierSessionService:
         round_record: RefinementRound
     ) -> dict[str, dict[str, Any]]:
         """Execute direct agent refinement without supervisor"""
-        responses = {}
-        
-        for participant in session.participants:
-            if participant.role == MessageRole.WORKER:
-                # Direct agent execution
-                responses[participant.agent_id] = {
-                    "content": f"Direct response from {participant.agent_id}",
-                    "confidence": 0.7 + (request.round_number * 0.05),
-                    "evidence": []
-                }
-        
-        return responses
+        return await self.round_executor.execute_direct_refinement(
+            session,
+            request,
+            round_record,
+        )
     
     async def _aggregate_refinement_results(
         self,
@@ -807,37 +563,7 @@ class TalkHierSessionService:
         strategy: RefinementStrategy
     ) -> dict[str, Any]:
         """Aggregate participant responses based on strategy"""
-        if strategy == RefinementStrategy.QUALITY_FOCUSED:
-            # Weight by confidence
-            best_response = max(
-                responses.items(),
-                key=lambda x: x[1].get("confidence", 0)
-            )
-            return best_response[1]
-        
-        elif strategy == RefinementStrategy.CONSENSUS_DRIVEN:
-            # Merge all responses
-            merged_content = "\n".join([
-                r.get("content", "")
-                for r in responses.values()
-            ])
-            avg_confidence = sum(
-                r.get("confidence", 0)
-                for r in responses.values()
-            ) / max(1, len(responses))
-            
-            return {
-                "content": merged_content,
-                "confidence": avg_confidence,
-                "aggregation_method": "consensus"
-            }
-        
-        else:
-            # Default: return all responses
-            return {
-                "responses": responses,
-                "aggregation_method": strategy.value
-            }
+        return await self.round_executor.aggregate_refinement_results(responses, strategy)
     
     async def _calculate_quality_score(
         self,
@@ -845,20 +571,7 @@ class TalkHierSessionService:
         threshold: float
     ) -> float:
         """Calculate quality score for result"""
-        # Base quality from confidence
-        base_quality = float(result.get("confidence", 0.5))
-
-        # Adjust for evidence
-        evidence_bonus = 0.1 if result.get("evidence") else 0.0
-
-        # Adjust for content length
-        content = str(result.get("content", ""))
-        length_factor = min(1.0, len(content) / 1000)
-
-        quality = base_quality + evidence_bonus
-        quality = quality * (0.7 + 0.3 * length_factor)
-
-        return float(min(1.0, quality))
+        return await self.round_executor.calculate_quality_score(result, threshold)
     
     async def _calculate_consensus_score(
         self,
@@ -866,57 +579,14 @@ class TalkHierSessionService:
         consensus_type: ConsensusType
     ) -> float:
         """Calculate consensus score among responses"""
-        if len(responses) <= 1:
-            return 1.0
-        
-        confidences = [r.get("confidence", 0) for r in responses.values()]
-        
-        if consensus_type == ConsensusType.MAJORITY:
-            # Simple agreement based on confidence similarity
-            avg_confidence = sum(confidences) / len(confidences)
-            variance = sum((c - avg_confidence) ** 2 for c in confidences) / len(confidences)
-            consensus = 1.0 - min(1.0, variance)
-            
-        elif consensus_type == ConsensusType.WEIGHTED:
-            # Weight by confidence values
-            weighted_sum = sum(c * c for c in confidences)
-            total_weight = sum(c for c in confidences)
-            consensus = weighted_sum / max(1, total_weight)
-            
-        elif consensus_type == ConsensusType.UNANIMOUS:
-            # All must be high confidence
-            consensus = 1.0 if all(c >= 0.8 for c in confidences) else 0.0
-            
-        else:
-            # Default threshold-based
-            high_confidence_count = sum(1 for c in confidences if c >= 0.7)
-            consensus = float(high_confidence_count) / float(len(confidences))
-
-        return float(consensus)
+        return await self.round_executor.calculate_consensus_score(
+            responses,
+            consensus_type,
+        )
     
     def _should_continue_refinement(self, session: TalkHierSession) -> bool:
         """Determine if refinement should continue"""
-        # Check round limits
-        if session.current_round >= session.max_rounds:
-            return False
-        
-        if session.current_round < session.min_rounds:
-            return True
-        
-        # Check quality threshold
-        if session.current_quality >= session.quality_threshold and session.current_consensus >= session.consensus_threshold:
-            return False
-        
-        # Check improvement trend
-        if len(session.rounds) >= 2:
-            recent_improvements = [
-                r.refinement_delta
-                for r in session.rounds[-2:]
-            ]
-            if all(delta < 0.01 for delta in recent_improvements):
-                return False  # No significant improvement
-        
-        return True
+        return self.round_executor.should_continue_refinement(session)
     
     async def _generate_refinement_suggestion(
         self,
@@ -925,57 +595,18 @@ class TalkHierSessionService:
         result: dict[str, Any]
     ) -> str:
         """Generate suggestion for next refinement round"""
-        suggestions = []
-        
-        # Check quality gap
-        quality_gap = session.quality_threshold - session.current_quality
-        if quality_gap > 0.2:
-            suggestions.append("Focus on improving evidence and supporting data")
-        elif quality_gap > 0.1:
-            suggestions.append("Refine clarity and strengthen key arguments")
-        
-        # Check consensus gap
-        consensus_gap = session.consensus_threshold - session.current_consensus
-        if consensus_gap > 0.2:
-            suggestions.append("Address disagreements between participants")
-        elif consensus_gap > 0.1:
-            suggestions.append("Align perspectives on key points")
-        
-        # Check specific weaknesses
-        low_confidence = [
-            agent_id
-            for agent_id, resp in responses.items()
-            if resp.get("confidence", 0) < 0.7
-        ]
-        if low_confidence:
-            suggestions.append(f"Strengthen responses from: {', '.join(low_confidence)}")
-        
-        return " | ".join(suggestions) if suggestions else "Continue general refinement"
+        return await self.round_executor.generate_refinement_suggestion(
+            session,
+            responses,
+            result,
+        )
     
     async def _calculate_agreement_matrix(
         self,
         results: list[dict[str, Any]]
     ) -> dict[str, dict[str, float]]:
         """Calculate pairwise agreement between participants"""
-        matrix: dict[str, dict[str, float]] = {}
-        
-        for i, result1 in enumerate(results):
-            agent1 = result1.get("agent", f"agent_{i}")
-            matrix[agent1] = {}
-            
-            for j, result2 in enumerate(results):
-                agent2 = result2.get("agent", f"agent_{j}")
-                
-                if i == j:
-                    matrix[agent1][agent2] = 1.0
-                else:
-                    # Simple confidence-based agreement
-                    conf1 = result1.get("confidence", 0.5)
-                    conf2 = result2.get("confidence", 0.5)
-                    agreement = 1.0 - abs(conf1 - conf2)
-                    matrix[agent1][agent2] = agreement
-        
-        return matrix
+        return await self.consensus_evaluator.calculate_agreement_matrix(results)
     
     async def _generate_minority_reports(
         self,
@@ -983,23 +614,10 @@ class TalkHierSessionService:
         consensus_score: float
     ) -> list[dict[str, Any]]:
         """Generate minority opinion reports"""
-        minority_reports = []
-        
-        avg_confidence = sum(
-            r.get("confidence", 0) for r in results
-        ) / max(1, len(results))
-        
-        for result in results:
-            confidence = result.get("confidence", 0)
-            if abs(confidence - avg_confidence) > 0.2:
-                minority_reports.append({
-                    "agent": result.get("agent"),
-                    "position": result.get("content"),
-                    "confidence": confidence,
-                    "deviation": confidence - avg_confidence
-                })
-        
-        return minority_reports
+        return await self.consensus_evaluator.generate_minority_reports(
+            results,
+            consensus_score,
+        )
     
     def _generate_consensus_recommendation(
         self,
@@ -1008,16 +626,11 @@ class TalkHierSessionService:
         session: TalkHierSession
     ) -> str:
         """Generate recommendation based on consensus status"""
-        if has_consensus:
-            return "Consensus achieved - proceed with final result"
-        
-        if consensus_score >= session.consensus_threshold * 0.9:
-            return "Near consensus - one more refinement round recommended"
-        
-        if consensus_score < 0.5:
-            return "Low consensus - consider debate mode or supervisor intervention"
-        
-        return "Continue refinement to improve consensus"
+        return self.consensus_evaluator.generate_consensus_recommendation(
+            has_consensus,
+            consensus_score,
+            session,
+        )
     
     def _generate_consensus_reasoning(
         self,
@@ -1027,42 +640,12 @@ class TalkHierSessionService:
         session: TalkHierSession
     ) -> str:
         """Generate reasoning for consensus result"""
-        reasoning_parts = []
-        
-        if has_consensus:
-            reasoning_parts.append(
-                f"Consensus achieved with score {consensus_score:.2f} "
-                f"(threshold: {session.consensus_threshold:.2f})"
-            )
-        else:
-            reasoning_parts.append(
-                f"Consensus not reached - score {consensus_score:.2f} "
-                f"below threshold {session.consensus_threshold:.2f}"
-            )
-        
-        # Analyze agreement patterns
-        high_agreement_pairs = []
-        low_agreement_pairs = []
-        
-        for agent1, agreements in agreement_matrix.items():
-            for agent2, score in agreements.items():
-                if agent1 < agent2:  # Avoid duplicates
-                    if score >= 0.8:
-                        high_agreement_pairs.append((agent1, agent2))
-                    elif score < 0.5:
-                        low_agreement_pairs.append((agent1, agent2))
-        
-        if high_agreement_pairs:
-            reasoning_parts.append(
-                f"Strong agreement between: {', '.join([f'{a1}-{a2}' for a1, a2 in high_agreement_pairs[:3]])}"
-            )
-        
-        if low_agreement_pairs:
-            reasoning_parts.append(
-                f"Disagreement between: {', '.join([f'{a1}-{a2}' for a1, a2 in low_agreement_pairs[:3]])}"
-            )
-        
-        return " | ".join(reasoning_parts)
+        return self.consensus_evaluator.generate_consensus_reasoning(
+            has_consensus,
+            consensus_score,
+            agreement_matrix,
+            session,
+        )
     
     async def _save_session_transcript(
         self,

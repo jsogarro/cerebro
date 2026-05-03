@@ -5,19 +5,52 @@ This service handles Jinja2 template rendering with custom filters and functions
 following functional programming principles.
 """
 
-import logging
 import os
 import re
-from typing import Any
+from typing import Any, cast
 
 import jinja2
-import markdown
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from structlog import get_logger
+
+try:
+    import markdown as markdown_module  # type: ignore[import-untyped]
+
+    MARKDOWN_AVAILABLE = True
+except ImportError:
+    markdown_module = None
+    MARKDOWN_AVAILABLE = False
 
 from src.models.report import Report, ReportType
 from src.services.report_config import ReportSettings, ReportTemplateConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
+
+ALLOWED_REPORT_HTML_TAGS = {
+    "a",
+    "blockquote",
+    "br",
+    "code",
+    "em",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "strong",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+}
 
 
 class TemplateRenderingError(Exception):
@@ -124,7 +157,7 @@ class TemplateRenderer:
             rendered = template.render(**context)
             
             logger.info(f"Successfully rendered report using template: {template_file}")
-            return rendered
+            return str(rendered)
             
         except Exception as e:
             logger.error(f"Template rendering failed: {e}")
@@ -198,8 +231,12 @@ class TemplateRenderer:
             return ""
         
         try:
+            if not MARKDOWN_AVAILABLE:
+                return self._basic_markdown_filter(text)
+
             # Configure markdown extensions
-            md = markdown.Markdown(
+            markdown_api = cast(Any, markdown_module)
+            md = markdown_api.Markdown(
                 extensions=[
                     'markdown.extensions.tables',
                     'markdown.extensions.fenced_code',
@@ -214,12 +251,44 @@ class TemplateRenderer:
                 }
             )
             result = md.convert(text)
-            return str(result)
+            return self._sanitize_rendered_html(str(result))
             
         except Exception as e:
             logger.warning(f"Markdown conversion failed: {e}")
             # Return plain text with line breaks converted
-            return text.replace('\n', '<br>')
+            return self._sanitize_rendered_html(text.replace('\n', '<br>'))
+
+    def _basic_markdown_filter(self, text: str) -> str:
+        """Render a small markdown subset when the optional package is unavailable."""
+        rendered = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+        rendered = re.sub(r"\*(.+?)\*", r"<em>\1</em>", rendered)
+        return self._sanitize_rendered_html(rendered.replace("\n", "<br>"))
+
+    def _sanitize_rendered_html(self, html: str) -> str:
+        """Remove unsafe HTML before templates mark rendered markdown as safe."""
+
+        sanitized = re.sub(
+            r"<(script|style)[^>]*>.*?</\1>",
+            "",
+            html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+
+        def replace_tag(match: re.Match[str]) -> str:
+            closing_slash = match.group(1)
+            tag_name = match.group(2).lower()
+            trailing_slash = match.group(3)
+            if tag_name not in ALLOWED_REPORT_HTML_TAGS:
+                return ""
+            if closing_slash:
+                return f"</{tag_name}>"
+            return f"<{tag_name}{trailing_slash}>"
+
+        return re.sub(
+            r"<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(/?)\s*>",
+            replace_tag,
+            sanitized,
+        )
     
     def _truncate_words_filter(self, text: str, length: int = 50, suffix: str = "...") -> str:
         """Truncate text to specified number of words."""

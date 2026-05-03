@@ -14,7 +14,6 @@ Features:
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import signal
 from datetime import datetime
@@ -25,15 +24,13 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from structlog import get_logger
+
+from src.core.pii_redactor import redact_pii
 
 from .masr import MASRouter, RoutingStrategy
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class RoutingRequest(BaseModel):
@@ -226,7 +223,11 @@ class MASRService:
                 )
                 
             except Exception as e:
-                logger.error(f"Routing failed for query '{request.query[:100]}...': {e}")
+                logger.error(
+                    "Routing failed for query '%s...': %s",
+                    redact_pii(request.query)[:100],
+                    e,
+                )
                 self.service_stats["requests_failed"] = int(self.service_stats["requests_failed"]) + 1
                 raise HTTPException(status_code=500, detail=f"Routing failed: {e!s}") from e
         

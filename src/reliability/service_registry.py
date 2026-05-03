@@ -8,18 +8,18 @@ for microservices architecture with health-aware routing.
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 import redis.asyncio as redis
+from structlog import get_logger
 
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ServiceStatus(Enum):
@@ -85,8 +85,8 @@ class ServiceInstance:
     metadata: ServiceMetadata
     status: ServiceStatus = ServiceStatus.STARTING
     health_check_url: str | None = None
-    registered_at: datetime = field(default_factory=datetime.utcnow)
-    last_heartbeat: datetime = field(default_factory=datetime.utcnow)
+    registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_heartbeat: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_health_check: datetime | None = None
     health_check_failures: int = 0
     active_connections: int = 0
@@ -121,10 +121,10 @@ class ServiceInstance:
         instance.status = ServiceStatus(data.get("status", "starting"))
         instance.health_check_url = data.get("health_check_url")
         instance.registered_at = datetime.fromisoformat(
-            data.get("registered_at", datetime.utcnow().isoformat())
+            data.get("registered_at", datetime.now(UTC).isoformat())
         )
         instance.last_heartbeat = datetime.fromisoformat(
-            data.get("last_heartbeat", datetime.utcnow().isoformat())
+            data.get("last_heartbeat", datetime.now(UTC).isoformat())
         )
 
         if data.get("last_health_check"):
@@ -153,7 +153,7 @@ class ServiceInstance:
         """Check if instance is available for requests."""
         return (
             self.status == ServiceStatus.HEALTHY
-            and (datetime.utcnow() - self.last_heartbeat).total_seconds() < 60
+            and (datetime.now(UTC) - self.last_heartbeat).total_seconds() < 60
         )
 
 
@@ -220,7 +220,11 @@ class ServiceRegistry:
             )
 
         logger.info(
-            f"Registered service: {service.name}/{service.instance_id} at {service.host}:{service.port}"
+            "service_registered",
+            service_name=service.name,
+            instance_id=service.instance_id,
+            host=service.host,
+            port=service.port,
         )
 
         return instance
@@ -245,7 +249,11 @@ class ServiceRegistry:
             key = f"{self._registry_prefix}{service_name}:{instance_id}"
             await self._redis_client.delete(key)
 
-        logger.info(f"Deregistered service: {service_name}/{instance_id}")
+        logger.info(
+            "service_deregistered",
+            service_name=service_name,
+            instance_id=instance_id,
+        )
 
     async def heartbeat(self, service_name: str, instance_id: str) -> None:
         """
@@ -260,7 +268,7 @@ class ServiceRegistry:
             and instance_id in self._services[service_name]
         ):
             instance = self._services[service_name][instance_id]
-            instance.last_heartbeat = datetime.utcnow()
+            instance.last_heartbeat = datetime.now(UTC)
 
             # Update in Redis
             if self._redis_client:
@@ -295,7 +303,10 @@ class ServiceRegistry:
                 )
 
             logger.info(
-                f"Updated service status: {service_name}/{instance_id} -> {status.value}"
+                "service_status_updated",
+                service_name=service_name,
+                instance_id=instance_id,
+                status=status.value,
             )
 
     async def get_service(
@@ -385,7 +396,7 @@ class ServiceRegistry:
 
     async def cleanup_expired(self) -> None:
         """Clean up expired service registrations."""
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         expired = []
 
         for service_name, instances in self._services.items():
@@ -397,7 +408,11 @@ class ServiceRegistry:
         # Remove expired instances
         for service_name, instance_id in expired:
             await self.deregister(service_name, instance_id)
-            logger.warning(f"Cleaned up expired service: {service_name}/{instance_id}")
+            logger.warning(
+                "expired_service_cleaned_up",
+                service_name=service_name,
+                instance_id=instance_id,
+            )
 
 
 class ServiceDiscovery:
@@ -447,7 +462,10 @@ class ServiceDiscovery:
         instances = await self._registry.get_healthy_instances(service_name)
 
         if not instances:
-            logger.warning(f"No healthy instances found for service: {service_name}")
+            logger.warning(
+                "no_healthy_service_instances",
+                service_name=service_name,
+            )
             return None
 
         # Filter by tags
@@ -465,7 +483,12 @@ class ServiceDiscovery:
             ]
 
         if not instances:
-            logger.warning(f"No instances match criteria for service: {service_name}")
+            logger.warning(
+                "no_matching_service_instances",
+                service_name=service_name,
+                tags=tags,
+                capabilities=capabilities,
+            )
             return None
 
         # Select instance based on strategy
@@ -568,7 +591,11 @@ class ServiceDiscovery:
 
         except Exception as e:
             instance.failed_requests += 1
-            logger.error(f"Service call failed: {service_name} -> {e}")
+            logger.error(
+                "service_call_failed",
+                service_name=service_name,
+                error=str(e),
+            )
             raise
         finally:
             instance.active_connections -= 1
@@ -655,7 +682,12 @@ class LoadBalancer:
                     # Mark as failed if threshold reached
                     if self._failure_counts[instance_id] >= self._max_failures:
                         self._failed_instances.add(instance_id)
-                        logger.warning(f"Marked instance as failed: {instance_id}")
+                        logger.warning(
+                            "service_instance_marked_failed",
+                            service_name=self.service_name,
+                            instance_id=instance_id,
+                            failure_count=self._failure_counts[instance_id],
+                        )
 
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2**attempt)  # Exponential backoff
@@ -681,7 +713,11 @@ class LoadBalancer:
             instance_id = next(iter(self._failed_instances))
             self._failed_instances.remove(instance_id)
             self._failure_counts[instance_id] = 0
-            logger.info(f"Attempting to recover failed instance: {instance_id}")
+            logger.info(
+                "service_instance_recovery_attempted",
+                service_name=self.service_name,
+                instance_id=instance_id,
+            )
             available = instances[:1]
 
         return available[0] if available else None
@@ -699,7 +735,7 @@ async def initialize_service_registry(redis_client: redis.Redis[Any] | None = No
     _global_registry = ServiceRegistry(redis_client)
     _global_discovery = ServiceDiscovery(_global_registry)
 
-    logger.info("Service registry initialized")
+    logger.info("service_registry_initialized")
 
 
 def get_service_registry() -> ServiceRegistry:

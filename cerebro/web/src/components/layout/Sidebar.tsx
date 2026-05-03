@@ -37,7 +37,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
 
             {/* Nav Links */}
             <div className="flex-1 overflow-auto py-4">
-                <nav className="space-y-1 px-2">
+                <nav aria-label="Primary navigation" className="space-y-1 px-2">
                     {navigation.map((item) => (
                         <NavLink
                             key={item.name}

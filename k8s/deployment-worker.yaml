@@ -18,10 +18,22 @@ spec:
         component: worker
     spec:
       serviceAccountName: research-platform-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: worker
         image: gcr.io/PROJECT_ID/research-platform-worker:latest
         imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         env:
         - name: POD_NAME
           valueFrom:

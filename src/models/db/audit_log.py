@@ -5,7 +5,7 @@ Provides comprehensive security audit trail for all authentication
 and authorization events in the system.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -408,7 +408,7 @@ class AuditLog(BaseModel):
         Args:
             reviewer: Username of reviewer
         """
-        self.reviewed_at = datetime.utcnow()
+        self.reviewed_at = datetime.now(UTC)
         self.reviewed_by = reviewer
         self.requires_review = False
 

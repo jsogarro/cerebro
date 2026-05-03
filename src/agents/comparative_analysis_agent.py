@@ -6,16 +6,21 @@ across multiple criteria to provide recommendations.
 """
 
 import hashlib
-import logging
 from typing import Any
 
+from structlog import get_logger
+
 from src.agents.base import BaseAgent
+from src.agents.comparative_insight_synthesizer import ComparativeInsightSynthesizer
+from src.agents.comparative_matrix_builder import ComparisonMatrixBuilder
+from src.agents.comparative_similarity_analyzer import SimilarityAnalyzer
+from src.agents.comparative_theory_extractor import TheoryExtractor
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_comparative_agent_prompt
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ComparativeAnalysisAgent(BaseAgent):
@@ -26,6 +31,13 @@ class ComparativeAnalysisAgent(BaseAgent):
     creates comparison matrices, identifies trade-offs, and provides
     contextual recommendations.
     """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.matrix_builder = ComparisonMatrixBuilder()
+        self.insight_synthesizer = ComparativeInsightSynthesizer()
+        self.similarity_analyzer = SimilarityAnalyzer()
+        self.theory_extractor = TheoryExtractor()
 
     def get_agent_type(self) -> str:
         """Return the agent type identifier."""
@@ -84,14 +96,16 @@ class ComparativeAnalysisAgent(BaseAgent):
 
             # Process comparison matrix with MCP statistical enhancements
             matrix = analysis.get("comparison_matrix", {})
-            enhanced_matrix = await self._enhance_matrix_with_statistics(
+            enhanced_matrix = await self.matrix_builder.enhance_matrix_with_statistics(
                 matrix, statistical_analysis
             )
-            normalized_matrix = self._normalize_comparison_matrix(enhanced_matrix)
+            normalized_matrix = self.matrix_builder.normalize_comparison_matrix(
+                enhanced_matrix
+            )
 
             # Calculate rankings with statistical significance
-            rankings = self._calculate_rankings(normalized_matrix, criteria)
-            statistical_rankings = await self._calculate_statistical_rankings(
+            rankings = self.matrix_builder.calculate_rankings(normalized_matrix, criteria)
+            statistical_rankings = await self.matrix_builder.calculate_statistical_rankings(
                 normalized_matrix, statistical_analysis
             )
 
@@ -110,7 +124,9 @@ class ComparativeAnalysisAgent(BaseAgent):
             confidence = self._calculate_confidence_with_mcp(
                 items_count=len(items),
                 criteria_count=len(criteria),
-                matrix_completeness=self._assess_matrix_completeness(normalized_matrix),
+                matrix_completeness=self.matrix_builder.assess_matrix_completeness(
+                    normalized_matrix
+                ),
                 trade_offs=trade_offs,
                 recommendations=analysis.get("recommendations", []),
                 mcp_data_quality={
@@ -164,7 +180,7 @@ class ComparativeAnalysisAgent(BaseAgent):
 
             # Add visual data if requested
             if task.input_data.get("generate_visual"):
-                output["visual_data"] = self._generate_visual_data(
+                output["visual_data"] = self.matrix_builder.generate_visual_data(
                     normalized_matrix, criteria
                 )
 
@@ -183,11 +199,10 @@ class ComparativeAnalysisAgent(BaseAgent):
                 output=output,
                 confidence=confidence,
                 execution_time=0.0,  # Would be calculated in real implementation
-                metadata={
-                    "agent_type": self.get_agent_type(),
-                    "items_count": len(items),
-                    "criteria_count": len(criteria),
-                },
+                metadata=self.build_execution_metadata(
+                    items_count=len(items),
+                    criteria_count=len(criteria),
+                ),
             )
 
             # Cache the result
@@ -242,40 +257,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Normalized matrix
         """
-        if not matrix:
-            return {}
-
-        # Find min and max values for each criterion
-        criteria_ranges = {}
-        for item_scores in matrix.values():
-            for criterion, score in item_scores.items():
-                if criterion not in criteria_ranges:
-                    criteria_ranges[criterion] = {"min": score, "max": score}
-                else:
-                    criteria_ranges[criterion]["min"] = min(
-                        criteria_ranges[criterion]["min"], score
-                    )
-                    criteria_ranges[criterion]["max"] = max(
-                        criteria_ranges[criterion]["max"], score
-                    )
-
-        # Normalize values
-        normalized: dict[str, dict[str, float]] = {}
-        for item, scores in matrix.items():
-            normalized[item] = {}
-            for criterion, score in scores.items():
-                range_val = (
-                    criteria_ranges[criterion]["max"]
-                    - criteria_ranges[criterion]["min"]
-                )
-                if range_val > 0:
-                    normalized[item][criterion] = (
-                        score - criteria_ranges[criterion]["min"]
-                    ) / range_val
-                else:
-                    normalized[item][criterion] = score
-
-        return normalized
+        return self.matrix_builder.normalize_comparison_matrix(matrix)
 
     def _calculate_rankings(
         self, matrix: dict[str, dict[str, float]], criteria: list[str]
@@ -290,30 +272,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Rankings dictionary
         """
-        if not matrix:
-            return {}
-
-        rankings = {}
-
-        # Rank by each criterion
-        for criterion in criteria:
-            criterion_scores = [
-                (item, item_scores.get(criterion, 0.0)) for item, item_scores in matrix.items()
-            ]
-            criterion_scores.sort(key=lambda x: x[1], reverse=True)
-            rankings[criterion] = [item for item, _ in criterion_scores]
-
-        # Calculate overall ranking (simple average)
-        overall_scores: dict[str, float] = {}
-        for item, item_scores in matrix.items():
-            overall_scores[item] = sum(item_scores.values()) / len(item_scores) if item_scores else 0.0
-
-        overall_ranking = sorted(
-            overall_scores.items(), key=lambda x: x[1], reverse=True
-        )
-        rankings["overall"] = [item for item, _ in overall_ranking]
-
-        return rankings
+        return self.matrix_builder.calculate_rankings(matrix, criteria)
 
     def _analyze_trade_offs(
         self, trade_offs: list[str], matrix: dict[str, dict[str, float]]
@@ -328,13 +287,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Trade-off analysis
         """
-        analysis = {
-            "total_trade_offs": len(trade_offs),
-            "trade_off_categories": self._categorize_trade_offs(trade_offs),
-            "severity": self._assess_trade_off_severity(trade_offs, matrix),
-        }
-
-        return analysis
+        return self.insight_synthesizer.analyze_trade_offs(trade_offs, matrix)
 
     def _categorize_trade_offs(self, trade_offs: list[str]) -> dict[str, list[str]]:
         """
@@ -346,30 +299,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Categorized trade-offs
         """
-        categories: dict[str, list[str]] = {
-            "performance": [],
-            "cost": [],
-            "complexity": [],
-            "time": [],
-            "quality": [],
-            "other": [],
-        }
-
-        for trade_off in trade_offs:
-            trade_off_lower = trade_off.lower()
-            categorized = False
-
-            for category in ["performance", "cost", "complexity", "time", "quality"]:
-                if category in trade_off_lower:
-                    categories[category].append(trade_off)
-                    categorized = True
-                    break
-
-            if not categorized:
-                categories["other"].append(trade_off)
-
-        # Remove empty categories
-        return {k: v for k, v in categories.items() if v}
+        return self.insight_synthesizer.categorize_trade_offs(trade_offs)
 
     def _assess_trade_off_severity(
         self, trade_offs: list[str], matrix: dict[str, dict[str, float]]
@@ -384,32 +314,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Severity assessment
         """
-        if not trade_offs:
-            return "none"
-
-        # Calculate variance in scores to assess trade-off severity
-        if matrix:
-            all_scores: list[float] = []
-            for scores in matrix.values():
-                all_scores.extend(scores.values())
-
-            if all_scores:
-                variance = sum((s - 0.5) ** 2 for s in all_scores) / len(all_scores)
-
-                if variance > 0.2:
-                    return "high"
-                elif variance > 0.1:
-                    return "moderate"
-                else:
-                    return "low"
-
-        # Default based on count
-        if len(trade_offs) > 5:
-            return "high"
-        elif len(trade_offs) > 2:
-            return "moderate"
-        else:
-            return "low"
+        return self.insight_synthesizer.assess_trade_off_severity(trade_offs, matrix)
 
     def _assess_matrix_completeness(self, matrix: dict[str, dict[str, float]]) -> float:
         """
@@ -421,23 +326,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Completeness score (0-1)
         """
-        if not matrix:
-            return 0.0
-
-        # Check if all items have scores for all criteria
-        all_criteria: set[str] = set()
-        for scores in matrix.values():
-            all_criteria.update(scores.keys())
-
-        if not all_criteria:
-            return 0.0
-
-        completeness_scores = []
-        for scores in matrix.values():
-            item_completeness = len(scores) / len(all_criteria)
-            completeness_scores.append(item_completeness)
-
-        return sum(completeness_scores) / len(completeness_scores)
+        return self.matrix_builder.assess_matrix_completeness(matrix)
 
     def _calculate_confidence(
         self,
@@ -460,47 +349,13 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Confidence score between 0.0 and 1.0
         """
-        confidence = 0.4  # Base confidence
-
-        # Factor 1: Number of items (max +0.15)
-        if items_count >= 4:
-            confidence += 0.15
-        elif items_count >= 3:
-            confidence += 0.10
-        elif items_count >= 2:
-            confidence += 0.05
-
-        # Factor 2: Number of criteria (max +0.15)
-        if criteria_count >= 4:
-            confidence += 0.15
-        elif criteria_count >= 3:
-            confidence += 0.10
-        elif criteria_count >= 2:
-            confidence += 0.05
-        elif criteria_count >= 1:
-            confidence += 0.02
-
-        # Factor 3: Matrix completeness (max +0.2)
-        confidence += matrix_completeness * 0.2
-
-        # Factor 4: Trade-offs identified (max +0.1)
-        if len(trade_offs) >= 3:
-            confidence += 0.1
-        elif len(trade_offs) >= 2:
-            confidence += 0.07
-        elif len(trade_offs) >= 1:
-            confidence += 0.04
-
-        # Factor 5: Recommendations provided (max +0.1)
-        if len(recommendations) >= 3:
-            confidence += 0.1
-        elif len(recommendations) >= 2:
-            confidence += 0.07
-        elif len(recommendations) >= 1:
-            confidence += 0.04
-
-        # Ensure confidence is within bounds
-        return min(max(confidence, 0.0), 1.0)
+        return self.similarity_analyzer.calculate_confidence(
+            items_count,
+            criteria_count,
+            matrix_completeness,
+            trade_offs,
+            recommendations,
+        )
 
     def _calculate_confidence_with_mcp(
         self,
@@ -525,26 +380,41 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Confidence score between 0.0 and 1.0
         """
-        # Base confidence from original method
-        confidence = self._calculate_confidence(
+        return self.similarity_analyzer.calculate_confidence_with_mcp(
             items_count,
             criteria_count,
             matrix_completeness,
             trade_offs,
             recommendations,
+            mcp_data_quality,
         )
 
-        # MCP enhancement bonuses (max +0.15)
-        mcp_bonus = 0.0
+    def _calculate_matrix_similarity(
+        self, matrix: dict[str, dict[str, float]]
+    ) -> dict[str, Any]:
+        """
+        Calculate pairwise similarity between compared matrix items.
 
-        if mcp_data_quality.get("research_quality"):
-            mcp_bonus += 0.05  # Research data available
-        if mcp_data_quality.get("statistical_quality"):
-            mcp_bonus += 0.05  # Statistical analysis available
-        if mcp_data_quality.get("graph_quality"):
-            mcp_bonus += 0.05  # Relationship data available
+        Args:
+            matrix: Comparison matrix
 
-        return min(confidence + mcp_bonus, 1.0)
+        Returns:
+            Pairwise similarity summary
+        """
+        return self.similarity_analyzer.calculate_matrix_similarity(matrix)
+
+    def _calculate_text_similarity(self, first: str, second: str) -> float:
+        """
+        Calculate text similarity using deterministic token overlap.
+
+        Args:
+            first: First text value
+            second: Second text value
+
+        Returns:
+            Similarity score between 0.0 and 1.0
+        """
+        return self.similarity_analyzer.calculate_text_similarity(first, second)
 
     def _generate_visual_data(
         self, matrix: dict[str, dict[str, float]], criteria: list[str]
@@ -559,19 +429,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Visual data dictionary
         """
-        data_points: dict[str, list[float]] = {}
-        for item, scores in matrix.items():
-            data_points[item] = [
-                scores.get(criterion, 0.0) for criterion in criteria
-            ]
-
-        visual_data: dict[str, Any] = {
-            "chart_type": "radar",
-            "labels": criteria,
-            "data_points": data_points
-        }
-
-        return visual_data
+        return self.matrix_builder.generate_visual_data(matrix, criteria)
 
     async def _search_comparative_studies(
         self, input_data: dict[str, Any]
@@ -585,36 +443,13 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Comparative research results
         """
-        if not self.mcp_integration:
-            self.log_warning("MCP integration not available for research search")
-            return self._fallback_comparative_research(input_data)
-
-        items = input_data.get("items", [])
-        criteria = input_data.get("criteria", [])
-
-        # Build research query
-        items_text = " vs ".join(items[:3])  # Use first 3 items
-        criteria_text = " ".join(criteria[:3])  # Use first 3 criteria
-        query = f"comparative analysis {items_text} {criteria_text} comparison study"
-
-        try:
-            result = await self.mcp_integration.search_academic_sources(
-                query=query, databases=["arxiv", "pubmed"], max_results=10
-            )
-
-            if result.get("success"):
-                self.log_info(
-                    f"Found {result.get('total_found', 0)} comparative studies"
-                )
-                return dict(result)
-            else:
-                raise Exception(
-                    f"Comparative research search failed: {result.get('error')}"
-                )
-
-        except Exception as e:
-            self.log_error(f"MCP comparative research search failed: {e}")
-            return self._fallback_comparative_research(input_data)
+        return await self.theory_extractor.search_comparative_studies(
+            input_data,
+            self.mcp_integration,
+            self.log_info,
+            self.log_warning,
+            self.log_error,
+        )
 
     async def _perform_statistical_comparison(
         self, input_data: dict[str, Any]
@@ -859,31 +694,9 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Enhanced matrix with statistical adjustments
         """
-        if not matrix or not statistical_data.get("success"):
-            return matrix
-
-        enhanced_matrix = matrix.copy()
-
-        # Apply statistical adjustments if descriptive stats available
-        descriptive_stats = statistical_data.get("descriptive_stats", {})
-        if descriptive_stats:
-            # Normalize scores based on statistical distribution
-            for item in enhanced_matrix:
-                for criterion in enhanced_matrix[item]:
-                    original_score = enhanced_matrix[item][criterion]
-                    # Apply statistical normalization (simplified)
-                    std_dev = descriptive_stats.get("std_dev", 1.0)
-                    mean_val = descriptive_stats.get("mean", 0.5)
-
-                    # Z-score normalization
-                    if std_dev > 0:
-                        z_score = (original_score - mean_val) / std_dev
-                        # Convert back to 0-1 range
-                        enhanced_matrix[item][criterion] = max(
-                            0, min(1, 0.5 + z_score * 0.2)
-                        )
-
-        return enhanced_matrix
+        return await self.matrix_builder.enhance_matrix_with_statistics(
+            matrix, statistical_data
+        )
 
     async def _calculate_statistical_rankings(
         self, matrix: dict[str, dict[str, float]], statistical_data: dict[str, Any]
@@ -898,38 +711,9 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Statistical rankings with confidence intervals
         """
-        if not statistical_data.get("success"):
-            return {"method": "basic", "note": "No statistical data available"}
-
-        # Calculate rankings with statistical significance
-        rankings: dict[str, Any] = {}
-
-        # Overall ranking with confidence scores
-        item_scores = {}
-        for item, scores in matrix.items():
-            mean_score = sum(scores.values()) / len(scores) if scores else 0.0
-            item_scores[item] = {
-                "score": mean_score,
-                "confidence": self._calculate_ranking_confidence(
-                    scores, statistical_data
-                ),
-            }
-
-        # Sort by score
-        sorted_items = sorted(
-            item_scores.items(), key=lambda x: x[1]["score"], reverse=True
+        return await self.matrix_builder.calculate_statistical_rankings(
+            matrix, statistical_data
         )
-
-        rankings_list: list[dict[str, str | float | int]] = [
-            {"item": item, "score": data["score"], "confidence": data["confidence"]}
-            for item, data in sorted_items
-        ]
-        rankings["overall_with_confidence"] = rankings_list
-
-        rankings["method"] = "statistical"
-        rankings["tests_used"] = statistical_data.get("tests_performed", [])
-
-        return rankings
 
     def _calculate_ranking_confidence(
         self, scores: dict[str, float], statistical_data: dict[str, Any]
@@ -944,21 +728,9 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Confidence score for ranking
         """
-        if not scores:
-            return 0.0
-
-        # Base confidence on score variance
-        score_values = list(scores.values())
-        variance = sum((s - 0.5) ** 2 for s in score_values) / len(score_values)
-
-        # Lower variance = higher confidence
-        base_confidence = max(0.5, 1.0 - variance * 2)
-
-        # Boost confidence if statistical data available
-        if statistical_data.get("data_quality") == "high":
-            base_confidence = min(1.0, base_confidence + 0.2)
-
-        return base_confidence
+        return self.matrix_builder.calculate_ranking_confidence(
+            scores, statistical_data
+        )
 
     def _analyze_trade_offs_with_relationships(
         self,
@@ -977,37 +749,9 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Enhanced trade-off analysis
         """
-        # Base trade-off analysis
-        analysis = self._analyze_trade_offs(trade_offs, matrix)
-
-        # Add relationship insights if available
-        if relationship_graph.get("success"):
-            entities = relationship_graph.get("entities", [])
-            relationships = relationship_graph.get("relationships", [])
-
-            analysis["relationship_insights"] = {
-                "entities_identified": len(entities),
-                "relationships_found": len(relationships),
-                "relationship_types": list(
-                    {r.get("type", "unknown") for r in relationships}
-                ),
-            }
-
-            # Analyze entity coverage in trade-offs
-            entity_texts = [e.get("text", "").lower() for e in entities]
-            trade_off_coverage = 0
-            for trade_off in trade_offs:
-                trade_off_lower = trade_off.lower()
-                for entity_text in entity_texts:
-                    if entity_text in trade_off_lower:
-                        trade_off_coverage += 1
-                        break
-
-            analysis["entity_coverage"] = (
-                trade_off_coverage / len(trade_offs) if trade_offs else 0
-            )
-
-        return analysis
+        return self.insight_synthesizer.analyze_trade_offs_with_relationships(
+            trade_offs, matrix, relationship_graph
+        )
 
     async def _cite_comparison_methodologies(
         self, research_data: dict[str, Any]
@@ -1021,71 +765,12 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Formatted citations for methodologies
         """
-        if not self.mcp_integration or not research_data.get("success"):
-            return {"success": False, "citations": []}
-
-        sources = research_data.get("sources", [])
-        if not sources:
-            return {"success": True, "citations": []}
-
-        # Filter for methodology-focused papers
-        methodology_sources = []
-        for source in sources[:5]:  # Top 5 sources
-            title = source.get("title", "").lower()
-            abstract = source.get("abstract", "").lower()
-
-            methodology_keywords = [
-                "comparison",
-                "comparative",
-                "methodology",
-                "framework",
-                "approach",
-            ]
-            if any(
-                keyword in title or keyword in abstract
-                for keyword in methodology_keywords
-            ):
-                methodology_sources.append(source)
-
-        if not methodology_sources:
-            return {
-                "success": True,
-                "citations": [],
-                "note": "No methodology-specific sources found",
-            }
-
-        # Convert to citation format
-        citation_sources = []
-        for source in methodology_sources:
-            citation_source = {
-                "title": source.get("title", "Unknown Title"),
-                "authors": source.get("authors", ["Unknown Author"]),
-                "year": source.get("year", "n.d."),
-                "journal": source.get("journal", ""),
-                "doi": source.get("doi", ""),
-            }
-            citation_sources.append(citation_source)
-
-        try:
-            result = await self.mcp_integration.format_citations(
-                sources=citation_sources, style="APA"
-            )
-
-            if result.get("success"):
-                self.log_info(
-                    f"Generated {len(citation_sources)} methodology citations"
-                )
-                return {
-                    "success": True,
-                    "citations": result.get("formatted_citations", []),
-                    "methodology_count": len(citation_sources),
-                }
-            else:
-                raise Exception(f"Citation formatting failed: {result.get('error')}")
-
-        except Exception as e:
-            self.log_error(f"Methodology citation generation failed: {e}")
-            return {"success": False, "error": str(e)}
+        return await self.insight_synthesizer.cite_comparison_methodologies(
+            research_data,
+            self.mcp_integration,
+            self.log_info,
+            self.log_error,
+        )
 
     def _summarize_research_findings(self, research_data: dict[str, Any]) -> str:
         """
@@ -1097,30 +782,21 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Summary text of research findings
         """
-        if not research_data.get("success"):
-            return "No research data available."
+        return self.insight_synthesizer.summarize_research_findings(research_data)
 
-        sources = research_data.get("sources", [])
-        if not sources:
-            return "No research sources found."
+    def _extract_theories_from_sources(
+        self, research_data: dict[str, Any]
+    ) -> list[dict[str, str]]:
+        """
+        Extract theory/framework hints from comparative research sources.
 
-        summary_parts = []
-        for i, source in enumerate(sources[:3], 1):  # Top 3 sources
-            title = source.get("title", "Unknown Title")
-            year = source.get("year", "n.d.")
-            abstract = source.get("abstract", "")
+        Args:
+            research_data: Research results from MCP
 
-            source_summary = f"{i}. {title} ({year})"
-            if abstract:
-                # Extract key phrases from abstract
-                abstract_snippet = (
-                    abstract[:150] + "..." if len(abstract) > 150 else abstract
-                )
-                source_summary += f": {abstract_snippet}"
-
-            summary_parts.append(source_summary)
-
-        return "\n".join(summary_parts)
+        Returns:
+            Extracted theory metadata
+        """
+        return self.theory_extractor.extract_theories_from_sources(research_data)
 
     def _fallback_comparative_research(
         self, input_data: dict[str, Any]
@@ -1134,29 +810,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Mock research results
         """
-        items = input_data.get("items", [])
-        criteria = input_data.get("criteria", [])
-
-        mock_sources = []
-        for i in range(3):
-            mock_sources.append(
-                {
-                    "title": f"Comparative Study {i+1}: {' vs '.join(items[:2])} Analysis",
-                    "authors": [f"Researcher {i+1}"],
-                    "year": 2024 - i,
-                    "journal": "Journal of Comparative Analysis",
-                    "abstract": f"This study compares {items[0]} and {items[1] if len(items) > 1 else 'alternatives'} across {criteria[0] if criteria else 'multiple criteria'}...",
-                    "source": "fallback",
-                }
-            )
-
-        return {
-            "success": True,
-            "sources": mock_sources,
-            "total_found": len(mock_sources),
-            "search_strategy": "Fallback comparative research",
-            "fallback": True,
-        }
+        return self.theory_extractor.fallback_comparative_research(input_data)
 
     def _fallback_statistical_analysis(
         self, input_data: dict[str, Any]
@@ -1170,17 +824,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Mock statistical analysis
         """
-        return {
-            "success": True,
-            "tests_performed": ["basic_comparison"],
-            "descriptive_stats": {
-                "mean": 0.5,
-                "std_dev": 0.2,
-                "count": len(input_data.get("items", [])),
-            },
-            "data_quality": "limited",
-            "fallback": True,
-        }
+        return self.insight_synthesizer.fallback_statistical_analysis(input_data)
 
     def _generate_mock_analysis_with_mcp(
         self,
@@ -1199,22 +843,17 @@ class ComparativeAnalysisAgent(BaseAgent):
         Returns:
             Enhanced mock analysis
         """
-        # Base mock analysis
-        fake_task = AgentTask(id="mock", agent_type="comparative", input_data=input_data, priority=1)
-        analysis = self._generate_mock_analysis(fake_task)
-
-        # Enhance with MCP insights
-        if research_data.get("success"):
-            analysis["research_informed"] = True
-            analysis["research_sources"] = research_data.get("total_found", 0)
-
-        if statistical_data.get("success"):
-            analysis["statistically_enhanced"] = True
-            analysis["statistical_tests"] = statistical_data.get("tests_performed", [])
-
-        analysis["mcp_enhanced"] = True
-
-        return analysis
+        fake_task = AgentTask(
+            id="mock",
+            agent_type="comparative",
+            input_data=input_data,
+            priority=1,
+        )
+        return self.insight_synthesizer.generate_mock_analysis_with_mcp(
+            self._generate_mock_analysis(fake_task),
+            research_data,
+            statistical_data,
+        )
 
     def _get_mcp_status(self) -> dict[str, Any]:
         """Get MCP integration status for comparative analysis."""

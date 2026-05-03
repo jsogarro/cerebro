@@ -13,23 +13,23 @@ Semantic memory stores:
 - Retrieved information with relevance scoring
 """
 
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from structlog import get_logger
 
+logger = get_logger()
+
+# Optional vector-storage backend. Install with: pip install ".[vector]"
 try:
-    # Try to import sentence transformers for embeddings
     from sentence_transformers import SentenceTransformer
 except ImportError:
     SentenceTransformer = None
     logger.warning("sentence-transformers not available - using fallback embeddings")
 
 try:
-    # Try to import qdrant client for vector storage
     from qdrant_client import QdrantClient
     from qdrant_client.http import models
 except ImportError:
@@ -334,6 +334,21 @@ class SemanticMemoryManager:
         except Exception as e:
             logger.error(f"Failed to delete semantic item {item_id}: {e}")
             return False
+
+    async def delete_by_user_id(self, user_id: str) -> int:
+        """Delete fallback semantic items associated with a user."""
+
+        if self.vector_client:
+            logger.warning("User-scoped semantic vector deletion is not implemented")
+            return 0
+
+        original_count = len(self._fallback_storage)
+        self._fallback_storage = [
+            item
+            for item in self._fallback_storage
+            if item.metadata.get("user_id") != user_id
+        ]
+        return original_count - len(self._fallback_storage)
 
     async def get_memory_stats(self) -> dict[str, Any]:
         """Get semantic memory statistics."""

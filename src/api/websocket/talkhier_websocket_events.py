@@ -5,11 +5,11 @@ Manages real-time WebSocket communication for TalkHier protocol sessions,
 including live updates, interactive dialogue, and multi-session coordination.
 """
 
-import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import WebSocket
+from structlog import get_logger
 
 from src.models.talkhier_api_models import (
     ConsensusResult,
@@ -26,7 +26,7 @@ from src.models.talkhier_api_models import (
     TalkHierWebSocketEvent,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class TalkHierWebSocketHandler:
@@ -257,7 +257,7 @@ class TalkHierWebSocketHandler:
             {
                 "type": "participant_joined",
                 "connection_id": connection_id,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             },
             exclude_connection=connection_id
         )
@@ -277,7 +277,7 @@ class TalkHierWebSocketHandler:
                 {
                     "type": "participant_left",
                     "connection_id": connection_id,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(UTC).isoformat()
                 }
             )
             
@@ -306,7 +306,7 @@ class TalkHierWebSocketHandler:
                 "confidence": message.confidence,
                 "supporting_evidence": message.supporting_evidence,
                 "in_response_to": message.in_response_to,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
         )
         
@@ -340,7 +340,7 @@ class TalkHierWebSocketHandler:
                 "command": command.command,
                 "success": command_result.get("success", False),
                 "result": command_result,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             })
         
         # Broadcast command effect to all participants
@@ -351,7 +351,7 @@ class TalkHierWebSocketHandler:
                 "command": command.command,
                 "issuer_id": connection_id,
                 "effect": command_result.get("effect", ""),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
         )
     
@@ -404,7 +404,7 @@ class TalkHierWebSocketHandler:
                             "type": "coordination_update",
                             "coordination_id": coordination_id,
                             "data": update_data,
-                            "timestamp": datetime.utcnow().isoformat()
+                            "timestamp": datetime.now(UTC).isoformat()
                         })
                     except Exception as e:
                         logger.error(f"Failed to send coordination update: {e!s}")

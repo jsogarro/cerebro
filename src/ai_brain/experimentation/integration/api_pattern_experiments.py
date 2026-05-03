@@ -7,17 +7,18 @@ and query handling strategies for the Agent Framework.
 """
 
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from structlog import get_logger
+
 from ..core.adaptive_allocation_engine import AdaptiveAllocationEngine
 from ..core.unified_experiment_manager import UnifiedExperimentManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class APIPattern(Enum):

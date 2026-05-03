@@ -16,21 +16,34 @@ export function AppShell() {
 
             {/* Mobile Sidebar Overlay */}
             {sidebarOpen && (
-                <div
+                <button
+                    type="button"
+                    aria-label="Close navigation menu"
                     className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm md:hidden"
                     onClick={() => setSidebarOpen(false)}
                 />
             )}
 
             {/* Mobile Sidebar */}
-            <div className={`fixed inset-y-0 left-0 z-50 w-64 transform transition-transform duration-200 ease-in-out md:hidden ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-                }`}>
-                <Sidebar />
-            </div>
+            {sidebarOpen && (
+                <div
+                    aria-label="Navigation menu"
+                    aria-modal="true"
+                    className="fixed inset-y-0 left-0 z-50 w-64 transform transition-transform duration-200 ease-in-out md:hidden"
+                    role="dialog"
+                >
+                    <Sidebar />
+                </div>
+            )}
 
             <div className="flex-1 flex flex-col min-w-0">
                 <Header toggleSidebar={() => setSidebarOpen(true)} />
-                <main className="flex-1 overflow-auto p-4 md:p-6 pb-20 md:pb-6 relative">
+                <main
+                    id="main-content"
+                    aria-label="Main content"
+                    className="flex-1 overflow-auto p-4 md:p-6 pb-20 md:pb-6 relative"
+                    tabIndex={0}
+                >
                     <Suspense fallback={<PageLoading />}>
                         <Outlet />
                     </Suspense>

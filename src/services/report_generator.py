@@ -5,28 +5,23 @@ This service orchestrates the generation of research reports in multiple formats
 following functional programming principles with pure transformation functions.
 """
 
-import asyncio
 import hashlib
-import json
-import logging
 import os
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from structlog import get_logger
+
 from src.models.report import (
-    Citation,
     Report,
     ReportConfiguration,
     ReportFormat,
     ReportGenerationRequest,
     ReportGenerationResponse,
-    ReportMetadata,
     ReportOutput,
     ReportSection,
-    Visualization,
-    VisualizationType,
 )
 from src.services.report_config import (
     ReportFormatConfig,
@@ -38,8 +33,10 @@ from src.services.report_config import (
     create_report_settings,
     create_template_config,
 )
+from src.services.report_output_generator import ReportOutputGenerator
+from src.services.report_structure_builder import ReportStructureBuilder
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ReportGenerationError(Exception):
@@ -65,9 +62,13 @@ class ReportGenerator:
         
         # Initialize storage directory
         self._ensure_storage_directory()
-        
-        # Template cache for performance
-        self._template_cache: dict[str, Any] = {}
+
+        self.output_generator = ReportOutputGenerator(
+            self.settings, self.format_config, self.template_config
+        )
+        self.structure_builder = ReportStructureBuilder(
+            self.template_config, self.quality_config
+        )
     
     def _ensure_storage_directory(self) -> None:
         """Ensure the report storage directory exists."""
@@ -266,704 +267,145 @@ class ReportGenerator:
     
     async def _build_sections(self, report: Report, input_data: dict[str, Any]) -> None:
         """Build report sections based on configuration and input data."""
-        report_type = report.configuration.type
-        required_sections = self.template_config.get_required_sections(report_type)
-        aggregated_results = input_data.get("aggregated_results", {})
-        
-        section_builders = {
-            "introduction": self._build_introduction_section,
-            "methodology": self._build_methodology_section,
-            "literature_review": self._build_literature_section,
-            "findings": self._build_findings_section,
-            "analysis": self._build_analysis_section,
-            "discussion": self._build_discussion_section,
-            "conclusions": self._build_conclusions_section,
-            "recommendations": self._build_recommendations_section,
-            "limitations": self._build_limitations_section,
-            "abstract": self._build_abstract_section,
-            "results": self._build_results_section,
-            "key_findings": self._build_key_findings_section,
-            "strategic_insights": self._build_insights_section,
-        }
-        
-        for section_name in required_sections:
-            if section_name in section_builders:
-                section = await section_builders[section_name](report, aggregated_results)
-                if section:
-                    report.sections.append(section)
+        await self.structure_builder.build_sections(report, input_data)
     
     async def _build_introduction_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build introduction section."""
-        content = f"""
-        This research investigates the following question: "{report.query}"
-        
-        The research spans across the following domains: {', '.join(report.domains)}.
-        
-        This report presents a comprehensive analysis of the available literature and
-        synthesizes key findings to provide insights and recommendations.
-        """.strip()
-        
-        return ReportSection(
-            title="Introduction",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_introduction_section(report, results)
     
     async def _build_methodology_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build methodology section."""
-        methodologies = results.get("methodologies", {})
-        
-        content = "## Research Methodology\n\n"
-        content += "This research employed a systematic approach to data collection and analysis.\n\n"
-        
-        if methodologies.get("recommended_approaches"):
-            content += "### Recommended Approaches\n"
-            for approach in methodologies["recommended_approaches"]:
-                content += f"- {approach}\n"
-        
-        if methodologies.get("statistical_methods"):
-            content += "\n### Statistical Methods\n"
-            for method in methodologies["statistical_methods"]:
-                content += f"- {method}\n"
-        
-        return ReportSection(
-            title="Methodology",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_methodology_section(report, results)
     
     async def _build_literature_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build literature review section."""
-        sources = results.get("sources", [])
-        
-        content = f"## Literature Review\n\nThis review examines {len(sources)} sources.\n\n"
-        
-        # Include top sources
-        for source in sources[:10]:
-            title = source.get("title", "Untitled")
-            year = source.get("year", "n.d.")
-            content += f"- {title} ({year})\n"
-            if source.get("summary"):
-                content += f"  {source['summary'][:200]}...\n"
-        
-        return ReportSection(
-            title="Literature Review",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_literature_section(report, results)
     
     async def _build_findings_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build findings section."""
-        findings = results.get("findings", {})
-        
-        if not findings:
-            return None
-        
-        section = ReportSection(
-            title="Key Findings",
-            content=f"The research identified {sum(len(f) for f in findings.values())} key findings across {len(findings)} categories.",
-            level=1
-        )
-        
-        # Add subsections for each category
-        for category, finding_list in findings.items():
-            if finding_list:
-                subsection_content = ""
-                for finding in finding_list:
-                    text = finding.get("text", "") if isinstance(finding, dict) else str(finding)
-                    subsection_content += f"- {text}\n"
-                    if isinstance(finding, dict) and finding.get("confidence"):
-                        subsection_content += f"  (Confidence: {finding['confidence']:.2f})\n"
-                
-                subsection = ReportSection(
-                    title=category.replace("_", " ").title(),
-                    content=subsection_content,
-                    level=2
-                )
-                section.subsections.append(subsection)
-        
-        return section
+        return await self.structure_builder.build_findings_section(report, results)
     
     async def _build_analysis_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build analysis section."""
-        comparisons = results.get("comparisons", {})
-        
-        content = "## Analysis\n\n"
-        content += "This section presents the analytical framework and key comparisons.\n\n"
-        
-        if comparisons.get("frameworks"):
-            content += "### Comparison Frameworks\n"
-            for framework in comparisons["frameworks"]:
-                content += f"- {framework}\n"
-        
-        if comparisons.get("metrics"):
-            content += "\n### Key Metrics\n"
-            for metric, value in comparisons["metrics"].items():
-                content += f"- {metric}: {value}\n"
-        
-        return ReportSection(
-            title="Analysis",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_analysis_section(report, results)
     
     async def _build_discussion_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build discussion section."""
-        insights = results.get("insights", [])
-        conflicts = results.get("conflict_resolutions", [])
-        
-        content = "## Discussion\n\n"
-        content += "This section discusses the implications of the findings.\n\n"
-        
-        if insights:
-            content += "### Key Insights\n"
-            for insight in insights:
-                if isinstance(insight, dict):
-                    content += f"- {insight.get('text', '')}\n"
-                    if insight.get("importance") == "high":
-                        content += "  **High importance**\n"
-                else:
-                    content += f"- {insight}\n"
-        
-        if conflicts:
-            content += "\n### Resolved Conflicts\n"
-            content += f"{len(conflicts)} conflicts were identified and resolved.\n"
-        
-        return ReportSection(
-            title="Discussion",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_discussion_section(report, results)
     
     async def _build_conclusions_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build conclusions section."""
-        confidence_score = results.get("confidence_score", 0.7)
-        metrics = results.get("metrics", {})
-        
-        content = f"""## Conclusions
-
-        This research synthesized findings from {metrics.get('total_sources', 0)} sources 
-        and {metrics.get('total_citations', 0)} citations.
-
-        Overall confidence in findings: {confidence_score:.2%}
-
-        The evidence suggests that the research question has been addressed with 
-        {self._get_confidence_level(confidence_score)} confidence.
-        """.strip()
-        
-        return ReportSection(
-            title="Conclusions",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_conclusions_section(report, results)
     
     async def _build_recommendations_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build recommendations section."""
-        recommendations = results.get("recommendations", [])
-        
-        if not recommendations:
-            return None
-        
-        content = "## Recommendations\n\nBased on the research findings:\n\n"
-        
-        for i, rec in enumerate(recommendations, 1):
-            content += f"{i}. {rec}\n"
-        
-        return ReportSection(
-            title="Recommendations",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_recommendations_section(report, results)
     
     async def _build_limitations_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build limitations section."""
-        limitations = results.get("limitations", [])
-        quality_report = results.get("quality_report", {})
-        issues = quality_report.get("issues_found", [])
-        
-        content = "## Limitations\n\n"
-        
-        if limitations:
-            content += "### Research Limitations\n"
-            for limitation in limitations:
-                content += f"- {limitation}\n"
-        
-        if issues:
-            content += "\n### Quality Considerations\n"
-            for issue in issues:
-                if isinstance(issue, dict) and issue.get("severity") == "warning":
-                    content += f"- {issue.get('message', '')}\n"
-        
-        return ReportSection(
-            title="Limitations",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_limitations_section(report, results)
     
     async def _build_abstract_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build abstract section for academic papers."""
-        content = f"""
-        This study investigates: {report.query}
-
-        Methods: Comprehensive research approach across {len(report.domains)} domains.
-
-        Results: Analysis of {len(results.get('sources', []))} sources yielded 
-        {sum(len(f) for f in results.get('findings', {}).values())} findings.
-
-        Conclusions: {', '.join(results.get('recommendations', ['Further research recommended'])[:2])}
-        """.strip()
-        
-        return ReportSection(
-            title="Abstract",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_abstract_section(report, results)
     
     async def _build_results_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build results section for academic papers."""
-        metrics = results.get("metrics", {})
-        
-        content = f"""## Results
-
-        ### Quantitative Findings
-        - Total sources analyzed: {metrics.get('total_sources', 0)}
-        - Citations reviewed: {metrics.get('total_citations', 0)}
-        - Average confidence: {metrics.get('average_confidence', 0):.2%}
-        - Coverage score: {metrics.get('coverage_score', 0):.2%}
-        """.strip()
-        
-        return ReportSection(
-            title="Results",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_results_section(report, results)
     
     async def _build_key_findings_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build key findings section for executive summary."""
-        findings = results.get("findings", {})
-        
-        # Get top findings from each category
-        top_findings = []
-        for _category, finding_list in findings.items():
-            for finding in finding_list[:2]:  # Top 2 from each category
-                if isinstance(finding, dict):
-                    top_findings.append(finding.get("text", ""))
-                else:
-                    top_findings.append(str(finding))
-        
-        content = "## Key Findings\n\n"
-        for finding in top_findings:
-            content += f"• {finding}\n"
-        
-        return ReportSection(
-            title="Key Findings",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_key_findings_section(report, results)
     
     async def _build_insights_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
         """Build insights section."""
-        insights = results.get("insights", [])
-        
-        # Filter high-importance insights
-        high_importance = []
-        for insight in insights:
-            if isinstance(insight, dict) and insight.get("importance") == "high":
-                high_importance.append(insight.get("text", ""))
-            elif isinstance(insight, str):
-                high_importance.append(insight)
-        
-        content = "## Strategic Insights\n\n"
-        for insight in high_importance:
-            content += f"• {insight}\n"
-        
-        return ReportSection(
-            title="Strategic Insights",
-            content=content,
-            level=1
-        )
+        return await self.structure_builder.build_insights_section(report, results)
     
     async def _process_citations(self, report: Report, input_data: dict[str, Any]) -> None:
         """Process and format citations from input data."""
-        aggregated_results = input_data.get("aggregated_results", {})
-        citations_data = aggregated_results.get("citations", [])
-        
-        for citation_data in citations_data:
-            if isinstance(citation_data, dict):
-                citation = Citation(
-                    id=citation_data.get("id", str(uuid4())),
-                    authors=citation_data.get("authors", ["Unknown"]),
-                    title=citation_data.get("title", "Untitled"),
-                    year=citation_data.get("year"),
-                    journal=citation_data.get("journal"),
-                    volume=citation_data.get("volume"),
-                    issue=citation_data.get("issue"),
-                    pages=citation_data.get("pages"),
-                    doi=citation_data.get("doi"),
-                    url=citation_data.get("url"),
-                    publisher=citation_data.get("publisher"),
-                    location=citation_data.get("location"),
-                    isbn=citation_data.get("isbn"),
-                )
-                report.add_citation(citation)
+        await self.structure_builder.process_citations(report, input_data)
     
     async def _generate_visualizations(self, report: Report, input_data: dict[str, Any]) -> None:
         """Generate visualization specifications (actual chart generation will be handled by exporters)."""
-        aggregated_results = input_data.get("aggregated_results", {})
-        
-        # Source distribution visualization
-        sources = aggregated_results.get("sources", [])
-        if sources and len(sources) > 1:
-            year_dist: dict[str, int] = {}
-            for source in sources:
-                year = source.get("year", "Unknown")
-                year_dist[str(year)] = year_dist.get(str(year), 0) + 1
-            
-            if len(year_dist) > 1:
-                viz = Visualization(
-                    id="source_distribution",
-                    type=VisualizationType.BAR_CHART,
-                    title="Source Distribution by Year",
-                    data={"years": list(year_dist.keys()), "counts": list(year_dist.values())},
-                    config={"x_label": "Year", "y_label": "Number of Sources"},
-                    caption=None,
-                    width=None,
-                    height=None
-                )
-                report.add_visualization(viz)
-        
-        # Domain distribution visualization
-        if len(report.domains) > 1:
-            viz = Visualization(
-                id="domain_distribution",
-                type=VisualizationType.PIE_CHART,
-                title="Research Domains Coverage",
-                data={"labels": report.domains, "values": [1] * len(report.domains)},
-                config={},
-                caption=None,
-                width=None,
-                height=None
-            )
-            report.add_visualization(viz)
+        await self.structure_builder.generate_visualizations(report, input_data)
     
     async def _build_metadata(self, report: Report, input_data: dict[str, Any]) -> None:
         """Build report metadata from input data."""
-        metadata_input = input_data.get("metadata", {})
-        aggregated_results = input_data.get("aggregated_results", {})
-        
-        report.metadata = ReportMetadata(
-            workflow_id=metadata_input.get("workflow_id"),
-            project_id=input_data.get("project_id"),
-            user_id=None,
-            total_sources=len(aggregated_results.get("sources", [])),
-            total_citations=len(aggregated_results.get("citations", [])),
-            agents_used=metadata_input.get("agents_used", []),
-            quality_score=input_data.get("quality_report", {}).get("quality_score", 0.8),
-            confidence_score=aggregated_results.get("confidence_score", 0.75),
-            generation_time_seconds=0.0,
-            word_count=0,
-            page_count=None,
-        )
+        await self.structure_builder.build_metadata(report, input_data)
     
     async def _generate_executive_summary(self, report: Report, input_data: dict[str, Any]) -> None:
         """Generate executive summary for the report."""
-        aggregated_results = input_data.get("aggregated_results", {})
-        insights = aggregated_results.get("insights", [])
-        recommendations = aggregated_results.get("recommendations", [])
-        
-        summary = f"""# Executive Summary
-
-**Research Question:** {report.query}
-
-**Approach:** {report.configuration.type.value.replace('_', ' ').title()}
-
-**Key Outcomes:**
-- Analyzed {len(aggregated_results.get('sources', []))} sources
-- Identified {sum(len(f) for f in aggregated_results.get('findings', {}).values())} key findings
-- Quality Score: {report.metadata.quality_score:.2%}
-
-**Main Insights:**
-"""
-        
-        # Add top insights
-        for insight in insights[:3]:
-            if isinstance(insight, dict):
-                summary += f"- {insight.get('text', '')}\n"
-            else:
-                summary += f"- {insight}\n"
-        
-        # Add recommendations
-        if recommendations:
-            summary += "\n**Key Recommendations:**\n"
-            for rec in recommendations[:3]:
-                summary += f"- {rec}\n"
-        
-        report.executive_summary = summary
+        await self.structure_builder.generate_executive_summary(report, input_data)
     
     async def _validate_report_quality(self, report: Report) -> None:
         """Validate report quality against configured thresholds."""
-        report_type = report.configuration.type
-        
-        # Check word count
-        word_count = report.get_word_count()
-        min_words = self.quality_config.get_min_word_count(report_type)
-        if word_count < min_words:
-            logger.warning(f"Report word count ({word_count}) below minimum ({min_words})")
-        
-        # Check sources
-        source_count = report.metadata.total_sources
-        min_sources = self.quality_config.get_min_sources(report_type)
-        if source_count < min_sources:
-            logger.warning(f"Report source count ({source_count}) below minimum ({min_sources})")
-        
-        # Check citations if required
-        if self.quality_config.requires_citations(report_type) and not report.citations:
-            logger.warning("Report missing required citations")
+        await self.structure_builder.validate_report_quality(report)
     
     async def _generate_formats(
         self, report: Report, formats: list[ReportFormat]
     ) -> dict[ReportFormat, ReportOutput]:
         """Generate report outputs in the requested formats."""
-        outputs = {}
-        
-        if self.settings.parallel_generation and len(formats) > 1:
-            # Generate formats in parallel
-            tasks = [self._generate_single_format(report, fmt) for fmt in formats]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for fmt, result in zip(formats, results, strict=True):
-                if isinstance(result, Exception):
-                    logger.error(f"Failed to generate {fmt}: {result}")
-                elif isinstance(result, ReportOutput):
-                    outputs[fmt] = result
-        else:
-            # Generate formats sequentially
-            for fmt in formats:
-                try:
-                    output = await self._generate_single_format(report, fmt)
-                    outputs[fmt] = output
-                except Exception as e:
-                    logger.error(f"Failed to generate {fmt}: {e}")
-        
-        return outputs
+        return await self.output_generator.generate_formats(report, formats)
     
     async def _generate_single_format(
         self, report: Report, format: ReportFormat
     ) -> ReportOutput:
         """Generate report output in a single format."""
-        _format_config = self.format_config.get_format_config(format)
-        
-        if format == ReportFormat.HTML:
-            return await self._generate_html(report)
-        elif format == ReportFormat.MARKDOWN:
-            return await self._generate_markdown(report)
-        elif format == ReportFormat.JSON:
-            return await self._generate_json(report)
-        elif format == ReportFormat.PDF:
-            return await self._generate_pdf(report)
-        elif format == ReportFormat.LATEX:
-            return await self._generate_latex(report)
-        elif format == ReportFormat.DOCX:
-            return await self._generate_docx(report)
-        else:
-            raise ReportGenerationError(f"Unsupported format: {format}")
+        return await self.output_generator.generate_single_format(report, format)
     
     async def _generate_html(self, report: Report) -> ReportOutput:
         """Generate HTML report output."""
-        # This will be implemented with Jinja2 templates
-        html_content = self._generate_basic_html(report)
-
-        return ReportOutput(
-            format=ReportFormat.HTML,
-            content=html_content,
-            file_path=None,
-            file_size=len(html_content.encode("utf-8")),
-            mime_type=self.format_config.get_mime_type(ReportFormat.HTML),
-            encoding="utf-8"
-        )
+        return await self.output_generator.generate_html(report)
     
     async def _generate_markdown(self, report: Report) -> ReportOutput:
         """Generate Markdown report output."""
-        markdown = f"# {report.title}\n\n"
-        
-        # Add metadata
-        markdown += f"**Generated:** {report.metadata.generated_at}\n"
-        markdown += f"**Quality Score:** {report.metadata.quality_score:.2%}\n\n"
-        
-        # Add executive summary
-        if report.executive_summary:
-            markdown += report.executive_summary + "\n\n"
-        
-        # Add sections
-        for section in report.sections:
-            markdown += f"{'#' * section.level} {section.title}\n\n"
-            markdown += section.content + "\n\n"
-            
-            for subsection in section.subsections:
-                markdown += f"{'#' * (section.level + 1)} {subsection.title}\n\n"
-                markdown += subsection.content + "\n\n"
-        
-        # Add references
-        if report.citations:
-            markdown += "## References\n\n"
-            for citation in report.citations:
-                formatted = citation.format_citation(report.configuration.citation_style)
-                markdown += f"- {formatted}\n"
-        
-        return ReportOutput(
-            format=ReportFormat.MARKDOWN,
-            content=markdown,
-            file_path=None,
-            file_size=len(markdown.encode("utf-8")),
-            mime_type=self.format_config.get_mime_type(ReportFormat.MARKDOWN),
-            encoding="utf-8"
-        )
+        return await self.output_generator.generate_markdown(report)
     
     async def _generate_json(self, report: Report) -> ReportOutput:
         """Generate JSON report output."""
-        # Convert report to dictionary, handling datetime serialization
-        report_dict = report.dict()
-        json_content = json.dumps(report_dict, indent=2, default=str)
-
-        return ReportOutput(
-            format=ReportFormat.JSON,
-            content=json_content,
-            file_path=None,
-            file_size=len(json_content.encode("utf-8")),
-            mime_type=self.format_config.get_mime_type(ReportFormat.JSON),
-            encoding="utf-8"
-        )
+        return await self.output_generator.generate_json(report)
     
     async def _generate_pdf(self, report: Report) -> ReportOutput:
-        """Generate PDF report output (placeholder - will be implemented with WeasyPrint)."""
-        # For now, generate HTML and convert to PDF
-        _html_output = await self._generate_html(report)
-        
-        # This will be replaced with actual PDF generation
-        pdf_content = f"PDF version of: {report.title}".encode()
-
-        return ReportOutput(
-            format=ReportFormat.PDF,
-            content=pdf_content,
-            file_path=None,
-            file_size=len(pdf_content),
-            mime_type=self.format_config.get_mime_type(ReportFormat.PDF),
-            encoding="binary"
-        )
+        """Generate PDF report output."""
+        return await self.output_generator.generate_pdf(report)
     
     async def _generate_latex(self, report: Report) -> ReportOutput:
-        """Generate LaTeX report output (placeholder)."""
-        latex_content = f"""\\documentclass{{article}}
-\\title{{{report.title}}}
-\\author{{Research Platform}}
-\\date{{\\today}}
-
-\\begin{{document}}
-\\maketitle
-
-\\section{{Introduction}}
-{report.query}
-
-\\end{{document}}
-"""
-        
-        return ReportOutput(
-            format=ReportFormat.LATEX,
-            content=latex_content,
-            file_path=None,
-            file_size=len(latex_content.encode("utf-8")),
-            mime_type=self.format_config.get_mime_type(ReportFormat.LATEX),
-            encoding="utf-8"
-        )
+        """Generate LaTeX report output."""
+        return await self.output_generator.generate_latex(report)
     
     async def _generate_docx(self, report: Report) -> ReportOutput:
-        """Generate DOCX report output (placeholder)."""
-        # This will be implemented with python-docx
-        docx_content = b"DOCX placeholder content"
-
-        return ReportOutput(
-            format=ReportFormat.DOCX,
-            content=docx_content,
-            file_path=None,
-            file_size=len(docx_content),
-            mime_type=self.format_config.get_mime_type(ReportFormat.DOCX),
-            encoding="binary"
-        )
+        """Generate DOCX report output."""
+        return await self.output_generator.generate_docx(report)
     
     def _generate_basic_html(self, report: Report) -> str:
         """Generate basic HTML without templates (temporary implementation)."""
-        html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>{report.title}</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; }}
-        h1 {{ color: #333; }}
-        h2 {{ color: #666; }}
-        .metadata {{ background: #f0f0f0; padding: 10px; margin: 20px 0; }}
-        .section {{ margin: 20px 0; }}
-    </style>
-</head>
-<body>
-    <h1>{report.title}</h1>
-    
-    <div class="metadata">
-        <strong>Generated:</strong> {report.metadata.generated_at}<br>
-        <strong>Quality Score:</strong> {report.metadata.quality_score:.2%}
-    </div>
-"""
-        
-        # Add executive summary
-        if report.executive_summary:
-            html += f"<div class='section'>{report.executive_summary}</div>"
-        
-        # Add sections
-        for section in report.sections:
-            html += f"<div class='section'><h{section.level + 1}>{section.title}</h{section.level + 1}>"
-            html += f"<p>{section.content}</p>"
-            
-            for subsection in section.subsections:
-                html += f"<h{section.level + 2}>{subsection.title}</h{section.level + 2}>"
-                html += f"<p>{subsection.content}</p>"
-            
-            html += "</div>"
-        
-        # Add references
-        if report.citations:
-            html += "<div class='section'><h2>References</h2><ul>"
-            for citation in report.citations:
-                formatted = citation.format_citation(report.configuration.citation_style)
-                html += f"<li>{formatted}</li>"
-            html += "</ul></div>"
-        
-        html += "</body></html>"
-        return html
+        return self.output_generator.generate_basic_html(report)
     
     async def _save_outputs(
         self, report: Report, outputs: dict[ReportFormat, ReportOutput]
@@ -1007,7 +449,7 @@ class ReportGenerator:
     
     def _generate_report_id(self) -> str:
         """Generate a unique report ID."""
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         random_suffix = hashlib.md5(str(uuid4()).encode()).hexdigest()[:8]
         return f"report_{timestamp}_{random_suffix}"
     

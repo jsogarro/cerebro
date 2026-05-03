@@ -6,9 +6,10 @@ based on the aggregated and quality-checked results, now integrated
 with the advanced report generation system.
 """
 
-import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
+
+from structlog import get_logger
 
 from src.models.report import (
     CitationStyle,
@@ -22,7 +23,7 @@ from src.services.report_config import create_report_settings
 from src.services.report_generator import ReportGenerator
 from src.utils.serialization import serialize_to_str
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 async def report_generation_node(state: ResearchState) -> ResearchState:
@@ -225,7 +226,7 @@ def _prepare_workflow_data(state: ResearchState) -> dict[str, Any]:
             "agents_used": list(state.completed_agents),
             "total_sources": len(aggregated_results.get("sources", [])),
             "total_citations": len(aggregated_results.get("citations", [])),
-            "generation_timestamp": datetime.utcnow().isoformat(),
+            "generation_timestamp": datetime.now(UTC).isoformat(),
         }
     }
     
@@ -262,7 +263,7 @@ def _convert_to_legacy_format(workflow_data: dict[str, Any], response: Any) -> d
         "query": workflow_data["query"],
         "domains": workflow_data["domains"],
         "metadata": {
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "report_id": response.report_id,
             "formats_generated": response.formats_generated,
             "generation_time": response.generation_time,
@@ -295,7 +296,7 @@ async def _fallback_legacy_generation(state: ResearchState) -> ResearchState:
 
     # Add metadata
     report["metadata"] = {
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "workflow_id": state.workflow_id,
         "project_id": state.project_id,
         "quality_score": state.quality_score,
@@ -948,7 +949,7 @@ def calculate_generation_time(state: ResearchState) -> float:
     """
     if state.metadata:
         start = state.metadata.started_at
-        end = datetime.utcnow()
+        end = datetime.now(UTC)
         return (end - start).total_seconds()
     return 0.0
 

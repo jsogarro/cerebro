@@ -6,15 +6,16 @@ enabling agents to use real external services in production.
 """
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from structlog import get_logger
+
 from src.mcp.client import MCPClient
 from src.mcp.server import MCPServerConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class MCPIntegration:
@@ -51,7 +52,7 @@ class MCPIntegration:
         self._circuit_breaker_timeout = self.config.get("circuit_breaker_timeout", 60)
         self._last_failure_time: float = 0
 
-        logger.info("MCP Integration initialized")
+        logger.info("mcp_integration_initialized", fallback_enabled=enable_fallback)
 
     async def initialize(self) -> None:
         """Initialize the MCP client if not already done."""
@@ -71,11 +72,11 @@ class MCPIntegration:
             health = await self._client.health_check()
             if health.get("client") == "healthy":
                 self._initialized = True
-                logger.info("MCP client initialized successfully")
+                logger.info("mcp_client_initialized")
             else:
-                logger.warning(f"MCP client health check failed: {health}")
+                logger.warning("mcp_client_health_check_failed", health=health)
         except Exception as e:
-            logger.error(f"Failed to initialize MCP client: {e}")
+            logger.error("mcp_client_initialization_failed", error=str(e))
             if not self.enable_fallback:
                 raise
 
@@ -101,7 +102,9 @@ class MCPIntegration:
             self._failure_count += 1
             self._last_failure_time = float(current_time)
             logger.warning(
-                f"Tool execution failed ({self._failure_count} failures): {e}"
+                "mcp_tool_execution_failed",
+                failure_count=self._failure_count,
+                error=str(e),
             )
             raise
 
@@ -139,7 +142,9 @@ class MCPIntegration:
 
                 if result.get("success"):
                     logger.info(
-                        f"Academic search successful: {len(result.get('results', []))} results"
+                        "mcp_academic_search_succeeded",
+                        result_count=len(result.get("results", [])),
+                        database_count=len(databases),
                     )
                     return {
                         "success": True,
@@ -154,7 +159,7 @@ class MCPIntegration:
                     )
 
         except Exception as e:
-            logger.error(f"Academic search error: {e}")
+            logger.error("mcp_academic_search_failed", error=str(e))
             if self.enable_fallback:
                 return self._fallback_academic_search(query, databases, max_results)
             raise
@@ -184,7 +189,9 @@ class MCPIntegration:
 
                 if result.get("success"):
                     logger.info(
-                        f"Citation formatting successful: {len(sources)} sources in {style} style"
+                        "mcp_citation_formatting_succeeded",
+                        source_count=len(sources),
+                        style=style,
                     )
                     return {
                         "success": True,
@@ -198,7 +205,7 @@ class MCPIntegration:
                     )
 
         except Exception as e:
-            logger.error(f"Citation formatting error: {e}")
+            logger.error("mcp_citation_formatting_failed", style=style, error=str(e))
             if self.enable_fallback:
                 return self._fallback_citation_formatting(sources, style)
             raise
@@ -228,7 +235,11 @@ class MCPIntegration:
                 )
 
                 if result.get("success"):
-                    logger.info(f"Statistical analysis successful: {operation}")
+                    logger.info(
+                        "mcp_statistical_analysis_succeeded",
+                        operation=operation,
+                        data_points=len(data) if data else 0,
+                    )
                     return {
                         "success": True,
                         "analysis": result.get("result", {}),
@@ -241,7 +252,11 @@ class MCPIntegration:
                     )
 
         except Exception as e:
-            logger.error(f"Statistical analysis error: {e}")
+            logger.error(
+                "mcp_statistical_analysis_failed",
+                operation=operation,
+                error=str(e),
+            )
             if self.enable_fallback:
                 return self._fallback_statistical_analysis(operation, data, **kwargs)
             raise
@@ -274,7 +289,7 @@ class MCPIntegration:
                 )
 
                 if result.get("success"):
-                    logger.info("Knowledge graph building successful")
+                    logger.info("mcp_knowledge_graph_build_succeeded")
                     return {
                         "success": True,
                         "graph": result.get("graph", {}),
@@ -287,7 +302,7 @@ class MCPIntegration:
                     )
 
         except Exception as e:
-            logger.error(f"Knowledge graph building error: {e}")
+            logger.error("mcp_knowledge_graph_build_failed", error=str(e))
             if self.enable_fallback:
                 return self._fallback_knowledge_graph(text, entities, relationships)
             raise
@@ -319,7 +334,7 @@ class MCPIntegration:
                 ),
             }
         except Exception as e:
-            logger.error(f"Failed to get tool status: {e}")
+            logger.error("mcp_tool_status_get_failed", error=str(e))
             return {
                 "initialized": False,
                 "error": str(e),
@@ -332,7 +347,11 @@ class MCPIntegration:
         self, query: str, databases: list[str], max_results: int
     ) -> dict[str, Any]:
         """Fallback implementation for academic search."""
-        logger.info("Using fallback academic search")
+        logger.info(
+            "mcp_academic_search_fallback_used",
+            database_count=len(databases),
+            max_results=max_results,
+        )
 
         # Generate mock results based on query
         mock_sources = []
@@ -362,7 +381,11 @@ class MCPIntegration:
         self, sources: list[dict[str, Any]], style: str
     ) -> dict[str, Any]:
         """Fallback implementation for citation formatting."""
-        logger.info("Using fallback citation formatting")
+        logger.info(
+            "mcp_citation_formatting_fallback_used",
+            source_count=len(sources),
+            style=style,
+        )
 
         formatted_citations = []
         for source in sources:
@@ -387,7 +410,11 @@ class MCPIntegration:
         self, operation: str, data: list[Any] | None, **kwargs: Any
     ) -> dict[str, Any]:
         """Fallback implementation for statistical analysis."""
-        logger.info("Using fallback statistical analysis")
+        logger.info(
+            "mcp_statistical_analysis_fallback_used",
+            operation=operation,
+            data_points=len(data) if data else 0,
+        )
 
         result = {"operation": operation, "fallback": True}
 
@@ -419,7 +446,11 @@ class MCPIntegration:
         relationships: list[Any] | None,
     ) -> dict[str, Any]:
         """Fallback implementation for knowledge graph building."""
-        logger.info("Using fallback knowledge graph building")
+        logger.info(
+            "mcp_knowledge_graph_fallback_used",
+            entity_count=len(entities) if entities else 0,
+            relationship_count=len(relationships) if relationships else 0,
+        )
 
         # Simple entity extraction using basic patterns
         extracted_entities = []

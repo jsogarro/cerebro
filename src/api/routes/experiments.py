@@ -5,7 +5,7 @@ This module provides REST API endpoints for creating, managing, and
 analyzing experiments across the Cerebro AI Brain platform.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
@@ -333,7 +333,7 @@ async def update_experiment(
     if update.success_criteria is not None:
         experiment.success_criteria = update.success_criteria
 
-    experiment.updated_at = datetime.utcnow()
+    experiment.updated_at = datetime.now(UTC)
     
     await db.commit()
     await db.refresh(experiment)

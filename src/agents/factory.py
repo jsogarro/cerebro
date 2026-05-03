@@ -5,8 +5,9 @@ This module provides a factory pattern for creating agent instances
 with appropriate configuration.
 """
 
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 from src.agents.base import BaseAgent
 from src.agents.citation_agent import CitationAgent
@@ -15,7 +16,7 @@ from src.agents.literature_review_agent import LiteratureReviewAgent
 from src.agents.methodology_agent import MethodologyAgent
 from src.agents.synthesis_agent import SynthesisAgent
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class AgentFactory:
@@ -77,14 +78,14 @@ class AgentFactory:
                 enable_fallback=mcp_config.get("enable_fallback", True),
             )
             config["mcp_integration"] = mcp_integration
-            logger.info(f"MCP integration enabled for {agent_type} agent")
+            logger.info("agent_mcp_integration_enabled", agent_type=agent_type)
 
         # Create agent instance
         agent = agent_class(
             gemini_service=gemini_service, cache_client=cache_client, config=config
         )
 
-        logger.info(f"Created {agent_type} agent")
+        logger.info("agent_created", agent_type=agent_type)
         return agent
 
     @classmethod
@@ -106,9 +107,13 @@ class AgentFactory:
                 agent = cls.create_agent(agent_type, config)
                 agents.append(agent)
             except Exception as e:
-                logger.warning(f"Failed to create {agent_type} agent: {e}")
+                logger.warning(
+                    "agent_create_failed",
+                    agent_type=agent_type,
+                    error=str(e),
+                )
 
-        logger.info(f"Created {len(agents)} agents")
+        logger.info("agents_created", agent_count=len(agents))
         return agents
 
     @classmethod
@@ -136,7 +141,7 @@ class AgentFactory:
             raise ValueError(f"{agent_class} must inherit from BaseAgent")
 
         cls._agent_registry[agent_type] = agent_class
-        logger.info(f"Registered new agent type: {agent_type}")
+        logger.info("agent_type_registered", agent_type=agent_type)
 
     @classmethod
     def unregister_agent(cls, agent_type: str) -> None:
@@ -148,7 +153,7 @@ class AgentFactory:
         """
         if agent_type in cls._agent_registry:
             del cls._agent_registry[agent_type]
-            logger.info(f"Unregistered agent type: {agent_type}")
+            logger.info("agent_type_unregistered", agent_type=agent_type)
 
     def get_agent_registry(self) -> dict[str, type[BaseAgent]]:
         """
@@ -181,6 +186,8 @@ class AgentFactory:
             return cls.create_agent(agent_type, config)
         except ValueError:
             logger.warning(
-                f"Agent type {agent_type} not found, using fallback: {fallback_type}"
+                "agent_type_fallback_used",
+                agent_type=agent_type,
+                fallback_type=fallback_type,
             )
             return cls.create_agent(fallback_type, config)

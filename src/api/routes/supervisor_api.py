@@ -7,10 +7,7 @@ Provides comprehensive supervisor management, worker coordination, and
 cross-domain orchestration capabilities.
 """
 
-import asyncio
 import json
-import logging
-from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -19,10 +16,12 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from structlog import get_logger
 
 from src.api.services.supervisor_coordination_service import (
     SupervisorCoordinationService,
 )
+from src.api.services.supervisor_progress_tracker import SupervisorProgressTracker
 from src.models.supervisor_api_models import (
     ConflictResolutionRequest,
     ConflictResolutionResponse,
@@ -47,8 +46,7 @@ from src.models.supervisor_api_models import (
     WorkerListResponse,
 )
 
-# Configure logging
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # Create router with prefix and tags
 router = APIRouter(
@@ -63,46 +61,8 @@ router = APIRouter(
 # Initialize service (in production, this would be dependency injected)
 supervisor_service = SupervisorCoordinationService()
 
-# WebSocket connection manager for real-time updates
-class SupervisorConnectionManager:
-
-    def __init__(self) -> None:
-        self.active_connections: dict[str, list[WebSocket]] = {}
-        self.supervisor_subscriptions: dict[str, list[WebSocket]] = {}
-    
-    async def connect(self, websocket: WebSocket, client_id: str) -> None:
-        """Accept and register a WebSocket connection"""
-        await websocket.accept()
-        if client_id not in self.active_connections:
-            self.active_connections[client_id] = []
-        self.active_connections[client_id].append(websocket)
-    
-    def disconnect(self, websocket: WebSocket, client_id: str) -> None:
-        """Remove a WebSocket connection"""
-        if client_id in self.active_connections:
-            self.active_connections[client_id].remove(websocket)
-            if not self.active_connections[client_id]:
-                del self.active_connections[client_id]
-    
-    async def send_supervisor_event(self, supervisor_type: str, event: SupervisorWebSocketEvent) -> None:
-        """Send event to all clients subscribed to a supervisor"""
-        if supervisor_type in self.supervisor_subscriptions:
-            for connection in self.supervisor_subscriptions[supervisor_type]:
-                try:
-                    await connection.send_json(event.model_dump())
-                except Exception as e:
-                    logger.error(f"Error sending event to client: {e}")
-    
-    async def broadcast_event(self, event: dict[str, Any]) -> None:
-        for client_connections in self.active_connections.values():
-            for connection in client_connections:
-                try:
-                    await connection.send_json(event)
-                except Exception as e:
-                    logger.error(f"Error broadcasting event: {e}")
-
 # Initialize connection manager
-connection_manager = SupervisorConnectionManager()
+connection_manager = SupervisorProgressTracker()
 
 
 # Primary Endpoints
@@ -150,7 +110,11 @@ async def execute_supervisor_task(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error executing supervisor task: {e}")
+        logger.error(
+            "supervisor_task_execution_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Internal error during supervisor execution"
@@ -179,7 +143,7 @@ async def list_supervisors() -> SupervisorListResponse:
         )
         
     except Exception as e:
-        logger.error(f"Error listing supervisors: {e}")
+        logger.error("supervisor_list_failed", error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor list"
@@ -196,7 +160,11 @@ async def get_supervisor_info(supervisor_type: SupervisorType) -> SupervisorInfo
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error getting supervisor info: {e}")
+        logger.error(
+            "supervisor_info_get_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor information"
@@ -225,7 +193,11 @@ async def get_supervisor_workers(supervisor_type: SupervisorType) -> WorkerListR
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error getting supervisor workers: {e}")
+        logger.error(
+            "supervisor_workers_get_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error retrieving worker information"
@@ -265,7 +237,11 @@ async def coordinate_workers(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error coordinating workers: {e}")
+        logger.error(
+            "supervisor_worker_coordination_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error during worker coordination"
@@ -298,7 +274,7 @@ async def orchestrate_multi_supervisor(
         return response
         
     except Exception as e:
-        logger.error(f"Error in multi-supervisor orchestration: {e}")
+        logger.error("multi_supervisor_orchestration_failed", error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Error during multi-supervisor orchestration"
@@ -318,7 +294,11 @@ async def get_supervisor_stats(supervisor_type: SupervisorType) -> SupervisorSta
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error getting supervisor stats: {e}")
+        logger.error(
+            "supervisor_stats_get_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor statistics"
@@ -337,7 +317,11 @@ async def get_supervisor_health(supervisor_type: SupervisorType) -> SupervisorHe
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error getting supervisor health: {e}")
+        logger.error(
+            "supervisor_health_get_failed",
+            supervisor_type=supervisor_type.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error retrieving supervisor health status"
@@ -359,7 +343,7 @@ async def optimize_worker_allocation(
     try:
         return await supervisor_service.optimize_worker_allocation(request)
     except Exception as e:
-        logger.error(f"Error optimizing worker allocation: {e}")
+        logger.error("supervisor_worker_allocation_optimization_failed", error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Error during allocation optimization"
@@ -396,7 +380,11 @@ async def resolve_conflicts(
         return response
         
     except Exception as e:
-        logger.error(f"Error resolving conflicts: {e}")
+        logger.error(
+            "supervisor_conflict_resolution_failed",
+            conflict_id=request.conflict_id,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error during conflict resolution"
@@ -420,7 +408,11 @@ async def compare_supervisor_performance(
         supervisor_types = [s.value for s in supervisors]
         return await supervisor_service.compare_supervisor_performance(supervisor_types)
     except Exception as e:
-        logger.error(f"Error comparing supervisor performance: {e}")
+        logger.error(
+            "supervisor_performance_comparison_failed",
+            supervisor_count=len(supervisors),
+            error=str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Error during performance comparison"
@@ -452,7 +444,7 @@ async def run_coordination_experiment(
         return response
         
     except Exception as e:
-        logger.error(f"Error running experiment: {e}")
+        logger.error("supervisor_coordination_experiment_failed", error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Error during coordination experiment"
@@ -460,6 +452,63 @@ async def run_coordination_experiment(
 
 
 # WebSocket Endpoints
+
+@router.websocket("/coordination/ws")
+async def coordination_progress_websocket(
+    websocket: WebSocket,
+    coordination_id: str | None = Query(None)
+) -> None:
+    """
+    WebSocket endpoint for real-time worker coordination progress updates.
+
+    Streams live updates about worker assignments, task progress,
+    conflict detection, and resolution events.
+    """
+    client_id = f"coordination-{coordination_id or id(websocket)}"
+
+    try:
+        await connection_manager.connect(websocket, client_id)
+
+        # Send initial connection confirmation
+        await websocket.send_json({
+            "event_type": "connection_established",
+            "coordination_id": coordination_id
+        })
+
+        # Simulate progress updates if coordination_id provided
+        if coordination_id:
+            # In production, this would fetch real coordination status
+            async for event in connection_manager.iter_coordination_progress_events(
+                coordination_id
+            ):
+                await websocket.send_json(event.model_dump())
+
+                if event.progress_percentage == 100:
+                    await websocket.send_json({
+                        "event_type": "completed",
+                        "coordination_id": coordination_id,
+                        "message": "Coordination completed successfully"
+                    })
+
+        # Keep connection alive
+        while True:
+            try:
+                data = await websocket.receive_json()
+                if data.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except WebSocketDisconnect:
+                break
+
+    except Exception as e:
+        logger.error(
+            "coordination_websocket_error",
+            coordination_id=coordination_id,
+            client_id=client_id,
+            error=str(e),
+        )
+    finally:
+        connection_manager.disconnect(websocket, client_id)
+
 
 @router.websocket("/{supervisor_type}/ws")
 async def supervisor_websocket(
@@ -479,9 +528,7 @@ async def supervisor_websocket(
         await connection_manager.connect(websocket, client_id)
         
         # Subscribe to supervisor events
-        if supervisor_type.value not in connection_manager.supervisor_subscriptions:
-            connection_manager.supervisor_subscriptions[supervisor_type.value] = []
-        connection_manager.supervisor_subscriptions[supervisor_type.value].append(websocket)
+        connection_manager.subscribe_supervisor(supervisor_type.value, websocket)
         
         # Send initial status
         supervisor_info = await supervisor_service.get_supervisor_info(supervisor_type.value)
@@ -515,79 +562,26 @@ async def supervisor_websocket(
                     "error": "Invalid JSON format"
                 })
             except Exception as e:
-                logger.error(f"WebSocket error: {e}")
+                logger.error(
+                    "supervisor_websocket_message_error",
+                    supervisor_type=supervisor_type.value,
+                    client_id=client_id,
+                    error=str(e),
+                )
                 await websocket.send_json({
                     "error": "Processing error"
                 })
                 
     except Exception as e:
-        logger.error(f"WebSocket connection error: {e}")
+        logger.error(
+            "supervisor_websocket_connection_error",
+            supervisor_type=supervisor_type.value,
+            client_id=client_id,
+            error=str(e),
+        )
     finally:
         connection_manager.disconnect(websocket, client_id)
-        if (supervisor_type.value in connection_manager.supervisor_subscriptions and
-            websocket in connection_manager.supervisor_subscriptions[supervisor_type.value]):
-            connection_manager.supervisor_subscriptions[supervisor_type.value].remove(websocket)
-
-
-@router.websocket("/coordination/ws")
-async def coordination_progress_websocket(
-    websocket: WebSocket,
-    coordination_id: str | None = Query(None)
-) -> None:
-    """
-    WebSocket endpoint for real-time worker coordination progress updates.
-    
-    Streams live updates about worker assignments, task progress,
-    conflict detection, and resolution events.
-    """
-    client_id = f"coordination-{coordination_id or id(websocket)}"
-    
-    try:
-        await connection_manager.connect(websocket, client_id)
-        
-        # Send initial connection confirmation
-        await websocket.send_json({
-            "event_type": "connection_established",
-            "coordination_id": coordination_id
-        })
-        
-        # Simulate progress updates if coordination_id provided
-        if coordination_id:
-            # In production, this would fetch real coordination status
-            for progress in [10, 30, 50, 70, 90, 100]:
-                await asyncio.sleep(1)  # Simulate processing
-                
-                event = WorkerCoordinationProgressEvent(
-                    coordination_id=coordination_id,
-                    event_type="progress",
-                    progress_percentage=float(progress),
-                    current_phase=f"Phase {progress // 25 + 1}",
-                    workers_active=5 - (progress // 25),
-                    estimated_remaining_seconds=max(0, 10 - progress // 10)
-                )
-                
-                await websocket.send_json(event.model_dump())
-                
-                if progress == 100:
-                    await websocket.send_json({
-                        "event_type": "completed",
-                        "coordination_id": coordination_id,
-                        "message": "Coordination completed successfully"
-                    })
-        
-        # Keep connection alive
-        while True:
-            try:
-                data = await websocket.receive_json()
-                if data.get("type") == "ping":
-                    await websocket.send_json({"type": "pong"})
-            except WebSocketDisconnect:
-                break
-                
-    except Exception as e:
-        logger.error(f"Coordination WebSocket error: {e}")
-    finally:
-        connection_manager.disconnect(websocket, client_id)
+        connection_manager.unsubscribe_supervisor(supervisor_type.value, websocket)
 
 
 # Error Handlers (deprecated - use FastAPI exception handlers in main app)

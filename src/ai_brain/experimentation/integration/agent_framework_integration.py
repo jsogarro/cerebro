@@ -9,13 +9,16 @@ This is the KEY INTEGRATION POINT that enables Cerebro to become a
 self-improving AI system through experimental optimization.
 """
 
+from __future__ import annotations
+
 import asyncio
-import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+from structlog import get_logger
 
 # Import Agent Framework API components
 from src.api.services.agent_execution_service import AgentExecutionService
@@ -31,10 +34,38 @@ from ..core.system_experiment_registry import SystemExperimentRegistry
 
 # Import A/B Testing components
 from ..core.unified_experiment_manager import UnifiedExperimentManager
-from ..statistical.bayesian_experiment_design import BayesianExperimentDesigner
-from ..statistical.enhanced_statistical_engine import EnhancedStatisticalEngine
+from ..statistical.enhanced_statistical_engine import (
+    EnhancedStatisticalEngine,
+    PowerAnalysisResult,
+)
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from ..statistical.bayesian_experiment_design import BayesianExperimentDesigner
+
+try:
+    from ..statistical.bayesian_experiment_design import (
+        BayesianExperimentDesigner as _BayesianExperimentDesigner,
+    )
+except ImportError:
+    # Optional dep fallback: rebind name to None when the real class is unavailable.
+    _BayesianExperimentDesigner = None  # type: ignore[assignment,misc]
+
+logger = get_logger()
+
+RESEARCH_CLAIM_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "performance_gain_20_40_percent": {
+        "claim": "20-40% performance gain",
+        "metric": "quality_score",
+        "minimum_percent": 20.0,
+        "maximum_percent": 40.0,
+    },
+    "cost_reduction_45_55_percent": {
+        "claim": "45-55% cost reduction",
+        "metric": "total_cost",
+        "minimum_percent": 45.0,
+        "maximum_percent": 55.0,
+    },
+}
 
 
 class AgentExperimentType(Enum):
@@ -82,6 +113,8 @@ class AgentExperimentConfig:
     expected_effect_size: float = 0.1
     optimization_goal: str = "maximize"
     constraints: dict[str, float] = field(default_factory=dict)
+    power_analysis: PowerAnalysisResult | None = None
+    power_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -190,6 +223,7 @@ class AgentFrameworkExperimentor:
             allocation_strategy="thompson_sampling",
             optimization_goal="maximize"
         )
+        await self._run_power_preflight(config)
 
         self.active_experiments[experiment_id] = config
 
@@ -252,6 +286,7 @@ class AgentFrameworkExperimentor:
             secondary_metrics=["latency_ms", "total_cost"],
             constraints={"latency_ms": 5000, "total_cost": 0.10}
         )
+        await self._run_power_preflight(config)
         
         self.active_experiments[experiment_id] = config
         
@@ -294,6 +329,7 @@ class AgentFrameworkExperimentor:
             secondary_metrics=["latency_ms", "refinement_count"],
             optimization_goal="maximize"
         )
+        await self._run_power_preflight(config)
         
         self.active_experiments[experiment_id] = config
         
@@ -325,7 +361,7 @@ class AgentFrameworkExperimentor:
             Execution result with experiment metadata
         """
         request_id = str(uuid4())
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
 
         applicable_experiments = await self._get_applicable_experiments(
             query, context, experiment_ids
@@ -342,7 +378,7 @@ class AgentFrameworkExperimentor:
             query, context, execution_config
         )
 
-        end_time = datetime.utcnow()
+        end_time = datetime.now(UTC)
         latency_ms = (end_time - start_time).total_seconds() * 1000
 
         for exp_id, variant_id in assignments.items():
@@ -418,7 +454,7 @@ class AgentFrameworkExperimentor:
                 experiment_id=experiment_id,
                 user_context=context
             )
-            variant = allocation_decision.variant_id
+            variant = str(allocation_decision.variant_id)
         else:
             variant = random.choice(list(config.variants.keys()))
 
@@ -704,11 +740,166 @@ class AgentFrameworkExperimentor:
         logger.info(f"Stopped experiment {experiment_id}: {reason}")
 
         final_results["stop_reason"] = reason
-        final_results["stopped_at"] = datetime.utcnow().isoformat()
+        final_results["stopped_at"] = datetime.now(UTC).isoformat()
 
         return final_results
     
     # ==================== Helper Methods ====================
+
+    def validate_research_claims_against_logs(self) -> dict[str, dict[str, Any]]:
+        """
+        Map paper performance claims to A/B test IDs backed by execution logs.
+
+        The validation is intentionally conservative: an experiment only supports
+        a claim when logged control/treatment averages land within the stated
+        claim range.
+        """
+
+        experiment_summaries = self._summarize_experiment_execution_logs()
+        validation: dict[str, dict[str, Any]] = {}
+
+        for claim_id, claim in RESEARCH_CLAIM_DEFINITIONS.items():
+            supporting_experiment_ids: list[str] = []
+            observations: dict[str, float] = {}
+            metric = str(claim["metric"])
+            minimum_percent = float(claim["minimum_percent"])
+            maximum_percent = float(claim["maximum_percent"])
+
+            for experiment_id, summary in experiment_summaries.items():
+                observed_percent = summary.get(metric)
+                if observed_percent is None:
+                    continue
+
+                observations[experiment_id] = observed_percent
+                if minimum_percent <= observed_percent <= maximum_percent:
+                    supporting_experiment_ids.append(experiment_id)
+
+            validation[claim_id] = {
+                "claim": claim["claim"],
+                "experiment_ids": sorted(supporting_experiment_ids),
+                "validated": bool(supporting_experiment_ids),
+                "observed_percent_by_experiment": observations,
+            }
+
+        return validation
+
+    def _summarize_experiment_execution_logs(self) -> dict[str, dict[str, float]]:
+        """Summarize A/B execution logs into claim-validation percentages."""
+
+        logs_by_experiment: dict[str, list[AgentExperimentResult]] = {}
+        for result in self.results_buffer:
+            logs_by_experiment.setdefault(result.experiment_id, []).append(result)
+
+        summaries: dict[str, dict[str, float]] = {}
+        for experiment_id, results in logs_by_experiment.items():
+            config = self.active_experiments.get(experiment_id)
+            if config is None or len(config.variants) < 2:
+                continue
+
+            control_variant = next(iter(config.variants))
+            variant_metrics = self._average_metrics_by_variant(results)
+            control_metrics = variant_metrics.get(control_variant)
+            if control_metrics is None:
+                continue
+
+            treatment_metrics = [
+                metrics
+                for variant_id, metrics in variant_metrics.items()
+                if variant_id != control_variant
+            ]
+            if not treatment_metrics:
+                continue
+
+            best_quality = max(metrics["quality_score"] for metrics in treatment_metrics)
+            best_cost = min(metrics["total_cost"] for metrics in treatment_metrics)
+            control_quality = control_metrics["quality_score"]
+            control_cost = control_metrics["total_cost"]
+
+            summary: dict[str, float] = {}
+            if control_quality > 0:
+                summary["quality_score"] = (
+                    (best_quality - control_quality) / control_quality * 100
+                )
+            if control_cost > 0:
+                summary["total_cost"] = (
+                    (control_cost - best_cost) / control_cost * 100
+                )
+            summaries[experiment_id] = summary
+
+        return summaries
+
+    def _average_metrics_by_variant(
+        self, results: list[AgentExperimentResult]
+    ) -> dict[str, dict[str, float]]:
+        """Average quality and cost metrics from execution logs by variant."""
+
+        totals: dict[str, dict[str, float]] = {}
+        counts: dict[str, int] = {}
+        for result in results:
+            metrics = totals.setdefault(
+                result.variant_id, {"quality_score": 0.0, "total_cost": 0.0}
+            )
+            metrics["quality_score"] += result.quality_score
+            metrics["total_cost"] += result.total_cost
+            counts[result.variant_id] = counts.get(result.variant_id, 0) + 1
+
+        return {
+            variant_id: {
+                metric: value / counts[variant_id]
+                for metric, value in metrics.items()
+            }
+            for variant_id, metrics in totals.items()
+        }
+
+    async def _run_power_preflight(
+        self, config: AgentExperimentConfig
+    ) -> list[str]:
+        """Warn when configured samples are below power-analysis requirements."""
+
+        baseline_metric = self._baseline_metric_for_power(config.primary_metric)
+        metric_type = self._metric_type_for_power(config.primary_metric)
+        significance_level = max(0.0, min(1.0, 1.0 - config.confidence_level))
+
+        power_analysis = await self.statistical_engine.frequentist.power_analysis(
+            baseline_metric=baseline_metric,
+            minimum_effect=config.expected_effect_size,
+            significance_level=significance_level,
+            power_target=0.8,
+            metric_type=metric_type,
+        )
+        config.power_analysis = power_analysis
+
+        if config.min_samples_per_variant >= power_analysis.required_sample_size:
+            config.power_warnings = []
+            return []
+
+        warning = (
+            f"Experiment {config.experiment_id} is underpowered: "
+            f"min_samples_per_variant={config.min_samples_per_variant}, "
+            f"required_sample_size={power_analysis.required_sample_size}, "
+            "alpha=0.05, beta=0.2"
+        )
+        config.power_warnings = [warning]
+        logger.warning(warning)
+        return config.power_warnings
+
+    def _baseline_metric_for_power(self, primary_metric: str) -> float:
+        """Return conservative baseline values for experiment power checks."""
+
+        if primary_metric in {"success", "success_rate"}:
+            return 0.8
+        if primary_metric == "total_cost":
+            return 0.01
+        if primary_metric == "latency_ms":
+            return 1000.0
+        return 0.8
+
+    def _metric_type_for_power(self, primary_metric: str) -> str:
+        """Map experiment metrics to statistical power-analysis metric types."""
+
+        if primary_metric in {"success", "success_rate"}:
+            return "proportion"
+        return "continuous"
     
     def _get_default_strategy_params(self, strategy: str) -> dict[str, Any]:
         """Get default parameters for a routing strategy."""

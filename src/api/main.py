@@ -2,16 +2,35 @@
 Main FastAPI application for Research Platform.
 """
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import cast
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
+from starlette.responses import Response
 from structlog import get_logger
 
 from src.api.auth import router as auth_router
+from src.api.middleware.cost_drift import LLMCostDriftMiddleware
+from src.api.middleware.error_envelope import (
+    build_error_payload,
+    http_exception_handler,
+    validation_exception_handler,
+)
+from src.api.middleware.idempotency import (
+    IdempotencyMiddleware,
+    RedisIdempotencyStore,
+    ResilientIdempotencyStore,
+)
+from src.api.middleware.rate_limiter import (
+    RateLimitMiddleware,
+    RedisRateLimitStore,
+    ResilientRateLimitStore,
+)
 from src.api.routes import (
     agent_api,
     health,
@@ -20,6 +39,8 @@ from src.api.routes import (
     reports,
     research,
     supervisor_api,
+    talkhier_api,
+    users,
     websocket,
 )
 from src.api.services.event_publisher import event_publisher
@@ -128,6 +149,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(
+    IdempotencyMiddleware,
+    store=ResilientIdempotencyStore(RedisIdempotencyStore(settings.REDIS_URL)),
+)
+
+app.add_middleware(
+    RateLimitMiddleware,
+    store=ResilientRateLimitStore(RedisRateLimitStore(settings.REDIS_URL)),
+    requests_per_minute=settings.MAX_REQUESTS_PER_MINUTE,
+    enabled=settings.ENABLE_RATE_LIMITING,
+)
+
+app.add_middleware(LLMCostDriftMiddleware)
+
 # Add Authentication middleware
 app.add_middleware(AuthMiddleware)
 
@@ -138,6 +173,7 @@ app.mount("/metrics", metrics_app)
 # Include routers
 app.include_router(health.router, tags=["health"])
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(users.router, prefix="/api/v1")
 app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
 # Agent Framework APIs (Research-Informed)
@@ -147,10 +183,10 @@ app.include_router(agent_api.router, tags=["direct-agents"])     # Bypass API - 
 app.include_router(masr_api.router, tags=["masr-routing"])       # MASR routing intelligence
 # Hierarchical Supervisor API (Week 3 - Talk Structurally, Act Hierarchically)
 app.include_router(supervisor_api.router, tags=["supervisors"])  # Supervisor coordination
+app.include_router(talkhier_api.router, tags=["talkhier"])
 app.include_router(websocket.router, tags=["websocket"])
 
 
-@app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Global exception handler."""
     logger.error(
@@ -161,5 +197,31 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     )
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error"},
+        content=build_error_payload(
+            code="INTERNAL_SERVER_ERROR",
+            message="Internal server error",
+        ),
     )
+
+
+app.add_exception_handler(
+    HTTPException,
+    cast(
+        Callable[[Request, Exception], Response | Awaitable[Response]],
+        http_exception_handler,
+    ),
+)
+app.add_exception_handler(
+    RequestValidationError,
+    cast(
+        Callable[[Request, Exception], Response | Awaitable[Response]],
+        validation_exception_handler,
+    ),
+)
+app.add_exception_handler(
+    Exception,
+    cast(
+        Callable[[Request, Exception], Response | Awaitable[Response]],
+        global_exception_handler,
+    ),
+)

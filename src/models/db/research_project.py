@@ -4,6 +4,7 @@ Research Project database model.
 Represents a research project in the system.
 """
 
+import uuid
 from enum import StrEnum
 from typing import Any
 
@@ -19,6 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.models.db.base import UUID as DBUUID
 from src.models.db.base import BaseModel
 
 
@@ -62,6 +64,13 @@ class ResearchProject(BaseModel):
         String(255), nullable=False, index=True
     )
 
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        DBUUID(),
+        nullable=True,
+        index=True,
+        comment="Tenant organization boundary identifier",
+    )
+
     workflow_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
@@ -101,7 +110,9 @@ class ResearchProject(BaseModel):
 
     # Indexes
     __table_args__ = (
+        Index("idx_project_org_user_status", "organization_id", "user_id", "status", "created_at"),
         Index("idx_project_user_status", "user_id", "status", "created_at"),
+        Index("idx_project_org_status", "organization_id", "status", "created_at"),
         Index("idx_project_workflow", "workflow_id"),
         Index("idx_project_quality", "quality_score", "status"),
     )

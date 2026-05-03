@@ -5,7 +5,7 @@ Pydantic models for authentication requests and responses.
 """
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -19,6 +19,7 @@ class TokenPayload(BaseModel):
     email: str | None = Field(None, description="User email")
     roles: list[str] = Field(default_factory=list, description="User roles")
     permissions: list[str] = Field(default_factory=list, description="User permissions")
+    organization_id: str | None = Field(None, description="Tenant organization ID")
     jti: str = Field(..., description="JWT ID (unique token identifier)")
     iat: datetime = Field(..., description="Issued at timestamp")
     exp: datetime = Field(..., description="Expiration timestamp")
@@ -42,7 +43,7 @@ class TokenPayload(BaseModel):
 
     def is_expired(self) -> bool:
         """Check if token is expired."""
-        return datetime.utcnow() > self.exp
+        return datetime.now(UTC) > self.exp
 
     model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
 

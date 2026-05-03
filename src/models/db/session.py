@@ -4,7 +4,6 @@ Database session management.
 Provides utilities for managing database connections and sessions.
 """
 
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -17,10 +16,11 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.pool import NullPool, QueuePool
+from structlog import get_logger
 
 from src.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _engine: AsyncEngine | None = None
 _async_session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -87,11 +87,15 @@ def create_engine(
 
         @event.listens_for(engine.sync_engine, "connect")
         def receive_connect(dbapi_conn: Any, connection_record: Any) -> None:
-            logger.debug(f"Pool connect: {connection_record}")
+            logger.debug("pool_connect", connection_record=str(connection_record))
 
         @event.listens_for(engine.sync_engine, "checkout")
-        def receive_checkout(dbapi_conn: Any, connection_record: Any, connection_proxy: Any) -> None:
-            logger.debug(f"Pool checkout: {connection_record}")
+        def receive_checkout(
+            dbapi_conn: Any,
+            connection_record: Any,
+            connection_proxy: Any,
+        ) -> None:
+            logger.debug("pool_checkout", connection_record=str(connection_record))
 
     return engine
 
@@ -107,10 +111,10 @@ async def init_db(database_url: str | None = None, **engine_kwargs: Any) -> None
     global _engine, _async_session_factory
 
     if _engine is not None:
-        logger.warning("Database already initialized")
+        logger.warning("database_already_initialized")
         return
 
-    logger.info("Initializing database connection")
+    logger.info("initializing_database_connection")
 
     # Use NullPool for SQLite (QueuePool is incompatible with aiosqlite)
     url = database_url or get_database_url()
@@ -133,9 +137,9 @@ async def init_db(database_url: str | None = None, **engine_kwargs: Any) -> None
     try:
         async with _engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
-        logger.info("Database connection successful")
+        logger.info("database_connection_successful")
     except Exception as e:
-        logger.error(f"Database connection failed: {e}")
+        logger.error("database_connection_failed", error=str(e))
         await close_db()
         raise
 
@@ -145,7 +149,7 @@ async def close_db() -> None:
     global _engine, _async_session_factory
 
     if _engine is not None:
-        logger.info("Closing database connections")
+        logger.info("closing_database_connections")
         await _engine.dispose()
         _engine = None
         _async_session_factory = None
@@ -253,7 +257,7 @@ class DatabaseManager:
                 await conn.execute(text("SELECT 1"))
             return True
         except Exception as e:
-            logger.error(f"Database connection check failed: {e}")
+            logger.error("database_connection_check_failed", error=str(e))
             return False
 
     async def get_pool_status(self) -> dict[str, Any]:
@@ -341,9 +345,7 @@ class DatabaseManager:
                 for row in rows
             ]
         except Exception as e:
-            logger.warning(
-                f"Could not get slow queries (pg_stat_statements may not be enabled): {e}"
-            )
+            logger.warning("slow_queries_unavailable", error=str(e))
             return []
 
     async def analyze_indexes(self) -> dict[str, Any]:
@@ -402,7 +404,7 @@ class DatabaseManager:
         async with self.engine.begin() as conn:
             await conn.execute(text(query))
 
-        logger.info(f"VACUUM ANALYZE completed for {table_name or 'all tables'}")
+        logger.info("vacuum_analyze_completed", table_name=table_name or "all tables")
 
 
 # Convenience functions

@@ -5,7 +5,7 @@ Manages OAuth provider connections for social authentication
 (Google, GitHub, etc.).
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -218,7 +218,7 @@ class OAuthAccount(BaseModel):
         # Calculate token expiration
         access_token_expires_at = None
         if expires_in:
-            access_token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            access_token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
         # Extract profile information from provider data
         provider_email = None
@@ -282,15 +282,15 @@ class OAuthAccount(BaseModel):
             self.refresh_token = refresh_token  # Should be encrypted
 
         if expires_in:
-            self.access_token_expires_at = datetime.utcnow() + timedelta(
+            self.access_token_expires_at = datetime.now(UTC) + timedelta(
                 seconds=expires_in
             )
 
-        self.last_refreshed_at = datetime.utcnow()
+        self.last_refreshed_at = datetime.now(UTC)
 
     def record_usage(self) -> None:
         """Record OAuth account usage."""
-        self.last_used_at = datetime.utcnow()
+        self.last_used_at = datetime.now(UTC)
         self.connection_count += 1
 
     def record_error(self, error_message: str) -> None:
@@ -301,7 +301,7 @@ class OAuthAccount(BaseModel):
             error_message: Error message
         """
         self.last_error = error_message[:500]  # Truncate to field length
-        self.last_error_at = datetime.utcnow()
+        self.last_error_at = datetime.now(UTC)
         self.error_count += 1
 
         # Deactivate if too many errors
@@ -335,7 +335,7 @@ class OAuthAccount(BaseModel):
         """Check if access token is expired."""
         if not self.access_token_expires_at:
             return False
-        return bool(datetime.utcnow() > self.access_token_expires_at)
+        return bool(datetime.now(UTC) > self.access_token_expires_at)
 
     @property
     def needs_refresh(self) -> bool:
@@ -343,7 +343,7 @@ class OAuthAccount(BaseModel):
         if not self.access_token_expires_at:
             return False
 
-        buffer_time = datetime.utcnow() + timedelta(minutes=5)
+        buffer_time = datetime.now(UTC) + timedelta(minutes=5)
         return bool(buffer_time > self.access_token_expires_at)
 
     @property
@@ -351,7 +351,7 @@ class OAuthAccount(BaseModel):
         """Get days since last use."""
         if not self.last_used_at:
             return None
-        delta = datetime.utcnow() - self.last_used_at
+        delta = datetime.now(UTC) - self.last_used_at
         return delta.days
 
     @classmethod

@@ -7,15 +7,15 @@ the overall research process.
 """
 
 import asyncio
-import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from structlog import get_logger
 
 from src.agents.supervisors.supervisor_factory import SupervisorFactory
 from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
@@ -49,7 +49,7 @@ from src.orchestration.state import (
     WorkflowPhase,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass
@@ -64,6 +64,7 @@ class OrchestratorConfig:
     enable_human_in_loop: bool = False
     quality_threshold: float = 0.7
     max_workflow_errors: int = 3
+    max_iterations: int = 10
     timeout_seconds: int = 1800  # 30 minutes
     enable_monitoring: bool = True
     enable_visualization: bool = True
@@ -217,6 +218,7 @@ class ResearchOrchestrator:
             enable_checkpointing=self.config.enable_checkpointing,
             enable_parallel_execution=self.config.enable_parallel_execution,
             max_parallel_nodes=self.config.max_parallel_agents,
+            max_iterations=self.config.max_iterations,
             enable_visualization=self.config.enable_visualization,
             router_config=self._router.config,
         )
@@ -377,7 +379,7 @@ class ResearchOrchestrator:
         """
         logger.info(f"Starting research workflow for project {project_id}")
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
         workflow_id = f"workflow-{uuid.uuid4().hex[:8]}"
 
         try:
@@ -389,6 +391,7 @@ class ResearchOrchestrator:
                 domains=domains,
                 context=context or {},
                 max_errors=self.config.max_workflow_errors,
+                max_iterations=self.config.max_iterations,
                 metadata=WorkflowMetadata(
                     workflow_id=workflow_id,
                     started_at=start_time,
@@ -414,7 +417,7 @@ class ResearchOrchestrator:
             )
 
             # Calculate execution time
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(UTC) - start_time).total_seconds()
 
             # Create result
             result = WorkflowResult(
@@ -614,6 +617,7 @@ class ResearchOrchestrator:
             workflow_id=checkpoint.checkpoint_id.split("-")[0],
             query=checkpoint.state_data["query"],
             domains=checkpoint.state_data["domains"],
+            max_iterations=self.config.max_iterations,
         )
 
         # Restore from checkpoint

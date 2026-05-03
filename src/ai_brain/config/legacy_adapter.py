@@ -12,9 +12,10 @@ Key Functions:
 - Generate configuration files from existing hard-coded data
 """
 
-import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+
+from structlog import get_logger
 
 if TYPE_CHECKING:
     from ..providers.base_provider import BaseProvider
@@ -34,7 +35,7 @@ from .model_schemas import (
     ModelCapability as ConfigModelCapability,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class LegacyConfigurationAdapter:

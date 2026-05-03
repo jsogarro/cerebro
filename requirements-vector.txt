@@ -1,0 +1,8 @@
+# Optional vector-memory dependencies.
+#
+# Install only when exercising semantic vector storage:
+#
+#   python -m pip install -r requirements-vector.txt
+
+qdrant-client>=1.7.0
+sentence-transformers>=2.5.0

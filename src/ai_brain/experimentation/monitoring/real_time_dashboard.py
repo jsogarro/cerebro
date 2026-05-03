@@ -7,20 +7,20 @@ infrastructure for live updates and provides comprehensive analytics.
 """
 
 import asyncio
-import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
+from importlib import import_module
 from typing import Any
 
-import pandas as pd
 from fastapi import WebSocket
-from src.api.websocket.event_publisher import EventPublisher
+from structlog import get_logger
 
 from src.api.websocket.connection_manager import ConnectionManager
+from src.api.websocket.event_publisher import EventPublisher
 from src.utils.async_helpers import BackgroundTaskTracker
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class DashboardMetric(Enum):
@@ -137,7 +137,7 @@ class RealTimeDashboard:
             "event": "experiment_registered",
             "experiment_id": experiment_id,
             "config": experiment_config,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         })
         
         logger.info(f"Registered experiment {experiment_id} for monitoring")
@@ -156,7 +156,7 @@ class RealTimeDashboard:
         # Create snapshot
         snapshot = ExperimentSnapshot(
             experiment_id=experiment_id,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             variants=variant_metrics,
             sample_sizes=sample_sizes
         )
@@ -496,7 +496,7 @@ class RealTimeDashboard:
         """Get current dashboard state for new clients."""
         state: dict[str, Any] = {
             "event": "dashboard_state",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "active_experiments": list(self.active_experiments),
             "experiments": {}
         }
@@ -523,7 +523,7 @@ class RealTimeDashboard:
     
     async def _clean_old_history(self) -> None:
         """Remove old data from history."""
-        cutoff_time = datetime.utcnow() - timedelta(
+        cutoff_time = datetime.now(UTC) - timedelta(
             minutes=self.config.history_window_minutes
         )
         
@@ -565,7 +565,14 @@ class RealTimeDashboard:
             ]
         
         elif format == "dataframe":
-            # Convert to pandas DataFrame
+            # Convert to pandas DataFrame only when the optional dependency is installed.
+            try:
+                pandas = import_module("pandas")
+            except ImportError as exc:
+                raise RuntimeError(
+                    "pandas is required to export experiment data as a dataframe"
+                ) from exc
+
             data = []
             for snapshot in history:
                 for variant, metrics in snapshot.variants.items():
@@ -576,8 +583,8 @@ class RealTimeDashboard:
                         **metrics
                     }
                     data.append(row)
-            
-            return pd.DataFrame(data)
+
+            return pandas.DataFrame(data)
         
         else:
             raise ValueError(f"Unsupported format: {format}")

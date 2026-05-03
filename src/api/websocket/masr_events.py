@@ -8,7 +8,7 @@ and strategy evaluation notifications.
 Based on "MasRouter: Learning to Route LLMs" research patterns.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -38,7 +38,7 @@ class MASREventType(StrEnum):
 class MASREvent(BaseModel):
     """Base MASR routing event"""
     event_type: MASREventType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     routing_id: str | None = None
     data: dict[str, Any]
     metadata: dict[str, Any] | None = None
@@ -152,7 +152,7 @@ class MASRWebSocketManager:
             if routing_id not in self.routing_sessions:
                 self.routing_sessions[routing_id] = {
                     "websockets": set(),
-                    "start_time": datetime.utcnow(),
+                    "start_time": datetime.now(UTC),
                     "events": []
                 }
             self.routing_sessions[routing_id]["websockets"].add(websocket)
@@ -397,7 +397,7 @@ class MASRWebSocketManager:
             data={
                 "error": error,
                 "details": details or {},
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
         )
         

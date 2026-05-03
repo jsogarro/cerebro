@@ -16,6 +16,9 @@ help: ## Show this help message
 install: ## Install dependencies with uv
 	uv pip install -e ".[dev]"
 
+install-pip: ## Create .venv and install dependencies with pip
+	./scripts/setup-python-env.sh
+
 dev: ## Start development environment
 	docker-compose up -d
 

@@ -6,12 +6,12 @@ experiments on the Agent Framework APIs, enabling systematic optimization
 of routing strategies, execution patterns, and quality metrics.
 """
 
-import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket
 from pydantic import BaseModel, Field
+from structlog import get_logger
 
 # Import A/B Testing Integration components
 from src.ai_brain.experimentation.integration.agent_framework_integration import (
@@ -26,7 +26,7 @@ from src.ai_brain.experimentation.optimization.feedback_loop_optimizer import (
 from src.auth.dependencies import get_current_user
 from src.models.user import User
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # ==================== Pydantic Models ====================
 
@@ -259,7 +259,7 @@ async def create_supervisor_experiment(
     
     try:
         # Create supervisor experiment (would implement in experimentor)
-        experiment_id = f"supervisor_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        experiment_id = f"supervisor_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
         
         # Register with dashboard
         dashboard = get_dashboard()
@@ -455,7 +455,7 @@ async def dashboard_websocket(websocket: WebSocket) -> None:
     and optimization recommendations.
     """
     dashboard = get_dashboard()
-    client_id = f"dashboard_{datetime.utcnow().timestamp()}"
+    client_id = f"dashboard_{datetime.now(UTC).timestamp()}"
     
     try:
         await dashboard.connect_dashboard_client(client_id, websocket)
@@ -482,7 +482,7 @@ async def dashboard_websocket(websocket: WebSocket) -> None:
                 })
                 
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error("experiment_dashboard_websocket_error", error=str(e))
         
     finally:
         await dashboard.disconnect_dashboard_client(client_id)
@@ -515,5 +515,5 @@ async def experiment_system_health() -> dict[str, Any]:
             "dashboard_clients": len(dashboard.dashboard_clients),
             "pending_optimizations": len(optimizer.active_optimizations)
         },
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(UTC).isoformat()
     }

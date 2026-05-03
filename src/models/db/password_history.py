@@ -7,7 +7,7 @@ password history policies.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -118,7 +118,7 @@ class PasswordHistory(BaseModel):
 
         expires_at = None
         if expires_in_days:
-            expires_at = datetime.utcnow() + timedelta(days=expires_in_days)
+            expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
 
         return cls(
             user_id=user_id,
@@ -148,12 +148,12 @@ class PasswordHistory(BaseModel):
         """Check if this password has expired."""
         if self.expires_at is None:
             return False
-        return bool(datetime.utcnow() > self.expires_at)
+        return bool(datetime.now(UTC) > self.expires_at)
 
     @property
     def age_in_days(self) -> int:
         """Get age of password in days."""
-        delta = datetime.utcnow() - self.created_at
+        delta = datetime.now(UTC) - self.created_at
         return delta.days
 
     @classmethod

@@ -14,15 +14,25 @@ Research Foundation:
 - Bayesian inference patterns from PyMC and ArviZ
 """
 
-import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 import numpy as np
+from structlog import get_logger
+
+logger = get_logger()
 
 # Statistical libraries
-import scipy.stats as stats
+try:
+    import scipy.stats as scipy_stats
+    SCIPY_AVAILABLE = True
+except ImportError:
+    scipy_stats = None
+    SCIPY_AVAILABLE = False
+    logger.warning("scipy_not_available")
+
+stats: Any = scipy_stats
 
 try:
     import statsmodels.stats.api as sms
@@ -30,7 +40,7 @@ try:
     STATSMODELS_AVAILABLE = True
 except ImportError:
     STATSMODELS_AVAILABLE = False
-    logging.warning("statsmodels not available - some advanced features disabled")
+    logger.warning("statsmodels_not_available")
 
 # Bayesian libraries (optional imports)
 try:
@@ -39,7 +49,7 @@ try:
     BAYESIAN_AVAILABLE = True
 except ImportError:
     BAYESIAN_AVAILABLE = False
-    logging.warning("PyMC not available - Bayesian features disabled")
+    logger.warning("pymc_not_available")
 
 # Multi-armed bandit libraries (optional imports)
 try:
@@ -47,9 +57,9 @@ try:
     MAB_AVAILABLE = True
 except ImportError:
     MAB_AVAILABLE = False
-    logging.warning("MABWiser not available - bandit features disabled")
+    logger.warning("mabwiser_not_available")
 
-logger = logging.getLogger(__name__)
+DEFAULT_MULTIPLE_COMPARISON_METHOD = "bonferroni"
 
 
 class StatisticalMethod(Enum):
@@ -518,28 +528,28 @@ class BayesianAnalyzer:
             )
             
             # Probability that treatment is better
-            prob_better = np.mean(posterior_diff > 0)
+            prob_better = float(np.mean(posterior_diff > 0))
             
             # ROPE analysis (Region of Practical Equivalence)
-            prob_rope = np.mean(
+            prob_rope = float(np.mean(
                 (posterior_diff >= self.rope_lower) & (posterior_diff <= self.rope_upper)
-            )
+            ))
             
             # Decision making
-            is_significant = prob_better > 0.95 or prob_better < 0.05
+            is_significant = bool(prob_better > 0.95 or prob_better < 0.05)
             
             # Effect size (standardized difference)
-            effect_size = np.mean(posterior_diff) / np.std(posterior_diff)
+            effect_size = float(np.mean(posterior_diff) / np.std(posterior_diff))
             
             interpretation = self._interpret_bayesian_result(prob_better, prob_rope)
             
             return StatisticalTestResult(
                 method=StatisticalMethod.BAYESIAN_TTEST,
-                p_value=1 - prob_better if prob_better > 0.5 else prob_better,  # Bayesian p-value analog
+                p_value=float(1 - prob_better if prob_better > 0.5 else prob_better),  # Bayesian p-value analog
                 confidence_interval=(ci_lower, ci_upper),
                 effect_size=effect_size,
                 statistical_power=0.95,  # High power with Bayesian approach
-                test_statistic=np.mean(posterior_diff),
+                test_statistic=float(np.mean(posterior_diff)),
                 is_significant=is_significant,
                 significance_level=0.05,
                 interpretation=interpretation,
@@ -794,14 +804,13 @@ class EnhancedStatisticalEngine:
         self.correction_methods: dict[str, Any] = {
             "bonferroni": self._bonferroni_correction,
             "fdr": self._fdr_correction,
-            "none": lambda p: p,
         }
     
     async def comprehensive_analysis(
         self,
         experiment_data: dict[str, list[float]],
         method: StatisticalMethod = StatisticalMethod.FREQUENTIST_TTEST,
-        multiple_comparison: str = "bonferroni",
+        multiple_comparison: str = DEFAULT_MULTIPLE_COMPARISON_METHOD,
     ) -> dict[str, StatisticalTestResult]:
         """
         Perform comprehensive statistical analysis across all variants.
@@ -850,17 +859,20 @@ class EnhancedStatisticalEngine:
             results[f"{treatment_name}_vs_{control_name}"] = result
             p_values.append(result.p_value)
         
-        # Apply multiple comparison correction
-        if len(p_values) > 1:
-            correction_func_raw = self.correction_methods.get(multiple_comparison, self._bonferroni_correction)
-            correction_func: Any = correction_func_raw
-            adjusted_p_values = correction_func(p_values)
-            
-            # Update results with adjusted p-values
-            for i, (_comparison_name, result) in enumerate(results.items()):
-                result.adjusted_p_value = adjusted_p_values[i]
-                result.correction_method = multiple_comparison
-                result.is_significant = adjusted_p_values[i] < result.significance_level
+        correction_method = (
+            multiple_comparison
+            if multiple_comparison in self.correction_methods
+            else DEFAULT_MULTIPLE_COMPARISON_METHOD
+        )
+        correction_func_raw = self.correction_methods[correction_method]
+        correction_func: Any = correction_func_raw
+        adjusted_p_values = correction_func(p_values)
+
+        # Update every result with an adjusted p-value, including single comparisons.
+        for i, (_comparison_name, result) in enumerate(results.items()):
+            result.adjusted_p_value = adjusted_p_values[i]
+            result.correction_method = correction_method
+            result.is_significant = adjusted_p_values[i] < result.significance_level
         
         return results
     
@@ -996,6 +1008,7 @@ class EnhancedStatisticalEngine:
                 "frequentist_analysis": True,
                 "bayesian_analysis": BAYESIAN_AVAILABLE,
                 "bandit_optimization": MAB_AVAILABLE,
+                "scipy_analysis": SCIPY_AVAILABLE,
                 "power_analysis": STATSMODELS_AVAILABLE,
             },
             "supported_methods": [method.value for method in StatisticalMethod],

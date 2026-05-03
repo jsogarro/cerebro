@@ -4,6 +4,11 @@ Integration tests for MCP server and tools.
 
 import pytest
 
+pytest.importorskip(
+    "fastmcp",
+    reason="fastmcp lives in optional [mcp] extra; install with `pip install -e .[mcp]`",
+)
+
 from src.mcp.client import MCPClient
 from src.mcp.server import MCPServer, MCPServerConfig
 from src.mcp.tools import (

@@ -6,7 +6,7 @@ as REST API endpoints for cost optimization, routing decisions, and
 learning-based LLM routing following MasRouter research patterns.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends
@@ -344,8 +344,8 @@ async def analyze_complexity(
         ),
         "requires_research": "research" in request.query.lower() or "find" in request.query.lower(),
         "requires_analysis": "analyze" in request.query.lower() or "compare" in request.query.lower(),
-        "multi_step": complexity in [QueryComplexity.MEDIUM, QueryComplexity.HIGH],
-        "estimated_subtasks": 1 if complexity == QueryComplexity.LOW else (3 if complexity == QueryComplexity.MEDIUM else 5)
+        "multi_step": complexity in [QueryComplexity.MODERATE, QueryComplexity.COMPLEX],
+        "estimated_subtasks": 1 if complexity == QueryComplexity.SIMPLE else (3 if complexity == QueryComplexity.MODERATE else 5)
     }
     
     # Generate reasoning
@@ -359,8 +359,8 @@ async def analyze_complexity(
     reasoning += f"estimated {features['estimated_subtasks']} subtasks needed."
     
     # Calculate confidence
-    confidence = 0.85 if complexity == QueryComplexity.LOW else (
-        0.75 if complexity == QueryComplexity.MEDIUM else 0.65
+    confidence = 0.85 if complexity == QueryComplexity.SIMPLE else (
+        0.75 if complexity == QueryComplexity.MODERATE else 0.65
     )
     
     return ComplexityAnalysisResponse(
@@ -396,7 +396,7 @@ async def submit_routing_feedback(
         "quality_score": feedback.quality_score,
         "success": feedback.success,
         "feedback": feedback.feedback,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(UTC).isoformat()
     }
     
     # In production, this would update the learning model

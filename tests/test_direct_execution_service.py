@@ -6,14 +6,13 @@ the Temporal workflow system.
 """
 
 import asyncio
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from src.agents.models import AgentResult
-from src.ai_brain.integration.masr_supervisor_bridge import SupervisorExecutionResult
-from src.ai_brain.router.masr import AgentAllocation, CollaborationMode, RoutingDecision
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
@@ -27,97 +26,95 @@ from src.models.research_project import (
 )
 
 
+# Lightweight dataclass stand-ins so the SUT's ``asdict(routing_decision)``
+# call works. Real ``RoutingDecision`` requires constructing five transitive
+# dataclass dependencies (ComplexityAnalysis, OptimizationResult, ...) that
+# this test does not exercise; the SUT only reads ``agent_allocation.*`` and
+# scalar estimate fields off the decision and serializes the rest opaquely.
+@dataclass
+class _FakeAgentAllocation:
+    supervisor_type: str = "research"
+    worker_count: int = 3
+    worker_types: list[str] = field(
+        default_factory=lambda: ["literature", "analysis", "synthesis"]
+    )
+
+
+@dataclass
+class _FakeRoutingDecision:
+    query_id: str = "test-query-123"
+    collaboration_mode: str = "hierarchical"
+    agent_allocation: _FakeAgentAllocation = field(default_factory=_FakeAgentAllocation)
+    estimated_cost: float = 0.015
+    estimated_latency_ms: int = 120000
+    estimated_quality: float = 0.87
+    confidence_score: float = 0.85
+    context: dict[str, Any] = field(default_factory=dict)
+
+
+@pytest.fixture
+def execution_service():
+    """Module-level DirectExecutionService with mocked dependencies.
+
+    Shared by ``TestDirectExecutionService`` and
+    ``TestDirectExecutionPerformance``; each test gets a fresh instance.
+    """
+    masr_router = AsyncMock()
+    masr_router.route.return_value = _FakeRoutingDecision()
+
+    bridge = AsyncMock()
+    result = Mock()
+    result.execution_id = "supervisor-exec-123"
+    result.supervisor_type = "research"
+    result.domain = "research"
+    result.status.value = "completed"
+    result.quality_score = 0.89
+    result.consensus_score = 0.92
+    result.execution_time_seconds = 95.0
+    result.workers_used = 3
+    result.refinement_rounds = 2
+    result.errors = []
+    agent_result = Mock()
+    agent_result.output = {
+        "research_findings": ["Finding 1"],
+        "literature_sources": ["Source 1"],
+        "synthesis": "ok",
+        "quality_metrics": {"confidence": 0.89},
+    }
+    result.agent_result = agent_result
+    bridge.execute_routing_decision.return_value = result
+
+    publisher = AsyncMock()
+    publisher.publish_project_event.return_value = None
+
+    return DirectExecutionService(
+        masr_router=masr_router,
+        supervisor_bridge=bridge,
+        supervisor_factory=Mock(),
+        event_publisher=publisher,
+    )
+
+
+@pytest.fixture
+def sample_project():
+    """Module-level sample ResearchProject for execution tests."""
+    return ResearchProject(
+        title="Test Research Project",
+        query=ResearchQuery(
+            text="What are the impacts of AI on society?",
+            domains=["ai", "sociology"],
+            depth_level=ResearchDepth.COMPREHENSIVE,
+        ),
+        user_id="test-user-123",
+        scope=ResearchScope(max_sources=25),
+    )
+
+
 class TestDirectExecutionService:
     """Test suite for DirectExecutionService."""
 
-    @pytest.fixture
-    def mock_masr_router(self):
-        """Mock MASR router."""
-        router = AsyncMock()
-        
-        # Mock routing decision
-        mock_decision = Mock(spec=RoutingDecision)
-        mock_decision.query_id = "test-query-123"
-        mock_decision.timestamp = datetime.now()
-        mock_decision.collaboration_mode = CollaborationMode.HIERARCHICAL
-        mock_decision.agent_allocation = Mock(spec=AgentAllocation)
-        mock_decision.agent_allocation.supervisor_type = "research"
-        mock_decision.agent_allocation.worker_count = 3
-        mock_decision.agent_allocation.worker_types = ["literature", "analysis", "synthesis"]
-        mock_decision.estimated_cost = 0.015
-        mock_decision.estimated_latency_ms = 120000
-        mock_decision.estimated_quality = 0.87
-        mock_decision.confidence_score = 0.85
-        
-        router.route.return_value = mock_decision
-        return router
-    
-    @pytest.fixture
-    def mock_supervisor_bridge(self):
-        """Mock supervisor bridge."""
-        bridge = AsyncMock()
-        
-        # Mock successful execution result
-        mock_result = Mock(spec=SupervisorExecutionResult)
-        mock_result.execution_id = "supervisor-exec-123"
-        mock_result.supervisor_type = "research"
-        mock_result.domain = "research"
-        mock_result.status.value = "completed"
-        mock_result.quality_score = 0.89
-        mock_result.consensus_score = 0.92
-        mock_result.execution_time_seconds = 95.0
-        mock_result.workers_used = 3
-        mock_result.refinement_rounds = 2
-        mock_result.errors = []
-        
-        # Mock agent result
-        mock_agent_result = Mock(spec=AgentResult)
-        mock_agent_result.output = {
-            "research_findings": ["Finding 1", "Finding 2"],
-            "literature_sources": ["Source 1", "Source 2"],
-            "synthesis": "Comprehensive analysis completed",
-            "quality_metrics": {"confidence": 0.89}
-        }
-        mock_result.agent_result = mock_agent_result
-        
-        bridge.execute_routing_decision.return_value = mock_result
-        return bridge
-    
-    @pytest.fixture
-    def mock_supervisor_factory(self):
-        """Mock supervisor factory."""
-        return Mock()
-    
-    @pytest.fixture
-    def mock_event_publisher(self):
-        """Mock event publisher."""
-        publisher = AsyncMock()
-        publisher.publish_project_event.return_value = None
-        return publisher
-    
-    @pytest.fixture
-    def execution_service(self, mock_masr_router, mock_supervisor_bridge, mock_supervisor_factory, mock_event_publisher):
-        """Create DirectExecutionService with mocked dependencies."""
-        return DirectExecutionService(
-            masr_router=mock_masr_router,
-            supervisor_bridge=mock_supervisor_bridge,
-            supervisor_factory=mock_supervisor_factory,
-            event_publisher=mock_event_publisher
-        )
-    
-    @pytest.fixture
-    def sample_project(self):
-        """Create sample research project."""
-        return ResearchProject(
-            title="Test Research Project",
-            query=ResearchQuery(
-                question="What are the impacts of AI on society?",
-                domains=["ai", "sociology"],
-                depth_level=ResearchDepth.COMPREHENSIVE
-            ),
-            user_id="test-user-123",
-            scope=ResearchScope(max_sources=25)
-        )
+    # Fixtures (execution_service, sample_project) are module-level so
+    # TestDirectExecutionPerformance can share them.
 
     @pytest.mark.asyncio
     async def test_start_research_execution_success(self, execution_service, sample_project):
@@ -134,22 +131,22 @@ class TestDirectExecutionService:
         assert execution_status.current_phase == "initialization"
 
     @pytest.mark.asyncio
-    async def test_execution_workflow_complete_flow(self, execution_service, sample_project, mock_masr_router, mock_supervisor_bridge):
+    async def test_execution_workflow_complete_flow(self, execution_service, sample_project):
         """Test complete execution workflow from start to finish."""
-        
+
         # Start execution
         execution_id = await execution_service.start_research_execution(sample_project)
-        
+
         # Wait for async execution to complete
         await asyncio.sleep(0.1)  # Give time for background task
-        
-        # Verify MASR router was called
-        mock_masr_router.route.assert_called_once()
-        call_args = mock_masr_router.route.call_args
-        assert sample_project.query.question in str(call_args)
-        
+
+        # Verify MASR router was called (mocks live on the service instance)
+        execution_service.masr_router.route.assert_called_once()
+        call_args = execution_service.masr_router.route.call_args
+        assert sample_project.query.text in str(call_args)
+
         # Verify supervisor bridge was called
-        mock_supervisor_bridge.execute_routing_decision.assert_called_once()
+        execution_service.supervisor_bridge.execute_routing_decision.assert_called_once()
         
         # Check execution status
         execution_status = execution_service.active_executions[execution_id]
@@ -341,17 +338,21 @@ class TestExecutionStatus:
         assert status.retry_count == 0
         assert isinstance(status.started_at, datetime)
 
-    def test_execution_status_post_init(self):
-        """Test ExecutionStatus post-initialization."""
-        
+    def test_execution_status_default_collections(self):
+        """ExecutionStatus dataclass uses default_factory for collections.
+
+        Previously the dataclass coerced ``None`` to ``{}`` in ``__post_init__``;
+        the simplified version relies on ``field(default_factory=...)`` instead.
+        Explicit ``None`` is no longer accepted as input; callers should omit
+        the field to get the default empty container.
+        """
+
         status = ExecutionStatus(
             execution_id="test-123",
-            project_id="project-456", 
+            project_id="project-456",
             status="pending",
-            agent_results=None,  # Should be initialized to {}
-            quality_scores=None,  # Should be initialized to {}
         )
-        
+
         assert status.agent_results == {}
         assert status.quality_scores == {}
         assert status.errors == []
@@ -374,7 +375,7 @@ class TestDirectExecutionIntegration:
         ResearchProject(
             title="Integration Test Project",
             query=ResearchQuery(
-                question="Test query for integration",
+                text="Test query for integration",
                 domains=["test"],
                 depth_level=ResearchDepth.COMPREHENSIVE
             ),

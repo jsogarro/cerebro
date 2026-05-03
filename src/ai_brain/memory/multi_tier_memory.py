@@ -15,18 +15,19 @@ cross-tier relationships, and automatic memory management.
 """
 
 import asyncio
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from .episodic_memory import Episode, EpisodeQuery, EpisodicMemoryManager, EventType
 from .procedural_memory import ProceduralMemoryManager, Procedure
 from .semantic_memory import SemanticMemoryManager
 from .working_memory import ConversationContext, WorkingMemoryManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class MemoryTier(Enum):
@@ -101,8 +102,8 @@ class MultiTierMemorySystem:
         self.enable_cross_tier_retrieval = config.get("enable_cross_tier", True)
         self.max_recall_items = config.get("max_recall_items", 10)
         self.memory_consolidation_interval = config.get(
-            "consolidation_interval", 3600
-        )  # 1 hour
+            "consolidation_interval", 300
+        )  # 5 minutes
 
         # Performance tracking
         self.total_operations = 0
@@ -452,6 +453,20 @@ class MultiTierMemorySystem:
             "episodic_memory": episodic_stats,
             "semantic_memory": semantic_stats,
             "procedural_memory": procedural_stats,
+        }
+
+    async def purge_user_data(self, user_id: str) -> dict[str, int]:
+        """Purge user-scoped data from memory tiers that store user interactions."""
+
+        working_deleted = await self.working_memory.delete_by_user_id(user_id)
+        episodic_deleted = await self.episodic_memory.delete_by_user_id(user_id)
+        semantic_deleted = await self.semantic_memory.delete_by_user_id(user_id)
+        procedural_deleted = await self.procedural_memory.delete_by_user_id(user_id)
+        return {
+            "working_memory": working_deleted,
+            "episodic_memory": episodic_deleted,
+            "semantic_memory": semantic_deleted,
+            "procedural_memory": procedural_deleted,
         }
 
     async def _store_in_working_memory(

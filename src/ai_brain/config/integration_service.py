@@ -12,9 +12,10 @@ This service acts as the glue between:
 - Memory System (configuration for different memory tiers)
 """
 
-import logging
 from datetime import datetime
 from typing import Any
+
+from structlog import get_logger
 
 from ...utils.async_helpers import BackgroundTaskTracker
 from ..providers.model_router import ModelRouter
@@ -23,7 +24,7 @@ from ..router.masr import MASRouter
 from .model_config_manager import ConfigurationChangeEvent, ModelConfigManager
 from .model_schemas import ModelConfiguration, ModelSpecification, ProviderConfiguration
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ConfigurationIntegrationService:

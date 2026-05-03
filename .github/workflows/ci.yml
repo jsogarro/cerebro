@@ -95,6 +95,10 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install -e ".[dev]"
+
+      - name: Run golden dataset regression tests
+        run: |
+          pytest -o addopts='' tests/regression -q
       
       - name: Run tests with coverage
         env:
@@ -225,18 +229,18 @@ jobs:
       
       - name: Run bandit
         run: |
-          bandit -r src -f json -o bandit-report.json || true
-          bandit -r src
+          bandit -r src -f json -o bandit-report.json
       
       - name: Run safety check
         run: |
-          uv pip freeze | safety check --stdin --json || true
+          uv pip freeze | safety check --stdin --json
       
       - name: Run pip-audit
         run: |
-          pip-audit || true
+          pip-audit
       
       - name: Upload security reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
@@ -255,8 +259,14 @@ jobs:
       
       - name: Validate Dockerfile
         run: |
-          docker run --rm -i hadolint/hadolint < Dockerfile || true
-          docker run --rm -i hadolint/hadolint < docker/Dockerfile.worker || true
+          for dockerfile in Dockerfile docker/Dockerfile.worker; do
+            if [ -f "$dockerfile" ]; then
+              echo "Linting $dockerfile"
+              docker run --rm -i hadolint/hadolint < "$dockerfile"
+            else
+              echo "Skipping $dockerfile (not present in tree)"
+            fi
+          done
       
       - name: Build API image
         uses: docker/build-push-action@v5

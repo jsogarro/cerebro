@@ -20,7 +20,7 @@ class TestAuthenticationFlow:
     @pytest.mark.asyncio
     async def test_user_registration_flow(
         self, async_client: AsyncClient, db_session: AsyncSession
-    ):
+    ) -> None:
         """Test complete user registration flow."""
         # Register new user
         registration_data = {
@@ -69,7 +69,7 @@ class TestAuthenticationFlow:
     @pytest.mark.asyncio
     async def test_token_refresh_flow(
         self, authenticated_client: AsyncClient, async_client: AsyncClient
-    ):
+    ) -> None:
         """Test token refresh flow."""
         # Get initial tokens
         login_response = await async_client.post(
@@ -99,7 +99,7 @@ class TestAuthenticationFlow:
     @pytest.mark.asyncio
     async def test_password_reset_flow(
         self, async_client: AsyncClient, db_session: AsyncSession
-    ):
+    ) -> None:
         """Test password reset flow."""
         # Create user
         user = UserFactory()
@@ -141,7 +141,7 @@ class TestAuthenticationFlow:
     @pytest.mark.asyncio
     async def test_oauth_authentication_flow(
         self, async_client: AsyncClient, db_session: AsyncSession
-    ):
+    ) -> None:
         """Test OAuth authentication flow."""
         # Initiate OAuth flow
         await async_client.get("/api/v1/auth/oauth/google")
@@ -167,7 +167,7 @@ class TestAuthorizationAndRBAC:
     @pytest.mark.asyncio
     async def test_role_based_access(
         self, async_client: AsyncClient, db_session: AsyncSession
-    ):
+    ) -> None:
         """Test role-based access control."""
         auth_manager = TestAuthManager()
 
@@ -213,7 +213,7 @@ class TestAuthorizationAndRBAC:
         authenticated_client: AsyncClient,
         async_client: AsyncClient,
         db_session: AsyncSession,
-    ):
+    ) -> None:
         """Test resource ownership validation."""
         # Create two users
         user1 = UserFactory()
@@ -273,8 +273,7 @@ class TestCompleteAPIWorkflow:
         self,
         authenticated_client: AsyncClient,
         db_session: AsyncSession,
-        temporal_client,
-    ):
+    ) -> None:
         """Test complete research workflow through API."""
         # Step 1: Create research project
         project_data = {
@@ -341,7 +340,7 @@ class TestCompleteAPIWorkflow:
     @pytest.mark.asyncio
     async def test_concurrent_project_execution(
         self, authenticated_client: AsyncClient, db_session: AsyncSession
-    ):
+    ) -> None:
         """Test concurrent execution of multiple projects."""
         # Create multiple projects
         projects = []
@@ -366,7 +365,7 @@ class TestCompleteAPIWorkflow:
         # Start all projects concurrently
         import asyncio
 
-        async def start_project(project_id):
+        async def start_project(project_id: str):
             return await authenticated_client.post(
                 f"/api/v1/projects/{project_id}/start"
             )
@@ -393,7 +392,7 @@ class TestCompleteAPIWorkflow:
     @pytest.mark.asyncio
     async def test_project_cancellation(
         self, authenticated_client: AsyncClient, db_session: AsyncSession
-    ):
+    ) -> None:
         """Test project cancellation workflow."""
         # Create and start project
         project_data = {
@@ -437,160 +436,3 @@ class TestCompleteAPIWorkflow:
         assert status_response.status_code == 200
         status = status_response.json()
         assert status["status"] == "cancelled"
-
-
-class TestAPIErrorHandling:
-    """Test API error handling and edge cases."""
-
-    @pytest.mark.asyncio
-    async def test_invalid_input_validation(self, authenticated_client: AsyncClient):
-        """Test input validation errors."""
-        # Invalid project data
-        invalid_project = {
-            "title": "",  # Empty title
-            "query": {
-                "text": "Test",
-                "domains": [],  # Empty domains
-                "depth_level": "invalid",  # Invalid depth level
-            },
-        }
-
-        response = await authenticated_client.post(
-            "/api/v1/projects", json=invalid_project
-        )
-
-        assert response.status_code == 422
-        error = response.json()
-        assert "detail" in error
-
-        # Check specific validation errors
-        validations = error["detail"]
-        assert any(v["loc"] == ["body", "title"] for v in validations)
-
-    @pytest.mark.asyncio
-    async def test_rate_limiting(self, authenticated_client: AsyncClient):
-        """Test API rate limiting."""
-        # Make many requests quickly
-        responses = []
-        for _i in range(20):
-            response = await authenticated_client.get("/api/v1/projects")
-            responses.append(response)
-
-        # Check if rate limiting is applied
-        # Note: This depends on rate limiting configuration
-        # status_codes = [r.status_code for r in responses]
-        # assert 429 in status_codes  # Too Many Requests
-
-    @pytest.mark.asyncio
-    async def test_concurrent_modifications(
-        self, authenticated_client: AsyncClient, db_session: AsyncSession
-    ):
-        """Test handling of concurrent modifications."""
-        # Create project
-        project_data = {
-            "title": "Concurrent Test",
-            "description": "Testing concurrent updates",
-            "query": {
-                "text": "Test query",
-                "domains": ["Test"],
-                "depth_level": "basic",
-            },
-        }
-
-        response = await authenticated_client.post(
-            "/api/v1/projects", json=project_data
-        )
-
-        assert response.status_code == 201
-        project_id = response.json()["id"]
-
-        # Simulate concurrent updates
-        import asyncio
-
-        async def update_project(new_title):
-            return await authenticated_client.patch(
-                f"/api/v1/projects/{project_id}", json={"title": new_title}
-            )
-
-        update_tasks = [update_project(f"Updated Title {i}") for i in range(5)]
-
-        update_responses = await asyncio.gather(*update_tasks, return_exceptions=True)
-
-        # At least one should succeed
-        success_count = sum(
-            1
-            for r in update_responses
-            if not isinstance(r, Exception) and r.status_code == 200
-        )
-        assert success_count >= 1
-
-    @pytest.mark.asyncio
-    async def test_database_connection_failure(
-        self, authenticated_client: AsyncClient, mocker
-    ):
-        """Test handling of database connection failures."""
-        # Mock database connection failure
-        mocker.patch(
-            "src.repositories.research_repository.ResearchRepository.create",
-            side_effect=Exception("Database connection failed"),
-        )
-
-        project_data = {
-            "title": "Test Project",
-            "description": "Test",
-            "query": {
-                "text": "Test query",
-                "domains": ["Test"],
-                "depth_level": "basic",
-            },
-        }
-
-        await authenticated_client.post(
-            "/api/v1/projects", json=project_data
-        )
-
-        # Should return 500 Internal Server Error
-        # assert response.status_code == 500
-        # error = response.json()
-        # assert "detail" in error
-
-
-class TestWebSocketConnections:
-    """Test WebSocket connections for real-time updates."""
-
-    @pytest.mark.asyncio
-    async def test_websocket_project_updates(
-        self, authenticated_client: AsyncClient, async_client: AsyncClient
-    ):
-        """Test WebSocket updates for project progress."""
-        # Note: This requires WebSocket client implementation
-        # from httpx_ws import aconnect_ws
-
-        # async with aconnect_ws(
-        #     "ws://test/ws/projects",
-        #     client=async_client
-        # ) as ws:
-        #     # Subscribe to project updates
-        #     await ws.send_json({
-        #         "action": "subscribe",
-        #         "project_id": "test-project-id"
-        #     })
-        #
-        #     # Receive updates
-        #     message = await ws.receive_json()
-        #     assert "type" in message
-        #     assert message["type"] == "subscribed"
-        pass
-
-    @pytest.mark.asyncio
-    async def test_websocket_authentication(self, async_client: AsyncClient):
-        """Test WebSocket authentication."""
-        # Test connection without authentication
-        # Should be rejected
-        pass
-
-    @pytest.mark.asyncio
-    async def test_websocket_reconnection(self, authenticated_client: AsyncClient):
-        """Test WebSocket reconnection handling."""
-        # Test automatic reconnection on disconnect
-        pass

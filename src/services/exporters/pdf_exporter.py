@@ -6,17 +6,18 @@ following functional programming principles with pure transformation functions.
 """
 
 import io
-import logging
 import os
 import tempfile
 from typing import Any
+
+from structlog import get_logger
 
 try:
     import weasyprint
     from weasyprint import CSS, HTML
     from weasyprint.text.fonts import FontConfiguration
     WEASYPRINT_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     WEASYPRINT_AVAILABLE = False
     weasyprint = None
     HTML = None
@@ -26,7 +27,7 @@ except ImportError:
 from src.models.report import Report, ReportFormat, ReportOutput
 from src.services.report_config import ReportSettings
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class PDFExportError(Exception):
