@@ -207,7 +207,9 @@ class EpisodicMemoryManager:
 
         # Memory configuration
         self.max_session_duration_hours: int = config.get("max_session_duration_hours", 24)
-        self.retention_days: int = config.get("retention_days", 90)
+        self.retention_days: int = config.get("retention_days", 7)
+        self.max_size: int = config.get("max_size", 10000)
+        self.cleanup_interval: int = config.get("cleanup_interval", 300)
 
         # Database components
         self.engine: Any = None
@@ -215,6 +217,7 @@ class EpisodicMemoryManager:
 
         # Fallback storage
         self._fallback_storage: list[Episode] = []
+        self._fallback_accessed_at: dict[str, datetime] = {}
 
         # Performance tracking
         self.write_count = 0
@@ -628,12 +631,8 @@ class EpisodicMemoryManager:
     def _store_episode_fallback(self, episode: Episode) -> None:
         """Store episode in fallback storage."""
         self._fallback_storage.append(episode)
-
-        # Limit fallback storage size
-        max_fallback_size = self.config.get("max_fallback_size", 1000)
-        if len(self._fallback_storage) > max_fallback_size:
-            # Remove oldest episodes
-            self._fallback_storage = self._fallback_storage[-max_fallback_size:]
+        self._fallback_accessed_at[episode.id] = datetime.now()
+        self._evict_fallback_if_needed()
 
     def _retrieve_episodes_fallback(self, query: EpisodeQuery) -> list[Episode]:
         """Retrieve episodes from fallback storage."""
@@ -671,7 +670,26 @@ class EpisodicMemoryManager:
         episodes.sort(key=lambda e: getattr(e, query.order_by), reverse=reverse)
 
         # Apply offset and limit
-        return episodes[query.offset : query.offset + query.limit]
+        selected = episodes[query.offset : query.offset + query.limit]
+        now = datetime.now()
+        for episode in selected:
+            self._fallback_accessed_at[episode.id] = now
+        return selected
+
+    def _evict_fallback_if_needed(self) -> None:
+        """Evict least recently used fallback episodes over the configured cap."""
+        while len(self._fallback_storage) > self.max_size:
+            lru_episode = min(
+                self._fallback_storage,
+                key=lambda episode: self._fallback_accessed_at.get(
+                    episode.id,
+                    episode.timestamp,
+                ),
+            )
+            self._fallback_storage = [
+                episode for episode in self._fallback_storage if episode.id != lru_episode.id
+            ]
+            self._fallback_accessed_at.pop(lru_episode.id, None)
 
     def _calculate_episode_similarity(
         self, episode1: Episode, episode2: Episode
@@ -753,6 +771,12 @@ class EpisodicMemoryManager:
         self._fallback_storage = [
             e for e in self._fallback_storage if e.timestamp >= cutoff_date
         ]
+        retained_ids = {episode.id for episode in self._fallback_storage}
+        self._fallback_accessed_at = {
+            episode_id: accessed_at
+            for episode_id, accessed_at in self._fallback_accessed_at.items()
+            if episode_id in retained_ids
+        }
         return original_count - len(self._fallback_storage)
 
     async def close(self) -> None:
