@@ -453,6 +453,63 @@ async def run_coordination_experiment(
 
 # WebSocket Endpoints
 
+@router.websocket("/coordination/ws")
+async def coordination_progress_websocket(
+    websocket: WebSocket,
+    coordination_id: str | None = Query(None)
+) -> None:
+    """
+    WebSocket endpoint for real-time worker coordination progress updates.
+
+    Streams live updates about worker assignments, task progress,
+    conflict detection, and resolution events.
+    """
+    client_id = f"coordination-{coordination_id or id(websocket)}"
+
+    try:
+        await connection_manager.connect(websocket, client_id)
+
+        # Send initial connection confirmation
+        await websocket.send_json({
+            "event_type": "connection_established",
+            "coordination_id": coordination_id
+        })
+
+        # Simulate progress updates if coordination_id provided
+        if coordination_id:
+            # In production, this would fetch real coordination status
+            async for event in connection_manager.iter_coordination_progress_events(
+                coordination_id
+            ):
+                await websocket.send_json(event.model_dump())
+
+                if event.progress_percentage == 100:
+                    await websocket.send_json({
+                        "event_type": "completed",
+                        "coordination_id": coordination_id,
+                        "message": "Coordination completed successfully"
+                    })
+
+        # Keep connection alive
+        while True:
+            try:
+                data = await websocket.receive_json()
+                if data.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except WebSocketDisconnect:
+                break
+
+    except Exception as e:
+        logger.error(
+            "coordination_websocket_error",
+            coordination_id=coordination_id,
+            client_id=client_id,
+            error=str(e),
+        )
+    finally:
+        connection_manager.disconnect(websocket, client_id)
+
+
 @router.websocket("/{supervisor_type}/ws")
 async def supervisor_websocket(
     websocket: WebSocket,
@@ -525,63 +582,6 @@ async def supervisor_websocket(
     finally:
         connection_manager.disconnect(websocket, client_id)
         connection_manager.unsubscribe_supervisor(supervisor_type.value, websocket)
-
-
-@router.websocket("/coordination/ws")
-async def coordination_progress_websocket(
-    websocket: WebSocket,
-    coordination_id: str | None = Query(None)
-) -> None:
-    """
-    WebSocket endpoint for real-time worker coordination progress updates.
-    
-    Streams live updates about worker assignments, task progress,
-    conflict detection, and resolution events.
-    """
-    client_id = f"coordination-{coordination_id or id(websocket)}"
-    
-    try:
-        await connection_manager.connect(websocket, client_id)
-        
-        # Send initial connection confirmation
-        await websocket.send_json({
-            "event_type": "connection_established",
-            "coordination_id": coordination_id
-        })
-        
-        # Simulate progress updates if coordination_id provided
-        if coordination_id:
-            # In production, this would fetch real coordination status
-            async for event in connection_manager.iter_coordination_progress_events(
-                coordination_id
-            ):
-                await websocket.send_json(event.model_dump())
-                
-                if event.progress_percentage == 100:
-                    await websocket.send_json({
-                        "event_type": "completed",
-                        "coordination_id": coordination_id,
-                        "message": "Coordination completed successfully"
-                    })
-        
-        # Keep connection alive
-        while True:
-            try:
-                data = await websocket.receive_json()
-                if data.get("type") == "ping":
-                    await websocket.send_json({"type": "pong"})
-            except WebSocketDisconnect:
-                break
-                
-    except Exception as e:
-        logger.error(
-            "coordination_websocket_error",
-            coordination_id=coordination_id,
-            client_id=client_id,
-            error=str(e),
-        )
-    finally:
-        connection_manager.disconnect(websocket, client_id)
 
 
 # Error Handlers (deprecated - use FastAPI exception handlers in main app)
