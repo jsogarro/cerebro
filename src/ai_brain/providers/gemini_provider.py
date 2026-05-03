@@ -29,7 +29,8 @@ try:
     from src.services.gemini_service import GeminiService as GeminiServiceClass
     GEMINI_SERVICE_AVAILABLE = True
 except ImportError:
-    GeminiServiceClass = None
+    # Optional dep fallback: rebind name to None when the real class is unavailable.
+    GeminiServiceClass = None  # type: ignore[assignment,misc]
     GEMINI_SERVICE_AVAILABLE = False
 
 logger = get_logger(__name__)

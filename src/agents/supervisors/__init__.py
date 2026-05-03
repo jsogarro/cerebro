@@ -16,6 +16,8 @@ Integration:
 - MASR: Intelligent routing and resource allocation
 """
 
+from typing import Any
+
 from .base_supervisor import BaseSupervisor
 from .research_supervisor import ResearchSupervisor
 
@@ -23,7 +25,7 @@ from .research_supervisor import ResearchSupervisor
 # Use lazy imports to avoid crashing when their modules don't exist.
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "AnalyticsSupervisor":
         from .analytics_supervisor import AnalyticsSupervisor
 

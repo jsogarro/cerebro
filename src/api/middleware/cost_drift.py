@@ -1,7 +1,7 @@
 """Request-level LLM cost drift tracking middleware."""
 
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -16,7 +16,7 @@ from src.core.observability import (
 DEFAULT_COST_DRIFT_THRESHOLD_RATIO = 0.2
 
 
-class LLMCostDriftMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
+class LLMCostDriftMiddleware(BaseHTTPMiddleware):
     """Compare MASR-estimated request cost with actual LLM provider cost."""
 
     def __init__(
@@ -50,4 +50,4 @@ def _route_label(request: Request) -> str:
     path = getattr(route, "path", None)
     if isinstance(path, str):
         return path
-    return cast("str", request.url.path)
+    return request.url.path

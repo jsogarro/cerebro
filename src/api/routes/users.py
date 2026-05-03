@@ -27,7 +27,7 @@ async def get_memory_system(request: Request) -> MultiTierMemorySystem | None:
     return None
 
 
-@router.delete("/{user_id}/gdpr")  # type: ignore[untyped-decorator]
+@router.delete("/{user_id}/gdpr")
 async def delete_user_gdpr(
     user_id: UUID,
     db: AsyncSession = Depends(get_session),
@@ -46,7 +46,8 @@ async def delete_user_gdpr(
         task_result = await db.execute(
             delete(AgentTask).where(AgentTask.project_id.in_(project_ids))
         )
-        deleted_tasks = task_result.rowcount or 0
+        # SQLAlchemy 2.x: Result.rowcount is valid for DELETE/UPDATE; mypy stub gap.
+        deleted_tasks = task_result.rowcount or 0  # type: ignore[attr-defined]
 
     project_result = await db.execute(
         delete(ResearchProject).where(ResearchProject.user_id == user_id_text)
@@ -62,8 +63,9 @@ async def delete_user_gdpr(
     return {
         "user_id": user_id_text,
         "deleted": {
-            "users": user_result.rowcount or 0,
-            "research_projects": project_result.rowcount or 0,
+            # SQLAlchemy 2.x: Result.rowcount is valid for DELETE/UPDATE; mypy stub gap.
+            "users": user_result.rowcount or 0,  # type: ignore[attr-defined]
+            "research_projects": project_result.rowcount or 0,  # type: ignore[attr-defined]
             "agent_tasks": deleted_tasks,
             "memory": memory_deleted,
         },

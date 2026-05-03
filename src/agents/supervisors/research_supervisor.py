@@ -363,6 +363,13 @@ REFERENCES:
 
         sections: dict[str, Any] = {"revision_count": 0, "references": citations[:15]}
 
+        if self.gemini_service is None:
+            logger.warning(
+                "research_paper_generation_skipped_no_gemini",
+                reason="gemini_service unavailable; cannot generate paper sections",
+            )
+            return sections
+
         section_prompts = [
             ("title", "Write a concise, descriptive academic title for a research paper on this topic. Return ONLY the title text, nothing else."),
             ("abstract", "Write a 200-300 word academic abstract. Include: research question, methodology, key findings, and implications. Write in formal academic prose. Return ONLY the abstract text."),

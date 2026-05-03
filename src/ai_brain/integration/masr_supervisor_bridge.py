@@ -309,8 +309,12 @@ class ResourcePool:
                 logger.debug(f"Reused supervisor {supervisor_type} from pool")
                 return supervisor
         
-        # Create new supervisor
+        # Create new supervisor. ``BaseSupervisor.__init__`` requires
+        # ``supervisor_type`` and ``domain`` positionally; pull them off the
+        # config so subclasses inheriting the base signature collect.
         supervisor = supervisor_class(
+            supervisor_type=config.supervisor_type,
+            domain=config.domain,
             gemini_service=self.gemini_service,
             cache_client=None,
             config=self._create_supervisor_config(config),

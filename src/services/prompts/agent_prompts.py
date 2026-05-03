@@ -4,7 +4,7 @@ Agent-specific prompt templates.
 This module contains prompts for different research agents.
 """
 
-from typing import Any, cast
+from typing import Any
 
 from src.services.prompts.base_prompts import (
     add_output_format,
@@ -85,7 +85,7 @@ Please provide a comprehensive literature analysis following systematic review p
     }
 
     prompt = compose_prompt([system_prompt, task_description])
-    return cast(str, add_output_format(prompt, schema))
+    return add_output_format(prompt, schema)
 
 
 def generate_comparative_agent_prompt(
@@ -146,7 +146,7 @@ Provide a comprehensive comparative analysis with comparison matrix, strengths/w
         schema["comparative_analysis"]["contextual_recommendation"] = str
 
     prompt = compose_prompt([system_prompt, task_description])
-    return cast(str, add_output_format(prompt, schema))
+    return add_output_format(prompt, schema)
 
 
 def generate_methodology_agent_prompt(
@@ -190,7 +190,7 @@ Provide detailed methodological recommendations including design, data collectio
     }
 
     prompt = compose_prompt([system_prompt, task_description])
-    return cast(str, add_output_format(prompt, schema))
+    return add_output_format(prompt, schema)
 
 
 def generate_synthesis_agent_prompt(agent_outputs: dict[str, Any]) -> str:
@@ -236,7 +236,7 @@ Create a comprehensive synthesis that integrates all findings into a coherent re
     }
 
     prompt = compose_prompt([system_prompt, task_description])
-    return cast(str, add_output_format(prompt, schema))
+    return add_output_format(prompt, schema)
 
 
 def generate_citation_agent_prompt(
@@ -282,4 +282,4 @@ Provide properly formatted citations and verify source information.
     }
 
     prompt = compose_prompt([system_prompt, task_description])
-    return cast(str, add_output_format(prompt, schema))
+    return add_output_format(prompt, schema)

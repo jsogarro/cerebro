@@ -47,7 +47,8 @@ try:
         BayesianExperimentDesigner as _BayesianExperimentDesigner,
     )
 except ImportError:
-    _BayesianExperimentDesigner = None
+    # Optional dep fallback: rebind name to None when the real class is unavailable.
+    _BayesianExperimentDesigner = None  # type: ignore[assignment,misc]
 
 logger = get_logger()
 

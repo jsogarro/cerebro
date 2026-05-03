@@ -6,7 +6,7 @@ Provides utilities for managing Alembic migrations programmatically.
 
 import subprocess
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
@@ -89,7 +89,7 @@ class MigrationManager:
 
         with engine.connect() as connection:
             context = MigrationContext.configure(connection)
-            current_rev = cast("str | None", context.get_current_revision())
+            current_rev = context.get_current_revision()
 
         engine.dispose()
         return current_rev
@@ -159,7 +159,7 @@ class MigrationManager:
         script = self.script_dir.get_revision(head)
 
         logger.info("migration_created", path=script.path)
-        return cast("str", script.path)
+        return script.path
 
     def show_history(self, verbose: bool = False) -> list[dict[str, Any]]:
         """

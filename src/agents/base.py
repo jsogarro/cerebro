@@ -221,7 +221,7 @@ class BaseAgent(ABC):
         """Clear the message queue."""
         self._message_queue.clear()
 
-    @retry(  # type: ignore[untyped-decorator]
+    @retry(
         retry=retry_if_exception_type((ConnectionError, TimeoutError)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),

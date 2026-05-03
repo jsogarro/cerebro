@@ -85,11 +85,11 @@ def create_engine(
     # Add event listeners for debugging
     if echo_pool:
 
-        @event.listens_for(engine.sync_engine, "connect")  # type: ignore[untyped-decorator]
+        @event.listens_for(engine.sync_engine, "connect")
         def receive_connect(dbapi_conn: Any, connection_record: Any) -> None:
             logger.debug("pool_connect", connection_record=str(connection_record))
 
-        @event.listens_for(engine.sync_engine, "checkout")  # type: ignore[untyped-decorator]
+        @event.listens_for(engine.sync_engine, "checkout")
         def receive_checkout(
             dbapi_conn: Any,
             connection_record: Any,

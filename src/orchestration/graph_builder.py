@@ -7,7 +7,7 @@ with nodes, edges, and conditional routing.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
 from langgraph.graph import END, StateGraph
 from structlog import get_logger
@@ -178,7 +178,7 @@ class ResearchGraphBuilder:
             route = router(state)
             if route not in route_map:
                 logger.warning(f"Unknown route: {route}, defaulting to END")
-                return cast(str, END)
+                return END
             return route_map[route]
 
         self.add_edge(source, wrapped_router)
@@ -250,7 +250,7 @@ class ResearchGraphBuilder:
                     def conditional_target(state: ResearchState, _edge: EdgeConfig = edge) -> str:
                         if _edge.condition and _edge.condition(state) and isinstance(_edge.target, str):
                             return _edge.target
-                        return cast(str, END)
+                        return END
 
                     self._graph.add_conditional_edges(edge.source, conditional_target)
                 else:

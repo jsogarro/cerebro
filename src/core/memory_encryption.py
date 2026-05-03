@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, cast
+from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -68,8 +68,7 @@ class MemoryEncryption:
             raise ValueError("MEMORY_ENCRYPTION_KEY is required to decrypt memory text")
         token = value.removeprefix(ENCRYPTED_TEXT_PREFIX).encode("utf-8")
         try:
-            decrypted = cast(str, self._fernet.decrypt(token).decode("utf-8"))
-            return decrypted
+            return self._fernet.decrypt(token).decode("utf-8")
         except InvalidToken as exc:
             raise ValueError("Invalid encrypted memory text") from exc
 

@@ -19,7 +19,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from structlog import get_logger
 
@@ -201,7 +201,7 @@ class MASRouter:
             if cached_decision:
                 logger.info(f"Using cached routing for {query_id}")
                 await self._routing_circuit_breaker._on_success()
-                return cast(RoutingDecision, cached_decision)
+                return cached_decision
 
             # Step 1: Analyze query complexity
             complexity_analysis = await self.complexity_analyzer.analyze(query, context)

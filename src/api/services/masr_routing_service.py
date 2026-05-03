@@ -135,9 +135,11 @@ class MASRRoutingService:
                 from src.ai_brain.router.query_analyzer import ComplexityLevel
                 complexity = ComplexityLevel.MODERATE
 
-            # Extract domain
+            # Extract domain. ``domains`` may be empty if the analyzer did not
+            # surface a primary domain; fall back to GENERAL so the response
+            # type (``QueryDomain``, not ``QueryDomain | None``) is satisfied.
             domains = decision.complexity_analysis.domains if hasattr(decision.complexity_analysis, 'domains') else []
-            domain = domains[0] if domains else None
+            domain = domains[0] if domains else QueryDomain.GENERAL
 
             # Build response
             response = RoutingDecisionResponse(
