@@ -86,10 +86,9 @@ class MethodologyAgent(BaseAgent):
                 output=output,
                 confidence=confidence,
                 execution_time=0.0,
-                metadata={
-                    "agent_type": self.get_agent_type(),
-                    "methods_count": len(output["data_collection_methods"]),
-                },
+                metadata=self.build_execution_metadata(
+                    methods_count=len(output["data_collection_methods"]),
+                ),
             )
 
             # Cache the result

@@ -5,6 +5,10 @@ import tempfile
 
 from src.models.report import Report, ReportConfiguration
 from src.prompts.manager import PromptManager
+from src.services.prompts.agent_prompts import (
+    AGENT_PROMPT_TEMPLATE_METADATA,
+    get_agent_prompt_version,
+)
 from src.services.report_config import ReportSettings
 from src.services.template_renderer import TemplateRenderer
 
@@ -59,3 +63,49 @@ def test_template_renderer_sanitizes_markdown_html_before_safe_rendering() -> No
         assert "<script" not in html.lower()
         assert "onerror" not in html.lower()
         assert "<img" not in html.lower()
+
+
+def test_agent_prompt_templates_expose_versions() -> None:
+    expected_agents = {
+        "literature_review",
+        "comparative_analysis",
+        "methodology",
+        "synthesis",
+        "citation",
+    }
+
+    assert expected_agents <= set(AGENT_PROMPT_TEMPLATE_METADATA)
+    for agent_type in expected_agents:
+        metadata = AGENT_PROMPT_TEMPLATE_METADATA[agent_type]
+        assert metadata["version"]
+        assert get_agent_prompt_version(agent_type) == metadata["version"]
+
+
+def test_agent_execution_metadata_tracks_prompt_version() -> None:
+    from src.agents.base import BaseAgent
+    from src.agents.models import AgentTask
+
+    class VersionedTestAgent(BaseAgent):
+        def get_agent_type(self) -> str:
+            return "literature_review"
+
+        async def execute(self, task: AgentTask):  # type: ignore[no-untyped-def]
+            raise NotImplementedError
+
+        async def validate_result(self, result):  # type: ignore[no-untyped-def]
+            return True
+
+    agent = VersionedTestAgent()
+    result = agent.handle_error(
+        AgentTask(
+            id="task-1",
+            agent_type="literature_review",
+            input_data={},
+        ),
+        ValueError("boom"),
+    )
+
+    assert result.metadata["prompt_version"] == get_agent_prompt_version(
+        "literature_review"
+    )
+    assert result.metadata["prompt_template"] == "literature_review"

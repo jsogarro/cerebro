@@ -4,13 +4,45 @@ Agent-specific prompt templates.
 This module contains prompts for different research agents.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from src.services.prompts.base_prompts import (
     add_output_format,
     compose_prompt,
     create_system_prompt,
 )
+
+AGENT_PROMPT_TEMPLATE_METADATA: dict[str, dict[str, str]] = {
+    "literature_review": {
+        "template": "generate_literature_agent_prompt",
+        "version": "1.0.0",
+    },
+    "comparative_analysis": {
+        "template": "generate_comparative_agent_prompt",
+        "version": "1.0.0",
+    },
+    "methodology": {
+        "template": "generate_methodology_agent_prompt",
+        "version": "1.0.0",
+    },
+    "synthesis": {
+        "template": "generate_synthesis_agent_prompt",
+        "version": "1.0.0",
+    },
+    "citation": {
+        "template": "generate_citation_agent_prompt",
+        "version": "1.0.0",
+    },
+}
+
+
+def get_agent_prompt_version(agent_type: str) -> str:
+    """Return the tracked prompt version for an agent type."""
+
+    metadata = AGENT_PROMPT_TEMPLATE_METADATA.get(agent_type)
+    if metadata is None:
+        return "unversioned"
+    return metadata["version"]
 
 
 def generate_literature_agent_prompt(task: dict[str, Any]) -> str:
@@ -53,10 +85,14 @@ Please provide a comprehensive literature analysis following systematic review p
     }
 
     prompt = compose_prompt([system_prompt, task_description])
-    return add_output_format(prompt, schema)
+    return cast(str, add_output_format(prompt, schema))
 
 
-def generate_comparative_agent_prompt(task: dict[str, Any]) -> str:
+def generate_comparative_agent_prompt(
+    task: dict[str, Any] | list[Any],
+    criteria: list[str] | None = None,
+    context: dict[str, Any] | None = None,
+) -> str:
     """Generate prompt for Comparative Analysis Agent."""
     system_prompt = create_system_prompt(
         role="Comparative Analysis Agent",
@@ -70,9 +106,14 @@ def generate_comparative_agent_prompt(task: dict[str, Any]) -> str:
         ],
     )
 
-    items = task.get("items", [])
-    criteria = task.get("criteria", [])
-    context = task.get("context", {})
+    if isinstance(task, dict):
+        items = task.get("items", [])
+        criteria = task.get("criteria", criteria or [])
+        context = task.get("context", context or {})
+    else:
+        items = task
+        criteria = criteria or []
+        context = context or {}
 
     items_text = "\n".join(f"- {item}" for item in items)
     criteria_text = ", ".join(criteria)
@@ -105,7 +146,7 @@ Provide a comprehensive comparative analysis with comparison matrix, strengths/w
         schema["comparative_analysis"]["contextual_recommendation"] = str
 
     prompt = compose_prompt([system_prompt, task_description])
-    return add_output_format(prompt, schema)
+    return cast(str, add_output_format(prompt, schema))
 
 
 def generate_methodology_agent_prompt(
@@ -149,7 +190,7 @@ Provide detailed methodological recommendations including design, data collectio
     }
 
     prompt = compose_prompt([system_prompt, task_description])
-    return add_output_format(prompt, schema)
+    return cast(str, add_output_format(prompt, schema))
 
 
 def generate_synthesis_agent_prompt(agent_outputs: dict[str, Any]) -> str:
@@ -195,7 +236,7 @@ Create a comprehensive synthesis that integrates all findings into a coherent re
     }
 
     prompt = compose_prompt([system_prompt, task_description])
-    return add_output_format(prompt, schema)
+    return cast(str, add_output_format(prompt, schema))
 
 
 def generate_citation_agent_prompt(
@@ -241,4 +282,4 @@ Provide properly formatted citations and verify source information.
     }
 
     prompt = compose_prompt([system_prompt, task_description])
-    return add_output_format(prompt, schema)
+    return cast(str, add_output_format(prompt, schema))

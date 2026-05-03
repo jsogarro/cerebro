@@ -143,11 +143,10 @@ class LiteratureReviewAgent(BaseAgent):
                 output=output,
                 confidence=confidence,
                 execution_time=0.0,  # Would be calculated in real implementation
-                metadata={
-                    "agent_type": self.get_agent_type(),
-                    "sources_count": len(ranked_sources),
-                    "gaps_identified": len(gaps),
-                },
+                metadata=self.build_execution_metadata(
+                    sources_count=len(ranked_sources),
+                    gaps_identified=len(gaps),
+                ),
             )
 
             # Cache the result

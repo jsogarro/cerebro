@@ -198,11 +198,10 @@ class ComparativeAnalysisAgent(BaseAgent):
                 output=output,
                 confidence=confidence,
                 execution_time=0.0,  # Would be calculated in real implementation
-                metadata={
-                    "agent_type": self.get_agent_type(),
-                    "items_count": len(items),
-                    "criteria_count": len(criteria),
-                },
+                metadata=self.build_execution_metadata(
+                    items_count=len(items),
+                    criteria_count=len(criteria),
+                ),
             )
 
             # Cache the result

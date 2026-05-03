@@ -85,10 +85,9 @@ class SynthesisAgent(BaseAgent):
                 output=output,
                 confidence=confidence,
                 execution_time=0.0,
-                metadata={
-                    "agent_type": self.get_agent_type(),
-                    "agents_synthesized": len(agent_outputs),
-                },
+                metadata=self.build_execution_metadata(
+                    agents_synthesized=len(agent_outputs),
+                ),
             )
 
             # Cache the result

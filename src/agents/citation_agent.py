@@ -98,10 +98,9 @@ class CitationAgent(BaseAgent):
                 output=output,
                 confidence=confidence,
                 execution_time=0.0,
-                metadata={
-                    "agent_type": self.get_agent_type(),
-                    "citation_count": len(output["formatted_citations"])
-                }
+                metadata=self.build_execution_metadata(
+                    citation_count=len(output["formatted_citations"])
+                )
             )
             
             # Cache the result

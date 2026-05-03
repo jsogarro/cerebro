@@ -25,6 +25,7 @@ from src.agents.models import (
     AgentState,
     AgentTask,
 )
+from src.services.prompts.agent_prompts import get_agent_prompt_version
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,17 @@ class BaseAgent(ABC):
         """
         self.log_info(f"Metric: {name}={value}")
 
+    def build_execution_metadata(self, **metadata: Any) -> dict[str, Any]:
+        """Build agent execution metadata with prompt version tracking."""
+
+        agent_type = self.get_agent_type()
+        return {
+            "agent_type": agent_type,
+            "prompt_template": agent_type,
+            "prompt_version": get_agent_prompt_version(agent_type),
+            **metadata,
+        }
+
     def handle_error(self, task: AgentTask, error: Exception) -> AgentResult:
         """
         Handle an error during execution.
@@ -158,10 +170,9 @@ class BaseAgent(ABC):
             output={"error": str(error), "error_type": type(error).__name__},
             confidence=0.0,
             execution_time=0.0,
-            metadata={
-                "agent_type": self.get_agent_type(),
-                "task_type": task.agent_type,
-            },
+            metadata=self.build_execution_metadata(
+                task_type=task.agent_type,
+            ),
         )
 
     async def communicate(self, other_agent: "BaseAgent", message: AgentMessage) -> None:
@@ -204,7 +215,7 @@ class BaseAgent(ABC):
         """Clear the message queue."""
         self._message_queue.clear()
 
-    @retry(
+    @retry(  # type: ignore[untyped-decorator]
         retry=retry_if_exception_type((ConnectionError, TimeoutError)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
