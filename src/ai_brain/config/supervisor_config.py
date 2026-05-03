@@ -12,17 +12,18 @@ Key Features:
 - Collaboration mode to supervision mode translation
 """
 
-import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from ...agents.supervisors.base_supervisor import SupervisionMode, WorkerAllocation
 from ...utils.type_coercion import coerce_float, coerce_int
 from ..router.masr import CollaborationMode, RoutingStrategy
 from ..router.query_analyzer import ComplexityLevel
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class QualityFocusLevel(Enum):
