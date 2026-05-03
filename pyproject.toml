@@ -77,10 +77,12 @@ dev = [
     "ipdb>=0.13.0",
     "pre-commit>=4.0.0",
     "testcontainers[postgres,redis]>=4.9.0",
+    "httpx-ws>=0.6.0",
     "playwright>=1.49.0",
     "locust>=2.34.0",
     "pytest-playwright>=0.6.0",
     "aiosqlite>=0.20.0",
+    "bcrypt<5.0",  # Pin for passlib 1.7.4 compatibility
 ]
 
 [project.scripts]
