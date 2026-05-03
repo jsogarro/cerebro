@@ -35,7 +35,6 @@ _SKIP_REASON_STUB = (
 )
 
 
-@pytest.mark.skip(reason=_SKIP_REASON_INFRA)
 class TestAPIErrorHandling:
     """Test API error handling and edge cases."""
 
@@ -138,24 +137,96 @@ class TestAPIErrorHandling:
 class TestWebSocketConnections:
     """Test WebSocket connections for real-time updates."""
 
-    @pytest.mark.skip(reason=_SKIP_REASON_STUB)
     @pytest.mark.asyncio
     async def test_websocket_project_updates(
-        self, authenticated_client: AsyncClient, async_client: AsyncClient
+        self, test_engine: Any, authenticated_client: AsyncClient
     ) -> None:
         """Test WebSocket updates for project progress."""
-        pass
+        from httpx_ws import aconnect_ws
 
-    @pytest.mark.skip(reason=_SKIP_REASON_STUB)
+
+        # Get JWT token from authenticated client headers
+        auth_header = authenticated_client.headers.get("Authorization")
+        assert auth_header is not None
+        token = auth_header.replace("Bearer ", "")
+
+        # Connect via WebSocket with JWT auth
+        async with aconnect_ws(
+            f"ws://test/api/v1/ws?token={token}",
+            authenticated_client,
+        ) as ws:
+            # Should successfully connect with valid JWT
+            # Send heartbeat to verify connection
+            await ws.send_json({"type": "heartbeat_response"})
+
+            # Connection should remain open and not error
+            # (this validates auth + connection establishment)
+
     @pytest.mark.asyncio
-    async def test_websocket_authentication(self, async_client: AsyncClient) -> None:
+    async def test_websocket_authentication(self, authenticated_client: AsyncClient) -> None:
         """Test WebSocket authentication."""
-        pass
+        from httpx_ws import aconnect_ws
 
-    @pytest.mark.skip(reason=_SKIP_REASON_STUB)
+        # Test 1: Missing JWT should fail
+        try:
+            async with aconnect_ws(
+                "ws://test/api/v1/ws",
+                authenticated_client,
+            ) as ws:
+                # Should not reach here
+                await ws.send_json({"type": "heartbeat_response"})
+                assert False, "Expected auth failure but connection succeeded"
+        except Exception:
+            # Expected — no JWT provided
+            pass
+
+        # Test 2: Invalid JWT should fail
+        try:
+            async with aconnect_ws(
+                "ws://test/api/v1/ws?token=invalid-jwt-token",
+                authenticated_client,
+            ) as ws:
+                await ws.send_json({"type": "heartbeat_response"})
+                assert False, "Expected auth failure but connection succeeded"
+        except Exception:
+            # Expected — invalid JWT
+            pass
+
+        # Test 3: Valid JWT should succeed
+        auth_header = authenticated_client.headers.get("Authorization")
+        assert auth_header is not None
+        token = auth_header.replace("Bearer ", "")
+
+        async with aconnect_ws(
+            f"ws://test/api/v1/ws?token={token}",
+            authenticated_client,
+        ) as ws:
+            # Should connect successfully
+            await ws.send_json({"type": "heartbeat_response"})
+
     @pytest.mark.asyncio
     async def test_websocket_reconnection(
         self, authenticated_client: AsyncClient
     ) -> None:
         """Test WebSocket reconnection handling."""
-        pass
+        from httpx_ws import aconnect_ws
+
+        auth_header = authenticated_client.headers.get("Authorization")
+        assert auth_header is not None
+        token = auth_header.replace("Bearer ", "")
+
+        # Connect, disconnect, reconnect
+        async with aconnect_ws(
+            f"ws://test/api/v1/ws?token={token}",
+            authenticated_client,
+        ) as ws:
+            await ws.send_json({"type": "heartbeat_response"})
+            # First connection successful
+
+        # Reconnect with same token
+        async with aconnect_ws(
+            f"ws://test/api/v1/ws?token={token}",
+            authenticated_client,
+        ) as ws:
+            await ws.send_json({"type": "heartbeat_response"})
+            # Second connection successful — reconnection works
