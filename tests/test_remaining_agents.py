@@ -4,12 +4,14 @@ Tests for remaining agents: Methodology, Synthesis, and Citation.
 Following TDD principles - tests written before implementation.
 """
 
-import json
 from unittest.mock import AsyncMock
 
 import pytest
 
 from src.agents.models import AgentResult, AgentTask
+from src.agents.schemas.citation import CitationSchema, FormattedCitation
+from src.agents.schemas.methodology import MethodologySchema
+from src.agents.schemas.synthesis import SynthesisSchema
 
 
 class TestMethodologyAgent:
@@ -21,32 +23,28 @@ class TestMethodologyAgent:
         from src.agents.methodology_agent import MethodologyAgent
 
         mock_gemini = AsyncMock()
-        mock_gemini.generate_content = AsyncMock(
-            return_value=json.dumps(
-                {
-                    "methodology_analysis": {
-                        "research_design": "Mixed methods approach",
-                        "data_collection_methods": [
-                            "Surveys",
-                            "Interviews",
-                            "Document analysis",
-                        ],
-                        "sampling_strategy": "Stratified random sampling",
-                        "analysis_approaches": [
-                            "Statistical analysis",
-                            "Thematic analysis",
-                        ],
-                        "validity_measures": ["Triangulation", "Member checking"],
-                        "ethical_considerations": ["Informed consent", "Data privacy"],
-                        "limitations": ["Sample size", "Time constraints"],
-                        "timeline": "6 months",
-                        "quality_indicators": [
-                            "Reliability",
-                            "Validity",
-                            "Generalizability",
-                        ],
-                    }
-                }
+        mock_gemini.generate_structured_content = AsyncMock(
+            return_value=MethodologySchema(
+                research_design="Mixed methods approach",
+                data_collection_methods=[
+                    "Surveys",
+                    "Interviews",
+                    "Document analysis",
+                ],
+                sampling_strategy="Stratified random sampling",
+                analysis_approaches=[
+                    "Statistical analysis",
+                    "Thematic analysis",
+                ],
+                validity_measures=["Triangulation", "Member checking"],
+                ethical_considerations=["Informed consent", "Data privacy"],
+                limitations=["Sample size", "Time constraints"],
+                timeline="6 months",
+                quality_indicators=[
+                    "Reliability",
+                    "Validity",
+                    "Generalizability",
+                ],
             )
         )
 
@@ -105,26 +103,22 @@ class TestSynthesisAgent:
         from src.agents.synthesis_agent import SynthesisAgent
 
         mock_gemini = AsyncMock()
-        mock_gemini.generate_content = AsyncMock(
-            return_value=json.dumps(
-                {
-                    "synthesis_result": {
-                        "integrated_findings": [
-                            "Finding 1 from multiple sources",
-                            "Finding 2 synthesized across agents",
-                        ],
-                        "cross_agent_patterns": [
-                            "Pattern A identified across literature and methodology",
-                            "Pattern B from comparative analysis",
-                        ],
-                        "conflict_resolutions": [
-                            "Resolved conflict between Agent 1 and Agent 2"
-                        ],
-                        "meta_insights": ["Higher-order insight from synthesis"],
-                        "comprehensive_narrative": "Complete synthesis narrative...",
-                        "confidence_assessment": "High confidence in synthesis",
-                    }
-                }
+        mock_gemini.generate_structured_content = AsyncMock(
+            return_value=SynthesisSchema(
+                integrated_findings=[
+                    "Finding 1 from multiple sources",
+                    "Finding 2 synthesized across agents",
+                ],
+                cross_agent_patterns=[
+                    "Pattern A identified across literature and methodology",
+                    "Pattern B from comparative analysis",
+                ],
+                conflict_resolutions=[
+                    "Resolved conflict between Agent 1 and Agent 2"
+                ],
+                meta_insights=["Higher-order insight from synthesis"],
+                comprehensive_narrative="Complete synthesis narrative...",
+                confidence_assessment="High confidence in synthesis",
             )
         )
 
@@ -188,27 +182,20 @@ class TestCitationAgent:
         from src.agents.citation_agent import CitationAgent
 
         mock_gemini = AsyncMock()
-        mock_gemini.generate_content = AsyncMock(
-            return_value=json.dumps(
-                {
-                    "citation_result": {
-                        "formatted_citations": [
-                            "Smith, J. (2024). AI in Healthcare. Journal of AI, 10(2), 45-67.",
-                            "Doe, A. (2023). Machine Learning. Tech Review, 5(1), 12-28.",
-                        ],
-                        "bibliography": [
-                            "Doe, A. (2023). Machine Learning. Tech Review, 5(1), 12-28.",
-                            "Smith, J. (2024). AI in Healthcare. Journal of AI, 10(2), 45-67.",
-                        ],
-                        "citation_style": "APA",
-                        "total_references": 2,
-                        "verified_sources": 2,
-                        "verification_status": [
-                            {"source_id": 0, "verified": True, "issues": []},
-                            {"source_id": 1, "verified": True, "issues": []},
-                        ],
-                    }
-                }
+        mock_gemini.generate_structured_content = AsyncMock(
+            return_value=CitationSchema(
+                citations=[
+                    FormattedCitation(
+                        citation_text="Smith, J. (2024). AI in Healthcare. Journal of AI, 10(2), 45-67.",
+                        source_id="source_0",
+                    ),
+                    FormattedCitation(
+                        citation_text="Doe, A. (2023). Machine Learning. Tech Review, 5(1), 12-28.",
+                        source_id="source_1",
+                    ),
+                ],
+                style="APA",
+                total_sources=2,
             )
         )
 
