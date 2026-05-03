@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import jwt
+from jose import ExpiredSignatureError, JWTError, jwt
 
 from src.auth.jwt_service import JWTService
 from src.auth.password_service import PasswordService
@@ -36,7 +36,7 @@ class TestAuthManager:
         expires_delta: timedelta | None = None,
     ) -> str:
         """Create an access token for testing."""
-        data = {
+        data: dict[str, Any] = {
             "sub": user_id,
             "email": email,
             "role": role,
@@ -59,7 +59,7 @@ class TestAuthManager:
         self, user_id: str, expires_delta: timedelta | None = None
     ) -> str:
         """Create a refresh token for testing."""
-        data = {"sub": user_id, "type": "refresh"}
+        data: dict[str, Any] = {"sub": user_id, "type": "refresh"}
 
         if expires_delta:
             expire = datetime.now(UTC) + expires_delta
@@ -119,9 +119,9 @@ class TestAuthManager:
         """Decode a token for testing verification."""
         try:
             return jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-        except jwt.ExpiredSignatureError:
+        except ExpiredSignatureError:
             return {"error": "Token expired"}
-        except jwt.InvalidTokenError as e:
+        except JWTError as e:
             return {"error": str(e)}
 
     def hash_password(self, password: str) -> str:
@@ -274,11 +274,11 @@ class MockOAuthProvider:
 
     def __init__(self, provider_name: str = "google"):
         self.provider_name = provider_name
-        self.users = {}
+        self.users: dict[str, dict[str, Any]] = {}
 
     def register_user(
         self, oauth_id: str, email: str, name: str, picture: str | None = None
-    ):
+    ) -> None:
         """Register a user with the mock OAuth provider."""
         self.users[oauth_id] = {
             "id": oauth_id,
