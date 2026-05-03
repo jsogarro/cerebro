@@ -101,8 +101,8 @@ class MultiTierMemorySystem:
         self.enable_cross_tier_retrieval = config.get("enable_cross_tier", True)
         self.max_recall_items = config.get("max_recall_items", 10)
         self.memory_consolidation_interval = config.get(
-            "consolidation_interval", 3600
-        )  # 1 hour
+            "consolidation_interval", 300
+        )  # 5 minutes
 
         # Performance tracking
         self.total_operations = 0

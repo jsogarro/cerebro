@@ -8,6 +8,7 @@ from src.ai_brain.memory.episodic_memory import (
     EpisodeQuery,
     EpisodicMemoryManager,
 )
+from src.ai_brain.memory.multi_tier_memory import MultiTierMemorySystem
 from src.ai_brain.memory.working_memory import WorkingMemoryManager
 
 
@@ -98,3 +99,9 @@ def test_episodic_memory_cleanup_uses_seven_day_ttl_default() -> None:
         assert [episode.id for episode in memory._fallback_storage] == ["fresh"]
 
     asyncio.run(run())
+
+
+def test_multi_tier_memory_cleanup_interval_defaults_to_five_minutes() -> None:
+    memory = MultiTierMemorySystem({})
+
+    assert memory.memory_consolidation_interval == 300
