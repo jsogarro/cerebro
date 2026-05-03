@@ -10,9 +10,9 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum
+from importlib import import_module
 from typing import Any
 
-import pandas as pd
 from fastapi import WebSocket
 from structlog import get_logger
 
@@ -565,7 +565,14 @@ class RealTimeDashboard:
             ]
         
         elif format == "dataframe":
-            # Convert to pandas DataFrame
+            # Convert to pandas DataFrame only when the optional dependency is installed.
+            try:
+                pandas = import_module("pandas")
+            except ImportError as exc:
+                raise RuntimeError(
+                    "pandas is required to export experiment data as a dataframe"
+                ) from exc
+
             data = []
             for snapshot in history:
                 for variant, metrics in snapshot.variants.items():
@@ -576,8 +583,8 @@ class RealTimeDashboard:
                         **metrics
                     }
                     data.append(row)
-            
-            return pd.DataFrame(data)
+
+            return pandas.DataFrame(data)
         
         else:
             raise ValueError(f"Unsupported format: {format}")
