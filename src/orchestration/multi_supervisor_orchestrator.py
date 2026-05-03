@@ -14,12 +14,13 @@ Key Features:
 """
 
 import asyncio
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.constants import HIGH_ESTIMATED_TOKENS
 from src.core.pii_redactor import redact_pii
@@ -41,7 +42,7 @@ from .research_orchestrator import (
 )
 from .state import ResearchState
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class SupervisorCoordinationMode(Enum):

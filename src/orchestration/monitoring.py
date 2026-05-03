@@ -5,7 +5,6 @@ This module provides comprehensive monitoring, metrics collection,
 and visualization for the orchestration system.
 """
 
-import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -15,10 +14,11 @@ from typing import Any
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from prometheus_client import Counter, Gauge, Histogram, Summary
+from structlog import get_logger
 
 from src.orchestration.state import AgentExecutionStatus, WorkflowPhase
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 tracer = trace.get_tracer(__name__)
 
 

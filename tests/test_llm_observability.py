@@ -80,6 +80,10 @@ REPORT_SERVICE_MODULES = [
     SRC_DIR / "services" / "exporters" / "latex_exporter.py",
     SRC_DIR / "services" / "cache" / "cache_manager.py",
 ]
+ORCHESTRATION_MODULES = [
+    *(SRC_DIR / "orchestration").glob("*.py"),
+    *(SRC_DIR / "orchestration" / "nodes").glob("*.py"),
+]
 
 
 class StubProvider(BaseProvider):  # type: ignore[misc]
@@ -228,6 +232,11 @@ def test_ai_brain_router_modules_use_structlog_logger() -> None:
 
 def test_report_service_modules_use_structlog_logger() -> None:
     for module_path in REPORT_SERVICE_MODULES:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_orchestration_modules_use_structlog_logger() -> None:
+    for module_path in ORCHESTRATION_MODULES:
         assert_no_stdlib_logging_logger(module_path)
 
 

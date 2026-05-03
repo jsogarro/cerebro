@@ -5,17 +5,17 @@ This module provides utilities for building and configuring workflow graphs
 with nodes, edges, and conditional routing.
 """
 
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 from langgraph.graph import END, StateGraph
+from structlog import get_logger
 
 from src.orchestration.edges import RouterConfig, WorkflowRouter
 from src.orchestration.state import MaxIterationsExceeded, ResearchState, WorkflowPhase
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass

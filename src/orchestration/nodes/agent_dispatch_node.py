@@ -6,8 +6,9 @@ including parallel execution when possible.
 """
 
 import asyncio
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 from src.agents.factory import AgentFactory
 from src.agents.models import AgentTask
@@ -18,7 +19,7 @@ from src.orchestration.state import (
     WorkflowPhase,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 async def agent_dispatch_node(state: ResearchState) -> ResearchState:

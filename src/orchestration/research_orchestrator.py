@@ -7,7 +7,6 @@ the overall research process.
 """
 
 import asyncio
-import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -16,6 +15,7 @@ from typing import Any, cast
 
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from structlog import get_logger
 
 from src.agents.supervisors.supervisor_factory import SupervisorFactory
 from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
@@ -49,7 +49,7 @@ from src.orchestration.state import (
     WorkflowPhase,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass

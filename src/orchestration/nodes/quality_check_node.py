@@ -5,13 +5,14 @@ This node performs comprehensive quality checks on the aggregated research resul
 ensuring they meet defined standards before report generation.
 """
 
-import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from structlog import get_logger
+
 from src.orchestration.state import ResearchState
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 async def quality_check_node(state: ResearchState) -> ResearchState:

@@ -6,9 +6,10 @@ orchestration. Handles supervisor handoffs, coordination messages, and maintains
 message history for cross-supervisor collaboration.
 """
 
-import logging
 from datetime import datetime
 from typing import Any
+
+from structlog import get_logger
 
 from ..agents.communication.talkhier_message import (
     HierarchyMetadata,
@@ -17,7 +18,7 @@ from ..agents.communication.talkhier_message import (
     TalkHierMessage,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class InterSupervisorCommunicator:

@@ -5,14 +5,15 @@ This node analyzes the user's research query to extract key concepts,
 identify research domains, and determine the appropriate research approach.
 """
 
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.pii_redactor import redact_pii
 from src.orchestration.state import ResearchState
 from src.services.gemini_service import GeminiService
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 async def query_analysis_node(state: ResearchState) -> ResearchState:
@@ -31,7 +32,7 @@ async def query_analysis_node(state: ResearchState) -> ResearchState:
     Returns:
         Updated state with query analysis results
     """
-    logger.info("Analyzing query: %s", redact_pii(state.query))
+    logger.info("query_analysis_started", query=redact_pii(state.query))
 
     try:
         # Extract key concepts from query
@@ -65,11 +66,13 @@ async def query_analysis_node(state: ResearchState) -> ResearchState:
             state.context["query_analysis"].update(enhanced_analysis)
 
         logger.info(
-            f"Query analysis complete. Identified {len(concepts)} key concepts in {len(state.domains)} domains"
+            "query_analysis_completed",
+            concept_count=len(concepts),
+            domain_count=len(state.domains),
         )
 
     except Exception as e:
-        logger.error(f"Error in query analysis: {e}")
+        logger.error("query_analysis_failed", error=str(e))
         state.validation_errors.append(f"Query analysis failed: {e!s}")
 
     return state

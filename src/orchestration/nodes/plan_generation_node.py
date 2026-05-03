@@ -5,10 +5,11 @@ This node generates a comprehensive research plan based on the query analysis,
 determining which agents to use, in what order, and with what parameters.
 """
 
-import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+
+from structlog import get_logger
 
 from src.orchestration.state import (
     AgentExecutionStatus,
@@ -16,7 +17,7 @@ from src.orchestration.state import (
     ResearchState,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 async def plan_generation_node(state: ResearchState) -> ResearchState:

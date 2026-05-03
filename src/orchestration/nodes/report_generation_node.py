@@ -6,9 +6,10 @@ based on the aggregated and quality-checked results, now integrated
 with the advanced report generation system.
 """
 
-import logging
 from datetime import UTC, datetime
 from typing import Any
+
+from structlog import get_logger
 
 from src.models.report import (
     CitationStyle,
@@ -22,7 +23,7 @@ from src.services.report_config import create_report_settings
 from src.services.report_generator import ReportGenerator
 from src.utils.serialization import serialize_to_str
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 async def report_generation_node(state: ResearchState) -> ResearchState:

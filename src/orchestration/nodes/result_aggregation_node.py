@@ -5,13 +5,14 @@ This node aggregates results from multiple agents, resolves conflicts,
 and creates a unified research output.
 """
 
-import logging
 import statistics
 from typing import Any
 
+from structlog import get_logger
+
 from src.orchestration.state import ResearchState
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 async def result_aggregation_node(state: ResearchState) -> ResearchState:

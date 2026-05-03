@@ -8,16 +8,16 @@ enabling recovery from failures and resumption of long-running workflows.
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 
 import redis.asyncio as redis
+from structlog import get_logger
 
 from src.orchestration.state import ResearchState, StateCheckpoint, WorkflowPhase
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CheckpointStorage:

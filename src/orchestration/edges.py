@@ -5,12 +5,13 @@ This module defines the conditional logic that determines how the workflow
 moves between different nodes based on the current state.
 """
 
-import logging
 from typing import Literal
+
+from structlog import get_logger
 
 from src.orchestration.state import AgentExecutionStatus, ResearchState, WorkflowPhase
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class EdgeConditions:
