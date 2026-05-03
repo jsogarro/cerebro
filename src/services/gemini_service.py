@@ -7,11 +7,11 @@ This service integrates with Google's Gemini API following functional programmin
 from __future__ import annotations
 
 import hashlib
-import logging
 from typing import Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from redis import asyncio as aioredis
+from structlog import get_logger
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -23,7 +23,7 @@ from src.services.gemini_config import GeminiConfig
 from src.services.gemini_limiter import RateLimiter
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class GeminiService:
@@ -87,7 +87,7 @@ class GeminiService:
         self.cache_client = cache_client
         self._cache_enabled = self.config.cache_enabled and cache_client is not None
 
-        logger.info(f"Initialized Gemini service with model: {self.config.model_name}")
+        logger.info("gemini_service_initialized", model=self.config.model_name)
 
     @retry(
         retry=retry_if_exception_type(Exception),
@@ -105,7 +105,7 @@ class GeminiService:
                 result = await self.model.ainvoke(prompt)
                 return str(result.content)
             except Exception as e:
-                logger.error(f"Gemini API error: {e}")
+                logger.error("gemini_api_error", error=str(e))
                 raise
 
     async def generate_content(self, prompt: str) -> str:
@@ -157,18 +157,27 @@ class GeminiService:
 
                 # Parse and validate response
                 parsed = parser.parse(response)
-                logger.debug(f"Successfully parsed structured output (attempt {attempt + 1})")
+                logger.debug(
+                    "structured_output_parsed",
+                    attempt=attempt + 1,
+                )
                 return parsed
 
             except Exception as e:
                 last_error = e
                 logger.warning(
-                    f"Failed to parse structured output (attempt {attempt + 1}/{max_retries + 1}): {e}"
+                    "structured_output_parse_failed",
+                    attempt=attempt + 1,
+                    max_attempts=max_retries + 1,
+                    error=str(e),
                 )
                 if attempt < max_retries:
                     continue
                 else:
-                    logger.error(f"All parse attempts failed: {last_error}")
+                    logger.error(
+                        "structured_output_parse_exhausted",
+                        error=str(last_error),
+                    )
                     raise
 
         # Should never reach here, but for type safety
@@ -203,12 +212,12 @@ class GeminiService:
             if self.cache_client:
                 cached = await self.cache_client.get(cache_key)
                 if cached:
-                    logger.debug(f"Cache hit for key: {cache_key}")
+                    logger.debug("gemini_cache_hit", cache_key=cache_key)
                     result = deserialize_from_cache(cached)
                     if isinstance(result, dict):
                         return result
         except Exception as e:
-            logger.warning(f"Cache read error: {e}")
+            logger.warning("gemini_cache_read_failed", error=str(e))
 
         return None
 
@@ -226,9 +235,9 @@ class GeminiService:
                 await self.cache_client.set(
                     cache_key, serialize_for_cache(data).decode("utf-8"), ex=self.config.cache_ttl
                 )
-                logger.debug(f"Cached response for key: {cache_key}")
+                logger.debug("gemini_cache_write_completed", cache_key=cache_key)
         except Exception as e:
-            logger.warning(f"Cache write error: {e}")
+            logger.warning("gemini_cache_write_failed", error=str(e))
 
     def _parse_json_response(self, response: str) -> dict[str, Any]:
         """

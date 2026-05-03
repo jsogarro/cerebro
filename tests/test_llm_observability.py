@@ -84,6 +84,10 @@ ORCHESTRATION_MODULES = [
     *(SRC_DIR / "orchestration").glob("*.py"),
     *(SRC_DIR / "orchestration" / "nodes").glob("*.py"),
 ]
+STANDALONE_SERVICE_CLI_MODULES = [
+    SRC_DIR / "services" / "gemini_service.py",
+    SRC_DIR / "cli" / "websocket_client.py",
+]
 
 
 class StubProvider(BaseProvider):  # type: ignore[misc]
@@ -237,6 +241,11 @@ def test_report_service_modules_use_structlog_logger() -> None:
 
 def test_orchestration_modules_use_structlog_logger() -> None:
     for module_path in ORCHESTRATION_MODULES:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_standalone_service_cli_modules_use_structlog_logger() -> None:
+    for module_path in STANDALONE_SERVICE_CLI_MODULES:
         assert_no_stdlib_logging_logger(module_path)
 
 

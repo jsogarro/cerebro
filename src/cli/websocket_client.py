@@ -7,7 +7,6 @@ real-time updates instead of polling the API.
 
 import asyncio
 import json
-import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -18,6 +17,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.progress import Progress, TaskID
+from structlog import get_logger
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.legacy.client import WebSocketClientProtocol
 
@@ -32,7 +32,7 @@ from src.cli.formatters import (
 from src.models.websocket_messages import WSMessage, WSMessageType
 from src.utils.serialization import deserialize, serialize_to_str
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CLIWebSocketClient:
