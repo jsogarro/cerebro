@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from src.ai_brain.experimentation.integration.agent_framework_integration import (
     AgentExperimentConfig,
+    AgentExperimentResult,
     AgentExperimentType,
     AgentFrameworkExperimentor,
 )
@@ -100,3 +103,51 @@ async def test_power_preflight_warns_when_configured_sample_size_is_too_low() ->
     assert config.power_analysis is not None
     assert config.power_analysis.required_sample_size > config.min_samples_per_variant
     assert config.power_warnings == warnings
+
+
+def test_research_claims_are_mapped_to_ab_test_execution_logs() -> None:
+    experimentor = AgentFrameworkExperimentor.__new__(AgentFrameworkExperimentor)
+    experimentor.active_experiments = {
+        "routing_claim_test": AgentExperimentConfig(
+            experiment_id="routing_claim_test",
+            experiment_type=AgentExperimentType.ROUTING_STRATEGY,
+            variants={"control": {}, "treatment": {}},
+        )
+    }
+    experimentor.results_buffer = [
+        _experiment_result("routing_claim_test", "control", quality_score=0.80, total_cost=1.00),
+        _experiment_result("routing_claim_test", "control", quality_score=0.80, total_cost=1.00),
+        _experiment_result("routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50),
+        _experiment_result("routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50),
+    ]
+
+    validation = experimentor.validate_research_claims_against_logs()
+
+    performance_claim = validation["performance_gain_20_40_percent"]
+    cost_claim = validation["cost_reduction_45_55_percent"]
+    assert performance_claim["experiment_ids"] == ["routing_claim_test"]
+    assert cost_claim["experiment_ids"] == ["routing_claim_test"]
+    assert performance_claim["validated"] is True
+    assert cost_claim["validated"] is True
+
+
+def _experiment_result(
+    experiment_id: str,
+    variant_id: str,
+    *,
+    quality_score: float,
+    total_cost: float,
+) -> AgentExperimentResult:
+    return AgentExperimentResult(
+        experiment_id=experiment_id,
+        variant_id=variant_id,
+        request_id=f"{experiment_id}_{variant_id}",
+        timestamp=datetime.now(UTC),
+        api_pattern="primary",
+        execution_mode="chain",
+        quality_score=quality_score,
+        latency_ms=1000.0,
+        total_cost=total_cost,
+        token_usage=100,
+        success=True,
+    )
