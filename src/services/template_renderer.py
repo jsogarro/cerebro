@@ -26,6 +26,32 @@ from src.services.report_config import ReportSettings, ReportTemplateConfig
 
 logger = logging.getLogger(__name__)
 
+ALLOWED_REPORT_HTML_TAGS = {
+    "a",
+    "blockquote",
+    "br",
+    "code",
+    "em",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "strong",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+}
+
 
 class TemplateRenderingError(Exception):
     """Exception raised during template rendering."""
@@ -131,7 +157,7 @@ class TemplateRenderer:
             rendered = template.render(**context)
             
             logger.info(f"Successfully rendered report using template: {template_file}")
-            return rendered
+            return str(rendered)
             
         except Exception as e:
             logger.error(f"Template rendering failed: {e}")
@@ -225,18 +251,44 @@ class TemplateRenderer:
                 }
             )
             result = md.convert(text)
-            return str(result)
+            return self._sanitize_rendered_html(str(result))
             
         except Exception as e:
             logger.warning(f"Markdown conversion failed: {e}")
             # Return plain text with line breaks converted
-            return text.replace('\n', '<br>')
+            return self._sanitize_rendered_html(text.replace('\n', '<br>'))
 
     def _basic_markdown_filter(self, text: str) -> str:
         """Render a small markdown subset when the optional package is unavailable."""
         rendered = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
         rendered = re.sub(r"\*(.+?)\*", r"<em>\1</em>", rendered)
-        return rendered.replace("\n", "<br>")
+        return self._sanitize_rendered_html(rendered.replace("\n", "<br>"))
+
+    def _sanitize_rendered_html(self, html: str) -> str:
+        """Remove unsafe HTML before templates mark rendered markdown as safe."""
+
+        sanitized = re.sub(
+            r"<(script|style)[^>]*>.*?</\1>",
+            "",
+            html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+
+        def replace_tag(match: re.Match[str]) -> str:
+            closing_slash = match.group(1)
+            tag_name = match.group(2).lower()
+            trailing_slash = match.group(3)
+            if tag_name not in ALLOWED_REPORT_HTML_TAGS:
+                return ""
+            if closing_slash:
+                return f"</{tag_name}>"
+            return f"<{tag_name}{trailing_slash}>"
+
+        return re.sub(
+            r"<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(/?)\s*>",
+            replace_tag,
+            sanitized,
+        )
     
     def _truncate_words_filter(self, text: str, length: int = 50, suffix: str = "...") -> str:
         """Truncate text to specified number of words."""
