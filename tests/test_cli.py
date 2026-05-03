@@ -82,7 +82,7 @@ class TestCLICommands:
         assert result.exit_code == 0
         assert "Research Platform CLI" in result.output
 
-    @patch("src.cli.main.ResearchAPIClient")
+    @patch("src.cli.client.ResearchAPIClient")
     def test_health_command(self, mock_client_class, runner):
         """Test health check command."""
         # Setup mock
@@ -130,6 +130,8 @@ class TestProjectCommands:
         result = runner.invoke(
             cli,
             [
+                "--format",
+                "json",
                 "projects",
                 "create",
                 "--title",
@@ -138,8 +140,6 @@ class TestProjectCommands:
                 "Test query",
                 "--domains",
                 "AI,Ethics",
-                "--format",
-                "json",
             ],
         )
 
@@ -162,11 +162,11 @@ class TestProjectCommands:
         result = runner.invoke(
             cli,
             [
+                "--format",
+                "json",
                 "projects",
                 "get",
                 project_id,
-                "--format",
-                "json",
             ],
         )
 
@@ -186,10 +186,10 @@ class TestProjectCommands:
         result = runner.invoke(
             cli,
             [
-                "projects",
-                "list",
                 "--format",
                 "json",
+                "projects",
+                "list",
             ],
         )
 
@@ -211,11 +211,11 @@ class TestProjectCommands:
         result = runner.invoke(
             cli,
             [
+                "--format",
+                "json",
                 "projects",
                 "progress",
                 project_id,
-                "--format",
-                "json",
             ],
         )
 
