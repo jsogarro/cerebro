@@ -4,15 +4,15 @@ Knowledge Graph Tool for MCP.
 Provides entity extraction, graph building, and analysis capabilities.
 """
 
-import logging
 from typing import Any
 
 import networkx as nx
 import plotly.graph_objects as go
+from structlog import get_logger
 
 from src.mcp.base import BaseMCPTool, ToolMetadata, ToolParameter
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class KnowledgeGraphTool(BaseMCPTool):

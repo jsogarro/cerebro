@@ -43,6 +43,16 @@ REPOSITORY_PROMPT_PLATFORM_MODULES = [
     SRC_DIR / "prompts" / "versioning.py",
     SRC_DIR / "research_platform" / "__init__.py",
 ]
+MCP_MODULES = [
+    SRC_DIR / "mcp" / "base.py",
+    SRC_DIR / "mcp" / "client.py",
+    SRC_DIR / "mcp" / "registry.py",
+    SRC_DIR / "mcp" / "server.py",
+    SRC_DIR / "mcp" / "tools" / "academic_search_tool.py",
+    SRC_DIR / "mcp" / "tools" / "citation_tool.py",
+    SRC_DIR / "mcp" / "tools" / "knowledge_graph_tool.py",
+    SRC_DIR / "mcp" / "tools" / "statistics_tool.py",
+]
 REPORT_SERVICE_MODULES = [
     SRC_DIR / "services" / "template_renderer.py",
     SRC_DIR / "services" / "report_generator.py",
@@ -183,6 +193,11 @@ def test_api_service_websocket_modules_use_structlog_logger() -> None:
 
 def test_repository_prompt_platform_modules_use_structlog_logger() -> None:
     for module_path in REPOSITORY_PROMPT_PLATFORM_MODULES:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_mcp_modules_use_structlog_logger() -> None:
+    for module_path in MCP_MODULES:
         assert_no_stdlib_logging_logger(module_path)
 
 

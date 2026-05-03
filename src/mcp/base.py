@@ -4,13 +4,13 @@ Base class for MCP tools.
 Provides common functionality for all MCP tool implementations.
 """
 
-import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
 from pydantic import BaseModel, Field
+from structlog import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ToolParameter(BaseModel):
@@ -58,7 +58,7 @@ class BaseMCPTool(ABC):
             config: Optional configuration dictionary
         """
         self.config = config or {}
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = get_logger(self.__class__.__name__)
         self._metadata = self._build_metadata()
 
     @abstractmethod
@@ -98,7 +98,7 @@ class BaseMCPTool(ABC):
 
         for param in required_params:
             if param not in kwargs:
-                self.logger.error(f"Missing required parameter: {param}")
+                self.logger.error("mcp_tool_missing_required_parameter", parameter=param)
                 return False
 
         return True
@@ -139,13 +139,11 @@ class BaseMCPTool(ABC):
             result: Execution result
         """
         self.logger.info(
-            f"Tool {self.get_name()} executed",
-            extra={
-                "tool_name": self.get_name(),
-                "parameters": params,
-                "result_keys": list(result.keys()) if result else [],
-                "success": result.get("success", False) if result else False,
-            },
+            "mcp_tool_executed",
+            tool_name=self.get_name(),
+            parameters=params,
+            result_keys=list(result.keys()) if result else [],
+            success=result.get("success", False) if result else False,
         )
 
     async def handle_error(
@@ -162,12 +160,10 @@ class BaseMCPTool(ABC):
             Error response dictionary
         """
         self.logger.error(
-            f"Tool {self.get_name()} failed: {error!s}",
-            extra={
-                "tool_name": self.get_name(),
-                "parameters": params,
-                "error": str(error),
-            },
+            "mcp_tool_failed",
+            tool_name=self.get_name(),
+            parameters=params,
+            error=str(error),
         )
 
         return {

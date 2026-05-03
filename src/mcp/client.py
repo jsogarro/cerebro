@@ -4,8 +4,9 @@ MCP Client for agent integration.
 Provides a client interface for agents to use MCP tools.
 """
 
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 from src.mcp.server import MCPServer, MCPServerConfig
 from src.mcp.tools import (
@@ -15,7 +16,7 @@ from src.mcp.tools import (
     StatisticsTool,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class MCPClient:
