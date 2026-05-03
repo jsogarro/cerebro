@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import pytest
 
+from src.ai_brain.experimentation.integration.agent_framework_integration import (
+    AgentExperimentConfig,
+    AgentExperimentType,
+    AgentFrameworkExperimentor,
+)
 from src.ai_brain.experimentation.statistical.enhanced_statistical_engine import (
     EnhancedStatisticalEngine,
     StatisticalMethod,
@@ -73,3 +78,25 @@ async def test_single_comparison_still_reports_corrected_p_value() -> None:
     assert result.adjusted_p_value == pytest.approx(0.03)
     assert result.correction_method == "bonferroni"
     assert result.is_significant is True
+
+
+@pytest.mark.asyncio  # type: ignore[untyped-decorator]
+async def test_power_preflight_warns_when_configured_sample_size_is_too_low() -> None:
+    experimentor = AgentFrameworkExperimentor.__new__(AgentFrameworkExperimentor)
+    experimentor.statistical_engine = EnhancedStatisticalEngine()
+
+    config = AgentExperimentConfig(
+        experiment_id="routing_underpowered",
+        experiment_type=AgentExperimentType.ROUTING_STRATEGY,
+        variants={"control": {}, "treatment": {}},
+        primary_metric="quality_score",
+        min_samples_per_variant=50,
+        expected_effect_size=0.01,
+    )
+
+    warnings = await experimentor._run_power_preflight(config)
+
+    assert warnings
+    assert config.power_analysis is not None
+    assert config.power_analysis.required_sample_size > config.min_samples_per_variant
+    assert config.power_warnings == warnings

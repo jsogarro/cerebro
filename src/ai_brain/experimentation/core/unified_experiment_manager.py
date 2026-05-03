@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Any
 
 # Import existing prompt version manager for extension
-from src.ai_brain.prompts.prompt_version_manager import PromptVersionManager
+from src.prompts.versioning import PromptVersionManager
 
 
 class ExperimentType(Enum):

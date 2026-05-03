@@ -9,12 +9,14 @@ This is the KEY INTEGRATION POINT that enables Cerebro to become a
 self-improving AI system through experimental optimization.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 # Import Agent Framework API components
@@ -31,8 +33,20 @@ from ..core.system_experiment_registry import SystemExperimentRegistry
 
 # Import A/B Testing components
 from ..core.unified_experiment_manager import UnifiedExperimentManager
-from ..statistical.bayesian_experiment_design import BayesianExperimentDesigner
-from ..statistical.enhanced_statistical_engine import EnhancedStatisticalEngine
+from ..statistical.enhanced_statistical_engine import (
+    EnhancedStatisticalEngine,
+    PowerAnalysisResult,
+)
+
+if TYPE_CHECKING:
+    from ..statistical.bayesian_experiment_design import BayesianExperimentDesigner
+
+try:
+    from ..statistical.bayesian_experiment_design import (
+        BayesianExperimentDesigner as _BayesianExperimentDesigner,
+    )
+except ImportError:
+    _BayesianExperimentDesigner = None
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +96,8 @@ class AgentExperimentConfig:
     expected_effect_size: float = 0.1
     optimization_goal: str = "maximize"
     constraints: dict[str, float] = field(default_factory=dict)
+    power_analysis: PowerAnalysisResult | None = None
+    power_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -190,6 +206,7 @@ class AgentFrameworkExperimentor:
             allocation_strategy="thompson_sampling",
             optimization_goal="maximize"
         )
+        await self._run_power_preflight(config)
 
         self.active_experiments[experiment_id] = config
 
@@ -252,6 +269,7 @@ class AgentFrameworkExperimentor:
             secondary_metrics=["latency_ms", "total_cost"],
             constraints={"latency_ms": 5000, "total_cost": 0.10}
         )
+        await self._run_power_preflight(config)
         
         self.active_experiments[experiment_id] = config
         
@@ -294,6 +312,7 @@ class AgentFrameworkExperimentor:
             secondary_metrics=["latency_ms", "refinement_count"],
             optimization_goal="maximize"
         )
+        await self._run_power_preflight(config)
         
         self.active_experiments[experiment_id] = config
         
@@ -418,7 +437,7 @@ class AgentFrameworkExperimentor:
                 experiment_id=experiment_id,
                 user_context=context
             )
-            variant = allocation_decision.variant_id
+            variant = str(allocation_decision.variant_id)
         else:
             variant = random.choice(list(config.variants.keys()))
 
@@ -709,6 +728,56 @@ class AgentFrameworkExperimentor:
         return final_results
     
     # ==================== Helper Methods ====================
+
+    async def _run_power_preflight(
+        self, config: AgentExperimentConfig
+    ) -> list[str]:
+        """Warn when configured samples are below power-analysis requirements."""
+
+        baseline_metric = self._baseline_metric_for_power(config.primary_metric)
+        metric_type = self._metric_type_for_power(config.primary_metric)
+        significance_level = max(0.0, min(1.0, 1.0 - config.confidence_level))
+
+        power_analysis = await self.statistical_engine.frequentist.power_analysis(
+            baseline_metric=baseline_metric,
+            minimum_effect=config.expected_effect_size,
+            significance_level=significance_level,
+            power_target=0.8,
+            metric_type=metric_type,
+        )
+        config.power_analysis = power_analysis
+
+        if config.min_samples_per_variant >= power_analysis.required_sample_size:
+            config.power_warnings = []
+            return []
+
+        warning = (
+            f"Experiment {config.experiment_id} is underpowered: "
+            f"min_samples_per_variant={config.min_samples_per_variant}, "
+            f"required_sample_size={power_analysis.required_sample_size}, "
+            "alpha=0.05, beta=0.2"
+        )
+        config.power_warnings = [warning]
+        logger.warning(warning)
+        return config.power_warnings
+
+    def _baseline_metric_for_power(self, primary_metric: str) -> float:
+        """Return conservative baseline values for experiment power checks."""
+
+        if primary_metric in {"success", "success_rate"}:
+            return 0.8
+        if primary_metric == "total_cost":
+            return 0.01
+        if primary_metric == "latency_ms":
+            return 1000.0
+        return 0.8
+
+    def _metric_type_for_power(self, primary_metric: str) -> str:
+        """Map experiment metrics to statistical power-analysis metric types."""
+
+        if primary_metric in {"success", "success_rate"}:
+            return "proportion"
+        return "continuous"
     
     def _get_default_strategy_params(self, strategy: str) -> dict[str, Any]:
         """Get default parameters for a routing strategy."""
