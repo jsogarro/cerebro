@@ -5,7 +5,6 @@ This module provides data access operations for generated reports,
 following the repository pattern with functional programming principles.
 """
 
-import logging
 import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -14,11 +13,12 @@ from uuid import UUID
 from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from structlog import get_logger
 
 from src.models.db.generated_report import GeneratedReport, ReportFormat
 from src.repositories.base import BaseRepository
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ReportRepository(BaseRepository[GeneratedReport]):

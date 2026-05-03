@@ -14,7 +14,6 @@ Features:
 """
 
 import asyncio
-import logging
 import os
 import re
 import threading
@@ -24,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
+from structlog import get_logger
 
 try:
     from watchdog.events import FileSystemEventHandler
@@ -41,7 +41,7 @@ from .schemas import (
     PromptTemplate,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 _CONTROL_CHARACTER_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _PROMPT_INJECTION_PATTERNS = (

@@ -4,7 +4,6 @@ Base repository implementation.
 Provides generic CRUD operations for all repositories.
 """
 
-import logging
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 from uuid import UUID
@@ -13,10 +12,11 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import Select
+from structlog import get_logger
 
 from src.models.db.base import BaseModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # Type variable for model classes
 ModelType = TypeVar("ModelType", bound=BaseModel)

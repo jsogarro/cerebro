@@ -36,6 +36,13 @@ API_SERVICE_WEBSOCKET_MODULES = [
     SRC_DIR / "api" / "websocket" / "event_publisher.py",
     SRC_DIR / "api" / "websocket" / "talkhier_websocket_events.py",
 ]
+REPOSITORY_PROMPT_PLATFORM_MODULES = [
+    SRC_DIR / "repositories" / "base.py",
+    SRC_DIR / "repositories" / "report_repository.py",
+    SRC_DIR / "prompts" / "manager.py",
+    SRC_DIR / "prompts" / "versioning.py",
+    SRC_DIR / "research_platform" / "__init__.py",
+]
 REPORT_SERVICE_MODULES = [
     SRC_DIR / "services" / "template_renderer.py",
     SRC_DIR / "services" / "report_generator.py",
@@ -171,6 +178,11 @@ def test_memory_modules_use_structlog_logger() -> None:
 
 def test_api_service_websocket_modules_use_structlog_logger() -> None:
     for module_path in API_SERVICE_WEBSOCKET_MODULES:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_repository_prompt_platform_modules_use_structlog_logger() -> None:
+    for module_path in REPOSITORY_PROMPT_PLATFORM_MODULES:
         assert_no_stdlib_logging_logger(module_path)
 
 

@@ -12,16 +12,17 @@ Features:
 - Version rollback and deployment controls
 """
 
-import logging
 import statistics
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from structlog import get_logger
+
 from .schemas import PromptTemplate
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class VersionStatus(Enum):
