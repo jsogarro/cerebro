@@ -10,15 +10,16 @@ and optimal routing strategy based on multiple factors including:
 - Expected output format and quality requirements
 """
 
-import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from structlog import get_logger
+
 from src.core.pii_redactor import redact_pii
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ComplexityLevel(Enum):

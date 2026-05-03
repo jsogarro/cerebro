@@ -12,15 +12,16 @@ Optimizes model selection based on cost-performance trade-offs, analyzing:
 Now supports dynamic model configuration instead of hard-coded specifications.
 """
 
-import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
+from structlog import get_logger
+
 if TYPE_CHECKING:
     from ..config.model_config_manager import ModelConfigManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class OptimizationStrategy(Enum):

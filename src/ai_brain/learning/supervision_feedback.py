@@ -13,7 +13,6 @@ Key Features:
 """
 
 import asyncio
-import logging
 import pickle
 import statistics
 from collections import defaultdict, deque
@@ -22,10 +21,12 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
+from structlog import get_logger
+
 from ..integration.masr_supervisor_bridge import SupervisorExecutionResult
 from ..router.masr import RoutingDecision, RoutingStrategy
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class FeedbackType(Enum):

@@ -59,6 +59,15 @@ AI_BRAIN_CONFIG_MODULES = [
     SRC_DIR / "ai_brain" / "config" / "supervisor_config.py",
     SRC_DIR / "ai_brain" / "config" / "integration_service.py",
 ]
+AI_BRAIN_ROUTER_MODULES = [
+    SRC_DIR / "ai_brain" / "router" / "masr.py",
+    SRC_DIR / "ai_brain" / "router" / "masr_service.py",
+    SRC_DIR / "ai_brain" / "router" / "query_analyzer.py",
+    SRC_DIR / "ai_brain" / "router" / "cost_optimizer.py",
+    SRC_DIR / "ai_brain" / "router" / "hierarchical_cost_model.py",
+    SRC_DIR / "ai_brain" / "integration" / "masr_supervisor_bridge.py",
+    SRC_DIR / "ai_brain" / "learning" / "supervision_feedback.py",
+]
 REPORT_SERVICE_MODULES = [
     SRC_DIR / "services" / "template_renderer.py",
     SRC_DIR / "services" / "report_generator.py",
@@ -209,6 +218,11 @@ def test_mcp_modules_use_structlog_logger() -> None:
 
 def test_ai_brain_config_modules_use_structlog_logger() -> None:
     for module_path in AI_BRAIN_CONFIG_MODULES:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_ai_brain_router_modules_use_structlog_logger() -> None:
+    for module_path in AI_BRAIN_ROUTER_MODULES:
         assert_no_stdlib_logging_logger(module_path)
 
 

@@ -12,12 +12,13 @@ This bridge enables intelligent end-to-end query processing by connecting:
 """
 
 import asyncio
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.types import HealthCheckDict
 
@@ -26,7 +27,7 @@ from ...agents.supervisors.base_supervisor import BaseSupervisor
 from ..router.masr import CollaborationMode, RoutingDecision, RoutingStrategy
 from ..router.query_analyzer import ComplexityLevel
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class SupervisorExecutionStatus(Enum):

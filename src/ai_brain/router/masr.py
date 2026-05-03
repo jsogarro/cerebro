@@ -16,11 +16,12 @@ decisions about how to handle each query most effectively.
 from __future__ import annotations
 
 import asyncio
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
+
+from structlog import get_logger
 
 from src.core.pii_redactor import redact_pii
 from src.core.types import HealthCheckDict
@@ -54,7 +55,7 @@ from .routing_types import (
     RoutingStrategy,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass
