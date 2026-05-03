@@ -7,12 +7,12 @@ where cost efficiency is important.
 """
 
 import json
-import logging
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from structlog import get_logger
 
 from .base_provider import (
     BaseProvider,
@@ -25,7 +25,7 @@ from .base_provider import (
 if TYPE_CHECKING:
     from ..config.model_config_manager import ModelConfigManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LlamaProvider(BaseProvider):
@@ -181,7 +181,7 @@ class LlamaProvider(BaseProvider):
             return await self._postprocess_response(model_response, request)
 
         except Exception as e:
-            logger.error(f"Llama generation failed: {e}")
+            logger.error("Llama generation failed", error=str(e), exc_info=True)
             return self._create_error_response(request, e, "generation_error")
 
     async def stream(
@@ -235,7 +235,7 @@ class LlamaProvider(BaseProvider):
                             continue  # Skip invalid JSON chunks
 
         except Exception as e:
-            logger.error(f"Llama streaming failed: {e}")
+            logger.error("Llama streaming failed", error=str(e), exc_info=True)
             yield f"Error: {e!s}"
 
     def _build_request_payload(self, request: ModelRequest, model_name: str) -> dict[str, Any]:
@@ -310,11 +310,15 @@ class LlamaProvider(BaseProvider):
                 available_models = [m["name"] for m in models_data.get("models", [])]
 
                 if model_name not in available_models:
-                    logger.info(f"Pulling model {model_name}...")
+                    logger.info("Pulling model", model_name=model_name)
                     await self._pull_model(model_name)
 
         except Exception as e:
-            logger.warning(f"Failed to check model availability: {e}")
+            logger.warning(
+                "Failed to check model availability",
+                model_name=model_name,
+                error=str(e),
+            )
             # Continue anyway, let the generation request handle the error
 
     async def _pull_model(self, model_name: str) -> None:
@@ -341,7 +345,11 @@ class LlamaProvider(BaseProvider):
                         if "error" in progress:
                             raise Exception(f"Model pull error: {progress['error']}")
 
-                        logger.debug(f"Model pull progress: {status}")
+                        logger.debug(
+                            "Model pull progress",
+                            model_name=model_name,
+                            status=status,
+                        )
 
                     except json.JSONDecodeError:
                         continue
@@ -513,7 +521,7 @@ class LlamaProvider(BaseProvider):
                 self.health_status.api_status = "degraded"
 
         except Exception as e:
-            logger.error(f"Llama health check failed: {e}")
+            logger.error("Llama health check failed", error=str(e), exc_info=True)
             self.health_status.healthy = False
             self.health_status.last_error = str(e)
             self.health_status.api_status = "error"

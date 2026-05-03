@@ -1,6 +1,8 @@
 """Tests for shared LLM observability instrumentation."""
 
+import ast
 import asyncio
+from pathlib import Path
 
 import pytest
 from prometheus_client import REGISTRY
@@ -11,6 +13,8 @@ from src.ai_brain.providers.base_provider import (
     ModelResponse,
 )
 from src.core.observability import LLMCallMetrics, record_llm_call
+
+PROVIDERS_DIR = Path(__file__).resolve().parents[1] / "src" / "ai_brain" / "providers"
 
 
 class StubProvider(BaseProvider):
@@ -107,3 +111,28 @@ def test_base_provider_records_llm_metrics_after_postprocess(
             success=True,
         )
     ]
+
+
+def test_provider_modules_use_structlog_logger() -> None:
+    for provider_path in PROVIDERS_DIR.glob("*.py"):
+        tree = ast.parse(provider_path.read_text())
+
+        logging_imports = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+            if alias.name == "logging"
+        ]
+        get_logger_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "logging"
+            and node.func.attr == "getLogger"
+        ]
+
+        assert logging_imports == [], provider_path
+        assert get_logger_calls == [], provider_path

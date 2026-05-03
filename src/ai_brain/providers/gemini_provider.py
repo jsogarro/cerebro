@@ -7,10 +7,11 @@ service in the research platform.
 """
 
 import asyncio
-import logging
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+
+from structlog import get_logger
 
 from .base_provider import (
     BaseProvider,
@@ -28,10 +29,10 @@ try:
     from src.services.gemini_service import GeminiService as GeminiServiceClass
     GEMINI_SERVICE_AVAILABLE = True
 except ImportError:
-    GeminiServiceClass = None  # type: ignore[assignment,misc]
+    GeminiServiceClass = None
     GEMINI_SERVICE_AVAILABLE = False
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class GeminiProvider(BaseProvider):
@@ -153,7 +154,7 @@ class GeminiProvider(BaseProvider):
             return await self._postprocess_response(response, request)
 
         except Exception as e:
-            logger.error(f"Gemini generation failed: {e}")
+            logger.error("Gemini generation failed", error=str(e), exc_info=True)
             return self._create_error_response(request, e, "generation_error")
 
     async def _generate_via_service(
@@ -214,7 +215,7 @@ class GeminiProvider(BaseProvider):
             )
 
         except Exception as e:
-            logger.error(f"Gemini service call failed: {e}")
+            logger.error("Gemini service call failed", error=str(e), exc_info=True)
             raise
 
     async def _generate_via_direct_api(
@@ -308,7 +309,7 @@ class GeminiProvider(BaseProvider):
                 yield f"Error: {response.error_message}"
 
         except Exception as e:
-            logger.error(f"Gemini streaming failed: {e}")
+            logger.error("Gemini streaming failed", error=str(e), exc_info=True)
             yield f"Error: {e!s}"
 
     async def health_check(self) -> ProviderHealthStatus:
@@ -341,7 +342,7 @@ class GeminiProvider(BaseProvider):
                 self.health_status.last_error = response.error_message
 
         except Exception as e:
-            logger.error(f"Gemini health check failed: {e}")
+            logger.error("Gemini health check failed", error=str(e), exc_info=True)
             self.health_status.healthy = False
             self.health_status.last_error = str(e)
             self.health_status.api_status = "error"

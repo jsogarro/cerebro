@@ -208,7 +208,7 @@ class BaseProvider(ABC):
         self.last_health_check = datetime.now()
         self.health_status = ProviderHealthStatus(provider_name=self.provider_name)
 
-        logger.info(f"Initialized {self.provider_name} provider")
+        logger.info("Initialized provider", provider_name=self.provider_name)
 
     @abstractmethod
     def _get_provider_name(self) -> str:
@@ -222,7 +222,10 @@ class BaseProvider(ABC):
             # Fallback to legacy hard-coded configuration
             self.supported_capabilities = self._get_supported_capabilities_legacy()
             self.supported_models = self._get_supported_models_legacy()
-            logger.warning(f"Provider {self.provider_name} using legacy configuration")
+            logger.warning(
+                "Provider using legacy configuration",
+                provider_name=self.provider_name,
+            )
             return
 
         try:
@@ -279,17 +282,23 @@ class BaseProvider(ABC):
                                 legacy_capability_mapping[config_cap_enum]
                             )
                     except ValueError:
-                        logger.warning(f"Unknown capability: {config_cap}")
+                        logger.warning("Unknown capability", capability=config_cap)
 
             self._config_loaded = True
             logger.info(
-                f"Loaded configuration for {self.provider_name}: "
-                f"{len(self.supported_models)} models, "
-                f"{len(self.supported_capabilities)} capabilities"
+                "Loaded provider configuration",
+                provider_name=self.provider_name,
+                model_count=len(self.supported_models),
+                capability_count=len(self.supported_capabilities),
             )
 
         except Exception as e:
-            logger.error(f"Failed to load configuration for {self.provider_name}: {e}")
+            logger.error(
+                "Failed to load provider configuration",
+                provider_name=self.provider_name,
+                error=str(e),
+                exc_info=True,
+            )
             # Fallback to legacy configuration
             self.supported_capabilities = self._get_supported_capabilities_legacy()
             self.supported_models = self._get_supported_models_legacy()
@@ -374,7 +383,12 @@ class BaseProvider(ABC):
                 ]
 
         except Exception as e:
-            logger.error(f"Health check failed for {self.provider_name}: {e}")
+            logger.error(
+                "Health check failed",
+                provider_name=self.provider_name,
+                error=str(e),
+                exc_info=True,
+            )
             self.health_status.healthy = False
             self.health_status.last_error = str(e)
             self.health_status.last_check = datetime.now()

@@ -7,11 +7,12 @@ monitoring. This is the execution layer that implements the routing decisions
 from the MASR system.
 """
 
-import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
+
+from structlog import get_logger
 
 from .base_provider import (
     BaseProvider,
@@ -23,7 +24,7 @@ from .deepseek_provider import DeepSeekProvider
 from .gemini_provider import GeminiProvider
 from .llama_provider import LlamaProvider
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -92,13 +93,13 @@ class ModelRouter:
 
         for provider_name, provider_config in provider_configs.items():
             if not provider_config.get("enabled", True):
-                logger.info(f"Skipping disabled provider: {provider_name}")
+                logger.info("Skipping disabled provider", provider_name=provider_name)
                 continue
 
             try:
                 provider_class = self.provider_classes.get(provider_name)
                 if not provider_class:
-                    logger.warning(f"Unknown provider type: {provider_name}")
+                    logger.warning("Unknown provider type", provider_name=provider_name)
                     continue
 
                 # Initialize provider
@@ -107,10 +108,15 @@ class ModelRouter:
                 self.registry.providers[provider_name] = provider
                 self.registry.provider_configs[provider_name] = provider_config
 
-                logger.info(f"Initialized provider: {provider_name}")
+                logger.info("Initialized provider", provider_name=provider_name)
 
             except Exception as e:
-                logger.error(f"Failed to initialize provider {provider_name}: {e}")
+                logger.error(
+                    "Failed to initialize provider",
+                    provider_name=provider_name,
+                    error=str(e),
+                    exc_info=True,
+                )
 
     async def route_and_generate(
         self, request: ModelRequest, routing_decision: dict[str, Any] | None = None
@@ -150,7 +156,8 @@ class ModelRouter:
             # Try fallback providers if enabled
             if self.fallback_enabled and fallback_models:
                 logger.info(
-                    f"Primary provider {primary_provider} failed, trying fallbacks"
+                    "Primary provider failed, trying fallbacks",
+                    provider_name=primary_provider,
                 )
 
                 for fallback_model in fallback_models:
@@ -169,7 +176,9 @@ class ModelRouter:
 
                     except Exception as e:
                         logger.warning(
-                            f"Fallback provider {fallback_provider} failed: {e}"
+                            "Fallback provider failed",
+                            provider_name=fallback_provider,
+                            error=str(e),
                         )
                         continue
 
@@ -178,7 +187,7 @@ class ModelRouter:
             return self._create_failure_response(request, "All providers failed")
 
         except Exception as e:
-            logger.error(f"Routing failed: {e}")
+            logger.error("Routing failed", error=str(e), exc_info=True)
             return self._create_failure_response(request, str(e))
 
     async def _try_provider(
@@ -278,7 +287,12 @@ class ModelRouter:
                     self.registry.health_status[provider_name] = health_status
                     self.registry.last_health_check[provider_name] = now
                 except Exception as e:
-                    logger.error(f"Health check failed for {provider_name}: {e}")
+                    logger.error(
+                        "Health check failed",
+                        provider_name=provider_name,
+                        error=str(e),
+                        exc_info=True,
+                    )
                     # Create error status
                     health_status = ProviderHealthStatus(
                         provider_name=provider_name, healthy=False, last_error=str(e)
@@ -399,7 +413,7 @@ class ModelRouter:
                 yield chunk
 
         except Exception as e:
-            logger.error(f"Streaming failed: {e}")
+            logger.error("Streaming failed", error=str(e), exc_info=True)
             yield f"Error: {e!s}"
 
     def add_provider(self, provider_name: str, provider_config: dict[str, Any]) -> None:
@@ -415,10 +429,15 @@ class ModelRouter:
             self.registry.providers[provider_name] = provider
             self.registry.provider_configs[provider_name] = provider_config
 
-            logger.info(f"Added provider: {provider_name}")
+            logger.info("Added provider", provider_name=provider_name)
 
         except Exception as e:
-            logger.error(f"Failed to add provider {provider_name}: {e}")
+            logger.error(
+                "Failed to add provider",
+                provider_name=provider_name,
+                error=str(e),
+                exc_info=True,
+            )
             raise
 
     def remove_provider(self, provider_name: str) -> None:
@@ -434,7 +453,7 @@ class ModelRouter:
             if provider_name in self.registry.last_health_check:
                 del self.registry.last_health_check[provider_name]
 
-            logger.info(f"Removed provider: {provider_name}")
+            logger.info("Removed provider", provider_name=provider_name)
 
     async def close(self) -> None:
         """Clean up all provider resources."""
@@ -444,7 +463,7 @@ class ModelRouter:
                 try:
                     await provider.close()
                 except Exception as e:
-                    logger.warning(f"Error closing provider: {e}")
+                    logger.warning("Error closing provider", error=str(e))
 
 
 __all__ = ["ModelRouter", "ProviderRegistry", "RoutingDecision"]
