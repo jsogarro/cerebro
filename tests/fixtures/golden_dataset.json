@@ -1,0 +1,465 @@
+{
+  "version": "2026-05-03",
+  "description": "Offline golden research-evaluation fixture for deterministic regression testing. Each case includes stable expected insights, expected citations, and trusted source evidence used by local test infrastructure.",
+  "cases": [
+    {
+      "id": "golden-001",
+      "query": "Summarize why CRISPR-Cas9 experiments need off-target analysis.",
+      "domains": ["genomics", "research-methods"],
+      "expected_citations": [{"title": "CRISPR-Cas9 Off-Target Activity", "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4744125/", "source_type": "review"}],
+      "expected_insights": ["CRISPR-Cas9 can cut genomic sites that partially match the guide RNA.", "Off-target analysis helps separate intended edits from unintended genomic changes."],
+      "trusted_sources": [{"title": "CRISPR-Cas9 Off-Target Activity", "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4744125/", "source_type": "review", "snippet": "Review evidence on guide RNA specificity and genome-wide off-target detection.", "supported_claims": ["CRISPR-Cas9 can cut genomic sites that partially match the guide RNA.", "Off-target analysis helps separate intended edits from unintended genomic changes."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-002",
+      "query": "Explain the role of attention in transformer language models.",
+      "domains": ["machine-learning", "natural-language-processing"],
+      "expected_citations": [{"title": "Attention Is All You Need", "url": "https://arxiv.org/abs/1706.03762", "source_type": "paper"}],
+      "expected_insights": ["Self-attention lets each token condition on other tokens in the same sequence.", "Transformer models replace recurrent sequence processing with stacked attention and feed-forward layers."],
+      "trusted_sources": [{"title": "Attention Is All You Need", "url": "https://arxiv.org/abs/1706.03762", "source_type": "paper", "snippet": "The transformer architecture relies on self-attention mechanisms instead of recurrence.", "supported_claims": ["Self-attention lets each token condition on other tokens in the same sequence.", "Transformer models replace recurrent sequence processing with stacked attention and feed-forward layers."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-003",
+      "query": "Describe why randomized controlled trials support causal inference.",
+      "domains": ["statistics", "clinical-research"],
+      "expected_citations": [{"title": "Randomized Controlled Trial", "url": "https://www.ncbi.nlm.nih.gov/books/NBK459363/", "source_type": "reference"}],
+      "expected_insights": ["Random assignment reduces systematic baseline differences between treatment groups.", "Controlled trial design helps attribute outcome differences to the intervention under study."],
+      "trusted_sources": [{"title": "Randomized Controlled Trial", "url": "https://www.ncbi.nlm.nih.gov/books/NBK459363/", "source_type": "reference", "snippet": "Randomized controlled trials compare outcomes after random allocation to interventions.", "supported_claims": ["Random assignment reduces systematic baseline differences between treatment groups.", "Controlled trial design helps attribute outcome differences to the intervention under study."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-004",
+      "query": "What is the value of preregistration in empirical research?",
+      "domains": ["open-science", "research-methods"],
+      "expected_citations": [{"title": "Preregistration Revolution", "url": "https://www.pnas.org/doi/10.1073/pnas.1708274114", "source_type": "paper"}],
+      "expected_insights": ["Preregistration records hypotheses and analysis plans before observing study outcomes.", "Preregistration reduces undisclosed flexibility in analysis and interpretation."],
+      "trusted_sources": [{"title": "Preregistration Revolution", "url": "https://www.pnas.org/doi/10.1073/pnas.1708274114", "source_type": "paper", "snippet": "Preregistration distinguishes planned confirmatory tests from exploratory analysis.", "supported_claims": ["Preregistration records hypotheses and analysis plans before observing study outcomes.", "Preregistration reduces undisclosed flexibility in analysis and interpretation."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-005",
+      "query": "Summarize how systematic reviews differ from narrative reviews.",
+      "domains": ["evidence-synthesis", "research-methods"],
+      "expected_citations": [{"title": "Cochrane Handbook for Systematic Reviews", "url": "https://training.cochrane.org/handbook/current", "source_type": "handbook"}],
+      "expected_insights": ["Systematic reviews use explicit eligibility criteria and reproducible search methods.", "Narrative reviews are typically less protocol-driven and more dependent on author selection."],
+      "trusted_sources": [{"title": "Cochrane Handbook for Systematic Reviews", "url": "https://training.cochrane.org/handbook/current", "source_type": "handbook", "snippet": "Systematic reviews follow predefined methods to identify and synthesize evidence.", "supported_claims": ["Systematic reviews use explicit eligibility criteria and reproducible search methods.", "Narrative reviews are typically less protocol-driven and more dependent on author selection."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-006",
+      "query": "Explain Bayes theorem using medical test interpretation.",
+      "domains": ["statistics", "medicine"],
+      "expected_citations": [{"title": "Bayes Theorem", "url": "https://plato.stanford.edu/entries/bayes-theorem/", "source_type": "reference"}],
+      "expected_insights": ["Bayes theorem updates prior probability using the likelihood of observed evidence.", "A positive test result depends on sensitivity, specificity, and disease prevalence."],
+      "trusted_sources": [{"title": "Bayes Theorem", "url": "https://plato.stanford.edu/entries/bayes-theorem/", "source_type": "reference", "snippet": "Bayesian updating combines prior probabilities with evidence likelihoods.", "supported_claims": ["Bayes theorem updates prior probability using the likelihood of observed evidence.", "A positive test result depends on sensitivity, specificity, and disease prevalence."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-007",
+      "query": "What factors contributed to the reproducibility crisis in psychology?",
+      "domains": ["psychology", "open-science"],
+      "expected_citations": [{"title": "Estimating the Reproducibility of Psychological Science", "url": "https://www.science.org/doi/10.1126/science.aac4716", "source_type": "paper"}],
+      "expected_insights": ["Selective reporting and flexible analysis choices can inflate apparent findings.", "Large replication projects found that many psychology results were weaker in replication."],
+      "trusted_sources": [{"title": "Estimating the Reproducibility of Psychological Science", "url": "https://www.science.org/doi/10.1126/science.aac4716", "source_type": "paper", "snippet": "Replication studies assessed reproducibility of published psychological science.", "supported_claims": ["Selective reporting and flexible analysis choices can inflate apparent findings.", "Large replication projects found that many psychology results were weaker in replication."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-008",
+      "query": "Describe the privacy guarantee provided by differential privacy.",
+      "domains": ["privacy", "statistics"],
+      "expected_citations": [{"title": "The Algorithmic Foundations of Differential Privacy", "url": "https://www.cis.upenn.edu/~aaroth/Papers/privacybook.pdf", "source_type": "book"}],
+      "expected_insights": ["Differential privacy limits how much one individual's data can change an output distribution.", "The privacy budget controls the tradeoff between disclosure risk and statistical utility."],
+      "trusted_sources": [{"title": "The Algorithmic Foundations of Differential Privacy", "url": "https://www.cis.upenn.edu/~aaroth/Papers/privacybook.pdf", "source_type": "book", "snippet": "Differential privacy formalizes the effect of one person's data on algorithmic outputs.", "supported_claims": ["Differential privacy limits how much one individual's data can change an output distribution.", "The privacy budget controls the tradeoff between disclosure risk and statistical utility."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-009",
+      "query": "Summarize the main privacy benefit of federated learning.",
+      "domains": ["machine-learning", "privacy"],
+      "expected_citations": [{"title": "Communication-Efficient Learning of Deep Networks from Decentralized Data", "url": "https://arxiv.org/abs/1602.05629", "source_type": "paper"}],
+      "expected_insights": ["Federated learning trains models across decentralized clients without centralizing raw local data.", "Model updates can still leak information unless combined with safeguards such as secure aggregation or differential privacy."],
+      "trusted_sources": [{"title": "Communication-Efficient Learning of Deep Networks from Decentralized Data", "url": "https://arxiv.org/abs/1602.05629", "source_type": "paper", "snippet": "Federated optimization trains models from decentralized data stored on client devices.", "supported_claims": ["Federated learning trains models across decentralized clients without centralizing raw local data.", "Model updates can still leak information unless combined with safeguards such as secure aggregation or differential privacy."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-010",
+      "query": "Explain retrieval-augmented generation for factual question answering.",
+      "domains": ["llm-systems", "information-retrieval"],
+      "expected_citations": [{"title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks", "url": "https://arxiv.org/abs/2005.11401", "source_type": "paper"}],
+      "expected_insights": ["Retrieval-augmented generation conditions model outputs on externally retrieved documents.", "Grounding generation in retrieved evidence can improve factuality for knowledge-intensive tasks."],
+      "trusted_sources": [{"title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks", "url": "https://arxiv.org/abs/2005.11401", "source_type": "paper", "snippet": "RAG combines parametric generation with non-parametric document retrieval.", "supported_claims": ["Retrieval-augmented generation conditions model outputs on externally retrieved documents.", "Grounding generation in retrieved evidence can improve factuality for knowledge-intensive tasks."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-011",
+      "query": "What is a confounder in a causal directed acyclic graph?",
+      "domains": ["causal-inference", "statistics"],
+      "expected_citations": [{"title": "Causal Diagrams for Empirical Research", "url": "https://academic.oup.com/biomet/article/82/4/669/252471", "source_type": "paper"}],
+      "expected_insights": ["A confounder is a common cause of the exposure and outcome.", "Conditioning on appropriate confounders helps estimate causal effects without spurious association."],
+      "trusted_sources": [{"title": "Causal Diagrams for Empirical Research", "url": "https://academic.oup.com/biomet/article/82/4/669/252471", "source_type": "paper", "snippet": "Causal diagrams encode assumptions about common causes and causal pathways.", "supported_claims": ["A confounder is a common cause of the exposure and outcome.", "Conditioning on appropriate confounders helps estimate causal effects without spurious association."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-012",
+      "query": "Summarize why radiative forcing matters in climate science.",
+      "domains": ["climate-science", "earth-systems"],
+      "expected_citations": [{"title": "IPCC AR6 Working Group I Summary for Policymakers", "url": "https://www.ipcc.ch/report/ar6/wg1/", "source_type": "assessment"}],
+      "expected_insights": ["Radiative forcing measures changes in Earth's energy balance caused by drivers such as greenhouse gases.", "Positive radiative forcing tends to warm the climate system."],
+      "trusted_sources": [{"title": "IPCC AR6 Working Group I Summary for Policymakers", "url": "https://www.ipcc.ch/report/ar6/wg1/", "source_type": "assessment", "snippet": "IPCC assessment reports describe radiative forcing and climate drivers.", "supported_claims": ["Radiative forcing measures changes in Earth's energy balance caused by drivers such as greenhouse gases.", "Positive radiative forcing tends to warm the climate system."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-013",
+      "query": "Explain how mRNA vaccines stimulate adaptive immunity.",
+      "domains": ["immunology", "medicine"],
+      "expected_citations": [{"title": "mRNA Vaccines in the COVID-19 Pandemic and Beyond", "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7956899/", "source_type": "review"}],
+      "expected_insights": ["mRNA vaccines deliver instructions for host cells to produce a target antigen.", "The expressed antigen can trigger antibody and T-cell immune responses."],
+      "trusted_sources": [{"title": "mRNA Vaccines in the COVID-19 Pandemic and Beyond", "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7956899/", "source_type": "review", "snippet": "mRNA vaccine platforms encode antigens that stimulate immune responses.", "supported_claims": ["mRNA vaccines deliver instructions for host cells to produce a target antigen.", "The expressed antigen can trigger antibody and T-cell immune responses."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-014",
+      "query": "What drives antimicrobial resistance in bacterial populations?",
+      "domains": ["microbiology", "public-health"],
+      "expected_citations": [{"title": "WHO Antimicrobial Resistance Fact Sheet", "url": "https://www.who.int/news-room/fact-sheets/detail/antimicrobial-resistance", "source_type": "fact-sheet"}],
+      "expected_insights": ["Antimicrobial exposure creates selection pressure favoring resistant organisms.", "Misuse and overuse of antimicrobials accelerate the spread of resistance."],
+      "trusted_sources": [{"title": "WHO Antimicrobial Resistance Fact Sheet", "url": "https://www.who.int/news-room/fact-sheets/detail/antimicrobial-resistance", "source_type": "fact-sheet", "snippet": "Public health guidance describes misuse, overuse, and spread of antimicrobial resistance.", "supported_claims": ["Antimicrobial exposure creates selection pressure favoring resistant organisms.", "Misuse and overuse of antimicrobials accelerate the spread of resistance."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-015",
+      "query": "Describe how graph neural networks use neighborhood information.",
+      "domains": ["machine-learning", "graphs"],
+      "expected_citations": [{"title": "A Comprehensive Survey on Graph Neural Networks", "url": "https://arxiv.org/abs/1901.00596", "source_type": "paper"}],
+      "expected_insights": ["Graph neural networks update node representations by aggregating information from neighboring nodes.", "Message passing allows graph structure to influence learned embeddings."],
+      "trusted_sources": [{"title": "A Comprehensive Survey on Graph Neural Networks", "url": "https://arxiv.org/abs/1901.00596", "source_type": "paper", "snippet": "Graph neural networks propagate and transform information over graph neighborhoods.", "supported_claims": ["Graph neural networks update node representations by aggregating information from neighboring nodes.", "Message passing allows graph structure to influence learned embeddings."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-016",
+      "query": "Explain BM25 ranking for text retrieval.",
+      "domains": ["information-retrieval", "search"],
+      "expected_citations": [{"title": "Okapi BM25", "url": "https://nlp.stanford.edu/IR-book/html/htmledition/okapi-bm25-a-non-binary-model-1.html", "source_type": "textbook"}],
+      "expected_insights": ["BM25 scores documents using term frequency, inverse document frequency, and length normalization.", "The method is a sparse lexical retrieval baseline for matching query terms to documents."],
+      "trusted_sources": [{"title": "Okapi BM25", "url": "https://nlp.stanford.edu/IR-book/html/htmledition/okapi-bm25-a-non-binary-model-1.html", "source_type": "textbook", "snippet": "BM25 is a ranking function for probabilistic information retrieval.", "supported_claims": ["BM25 scores documents using term frequency, inverse document frequency, and length normalization.", "The method is a sparse lexical retrieval baseline for matching query terms to documents."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-017",
+      "query": "Why is exploration important in reinforcement learning?",
+      "domains": ["reinforcement-learning", "machine-learning"],
+      "expected_citations": [{"title": "Reinforcement Learning: An Introduction", "url": "http://incompleteideas.net/book/the-book-2nd.html", "source_type": "book"}],
+      "expected_insights": ["Exploration lets an agent gather information about actions whose value is uncertain.", "Balancing exploration and exploitation is necessary to learn high-reward policies."],
+      "trusted_sources": [{"title": "Reinforcement Learning: An Introduction", "url": "http://incompleteideas.net/book/the-book-2nd.html", "source_type": "book", "snippet": "Reinforcement learning requires tradeoffs between exploiting known rewards and exploring uncertain actions.", "supported_claims": ["Exploration lets an agent gather information about actions whose value is uncertain.", "Balancing exploration and exploitation is necessary to learn high-reward policies."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-018",
+      "query": "Compare demographic parity and equalized odds fairness metrics.",
+      "domains": ["machine-learning", "fairness"],
+      "expected_citations": [{"title": "Equality of Opportunity in Supervised Learning", "url": "https://arxiv.org/abs/1610.02413", "source_type": "paper"}],
+      "expected_insights": ["Demographic parity compares prediction rates across groups without conditioning on true outcome.", "Equalized odds compares error rates across groups conditional on the true outcome."],
+      "trusted_sources": [{"title": "Equality of Opportunity in Supervised Learning", "url": "https://arxiv.org/abs/1610.02413", "source_type": "paper", "snippet": "Fairness definitions can constrain predictions and errors across protected groups.", "supported_claims": ["Demographic parity compares prediction rates across groups without conditioning on true outcome.", "Equalized odds compares error rates across groups conditional on the true outcome."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-019",
+      "query": "What is the purpose of data lineage in analytics systems?",
+      "domains": ["data-engineering", "governance"],
+      "expected_citations": [{"title": "W3C PROV Overview", "url": "https://www.w3.org/TR/prov-overview/", "source_type": "standard"}],
+      "expected_insights": ["Data lineage records where data came from and how it was transformed.", "Lineage supports auditability, debugging, and governance of analytical outputs."],
+      "trusted_sources": [{"title": "W3C PROV Overview", "url": "https://www.w3.org/TR/prov-overview/", "source_type": "standard", "snippet": "PROV describes provenance information for entities, activities, and agents.", "supported_claims": ["Data lineage records where data came from and how it was transformed.", "Lineage supports auditability, debugging, and governance of analytical outputs."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-020",
+      "query": "Explain heterogeneity in meta-analysis.",
+      "domains": ["statistics", "evidence-synthesis"],
+      "expected_citations": [{"title": "Cochrane Handbook: Identifying and Measuring Heterogeneity", "url": "https://training.cochrane.org/handbook/current/chapter-10", "source_type": "handbook"}],
+      "expected_insights": ["Heterogeneity refers to variability in effect estimates or study characteristics across included studies.", "Assessing heterogeneity helps decide whether a pooled estimate is meaningful."],
+      "trusted_sources": [{"title": "Cochrane Handbook: Identifying and Measuring Heterogeneity", "url": "https://training.cochrane.org/handbook/current/chapter-10", "source_type": "handbook", "snippet": "Meta-analysis guidance distinguishes clinical, methodological, and statistical heterogeneity.", "supported_claims": ["Heterogeneity refers to variability in effect estimates or study characteristics across included studies.", "Assessing heterogeneity helps decide whether a pooled estimate is meaningful."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-021",
+      "query": "Why should time-series models avoid random cross-validation splits?",
+      "domains": ["forecasting", "machine-learning"],
+      "expected_citations": [{"title": "Forecasting: Principles and Practice", "url": "https://otexts.com/fpp3/tscv.html", "source_type": "textbook"}],
+      "expected_insights": ["Time-series validation should preserve temporal order between training and evaluation periods.", "Random splits can leak future information into model training."],
+      "trusted_sources": [{"title": "Forecasting: Principles and Practice", "url": "https://otexts.com/fpp3/tscv.html", "source_type": "textbook", "snippet": "Time-series cross-validation evaluates forecasts using rolling or expanding windows.", "supported_claims": ["Time-series validation should preserve temporal order between training and evaluation periods.", "Random splits can leak future information into model training."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-022",
+      "query": "Describe how knowledge graphs support semantic search.",
+      "domains": ["knowledge-representation", "search"],
+      "expected_citations": [{"title": "Knowledge Graphs", "url": "https://arxiv.org/abs/2003.02320", "source_type": "paper"}],
+      "expected_insights": ["Knowledge graphs represent entities and relationships in a structured graph.", "Semantic search can use graph relationships to retrieve context beyond exact keyword matches."],
+      "trusted_sources": [{"title": "Knowledge Graphs", "url": "https://arxiv.org/abs/2003.02320", "source_type": "paper", "snippet": "Knowledge graphs organize entities, types, and relations for semantic applications.", "supported_claims": ["Knowledge graphs represent entities and relationships in a structured graph.", "Semantic search can use graph relationships to retrieve context beyond exact keyword matches."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-023",
+      "query": "What are the research benefits of sharing open datasets?",
+      "domains": ["open-science", "data-management"],
+      "expected_citations": [{"title": "FAIR Guiding Principles", "url": "https://www.nature.com/articles/sdata201618", "source_type": "paper"}],
+      "expected_insights": ["Open datasets can support reproducibility and independent verification of research findings.", "FAIR data principles emphasize findability, accessibility, interoperability, and reusability."],
+      "trusted_sources": [{"title": "FAIR Guiding Principles", "url": "https://www.nature.com/articles/sdata201618", "source_type": "paper", "snippet": "FAIR principles guide stewardship and reuse of scientific data.", "supported_claims": ["Open datasets can support reproducibility and independent verification of research findings.", "FAIR data principles emphasize findability, accessibility, interoperability, and reusability."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-024",
+      "query": "Summarize why human factors matter in aviation safety.",
+      "domains": ["human-factors", "safety"],
+      "expected_citations": [{"title": "FAA Human Factors Guide for Aviation Maintenance", "url": "https://www.faa.gov/about/initiatives/maintenance_hf/library/documents/media/human_factors_maintenance/human_factors_guide.pdf", "source_type": "guide"}],
+      "expected_insights": ["Human factors research studies how people interact with tools, procedures, and operational environments.", "Aviation safety improves when systems account for workload, communication, and error management."],
+      "trusted_sources": [{"title": "FAA Human Factors Guide for Aviation Maintenance", "url": "https://www.faa.gov/about/initiatives/maintenance_hf/library/documents/media/human_factors_maintenance/human_factors_guide.pdf", "source_type": "guide", "snippet": "Aviation human factors guidance addresses communication, fatigue, workload, and error.", "supported_claims": ["Human factors research studies how people interact with tools, procedures, and operational environments.", "Aviation safety improves when systems account for workload, communication, and error management."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-025",
+      "query": "Explain participatory design in health technology projects.",
+      "domains": ["design", "health-informatics"],
+      "expected_citations": [{"title": "Participatory Design in Health Information Technology", "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3932469/", "source_type": "review"}],
+      "expected_insights": ["Participatory design involves end users and stakeholders in design decisions.", "Including users can improve fit between health technology workflows and real clinical practice."],
+      "trusted_sources": [{"title": "Participatory Design in Health Information Technology", "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3932469/", "source_type": "review", "snippet": "Participatory approaches involve stakeholders in designing health information technologies.", "supported_claims": ["Participatory design involves end users and stakeholders in design decisions.", "Including users can improve fit between health technology workflows and real clinical practice."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-026",
+      "query": "Describe social determinants of health in public health research.",
+      "domains": ["public-health", "health-equity"],
+      "expected_citations": [{"title": "WHO Social Determinants of Health", "url": "https://www.who.int/health-topics/social-determinants-of-health", "source_type": "reference"}],
+      "expected_insights": ["Social determinants of health are non-medical conditions shaping health outcomes.", "Income, education, housing, and social environments can influence health inequities."],
+      "trusted_sources": [{"title": "WHO Social Determinants of Health", "url": "https://www.who.int/health-topics/social-determinants-of-health", "source_type": "reference", "snippet": "WHO describes social determinants as conditions in which people are born, grow, work, live, and age.", "supported_claims": ["Social determinants of health are non-medical conditions shaping health outcomes.", "Income, education, housing, and social environments can influence health inequities."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-027",
+      "query": "What does NDVI measure in satellite remote sensing?",
+      "domains": ["remote-sensing", "environmental-science"],
+      "expected_citations": [{"title": "Measuring Vegetation from Satellite Imagery", "url": "https://earthobservatory.nasa.gov/features/MeasuringVegetation", "source_type": "reference"}],
+      "expected_insights": ["NDVI uses red and near-infrared reflectance to estimate vegetation greenness.", "Healthy vegetation typically reflects more near-infrared light and absorbs more red light."],
+      "trusted_sources": [{"title": "Measuring Vegetation from Satellite Imagery", "url": "https://earthobservatory.nasa.gov/features/MeasuringVegetation", "source_type": "reference", "snippet": "NASA explains vegetation indices from red and near-infrared satellite measurements.", "supported_claims": ["NDVI uses red and near-infrared reflectance to estimate vegetation greenness.", "Healthy vegetation typically reflects more near-infrared light and absorbs more red light."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-028",
+      "query": "Why are hierarchical Bayesian models useful for grouped data?",
+      "domains": ["statistics", "bayesian-methods"],
+      "expected_citations": [{"title": "Bayesian Data Analysis", "url": "http://www.stat.columbia.edu/~gelman/book/", "source_type": "book"}],
+      "expected_insights": ["Hierarchical Bayesian models share information across related groups through common population-level parameters.", "Partial pooling can stabilize estimates for groups with limited data."],
+      "trusted_sources": [{"title": "Bayesian Data Analysis", "url": "http://www.stat.columbia.edu/~gelman/book/", "source_type": "book", "snippet": "Hierarchical models model group-level variation and population distributions.", "supported_claims": ["Hierarchical Bayesian models share information across related groups through common population-level parameters.", "Partial pooling can stabilize estimates for groups with limited data."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-029",
+      "query": "Explain causal mediation analysis at a high level.",
+      "domains": ["causal-inference", "statistics"],
+      "expected_citations": [{"title": "A General Approach to Causal Mediation Analysis", "url": "https://doi.org/10.1037/a0020761", "source_type": "paper"}],
+      "expected_insights": ["Causal mediation analysis studies pathways through which an exposure affects an outcome.", "A mediator is an intermediate variable on a causal path between treatment and outcome."],
+      "trusted_sources": [{"title": "A General Approach to Causal Mediation Analysis", "url": "https://doi.org/10.1037/a0020761", "source_type": "paper", "snippet": "Mediation analysis decomposes effects into direct and indirect pathways under assumptions.", "supported_claims": ["Causal mediation analysis studies pathways through which an exposure affects an outcome.", "A mediator is an intermediate variable on a causal path between treatment and outcome."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-030",
+      "query": "Describe the core idea of public key cryptography.",
+      "domains": ["security", "cryptography"],
+      "expected_citations": [{"title": "New Directions in Cryptography", "url": "https://ee.stanford.edu/~hellman/publications/24.pdf", "source_type": "paper"}],
+      "expected_insights": ["Public key cryptography uses paired public and private keys for encryption or signatures.", "The public key can be shared while the private key must remain secret."],
+      "trusted_sources": [{"title": "New Directions in Cryptography", "url": "https://ee.stanford.edu/~hellman/publications/24.pdf", "source_type": "paper", "snippet": "Diffie and Hellman introduced public-key distribution concepts.", "supported_claims": ["Public key cryptography uses paired public and private keys for encryption or signatures.", "The public key can be shared while the private key must remain secret."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-031",
+      "query": "Summarize the security role of OAuth 2.0 authorization codes.",
+      "domains": ["security", "identity"],
+      "expected_citations": [{"title": "RFC 6749 OAuth 2.0 Authorization Framework", "url": "https://www.rfc-editor.org/rfc/rfc6749", "source_type": "standard"}],
+      "expected_insights": ["The authorization code flow separates user authorization from token issuance.", "Clients exchange a short-lived authorization code for access tokens at the token endpoint."],
+      "trusted_sources": [{"title": "RFC 6749 OAuth 2.0 Authorization Framework", "url": "https://www.rfc-editor.org/rfc/rfc6749", "source_type": "standard", "snippet": "OAuth 2.0 defines authorization grants including authorization code grants.", "supported_claims": ["The authorization code flow separates user authorization from token issuance.", "Clients exchange a short-lived authorization code for access tokens at the token endpoint."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-032",
+      "query": "What are supply-chain risks for container images?",
+      "domains": ["security", "devops"],
+      "expected_citations": [{"title": "SLSA Supply-chain Levels for Software Artifacts", "url": "https://slsa.dev/spec/v1.0/", "source_type": "standard"}],
+      "expected_insights": ["Container image risk includes vulnerable dependencies, tampered base images, and unverified build provenance.", "Digest pinning and provenance checks help make image inputs auditable."],
+      "trusted_sources": [{"title": "SLSA Supply-chain Levels for Software Artifacts", "url": "https://slsa.dev/spec/v1.0/", "source_type": "standard", "snippet": "SLSA provides a framework for integrity and provenance in software supply chains.", "supported_claims": ["Container image risk includes vulnerable dependencies, tampered base images, and unverified build provenance.", "Digest pinning and provenance checks help make image inputs auditable."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-033",
+      "query": "Explain zero trust architecture in enterprise security.",
+      "domains": ["security", "architecture"],
+      "expected_citations": [{"title": "NIST SP 800-207 Zero Trust Architecture", "url": "https://csrc.nist.gov/publications/detail/sp/800-207/final", "source_type": "standard"}],
+      "expected_insights": ["Zero trust architecture assumes no implicit trust based solely on network location.", "Access decisions should be explicit, continuously evaluated, and least-privilege oriented."],
+      "trusted_sources": [{"title": "NIST SP 800-207 Zero Trust Architecture", "url": "https://csrc.nist.gov/publications/detail/sp/800-207/final", "source_type": "standard", "snippet": "NIST defines zero trust concepts and logical components.", "supported_claims": ["Zero trust architecture assumes no implicit trust based solely on network location.", "Access decisions should be explicit, continuously evaluated, and least-privilege oriented."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-034",
+      "query": "Compare metrics, logs, and traces in observability.",
+      "domains": ["observability", "software-engineering"],
+      "expected_citations": [{"title": "OpenTelemetry Documentation", "url": "https://opentelemetry.io/docs/concepts/signals/", "source_type": "documentation"}],
+      "expected_insights": ["Metrics provide aggregated numerical measurements over time.", "Logs record discrete events while traces follow request paths across service boundaries."],
+      "trusted_sources": [{"title": "OpenTelemetry Documentation", "url": "https://opentelemetry.io/docs/concepts/signals/", "source_type": "documentation", "snippet": "OpenTelemetry defines telemetry signals including traces, metrics, and logs.", "supported_claims": ["Metrics provide aggregated numerical measurements over time.", "Logs record discrete events while traces follow request paths across service boundaries."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-035",
+      "query": "How does queue depth inform autoscaling decisions?",
+      "domains": ["distributed-systems", "operations"],
+      "expected_citations": [{"title": "Kubernetes Horizontal Pod Autoscaling", "url": "https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/", "source_type": "documentation"}],
+      "expected_insights": ["Queue depth can indicate backlog pressure when producers outpace consumers.", "Autoscaling workers based on backlog can reduce latency during demand spikes."],
+      "trusted_sources": [{"title": "Kubernetes Horizontal Pod Autoscaling", "url": "https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/", "source_type": "documentation", "snippet": "Autoscaling can use observed metrics to adjust workload replicas.", "supported_claims": ["Queue depth can indicate backlog pressure when producers outpace consumers.", "Autoscaling workers based on backlog can reduce latency during demand spikes."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-036",
+      "query": "Summarize the ACID properties of database transactions.",
+      "domains": ["databases", "software-engineering"],
+      "expected_citations": [{"title": "PostgreSQL Transaction Isolation", "url": "https://www.postgresql.org/docs/current/transaction-iso.html", "source_type": "documentation"}],
+      "expected_insights": ["ACID describes atomicity, consistency, isolation, and durability guarantees for transactions.", "Isolation controls how concurrent transactions observe each other's intermediate effects."],
+      "trusted_sources": [{"title": "PostgreSQL Transaction Isolation", "url": "https://www.postgresql.org/docs/current/transaction-iso.html", "source_type": "documentation", "snippet": "PostgreSQL documentation discusses transaction isolation behavior.", "supported_claims": ["ACID describes atomicity, consistency, isolation, and durability guarantees for transactions.", "Isolation controls how concurrent transactions observe each other's intermediate effects."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-037",
+      "query": "What is event sourcing in application architecture?",
+      "domains": ["software-architecture", "distributed-systems"],
+      "expected_citations": [{"title": "Event Sourcing", "url": "https://martinfowler.com/eaaDev/EventSourcing.html", "source_type": "article"}],
+      "expected_insights": ["Event sourcing stores state changes as an ordered sequence of events.", "Application state can be reconstructed by replaying events from the event log."],
+      "trusted_sources": [{"title": "Event Sourcing", "url": "https://martinfowler.com/eaaDev/EventSourcing.html", "source_type": "article", "snippet": "Event sourcing captures all changes to application state as event objects.", "supported_claims": ["Event sourcing stores state changes as an ordered sequence of events.", "Application state can be reconstructed by replaying events from the event log."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-038",
+      "query": "Explain why vector databases are used with text embeddings.",
+      "domains": ["databases", "machine-learning"],
+      "expected_citations": [{"title": "FAISS: A Library for Efficient Similarity Search", "url": "https://arxiv.org/abs/1702.08734", "source_type": "paper"}],
+      "expected_insights": ["Embeddings map text into vectors where semantic similarity can be approximated by distance.", "Vector indexes make nearest-neighbor search more efficient at large scale."],
+      "trusted_sources": [{"title": "FAISS: A Library for Efficient Similarity Search", "url": "https://arxiv.org/abs/1702.08734", "source_type": "paper", "snippet": "Similarity search libraries support efficient nearest-neighbor retrieval for dense vectors.", "supported_claims": ["Embeddings map text into vectors where semantic similarity can be approximated by distance.", "Vector indexes make nearest-neighbor search more efficient at large scale."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-039",
+      "query": "What is prompt injection in LLM applications?",
+      "domains": ["llm-safety", "security"],
+      "expected_citations": [{"title": "OWASP Top 10 for LLM Applications", "url": "https://owasp.org/www-project-top-10-for-large-language-model-applications/", "source_type": "standard"}],
+      "expected_insights": ["Prompt injection attempts to override developer or system instructions through user-controlled content.", "LLM applications should isolate untrusted content and enforce tool access controls outside the model."],
+      "trusted_sources": [{"title": "OWASP Top 10 for LLM Applications", "url": "https://owasp.org/www-project-top-10-for-large-language-model-applications/", "source_type": "standard", "snippet": "OWASP identifies prompt injection as a major LLM application risk.", "supported_claims": ["Prompt injection attempts to override developer or system instructions through user-controlled content.", "LLM applications should isolate untrusted content and enforce tool access controls outside the model."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-040",
+      "query": "Describe the goal of PII redaction in application logs.",
+      "domains": ["privacy", "observability"],
+      "expected_citations": [{"title": "NIST Privacy Framework", "url": "https://www.nist.gov/privacy-framework", "source_type": "framework"}],
+      "expected_insights": ["PII redaction removes or masks personal data before it is persisted or shared.", "Log redaction reduces privacy risk while preserving enough operational context for debugging."],
+      "trusted_sources": [{"title": "NIST Privacy Framework", "url": "https://www.nist.gov/privacy-framework", "source_type": "framework", "snippet": "Privacy engineering controls can reduce identifiability and data exposure risk.", "supported_claims": ["PII redaction removes or masks personal data before it is persisted or shared.", "Log redaction reduces privacy risk while preserving enough operational context for debugging."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-041",
+      "query": "Why do accessibility guidelines specify text contrast requirements?",
+      "domains": ["accessibility", "frontend-engineering"],
+      "expected_citations": [{"title": "WCAG 2.2 Contrast Minimum", "url": "https://www.w3.org/TR/WCAG22/#contrast-minimum", "source_type": "standard"}],
+      "expected_insights": ["Contrast requirements help users with low vision distinguish text from its background.", "WCAG defines minimum contrast ratios for normal and large text."],
+      "trusted_sources": [{"title": "WCAG 2.2 Contrast Minimum", "url": "https://www.w3.org/TR/WCAG22/#contrast-minimum", "source_type": "standard", "snippet": "WCAG success criteria define contrast requirements for text and images of text.", "supported_claims": ["Contrast requirements help users with low vision distinguish text from its background.", "WCAG defines minimum contrast ratios for normal and large text."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-042",
+      "query": "Explain keyboard operability in web accessibility.",
+      "domains": ["accessibility", "frontend-engineering"],
+      "expected_citations": [{"title": "WCAG 2.2 Keyboard", "url": "https://www.w3.org/TR/WCAG22/#keyboard", "source_type": "standard"}],
+      "expected_insights": ["Keyboard operability requires interactive functionality to be usable without a pointing device.", "Visible focus indicators help keyboard users understand their current location."],
+      "trusted_sources": [{"title": "WCAG 2.2 Keyboard", "url": "https://www.w3.org/TR/WCAG22/#keyboard", "source_type": "standard", "snippet": "WCAG keyboard criteria require functionality to be operable through a keyboard interface.", "supported_claims": ["Keyboard operability requires interactive functionality to be usable without a pointing device.", "Visible focus indicators help keyboard users understand their current location."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-043",
+      "query": "What does usability testing reveal during product development?",
+      "domains": ["ux-research", "product-development"],
+      "expected_citations": [{"title": "Usability Evaluation Basics", "url": "https://www.usability.gov/what-and-why/usability-evaluation.html", "source_type": "reference"}],
+      "expected_insights": ["Usability testing observes representative users attempting realistic tasks.", "Findings can reveal navigation problems, unclear labels, and workflow friction."],
+      "trusted_sources": [{"title": "Usability Evaluation Basics", "url": "https://www.usability.gov/what-and-why/usability-evaluation.html", "source_type": "reference", "snippet": "Usability evaluation methods identify interface problems through user tasks.", "supported_claims": ["Usability testing observes representative users attempting realistic tasks.", "Findings can reveal navigation problems, unclear labels, and workflow friction."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-044",
+      "query": "Summarize cognitive load theory for instructional design.",
+      "domains": ["education", "cognitive-science"],
+      "expected_citations": [{"title": "Cognitive Load During Problem Solving", "url": "https://doi.org/10.1207/s15516709cog1202_4", "source_type": "paper"}],
+      "expected_insights": ["Cognitive load theory focuses on limits of working memory during learning tasks.", "Instructional design can reduce extraneous load so learners focus on essential concepts."],
+      "trusted_sources": [{"title": "Cognitive Load During Problem Solving", "url": "https://doi.org/10.1207/s15516709cog1202_4", "source_type": "paper", "snippet": "Cognitive load theory links instructional design to working memory constraints.", "supported_claims": ["Cognitive load theory focuses on limits of working memory during learning tasks.", "Instructional design can reduce extraneous load so learners focus on essential concepts."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-045",
+      "query": "Why do human-subject studies require ethical review?",
+      "domains": ["research-ethics", "governance"],
+      "expected_citations": [{"title": "Belmont Report", "url": "https://www.hhs.gov/ohrp/regulations-and-policy/belmont-report/index.html", "source_type": "report"}],
+      "expected_insights": ["Ethical review protects human participants through informed consent, risk assessment, and privacy safeguards.", "The Belmont principles include respect for persons, beneficence, and justice."],
+      "trusted_sources": [{"title": "Belmont Report", "url": "https://www.hhs.gov/ohrp/regulations-and-policy/belmont-report/index.html", "source_type": "report", "snippet": "The Belmont Report identifies ethical principles for human-subject research.", "supported_claims": ["Ethical review protects human participants through informed consent, risk assessment, and privacy safeguards.", "The Belmont principles include respect for persons, beneficence, and justice."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-046",
+      "query": "Explain k-anonymity as a privacy concept.",
+      "domains": ["privacy", "data-management"],
+      "expected_citations": [{"title": "k-Anonymity: A Model for Protecting Privacy", "url": "https://doi.org/10.1142/S0218488502001648", "source_type": "paper"}],
+      "expected_insights": ["k-anonymity requires each released record to be indistinguishable from at least k minus one others on quasi-identifiers.", "Generalization and suppression can help reduce re-identification risk."],
+      "trusted_sources": [{"title": "k-Anonymity: A Model for Protecting Privacy", "url": "https://doi.org/10.1142/S0218488502001648", "source_type": "paper", "snippet": "k-anonymity protects released data by grouping records with shared quasi-identifier values.", "supported_claims": ["k-anonymity requires each released record to be indistinguishable from at least k minus one others on quasi-identifiers.", "Generalization and suppression can help reduce re-identification risk."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-047",
+      "query": "Why do map projections distort geospatial measurements?",
+      "domains": ["geospatial", "cartography"],
+      "expected_citations": [{"title": "Map Projections", "url": "https://pubs.usgs.gov/gip/70047422/report.pdf", "source_type": "guide"}],
+      "expected_insights": ["Projecting Earth's curved surface onto a flat map inevitably distorts some combination of area, shape, distance, or direction.", "Projection choice should match the analytical purpose and geographic extent."],
+      "trusted_sources": [{"title": "Map Projections", "url": "https://pubs.usgs.gov/gip/70047422/report.pdf", "source_type": "guide", "snippet": "USGS guidance explains distortion tradeoffs across map projections.", "supported_claims": ["Projecting Earth's curved surface onto a flat map inevitably distorts some combination of area, shape, distance, or direction.", "Projection choice should match the analytical purpose and geographic extent."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-048",
+      "query": "How can LLM systems evaluate hallucination risk?",
+      "domains": ["llm-evaluation", "ai-safety"],
+      "expected_citations": [{"title": "TruthfulQA: Measuring How Models Mimic Human Falsehoods", "url": "https://arxiv.org/abs/2109.07958", "source_type": "paper"}],
+      "expected_insights": ["Hallucination evaluation compares model claims against trusted evidence rather than fluency alone.", "Datasets with known answers can expose confident false statements from language models."],
+      "trusted_sources": [{"title": "TruthfulQA: Measuring How Models Mimic Human Falsehoods", "url": "https://arxiv.org/abs/2109.07958", "source_type": "paper", "snippet": "TruthfulQA evaluates whether language models produce truthful answers to questions.", "supported_claims": ["Hallucination evaluation compares model claims against trusted evidence rather than fluency alone.", "Datasets with known answers can expose confident false statements from language models."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-049",
+      "query": "Explain semantic versioning for API consumers.",
+      "domains": ["software-engineering", "api-design"],
+      "expected_citations": [{"title": "Semantic Versioning 2.0.0", "url": "https://semver.org/", "source_type": "specification"}],
+      "expected_insights": ["Semantic versioning uses major, minor, and patch numbers to communicate compatibility expectations.", "Breaking API changes should increment the major version."],
+      "trusted_sources": [{"title": "Semantic Versioning 2.0.0", "url": "https://semver.org/", "source_type": "specification", "snippet": "The SemVer specification defines version-number changes for public APIs.", "supported_claims": ["Semantic versioning uses major, minor, and patch numbers to communicate compatibility expectations.", "Breaking API changes should increment the major version."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-050",
+      "query": "Describe the test pyramid in software quality strategy.",
+      "domains": ["software-testing", "quality-engineering"],
+      "expected_citations": [{"title": "The Practical Test Pyramid", "url": "https://martinfowler.com/articles/practical-test-pyramid.html", "source_type": "article"}],
+      "expected_insights": ["The test pyramid encourages many fast unit tests with fewer slower integration and end-to-end tests.", "A balanced suite reduces feedback time while still validating cross-component behavior."],
+      "trusted_sources": [{"title": "The Practical Test Pyramid", "url": "https://martinfowler.com/articles/practical-test-pyramid.html", "source_type": "article", "snippet": "The practical test pyramid describes balancing automated test scopes.", "supported_claims": ["The test pyramid encourages many fast unit tests with fewer slower integration and end-to-end tests.", "A balanced suite reduces feedback time while still validating cross-component behavior."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    },
+    {
+      "id": "golden-051",
+      "query": "Why should database schema migrations be reversible when possible?",
+      "domains": ["databases", "devops"],
+      "expected_citations": [{"title": "Alembic Tutorial", "url": "https://alembic.sqlalchemy.org/en/latest/tutorial.html", "source_type": "documentation"}],
+      "expected_insights": ["Reversible migrations provide a controlled path to roll back schema changes when deployment problems occur.", "Migration scripts should make data and compatibility risks explicit before production rollout."],
+      "trusted_sources": [{"title": "Alembic Tutorial", "url": "https://alembic.sqlalchemy.org/en/latest/tutorial.html", "source_type": "documentation", "snippet": "Alembic migration scripts define upgrade and downgrade operations for schema revisions.", "supported_claims": ["Reversible migrations provide a controlled path to roll back schema changes when deployment problems occur.", "Migration scripts should make data and compatibility risks explicit before production rollout."], "contradicted_claims": []}],
+      "quality_thresholds": {"min_citations": 1, "min_insights": 2}
+    }
+  ]
+}
