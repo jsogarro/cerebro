@@ -14,12 +14,13 @@ Key Features:
 """
 
 import asyncio
-import logging
 import statistics
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.types import ProtocolStatsDict
 
@@ -33,7 +34,7 @@ from .talkhier_message import (
     TalkHierMessage,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CommunicationMode(Enum):
@@ -162,7 +163,12 @@ class CommunicationProtocol:
         conversation_id = f"refinement_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         consensus_target = consensus_threshold or self.consensus_threshold
 
-        logger.info(f"Starting TalkHier refinement: {conversation_id}")
+        logger.info(
+            "talkhier_refinement_started",
+            conversation_id=conversation_id,
+            agent_count=len(participating_agents),
+            consensus_target=consensus_target,
+        )
 
         self.total_conversations += 1
         start_time = datetime.now()
@@ -189,7 +195,10 @@ class CommunicationProtocol:
             if round_1.consensus_achieved:
                 if round_1.consensus_score:
                     logger.info(
-                        f"Consensus achieved in Round 1: {round_1.consensus_score.overall_score:.3f}"
+                        "talkhier_consensus_achieved",
+                        conversation_id=conversation_id,
+                        round_number=1,
+                        consensus_score=round_1.consensus_score.overall_score,
                     )
                 return await self._finalize_refinement(
                     conversation_id, refinement_rounds, start_time
@@ -207,7 +216,10 @@ class CommunicationProtocol:
                 if round_2.consensus_achieved:
                     if round_2.consensus_score:
                         logger.info(
-                            f"Consensus achieved in Round 2: {round_2.consensus_score.overall_score:.3f}"
+                            "talkhier_consensus_achieved",
+                            conversation_id=conversation_id,
+                            round_number=2,
+                            consensus_score=round_2.consensus_score.overall_score,
                         )
                     return await self._finalize_refinement(
                         conversation_id, refinement_rounds, start_time
@@ -226,7 +238,11 @@ class CommunicationProtocol:
             )
 
         except Exception as e:
-            logger.error(f"Refinement workflow failed: {e}")
+            logger.error(
+                "talkhier_refinement_workflow_failed",
+                conversation_id=conversation_id,
+                error=str(e),
+            )
             return RefinementResult(
                 total_rounds=len(refinement_rounds),
                 consensus_achieved=False,
@@ -249,7 +265,13 @@ class CommunicationProtocol:
 
         round_1 = RefinementRound(round_number=1, phase=WorkflowPhase.INITIAL_EXECUTION)
 
-        logger.info(f"Round 1: Gathering initial responses from {len(agents)} agents")
+        logger.info(
+            "talkhier_round_started",
+            conversation_id=conversation_id,
+            round_number=1,
+            phase=round_1.phase.value,
+            agent_count=len(agents),
+        )
 
         try:
             # Create initial messages for all agents
@@ -284,7 +306,11 @@ class CommunicationProtocol:
             for i, response in enumerate(responses):
                 if isinstance(response, Exception):
                     logger.error(
-                        f"Agent {agents[i].get_agent_type()} failed: {response}"
+                        "talkhier_round_agent_failed",
+                        conversation_id=conversation_id,
+                        round_number=1,
+                        agent_type=agents[i].get_agent_type(),
+                        error=str(response),
                     )
                 elif isinstance(response, TalkHierMessage):
                     valid_responses.append(response)
@@ -306,11 +332,19 @@ class CommunicationProtocol:
             )
 
             logger.info(
-                f"Round 1 complete: {round_1.consensus_score.overall_score:.3f} consensus"
+                "talkhier_round_completed",
+                conversation_id=conversation_id,
+                round_number=1,
+                consensus_score=round_1.consensus_score.overall_score,
             )
 
         except Exception as e:
-            logger.error(f"Round 1 execution failed: {e}")
+            logger.error(
+                "talkhier_round_execution_failed",
+                conversation_id=conversation_id,
+                round_number=1,
+                error=str(e),
+            )
 
         return round_1
 
@@ -321,7 +355,13 @@ class CommunicationProtocol:
 
         round_2 = RefinementRound(round_number=2, phase=WorkflowPhase.CROSS_VALIDATION)
 
-        logger.info("Round 2: Cross-validation and conflict resolution")
+        logger.info(
+            "talkhier_round_started",
+            conversation_id=conversation_id,
+            round_number=2,
+            phase=round_2.phase.value,
+            agent_count=len(agents),
+        )
 
         try:
             # Create validation messages based on Round 1 conflicts
@@ -370,7 +410,11 @@ class CommunicationProtocol:
             for i, response in enumerate(responses):
                 if isinstance(response, Exception):
                     logger.error(
-                        f"Round 2 agent {agents[i].get_agent_type()} failed: {response}"
+                        "talkhier_round_agent_failed",
+                        conversation_id=conversation_id,
+                        round_number=2,
+                        agent_type=agents[i].get_agent_type(),
+                        error=str(response),
                     )
                 elif isinstance(response, TalkHierMessage):
                     round_2.participant_messages.append(response)
@@ -390,11 +434,19 @@ class CommunicationProtocol:
             )
 
             logger.info(
-                f"Round 2 complete: {round_2.consensus_score.overall_score:.3f} consensus"
+                "talkhier_round_completed",
+                conversation_id=conversation_id,
+                round_number=2,
+                consensus_score=round_2.consensus_score.overall_score,
             )
 
         except Exception as e:
-            logger.error(f"Round 2 execution failed: {e}")
+            logger.error(
+                "talkhier_round_execution_failed",
+                conversation_id=conversation_id,
+                round_number=2,
+                error=str(e),
+            )
 
         return round_2
 
@@ -408,7 +460,13 @@ class CommunicationProtocol:
 
         round_3 = RefinementRound(round_number=3, phase=WorkflowPhase.FINAL_SYNTHESIS)
 
-        logger.info("Round 3: Final synthesis and consensus")
+        logger.info(
+            "talkhier_round_started",
+            conversation_id=conversation_id,
+            round_number=3,
+            phase=round_3.phase.value,
+            agent_count=len(agents),
+        )
 
         try:
             # Prepare synthesis data from all previous rounds
@@ -453,7 +511,11 @@ class CommunicationProtocol:
             for i, response in enumerate(responses):
                 if isinstance(response, Exception):
                     logger.error(
-                        f"Round 3 agent {agents[i].get_agent_type()} failed: {response}"
+                        "talkhier_round_agent_failed",
+                        conversation_id=conversation_id,
+                        round_number=3,
+                        agent_type=agents[i].get_agent_type(),
+                        error=str(response),
                     )
                 elif isinstance(response, TalkHierMessage):
                     round_3.participant_messages.append(response)
@@ -473,11 +535,19 @@ class CommunicationProtocol:
             )
 
             logger.info(
-                f"Round 3 complete: {round_3.consensus_score.overall_score:.3f} consensus"
+                "talkhier_round_completed",
+                conversation_id=conversation_id,
+                round_number=3,
+                consensus_score=round_3.consensus_score.overall_score,
             )
 
         except Exception as e:
-            logger.error(f"Round 3 execution failed: {e}")
+            logger.error(
+                "talkhier_round_execution_failed",
+                conversation_id=conversation_id,
+                round_number=3,
+                error=str(e),
+            )
 
         return round_3
 
@@ -531,7 +601,12 @@ class CommunicationProtocol:
             return response
 
         except Exception as e:
-            logger.error(f"Failed to send message to {agent.get_agent_type()}: {e}")
+            logger.error(
+                "talkhier_agent_message_send_failed",
+                agent_type=agent.get_agent_type(),
+                conversation_id=message.conversation_id,
+                error=str(e),
+            )
             # Return error response
             error_content = TalkHierContent(
                 content=f"Error processing message: {e!s}", confidence_score=0.0
@@ -594,9 +669,11 @@ class CommunicationProtocol:
         )
 
         logger.info(
-            f"Refinement complete: {len(rounds)} rounds, "
-            f"{final_quality:.3f} final quality, "
-            f"{quality_improvement:+.3f} improvement"
+            "talkhier_refinement_completed",
+            conversation_id=conversation_id,
+            round_count=len(rounds),
+            final_quality=final_quality,
+            quality_improvement=quality_improvement,
         )
 
         return result
@@ -671,7 +748,7 @@ class CommunicationProtocol:
                     responses.append(response)
 
         except Exception as e:
-            logger.error(f"Hierarchical message routing failed: {e}")
+            logger.error("talkhier_hierarchical_message_routing_failed", error=str(e))
 
         return responses
 
