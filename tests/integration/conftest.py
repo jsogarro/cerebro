@@ -5,7 +5,6 @@ This module provides comprehensive fixtures and utilities for integration testin
 with real PostgreSQL, Redis, and Temporal instances using Docker containers.
 """
 
-import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator
@@ -55,16 +54,6 @@ class IntegrationTestConfig:
 
 
 @pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="session")
 def docker_compose_file():
     """Path to docker-compose file for integration tests."""
     return os.path.join(os.path.dirname(__file__), "docker-compose.test.yml")
@@ -85,7 +74,7 @@ def docker_compose(docker_compose_file):
     compose.stop()
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def postgres_container():
     """Start PostgreSQL container for integration tests."""
     container = PostgresContainer(
@@ -99,7 +88,7 @@ async def postgres_container():
     container.stop()
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def redis_container():
     """Start Redis container for integration tests."""
     container = RedisContainer(image="redis:7-alpine")
