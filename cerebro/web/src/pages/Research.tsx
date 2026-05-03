@@ -10,25 +10,47 @@ import { Plus, Search, Beaker, Clock, ArrowLeft, Terminal, FileText, Settings as
 import { useResearchProjects, useCreateResearch, useResearchProject } from "@/api/research";
 import { useEffect } from "react";
 import { wsManager } from "@/api/websocket";
+
+type ResearchProjectSummary = {
+    id: string;
+    title: string;
+    status: string;
+    progress: number;
+    time?: string;
+};
+
+type ResearchProjectDetail = {
+    id?: string;
+    title: string;
+    status?: string;
+    progress?: number;
+    created_at?: string;
+    query?: {
+        main_query?: string;
+    };
+};
+
+type ProjectProgressMessage = {
+    id?: string;
+    project_id?: string;
+    progress_percentage?: number;
+    status?: string;
+};
+
 function ResearchDetail({ id }: { id: string }) {
     const navigate = useNavigate();
-    const { data: projectData, isLoading } = useResearchProject(id);
+    const { data: projectDataRaw, isLoading } = useResearchProject(id);
+    const projectData = projectDataRaw as ResearchProjectDetail | undefined;
     const [progress, setProgress] = useState(0);
-    const [status, setStatus] = useState('pending');
-
-    useEffect(() => {
-        if (projectData) {
-            setStatus(projectData.status || 'pending');
-        }
-    }, [projectData]);
+    const [liveStatus, setLiveStatus] = useState<string | null>(null);
 
     useEffect(() => {
         wsManager.connect();
 
-        const unsubscribe = wsManager.subscribe('project_progress', (data: any) => {
+        const unsubscribe = wsManager.subscribe('project_progress', (data: ProjectProgressMessage) => {
             if (data.project_id === id || data.id === id) {
                 setProgress(data.progress_percentage || 0);
-                setStatus(data.status || 'running');
+                setLiveStatus(data.status || 'running');
             }
         });
 
@@ -50,7 +72,7 @@ function ResearchDetail({ id }: { id: string }) {
     const project = {
         id: projectData.id || id,
         title: projectData.title,
-        status: status,
+        status: liveStatus || projectData.status || 'pending',
         progress: progress,
         description: projectData.query?.main_query || "Research in progress...",
         createdAt: projectData.created_at || "Just now"
@@ -59,8 +81,8 @@ function ResearchDetail({ id }: { id: string }) {
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
             <div className="flex items-center gap-4">
-                <Button variant="ghost" size="icon" onClick={() => navigate("/app/research")}>
-                    <ArrowLeft className="h-5 w-5" />
+                <Button aria-label="Back to research projects" variant="ghost" size="icon" onClick={() => navigate("/app/research")}>
+                    <ArrowLeft aria-hidden="true" className="h-5 w-5" />
                 </Button>
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight">{project.title}</h2>
@@ -72,7 +94,7 @@ function ResearchDetail({ id }: { id: string }) {
             </div>
 
             <Tabs defaultValue="overview" className="w-full">
-                <TabsList className="mb-4">
+                <TabsList aria-label="Research project sections" className="mb-4">
                     <TabsTrigger value="overview">Overview</TabsTrigger>
                     <TabsTrigger value="agents">Agents</TabsTrigger>
                     <TabsTrigger value="results">Results</TabsTrigger>
@@ -92,9 +114,16 @@ function ResearchDetail({ id }: { id: string }) {
                                         <span>Progress</span>
                                         <span>{project.progress}%</span>
                                     </div>
-                                    <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                                        <div className="h-full bg-primary transition-all" style={{ width: `${project.progress}%` }} />
-                                    </div>
+                                        <div
+                                            aria-label="Project progress"
+                                            aria-valuemax={100}
+                                            aria-valuemin={0}
+                                            aria-valuenow={project.progress}
+                                            className="h-2 w-full bg-secondary rounded-full overflow-hidden"
+                                            role="progressbar"
+                                        >
+                                            <div className="h-full bg-primary transition-all" style={{ width: `${project.progress}%` }} />
+                                        </div>
                                 </div>
                                 <div className="text-sm mt-4">
                                     <p className="text-muted-foreground">{project.description}</p>
@@ -160,6 +189,7 @@ export function Research() {
     const { id } = useParams();
     const navigate = useNavigate();
     const { data: projects, isLoading } = useResearchProjects();
+    const projectList = (projects ?? []) as ResearchProjectSummary[];
     const [searchQuery, setSearchQuery] = useState("");
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const createResearchList = useCreateResearch();
@@ -170,10 +200,10 @@ export function Research() {
         return <ResearchDetail id={id} />;
     }
 
-    const filteredProjects = projects?.filter((p: any) =>
+    const filteredProjects = projectList.filter((p) =>
         p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.id.toLowerCase().includes(searchQuery.toLowerCase())
-    ) || [];
+    );
 
     const handleCreate = () => {
         createResearchList.mutate(newProject, {
@@ -206,16 +236,18 @@ export function Research() {
                         </DialogHeader>
                         <div className="space-y-4 py-4">
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Title</label>
+                                <label className="text-sm font-medium" htmlFor="research-title">Title</label>
                                 <Input
+                                    id="research-title"
                                     placeholder="e.g. Q2 Competitor Analysis"
                                     value={newProject.title}
                                     onChange={(e) => setNewProject({ ...newProject, title: e.target.value })}
                                 />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Topic / Objective</label>
+                                <label className="text-sm font-medium" htmlFor="research-topic">Topic / Objective</label>
                                 <Input
+                                    id="research-topic"
                                     placeholder="What should the agents discover?"
                                     value={newProject.topic}
                                     onChange={(e) => setNewProject({ ...newProject, topic: e.target.value })}
@@ -233,8 +265,9 @@ export function Research() {
             </div>
 
             <div className="flex items-center gap-2 max-w-sm">
-                <Search className="h-4 w-4 text-muted-foreground absolute ml-3" />
+                <Search aria-hidden="true" className="h-4 w-4 text-muted-foreground absolute ml-3" />
                 <Input
+                    aria-label="Search research projects"
                     placeholder="Search projects by name or ID..."
                     className="pl-9"
                     value={searchQuery}
@@ -249,11 +282,20 @@ export function Research() {
                 </div>
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {filteredProjects.map((project: any) => (
+                    {filteredProjects.map((project) => (
                         <Card
                             key={project.id}
+                            aria-label={`Open research project ${project.title}`}
                             className="cursor-pointer hover:border-primary/50 transition-colors hover:shadow-md"
                             onClick={() => navigate(`/app/research/${project.id}`)}
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    navigate(`/app/research/${project.id}`);
+                                }
+                            }}
+                            role="button"
+                            tabIndex={0}
                         >
                             <CardHeader className="pb-3">
                                 <div className="flex items-start justify-between">
@@ -284,7 +326,14 @@ export function Research() {
                                             <span className="text-muted-foreground">Progress</span>
                                             <span>{project.progress}%</span>
                                         </div>
-                                        <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
+                                        <div
+                                            aria-label={`${project.title} progress`}
+                                            aria-valuemax={100}
+                                            aria-valuemin={0}
+                                            aria-valuenow={project.progress}
+                                            className="h-1.5 w-full bg-secondary rounded-full overflow-hidden"
+                                            role="progressbar"
+                                        >
                                             <div
                                                 className={`h-full transition-all duration-1000 ${project.status === 'completed' ? 'bg-emerald-500' : project.status === 'failed' ? 'bg-destructive' : 'bg-primary'}`}
                                                 style={{ width: `${project.progress}%` }}
