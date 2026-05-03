@@ -320,8 +320,26 @@ class TestSecurityValidators:
         sanitized = SecurityValidator.sanitize_filename(long_name)
         assert len(sanitized) <= 255
 
-    def test_validate_email(self) -> None:
-        """Test email validation."""
+    def test_validate_email(self, mocker: Any) -> None:
+        """Test email validation.
+
+        ``email_validator`` performs DNS deliverability checks by default;
+        the RFC-2606 reserved test domains (``example.com``, ``domain.co.uk``)
+        deliberately reject MX lookups, which would make this test brittle
+        and network-dependent. Patch the underlying validator to skip the
+        deliverability step so the format/structure assertions still run.
+        """
+        import email_validator
+
+        original_validate = email_validator.validate_email
+
+        def _format_only(email: str, **_: Any) -> Any:
+            return original_validate(email, check_deliverability=False)
+
+        mocker.patch.object(
+            email_validator, "validate_email", side_effect=_format_only
+        )
+
         # Valid emails
         assert (
             SecurityValidator.validate_email("user@example.com") == "user@example.com"
@@ -353,8 +371,30 @@ class TestSecurityValidators:
         with pytest.raises(ValueError):
             SecurityValidator.validate_ip_address("192.168.1.1", allow_private=False)
 
-    def test_login_request_validation(self) -> None:
-        """Test login request model validation."""
+    def test_login_request_validation(self, mocker: Any) -> None:
+        """Test login request model validation.
+
+        Same DNS-skip rationale as ``test_validate_email``: ``LoginRequest``
+        delegates email validation to ``email_validator.validate_email``,
+        which would otherwise refuse the RFC-2606 ``example.com`` test
+        domain and make this test network-dependent.
+
+        NOTE (tech debt): two ``LoginRequest`` classes exist — this one at
+        ``src/security/validators.py:405`` and a duplicate at
+        ``src/auth/models.py:69``. Consolidate in a follow-up PR; out of
+        scope for the stabilization milestone.
+        """
+        import email_validator
+
+        original_validate = email_validator.validate_email
+
+        def _format_only(email: str, **_: Any) -> Any:
+            return original_validate(email, check_deliverability=False)
+
+        mocker.patch.object(
+            email_validator, "validate_email", side_effect=_format_only
+        )
+
         # Valid request
         login = LoginRequest(
             email="user@example.com", password="SecureP@ss123", mfa_code="123456"
