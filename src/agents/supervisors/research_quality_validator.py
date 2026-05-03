@@ -1,8 +1,9 @@
 """Quality validation helpers for the research supervisor."""
 
-import logging
 from collections.abc import Callable
 from typing import Any
+
+from structlog import get_logger
 
 from ..communication.talkhier_message import (
     MessageType,
@@ -11,7 +12,7 @@ from ..communication.talkhier_message import (
 )
 from .base_supervisor import SupervisionState
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ResearchQualityValidator:
@@ -35,12 +36,12 @@ class ResearchQualityValidator:
     ) -> dict[str, Any]:
         """Validate literature sources to catch hallucinated papers."""
         state = langgraph_state["supervision_state"]
-        logger.info("Source validation phase")
+        logger.info("research_quality_phase_started", phase="source_validation")
         state.current_phase = "source_validation"
 
         lit_result = state.worker_results.get("literature_review")
         if not lit_result or not hasattr(lit_result, "intermediate_outputs"):
-            logger.warning("No literature results to validate")
+            logger.warning("research_source_validation_missing_literature_results")
             langgraph_state["supervision_state"] = state
             return langgraph_state
 
@@ -96,9 +97,10 @@ If a paper exists but with slightly different details, mark exists=true and prov
                         verified_sources.append(source)
                     else:
                         logger.info(
-                            f"Rejected source: {source.get('title', 'N/A')} "
-                            f"(confidence={verified.confidence}, "
-                            f"issues={verified.issues})"
+                            "research_source_rejected",
+                            title=source.get("title", "N/A"),
+                            confidence=verified.confidence,
+                            issues=verified.issues,
                         )
                 else:
                     source["verification_confidence"] = 0.5
@@ -129,12 +131,14 @@ If a paper exists but with slightly different details, mark exists=true and prov
                 )
 
                 logger.info(
-                    f"Source validation: {len(verified_sources)}/{len(sources)} "
-                    f"sources verified, {rejected_count} rejected"
+                    "research_source_validation_completed",
+                    verified_count=len(verified_sources),
+                    source_count=len(sources),
+                    rejected_count=rejected_count,
                 )
 
         except Exception as e:
-            logger.error(f"Source validation failed: {e}")
+            logger.error("research_source_validation_failed", error=str(e))
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
@@ -148,18 +152,18 @@ If a paper exists but with slightly different details, mark exists=true and prov
 
         state = langgraph_state["supervision_state"]
 
-        logger.info("Graduate review phase")
+        logger.info("research_quality_phase_started", phase="graduate_review")
         state.current_phase = "graduate_review"
 
         paper_data = state.worker_results.get("draft_paper")
         if not paper_data or not hasattr(paper_data, "intermediate_outputs"):
-            logger.warning("No paper to review")
+            logger.warning("research_review_missing_paper")
             langgraph_state["supervision_state"] = state
             return langgraph_state
 
         paper_dict = paper_data.intermediate_outputs
         if not isinstance(paper_dict, dict):
-            logger.warning("Invalid paper format for review")
+            logger.warning("research_review_invalid_paper_format")
             langgraph_state["supervision_state"] = state
             return langgraph_state
 
@@ -180,14 +184,15 @@ If a paper exists but with slightly different details, mark exists=true and prov
                 )
 
                 logger.info(
-                    f"Review complete: score={review.overall_score}, "
-                    f"meets_standard={review.meets_graduate_standard}"
+                    "research_graduate_review_completed",
+                    overall_score=review.overall_score,
+                    meets_graduate_standard=review.meets_graduate_standard,
                 )
             else:
-                logger.warning("No Gemini service available for review")
+                logger.warning("research_review_gemini_unavailable")
 
         except Exception as e:
-            logger.error(f"Graduate review failed: {e}")
+            logger.error("research_graduate_review_failed", error=str(e))
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
@@ -199,14 +204,14 @@ If a paper exists but with slightly different details, mark exists=true and prov
         """Revise the paper based on reviewer feedback."""
         state = langgraph_state["supervision_state"]
 
-        logger.info("Paper revision phase")
+        logger.info("research_quality_phase_started", phase="revise_paper")
         state.current_phase = "revise_paper"
 
         paper_data = state.worker_results.get("draft_paper")
         review_data = state.worker_results.get("graduate_review")
 
         if not paper_data or not review_data:
-            logger.warning("Missing paper or review for revision")
+            logger.warning("research_revision_missing_inputs")
             langgraph_state["supervision_state"] = state
             return langgraph_state
 
@@ -214,7 +219,7 @@ If a paper exists but with slightly different details, mark exists=true and prov
         review_dict = review_data.intermediate_outputs
 
         if not isinstance(paper_dict, dict) or not isinstance(review_dict, dict):
-            logger.warning("Invalid data format for revision")
+            logger.warning("research_revision_invalid_data_format")
             langgraph_state["supervision_state"] = state
             return langgraph_state
 
@@ -242,12 +247,15 @@ If a paper exists but with slightly different details, mark exists=true and prov
                     confidence_score=0.90,
                 )
 
-                logger.info(f"Paper revised (round {current_revision_count + 1})")
+                logger.info(
+                    "research_paper_revised",
+                    revision_round=current_revision_count + 1,
+                )
             else:
-                logger.warning("No Gemini service available for revision")
+                logger.warning("research_revision_gemini_unavailable")
 
         except Exception as e:
-            logger.error(f"Paper revision failed: {e}")
+            logger.error("research_paper_revision_failed", error=str(e))
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
@@ -264,21 +272,24 @@ If a paper exists but with slightly different details, mark exists=true and prov
                 revision_count = self._get_revision_count(state)
 
                 if score >= 9.0:
-                    logger.info(f"Paper accepted: score={score}")
+                    logger.info("research_paper_accepted", score=score)
                     return "accept"
                 if revision_count >= 5:
                     logger.warning(
-                        f"Max revisions reached (score={score}, "
-                        f"count={revision_count}), accepting"
+                        "research_revision_max_reached",
+                        score=score,
+                        revision_count=revision_count,
                     )
                     return "accept"
 
                 logger.info(
-                    f"Paper needs revision: score={score}, round={revision_count + 1}"
+                    "research_paper_revision_needed",
+                    score=score,
+                    next_revision_round=revision_count + 1,
                 )
                 return "revise"
 
-        logger.warning("No valid review data, accepting paper")
+        logger.warning("research_review_missing_valid_data_accepting")
         return "accept"
 
     async def evaluate_consensus(
@@ -288,7 +299,7 @@ If a paper exists but with slightly different details, mark exists=true and prov
         """Evaluate consensus across all workers."""
         state = langgraph_state["supervision_state"]
 
-        logger.info("Consensus evaluation phase")
+        logger.info("research_quality_phase_started", phase="consensus_evaluation")
         state.current_phase = "consensus_evaluation"
 
         if "draft_paper" in state.worker_results:
@@ -319,9 +330,13 @@ If a paper exists but with slightly different details, mark exists=true and prov
             state.consensus_score = consensus_score.overall_score
             state.quality_score = consensus_score.evidence_quality
 
-            logger.info(f"Research consensus: {consensus_score.overall_score:.3f}")
+            logger.info(
+                "research_consensus_evaluated",
+                consensus_score=consensus_score.overall_score,
+                evidence_quality=consensus_score.evidence_quality,
+            )
         else:
-            logger.warning("No worker results for consensus - defaulting to 1.0")
+            logger.warning("research_consensus_missing_worker_results")
             state.consensus_score = 1.0
             state.quality_score = 0.0
 
@@ -480,7 +495,11 @@ Revise this section addressing all feedback. Strengthen argumentation, add evide
                 )
                 revised_dict[section] = revised_text.strip()
             except Exception as e:
-                logger.warning(f"Failed to revise {section}: {e}")
+                logger.warning(
+                    "research_section_revision_failed",
+                    section=section,
+                    error=str(e),
+                )
                 revised_dict[section] = original
 
         return revised_dict

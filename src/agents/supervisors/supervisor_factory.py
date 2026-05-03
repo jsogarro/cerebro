@@ -13,11 +13,12 @@ Features:
 """
 
 import asyncio
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.types import FactoryStatsDict, HealthCheckDict, HealthReportDict
 
@@ -26,7 +27,7 @@ from ..models import AgentTask
 from .base_supervisor import BaseSupervisor
 from .research_supervisor import ResearchSupervisor
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class SupervisorCapability(Enum):
@@ -120,7 +121,10 @@ class SupervisorHealthMonitor:
         self.supervisor_health[spec.supervisor_type] = spec
         self.health_history[spec.supervisor_type] = []
 
-        logger.info(f"Registered supervisor {spec.supervisor_type} for health monitoring")
+        logger.info(
+            "supervisor_health_monitor_registered",
+            supervisor_type=spec.supervisor_type,
+        )
 
     def record_execution(self, supervisor_type: str, success: bool, execution_time_ms: int) -> None:
         """Record execution result for health tracking."""
@@ -267,7 +271,7 @@ class CapabilityMatcher:
         ]
         
         if not healthy_supervisors:
-            logger.warning("No healthy supervisors available for matching")
+            logger.warning("supervisor_matching_no_healthy_supervisors")
             return None
         
         # Score supervisors based on requirements
@@ -283,8 +287,9 @@ class CapabilityMatcher:
         if scored_supervisors:
             best_score, best_supervisor = scored_supervisors[0]
             logger.info(
-                f"Selected supervisor {best_supervisor.supervisor_type} "
-                f"with match score {best_score:.3f}"
+                "supervisor_matching_selected",
+                supervisor_type=best_supervisor.supervisor_type,
+                match_score=best_score,
             )
             return best_supervisor
         
@@ -430,7 +435,10 @@ class SupervisorFactory:
         self.health_monitor.register_supervisor(spec)
         self.factory_stats["registry_size"] = len(self.supervisor_registry)
         
-        logger.info(f"Registered supervisor type: {spec.supervisor_type}")
+        logger.info(
+            "supervisor_type_registered",
+            supervisor_type=spec.supervisor_type,
+        )
     
     def get_available_supervisors(self) -> list[SupervisorSpecification]:
         """Get list of all available supervisor specifications."""
@@ -457,13 +465,19 @@ class SupervisorFactory:
             # Get supervisor specification
             spec = self.supervisor_registry.get(config.supervisor_type)
             if not spec:
-                logger.error(f"Unknown supervisor type: {config.supervisor_type}")
+                logger.error(
+                    "supervisor_type_unknown",
+                    supervisor_type=config.supervisor_type,
+                )
                 self.factory_stats["failed_creations"] += 1
                 return None
-            
+
             # Check health status
             if not self.health_monitor.is_supervisor_healthy(config.supervisor_type):
-                logger.warning(f"Supervisor {config.supervisor_type} is unhealthy, skipping creation")
+                logger.warning(
+                    "supervisor_creation_skipped_unhealthy",
+                    supervisor_type=config.supervisor_type,
+                )
                 self.factory_stats["failed_creations"] += 1
                 return None
             
@@ -493,14 +507,21 @@ class SupervisorFactory:
             self.factory_stats["total_created"] += 1
             self.factory_stats["successful_creations"] += 1
 
-            logger.info(f"Created {config.supervisor_type} supervisor successfully")
+            logger.info(
+                "supervisor_created",
+                supervisor_type=config.supervisor_type,
+            )
 
             if isinstance(supervisor_instance, BaseSupervisor):
                 return supervisor_instance
             return None
             
         except Exception as e:
-            logger.error(f"Failed to create supervisor {config.supervisor_type}: {e}")
+            logger.error(
+                "supervisor_creation_failed",
+                supervisor_type=config.supervisor_type,
+                error=str(e),
+            )
             self.factory_stats["failed_creations"] += 1
             return None
     

@@ -1,8 +1,9 @@
 """Worker execution coordination for the research supervisor."""
 
-import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
+
+from structlog import get_logger
 
 from ..communication.talkhier_message import (
     MessageType,
@@ -10,7 +11,7 @@ from ..communication.talkhier_message import (
     TalkHierMessage,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 SendTalkHierMessage = Callable[
     [str, MessageType, TalkHierContent | str, dict[str, Any] | None],
@@ -36,7 +37,7 @@ class ResearchExecutionCoordinator:
         """Coordinate literature review worker."""
         state = langgraph_state["supervision_state"]
 
-        logger.info("Literature review phase")
+        logger.info("research_phase_started", phase="literature_review")
         state.current_phase = "literature_review"
 
         if "literature_review" in state.allocated_workers:
@@ -66,7 +67,7 @@ class ResearchExecutionCoordinator:
         """Coordinate methodology worker."""
         state = langgraph_state["supervision_state"]
 
-        logger.info("Methodology design phase")
+        logger.info("research_phase_started", phase="methodology")
         state.current_phase = "methodology"
 
         if "methodology" in state.allocated_workers:
@@ -101,7 +102,7 @@ class ResearchExecutionCoordinator:
         """Coordinate comparative analysis worker."""
         state = langgraph_state["supervision_state"]
 
-        logger.info("Comparative analysis phase")
+        logger.info("research_phase_started", phase="comparative_analysis")
         state.current_phase = "comparative_analysis"
 
         if "comparative_analysis" in state.allocated_workers:
@@ -138,15 +139,16 @@ class ResearchExecutionCoordinator:
         """Coordinate synthesis worker."""
         state = langgraph_state["supervision_state"]
 
-        logger.info("Synthesis phase")
+        logger.info("research_phase_started", phase="synthesis")
         state.current_phase = "synthesis"
 
         if "synthesis" in state.allocated_workers:
             agent_outputs = self._build_agent_outputs(state.worker_results)
 
             logger.info(
-                f"Synthesis receiving outputs from {len(agent_outputs)} agents: "
-                f"{list(agent_outputs.keys())}"
+                "research_synthesis_inputs_prepared",
+                agent_count=len(agent_outputs),
+                agent_types=list(agent_outputs.keys()),
             )
 
             response = await self.send_talkhier_message(
@@ -176,7 +178,7 @@ class ResearchExecutionCoordinator:
         """Coordinate citation worker."""
         state = langgraph_state["supervision_state"]
 
-        logger.info("Citation formatting phase")
+        logger.info("research_phase_started", phase="citation")
         state.current_phase = "citation"
 
         if "citation" in state.allocated_workers:

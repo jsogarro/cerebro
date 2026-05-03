@@ -114,6 +114,13 @@ AGENT_COMMUNICATION_INTEGRATION_MODULES = [
     SRC_DIR / "agents" / "communication" / "consensus_builder.py",
     SRC_DIR / "agents" / "integrations" / "mcp_integration.py",
 ]
+AGENT_SUPERVISOR_MODULES = [
+    SRC_DIR / "agents" / "supervisors" / "base_supervisor.py",
+    SRC_DIR / "agents" / "supervisors" / "research_execution_coordinator.py",
+    SRC_DIR / "agents" / "supervisors" / "research_quality_validator.py",
+    SRC_DIR / "agents" / "supervisors" / "research_supervisor.py",
+    SRC_DIR / "agents" / "supervisors" / "supervisor_factory.py",
+]
 
 
 class StubProvider(BaseProvider):  # type: ignore[misc]
@@ -292,6 +299,11 @@ def test_agent_core_modules_use_structlog_logger() -> None:
 
 def test_agent_communication_integration_modules_use_structlog_logger() -> None:
     for module_path in AGENT_COMMUNICATION_INTEGRATION_MODULES:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_agent_supervisor_modules_use_structlog_logger() -> None:
+    for module_path in AGENT_SUPERVISOR_MODULES:
         assert_no_stdlib_logging_logger(module_path)
 
 

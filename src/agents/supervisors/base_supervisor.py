@@ -13,7 +13,6 @@ Key Features:
 - Integration with MASR routing decisions
 """
 
-import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,6 +20,7 @@ from enum import Enum
 from typing import Any
 
 from langgraph.graph import StateGraph
+from structlog import get_logger
 
 from src.core.types import SupervisionStatsDict
 
@@ -37,7 +37,7 @@ from ..communication.talkhier_message import (
 )
 from ..models import AgentResult, AgentTask
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class SupervisionMode(Enum):
@@ -215,9 +215,13 @@ class BaseSupervisor(BaseAgent, ABC):
                             config=self.config,
                         )
                         self.active_workers[worker_type] = worker
-                        logger.info(f"Instantiated worker: {worker_type}")
+                        logger.info("supervisor_worker_instantiated", worker_type=worker_type)
                     except Exception as e:
-                        logger.warning(f"Failed to instantiate worker {worker_type}: {e}")
+                        logger.warning(
+                            "supervisor_worker_instantiation_failed",
+                            worker_type=worker_type,
+                            error=str(e),
+                        )
 
             # Initialize supervision state
             state = SupervisionState(
@@ -248,7 +252,12 @@ class BaseSupervisor(BaseAgent, ABC):
             return result
 
         except Exception as e:
-            logger.error(f"Supervision failed for task {task.id}: {e}")
+            logger.error(
+                "supervision_failed",
+                task_id=task.id,
+                supervisor_type=self.supervisor_type,
+                error=str(e),
+            )
             return self.handle_error(task, e)
 
     async def validate_result(self, result: AgentResult) -> bool:
@@ -271,7 +280,9 @@ class BaseSupervisor(BaseAgent, ABC):
         self.active_workers[worker_def.worker_type] = worker_instance
 
         logger.info(
-            f"Registered worker {worker_def.worker_type} with {self.supervisor_type} supervisor"
+            "supervisor_worker_registered",
+            worker_type=worker_def.worker_type,
+            supervisor_type=self.supervisor_type,
         )
 
     async def allocate_workers(self, task: AgentTask) -> list[str]:
@@ -439,7 +450,7 @@ class BaseSupervisor(BaseAgent, ABC):
 
         worker = self.active_workers.get(target_worker)
         if not worker:
-            logger.error(f"Worker not found: {target_worker}")
+            logger.error("supervisor_worker_not_found", worker_type=target_worker)
             return None
 
         # Create TalkHier message
@@ -468,7 +479,11 @@ class BaseSupervisor(BaseAgent, ABC):
             return response
 
         except Exception as e:
-            logger.error(f"Failed to send message to worker {target_worker}: {e}")
+            logger.error(
+                "supervisor_worker_message_send_failed",
+                worker_type=target_worker,
+                error=str(e),
+            )
             return None
 
     async def broadcast_to_workers(
@@ -497,7 +512,11 @@ class BaseSupervisor(BaseAgent, ABC):
     ) -> SupervisionState:
         """Coordinate a single refinement round."""
 
-        logger.info(f"Coordinating refinement round {round_number}")
+        logger.info(
+            "supervisor_refinement_round_started",
+            round_number=round_number,
+            supervisor_type=self.supervisor_type,
+        )
 
         # Get refinement prompt
         try:
@@ -555,7 +574,12 @@ class BaseSupervisor(BaseAgent, ABC):
             )
 
         except Exception as e:
-            logger.error(f"Refinement round {round_number} failed: {e}")
+            logger.error(
+                "supervisor_refinement_round_failed",
+                round_number=round_number,
+                supervisor_type=self.supervisor_type,
+                error=str(e),
+            )
 
         return state
 
@@ -589,7 +613,11 @@ class BaseSupervisor(BaseAgent, ABC):
                 result = await node_func(state)
                 return dict(result) if result else state
             except Exception as e:
-                logger.error(f"LangGraph node {node_name} failed: {e}")
+                logger.error(
+                    "supervisor_langgraph_node_failed",
+                    node_name=node_name,
+                    error=str(e),
+                )
                 # Return state with error information
                 state["error"] = str(e)
                 state["failed_node"] = node_name
@@ -606,11 +634,15 @@ class BaseSupervisor(BaseAgent, ABC):
                 try:
                     await worker.close()
                 except Exception as e:
-                    logger.warning(f"Failed to close worker: {e}")
+                    logger.warning(
+                        "supervisor_worker_close_failed",
+                        worker_type=getattr(worker, "get_agent_type", lambda: "unknown")(),
+                        error=str(e),
+                    )
 
         self.active_workers.clear()
 
-        logger.info(f"Closed {self.supervisor_type} supervisor")
+        logger.info("supervisor_closed", supervisor_type=self.supervisor_type)
 
 
 __all__ = [

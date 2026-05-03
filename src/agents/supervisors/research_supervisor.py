@@ -13,10 +13,10 @@ Coordinates:
 - Citation Agent: Source verification and formatting
 """
 
-import logging
 from typing import Any
 
 from langgraph.graph import END, StateGraph
+from structlog import get_logger
 
 from ..communication.talkhier_message import TalkHierContent
 from ..models import AgentTask
@@ -29,7 +29,7 @@ from .research_execution_coordinator import ResearchExecutionCoordinator
 from .research_quality_validator import ResearchQualityValidator
 from .research_query_planner import ResearchQueryPlanner
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ResearchSupervisor(BaseSupervisor):
@@ -219,7 +219,7 @@ class ResearchSupervisor(BaseSupervisor):
         state = langgraph_state["supervision_state"]
         task = langgraph_state["original_task"]
 
-        logger.info("Research planning phase")
+        logger.info("research_supervisor_phase_started", phase="planning")
 
         # Plan research approach
         state.current_phase = "planning"
@@ -265,7 +265,7 @@ class ResearchSupervisor(BaseSupervisor):
 
         state = langgraph_state["supervision_state"]
 
-        logger.info("Paper drafting phase")
+        logger.info("research_supervisor_phase_started", phase="draft_paper")
         state.current_phase = "draft_paper"
 
         # Collect all worker outputs
@@ -315,12 +315,15 @@ class ResearchSupervisor(BaseSupervisor):
                     confidence_score=0.85,
                 )
 
-                logger.info(f"Drafted paper: {paper_dict.get('title', 'Untitled')}")
+                logger.info(
+                    "research_paper_drafted",
+                    title=paper_dict.get("title", "Untitled"),
+                )
             else:
-                logger.warning("No Gemini service available for paper drafting")
+                logger.warning("research_paper_drafting_gemini_unavailable")
 
         except Exception as e:
-            logger.error(f"Paper drafting failed: {e}")
+            logger.error("research_paper_drafting_failed", error=str(e))
             state.worker_results["draft_paper"] = TalkHierContent(
                 content="Paper drafting incomplete",
                 background="Fallback due to drafting error",
@@ -382,9 +385,17 @@ Write in formal, graduate-level academic prose. No bullet points. Connected para
             try:
                 text = await self.gemini_service.generate_content(prompt)
                 sections[section_name] = text.strip()
-                logger.info(f"Generated section: {section_name} ({len(text)} chars)")
+                logger.info(
+                    "research_paper_section_generated",
+                    section_name=section_name,
+                    char_count=len(text),
+                )
             except Exception as e:
-                logger.error(f"Failed to generate {section_name}: {e}")
+                logger.error(
+                    "research_paper_section_generation_failed",
+                    section_name=section_name,
+                    error=str(e),
+                )
                 sections[section_name] = f"[Section generation failed: {e}]"
 
         return sections
@@ -416,11 +427,14 @@ Write in formal, graduate-level academic prose. No bullet points. Connected para
             and state.refinement_round < 1
         ):
             logger.info(
-                f"Consensus {state.consensus_score:.3f} below threshold, continuing refinement"
+                "research_workflow_refinement_continuing",
+                consensus_score=state.consensus_score,
+                threshold=self.consensus_threshold,
+                refinement_round=state.refinement_round,
             )
             return "continue"
         else:
-            logger.info("Research workflow complete")
+            logger.info("research_workflow_completed")
             return "complete"
 
     async def get_research_quality_assessment(
