@@ -59,7 +59,7 @@ class LiteratureReviewAgent(BaseAgent):
             if self.gemini_service:
                 literature_analysis = await self._search_and_analyze_structured(task.input_data)
                 # Extract sources from structured response
-                academic_sources = {
+                academic_sources: dict[str, Any] = {
                     "success": True,
                     "sources": [s.model_dump() for s in literature_analysis.sources],
                     "total_found": len(literature_analysis.sources),
@@ -662,7 +662,7 @@ class LiteratureReviewAgent(BaseAgent):
 
         return "\\n\\n".join(sources_text)
 
-    async def _search_sources_structured(self, input_data: dict[str, Any]) -> list:
+    async def _search_sources_structured(self, input_data: dict[str, Any]) -> list[dict[str, Any]]:
         """Find academic sources using structured output."""
         from pydantic import BaseModel, Field
 
@@ -690,6 +690,10 @@ Requirements:
 - Include 2-3 sentence abstracts
 - Include DOI when known"""
 
+        if self.gemini_service is None:
+            self.log_error("Source search invoked without a configured gemini_service")
+            return []
+
         try:
             result = await self.gemini_service.generate_structured_content(prompt, SourceListSchema)
             self.log_info(f"Found {len(result.sources)} sources")
@@ -698,7 +702,7 @@ Requirements:
             self.log_error(f"Source search failed: {e}")
             return []
 
-    async def _analyze_sources_structured(self, query: str, sources: list[dict]) -> dict:
+    async def _analyze_sources_structured(self, query: str, sources: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze found sources using structured output."""
         from src.agents.schemas import LiteratureAnalysisSchema
 
@@ -718,6 +722,10 @@ Analyze the literature and provide:
 2. research_gaps: 3-5 gaps in the current research
 3. methodologies_used: List of research methodologies observed across papers
 4. quality_assessment: Overall quality assessment of this literature corpus"""
+
+        if self.gemini_service is None:
+            self.log_error("Source analysis invoked without a configured gemini_service")
+            return {}
 
         try:
             result = await self.gemini_service.generate_structured_content(prompt, LiteratureAnalysisSchema)

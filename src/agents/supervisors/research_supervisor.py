@@ -429,7 +429,7 @@ Write in formal, graduate-level academic prose. No bullet points. Connected para
             logger.info(
                 "research_workflow_refinement_continuing",
                 consensus_score=state.consensus_score,
-                threshold=self.consensus_threshold,
+                threshold=self.quality_threshold,
                 refinement_round=state.refinement_round,
             )
             return "continue"
