@@ -5,10 +5,11 @@ Publishes real-time events to connected WebSocket clients
 during research execution.
 """
 
-import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from structlog import get_logger
+
+logger = get_logger()
 
 
 class EventPublisher:

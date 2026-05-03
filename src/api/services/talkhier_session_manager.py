@@ -5,11 +5,12 @@ Advanced session coordination and analytics management for TalkHier protocol.
 Handles multi-session coordination, performance tracking, and analytics aggregation.
 """
 
-import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+from structlog import get_logger
 
 from src.models.talkhier_api_models import (
     CoordinationRequest,
@@ -18,7 +19,7 @@ from src.models.talkhier_api_models import (
     SessionStatus,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass

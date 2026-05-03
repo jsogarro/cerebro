@@ -1,18 +1,18 @@
 """Progress and WebSocket tracking helpers for supervisor coordination."""
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import WebSocket
+from structlog import get_logger
 
 from src.models.supervisor_api_models import (
     SupervisorWebSocketEvent,
     WorkerCoordinationProgressEvent,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class SupervisorProgressTracker:
@@ -59,7 +59,7 @@ class SupervisorProgressTracker:
                 try:
                     await connection.send_json(event.model_dump())
                 except Exception as exc:
-                    logger.error("Error sending event to client: %s", exc)
+                    logger.error("supervisor_event_send_failed", error=str(exc))
 
     async def broadcast_event(self, event: dict[str, Any]) -> None:
         """Broadcast an event to all active WebSocket connections."""
@@ -68,7 +68,7 @@ class SupervisorProgressTracker:
                 try:
                     await connection.send_json(event)
                 except Exception as exc:
-                    logger.error("Error broadcasting event: %s", exc)
+                    logger.error("supervisor_event_broadcast_failed", error=str(exc))
 
     async def iter_coordination_progress_events(
         self, coordination_id: str, delay_seconds: float = 1.0

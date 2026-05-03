@@ -14,12 +14,12 @@ Key Features:
 """
 
 import asyncio
-import logging
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from structlog import get_logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
@@ -32,7 +32,7 @@ from ...ai_brain.router.masr import MASRouter
 from ...models.research_project import ResearchProject
 from ..websocket.event_publisher import EventPublisher
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass

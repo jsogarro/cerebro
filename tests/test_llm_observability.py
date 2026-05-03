@@ -27,6 +27,15 @@ PROVIDERS_DIR = SRC_DIR / "ai_brain" / "providers"
 MODELS_DB_DIR = SRC_DIR / "models" / "db"
 RELIABILITY_DIR = SRC_DIR / "reliability"
 MEMORY_DIR = SRC_DIR / "ai_brain" / "memory"
+API_SERVICE_WEBSOCKET_MODULES = [
+    SRC_DIR / "api" / "services" / "agent_execution_service.py",
+    SRC_DIR / "api" / "services" / "direct_execution_service.py",
+    SRC_DIR / "api" / "services" / "supervisor_progress_tracker.py",
+    SRC_DIR / "api" / "services" / "talkhier_session_manager.py",
+    SRC_DIR / "api" / "services" / "talkhier_session_service.py",
+    SRC_DIR / "api" / "websocket" / "event_publisher.py",
+    SRC_DIR / "api" / "websocket" / "talkhier_websocket_events.py",
+]
 REPORT_SERVICE_MODULES = [
     SRC_DIR / "services" / "template_renderer.py",
     SRC_DIR / "services" / "report_generator.py",
@@ -160,6 +169,11 @@ def test_memory_modules_use_structlog_logger() -> None:
         assert_no_stdlib_logging_logger(module_path)
 
 
+def test_api_service_websocket_modules_use_structlog_logger() -> None:
+    for module_path in API_SERVICE_WEBSOCKET_MODULES:
+        assert_no_stdlib_logging_logger(module_path)
+
+
 def test_report_service_modules_use_structlog_logger() -> None:
     for module_path in REPORT_SERVICE_MODULES:
         assert_no_stdlib_logging_logger(module_path)
@@ -193,7 +207,7 @@ def test_cost_drift_middleware_records_threshold_event() -> None:
     app = FastAPI()
     app.add_middleware(LLMCostDriftMiddleware, threshold_ratio=0.2)
 
-    @app.post("/llm-cost")  # type: ignore[untyped-decorator]
+    @app.post("/llm-cost")
     async def llm_cost_endpoint() -> dict[str, bool]:
         set_llm_request_estimated_cost(0.01)
         record_llm_call(

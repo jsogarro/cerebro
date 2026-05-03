@@ -5,11 +5,11 @@ Manages real-time WebSocket communication for TalkHier protocol sessions,
 including live updates, interactive dialogue, and multi-session coordination.
 """
 
-import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import WebSocket
+from structlog import get_logger
 
 from src.models.talkhier_api_models import (
     ConsensusResult,
@@ -26,7 +26,7 @@ from src.models.talkhier_api_models import (
     TalkHierWebSocketEvent,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class TalkHierWebSocketHandler:

@@ -11,11 +11,12 @@ Core responsibilities:
 - Integration with existing TalkHier protocol
 """
 
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+
+from structlog import get_logger
 
 from src.agents.communication.talkhier_message import TalkHierMessage
 from src.agents.supervisors.base_supervisor import BaseSupervisor
@@ -49,7 +50,7 @@ from src.models.talkhier_api_models import (
     ValidationResponse,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass

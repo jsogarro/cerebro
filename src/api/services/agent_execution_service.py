@@ -13,11 +13,12 @@ Based on academic research:
 """
 
 import asyncio
-import logging
 import statistics
 import uuid
 from datetime import datetime
 from typing import Any
+
+from structlog import get_logger
 
 from ...agents.base import BaseAgent
 from ...agents.factory import AgentFactory
@@ -36,7 +37,7 @@ from ...models.agent_api_models import (
     MixtureOfAgentsResponse,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class AgentExecutionService:
