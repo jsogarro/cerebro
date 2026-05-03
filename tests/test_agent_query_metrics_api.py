@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.main import app
 from src.api.services.agent_execution_service import AgentExecutionService
 from src.models.agent_api_models import (
     AgentType,
@@ -23,6 +22,7 @@ class TestIntelligentQueryAPI:
     @pytest.fixture
     def client(self) -> TestClient:
         """Create test client."""
+        from src.api.main import app
         return TestClient(app)
 
     @patch("src.api.services.direct_execution_service.get_direct_execution_service")
@@ -162,6 +162,8 @@ class TestPerformanceAndMetrics:
 
     @pytest.fixture
     def client(self) -> TestClient:
+        """Create test client."""
+        from src.api.main import app
         return TestClient(app)
 
     def test_agent_metrics_structure(self, client: TestClient) -> None:

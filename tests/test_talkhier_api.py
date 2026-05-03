@@ -441,7 +441,7 @@ class TestTalkHierSessionService:
 
 class TestTalkHierAPIIntegration:
     """Integration tests for TalkHier API endpoints"""
-    
+
     @pytest.fixture
     def client(self) -> TestClient:
         """Create test client"""

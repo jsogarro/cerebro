@@ -17,6 +17,7 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["REDIS_URL"] = "redis://localhost:6379/15"
 os.environ["SECRET_KEY"] = "test-secret-key-that-is-at-least-32-characters-long"
+os.environ["ENABLE_RATE_LIMITING"] = "false"
 
 
 @pytest.fixture(scope="session")

@@ -8,19 +8,22 @@ retrieval, and management functionality.
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
-from src.api.main import app
 from src.models.db.generated_report import GeneratedReport
-
-# Test client
-client = TestClient(app)
 
 
 class TestReportsAPI:
     """Test reports API endpoints."""
 
-    def test_create_report_endpoint(self) -> None:
+    @pytest.fixture
+    def client(self) -> TestClient:
+        """Create test client."""
+        from src.api.main import app
+        return TestClient(app)
+
+    def test_create_report_endpoint(self, client: TestClient) -> None:
         """Test report creation endpoint."""
         request_data = {
             "title": "Test Report",
@@ -66,7 +69,7 @@ class TestReportsAPI:
             assert data["report_type"] == "comprehensive"
             assert data["generation_status"] == "generating"
 
-    def test_get_report_endpoint(self) -> None:
+    def test_get_report_endpoint(self, client: TestClient) -> None:
         """Test get report endpoint."""
         report_id = uuid4()
 
@@ -110,7 +113,7 @@ class TestReportsAPI:
             assert data["generation_status"] == "completed"
             assert data["word_count"] == 1500
 
-    def test_get_report_not_found(self) -> None:
+    def test_get_report_not_found(self, client: TestClient) -> None:
         """Test get report when report doesn't exist."""
         report_id = uuid4()
 
@@ -133,7 +136,7 @@ class TestReportsAPI:
             assert response.status_code == 404
             assert "not found" in response.json()["error"]["message"]
 
-    def test_download_report_endpoint(self) -> None:
+    def test_download_report_endpoint(self, client: TestClient) -> None:
         """Test download report endpoint."""
         report_id = uuid4()
         format_type = "html"
@@ -164,7 +167,7 @@ class TestReportsAPI:
             assert response.headers["content-type"].startswith(mock_mime_type)
             assert "attachment" in response.headers["content-disposition"]
 
-    def test_download_report_not_found(self) -> None:
+    def test_download_report_not_found(self, client: TestClient) -> None:
         """Test download when report format doesn't exist."""
         report_id = uuid4()
         format_type = "pdf"
@@ -187,7 +190,7 @@ class TestReportsAPI:
 
             assert response.status_code == 404
 
-    def test_list_reports_endpoint(self) -> None:
+    def test_list_reports_endpoint(self, client: TestClient) -> None:
         """Test list reports endpoint."""
         user_id = uuid4()
 
@@ -252,7 +255,7 @@ class TestReportsAPI:
             assert data["page_size"] == 10
             assert data["has_more"] is False
 
-    def test_search_reports_endpoint(self) -> None:
+    def test_search_reports_endpoint(self, client: TestClient) -> None:
         """Test search reports endpoint."""
         search_request = {
             "search_term": "AI education",
@@ -305,7 +308,7 @@ class TestReportsAPI:
             assert data["total_count"] == 1
             assert data["reports"][0]["title"] == "AI in Education Report"
 
-    def test_get_statistics_endpoint(self) -> None:
+    def test_get_statistics_endpoint(self, client: TestClient) -> None:
         """Test get statistics endpoint."""
         mock_stats = {
             "total_reports": 50,
@@ -348,7 +351,7 @@ class TestReportsAPI:
             assert data["average_quality_score"] == 0.82
             assert data["storage_statistics"]["total_storage_mb"] == 125.5
 
-    def test_delete_report_endpoint(self) -> None:
+    def test_delete_report_endpoint(self, client: TestClient) -> None:
         """Test delete report endpoint."""
         report_id = uuid4()
 
@@ -371,7 +374,7 @@ class TestReportsAPI:
             assert response.status_code == 204
             mock_storage.delete_report.assert_called_once_with(report_id, True)
 
-    def test_delete_report_not_found(self) -> None:
+    def test_delete_report_not_found(self, client: TestClient) -> None:
         """Test delete report when report doesn't exist."""
         report_id = uuid4()
 
@@ -393,7 +396,7 @@ class TestReportsAPI:
 
             assert response.status_code == 404
 
-    def test_verify_integrity_endpoint(self) -> None:
+    def test_verify_integrity_endpoint(self, client: TestClient) -> None:
         """Test verify report integrity endpoint."""
         report_id = uuid4()
 
@@ -432,7 +435,7 @@ class TestReportsAPI:
             assert data["formats_checked"] == 3
             assert data["formats_valid"] == 3
 
-    def test_service_unavailable_handling(self) -> None:
+    def test_service_unavailable_handling(self, client: TestClient) -> None:
         """Test handling when services are unavailable."""
         with patch("src.api.routes.reports.get_report_services") as mock_services:
             # Simulate service unavailability

@@ -3,7 +3,7 @@ Tests for Agent Framework API
 
 Tests the research-informed agent API endpoints including:
 - Direct agent execution
-- Chain-of-Agents patterns  
+- Chain-of-Agents patterns
 - Mixture-of-Agents patterns
 - Intelligent query routing via MASR
 """
@@ -14,7 +14,6 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.main import app
 from src.api.services.agent_execution_service import AgentExecutionService
 from src.models.agent_api_models import (
     AgentType,
@@ -27,6 +26,7 @@ class TestAgentAPI:
     @pytest.fixture
     def client(self) -> TestClient:
         """Create test client."""
+        from src.api.main import app
         return TestClient(app)
 
     @pytest.fixture

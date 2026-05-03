@@ -2,17 +2,20 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
-
-from src.api.main import app
-
-client = TestClient(app)
 
 
 class TestReportsAPIValidation:
     """Test report API validation behavior."""
 
-    def test_validation_errors(self) -> None:
+    @pytest.fixture
+    def client(self) -> TestClient:
+        """Create test client."""
+        from src.api.main import app
+        return TestClient(app)
+
+    def test_validation_errors(self, client: TestClient) -> None:
         """Test request validation errors."""
         invalid_request = {
             "query": "Test query",
@@ -32,7 +35,7 @@ class TestReportsAPIValidation:
 
         assert response.status_code == 422
 
-    def test_report_type_enum_validation(self) -> None:
+    def test_report_type_enum_validation(self, client: TestClient) -> None:
         """Test report type enum validation."""
         request_data = {
             "title": "Test Report",
@@ -54,7 +57,7 @@ class TestReportsAPIValidation:
 
             assert response.status_code == 202
 
-    def test_citation_style_enum_validation(self) -> None:
+    def test_citation_style_enum_validation(self, client: TestClient) -> None:
         """Test citation style enum validation."""
         request_data = {
             "title": "Test Report",
@@ -75,7 +78,7 @@ class TestReportsAPIValidation:
 
             assert response.status_code == 202
 
-    def test_format_enum_validation(self) -> None:
+    def test_format_enum_validation(self, client: TestClient) -> None:
         """Test format enum validation."""
         request_data = {
             "title": "Test Report",
