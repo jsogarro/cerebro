@@ -15,18 +15,19 @@ cross-tier relationships, and automatic memory management.
 """
 
 import asyncio
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from .episodic_memory import Episode, EpisodeQuery, EpisodicMemoryManager, EventType
 from .procedural_memory import ProceduralMemoryManager, Procedure
 from .semantic_memory import SemanticMemoryManager
 from .working_memory import ConversationContext, WorkingMemoryManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class MemoryTier(Enum):

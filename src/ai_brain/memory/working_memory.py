@@ -13,10 +13,11 @@ Working memory stores:
 """
 
 import asyncio
-import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.memory_encryption import MemoryEncryption
 from src.utils.async_helpers import BackgroundTaskTracker
@@ -31,7 +32,7 @@ except ImportError:
     RedisType = type(None)  # type: ignore[assignment, misc]
     REDIS_AVAILABLE = False
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass

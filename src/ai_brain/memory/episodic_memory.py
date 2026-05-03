@@ -14,16 +14,17 @@ Episodic memory stores:
 - Temporal relationships between events
 """
 
-import logging
 import uuid
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
+from structlog import get_logger
+
 from src.core.memory_encryption import MemoryEncryption
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 HAS_SQLALCHEMY = False
 AsyncSession = None

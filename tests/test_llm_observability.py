@@ -26,6 +26,7 @@ SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 PROVIDERS_DIR = SRC_DIR / "ai_brain" / "providers"
 MODELS_DB_DIR = SRC_DIR / "models" / "db"
 RELIABILITY_DIR = SRC_DIR / "reliability"
+MEMORY_DIR = SRC_DIR / "ai_brain" / "memory"
 REPORT_SERVICE_MODULES = [
     SRC_DIR / "services" / "template_renderer.py",
     SRC_DIR / "services" / "report_generator.py",
@@ -151,6 +152,11 @@ def test_models_db_session_modules_use_structlog_logger() -> None:
 
 def test_reliability_modules_use_structlog_logger() -> None:
     for module_path in RELIABILITY_DIR.glob("*.py"):
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_memory_modules_use_structlog_logger() -> None:
+    for module_path in MEMORY_DIR.glob("*.py"):
         assert_no_stdlib_logging_logger(module_path)
 
 

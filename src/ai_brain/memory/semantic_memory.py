@@ -13,13 +13,14 @@ Semantic memory stores:
 - Retrieved information with relevance scoring
 """
 
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from structlog import get_logger
+
+logger = get_logger()
 
 # Optional vector-storage backend. Install with: pip install ".[vector]"
 try:
