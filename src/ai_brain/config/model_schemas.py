@@ -39,14 +39,10 @@ class ModelCapability(StrEnum):
     TESTING = "testing"
 
 
-class RoutingStrategy(StrEnum):
-    """Available routing strategies."""
-
-    COST_EFFICIENT = "cost_efficient"
-    QUALITY_FOCUSED = "quality_focused"
-    SPEED_FIRST = "speed_first"
-    BALANCED = "balanced"
-    ADAPTIVE = "adaptive"
+# Canonical RoutingStrategy lives in src.ai_brain.router.routing_types.
+# Re-exported here to preserve the historical import path and avoid duplicate
+# enum identities (which caused 10 mypy arg-type errors across MASR boundaries).
+from src.ai_brain.router.routing_types import RoutingStrategy  # noqa: E402
 
 
 class ModelSpecification(BaseModel):

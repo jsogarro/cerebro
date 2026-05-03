@@ -208,7 +208,7 @@ class MASRRoutingService:
         model_tier = decision.optimization_result.model_tier if hasattr(decision.optimization_result, 'model_tier') else ModelTier.STANDARD
         worker_count = decision.agent_allocation.worker_count if hasattr(decision.agent_allocation, 'worker_count') else 3
 
-        model_tier_map = {ModelTier.BASIC: 1.0, ModelTier.STANDARD: 2.0, ModelTier.ADVANCED: 3.0, ModelTier.PREMIUM: 4.0}
+        model_tier_map = {ModelTier.BASIC: 1.0, ModelTier.STANDARD: 2.0, ModelTier.SPECIALIZED: 3.0, ModelTier.PREMIUM: 4.0}
         response = CostEstimationResponse(
             estimated_cost=decision.estimated_cost,
             breakdown=breakdown,
@@ -723,7 +723,7 @@ class MASRRoutingService:
             RoutingStrategy.COST_EFFICIENT: 0.75,
             RoutingStrategy.QUALITY_FOCUSED: 0.95,
             RoutingStrategy.BALANCED: 0.85,
-            RoutingStrategy.SPEED_OPTIMIZED: 0.80
+            RoutingStrategy.SPEED_FIRST: 0.80
         }.get(strategy, 0.85)
 
         # Adjust for complexity
@@ -750,7 +750,7 @@ class MASRRoutingService:
                 "Versatile for most queries",
                 "Adaptive to complexity"
             ],
-            RoutingStrategy.SPEED_OPTIMIZED: [
+            RoutingStrategy.SPEED_FIRST: [
                 "Fastest response time",
                 "Minimal coordination overhead",
                 "Best for real-time needs"
@@ -775,7 +775,7 @@ class MASRRoutingService:
                 "Not optimal for any single metric",
                 "May need tuning for specific use cases"
             ],
-            RoutingStrategy.SPEED_OPTIMIZED: [
+            RoutingStrategy.SPEED_FIRST: [
                 "Higher cost for speed",
                 "May sacrifice depth of analysis",
                 "Limited collaboration"
@@ -789,7 +789,7 @@ class MASRRoutingService:
             RoutingStrategy.COST_EFFICIENT: "Minimizes cost while maintaining acceptable quality",
             RoutingStrategy.QUALITY_FOCUSED: "Maximizes output quality regardless of cost",
             RoutingStrategy.BALANCED: "Balances cost, quality, and speed",
-            RoutingStrategy.SPEED_OPTIMIZED: "Minimizes latency for real-time responses"
+            RoutingStrategy.SPEED_FIRST: "Minimizes latency for real-time responses"
         }
         return descriptions.get(strategy, "")
     
@@ -799,7 +799,7 @@ class MASRRoutingService:
             RoutingStrategy.COST_EFFICIENT: "cost reduction",
             RoutingStrategy.QUALITY_FOCUSED: "output quality",
             RoutingStrategy.BALANCED: "overall efficiency",
-            RoutingStrategy.SPEED_OPTIMIZED: "response time"
+            RoutingStrategy.SPEED_FIRST: "response time"
         }
         return focus_map.get(strategy, "balanced performance")
     
@@ -821,7 +821,7 @@ class MASRRoutingService:
                 "Mixed workloads",
                 "Default production use"
             ],
-            RoutingStrategy.SPEED_OPTIMIZED: [
+            RoutingStrategy.SPEED_FIRST: [
                 "Real-time interactions",
                 "User-facing applications",
                 "Time-critical operations"
@@ -844,7 +844,7 @@ class MASRRoutingService:
                 "benefit": "Good all-around performance",
                 "trade_off": "Not optimal for specific needs"
             },
-            RoutingStrategy.SPEED_OPTIMIZED: {
+            RoutingStrategy.SPEED_FIRST: {
                 "benefit": "<1s response time",
                 "trade_off": "Higher cost and reduced depth"
             }
@@ -975,7 +975,7 @@ class MASRRoutingService:
             return "Quality requirements exceeded cost-efficient capabilities"
         elif strategy == RoutingStrategy.QUALITY_FOCUSED and selected == RoutingStrategy.COST_EFFICIENT:
             return "Cost constraints made quality-focused approach infeasible"
-        elif strategy == RoutingStrategy.SPEED_OPTIMIZED and selected != RoutingStrategy.SPEED_OPTIMIZED:
+        elif strategy == RoutingStrategy.SPEED_FIRST and selected != RoutingStrategy.SPEED_FIRST:
             return "Query complexity requires more thorough processing"
         else:
             return f"Selected strategy better optimizes for {self._get_optimization_focus(selected)}"
