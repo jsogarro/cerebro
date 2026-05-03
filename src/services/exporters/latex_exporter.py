@@ -5,12 +5,13 @@ This module provides LaTeX generation from report data,
 following functional programming principles with pure transformation functions.
 """
 
-import logging
 import os
 import re
 import subprocess
 import tempfile
 from typing import Any
+
+from structlog import get_logger
 
 from src.models.report import (
     Citation,
@@ -21,7 +22,7 @@ from src.models.report import (
 )
 from src.services.report_config import ReportSettings
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class LaTeXExportError(Exception):

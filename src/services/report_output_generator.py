@@ -5,7 +5,8 @@ This module owns conversion of a structured report into concrete output formats.
 
 import asyncio
 import json
-import logging
+
+from structlog import get_logger
 
 from src.models.report import Report, ReportFormat, ReportOutput
 from src.services.exporters import (
@@ -23,7 +24,7 @@ from src.services.report_config import (
 )
 from src.services.template_renderer import TemplateRenderer, TemplateRenderingError
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ReportOutputGenerator:

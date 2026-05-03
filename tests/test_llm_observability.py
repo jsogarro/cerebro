@@ -26,9 +26,21 @@ SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 PROVIDERS_DIR = SRC_DIR / "ai_brain" / "providers"
 MODELS_DB_DIR = SRC_DIR / "models" / "db"
 RELIABILITY_DIR = SRC_DIR / "reliability"
+REPORT_SERVICE_MODULES = [
+    SRC_DIR / "services" / "template_renderer.py",
+    SRC_DIR / "services" / "report_generator.py",
+    SRC_DIR / "services" / "report_output_generator.py",
+    SRC_DIR / "services" / "report_structure_builder.py",
+    SRC_DIR / "services" / "report_storage.py",
+    SRC_DIR / "services" / "visualization_generator.py",
+    SRC_DIR / "services" / "exporters" / "pdf_exporter.py",
+    SRC_DIR / "services" / "exporters" / "docx_exporter.py",
+    SRC_DIR / "services" / "exporters" / "latex_exporter.py",
+    SRC_DIR / "services" / "cache" / "cache_manager.py",
+]
 
 
-class StubProvider(BaseProvider):
+class StubProvider(BaseProvider):  # type: ignore[misc]
     """Minimal concrete provider for base instrumentation tests."""
 
     def _get_provider_name(self) -> str:
@@ -139,6 +151,11 @@ def test_models_db_session_modules_use_structlog_logger() -> None:
 
 def test_reliability_modules_use_structlog_logger() -> None:
     for module_path in RELIABILITY_DIR.glob("*.py"):
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_report_service_modules_use_structlog_logger() -> None:
+    for module_path in REPORT_SERVICE_MODULES:
         assert_no_stdlib_logging_logger(module_path)
 
 

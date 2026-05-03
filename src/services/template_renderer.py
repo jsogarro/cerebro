@@ -5,13 +5,13 @@ This service handles Jinja2 template rendering with custom filters and functions
 following functional programming principles.
 """
 
-import logging
 import os
 import re
 from typing import Any, cast
 
 import jinja2
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from structlog import get_logger
 
 try:
     import markdown as markdown_module  # type: ignore[import-untyped]
@@ -24,7 +24,7 @@ except ImportError:
 from src.models.report import Report, ReportType
 from src.services.report_config import ReportSettings, ReportTemplateConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 ALLOWED_REPORT_HTML_TAGS = {
     "a",

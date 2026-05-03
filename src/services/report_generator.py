@@ -6,12 +6,13 @@ following functional programming principles with pure transformation functions.
 """
 
 import hashlib
-import logging
 import os
 import time
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
+
+from structlog import get_logger
 
 from src.models.report import (
     Report,
@@ -35,7 +36,7 @@ from src.services.report_config import (
 from src.services.report_output_generator import ReportOutputGenerator
 from src.services.report_structure_builder import ReportStructureBuilder
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ReportGenerationError(Exception):

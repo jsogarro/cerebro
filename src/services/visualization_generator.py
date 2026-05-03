@@ -7,8 +7,9 @@ following functional programming principles with pure data transformation functi
 
 import base64
 import io
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 try:
     import plotly.express as px
@@ -48,7 +49,7 @@ except ImportError:
 from src.models.report import Report, Visualization, VisualizationType
 from src.services.report_config import ReportSettings
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class VisualizationGenerationError(Exception):

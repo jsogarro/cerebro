@@ -1,8 +1,9 @@
 """Build structured report objects from normalized workflow data."""
 
-import logging
 from typing import Any
 from uuid import uuid4
+
+from structlog import get_logger
 
 from src.models.report import (
     Citation,
@@ -14,7 +15,7 @@ from src.models.report import (
 )
 from src.services.report_config import ReportQualityConfig, ReportTemplateConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ReportStructureBuilder:
