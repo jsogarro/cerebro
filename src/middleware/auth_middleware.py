@@ -123,14 +123,30 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return response
 
 
+async def get_jwt_service() -> JWTService:
+    """
+    Get JWT service instance.
+
+    This is a dependency that can be overridden in tests.
+    """
+    redis_client = await redis.from_url(settings.REDIS_URL)
+    return JWTService(
+        redis_client=redis_client,
+        private_key_path=settings.JWT_PRIVATE_KEY_PATH,
+        public_key_path=settings.JWT_PUBLIC_KEY_PATH,
+    )
+
+
 async def get_current_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    jwt_service: JWTService = Depends(get_jwt_service),
 ) -> TokenPayload:
     """
     Get current token payload from request.
 
     Args:
         credentials: HTTP authorization credentials
+        jwt_service: JWT service for token validation
 
     Returns:
         Decoded token payload
@@ -148,17 +164,8 @@ async def get_current_token(
     token = credentials.credentials
 
     try:
-        # Initialize JWT service
-        redis_client = await redis.from_url(settings.REDIS_URL)
-        jwt_service = JWTService(
-            redis_client=redis_client,
-            private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-            public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-        )
-
-        # Validate token
+        # Validate token using injected JWT service
         token_payload = await jwt_service.validate_token(token)
-
         return token_payload
 
     except Exception as e:
@@ -341,21 +348,14 @@ def optional_user() -> Callable[..., Any]:
     async def optional_user_getter(
         credentials: HTTPAuthorizationCredentials | None = Depends(security),
         db: AsyncSession = Depends(get_session),
+        jwt_service: JWTService = Depends(get_jwt_service),
     ) -> User | None:
         """Get user if authenticated."""
         if not credentials:
             return None
 
         try:
-            # Initialize JWT service
-            redis_client = await redis.from_url(settings.REDIS_URL)
-            jwt_service = JWTService(
-                redis_client=redis_client,
-                private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-                public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-            )
-
-            # Validate token
+            # Validate token using injected JWT service
             token_payload = await jwt_service.validate_token(credentials.credentials)
 
             # Get user
