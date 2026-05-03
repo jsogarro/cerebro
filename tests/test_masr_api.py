@@ -28,8 +28,8 @@ from src.ai_brain.models.masr import (  # noqa: E402
     RoutingStrategy,
 )
 
-from src.api.services.masr_routing_service import MASRRoutingService
-from src.models.masr_api_models import (
+from src.api.services.masr_routing_service import MASRRoutingService  # noqa: E402
+from src.models.masr_api_models import (  # noqa: E402
     AvailableStrategy,
     ComplexityAnalysisRequest,
     ComplexityAnalysisResponse,
