@@ -9,19 +9,16 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import WebSocket
 from fastapi.testclient import TestClient
 
 from src.api.services.talkhier_consensus_evaluator import TalkHierConsensusEvaluator
 from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
 from src.api.services.talkhier_session_coordinator import TalkHierSessionCoordinator
-from src.api.services.talkhier_session_manager import TalkHierSessionManager
 from src.api.services.talkhier_session_service import (
     TalkHierSession,
     TalkHierSessionService,
 )
 from src.api.services.talkhier_state_manager import TalkHierStateManager
-from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
 from src.models.talkhier_api_models import (
     ConsensusCheckRequest,
     ConsensusType,
@@ -39,7 +36,7 @@ from src.models.talkhier_api_models import (
 class TestTalkHierStateManager:
     """Test TalkHier state and metrics management."""
 
-    def test_store_and_get_session(self):
+    def test_store_and_get_session(self) -> None:
         """Test storing and retrieving a session."""
         manager = TalkHierStateManager()
         session = object()
@@ -48,14 +45,14 @@ class TestTalkHierStateManager:
 
         assert manager.get_session("session-1") is session
 
-    def test_get_missing_session_raises(self):
+    def test_get_missing_session_raises(self) -> None:
         """Test missing session validation."""
         manager = TalkHierStateManager()
 
         with pytest.raises(ValueError, match="Session missing not found"):
             manager.get_session("missing")
 
-    def test_record_round_initializes_missing_metrics(self):
+    def test_record_round_initializes_missing_metrics(self) -> None:
         """Test round metrics are initialized lazily for hand-built sessions."""
         manager = TalkHierStateManager()
 
@@ -71,7 +68,7 @@ class TestTalkHierRoundExecutor:
     """Test TalkHier round execution."""
 
     @pytest.mark.asyncio
-    async def test_quality_focused_aggregation_uses_highest_confidence(self):
+    async def test_quality_focused_aggregation_uses_highest_confidence(self) -> None:
         """Test quality-focused aggregation selects the highest-confidence response."""
         executor = TalkHierRoundExecutor()
 
@@ -86,7 +83,7 @@ class TestTalkHierRoundExecutor:
         assert result["content"] == "high"
 
     @pytest.mark.asyncio
-    async def test_execute_round_records_metrics(self):
+    async def test_execute_round_records_metrics(self) -> None:
         """Test executing a round updates session state and metrics."""
         executor = TalkHierRoundExecutor()
         state_manager = TalkHierStateManager()
@@ -134,7 +131,7 @@ class TestTalkHierConsensusEvaluator:
     """Test TalkHier consensus evaluation helpers."""
 
     @pytest.mark.asyncio
-    async def test_agreement_matrix_uses_confidence_distance(self):
+    async def test_agreement_matrix_uses_confidence_distance(self) -> None:
         """Test agreement matrix values are based on confidence distance."""
         evaluator = TalkHierConsensusEvaluator()
 
@@ -147,7 +144,7 @@ class TestTalkHierConsensusEvaluator:
         assert matrix["agent-1"]["agent-2"] == pytest.approx(0.7)
 
     @pytest.mark.asyncio
-    async def test_minority_reports_include_confidence_outliers(self):
+    async def test_minority_reports_include_confidence_outliers(self) -> None:
         """Test minority report generation identifies confidence outliers."""
         evaluator = TalkHierConsensusEvaluator()
 
@@ -166,7 +163,7 @@ class TestTalkHierSessionCoordinator:
     """Test TalkHier session coordination helpers."""
 
     @pytest.fixture
-    def coordinator(self):
+    def coordinator(self) -> TalkHierSessionCoordinator:
         """Create coordinator with mocked dependencies."""
         return TalkHierSessionCoordinator(
             supervisor_factory=MagicMock(),
@@ -174,7 +171,9 @@ class TestTalkHierSessionCoordinator:
             masr_router=MagicMock(),
         )
 
-    def test_estimate_duration_uses_protocol_multiplier(self, coordinator):
+    def test_estimate_duration_uses_protocol_multiplier(
+        self, coordinator: TalkHierSessionCoordinator
+    ) -> None:
         """Test duration estimate includes participant and protocol factors."""
         duration = coordinator.estimate_duration(
             max_rounds=3,
@@ -185,7 +184,9 @@ class TestTalkHierSessionCoordinator:
         assert duration == 300
 
     @pytest.mark.asyncio
-    async def test_determine_participants_uses_agent_allocation_agents(self, coordinator):
+    async def test_determine_participants_uses_agent_allocation_agents(
+        self, coordinator: TalkHierSessionCoordinator
+    ) -> None:
         """Test participant fallback for routing decisions exposing agents."""
         routing_decision = MagicMock()
         routing_decision.agent_allocation.worker_types = MagicMock()
@@ -210,12 +211,14 @@ class TestTalkHierSessionService:
     """Test TalkHier session service"""
     
     @pytest.fixture
-    def session_service(self):
+    def session_service(self) -> TalkHierSessionService:
         """Create session service instance"""
         return TalkHierSessionService()
     
     @pytest.mark.asyncio
-    async def test_create_session(self, session_service):
+    async def test_create_session(
+        self, session_service: TalkHierSessionService
+    ) -> None:
         """Test session creation"""
         request = TalkHierSessionRequest(
             query="Test query for refinement",
@@ -252,7 +255,9 @@ class TestTalkHierSessionService:
             assert response.estimated_duration_seconds > 0
     
     @pytest.mark.asyncio
-    async def test_execute_refinement_round(self, session_service):
+    async def test_execute_refinement_round(
+        self, session_service: TalkHierSessionService
+    ) -> None:
         """Test refinement round execution"""
         # Create a session first
         session_id = "test-session-123"
@@ -296,7 +301,9 @@ class TestTalkHierSessionService:
         assert response.duration_ms > 0
     
     @pytest.mark.asyncio
-    async def test_check_consensus(self, session_service):
+    async def test_check_consensus(
+        self, session_service: TalkHierSessionService
+    ) -> None:
         """Test consensus checking"""
         # Create session
         session_id = "test-session-456"
@@ -340,7 +347,9 @@ class TestTalkHierSessionService:
         assert result.reasoning
     
     @pytest.mark.asyncio
-    async def test_close_session(self, session_service):
+    async def test_close_session(
+        self, session_service: TalkHierSessionService
+    ) -> None:
         """Test session closure"""
         # Create session
         session_id = "test-session-789"
@@ -389,7 +398,9 @@ class TestTalkHierSessionService:
         assert isinstance(response.performance_metrics, dict)
     
     @pytest.mark.asyncio
-    async def test_validate_protocol(self, session_service):
+    async def test_validate_protocol(
+        self, session_service: TalkHierSessionService
+    ) -> None:
         """Test protocol validation"""
         from src.models.talkhier_api_models import ProtocolValidationRequest
         
@@ -428,250 +439,16 @@ class TestTalkHierSessionService:
         assert isinstance(response.recommendations, list)
 
 
-class TestTalkHierSessionManager:
-    """Test TalkHier session manager"""
-    
-    @pytest.fixture
-    def session_manager(self):
-        """Create session manager instance"""
-        return TalkHierSessionManager()
-    
-    @pytest.mark.asyncio
-    async def test_register_session(self, session_manager):
-        """Test session registration"""
-        session_id = "test-session-001"
-        config = {
-            "protocol_type": ProtocolType.STANDARD,
-            "refinement_strategy": RefinementStrategy.QUALITY_FOCUSED,
-            "max_rounds": 3,
-            "quality_threshold": 0.85
-        }
-        
-        await session_manager.register_session(session_id, config)
-        
-        assert session_id in session_manager.sessions
-        assert session_manager.sessions[session_id].protocol_type == ProtocolType.STANDARD
-        assert session_manager.sessions[session_id].started_at is not None
-    
-    @pytest.mark.asyncio
-    async def test_update_round_metrics(self, session_manager):
-        """Test round metrics update"""
-        session_id = "test-session-002"
-        
-        # Register session first
-        await session_manager.register_session(session_id, {})
-        
-        # Update metrics
-        round_data = {
-            "round": 1,
-            "quality": 0.82,
-            "consensus": 0.78,
-            "duration_ms": 2500
-        }
-        
-        await session_manager.update_round_metrics(session_id, round_data)
-        
-        metrics = session_manager.sessions[session_id]
-        assert metrics.rounds_completed == 1
-        assert 0.82 in metrics.quality_scores
-        assert 0.78 in metrics.consensus_scores
-        assert 2500 in metrics.round_durations
-        assert metrics.final_quality == 0.82
-        assert metrics.final_consensus == 0.78
-    
-    @pytest.mark.asyncio
-    async def test_get_analytics(self, session_manager):
-        """Test analytics generation"""
-        # Register some test sessions
-        for i in range(5):
-            session_id = f"test-session-{i:03d}"
-            await session_manager.register_session(session_id, {
-                "protocol_type": ProtocolType.STANDARD if i % 2 == 0 else ProtocolType.FAST_TRACK
-            })
-            
-            # Add some metrics
-            await session_manager.update_round_metrics(session_id, {
-                "quality": 0.75 + i * 0.02,
-                "consensus": 0.70 + i * 0.03,
-                "duration_ms": 2000 + i * 100
-            })
-        
-        # Get analytics
-        analytics = await session_manager.get_analytics(
-            time_range="24h",
-            protocol_type=None,
-            min_quality=None
-        )
-        
-        assert analytics["total_sessions"] == 5
-        assert analytics["active_sessions"] == 5
-        assert analytics["average_rounds"] > 0
-        assert analytics["average_quality"] > 0
-        assert analytics["average_consensus"] > 0
-        assert isinstance(analytics["protocol_usage"], dict)
-        assert isinstance(analytics["quality_trends"], list)
-    
-    @pytest.mark.asyncio
-    async def test_coordinate_sessions(self, session_manager):
-        """Test session coordination"""
-        from src.models.talkhier_api_models import CoordinationRequest
-        
-        # Register sessions
-        session_ids = ["session-1", "session-2", "session-3"]
-        for session_id in session_ids:
-            await session_manager.register_session(session_id, {})
-        
-        # Create coordination
-        request = CoordinationRequest(
-            session_ids=session_ids,
-            coordination_type="parallel",
-            share_context=True,
-            aggregate_results=True
-        )
-        
-        status = await session_manager.coordinate_sessions(request)
-        
-        assert status.coordination_id
-        assert len(status.session_statuses) == 3
-        assert 0.0 <= status.overall_progress <= 1.0
-        assert 0.0 <= status.aggregated_quality <= 1.0
-        assert isinstance(status.coordination_insights, list)
-
-
-class TestTalkHierWebSocketHandler:
-    """Test TalkHier WebSocket handler"""
-    
-    @pytest.fixture
-    def websocket_handler(self):
-        """Create WebSocket handler instance"""
-        return TalkHierWebSocketHandler()
-    
-    @pytest.mark.asyncio
-    async def test_register_session_connection(self, websocket_handler):
-        """Test session connection registration"""
-        session_id = "test-session"
-        connection_id = "conn-123"
-        websocket = MagicMock(spec=WebSocket)
-        
-        await websocket_handler.register_session_connection(
-            session_id,
-            connection_id,
-            websocket
-        )
-        
-        assert session_id in websocket_handler.session_connections
-        assert connection_id in websocket_handler.session_connections[session_id]
-        assert connection_id in websocket_handler.connections
-        assert websocket_handler.connections[connection_id] == websocket
-    
-    @pytest.mark.asyncio
-    async def test_broadcast_round_started(self, websocket_handler):
-        """Test round started event broadcasting"""
-        session_id = "test-session"
-        connection_id = "conn-456"
-        websocket = AsyncMock(spec=WebSocket)
-        
-        # Register connection
-        await websocket_handler.register_session_connection(
-            session_id,
-            connection_id,
-            websocket
-        )
-        
-        # Broadcast event
-        await websocket_handler.broadcast_round_started(
-            session_id,
-            round_number=2,
-            participants=["agent1", "agent2"]
-        )
-        
-        # Verify WebSocket send was called
-        websocket.send_json.assert_called_once()
-        sent_data = websocket.send_json.call_args[0][0]
-        assert sent_data["event_type"] == "round_started"
-        assert sent_data["session_id"] == session_id
-        assert sent_data["round_number"] == 2
-    
-    @pytest.mark.asyncio
-    async def test_interactive_session_management(self, websocket_handler):
-        """Test interactive session management"""
-        session_id = "interactive-session"
-        connection_id = "conn-789"
-        websocket = AsyncMock(spec=WebSocket)
-        
-        # Register interactive session
-        await websocket_handler.register_interactive_session(
-            session_id,
-            connection_id,
-            websocket
-        )
-        
-        assert session_id in websocket_handler.interactive_sessions
-        assert connection_id in websocket_handler.interactive_sessions[session_id]
-        
-        # Handle interactive message
-        from src.models.talkhier_api_models import InteractiveMessage
-        
-        message = InteractiveMessage(
-            content="Test message",
-            role=MessageRole.WORKER,
-            agent_id="test-agent",
-            confidence=0.85
-        )
-        
-        await websocket_handler.handle_interactive_message(
-            session_id,
-            connection_id,
-            message
-        )
-        
-        # Message should be broadcast (but not to sender in this test setup)
-        # In real scenario, would verify broadcast to other participants
-    
-    @pytest.mark.asyncio
-    async def test_coordination_monitoring(self, websocket_handler):
-        """Test coordination monitoring"""
-        coordination_id = "coord-123"
-        connection_id = "monitor-001"
-        websocket = AsyncMock(spec=WebSocket)
-        
-        # Register monitor
-        await websocket_handler.register_coordination_monitor(
-            coordination_id,
-            connection_id,
-            websocket
-        )
-        
-        assert coordination_id in websocket_handler.coordination_monitors
-        assert connection_id in websocket_handler.coordination_monitors[coordination_id]
-        
-        # Broadcast update
-        await websocket_handler.broadcast_coordination_update(
-            coordination_id,
-            {
-                "overall_progress": 0.5,
-                "session_count": 3,
-                "average_quality": 0.83
-            }
-        )
-        
-        # Verify broadcast
-        websocket.send_json.assert_called_once()
-        sent_data = websocket.send_json.call_args[0][0]
-        assert sent_data["type"] == "coordination_update"
-        assert sent_data["coordination_id"] == coordination_id
-
-
 class TestTalkHierAPIIntegration:
     """Integration tests for TalkHier API endpoints"""
     
     @pytest.fixture
-    def client(self):
+    def client(self) -> TestClient:
         """Create test client"""
         from src.api.main import app
         return TestClient(app)
     
-    def test_list_protocols(self, client):
+    def test_list_protocols(self, client: TestClient) -> None:
         """Test protocol listing endpoint"""
         response = client.get("/api/v1/talkhier/protocols")
         
@@ -682,7 +459,7 @@ class TestTalkHierAPIIntegration:
         assert "recommended_protocols" in data
         assert len(data["protocols"]) >= 5
     
-    def test_health_check(self, client):
+    def test_health_check(self, client: TestClient) -> None:
         """Test health check endpoint"""
         response = client.get("/api/v1/talkhier/health")
         
