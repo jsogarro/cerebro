@@ -67,57 +67,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
         Returns:
             Response from endpoint
         """
-        # Skip authentication for excluded paths
-        path = request.url.path
-        if any(path.startswith(excluded) for excluded in self.exclude_paths):
-            response: Response = await call_next(request)
-            return response
+        # NOTE: This middleware no longer performs JWT validation directly.
+        # JWT validation happens via the get_current_token dependency in endpoints.
+        # This allows test fixtures to override the JWT service via dependency_overrides.
+        # The middleware just ensures request.state attributes are initialized.
 
-        # Extract token from Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            # Allow request to continue without user context
-            # Endpoints can enforce authentication as needed
-            request.state.user = None
-            request.state.token_payload = None
-            request.state.organization_id = None
-            response = await call_next(request)
-            return response
-
-        token = auth_header.replace("Bearer ", "")
-
-        try:
-            # Initialize JWT service
-            redis_client = await redis.from_url(settings.REDIS_URL)
-            jwt_service = JWTService(
-                redis_client=redis_client,
-                private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-                public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-            )
-
-            # Validate token
-            token_payload = await jwt_service.validate_token(token)
-
-            # Add to request state
-            request.state.token_payload = token_payload
-            request.state.user_id = token_payload.sub
-            request.state.organization_id = token_payload.organization_id
-
-            # Log authenticated request
-            logger.debug(
-                "Authenticated request",
-                user_id=token_payload.sub,
-                organization_id=token_payload.organization_id,
-                path=path,
-                method=request.method,
-            )
-
-        except Exception as e:
-            logger.warning("Authentication failed", error=str(e), path=path)
-            # Allow request to continue without user context
-            request.state.user = None
-            request.state.token_payload = None
-            request.state.organization_id = None
+        # Initialize request state (endpoints may set these via dependencies)
+        request.state.user = None
+        request.state.token_payload = None
+        request.state.organization_id = None
 
         response = await call_next(request)
         return response

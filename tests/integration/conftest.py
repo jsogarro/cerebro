@@ -15,6 +15,7 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as redis
 from faker import Faker
+from fastapi import Depends
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -26,6 +27,7 @@ from src.api.main import app
 from src.auth.jwt_service import JWTService
 from src.auth.password_service import PasswordService
 from src.core.config import Settings
+from src.middleware.auth_middleware import get_current_token
 
 # Import all models to ensure they're registered with Base.metadata
 from src.models.db.agent_task import AgentTask  # noqa: F401
@@ -232,14 +234,20 @@ async def authenticated_client(
         return jwt_service
 
     # Override tenant context to skip Postgres RLS setup in tests
+    from src.auth.models import TokenPayload
     from src.middleware.tenant_context import TenantContext, get_tenant_context
 
-    async def override_get_tenant_context() -> TenantContext:
+    async def override_get_tenant_context(
+        token_payload: TokenPayload = Depends(get_current_token),
+        session: AsyncSession = Depends(get_session),
+    ) -> TenantContext:
         # Return tenant context without executing Postgres SET LOCAL command
         # The test database doesn't have RLS policies configured
+        # We skip the Postgres RLS `SET LOCAL app.current_org_id` command since
+        # the test database doesn't have RLS policies configured
         return TenantContext(
-            user_id=IntegrationTestConfig.TEST_USER_ID,
-            organization_id=IntegrationTestConfig.TEST_ORG_ID,
+            user_id=token_payload.sub,  # Use actual token user_id
+            organization_id=token_payload.organization_id or IntegrationTestConfig.TEST_ORG_ID,
         )
 
     app.dependency_overrides[get_session] = override_get_session
