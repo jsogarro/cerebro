@@ -12,12 +12,13 @@ self-improving AI system through experimental optimization.
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+from structlog import get_logger
 
 # Import Agent Framework API components
 from src.api.services.agent_execution_service import AgentExecutionService
@@ -48,7 +49,7 @@ try:
 except ImportError:
     _BayesianExperimentDesigner = None
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 RESEARCH_CLAIM_DEFINITIONS: dict[str, dict[str, Any]] = {
     "performance_gain_20_40_percent": {

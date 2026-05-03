@@ -7,7 +7,6 @@ infrastructure for live updates and provides comprehensive analytics.
 """
 
 import asyncio
-import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -15,12 +14,13 @@ from typing import Any
 
 import pandas as pd
 from fastapi import WebSocket
+from structlog import get_logger
 
 from src.api.websocket.connection_manager import ConnectionManager
 from src.api.websocket.event_publisher import EventPublisher
 from src.utils.async_helpers import BackgroundTaskTracker
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class DashboardMetric(Enum):

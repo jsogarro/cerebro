@@ -8,7 +8,6 @@ for continuous optimization.
 """
 
 import asyncio
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -23,8 +22,9 @@ from scipy.optimize import minimize
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel
+from structlog import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class AcquisitionFunction(Enum):

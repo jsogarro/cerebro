@@ -15,20 +15,20 @@ Features:
 
 import asyncio
 import contextlib
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
 import numpy as np
+from structlog import get_logger
 
 from ..statistical.enhanced_statistical_engine import (
     BanditAlgorithm,
     MultiBanditOptimizer,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class AllocationStrategy(Enum):

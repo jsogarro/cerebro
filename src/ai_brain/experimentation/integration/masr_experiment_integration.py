@@ -6,11 +6,12 @@ This module integrates experimentation capabilities directly into the MASR
 collaboration modes, and resource allocation decisions.
 """
 
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.constants import (
     DEFAULT_AGENT_TIMEOUT,
@@ -36,7 +37,7 @@ from ..core.adaptive_allocation_engine import AdaptiveAllocationEngine
 from ..core.system_experiment_registry import SystemExperimentRegistry
 from ..core.unified_experiment_manager import UnifiedExperimentManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class MASRExperimentType(Enum):

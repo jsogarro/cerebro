@@ -8,7 +8,6 @@ optimization strategies.
 """
 
 import asyncio
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -19,8 +18,9 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from scipy.optimize import differential_evolution
+from structlog import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class OptimizationObjective(Enum):

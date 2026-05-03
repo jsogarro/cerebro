@@ -7,7 +7,6 @@ Manages experiment lifecycle, coordination, and integration with existing system
 
 import asyncio
 import contextlib
-import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -15,13 +14,15 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
+from structlog import get_logger
+
 from .unified_experiment_manager import (
     ExperimentVariant,
     SystemComponent,
     SystemExperiment,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass

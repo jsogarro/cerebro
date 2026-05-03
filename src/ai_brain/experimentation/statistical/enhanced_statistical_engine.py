@@ -14,12 +14,14 @@ Research Foundation:
 - Bayesian inference patterns from PyMC and ArviZ
 """
 
-import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 import numpy as np
+from structlog import get_logger
+
+logger = get_logger()
 
 # Statistical libraries
 try:
@@ -28,7 +30,7 @@ try:
 except ImportError:
     scipy_stats = None
     SCIPY_AVAILABLE = False
-    logging.warning("scipy not available - statistical tests disabled")
+    logger.warning("scipy_not_available")
 
 stats: Any = scipy_stats
 
@@ -38,7 +40,7 @@ try:
     STATSMODELS_AVAILABLE = True
 except ImportError:
     STATSMODELS_AVAILABLE = False
-    logging.warning("statsmodels not available - some advanced features disabled")
+    logger.warning("statsmodels_not_available")
 
 # Bayesian libraries (optional imports)
 try:
@@ -47,7 +49,7 @@ try:
     BAYESIAN_AVAILABLE = True
 except ImportError:
     BAYESIAN_AVAILABLE = False
-    logging.warning("PyMC not available - Bayesian features disabled")
+    logger.warning("pymc_not_available")
 
 # Multi-armed bandit libraries (optional imports)
 try:
@@ -55,9 +57,7 @@ try:
     MAB_AVAILABLE = True
 except ImportError:
     MAB_AVAILABLE = False
-    logging.warning("MABWiser not available - bandit features disabled")
-
-logger = logging.getLogger(__name__)
+    logger.warning("mabwiser_not_available")
 
 DEFAULT_MULTIPLE_COMPARISON_METHOD = "bonferroni"
 

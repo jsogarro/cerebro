@@ -7,13 +7,13 @@ improve its performance through experimental optimization.
 """
 
 import asyncio
-import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 import numpy as np
+from structlog import get_logger
 
 # Import Agent Framework components
 from src.ai_brain.learning.supervision_feedback import SupervisionFeedbackLearner
@@ -25,7 +25,7 @@ from ..integration.agent_framework_integration import (
 )
 from ..statistical.enhanced_statistical_engine import EnhancedStatisticalEngine
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class OptimizationTarget(Enum):
