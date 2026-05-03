@@ -5,6 +5,8 @@ This module provides a sophisticated cache manager with support for
 various caching strategies, compression, and batch operations.
 """
 
+from __future__ import annotations
+
 import gzip
 from typing import Any
 

@@ -26,7 +26,7 @@ class SecurityValidator:
     # Patterns for detecting malicious input
     SQL_INJECTION_PATTERNS = [
         r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|CREATE|ALTER|EXEC|EXECUTE|SCRIPT|TRUNCATE)\b)",
-        r"(--|\||;|\/\*|\*\/|@@|@|xp_|sp_|0x)",
+        r"(--|\||;|\/\*|\*\/|@@|xp_|sp_|0x)",
         r"(\bOR\b\s*\d+\s*=\s*\d+)",
         r"(\bAND\b\s*\d+\s*=\s*\d+)",
         r"(\'|\"|`|´|'|'|\"|\")",  # noqa: RUF001
