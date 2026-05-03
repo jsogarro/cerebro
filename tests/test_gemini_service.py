@@ -28,17 +28,21 @@ class TestGeminiService:
 
     @pytest.fixture
     def mock_gemini_model(self):
-        """Mock Gemini model for testing."""
+        """Mock Gemini model (langchain ChatGoogleGenerativeAI) for testing.
+
+        Production calls `await self.model.ainvoke(prompt)` and reads
+        `result.content`. The mock matches that contract.
+        """
         mock_model = MagicMock()
         mock_response = MagicMock()
-        mock_response.text = json.dumps(
+        mock_response.content = json.dumps(
             {
                 "phases": ["literature_review", "analysis", "synthesis"],
                 "estimated_time": 3600,
                 "methodology": "systematic_review",
             }
         )
-        mock_model.generate_content_async = AsyncMock(return_value=mock_response)
+        mock_model.ainvoke = AsyncMock(return_value=mock_response)
         return mock_model
 
     async def test_service_initialization(self):
@@ -78,7 +82,7 @@ class TestGeminiService:
         assert result is not None
         assert "phases" in result
         assert "methodology" in result
-        assert mock_gemini_model.generate_content_async.called
+        assert mock_gemini_model.ainvoke.called
 
     async def test_retry_on_api_failure(self, mock_gemini_model):
         """Test that service retries on API failures."""
@@ -88,10 +92,10 @@ class TestGeminiService:
 
         # Configure mock to fail twice then succeed
         success_response = MagicMock()
-        success_response.text = json.dumps(
+        success_response.content = json.dumps(
             {"phases": ["literature_review"], "methodology": "test"}
         )
-        mock_gemini_model.generate_content_async.side_effect = [
+        mock_gemini_model.ainvoke.side_effect = [
             Exception("API Error"),
             Exception("API Error"),
             success_response,
@@ -105,7 +109,7 @@ class TestGeminiService:
         result = await service.generate_research_plan(query)
 
         assert result is not None
-        assert mock_gemini_model.generate_content_async.call_count == 3
+        assert mock_gemini_model.ainvoke.call_count == 3
 
     async def test_rate_limiting(self, mock_gemini_model, redis_client):
         """Test that rate limiting works correctly."""
@@ -157,21 +161,21 @@ class TestGeminiService:
         assert redis_client.get.called
         assert result["cached"] is True
         # Model should not be called since we got cached result
-        assert not mock_gemini_model.generate_content_async.called
+        assert not mock_gemini_model.ainvoke.called
 
     async def test_analyze_literature(self, mock_gemini_model):
         """Test literature analysis functionality."""
         from src.services.gemini_service import GeminiService
 
         mock_response = MagicMock()
-        mock_response.text = json.dumps(
+        mock_response.content = json.dumps(
             {
                 "key_findings": ["Finding 1", "Finding 2"],
                 "gaps": ["Gap 1"],
                 "summary": "Analysis summary",
             }
         )
-        mock_gemini_model.generate_content_async = AsyncMock(return_value=mock_response)
+        mock_gemini_model.ainvoke = AsyncMock(return_value=mock_response)
 
         service = GeminiService(api_key="test-key")
         service.model = mock_gemini_model
@@ -188,14 +192,14 @@ class TestGeminiService:
         from src.services.gemini_service import GeminiService
 
         mock_response = MagicMock()
-        mock_response.text = json.dumps(
+        mock_response.content = json.dumps(
             {
                 "synthesis": "Comprehensive synthesis",
                 "conclusions": ["Conclusion 1", "Conclusion 2"],
                 "recommendations": ["Recommendation 1"],
             }
         )
-        mock_gemini_model.generate_content_async = AsyncMock(return_value=mock_response)
+        mock_gemini_model.ainvoke = AsyncMock(return_value=mock_response)
 
         service = GeminiService(api_key="test-key")
         service.model = mock_gemini_model
@@ -216,7 +220,7 @@ class TestGeminiService:
         from src.services.gemini_service import GeminiService
 
         mock_response = MagicMock()
-        mock_response.text = json.dumps(
+        mock_response.content = json.dumps(
             {
                 "citations": [
                     {
@@ -227,7 +231,7 @@ class TestGeminiService:
                 ]
             }
         )
-        mock_gemini_model.generate_content_async = AsyncMock(return_value=mock_response)
+        mock_gemini_model.ainvoke = AsyncMock(return_value=mock_response)
 
         service = GeminiService(api_key="test-key")
         service.model = mock_gemini_model
@@ -244,7 +248,7 @@ class TestGeminiService:
         from src.services.gemini_service import GeminiService
 
         mock_response = MagicMock()
-        mock_response.text = json.dumps(
+        mock_response.content = json.dumps(
             {
                 "validation": "supported",
                 "confidence": 0.85,
@@ -252,7 +256,7 @@ class TestGeminiService:
                 "counter_evidence": ["Counter 1"],
             }
         )
-        mock_gemini_model.generate_content_async = AsyncMock(return_value=mock_response)
+        mock_gemini_model.ainvoke = AsyncMock(return_value=mock_response)
 
         service = GeminiService(api_key="test-key")
         service.model = mock_gemini_model
@@ -271,8 +275,8 @@ class TestGeminiService:
         from src.services.gemini_service import GeminiService
 
         mock_response = MagicMock()
-        mock_response.text = "Invalid JSON response"
-        mock_gemini_model.generate_content_async = AsyncMock(return_value=mock_response)
+        mock_response.content = "Invalid JSON response"
+        mock_gemini_model.ainvoke = AsyncMock(return_value=mock_response)
 
         service = GeminiService(api_key="test-key")
         service.model = mock_gemini_model
