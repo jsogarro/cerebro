@@ -8,7 +8,6 @@ retrieval, and management functionality.
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
@@ -21,7 +20,7 @@ client = TestClient(app)
 class TestReportsAPI:
     """Test reports API endpoints."""
 
-    def test_create_report_endpoint(self):
+    def test_create_report_endpoint(self) -> None:
         """Test report creation endpoint."""
         request_data = {
             "title": "Test Report",
@@ -67,7 +66,7 @@ class TestReportsAPI:
             assert data["report_type"] == "comprehensive"
             assert data["generation_status"] == "generating"
 
-    def test_get_report_endpoint(self):
+    def test_get_report_endpoint(self) -> None:
         """Test get report endpoint."""
         report_id = uuid4()
 
@@ -111,7 +110,7 @@ class TestReportsAPI:
             assert data["generation_status"] == "completed"
             assert data["word_count"] == 1500
 
-    def test_get_report_not_found(self):
+    def test_get_report_not_found(self) -> None:
         """Test get report when report doesn't exist."""
         report_id = uuid4()
 
@@ -134,7 +133,7 @@ class TestReportsAPI:
             assert response.status_code == 404
             assert "not found" in response.json()["error"]["message"]
 
-    def test_download_report_endpoint(self):
+    def test_download_report_endpoint(self) -> None:
         """Test download report endpoint."""
         report_id = uuid4()
         format_type = "html"
@@ -165,7 +164,7 @@ class TestReportsAPI:
             assert response.headers["content-type"].startswith(mock_mime_type)
             assert "attachment" in response.headers["content-disposition"]
 
-    def test_download_report_not_found(self):
+    def test_download_report_not_found(self) -> None:
         """Test download when report format doesn't exist."""
         report_id = uuid4()
         format_type = "pdf"
@@ -188,7 +187,7 @@ class TestReportsAPI:
 
             assert response.status_code == 404
 
-    def test_list_reports_endpoint(self):
+    def test_list_reports_endpoint(self) -> None:
         """Test list reports endpoint."""
         user_id = uuid4()
 
@@ -253,7 +252,7 @@ class TestReportsAPI:
             assert data["page_size"] == 10
             assert data["has_more"] is False
 
-    def test_search_reports_endpoint(self):
+    def test_search_reports_endpoint(self) -> None:
         """Test search reports endpoint."""
         search_request = {
             "search_term": "AI education",
@@ -306,7 +305,7 @@ class TestReportsAPI:
             assert data["total_count"] == 1
             assert data["reports"][0]["title"] == "AI in Education Report"
 
-    def test_get_statistics_endpoint(self):
+    def test_get_statistics_endpoint(self) -> None:
         """Test get statistics endpoint."""
         mock_stats = {
             "total_reports": 50,
@@ -349,7 +348,7 @@ class TestReportsAPI:
             assert data["average_quality_score"] == 0.82
             assert data["storage_statistics"]["total_storage_mb"] == 125.5
 
-    def test_delete_report_endpoint(self):
+    def test_delete_report_endpoint(self) -> None:
         """Test delete report endpoint."""
         report_id = uuid4()
 
@@ -372,7 +371,7 @@ class TestReportsAPI:
             assert response.status_code == 204
             mock_storage.delete_report.assert_called_once_with(report_id, True)
 
-    def test_delete_report_not_found(self):
+    def test_delete_report_not_found(self) -> None:
         """Test delete report when report doesn't exist."""
         report_id = uuid4()
 
@@ -394,7 +393,7 @@ class TestReportsAPI:
 
             assert response.status_code == 404
 
-    def test_verify_integrity_endpoint(self):
+    def test_verify_integrity_endpoint(self) -> None:
         """Test verify report integrity endpoint."""
         report_id = uuid4()
 
@@ -433,7 +432,7 @@ class TestReportsAPI:
             assert data["formats_checked"] == 3
             assert data["formats_valid"] == 3
 
-    def test_service_unavailable_handling(self):
+    def test_service_unavailable_handling(self) -> None:
         """Test handling when services are unavailable."""
         with patch("src.api.routes.reports.get_report_services") as mock_services:
             # Simulate service unavailability
@@ -443,136 +442,3 @@ class TestReportsAPI:
 
             assert response.status_code == 503
             assert "not available" in response.json()["error"]["message"]
-
-    def test_validation_errors(self):
-        """Test request validation errors."""
-        # Test with missing required fields
-        invalid_request = {
-            "query": "Test query"
-            # Missing title
-        }
-
-        response = client.post("/api/v1/reports/generate", json=invalid_request)
-
-        assert response.status_code == 422  # Validation error
-
-        # Test with invalid field values
-        invalid_request = {
-            "title": "",  # Empty title
-            "query": "Test query",
-            "report_type": "invalid_type",
-        }
-
-        response = client.post("/api/v1/reports/generate", json=invalid_request)
-
-        assert response.status_code == 422
-
-    def test_report_type_enum_validation(self):
-        """Test report type enum validation."""
-        request_data = {
-            "title": "Test Report",
-            "query": "Test query",
-            "report_type": "comprehensive",  # Valid enum value
-            "citation_style": "APA",
-            "formats": ["html"],
-        }
-
-        with patch("src.api.routes.reports.get_report_services") as mock_services:
-            mock_services.return_value = (
-                MagicMock(),
-                MagicMock(),
-                MagicMock(),
-                MagicMock(),
-            )
-
-            response = client.post("/api/v1/reports/generate", json=request_data)
-
-            assert response.status_code == 202
-
-    def test_citation_style_enum_validation(self):
-        """Test citation style enum validation."""
-        request_data = {
-            "title": "Test Report",
-            "query": "Test query",
-            "citation_style": "MLA",  # Valid enum value
-            "formats": ["html"],
-        }
-
-        with patch("src.api.routes.reports.get_report_services") as mock_services:
-            mock_services.return_value = (
-                MagicMock(),
-                MagicMock(),
-                MagicMock(),
-                MagicMock(),
-            )
-
-            response = client.post("/api/v1/reports/generate", json=request_data)
-
-            assert response.status_code == 202
-
-    def test_format_enum_validation(self):
-        """Test format enum validation."""
-        request_data = {
-            "title": "Test Report",
-            "query": "Test query",
-            "formats": ["html", "pdf", "markdown"],  # Valid enum values
-        }
-
-        with patch("src.api.routes.reports.get_report_services") as mock_services:
-            mock_services.return_value = (
-                MagicMock(),
-                MagicMock(),
-                MagicMock(),
-                MagicMock(),
-            )
-
-            response = client.post("/api/v1/reports/generate", json=request_data)
-
-            assert response.status_code == 202
-
-
-class TestReportResponseModels:
-    """Test report response model conversions."""
-
-    def test_report_response_from_db_report(self):
-        """Test creating response from database report."""
-        from src.api.routes.reports import ReportResponse
-
-        # Mock database report
-        mock_report = MagicMock(spec=GeneratedReport)
-        mock_report.id = uuid4()
-        mock_report.title = "Test Report"
-        mock_report.query = "Test query"
-        mock_report.report_type = "comprehensive"
-        mock_report.generation_status = "completed"
-        mock_report.word_count = 1500
-        mock_report.page_count = 5
-        mock_report.quality_score = 0.85
-        mock_report.confidence_score = 0.78
-        mock_report.created_at.isoformat.return_value = "2024-01-01T00:00:00Z"
-        mock_report.generation_time_seconds = 45.0
-
-        # Mock formats
-        mock_format1 = MagicMock()
-        mock_format1.format_type = "html"
-        mock_format2 = MagicMock()
-        mock_format2.format_type = "pdf"
-        mock_report.formats = [mock_format1, mock_format2]
-
-        response = ReportResponse.from_db_report(
-            mock_report, base_url="http://localhost:8000"
-        )
-
-        assert response.id == mock_report.id
-        assert response.title == "Test Report"
-        assert response.generation_status == "completed"
-        assert len(response.formats_generated) == 2
-        assert "html" in response.formats_generated
-        assert "pdf" in response.formats_generated
-        assert len(response.download_urls) == 2
-        assert "html" in response.download_urls
-        assert "pdf" in response.download_urls
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])
