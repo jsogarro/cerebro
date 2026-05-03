@@ -5,6 +5,8 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
 from src.ai_brain.providers.base_provider import (
@@ -12,7 +14,13 @@ from src.ai_brain.providers.base_provider import (
     ModelRequest,
     ModelResponse,
 )
-from src.core.observability import LLMCallMetrics, record_llm_call
+from src.api.middleware.cost_drift import LLMCostDriftMiddleware
+from src.core.observability import (
+    LLMCallMetrics,
+    get_llm_request_cost_tracking,
+    record_llm_call,
+    set_llm_request_estimated_cost,
+)
 
 PROVIDERS_DIR = Path(__file__).resolve().parents[1] / "src" / "ai_brain" / "providers"
 
@@ -136,3 +144,44 @@ def test_provider_modules_use_structlog_logger() -> None:
 
         assert logging_imports == [], provider_path
         assert get_logger_calls == [], provider_path
+
+
+def test_cost_drift_middleware_records_threshold_event() -> None:
+    app = FastAPI()
+    app.add_middleware(LLMCostDriftMiddleware, threshold_ratio=0.2)
+
+    @app.post("/llm-cost")  # type: ignore[untyped-decorator]
+    async def llm_cost_endpoint() -> dict[str, bool]:
+        set_llm_request_estimated_cost(0.01)
+        record_llm_call(
+            LLMCallMetrics(
+                provider="unit-provider",
+                model="unit-model",
+                prompt_tokens=2,
+                completion_tokens=4,
+                latency_ms=100,
+                cost_usd=0.013,
+                request_id="drift-request",
+            )
+        )
+        return {"ok": True}
+
+    labels = {"method": "POST", "route": "/llm-cost", "direction": "over"}
+    before_drift_events = sample_value("llm_cost_drift_events_total", labels)
+    before_drift_count = sample_value(
+        "llm_request_cost_drift_ratio_count",
+        {"method": "POST", "route": "/llm-cost"},
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/llm-cost")
+
+    assert response.status_code == 200
+    assert sample_value("llm_cost_drift_events_total", labels) == (
+        before_drift_events + 1
+    )
+    assert sample_value(
+        "llm_request_cost_drift_ratio_count",
+        {"method": "POST", "route": "/llm-cost"},
+    ) == (before_drift_count + 1)
+    assert get_llm_request_cost_tracking() is None

@@ -15,6 +15,7 @@ from starlette.responses import Response
 from structlog import get_logger
 
 from src.api.auth import router as auth_router
+from src.api.middleware.cost_drift import LLMCostDriftMiddleware
 from src.api.middleware.error_envelope import (
     build_error_payload,
     http_exception_handler,
@@ -158,6 +159,8 @@ app.add_middleware(
     requests_per_minute=settings.MAX_REQUESTS_PER_MINUTE,
     enabled=settings.ENABLE_RATE_LIMITING,
 )
+
+app.add_middleware(LLMCostDriftMiddleware)
 
 # Add Authentication middleware
 app.add_middleware(AuthMiddleware)
