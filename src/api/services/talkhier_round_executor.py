@@ -28,6 +28,10 @@ class TalkHierRoundExecutor:
         """Execute a refinement round in an active session."""
         if session.status != SessionStatus.ACTIVE:
             raise ValueError(f"Session {session_id} is not active (status: {session.status})")
+        if request.round_number > session.max_rounds:
+            raise ValueError(
+                f"Refinement round {request.round_number} exceeds max_rounds={session.max_rounds}"
+            )
 
         session.status = SessionStatus.REFINING
         session.current_round = request.round_number

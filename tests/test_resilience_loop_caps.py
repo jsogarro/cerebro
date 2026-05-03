@@ -1,7 +1,20 @@
 """Resilience characterization tests for bounded workflow iteration."""
 
+import asyncio
+from datetime import UTC, datetime
+
 import pytest
 
+from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
+from src.api.services.talkhier_session_service import TalkHierSession
+from src.api.services.talkhier_state_manager import TalkHierStateManager
+from src.models.talkhier_api_models import (
+    ConsensusType,
+    ProtocolType,
+    RefinementRoundRequest,
+    RefinementStrategy,
+    SessionStatus,
+)
 from src.orchestration.graph_builder import GraphConfig, ResearchGraphBuilder
 from src.orchestration.state import (
     MaxIterationsExceeded,
@@ -55,3 +68,34 @@ def test_graph_builder_enforces_max_iterations_before_node_execution() -> None:
         wrapped(state)
 
     assert executed == ["handler"]
+
+
+def test_talkhier_refinement_round_rejects_rounds_past_max_rounds() -> None:
+    async def execute_past_cap() -> None:
+        await TalkHierRoundExecutor().execute_refinement_round(
+            "session-1",
+            session,
+            RefinementRoundRequest(round_number=2),
+            TalkHierStateManager(),
+        )
+
+    session = TalkHierSession(
+        session_id="session-1",
+        query="bounded TalkHier",
+        domains=["general"],
+        status=SessionStatus.ACTIVE,
+        created_at=datetime.now(UTC),
+        protocol_type=ProtocolType.STANDARD,
+        refinement_strategy=RefinementStrategy.QUALITY_FOCUSED,
+        max_rounds=1,
+        min_rounds=1,
+        quality_threshold=0.9,
+        consensus_type=ConsensusType.WEIGHTED,
+        consensus_threshold=0.9,
+        timeout_seconds=300,
+        participants=[],
+        current_round=1,
+    )
+
+    with pytest.raises(ValueError, match="exceeds max_rounds=1"):
+        asyncio.run(execute_past_cap())
