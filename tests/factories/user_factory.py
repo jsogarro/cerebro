@@ -12,8 +12,8 @@ from faker import Faker
 
 from src.auth.password_service import PasswordService
 from src.models.db.api_key import APIKey
-from src.models.db.session import Session
 from src.models.db.user import User
+from src.models.db.user_session import UserSession
 
 fake = Faker()
 password_service = PasswordService()
@@ -124,14 +124,13 @@ class SessionFactory(Factory):
     """Factory for creating test sessions."""
 
     class Meta:
-        model = Session
+        model = UserSession
 
-    id = LazyFunction(lambda: str(uuid.uuid4()))
-    user_id = LazyFunction(lambda: str(uuid.uuid4()))
-    token = LazyFunction(lambda: fake.sha256())
+    id = LazyFunction(uuid.uuid4)
+    user_id = LazyFunction(uuid.uuid4)
+    session_token = LazyFunction(lambda: fake.sha256())
     refresh_token = LazyFunction(lambda: fake.sha256())
     expires_at = LazyFunction(lambda: datetime.now(UTC) + timedelta(hours=24))
-    refresh_expires_at = LazyFunction(lambda: datetime.now(UTC) + timedelta(days=7))
     ip_address = LazyFunction(fake.ipv4)
     user_agent = LazyFunction(fake.user_agent)
     is_active = True
@@ -139,18 +138,17 @@ class SessionFactory(Factory):
     last_activity = LazyFunction(lambda: datetime.now(UTC))
 
     @classmethod
-    def create_expired(cls, **kwargs) -> Session:
+    def create_expired(cls, **kwargs) -> UserSession:
         """Create an expired session."""
         defaults = {
             "expires_at": datetime.now(UTC) - timedelta(hours=1),
-            "refresh_expires_at": datetime.now(UTC) - timedelta(hours=1),
             "is_active": False,
         }
         defaults.update(kwargs)
         return cls(**defaults)
 
     @classmethod
-    def create_for_user(cls, user: User, **kwargs) -> Session:
+    def create_for_user(cls, user: User, **kwargs) -> UserSession:
         """Create a session for a specific user."""
         defaults = {"user_id": user.id}
         defaults.update(kwargs)

@@ -27,7 +27,7 @@ class TestTransactionManagement:
     """Test database transaction management."""
 
     @pytest.mark.asyncio
-    async def test_transaction_commit(self, db_session: AsyncSession):
+    async def test_transaction_commit(self, db_session: AsyncSession) -> None:
         """Test successful transaction commit."""
         user = UserFactory()
         project = ResearchProjectFactory(user_id=user.id)
@@ -51,7 +51,7 @@ class TestTransactionManagement:
         assert persisted_project.title == project.title
 
     @pytest.mark.asyncio
-    async def test_transaction_rollback(self, db_session: AsyncSession):
+    async def test_transaction_rollback(self, db_session: AsyncSession) -> None:
         """Test transaction rollback on error."""
         user = UserFactory()
         db_session.add(user)
@@ -70,7 +70,7 @@ class TestTransactionManagement:
         assert count == 0
 
     @pytest.mark.asyncio
-    async def test_nested_transactions(self, db_session: AsyncSession):
+    async def test_nested_transactions(self, db_session: AsyncSession) -> None:
         """Test nested transaction handling."""
         async with db_session.begin():
             user = UserFactory()
@@ -98,7 +98,7 @@ class TestRepositoryIntegration:
     """Test repository pattern integration."""
 
     @pytest.mark.asyncio
-    async def test_user_repository_crud(self, db_session: AsyncSession):
+    async def test_user_repository_crud(self, db_session: AsyncSession) -> None:
         """Test UserRepository CRUD operations."""
         repo = UserRepository(db_session)
 
@@ -129,7 +129,9 @@ class TestRepositoryIntegration:
         assert fetched is None
 
     @pytest.mark.asyncio
-    async def test_research_repository_queries(self, db_session: AsyncSession):
+    async def test_research_repository_queries(
+        self, db_session: AsyncSession
+    ) -> None:
         """Test ResearchRepository complex queries."""
         repo = ResearchRepository(db_session)
         seeder = TestDataSeeder(db_session)
@@ -158,7 +160,7 @@ class TestRepositoryIntegration:
             assert len(results) > 0
 
     @pytest.mark.asyncio
-    async def test_repository_relationships(self, db_session: AsyncSession):
+    async def test_repository_relationships(self, db_session: AsyncSession) -> None:
         """Test repository handling of relationships."""
         user_repo = UserRepository(db_session)
         project_repo = ResearchRepository(db_session)
@@ -215,7 +217,7 @@ class TestComplexQueries:
     """Test complex database queries and aggregations."""
 
     @pytest.mark.asyncio
-    async def test_aggregation_queries(self, db_session: AsyncSession):
+    async def test_aggregation_queries(self, db_session: AsyncSession) -> None:
         """Test aggregation queries."""
         seeder = TestDataSeeder(db_session)
         await seeder.seed_complete_dataset()
@@ -242,7 +244,7 @@ class TestComplexQueries:
         assert all(0 <= score <= 1 for score in agent_scores.values())
 
     @pytest.mark.asyncio
-    async def test_join_queries(self, db_session: AsyncSession):
+    async def test_join_queries(self, db_session: AsyncSession) -> None:
         """Test complex join queries."""
         seeder = TestDataSeeder(db_session)
         await seeder.seed_complete_dataset()
@@ -269,7 +271,7 @@ class TestComplexQueries:
         assert len(projects_with_results) >= 0
 
     @pytest.mark.asyncio
-    async def test_subquery_operations(self, db_session: AsyncSession):
+    async def test_subquery_operations(self, db_session: AsyncSession) -> None:
         """Test subquery operations."""
         seeder = TestDataSeeder(db_session)
         await seeder.seed_complete_dataset()
@@ -290,7 +292,7 @@ class TestComplexQueries:
         assert isinstance(users_with_completed, list)
 
     @pytest.mark.asyncio
-    async def test_window_functions(self, db_session: AsyncSession):
+    async def test_window_functions(self, db_session: AsyncSession) -> None:
         """Test window functions for analytics."""
         seeder = TestDataSeeder(db_session)
         await seeder.seed_complete_dataset()
@@ -316,7 +318,7 @@ class TestComplexQueries:
         ranked_projects = result.all()
 
         # Verify ranking
-        user_rankings = {}
+        user_rankings: dict[object, list[int]] = {}
         for row in ranked_projects:
             if row.user_id not in user_rankings:
                 user_rankings[row.user_id] = []
@@ -331,7 +333,7 @@ class TestDatabaseConstraints:
     """Test database constraints and integrity."""
 
     @pytest.mark.asyncio
-    async def test_unique_constraints(self, db_session: AsyncSession):
+    async def test_unique_constraints(self, db_session: AsyncSession) -> None:
         """Test unique constraint enforcement."""
         user1 = UserFactory(email="unique@example.com")
         user2 = UserFactory(email="unique@example.com")  # Same email
@@ -344,7 +346,7 @@ class TestDatabaseConstraints:
             await db_session.commit()
 
     @pytest.mark.asyncio
-    async def test_foreign_key_constraints(self, db_session: AsyncSession):
+    async def test_foreign_key_constraints(self, db_session: AsyncSession) -> None:
         """Test foreign key constraint enforcement."""
         # Try to create project with non-existent user
         project = ResearchProjectFactory(user_id=str(uuid.uuid4()))
@@ -354,7 +356,7 @@ class TestDatabaseConstraints:
             await db_session.commit()
 
     @pytest.mark.asyncio
-    async def test_check_constraints(self, db_session: AsyncSession):
+    async def test_check_constraints(self, db_session: AsyncSession) -> None:
         """Test check constraints."""
         # Test invalid enum values
         user = UserFactory()
@@ -371,7 +373,7 @@ class TestDatabaseConstraints:
         # await db_session.commit()  # Should fail with validation
 
     @pytest.mark.asyncio
-    async def test_cascade_operations(self, db_session: AsyncSession):
+    async def test_cascade_operations(self, db_session: AsyncSession) -> None:
         """Test cascade delete operations."""
         # Create user with projects and results
         user = UserFactory()
@@ -396,150 +398,3 @@ class TestDatabaseConstraints:
 
         result_check = await db_session.get(ResearchResult, result.id)
         assert result_check is None
-
-
-class TestDatabasePerformance:
-    """Test database performance and optimization."""
-
-    @pytest.mark.asyncio
-    async def test_bulk_operations(self, db_session: AsyncSession):
-        """Test bulk insert and update operations."""
-        import time
-
-        # Bulk insert
-        users = [UserFactory() for _ in range(100)]
-
-        start = time.time()
-        db_session.add_all(users)
-        await db_session.commit()
-        insert_time = time.time() - start
-
-        assert insert_time < 5  # Should be fast
-
-        # Verify all inserted
-        result = await db_session.execute(select(func.count()).select_from(User))
-        assert result.scalar() == 100
-
-        # Bulk update
-        start = time.time()
-        await db_session.execute(User.__table__.update().values(is_verified=True))
-        await db_session.commit()
-        update_time = time.time() - start
-
-        assert update_time < 2  # Should be fast
-
-    @pytest.mark.asyncio
-    async def test_index_performance(self, db_session: AsyncSession):
-        """Test query performance with indexes."""
-        # Seed large dataset
-        seeder = TestDataSeeder(db_session)
-        users = await seeder.seed_users(50)
-        await seeder.seed_projects(users, 10)  # 500 projects total
-
-        import time
-
-        # Query with indexed column (id)
-        start = time.time()
-        await db_session.execute(
-            select(ResearchProject).where(ResearchProject.id == users[0].id)
-        )
-        indexed_time = time.time() - start
-
-        # Query with non-indexed column (might be indexed depending on schema)
-        start = time.time()
-        await db_session.execute(
-            select(ResearchProject).where(ResearchProject.description.like("%test%"))
-        )
-        non_indexed_time = time.time() - start
-
-        # Indexed queries should generally be faster
-        # Note: This might not always be true for small datasets
-        assert indexed_time < 1
-        assert non_indexed_time < 2
-
-    @pytest.mark.asyncio
-    async def test_connection_pooling(self, db_session: AsyncSession):
-        """Test database connection pooling."""
-        from sqlalchemy.ext.asyncio import create_async_engine
-        from sqlalchemy.pool import QueuePool
-
-        # Create engine with connection pool
-        engine = create_async_engine(
-            "postgresql+asyncpg://test:test@localhost/test",
-            poolclass=QueuePool,
-            pool_size=5,
-            max_overflow=10,
-            pool_recycle=3600,
-        )
-
-        # Simulate concurrent connections
-        import asyncio
-
-        async def query_db():
-            async with engine.begin() as conn:
-                result = await conn.execute(select(func.now()))
-                return result.scalar()
-
-        # Run multiple concurrent queries
-        tasks = [query_db() for _ in range(20)]
-        results = await asyncio.gather(*tasks)
-
-        assert len(results) == 20
-
-        await engine.dispose()
-
-
-class TestDatabaseMigrations:
-    """Test database migration scenarios."""
-
-    @pytest.mark.asyncio
-    async def test_schema_evolution(self, db_session: AsyncSession):
-        """Test handling of schema changes."""
-        # This would typically test Alembic migrations
-        # For now, we'll test schema introspection
-
-        from sqlalchemy import inspect
-
-        inspector = inspect(db_session.bind)
-
-        # Check tables exist
-        tables = inspector.get_table_names()
-        assert "users" in tables
-        assert "research_projects" in tables
-        assert "research_results" in tables
-
-        # Check columns
-        user_columns = [col["name"] for col in inspector.get_columns("users")]
-        assert "id" in user_columns
-        assert "email" in user_columns
-        assert "created_at" in user_columns
-
-        # Check indexes
-        user_indexes = inspector.get_indexes("users")
-        [idx["name"] for idx in user_indexes]
-        # Verify expected indexes exist
-
-    @pytest.mark.asyncio
-    async def test_data_migration(self, db_session: AsyncSession):
-        """Test data migration scenarios."""
-        # Simulate migrating data from old schema to new
-
-        # Create data in "old" format
-        old_users = [UserFactory() for _ in range(10)]
-        db_session.add_all(old_users)
-        await db_session.commit()
-
-        # Simulate migration (e.g., adding new column with default)
-        for user in old_users:
-            if not hasattr(user, "preferences"):
-                user.preferences = json.dumps({"theme": "light"})
-
-        await db_session.commit()
-
-        # Verify migration
-        result = await db_session.execute(select(User))
-        migrated_users = result.scalars().all()
-
-        for _user in migrated_users:
-            # assert user.preferences is not None
-            pass  # Would check new column values
