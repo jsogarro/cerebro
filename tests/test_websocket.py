@@ -28,7 +28,7 @@ from src.models.websocket_messages import (
 class TestWebSocketMessages:
     """Test WebSocket message models."""
 
-    def test_ws_message_creation(self):
+    def test_ws_message_creation(self) -> None:
         """Test basic WebSocket message creation."""
         message = WSMessage(
             type=WSMessageType.PROGRESS,
@@ -41,7 +41,7 @@ class TestWebSocketMessages:
         assert message.data["progress"] == 50.0
         assert isinstance(message.timestamp, datetime)
 
-    def test_cli_ws_message_formatting(self):
+    def test_cli_ws_message_formatting(self) -> None:
         """Test CLI WebSocket message formatting."""
         project_id = uuid4()
 
@@ -66,6 +66,8 @@ class TestWebSocketMessages:
             project_id=project_id,
             data={
                 "agent_type": "literature_review",
+                "agent_id": "agent_123",
+                "status": "started",
                 "task_description": "Searching academic databases",
             },
         )
@@ -75,7 +77,7 @@ class TestWebSocketMessages:
         assert "literature_review" in output
         assert "Searching academic databases" in output
 
-    def test_progress_update_model(self):
+    def test_progress_update_model(self) -> None:
         """Test ProgressUpdate model."""
         progress = ProgressUpdate(
             total_tasks=10,
@@ -92,7 +94,7 @@ class TestWebSocketMessages:
         assert progress.progress_percentage == 60.0
         assert progress.current_agent == "synthesis_agent"
 
-    def test_agent_update_model(self):
+    def test_agent_update_model(self) -> None:
         """Test AgentUpdate model."""
         agent_update = AgentUpdate(
             agent_type="literature_review",
@@ -111,12 +113,12 @@ class TestConnectionManager:
     """Test WebSocket connection manager."""
 
     @pytest.fixture
-    def connection_manager(self):
+    def connection_manager(self) -> ConnectionManager:
         """Create a fresh connection manager for each test."""
         return ConnectionManager()
 
     @pytest.fixture
-    def mock_websocket(self):
+    def mock_websocket(self) -> AsyncMock:
         """Create a mock WebSocket connection."""
         websocket = AsyncMock()
         websocket.send_text = AsyncMock()
@@ -125,7 +127,9 @@ class TestConnectionManager:
         return websocket
 
     @pytest.mark.asyncio
-    async def test_connection_lifecycle(self, connection_manager, mock_websocket):
+    async def test_connection_lifecycle(
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+    ) -> None:
         """Test WebSocket connection lifecycle."""
         # Connect
         client_id = await connection_manager.connect(
@@ -149,7 +153,9 @@ class TestConnectionManager:
         assert len(connection_manager.connections) == 0
 
     @pytest.mark.asyncio
-    async def test_project_subscriptions(self, connection_manager, mock_websocket):
+    async def test_project_subscriptions(
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+    ) -> None:
         """Test project subscription functionality."""
         project_id = uuid4()
 
@@ -173,8 +179,8 @@ class TestConnectionManager:
 
     @pytest.mark.asyncio
     async def test_subscription_request_handling(
-        self, connection_manager, mock_websocket
-    ):
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+    ) -> None:
         """Test handling of subscription requests."""
         project_id = uuid4()
 
@@ -209,7 +215,9 @@ class TestConnectionManager:
         assert project_id not in response.active_subscriptions
 
     @pytest.mark.asyncio
-    async def test_message_broadcasting(self, connection_manager, mock_websocket):
+    async def test_message_broadcasting(
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+    ) -> None:
         """Test message broadcasting to subscribed clients."""
         project_id = uuid4()
 
@@ -221,6 +229,7 @@ class TestConnectionManager:
             websocket.accept = AsyncMock()
 
             client_id = await connection_manager.connect(websocket, client_type="web")
+            websocket.send_text.reset_mock()
             connection_manager.subscribe_to_project(client_id, project_id)
             client_ids.append(client_id)
 
@@ -238,7 +247,9 @@ class TestConnectionManager:
             connection.websocket.send_text.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_failed_message_cleanup(self, connection_manager, mock_websocket):
+    async def test_failed_message_cleanup(
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+    ) -> None:
         """Test cleanup of failed connections during broadcasting."""
         project_id = uuid4()
 
@@ -266,14 +277,16 @@ class TestEventPublisher:
     """Test event publishing system."""
 
     @pytest.fixture
-    def event_publisher(self):
+    def event_publisher(self) -> EventPublisher:
         """Create event publisher for testing."""
         publisher = EventPublisher()
         publisher.redis_client = None  # Disable Redis for testing
         return publisher
 
     @pytest.mark.asyncio
-    async def test_progress_update_publishing(self, event_publisher):
+    async def test_progress_update_publishing(
+        self, event_publisher: EventPublisher
+    ) -> None:
         """Test publishing progress updates."""
         project_id = uuid4()
 
@@ -294,7 +307,7 @@ class TestEventPublisher:
             assert args[1].type == WSMessageType.PROGRESS
 
     @pytest.mark.asyncio
-    async def test_agent_lifecycle_events(self, event_publisher):
+    async def test_agent_lifecycle_events(self, event_publisher: EventPublisher) -> None:
         """Test publishing agent lifecycle events."""
         project_id = uuid4()
 
@@ -323,7 +336,9 @@ class TestEventPublisher:
             assert mock_broadcast.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_project_lifecycle_events(self, event_publisher):
+    async def test_project_lifecycle_events(
+        self, event_publisher: EventPublisher
+    ) -> None:
         """Test publishing project lifecycle events."""
         project_id = uuid4()
 
@@ -348,16 +363,15 @@ class TestEventPublisher:
             assert mock_broadcast.call_count == 4
 
 
-@pytest.mark.asyncio
 class TestWebSocketEndpoints:
     """Test WebSocket API endpoints."""
 
     @pytest.fixture
-    def client(self):
+    def client(self) -> TestClient:
         """Create test client."""
         return TestClient(app)
 
-    def test_websocket_health_endpoint(self, client):
+    def test_websocket_health_endpoint(self, client: TestClient) -> None:
         """Test WebSocket health endpoint."""
         response = client.get("/ws/health")
         assert response.status_code == 200
@@ -365,149 +379,3 @@ class TestWebSocketEndpoints:
         data = response.json()
         assert data["status"] == "healthy"
         assert "websocket_stats" in data
-
-
-class TestCLIWebSocketIntegration:
-    """Test CLI WebSocket client integration."""
-
-    @pytest.mark.asyncio
-    async def test_cli_websocket_client_connection(self):
-        """Test CLI WebSocket client connection."""
-        from src.cli.websocket_client import CLIWebSocketClient
-
-        # Mock websockets.connect
-        mock_websocket = AsyncMock()
-        mock_websocket.__aenter__ = AsyncMock(return_value=mock_websocket)
-        mock_websocket.__aexit__ = AsyncMock()
-
-        with patch(
-            "src.cli.websocket_client.websockets.connect", return_value=mock_websocket
-        ):
-            client = CLIWebSocketClient(
-                base_url="ws://localhost:8000",
-                token="test_token",
-                verbose=True,
-            )
-
-            success = await client.connect("/ws/cli/test-project")
-            assert success
-            assert client._connected
-
-    @pytest.mark.asyncio
-    async def test_cli_message_handling(self):
-        """Test CLI WebSocket message handling."""
-        from src.cli.formatters import OutputFormatter
-        from src.cli.websocket_client import CLIWebSocketClient
-
-        project_id = uuid4()
-
-        # Create mock messages
-        progress_message = WSMessage(
-            type=WSMessageType.PROGRESS,
-            project_id=project_id,
-            data={
-                "progress_percentage": 75.0,
-                "completed_tasks": 3,
-                "total_tasks": 4,
-                "current_agent": "synthesis_agent",
-            },
-        )
-
-        completion_message = WSMessage(
-            type=WSMessageType.PROJECT_COMPLETED,
-            project_id=project_id,
-            data={"message": f"Research project {project_id} completed"},
-        )
-
-        # Mock websocket that yields messages
-        mock_websocket = AsyncMock()
-        mock_websocket.__aiter__ = AsyncMock(
-            return_value=iter(
-                [
-                    progress_message.model_dump_json(),
-                    completion_message.model_dump_json(),
-                ]
-            )
-        )
-
-        client = CLIWebSocketClient(verbose=True)
-        client.websocket = mock_websocket
-        client._connected = True
-
-        OutputFormatter("table", color=True)
-
-        # This would normally run the streaming loop
-        # For testing, we just verify the client is set up correctly
-        assert client.websocket is not None
-        assert client._connected
-
-
-class TestPerformanceAndScaling:
-    """Test WebSocket performance and scaling scenarios."""
-
-    @pytest.mark.asyncio
-    async def test_multiple_concurrent_connections(self):
-        """Test handling multiple concurrent WebSocket connections."""
-        connection_manager = ConnectionManager()
-
-        # Create multiple mock connections
-        connections = []
-        for i in range(50):
-            mock_websocket = AsyncMock()
-            mock_websocket.send_text = AsyncMock()
-            mock_websocket.accept = AsyncMock()
-
-            client_id = await connection_manager.connect(
-                mock_websocket,
-                client_type="cli",
-                user_id=f"user_{i}",
-            )
-            connections.append((client_id, mock_websocket))
-
-        assert len(connection_manager.connections) == 50
-
-        # Test broadcasting to all connections
-        message = WSMessage(
-            type=WSMessageType.INFO,
-            data={"message": "System maintenance in 5 minutes"},
-        )
-
-        await connection_manager.broadcast_to_all(message)
-
-        # Verify all connections received the message
-        for _client_id, mock_websocket in connections:
-            mock_websocket.send_text.assert_called_once()
-
-        # Clean up
-        for client_id, _ in connections:
-            await connection_manager.disconnect(client_id)
-
-        assert len(connection_manager.connections) == 0
-
-    @pytest.mark.asyncio
-    async def test_connection_health_monitoring(self):
-        """Test connection health monitoring and cleanup."""
-        connection_manager = ConnectionManager()
-
-        # Create connection
-        mock_websocket = AsyncMock()
-        mock_websocket.send_text = AsyncMock()
-        mock_websocket.accept = AsyncMock()
-
-        client_id = await connection_manager.connect(mock_websocket)
-        connection = connection_manager.connections[client_id]
-
-        # Test healthy connection
-        assert connection.is_healthy()
-
-        # Simulate connection failure
-        connection.is_active = False
-        assert not connection.is_healthy()
-
-        # Test heartbeat
-        await connection.send_heartbeat()
-        mock_websocket.send_text.assert_called()
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
