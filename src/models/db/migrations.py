@@ -4,19 +4,19 @@ Database migration utilities.
 Provides utilities for managing Alembic migrations programmatically.
 """
 
-import logging
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine
+from structlog import get_logger
 
 from alembic import command
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class MigrationManager:
@@ -48,12 +48,12 @@ class MigrationManager:
         Args:
             revision: Target revision (default: "head" for latest)
         """
-        logger.info(f"Running migrations to revision: {revision}")
+        logger.info("running_migrations", revision=revision)
         try:
             command.upgrade(self.config, revision)
-            logger.info("Migrations completed successfully")
+            logger.info("migrations_completed")
         except Exception as e:
-            logger.error(f"Migration failed: {e}")
+            logger.error("migration_failed", error=str(e))
             raise
 
     def rollback_migration(self, revision: str = "-1") -> None:
@@ -63,12 +63,12 @@ class MigrationManager:
         Args:
             revision: Target revision (default: "-1" for previous)
         """
-        logger.info(f"Rolling back to revision: {revision}")
+        logger.info("rolling_back_migration", revision=revision)
         try:
             command.downgrade(self.config, revision)
-            logger.info("Rollback completed successfully")
+            logger.info("rollback_completed")
         except Exception as e:
-            logger.error(f"Rollback failed: {e}")
+            logger.error("rollback_failed", error=str(e))
             raise
 
     def get_current_revision(self) -> str | None:
@@ -89,7 +89,7 @@ class MigrationManager:
 
         with engine.connect() as connection:
             context = MigrationContext.configure(connection)
-            current_rev = context.get_current_revision()
+            current_rev = cast("str | None", context.get_current_revision())
 
         engine.dispose()
         return current_rev
@@ -147,7 +147,7 @@ class MigrationManager:
         Returns:
             Path to created migration file
         """
-        logger.info(f"Creating migration: {message}")
+        logger.info("creating_migration", message=message)
 
         if autogenerate:
             command.revision(self.config, message=message, autogenerate=True)
@@ -158,8 +158,8 @@ class MigrationManager:
         head = self.get_head_revision()
         script = self.script_dir.get_revision(head)
 
-        logger.info(f"Migration created: {script.path}")
-        return script.path
+        logger.info("migration_created", path=script.path)
+        return cast("str", script.path)
 
     def show_history(self, verbose: bool = False) -> list[dict[str, Any]]:
         """
@@ -207,13 +207,14 @@ class MigrationManager:
             # Try to generate SQL for pending migrations (dry run)
             if status["pending_migrations"]:
                 logger.info(
-                    f"Found {len(status['pending_migrations'])} pending migrations"
+                    "pending_migrations_found",
+                    count=len(status["pending_migrations"]),
                 )
 
             return True
 
         except Exception as e:
-            logger.error(f"Migration verification failed: {e}")
+            logger.error("migration_verification_failed", error=str(e))
             return False
 
 
@@ -275,15 +276,15 @@ def run_migration_command(args: list[str]) -> int:
         Exit code
     """
     cmd = ["alembic", *args]
-    logger.info(f"Running command: {' '.join(cmd)}")
+    logger.info("running_migration_command", command=cmd)
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.stdout:
-        logger.info(f"migration_output: {result.stdout}")
+        logger.info("migration_output", output=result.stdout)
 
     if result.stderr and result.returncode != 0:
-        logger.error(f"migration_error: {result.stderr}")
+        logger.error("migration_error", error=result.stderr)
 
     return result.returncode
 

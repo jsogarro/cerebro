@@ -22,7 +22,9 @@ from src.core.observability import (
     set_llm_request_estimated_cost,
 )
 
-PROVIDERS_DIR = Path(__file__).resolve().parents[1] / "src" / "ai_brain" / "providers"
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+PROVIDERS_DIR = SRC_DIR / "ai_brain" / "providers"
+MODELS_DB_DIR = SRC_DIR / "models" / "db"
 
 
 class StubProvider(BaseProvider):
@@ -123,27 +125,39 @@ def test_base_provider_records_llm_metrics_after_postprocess(
 
 def test_provider_modules_use_structlog_logger() -> None:
     for provider_path in PROVIDERS_DIR.glob("*.py"):
-        tree = ast.parse(provider_path.read_text())
+        assert_no_stdlib_logging_logger(provider_path)
 
-        logging_imports = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-            if alias.name == "logging"
-        ]
-        get_logger_calls = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "logging"
-            and node.func.attr == "getLogger"
-        ]
 
-        assert logging_imports == [], provider_path
-        assert get_logger_calls == [], provider_path
+def test_models_db_session_modules_use_structlog_logger() -> None:
+    for module_path in [
+        MODELS_DB_DIR / "migrations.py",
+        MODELS_DB_DIR / "session.py",
+    ]:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def assert_no_stdlib_logging_logger(module_path: Path) -> None:
+    tree = ast.parse(module_path.read_text())
+
+    logging_imports = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "logging"
+    ]
+    get_logger_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "logging"
+        and node.func.attr == "getLogger"
+    ]
+
+    assert logging_imports == [], module_path
+    assert get_logger_calls == [], module_path
 
 
 def test_cost_drift_middleware_records_threshold_event() -> None:
