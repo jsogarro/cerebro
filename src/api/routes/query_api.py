@@ -20,6 +20,7 @@ from structlog import get_logger
 
 from ...ai_brain.router.masr import RoutingStrategy
 from ...core.observability import set_llm_request_estimated_cost
+from ...core.pii_redactor import redact_pii
 from ...models.research_project import ResearchDepth, ResearchQuery
 from ..services.direct_execution_service import get_direct_execution_service
 
@@ -136,7 +137,10 @@ async def intelligent_research_query(
     Based on "MasRouter: Learning to Route LLMs" research.
     """
     try:
-        logger.info(f"Intelligent research query: {request.query[:100]}...")
+        logger.info(
+            "intelligent_research_query_started",
+            query_preview=redact_pii(request.query)[:100],
+        )
         
         # Use direct execution service which integrates MASR routing
         execution_service = get_direct_execution_service()
