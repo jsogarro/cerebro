@@ -7,7 +7,6 @@ and bulkhead patterns for fault-tolerant operation execution.
 
 import asyncio
 import inspect
-import logging
 import random
 import time
 from collections.abc import Callable
@@ -17,7 +16,9 @@ from enum import Enum
 from functools import wraps
 from typing import Any, Optional, TypeVar
 
-logger = logging.getLogger(__name__)
+from structlog import get_logger
+
+logger = get_logger()
 
 T = TypeVar("T")
 
@@ -75,7 +76,7 @@ class RetryPolicy:
         """
         # Check retry budget if configured
         if self.retry_budget and not self.retry_budget.can_retry():
-            logger.warning("Retry budget exhausted")
+            logger.warning("retry_budget_exhausted")
             return False
 
         # Check max attempts
@@ -196,7 +197,10 @@ class CircuitBreaker:
                 self._half_open_counter = 0
 
             logger.info(
-                f"Circuit breaker '{self.name}' transitioned from {old_state} to {new_state}"
+                "circuit_breaker_state_transitioned",
+                circuit_breaker=self.name,
+                old_state=old_state.value,
+                new_state=new_state.value,
             )
 
     async def _should_attempt_reset(self) -> bool:
@@ -347,14 +351,21 @@ class ExponentialBackoff:
 
                 # Check if should retry
                 if not self.policy.should_retry(e, attempt + 1):
-                    logger.error(f"Non-retryable exception: {e}")
+                    logger.error(
+                        "non_retryable_exception",
+                        error=str(e),
+                        attempt=attempt + 1,
+                    )
                     raise
 
                 # Calculate delay
                 if attempt < self.policy.max_attempts - 1:
                     delay = self.policy.get_delay(attempt)
                     logger.warning(
-                        f"Attempt {attempt + 1} failed, retrying in {delay:.2f}s: {e}"
+                        "retry_attempt_failed",
+                        attempt=attempt + 1,
+                        retry_delay_seconds=delay,
+                        error=str(e),
                     )
                     await asyncio.sleep(delay)
 
@@ -363,7 +374,10 @@ class ExponentialBackoff:
                         await self.policy.retry_budget.consume()
 
         # All retries exhausted
-        logger.error(f"All {self.policy.max_attempts} attempts failed")
+        logger.error(
+            "all_retry_attempts_failed",
+            max_attempts=self.policy.max_attempts,
+        )
         if last_exception:
             raise last_exception
         raise Exception("All retry attempts failed")

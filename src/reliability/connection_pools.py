@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -29,10 +28,11 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.pool import QueuePool
+from structlog import get_logger
 
 from config import config
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class PoolStatus(Enum):
@@ -155,13 +155,13 @@ class DatabasePoolManager:
             )
 
             self._status = PoolStatus.HEALTHY
-            logger.info("Database pool initialized successfully")
+            logger.info("database_pool_initialized")
 
         except Exception as e:
             self._status = PoolStatus.UNHEALTHY
             self._metrics.last_error = str(e)
             self._metrics.last_error_time = datetime.now(UTC)
-            logger.error(f"Failed to initialize database pool: {e}")
+            logger.error("database_pool_initialization_failed", error=str(e))
             raise
 
     @asynccontextmanager
@@ -197,7 +197,7 @@ class DatabasePoolManager:
                 self._metrics.failed_requests += 1
                 self._metrics.last_error = str(e)
                 self._metrics.last_error_time = datetime.now(UTC)
-                logger.error(f"Database session error: {e}")
+                logger.error("database_session_error", error=str(e))
                 raise
             finally:
                 self._metrics.active_connections -= 1
@@ -230,12 +230,12 @@ class DatabasePoolManager:
         except asyncpg.TooManyConnectionsError:
             self._metrics.pool_exhausted_count += 1
             self._metrics.failed_requests += 1
-            logger.error("Database connection pool exhausted")
+            logger.error("database_connection_pool_exhausted")
             raise
         except Exception as e:
             self._metrics.failed_requests += 1
             self._metrics.connection_errors += 1
-            logger.error(f"Failed to acquire database connection: {e}")
+            logger.error("database_connection_acquire_failed", error=str(e))
             raise
         finally:
             self._metrics.active_connections -= 1
@@ -281,7 +281,7 @@ class DatabasePoolManager:
 
         except Exception as e:
             self._status = PoolStatus.UNHEALTHY
-            logger.error(f"Database health check failed: {e}")
+            logger.error("database_pool_health_check_failed", error=str(e))
 
         self._last_health_check = datetime.now(UTC)
         return self._status
@@ -292,7 +292,7 @@ class DatabasePoolManager:
             await self._pool.close()
         if self._engine:
             await self._engine.dispose()
-        logger.info("Database pool closed")
+        logger.info("database_pool_closed")
 
     def get_metrics(self) -> PoolMetrics:
         """Get pool metrics."""
@@ -355,13 +355,13 @@ class RedisPoolManager:
             await self._client.ping()
 
             self._status = PoolStatus.HEALTHY
-            logger.info("Redis pool initialized successfully")
+            logger.info("redis_pool_initialized")
 
         except Exception as e:
             self._status = PoolStatus.UNHEALTHY
             self._metrics.last_error = str(e)
             self._metrics.last_error_time = datetime.now(UTC)
-            logger.error(f"Failed to initialize Redis pool: {e}")
+            logger.error("redis_pool_initialization_failed", error=str(e))
             raise
 
     async def get_client(self) -> redis.Redis[Any]:
@@ -400,11 +400,11 @@ class RedisPoolManager:
         except redis.ConnectionError as e:
             self._metrics.connection_errors += 1
             self._metrics.failed_requests += 1
-            logger.error(f"Redis connection error: {e}")
+            logger.error("redis_connection_error", error=str(e))
             raise
         except Exception as e:
             self._metrics.failed_requests += 1
-            logger.error(f"Redis command error: {e}")
+            logger.error("redis_command_error", command=command, error=str(e))
             raise
         finally:
             self._metrics.active_connections -= 1
@@ -452,7 +452,7 @@ class RedisPoolManager:
 
         except Exception as e:
             self._status = PoolStatus.UNHEALTHY
-            logger.error(f"Redis health check failed: {e}")
+            logger.error("redis_pool_health_check_failed", error=str(e))
 
         return self._status
 
@@ -466,7 +466,7 @@ class RedisPoolManager:
         if self._client:
             await self._client.close()
 
-        logger.info("Redis pool closed")
+        logger.info("redis_pool_closed")
 
     def get_metrics(self) -> PoolMetrics:
         """Get pool metrics."""
@@ -534,11 +534,19 @@ class HTTPPoolManager:
 
     async def _log_request(self, request: httpx.Request) -> None:
         """Log HTTP request."""
-        logger.debug(f"HTTP Request: {request.method} {request.url}")
+        logger.debug(
+            "http_pool_request",
+            method=request.method,
+            url=str(request.url),
+        )
 
     async def _log_response(self, response: httpx.Response) -> None:
         """Log HTTP response."""
-        logger.debug(f"HTTP Response: {response.status_code} from {response.url}")
+        logger.debug(
+            "http_pool_response",
+            status_code=response.status_code,
+            url=str(response.url),
+        )
 
     async def request(
         self, method: str, url: str, base_url: str | None = None, **kwargs: Any
@@ -570,12 +578,16 @@ class HTTPPoolManager:
 
         except httpx.HTTPStatusError as e:
             metrics.failed_requests += 1
-            logger.error(f"HTTP error {e.response.status_code}: {e}")
+            logger.error(
+                "http_pool_status_error",
+                status_code=e.response.status_code,
+                error=str(e),
+            )
             raise
         except Exception as e:
             metrics.failed_requests += 1
             metrics.connection_errors += 1
-            logger.error(f"HTTP request failed: {e}")
+            logger.error("http_pool_request_failed", error=str(e))
             raise
         finally:
             metrics.active_connections -= 1
@@ -585,7 +597,7 @@ class HTTPPoolManager:
         for client in self._clients.values():
             await client.aclose()
         self._clients.clear()
-        logger.info("All HTTP clients closed")
+        logger.info("http_clients_closed")
 
     def get_metrics(self, base_url: str) -> PoolMetrics | None:
         """Get metrics for specific base URL."""
@@ -625,13 +637,13 @@ class TemporalPoolManager:
                 self._workflow_clients.append(client)
 
             self._status = PoolStatus.HEALTHY
-            logger.info("Temporal pool initialized successfully")
+            logger.info("temporal_pool_initialized")
 
         except Exception as e:
             self._status = PoolStatus.UNHEALTHY
             self._metrics.last_error = str(e)
             self._metrics.last_error_time = datetime.now(UTC)
-            logger.error(f"Failed to initialize Temporal pool: {e}")
+            logger.error("temporal_pool_initialization_failed", error=str(e))
             raise
 
     async def get_workflow_client(self) -> Any:
@@ -663,7 +675,7 @@ class TemporalPoolManager:
             self._status = PoolStatus.HEALTHY
         except Exception as e:
             self._status = PoolStatus.UNHEALTHY
-            logger.error(f"Temporal health check failed: {e}")
+            logger.error("temporal_pool_health_check_failed", error=str(e))
 
         return self._status
 
@@ -681,7 +693,7 @@ temporal_pool = TemporalPoolManager()
 
 async def initialize_pools() -> None:
     """Initialize all connection pools."""
-    logger.info("Initializing connection pools...")
+    logger.info("connection_pools_initializing")
 
     # Initialize pools in parallel
     await asyncio.gather(
@@ -691,12 +703,12 @@ async def initialize_pools() -> None:
         return_exceptions=True,
     )
 
-    logger.info("All connection pools initialized")
+    logger.info("connection_pools_initialized")
 
 
 async def close_pools() -> None:
     """Close all connection pools."""
-    logger.info("Closing connection pools...")
+    logger.info("connection_pools_closing")
 
     await asyncio.gather(
         database_pool.close(),
@@ -705,7 +717,7 @@ async def close_pools() -> None:
         return_exceptions=True,
     )
 
-    logger.info("All connection pools closed")
+    logger.info("connection_pools_closed")
 
 
 __all__ = [

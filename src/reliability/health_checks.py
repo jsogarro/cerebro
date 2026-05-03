@@ -8,7 +8,6 @@ liveness probes, readiness probes, and dependency health checks.
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -20,10 +19,11 @@ import asyncpg
 import redis.asyncio as redis
 from fastapi import FastAPI, Response, status
 from httpx import AsyncClient
+from structlog import get_logger
 
 from config import config
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class HealthStatus(Enum):

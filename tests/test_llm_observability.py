@@ -25,6 +25,7 @@ from src.core.observability import (
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 PROVIDERS_DIR = SRC_DIR / "ai_brain" / "providers"
 MODELS_DB_DIR = SRC_DIR / "models" / "db"
+RELIABILITY_DIR = SRC_DIR / "reliability"
 
 
 class StubProvider(BaseProvider):
@@ -133,6 +134,11 @@ def test_models_db_session_modules_use_structlog_logger() -> None:
         MODELS_DB_DIR / "migrations.py",
         MODELS_DB_DIR / "session.py",
     ]:
+        assert_no_stdlib_logging_logger(module_path)
+
+
+def test_reliability_modules_use_structlog_logger() -> None:
+    for module_path in RELIABILITY_DIR.glob("*.py"):
         assert_no_stdlib_logging_logger(module_path)
 
 
