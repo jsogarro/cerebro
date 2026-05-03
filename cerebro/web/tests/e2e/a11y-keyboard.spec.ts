@@ -1,54 +1,6 @@
-import { expect, type Page, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-const projects = [
-    {
-        id: 'RES-101',
-        title: 'Supply Chain Optimization',
-        status: 'running',
-        progress: 42,
-        time: '1d ago',
-        created_at: '2026-05-03T00:00:00Z',
-        query: { main_query: 'Optimize supplier routing.' },
-    },
-];
-
-async function mockApi(page: Page) {
-    await page.route('**/api/v1/**', async (route) => {
-        const url = new URL(route.request().url());
-        const path = url.pathname;
-
-        if (path.endsWith('/research/projects/RES-101')) {
-            await route.fulfill({ json: projects[0] });
-            return;
-        }
-
-        if (path.endsWith('/research/projects')) {
-            await route.fulfill({ json: projects });
-            return;
-        }
-
-        if (path.endsWith('/agents')) {
-            await route.fulfill({
-                json: [
-                    {
-                        id: 'A-01',
-                        name: 'Researcher Alpha',
-                        role: 'Research',
-                        status: 'active',
-                    },
-                ],
-            });
-            return;
-        }
-
-        if (path.endsWith('/agents/A-01/logs')) {
-            await route.fulfill({ json: ['INFO Agent ready'] });
-            return;
-        }
-
-        await route.fulfill({ json: [] });
-    });
-}
+import { mockApi } from './helpers/mock-api';
 
 test.describe('accessibility and keyboard navigation', () => {
     test.beforeEach(async ({ page }) => {

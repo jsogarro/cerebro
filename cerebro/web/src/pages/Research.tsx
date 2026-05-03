@@ -314,7 +314,7 @@ export function Research() {
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between">
                                         <Badge variant={project.status === 'completed' ? 'default' : project.status === 'failed' ? 'destructive' : 'secondary'}
-                                            className={`capitalize ${project.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-none' : project.status === 'running' ? 'bg-primary/10 text-primary border-none' : ''}`}>
+                                            className={`capitalize ${project.status === 'completed' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-none' : project.status === 'running' ? 'bg-primary/10 text-primary border-none' : ''}`}>
                                             {project.status}
                                         </Badge>
                                         <div className="flex items-center text-xs text-muted-foreground gap-1">

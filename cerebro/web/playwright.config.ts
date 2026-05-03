@@ -14,6 +14,7 @@ export default defineConfig({
     reporter: 'html',
     use: {
         baseURL,
+        reducedMotion: 'reduce',
         trace: 'on-first-retry',
     },
     projects: [

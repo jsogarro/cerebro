@@ -38,7 +38,12 @@ export function AppShell() {
 
             <div className="flex-1 flex flex-col min-w-0">
                 <Header toggleSidebar={() => setSidebarOpen(true)} />
-                <main id="main-content" className="flex-1 overflow-auto p-4 md:p-6 pb-20 md:pb-6 relative">
+                <main
+                    id="main-content"
+                    aria-label="Main content"
+                    className="flex-1 overflow-auto p-4 md:p-6 pb-20 md:pb-6 relative"
+                    tabIndex={0}
+                >
                     <Suspense fallback={<PageLoading />}>
                         <Outlet />
                     </Suspense>
