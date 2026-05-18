@@ -330,29 +330,39 @@ async def cancel_research_project(
             detail=f"Research project {project_id} not found",
         )
 
-    # Cancel direct execution
-    execution_service = get_direct_execution_service()
-
-    # Find and cancel execution for this project
-    success = False
-    for execution in execution_service.active_executions.values():
-        if execution.project_id == str(project_id):
-            success = await execution_service.cancel_execution(execution.execution_id)
-            break
-
-    if success:
-        # Update project status in database
-        await repo.update_status(
-            project_id,
-            ProjectStatus.CANCELLED,
-            organization_id=tenant_context.organization_id,
+    # Best-effort cancel of any in-flight execution
+    execution_cancelled = False
+    try:
+        execution_service = get_direct_execution_service()
+        for execution in execution_service.active_executions.values():
+            if execution.project_id == str(project_id):
+                execution_cancelled = await execution_service.cancel_execution(
+                    execution.execution_id
+                )
+                break
+    except Exception as e:
+        # An execution-service failure shouldn't prevent us from marking the
+        # project as cancelled in the database — log and continue.
+        logger.warning(
+            "Direct execution service unavailable during cancel; continuing with DB-only cancel",
+            project_id=str(project_id),
+            error=str(e),
         )
-        logger.info("Cancelled research project", project_id=str(project_id))
-    else:
-        raise HTTPException(
-            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to cancel research project",
-        )
+
+    # Mark the project as cancelled in the database regardless of execution state.
+    # A project may be cancellable even when no execution is currently in flight
+    # (e.g. DRAFT projects that were never started, or projects whose execution
+    # already finished but whose status hasn't been reconciled).
+    await repo.update_status(
+        project_id,
+        ProjectStatus.CANCELLED,
+        organization_id=tenant_context.organization_id,
+    )
+    logger.info(
+        "Cancelled research project",
+        project_id=str(project_id),
+        had_active_execution=execution_cancelled,
+    )
 
 
 @router.post("/projects/{project_id}/refine")

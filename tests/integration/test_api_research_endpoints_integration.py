@@ -9,6 +9,8 @@ import pytest
 from httpx import AsyncClient
 from starlette import status
 
+from tests.integration.conftest import IntegrationTestConfig
+
 
 class TestResearchEndpointsIntegration:
     """Test research API endpoints with real Postgres + JWT."""
@@ -25,7 +27,7 @@ class TestResearchEndpointsIntegration:
                 "domains": ["AI", "Ethics", "Sociology"],
                 "depth_level": "comprehensive",
             },
-            "user_id": "test-user-123",
+            "user_id": IntegrationTestConfig.TEST_USER_ID,
         }
 
         response = await authenticated_client.post(
@@ -35,9 +37,11 @@ class TestResearchEndpointsIntegration:
         assert response.status_code == status.HTTP_201_CREATED
         data = response.json()
         assert data["title"] == "Test Research Project"
-        assert data["user_id"] == "test-user-123"
+        assert data["user_id"] == IntegrationTestConfig.TEST_USER_ID
         assert "id" in data
-        assert data["status"] == "pending"
+        # Status starts as "pending" but may transition to "in_progress" if the
+        # direct execution service successfully kicks off — accept either.
+        assert data["status"] in {"pending", "in_progress"}
 
     @pytest.mark.asyncio
     async def test_get_research_project_not_found(
@@ -51,7 +55,8 @@ class TestResearchEndpointsIntegration:
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         data = response.json()
-        assert "not found" in data["detail"]
+        # Responses use the standard error envelope: {"error": {"code", "message", "details"}}
+        assert "not found" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_list_research_projects(
@@ -68,8 +73,19 @@ class TestResearchEndpointsIntegration:
     async def test_get_research_progress(
         self, authenticated_client: AsyncClient
     ) -> None:
-        """Test getting research project progress."""
-        project_id = "550e8400-e29b-41d4-a716-446655440000"
+        """Test getting research project progress for an existing project."""
+        # Create a project first — the progress endpoint requires the project to exist
+        create_payload = {
+            "title": "Progress Test Project",
+            "query": {"text": "Test query for progress endpoint", "domains": ["CS"]},
+            "user_id": IntegrationTestConfig.TEST_USER_ID,
+        }
+        create_response = await authenticated_client.post(
+            "/api/v1/research/projects", json=create_payload
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        project_id = create_response.json()["id"]
+
         response = await authenticated_client.get(
             f"/api/v1/research/projects/{project_id}/progress"
         )
@@ -86,7 +102,18 @@ class TestResearchEndpointsIntegration:
         self, authenticated_client: AsyncClient
     ) -> None:
         """Test cancelling a research project."""
-        project_id = "550e8400-e29b-41d4-a716-446655440000"
+        # Create a project first — cancel requires the project to exist
+        create_payload = {
+            "title": "Cancel Test Project",
+            "query": {"text": "Test query for cancel endpoint", "domains": ["CS"]},
+            "user_id": IntegrationTestConfig.TEST_USER_ID,
+        }
+        create_response = await authenticated_client.post(
+            "/api/v1/research/projects", json=create_payload
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        project_id = create_response.json()["id"]
+
         response = await authenticated_client.post(
             f"/api/v1/research/projects/{project_id}/cancel"
         )
