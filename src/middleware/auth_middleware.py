@@ -77,7 +77,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.token_payload = None
         request.state.organization_id = None
 
-        response = await call_next(request)
+        response: Response = await call_next(request)
         return response
 
 

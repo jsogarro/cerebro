@@ -175,7 +175,7 @@ class TestWebSocketConnections:
             ) as ws:
                 # Should not reach here
                 await ws.send_json({"type": "heartbeat_response"})
-                assert False, "Expected auth failure but connection succeeded"
+                raise AssertionError("Expected auth failure but connection succeeded")
         except Exception:
             # Expected — no JWT provided
             pass
@@ -187,7 +187,7 @@ class TestWebSocketConnections:
                 authenticated_client,
             ) as ws:
                 await ws.send_json({"type": "heartbeat_response"})
-                assert False, "Expected auth failure but connection succeeded"
+                raise AssertionError("Expected auth failure but connection succeeded")
         except Exception:
             # Expected — invalid JWT
             pass
