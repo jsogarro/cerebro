@@ -16,7 +16,8 @@ import pytest_asyncio
 import redis.asyncio as redis
 from faker import Faker
 from fastapi import Depends
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
+from httpx_ws.transport import ASGIWebSocketTransport
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from testcontainers.compose import DockerCompose
@@ -261,17 +262,32 @@ async def authenticated_client(
     app.dependency_overrides[middleware_get_jwt_service] = override_get_jwt_service
     app.dependency_overrides[get_tenant_context] = override_get_tenant_context
 
-    # Create client with auth header
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
+    # Create client with auth header.
+    # Use ASGIWebSocketTransport so the same client can speak both HTTP and
+    # WebSocket against the in-process app (httpx-ws supplied).
+    transport = ASGIWebSocketTransport(app=app)
+    client = AsyncClient(
         transport=transport,
         base_url="http://test",
         headers={"Authorization": f"Bearer {token}"},
-    ) as client:
+    )
+    await client.__aenter__()
+    try:
         yield client
+    finally:
+        try:
+            await client.__aexit__(None, None, None)
+        except RuntimeError as exit_error:
+            # pytest-asyncio runs fixture teardown in a different task than
+            # setup; anyio's CancelScope (used by ASGIWebSocketTransport)
+            # asserts same-task entry/exit and raises RuntimeError. The
+            # actual connection-level cleanup has already completed — only
+            # the scope-exit reporting fails. Re-raise anything else.
+            if "different task" not in str(exit_error):
+                raise
 
-    # Clear overrides
-    app.dependency_overrides.clear()
+        # Clear overrides
+        app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
@@ -350,17 +366,32 @@ async def admin_client(
     app.dependency_overrides[middleware_get_jwt_service] = override_get_jwt_service
     app.dependency_overrides[get_tenant_context] = override_get_tenant_context
 
-    # Create client with auth header
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
+    # Create client with auth header.
+    # Use ASGIWebSocketTransport so the same client can speak both HTTP and
+    # WebSocket against the in-process app (httpx-ws supplied).
+    transport = ASGIWebSocketTransport(app=app)
+    client = AsyncClient(
         transport=transport,
         base_url="http://test",
         headers={"Authorization": f"Bearer {token}"},
-    ) as client:
+    )
+    await client.__aenter__()
+    try:
         yield client
+    finally:
+        try:
+            await client.__aexit__(None, None, None)
+        except RuntimeError as exit_error:
+            # pytest-asyncio runs fixture teardown in a different task than
+            # setup; anyio's CancelScope (used by ASGIWebSocketTransport)
+            # asserts same-task entry/exit and raises RuntimeError. The
+            # actual connection-level cleanup has already completed — only
+            # the scope-exit reporting fails. Re-raise anything else.
+            if "different task" not in str(exit_error):
+                raise
 
-    # Clear overrides
-    app.dependency_overrides.clear()
+        # Clear overrides
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture

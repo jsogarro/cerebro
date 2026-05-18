@@ -5,9 +5,10 @@ This module provides authentication and authorization for WebSocket connections.
 """
 
 
-from jose import JWTError, jwt
+from jose import JWTError
 from structlog import get_logger
 
+from src.auth.jwt_service import JWTService
 from src.core.config import settings
 
 logger = get_logger()
@@ -22,12 +23,18 @@ class WebSocketAuthError(Exception):
         super().__init__(message)
 
 
-async def verify_websocket_token(token: str | None) -> str | None:
+async def verify_websocket_token(
+    token: str | None,
+    jwt_service: JWTService,
+) -> str | None:
     """
     Verify JWT token for WebSocket authentication.
 
     Args:
         token: JWT token string
+        jwt_service: Shared JWT service (same one used by HTTP middleware)
+            so that WebSocket and HTTP requests validate tokens against the
+            same RSA key pair and blacklist.
 
     Returns:
         User ID if token is valid, None otherwise
@@ -50,16 +57,12 @@ async def verify_websocket_token(token: str | None) -> str | None:
         if token.startswith("Bearer "):
             token = token[7:]
 
-        # Decode JWT token
-        # Note: In production, load the public key from settings.JWT_PUBLIC_KEY_PATH
-        payload = jwt.decode(
-            token,
-            settings.SECRET_KEY,  # Use secret key for now, will update with proper key management
-            algorithms=["HS256"],  # Will update to RS256 with proper key management
-        )
+        # Validate via the shared JWT service so RS256 keys and the Redis
+        # blacklist match the rest of the auth stack.
+        token_payload = await jwt_service.validate_token(token)
 
-        user_id = payload.get("sub")
-        if not user_id or not isinstance(user_id, str):
+        user_id = token_payload.sub
+        if not user_id:
             raise WebSocketAuthError("Invalid token: missing user ID")
 
         logger.info(
@@ -68,6 +71,9 @@ async def verify_websocket_token(token: str | None) -> str | None:
         )
 
         return str(user_id)
+
+    except WebSocketAuthError:
+        raise
 
     except JWTError as e:
         logger.warning(
@@ -131,8 +137,9 @@ def extract_client_type(user_agent: str | None) -> str:
 
 
 async def authenticate_websocket_connection(
-    token: str | None = None,
-    user_agent: str | None = None,
+    token: str | None,
+    user_agent: str | None,
+    jwt_service: JWTService,
 ) -> tuple[str | None, str]:
     """
     Authenticate a WebSocket connection and determine client type.
@@ -140,6 +147,7 @@ async def authenticate_websocket_connection(
     Args:
         token: Authentication token
         user_agent: User-Agent header
+        jwt_service: Shared JWT service used to validate the token
 
     Returns:
         Tuple of (user_id, client_type)
@@ -148,7 +156,7 @@ async def authenticate_websocket_connection(
         WebSocketAuthError: If authentication fails
     """
     # Authenticate user
-    user_id = await verify_websocket_token(token)
+    user_id = await verify_websocket_token(token, jwt_service)
 
     # Determine client type
     client_type = extract_client_type(user_agent)

@@ -152,7 +152,7 @@ class TestWebSocketConnections:
 
         # Connect via WebSocket with JWT auth
         async with aconnect_ws(
-            f"ws://test/api/v1/ws?token={token}",
+            f"ws://test/ws?token={token}",
             authenticated_client,
         ) as ws:
             # Should successfully connect with valid JWT
@@ -170,7 +170,7 @@ class TestWebSocketConnections:
         # Test 1: Missing JWT should fail
         try:
             async with aconnect_ws(
-                "ws://test/api/v1/ws",
+                "ws://test/ws",
                 authenticated_client,
             ) as ws:
                 # Should not reach here
@@ -183,7 +183,7 @@ class TestWebSocketConnections:
         # Test 2: Invalid JWT should fail
         try:
             async with aconnect_ws(
-                "ws://test/api/v1/ws?token=invalid-jwt-token",
+                "ws://test/ws?token=invalid-jwt-token",
                 authenticated_client,
             ) as ws:
                 await ws.send_json({"type": "heartbeat_response"})
@@ -198,7 +198,7 @@ class TestWebSocketConnections:
         token = auth_header.replace("Bearer ", "")
 
         async with aconnect_ws(
-            f"ws://test/api/v1/ws?token={token}",
+            f"ws://test/ws?token={token}",
             authenticated_client,
         ) as ws:
             # Should connect successfully
@@ -217,7 +217,7 @@ class TestWebSocketConnections:
 
         # Connect, disconnect, reconnect
         async with aconnect_ws(
-            f"ws://test/api/v1/ws?token={token}",
+            f"ws://test/ws?token={token}",
             authenticated_client,
         ) as ws:
             await ws.send_json({"type": "heartbeat_response"})
@@ -225,7 +225,7 @@ class TestWebSocketConnections:
 
         # Reconnect with same token
         async with aconnect_ws(
-            f"ws://test/api/v1/ws?token={token}",
+            f"ws://test/ws?token={token}",
             authenticated_client,
         ) as ws:
             await ws.send_json({"type": "heartbeat_response"})
