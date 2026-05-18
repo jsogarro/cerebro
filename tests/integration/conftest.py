@@ -226,7 +226,14 @@ async def authenticated_client(
     # Override app's get_session dependency to use test engine
     async def override_get_session() -> AsyncGenerator[AsyncSession, None]:
         async with async_session() as session:
-            yield session
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+            finally:
+                await session.close()
 
     # Override JWT service dependency to use the shared test JWT service
     # This ensures token validation uses the same in-memory keys and test Redis
@@ -315,7 +322,14 @@ async def admin_client(
     # Override app's get_session dependency to use test engine
     async def override_get_session() -> AsyncGenerator[AsyncSession, None]:
         async with async_session() as session:
-            yield session
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+            finally:
+                await session.close()
 
     # Override JWT service dependency to use the shared test JWT service
     async def override_get_jwt_service() -> JWTService:
