@@ -8,6 +8,103 @@ inherit from. Environment-specific configs override these defaults.
 from typing import Any
 
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Values that must never be used as a JWT signing secret in production.
+# Includes the historical hardcoded fallback and the dev/test/staging
+# placeholder values that are checked into the repository.
+KNOWN_WEAK_JWT_SECRETS: frozenset[str] = frozenset(
+    {
+        "change-me-in-production",
+        "dev-secret-key",
+        "dev-secret-key-not-for-production",
+        "staging-secret-key",
+        "test-secret-key",
+    }
+)
+
+
+def validate_production_jwt_secret(value: str) -> None:
+    """Reject empty or known-weak JWT signing secrets.
+
+    Called from production startup to fail fast when the deployment is missing
+    a real ``JWT_SECRET_KEY`` env var or has accidentally inherited one of the
+    placeholder values used in dev/test/staging configs.
+
+    Raises:
+        ValueError: if ``value`` is empty or matches a known weak default.
+    """
+    if not value:
+        raise ValueError(
+            "JWT_SECRET_KEY is empty. Set a strong, randomly generated secret "
+            "in the production environment before starting the service."
+        )
+    if value in KNOWN_WEAK_JWT_SECRETS:
+        raise ValueError(
+            "JWT_SECRET_KEY is set to a known weak/default placeholder. "
+            "Generate a strong secret (e.g., `openssl rand -hex 32`) and set "
+            "it via the JWT_SECRET_KEY environment variable."
+        )
+
+
+def _default_mcp_tools() -> dict[str, dict[str, Any]]:
+    return {
+        "academic_search": {
+            "enabled": True,
+            "max_results": 50,
+            "databases": ["arxiv", "pubmed"],
+            "cache_ttl": 3600,
+        },
+        "citation": {
+            "enabled": True,
+            "supported_styles": ["APA", "MLA", "Chicago"],
+            "doi_resolution": True,
+            "cache_ttl": 86400,
+        },
+        "statistics": {
+            "enabled": True,
+            "max_data_points": 10000,
+            "operations": ["descriptive", "correlation", "hypothesis"],
+            "cache_ttl": 1800,
+        },
+        "knowledge_graph": {
+            "enabled": True,
+            "max_entities": 1000,
+            "max_relationships": 5000,
+            "cache_ttl": 3600,
+        },
+    }
+
+
+def _default_agent_configs() -> dict[str, dict[str, Any]]:
+    return {
+        "literature_review": {
+            "max_sources": 100,
+            "search_depth": "comprehensive",
+            "enable_mcp": True,
+        },
+        "comparative_analysis": {
+            "max_items": 20,
+            "max_criteria": 15,
+            "enable_statistics": True,
+            "enable_mcp": True,
+        },
+        "methodology": {
+            "recommendation_count": 5,
+            "bias_detection": True,
+            "enable_mcp": True,
+        },
+        "synthesis": {
+            "max_input_size": 50000,
+            "coherence_check": True,
+            "enable_mcp": True,
+        },
+        "citation": {
+            "verification_enabled": True,
+            "plagiarism_check": False,
+            "enable_mcp": True,
+        },
+    }
 
 
 class MCPConfig(BaseModel):
@@ -36,32 +133,7 @@ class MCPConfig(BaseModel):
     connection_pool_recycle: int = Field(default=3600)
     
     # Tool-specific settings
-    tools: dict[str, dict[str, Any]] = Field(default_factory=lambda: {
-        "academic_search": {
-            "enabled": True,
-            "max_results": 50,
-            "databases": ["arxiv", "pubmed"],
-            "cache_ttl": 3600
-        },
-        "citation": {
-            "enabled": True,
-            "supported_styles": ["APA", "MLA", "Chicago"],
-            "doi_resolution": True,
-            "cache_ttl": 86400
-        },
-        "statistics": {
-            "enabled": True,
-            "max_data_points": 10000,
-            "operations": ["descriptive", "correlation", "hypothesis"],
-            "cache_ttl": 1800
-        },
-        "knowledge_graph": {
-            "enabled": True,
-            "max_entities": 1000,
-            "max_relationships": 5000,
-            "cache_ttl": 3600
-        }
-    })
+    tools: dict[str, dict[str, Any]] = Field(default_factory=_default_mcp_tools)
 
 
 class AgentConfig(BaseModel):
@@ -89,34 +161,7 @@ class AgentConfig(BaseModel):
     mcp_fallback_enabled: bool = Field(default=True)
     
     # Agent-specific configurations
-    agents: dict[str, dict[str, Any]] = Field(default_factory=lambda: {
-        "literature_review": {
-            "max_sources": 100,
-            "search_depth": "comprehensive",
-            "enable_mcp": True
-        },
-        "comparative_analysis": {
-            "max_items": 20,
-            "max_criteria": 15,
-            "enable_statistics": True,
-            "enable_mcp": True
-        },
-        "methodology": {
-            "recommendation_count": 5,
-            "bias_detection": True,
-            "enable_mcp": True
-        },
-        "synthesis": {
-            "max_input_size": 50000,
-            "coherence_check": True,
-            "enable_mcp": True
-        },
-        "citation": {
-            "verification_enabled": True,
-            "plagiarism_check": False,
-            "enable_mcp": True
-        }
-    })
+    agents: dict[str, dict[str, Any]] = Field(default_factory=_default_agent_configs)
 
 
 class DatabaseConfig(BaseModel):
@@ -127,7 +172,10 @@ class DatabaseConfig(BaseModel):
     port: int = Field(default=5432)
     database: str = Field(default="research_db")
     username: str = Field(default="research")
-    password: str = Field(default="research123")
+    # Password is required - no insecure default. Each environment must
+    # provide it explicitly (via env var in production, via test fixture in
+    # tests, via dev secret in development).
+    password: str = Field(..., description="Database password (required)")
     
     # Pool settings
     pool_size: int = Field(default=20)
@@ -178,7 +226,7 @@ class RedisConfig(BaseModel):
     
     # Persistence settings
     persistence_enabled: bool = Field(default=True)
-    save_intervals: list = Field(default_factory=lambda: ["900 1", "300 10", "60 10000"])
+    save_intervals: list[str] = Field(default_factory=lambda: ["900 1", "300 10", "60 10000"])
     
     @property
     def url(self) -> str:
@@ -290,7 +338,12 @@ class SecurityConfig(BaseModel):
     """Security configuration settings."""
     
     # Authentication
-    jwt_secret_key: str = Field(default="change-me-in-production")
+    # JWT signing secret is a REQUIRED field with no default. The previous
+    # ``"change-me-in-production"`` fallback allowed silent fall-through to a
+    # well-known value when the ``JWT_SECRET_KEY`` env var was unset.
+    # Production startup additionally validates this via
+    # ``validate_production_jwt_secret`` to reject placeholder values.
+    jwt_secret_key: str = Field(..., description="JWT secret key (required)")
     jwt_algorithm: str = Field(default="HS256")
     jwt_expiration_minutes: int = Field(default=60)
     refresh_token_expiration_days: int = Field(default=7)
@@ -303,9 +356,9 @@ class SecurityConfig(BaseModel):
     
     # CORS
     cors_enabled: bool = Field(default=True)
-    cors_origins: list = Field(default_factory=lambda: ["http://localhost:3000"])
-    cors_methods: list = Field(default_factory=lambda: ["GET", "POST", "PUT", "DELETE"])
-    cors_headers: list = Field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    cors_methods: list[str] = Field(default_factory=lambda: ["GET", "POST", "PUT", "DELETE"])
+    cors_headers: list[str] = Field(default_factory=lambda: ["*"])
     
     # Security headers
     security_headers_enabled: bool = Field(default=True)
@@ -321,31 +374,50 @@ class SecurityConfig(BaseModel):
     audit_log_file: str = Field(default="/var/log/research/audit.log")
 
 
-class BaseConfig(BaseModel):
-    """Base configuration for all environments."""
-    
+class BaseConfig(BaseSettings):
+    """Base configuration for all environments.
+
+    Subclasses BaseSettings so that values are automatically loaded from a
+    .env file and environment variables. Subclasses (Development /
+    Production / Staging / Testing) override defaults with environment-
+    specific values.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        validate_assignment=True,
+    )
+
     # Application settings
     app_name: str = Field(default="Research Platform")
     app_version: str = Field(default="1.0.0")
     environment: str = Field(default="development")
     debug: bool = Field(default=False)
-    
+
     # API settings
     api_host: str = Field(default="0.0.0.0")
     api_port: int = Field(default=8000)
     api_workers: int = Field(default=4)
     api_reload: bool = Field(default=False)
-    
-    # Component configurations
+
+    # Component configurations.
+    #
+    # ``database`` and ``security`` have no default factory because their
+    # nested DTOs require credentials (DB password, JWT secret) that have
+    # no safe fallback. Subclasses provide them explicitly — by class-level
+    # assignment, ``model_post_init``, or constructor kwargs.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     agents: AgentConfig = Field(default_factory=AgentConfig)
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    database: DatabaseConfig = Field(...)
     redis: RedisConfig = Field(default_factory=RedisConfig)
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     gemini: GeminiConfig = Field(default_factory=GeminiConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
-    security: SecurityConfig = Field(default_factory=SecurityConfig)
-    
+    security: SecurityConfig = Field(...)
+
     # Feature flags
     features: dict[str, bool] = Field(default_factory=lambda: {
         "mcp_tools": True,
@@ -355,10 +427,5 @@ class BaseConfig(BaseModel):
         "health_checks": True,
         "metrics": True,
         "tracing": True,
-        "audit_logging": True
+        "audit_logging": True,
     })
-    
-    class Config:
-        """Pydantic config."""
-        validate_assignment = True
-        extra = "forbid"

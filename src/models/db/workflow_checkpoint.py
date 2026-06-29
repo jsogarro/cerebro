@@ -42,9 +42,7 @@ class WorkflowCheckpoint(BaseModel):
     checkpoint_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
     # Phase/stage information
-    phase: Mapped[str] = mapped_column(
-        String(100), nullable=False, index=True
-    )
+    phase: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
 
     # Checkpoint metadata
     checkpoint_type: Mapped[str] = mapped_column(
@@ -53,9 +51,7 @@ class WorkflowCheckpoint(BaseModel):
         default="automatic",
     )
 
-    checkpoint_version: Mapped[str | None] = mapped_column(
-        String(50), nullable=True
-    )
+    checkpoint_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Recovery information
     is_recoverable: Mapped[bool] = mapped_column(

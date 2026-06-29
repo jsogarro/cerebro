@@ -147,7 +147,9 @@ def _format_schema(schema: dict[str, Any], indent: int = 0) -> str:
     return "\n".join(lines)
 
 
-def create_system_prompt(role: str, context: str, constraints: list[str] | None = None) -> str:
+def create_system_prompt(
+    role: str, context: str, constraints: list[str] | None = None
+) -> str:
     """
     Create a system prompt with role and constraints.
 

@@ -7,15 +7,15 @@ the overall research process.
 """
 
 import asyncio
-import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from structlog import get_logger
 
 from src.agents.supervisors.supervisor_factory import SupervisorFactory
 from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
@@ -49,7 +49,7 @@ from src.orchestration.state import (
     WorkflowPhase,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass
@@ -64,10 +64,11 @@ class OrchestratorConfig:
     enable_human_in_loop: bool = False
     quality_threshold: float = 0.7
     max_workflow_errors: int = 3
+    max_iterations: int = 10
     timeout_seconds: int = 1800  # 30 minutes
     enable_monitoring: bool = True
     enable_visualization: bool = True
-    
+
     # MASR Integration configuration
     enable_masr_routing: bool = True
     masr_config: dict[str, Any] | None = None
@@ -148,43 +149,42 @@ class ResearchOrchestrator:
     def _initialize_masr_components(self) -> None:
         """Initialize MASR integration components."""
         logger.info("Initializing MASR integration components")
-        
+
         # Initialize MASR router
         masr_config = self.config.masr_config or {}
         self._masr_router = MASRouter(
             config=masr_config,
-            model_config_manager=None  # Would be injected in production
+            model_config_manager=None,  # Would be injected in production
         )
-        
+
         # Initialize supervisor factory
         self._supervisor_factory = SupervisorFactory(
             config=masr_config.get("supervisor_factory", {})
         )
-        
+
         # Initialize configuration manager
         self._configuration_manager = SupervisorConfigurationManager(
             config=masr_config.get("configuration_manager", {})
         )
-        
+
         # Initialize hierarchical cost optimizer if enabled
         if self.config.enable_hierarchical_costs:
             from src.ai_brain.router.cost_optimizer import CostOptimizer
-            
+
             # Create base cost optimizer (simplified initialization)
             base_optimizer = CostOptimizer(
-                config=masr_config.get("cost_optimizer", {}),
-                model_config_manager=None
+                config=masr_config.get("cost_optimizer", {}), model_config_manager=None
             )
-            
+
             self._hierarchical_cost_optimizer = HierarchicalCostOptimizer(
                 base_cost_optimizer=base_optimizer,
-                config=masr_config.get("hierarchical_cost", {})
+                config=masr_config.get("hierarchical_cost", {}),
             )
-        
+
         # Initialize MASR-Supervisor bridge
         bridge_config = self.config.supervisor_bridge_config or {}
         self._supervisor_bridge = MASRSupervisorBridge(config=bridge_config)
-        
+
         logger.info("MASR integration components initialized successfully")
 
     def _create_checkpoint_storage(
@@ -217,6 +217,7 @@ class ResearchOrchestrator:
             enable_checkpointing=self.config.enable_checkpointing,
             enable_parallel_execution=self.config.enable_parallel_execution,
             max_parallel_nodes=self.config.max_parallel_agents,
+            max_iterations=self.config.max_iterations,
             enable_visualization=self.config.enable_visualization,
             router_config=self._router.config,
         )
@@ -377,7 +378,7 @@ class ResearchOrchestrator:
         """
         logger.info(f"Starting research workflow for project {project_id}")
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
         workflow_id = f"workflow-{uuid.uuid4().hex[:8]}"
 
         try:
@@ -389,6 +390,7 @@ class ResearchOrchestrator:
                 domains=domains,
                 context=context or {},
                 max_errors=self.config.max_workflow_errors,
+                max_iterations=self.config.max_iterations,
                 metadata=WorkflowMetadata(
                     workflow_id=workflow_id,
                     started_at=start_time,
@@ -414,7 +416,7 @@ class ResearchOrchestrator:
             )
 
             # Calculate execution time
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(UTC) - start_time).total_seconds()
 
             # Create result
             result = WorkflowResult(
@@ -614,6 +616,7 @@ class ResearchOrchestrator:
             workflow_id=checkpoint.checkpoint_id.split("-")[0],
             query=checkpoint.state_data["query"],
             domains=checkpoint.state_data["domains"],
+            max_iterations=self.config.max_iterations,
         )
 
         # Restore from checkpoint
@@ -661,10 +664,8 @@ class ResearchOrchestrator:
             "quality_score": checkpoint.state_data.get("quality_score", 0),
             "error_count": checkpoint.state_data.get("error_count", 0),
         }
-    
-    async def _masr_enabled_agent_dispatch(
-        self, state: ResearchState
-    ) -> ResearchState:
+
+    async def _masr_enabled_agent_dispatch(self, state: ResearchState) -> ResearchState:
         """
         MASR-enabled agent dispatch node that uses intelligent routing.
 
@@ -749,7 +750,9 @@ class ResearchOrchestrator:
 
             # Update research state with results
             if execution_result.agent_result:
-                state.agent_results["supervisor_research"] = execution_result.agent_result
+                state.agent_results["supervisor_research"] = (
+                    execution_result.agent_result
+                )
                 state.quality_score = max(
                     state.quality_score, execution_result.quality_score
                 )
@@ -791,11 +794,11 @@ class ResearchOrchestrator:
                     "phase": WorkflowPhase.LITERATURE_REVIEW.value,
                 }
             )
-            
+
             # Fallback to traditional agent dispatch
             logger.info("Falling back to traditional agent dispatch")
             return await agent_dispatch_node(state)
-    
+
     async def get_masr_stats(self) -> dict[str, Any]:
         """Get MASR integration statistics."""
         if not self.config.enable_masr_routing:
@@ -807,10 +810,14 @@ class ResearchOrchestrator:
             stats["masr_router"] = await self._masr_router.get_metrics()
 
         if self._supervisor_bridge:
-            stats["supervisor_bridge"] = await self._supervisor_bridge.get_bridge_stats()
+            stats[
+                "supervisor_bridge"
+            ] = await self._supervisor_bridge.get_bridge_stats()
 
         if self._supervisor_factory:
-            stats["supervisor_factory"] = await self._supervisor_factory.get_factory_stats()
+            stats[
+                "supervisor_factory"
+            ] = await self._supervisor_factory.get_factory_stats()
 
         if self._hierarchical_cost_optimizer:
             stats[
@@ -818,7 +825,7 @@ class ResearchOrchestrator:
             ] = await self._hierarchical_cost_optimizer.get_cost_model_stats()
 
         return stats
-    
+
     async def health_check(self) -> dict[str, Any]:
         """Perform comprehensive health check including MASR components."""
         health: dict[str, Any] = {
@@ -835,8 +842,12 @@ class ResearchOrchestrator:
         if self.config.enable_masr_routing:
             masr_health: dict[str, str] = {
                 "masr_router": "healthy" if self._masr_router else "unavailable",
-                "supervisor_bridge": "healthy" if self._supervisor_bridge else "unavailable",
-                "supervisor_factory": "healthy" if self._supervisor_factory else "unavailable",
+                "supervisor_bridge": "healthy"
+                if self._supervisor_bridge
+                else "unavailable",
+                "supervisor_factory": "healthy"
+                if self._supervisor_factory
+                else "unavailable",
             }
 
             if self._hierarchical_cost_optimizer:

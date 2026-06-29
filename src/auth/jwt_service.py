@@ -68,7 +68,16 @@ class JWTService:
         self.refresh_token_prefix = "refresh:token:"
 
     def _load_or_generate_private_key(self, key_path: str | None = None) -> str:
-        """Load or generate RSA private key."""
+        """Load or generate RSA private key.
+
+        If ``key_path`` is set and exists, load it.
+        Otherwise generate a fresh RSA key pair and attempt to persist it
+        to ``key_path``. If the parent directory of ``key_path`` is not
+        writable (e.g., the production-only ``/secrets/`` mount on a dev
+        machine), log a WARNING and fall back to an ephemeral in-memory
+        key. The warning is intentionally loud so a misconfigured
+        production deployment still surfaces the failure in logs.
+        """
         if key_path and os.path.exists(key_path):
             with open(key_path, "rb") as f:
                 private_key = serialization.load_pem_private_key(
@@ -80,16 +89,29 @@ class JWTService:
                 public_exponent=65537, key_size=2048, backend=default_backend()
             )
 
-            # Save if path provided
+            # Best-effort persist if path provided
             if key_path:
-                os.makedirs(os.path.dirname(key_path), exist_ok=True)
-                with open(key_path, "wb") as f:
-                    f.write(
-                        private_key.private_bytes(
-                            encoding=serialization.Encoding.PEM,
-                            format=serialization.PrivateFormat.PKCS8,
-                            encryption_algorithm=serialization.NoEncryption(),
+                try:
+                    os.makedirs(os.path.dirname(key_path), exist_ok=True)
+                    with open(key_path, "wb") as f:
+                        f.write(
+                            private_key.private_bytes(
+                                encoding=serialization.Encoding.PEM,
+                                format=serialization.PrivateFormat.PKCS8,
+                                encryption_algorithm=serialization.NoEncryption(),
+                            )
                         )
+                except OSError as err:
+                    logger.warning(
+                        "jwt_private_key_path_not_writable_using_ephemeral",
+                        configured_path=key_path,
+                        error=str(err),
+                        guidance=(
+                            "Falling back to ephemeral in-memory key. "
+                            "Tokens will not survive process restart. "
+                            "In production, mount a writable secrets volume or "
+                            "set JWT_PRIVATE_KEY_PATH to a writable path."
+                        ),
                     )
 
         return private_key.private_bytes(
@@ -112,16 +134,21 @@ class JWTService:
             )
             public_key = private_key_obj.public_key()
 
-            # Save if path provided
+            # Best-effort persist if path provided. The companion private-key
+            # write path already logged a warning if the directory wasn't
+            # writable, so we silently skip here to avoid duplicate logging.
             if key_path:
-                os.makedirs(os.path.dirname(key_path), exist_ok=True)
-                with open(key_path, "wb") as f:
-                    f.write(
-                        public_key.public_bytes(
-                            encoding=serialization.Encoding.PEM,
-                            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+                try:
+                    os.makedirs(os.path.dirname(key_path), exist_ok=True)
+                    with open(key_path, "wb") as f:
+                        f.write(
+                            public_key.public_bytes(
+                                encoding=serialization.Encoding.PEM,
+                                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+                            )
                         )
-                    )
+                except OSError:
+                    pass
 
         if isinstance(public_key, bytes):
             return public_key.decode()
@@ -138,6 +165,7 @@ class JWTService:
         roles: list[str] | None = None,
         permissions: list[str] | None = None,
         device_id: str | None = None,
+        organization_id: str | None = None,
         additional_claims: dict[str, Any] | None = None,
     ) -> TokenPair:
         """
@@ -149,6 +177,7 @@ class JWTService:
             roles: User roles
             permissions: User permissions
             device_id: Device fingerprint
+            organization_id: Tenant organization identifier
             additional_claims: Additional JWT claims
 
         Returns:
@@ -166,6 +195,7 @@ class JWTService:
             "email": email,
             "roles": roles or [],
             "permissions": permissions or [],
+            "organization_id": organization_id,
             "jti": jti,
             "iat": now,
             "device_id": device_id,
@@ -190,6 +220,7 @@ class JWTService:
             "exp": now + timedelta(days=self.refresh_token_expire_days),
             "token_type": "refresh",
             "device_id": device_id,
+            "organization_id": organization_id,
         }
 
         # Generate tokens
@@ -207,6 +238,7 @@ class JWTService:
             refresh_data = {
                 "user_id": user_id,
                 "device_id": device_id,
+                "organization_id": organization_id,
                 "created_at": now.isoformat(),
             }
             await self.redis_client.setex(
@@ -271,6 +303,7 @@ class JWTService:
                 email=payload.get("email"),
                 roles=payload.get("roles", []),
                 permissions=payload.get("permissions", []),
+                organization_id=payload.get("organization_id"),
                 jti=payload["jti"],
                 iat=datetime.fromtimestamp(payload["iat"], tz=UTC),
                 exp=datetime.fromtimestamp(payload["exp"], tz=UTC),
@@ -332,6 +365,7 @@ class JWTService:
             roles=refresh_payload.roles,
             permissions=refresh_payload.permissions,
             device_id=device_id or refresh_payload.device_id,
+            organization_id=refresh_payload.organization_id,
         )
 
     async def revoke_token(self, token: str) -> bool:

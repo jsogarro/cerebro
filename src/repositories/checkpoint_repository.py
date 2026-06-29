@@ -6,7 +6,7 @@ Provides operations for workflow checkpoint storage and recovery.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -123,9 +123,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             raise RuntimeError("SQLAlchemy Result missing rowcount attribute")
         return int(rowcount)
 
-    async def get_recovery_point(
-        self, project_id: UUID
-    ) -> WorkflowCheckpoint | None:
+    async def get_recovery_point(self, project_id: UUID) -> WorkflowCheckpoint | None:
         """
         Find the best recovery checkpoint for a project.
 
@@ -375,7 +373,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Returns:
             Number of checkpoints deleted
         """
-        cutoff = datetime.utcnow() - timedelta(days=days_old)
+        cutoff = datetime.now(UTC) - timedelta(days=days_old)
 
         # Keep at least one checkpoint per workflow
         # Get the latest checkpoint for each workflow

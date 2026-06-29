@@ -297,7 +297,7 @@ class MockAgentResponseFactory:
             "citation_styles_available": citation_styles,
             "bibliography": {
                 style: [
-                    f"Bibliography entry {i+1} in {style} format"
+                    f"Bibliography entry {i + 1} in {style} format"
                     for i in range(num_citations)
                 ]
                 for style in citation_styles

@@ -7,12 +7,12 @@ where cost efficiency is important.
 """
 
 import json
-import logging
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from structlog import get_logger
 
 from .base_provider import (
     BaseProvider,
@@ -25,7 +25,7 @@ from .base_provider import (
 if TYPE_CHECKING:
     from ..config.model_config_manager import ModelConfigManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LlamaProvider(BaseProvider):
@@ -181,7 +181,7 @@ class LlamaProvider(BaseProvider):
             return await self._postprocess_response(model_response, request)
 
         except Exception as e:
-            logger.error(f"Llama generation failed: {e}")
+            logger.error("Llama generation failed", error=str(e), exc_info=True)
             return self._create_error_response(request, e, "generation_error")
 
     async def stream(
@@ -210,10 +210,13 @@ class LlamaProvider(BaseProvider):
                 headers=self._get_headers(),
                 json=payload,
             ) as response:
-
                 if response.status_code != 200:
                     error_text = await response.aread()
-                    error_str = error_text.decode('utf-8') if isinstance(error_text, bytes) else str(error_text)
+                    error_str = (
+                        error_text.decode("utf-8")
+                        if isinstance(error_text, bytes)
+                        else str(error_text)
+                    )
                     raise Exception(
                         f"Ollama error: {response.status_code} - {error_str}"
                     )
@@ -235,10 +238,12 @@ class LlamaProvider(BaseProvider):
                             continue  # Skip invalid JSON chunks
 
         except Exception as e:
-            logger.error(f"Llama streaming failed: {e}")
+            logger.error("Llama streaming failed", error=str(e), exc_info=True)
             yield f"Error: {e!s}"
 
-    def _build_request_payload(self, request: ModelRequest, model_name: str) -> dict[str, Any]:
+    def _build_request_payload(
+        self, request: ModelRequest, model_name: str
+    ) -> dict[str, Any]:
         """Build Ollama API request payload."""
 
         # Ollama uses a different format than OpenAI-style APIs
@@ -267,8 +272,8 @@ class LlamaProvider(BaseProvider):
 
         # Build payload for Ollama
         max_output = 4000
-        if hasattr(self, 'model_specs'):
-            spec = getattr(self, 'model_specs', {}).get(model_name, {})
+        if hasattr(self, "model_specs"):
+            spec = getattr(self, "model_specs", {}).get(model_name, {})
             max_output = spec.get("max_output_tokens", 4000)
 
         payload = {
@@ -310,11 +315,15 @@ class LlamaProvider(BaseProvider):
                 available_models = [m["name"] for m in models_data.get("models", [])]
 
                 if model_name not in available_models:
-                    logger.info(f"Pulling model {model_name}...")
+                    logger.info("Pulling model", model_name=model_name)
                     await self._pull_model(model_name)
 
         except Exception as e:
-            logger.warning(f"Failed to check model availability: {e}")
+            logger.warning(
+                "Failed to check model availability",
+                model_name=model_name,
+                error=str(e),
+            )
             # Continue anyway, let the generation request handle the error
 
     async def _pull_model(self, model_name: str) -> None:
@@ -328,7 +337,6 @@ class LlamaProvider(BaseProvider):
         async with self.client.stream(
             "POST", f"{self.ollama_endpoint}/api/pull", json=pull_payload
         ) as response:
-
             if response.status_code != 200:
                 raise Exception(f"Failed to pull model {model_name}")
 
@@ -341,7 +349,11 @@ class LlamaProvider(BaseProvider):
                         if "error" in progress:
                             raise Exception(f"Model pull error: {progress['error']}")
 
-                        logger.debug(f"Model pull progress: {status}")
+                        logger.debug(
+                            "Model pull progress",
+                            model_name=model_name,
+                            status=status,
+                        )
 
                     except json.JSONDecodeError:
                         continue
@@ -360,10 +372,12 @@ class LlamaProvider(BaseProvider):
 
         if response.status_code != 200:
             error_detail = await response.aread()
-            error_str = error_detail.decode('utf-8') if isinstance(error_detail, bytes) else str(error_detail)
-            raise Exception(
-                f"Ollama API error: {response.status_code} - {error_str}"
+            error_str = (
+                error_detail.decode("utf-8")
+                if isinstance(error_detail, bytes)
+                else str(error_detail)
             )
+            raise Exception(f"Ollama API error: {response.status_code} - {error_str}")
 
         return response
 
@@ -447,7 +461,11 @@ class LlamaProvider(BaseProvider):
         )
 
     def _calculate_confidence_score(
-        self, content: str, done: bool, request: ModelRequest, response_data: dict[str, Any]
+        self,
+        content: str,
+        done: bool,
+        request: ModelRequest,
+        response_data: dict[str, Any],
     ) -> float:
         """Calculate confidence score for Llama response."""
 
@@ -513,7 +531,7 @@ class LlamaProvider(BaseProvider):
                 self.health_status.api_status = "degraded"
 
         except Exception as e:
-            logger.error(f"Llama health check failed: {e}")
+            logger.error("Llama health check failed", error=str(e), exc_info=True)
             self.health_status.healthy = False
             self.health_status.last_error = str(e)
             self.health_status.api_status = "error"
@@ -540,7 +558,7 @@ class LlamaProvider(BaseProvider):
         if not self.supports_model(model_name):
             return None
 
-        spec = getattr(self, 'model_specs', {}).get(model_name, {})
+        spec = getattr(self, "model_specs", {}).get(model_name, {})
 
         return {
             "name": model_name,

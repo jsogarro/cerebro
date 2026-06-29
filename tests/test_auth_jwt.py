@@ -45,6 +45,7 @@ class TestJWTService:
             roles=["user", "researcher"],
             permissions=["read:projects", "write:projects"],
             device_id="device-123",
+            organization_id="org-123",
         )
 
         # Verify token pair structure
@@ -66,6 +67,7 @@ class TestJWTService:
         assert access_payload["roles"] == ["user", "researcher"]
         assert access_payload["permissions"] == ["read:projects", "write:projects"]
         assert access_payload["device_id"] == "device-123"
+        assert access_payload["organization_id"] == "org-123"
         assert access_payload["token_type"] == "access"
 
         # Decode and verify refresh token
@@ -77,6 +79,7 @@ class TestJWTService:
 
         assert refresh_payload["sub"] == "test-user-123"
         assert refresh_payload["device_id"] == "device-123"
+        assert refresh_payload["organization_id"] == "org-123"
         assert refresh_payload["token_type"] == "refresh"
 
     @pytest.mark.asyncio
@@ -88,6 +91,7 @@ class TestJWTService:
             email="test@example.com",
             roles=["user"],
             permissions=["read"],
+            organization_id="org-456",
         )
 
         # Validate token
@@ -100,6 +104,42 @@ class TestJWTService:
         assert payload.email == "test@example.com"
         assert payload.roles == ["user"]
         assert payload.permissions == ["read"]
+        assert payload.organization_id == "org-456"
+
+    @pytest.mark.asyncio
+    async def test_refresh_tokens_preserves_organization_id(
+        self, jwt_service, redis_mock
+    ):
+        """Test refreshed tokens keep the tenant organization claim."""
+        initial_pair = await jwt_service.generate_token_pair(
+            user_id="test-user-123",
+            email="test@example.com",
+            device_id="device-123",
+            organization_id="org-789",
+        )
+
+        redis_mock.get.return_value = (
+            '{"user_id": "test-user-123", "device_id": "device-123", '
+            '"organization_id": "org-789"}'
+        )
+
+        new_pair = await jwt_service.refresh_tokens(
+            initial_pair.refresh_token, device_id="device-123"
+        )
+
+        access_payload = jwt.decode(
+            new_pair.access_token,
+            jwt_service.public_key,
+            algorithms=[jwt_service.algorithm],
+        )
+        refresh_payload = jwt.decode(
+            new_pair.refresh_token,
+            jwt_service.public_key,
+            algorithms=[jwt_service.algorithm],
+        )
+
+        assert access_payload["organization_id"] == "org-789"
+        assert refresh_payload["organization_id"] == "org-789"
 
     @pytest.mark.asyncio
     async def test_validate_token_wrong_type(self, jwt_service):

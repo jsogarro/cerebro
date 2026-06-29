@@ -8,7 +8,12 @@ from uuid import UUID
 
 import httpx
 from rich.console import Console
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from src.cli.config import config
 from src.models.research_project import (
@@ -78,6 +83,10 @@ class ResearchAPIClient:
     @retry(
         stop=stop_after_attempt(config.max_retries),
         wait=wait_exponential(multiplier=1, min=4, max=10),
+        # Only retry transport-level failures; client/server HTTP error responses
+        # (raised as APIError) are surfaced to the caller without retry — retrying
+        # a 404 wastes time and a 4xx is unlikely to succeed on retry.
+        retry=retry_if_exception_type((httpx.TransportError, httpx.TimeoutException)),
     )
     async def _request(
         self,
@@ -234,7 +243,9 @@ class ResearchAPIClient:
 
     # Generic HTTP methods for agent framework
 
-    async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def get(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Generic GET request."""
         response = await self._request("GET", path, params=params)
         result: dict[str, Any] = response.json()

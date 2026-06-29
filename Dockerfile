@@ -1,7 +1,8 @@
 # Multi-stage Dockerfile for Research Platform
 
 # Stage 1: Base dependencies
-FROM python:3.11-slim as base
+# Base image pinned by digest for reproducibility (multi-arch index).
+FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -18,8 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Install uv (pinned by digest)
+COPY --from=ghcr.io/astral-sh/uv:latest@sha256:3b7b60a81d3c57ef471703e5c83fd4aaa33abcd403596fb22ab07db85ae91347 /uv /usr/local/bin/uv
 
 # Create app directory
 WORKDIR /app
@@ -58,7 +59,7 @@ RUN uv pip install -e .
 COPY src/ ./src/
 
 # Stage 4: Production runtime
-FROM python:3.11-slim as production
+FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as production
 
 # Create non-root user
 RUN groupadd -r app && useradd -r -g app app

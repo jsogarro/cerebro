@@ -6,16 +6,17 @@ Provides multiple synthesis strategies (comprehensive, prioritized, consensus-ba
 weighted average) and handles cross-domain conflict resolution.
 """
 
-import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
+
+from structlog import get_logger
 
 from src.core.constants import HIGH_CONSENSUS_THRESHOLD
 
 from ..ai_brain.integration.masr_supervisor_bridge import SupervisorExecutionResult
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CrossDomainSynthesizer:
@@ -27,7 +28,8 @@ class CrossDomainSynthesizer:
 
         # Synthesis strategies
         self.synthesis_strategies: dict[
-            str, Callable[[dict[str, SupervisorExecutionResult]], Awaitable[dict[str, Any]]]
+            str,
+            Callable[[dict[str, SupervisorExecutionResult]], Awaitable[dict[str, Any]]],
         ] = {
             "comprehensive": self._comprehensive_synthesis,
             "prioritized": self._prioritized_synthesis,
@@ -67,7 +69,9 @@ class CrossDomainSynthesizer:
                 "supervisor_count": len(supervisor_results),
                 "domains_covered": list(supervisor_results.keys()),
                 "synthesis_timestamp": datetime.now().isoformat(),
-                "overall_confidence": self._calculate_overall_confidence(supervisor_results),
+                "overall_confidence": self._calculate_overall_confidence(
+                    supervisor_results
+                ),
             }
 
             return synthesized
@@ -77,7 +81,9 @@ class CrossDomainSynthesizer:
             return {
                 "error": f"Synthesis failed: {e!s}",
                 "fallback_results": {
-                    supervisor: result.agent_result.output if result.agent_result else {}
+                    supervisor: result.agent_result.output
+                    if result.agent_result
+                    else {}
                     for supervisor, result in supervisor_results.items()
                 },
             }
@@ -166,7 +172,9 @@ class CrossDomainSynthesizer:
                     supporting_results.append(
                         {
                             "supervisor": supervisor,
-                            "output": result.agent_result.output if result.agent_result else {},
+                            "output": result.agent_result.output
+                            if result.agent_result
+                            else {},
                             "quality_score": result.quality_score,
                         }
                     )
@@ -193,7 +201,9 @@ class CrossDomainSynthesizer:
         # Calculate overall consensus (simplified)
         consensus_scores = [r.consensus_score for r in supervisor_results.values()]
         if consensus_scores:
-            synthesized["consensus_score"] = sum(consensus_scores) / len(consensus_scores)
+            synthesized["consensus_score"] = sum(consensus_scores) / len(
+                consensus_scores
+            )
 
         # Identify high-consensus areas
         high_consensus_results = [
@@ -222,7 +232,9 @@ class CrossDomainSynthesizer:
             {
                 "supervisor": supervisor,
                 "consensus_score": result.consensus_score,
-                "issues": result.errors if result.errors else ["Low consensus achieved"],
+                "issues": result.errors
+                if result.errors
+                else ["Low consensus achieved"],
             }
             for supervisor, result in low_consensus_results
         ]
@@ -252,8 +264,11 @@ class CrossDomainSynthesizer:
                 if isinstance(quality_weights, dict):
                     quality_weights[supervisor] = weight
 
-                if (result.agent_result and result.agent_result.output and
-                    isinstance(weighted_results, dict)):
+                if (
+                    result.agent_result
+                    and result.agent_result.output
+                    and isinstance(weighted_results, dict)
+                ):
                     weighted_results[supervisor] = {
                         "output": result.agent_result.output,
                         "weight": weight,
@@ -285,7 +300,10 @@ class CrossDomainSynthesizer:
             return 0.0
 
         weighted_confidence = (
-            sum(r.quality_score * r.confidence_score for r in supervisor_results.values())
+            sum(
+                r.quality_score * r.confidence_score
+                for r in supervisor_results.values()
+            )
             / total_quality
         )
 

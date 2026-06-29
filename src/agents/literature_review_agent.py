@@ -6,8 +6,9 @@ searching academic sources, and identifying research gaps.
 """
 
 import hashlib
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
@@ -16,7 +17,7 @@ from src.models.research_project import ResearchDepth
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_literature_agent_prompt
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class LiteratureReviewAgent(BaseAgent):
@@ -56,9 +57,11 @@ class LiteratureReviewAgent(BaseAgent):
 
             # Search and analyze using structured output (consolidates source search + analysis)
             if self.gemini_service:
-                literature_analysis = await self._search_and_analyze_structured(task.input_data)
+                literature_analysis = await self._search_and_analyze_structured(
+                    task.input_data
+                )
                 # Extract sources from structured response
-                academic_sources = {
+                academic_sources: dict[str, Any] = {
                     "success": True,
                     "sources": [s.model_dump() for s in literature_analysis.sources],
                     "total_found": len(literature_analysis.sources),
@@ -73,12 +76,17 @@ class LiteratureReviewAgent(BaseAgent):
                 )
                 # Convert to structured format
                 from src.agents.schemas import LiteratureAnalysisSchema
+
                 literature_analysis = LiteratureAnalysisSchema(
                     sources=[],
                     key_findings=literature_analysis_dict.get("key_findings", []),
                     research_gaps=literature_analysis_dict.get("research_gaps", []),
-                    methodologies_used=literature_analysis_dict.get("methodologies_used", []),
-                    quality_assessment=literature_analysis_dict.get("quality_assessment", ""),
+                    methodologies_used=literature_analysis_dict.get(
+                        "methodologies_used", []
+                    ),
+                    quality_assessment=literature_analysis_dict.get(
+                        "quality_assessment", ""
+                    ),
                 )
 
             # Step 3: Build knowledge graph of relationships
@@ -143,15 +151,16 @@ class LiteratureReviewAgent(BaseAgent):
                 output=output,
                 confidence=confidence,
                 execution_time=0.0,  # Would be calculated in real implementation
-                metadata={
-                    "agent_type": self.get_agent_type(),
-                    "sources_count": len(ranked_sources),
-                    "gaps_identified": len(gaps),
-                },
+                metadata=self.build_execution_metadata(
+                    sources_count=len(ranked_sources),
+                    gaps_identified=len(gaps),
+                ),
             )
 
             # Cache the result
-            await self.cache_result(cache_key, result, ttl=LONG_TERM_CACHE_TTL)  # 24 hours
+            await self.cache_result(
+                cache_key, result, ttl=LONG_TERM_CACHE_TTL
+            )  # 24 hours
 
             return result
 
@@ -444,7 +453,9 @@ class LiteratureReviewAgent(BaseAgent):
             Academic search results
         """
         if not self.mcp_integration:
-            self.log_warning("MCP integration not available, using Gemini source search")
+            self.log_warning(
+                "MCP integration not available, using Gemini source search"
+            )
             return await self._fallback_academic_search(input_data)
 
         query = input_data.get("query", "")
@@ -662,14 +673,18 @@ class LiteratureReviewAgent(BaseAgent):
 
         return "\\n\\n".join(sources_text)
 
-    async def _search_sources_structured(self, input_data: dict[str, Any]) -> list:
+    async def _search_sources_structured(
+        self, input_data: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """Find academic sources using structured output."""
         from pydantic import BaseModel, Field
 
         from src.agents.schemas.literature_review import AcademicSource
 
         class SourceListSchema(BaseModel):
-            sources: list[AcademicSource] = Field(description="List of academic sources")
+            sources: list[AcademicSource] = Field(
+                description="List of academic sources"
+            )
 
         query = input_data.get("query", "")
         domains = input_data.get("domains", [])
@@ -690,15 +705,23 @@ Requirements:
 - Include 2-3 sentence abstracts
 - Include DOI when known"""
 
+        if self.gemini_service is None:
+            self.log_error("Source search invoked without a configured gemini_service")
+            return []
+
         try:
-            result = await self.gemini_service.generate_structured_content(prompt, SourceListSchema)
+            result = await self.gemini_service.generate_structured_content(
+                prompt, SourceListSchema
+            )
             self.log_info(f"Found {len(result.sources)} sources")
             return [s.model_dump() for s in result.sources]
         except Exception as e:
             self.log_error(f"Source search failed: {e}")
             return []
 
-    async def _analyze_sources_structured(self, query: str, sources: list[dict]) -> dict:
+    async def _analyze_sources_structured(
+        self, query: str, sources: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """Analyze found sources using structured output."""
         from src.agents.schemas import LiteratureAnalysisSchema
 
@@ -719,8 +742,16 @@ Analyze the literature and provide:
 3. methodologies_used: List of research methodologies observed across papers
 4. quality_assessment: Overall quality assessment of this literature corpus"""
 
+        if self.gemini_service is None:
+            self.log_error(
+                "Source analysis invoked without a configured gemini_service"
+            )
+            return {}
+
         try:
-            result = await self.gemini_service.generate_structured_content(prompt, LiteratureAnalysisSchema)
+            result = await self.gemini_service.generate_structured_content(
+                prompt, LiteratureAnalysisSchema
+            )
             return {
                 "key_findings": result.key_findings,
                 "research_gaps": result.research_gaps,
@@ -729,7 +760,12 @@ Analyze the literature and provide:
             }
         except Exception as e:
             self.log_error(f"Analysis failed: {e}")
-            return {"key_findings": [], "research_gaps": [], "methodologies_used": [], "quality_assessment": ""}
+            return {
+                "key_findings": [],
+                "research_gaps": [],
+                "methodologies_used": [],
+                "quality_assessment": "",
+            }
 
     async def _search_and_analyze_structured(
         self, input_data: dict[str, Any]
@@ -777,7 +813,9 @@ Analyze the literature and provide:
             quality_assessment=analysis.get("quality_assessment", "Unable to assess"),
         )
 
-    async def _fallback_academic_search(self, input_data: dict[str, Any]) -> dict[str, Any]:
+    async def _fallback_academic_search(
+        self, input_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Fallback academic search using Gemini when MCP tools are unavailable.
 
@@ -856,7 +894,9 @@ Requirements:
                     "search_strategy": "LLM-assisted source identification (Gemini)",
                     "fallback": False,
                 }
-            self.log_warning(f"Gemini returned no sources. Parsed keys: {list(parsed.keys())}")
+            self.log_warning(
+                f"Gemini returned no sources. Parsed keys: {list(parsed.keys())}"
+            )
         except Exception as e:
             self.log_error(f"Gemini source search failed: {e}")
 

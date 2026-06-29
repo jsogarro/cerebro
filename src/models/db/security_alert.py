@@ -5,7 +5,7 @@ Manages security alerts and notifications for suspicious activities,
 policy violations, and security incidents.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 from uuid import UUID as PyUUID  # noqa: N811
@@ -140,25 +140,39 @@ class SecurityAlert(BaseModel):
     )
 
     # Alert details
-    title: Mapped[str] = mapped_column(String(255), nullable=False, comment="Alert title")
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False, comment="Alert title"
+    )
 
-    description: Mapped[str] = mapped_column(Text, nullable=False, comment="Detailed alert description")
+    description: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Detailed alert description"
+    )
 
     # Threat indicators
     ip_address: Mapped[str | None] = mapped_column(
         String(45), nullable=True, index=True, comment="Source IP address"
     )
 
-    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="User agent string")
+    user_agent: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="User agent string"
+    )
 
-    request_path: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Request path/endpoint")
+    request_path: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="Request path/endpoint"
+    )
 
-    request_method: Mapped[str | None] = mapped_column(String(10), nullable=True, comment="HTTP request method")
+    request_method: Mapped[str | None] = mapped_column(
+        String(10), nullable=True, comment="HTTP request method"
+    )
 
     # Location information
-    country: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="Country from IP geolocation")
+    country: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="Country from IP geolocation"
+    )
 
-    city: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="City from IP geolocation")
+    city: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="City from IP geolocation"
+    )
 
     is_known_location: Mapped[bool] = mapped_column(
         Boolean,
@@ -168,7 +182,9 @@ class SecurityAlert(BaseModel):
     )
 
     # Risk assessment
-    risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Calculated risk score (0-100)")
+    risk_score: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="Calculated risk score (0-100)"
+    )
 
     confidence_score: Mapped[int | None] = mapped_column(
         Integer, nullable=True, comment="Alert confidence score (0-100)"
@@ -182,16 +198,22 @@ class SecurityAlert(BaseModel):
     )
 
     # Related information
-    related_alerts: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True, comment="IDs of related alerts")
+    related_alerts: Mapped[list[Any] | None] = mapped_column(
+        JSON, nullable=True, comment="IDs of related alerts"
+    )
 
     affected_resources: Mapped[list[Any] | None] = mapped_column(
         JSON, nullable=True, comment="List of affected resources"
     )
 
-    evidence: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True, comment="Supporting evidence/logs")
+    evidence: Mapped[list[Any] | None] = mapped_column(
+        JSON, nullable=True, comment="Supporting evidence/logs"
+    )
 
     # Actions taken
-    actions_taken: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True, comment="List of actions taken")
+    actions_taken: Mapped[list[Any] | None] = mapped_column(
+        JSON, nullable=True, comment="List of actions taken"
+    )
 
     auto_remediated: Mapped[bool] = mapped_column(
         Boolean,
@@ -225,9 +247,13 @@ class SecurityAlert(BaseModel):
         DateTime(timezone=True), nullable=True, comment="When alert was resolved"
     )
 
-    resolved_by: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Who resolved the alert")
+    resolved_by: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Who resolved the alert"
+    )
 
-    resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Resolution notes")
+    resolution_notes: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Resolution notes"
+    )
 
     # Notification tracking
     notifications_sent: Mapped[list[Any] | None] = mapped_column(
@@ -266,7 +292,9 @@ class SecurityAlert(BaseModel):
     )
 
     # Alert metadata
-    alert_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="Additional alert metadata")
+    alert_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True, comment="Additional alert metadata"
+    )
 
     # Relationships
     user = relationship("User", back_populates="security_alerts")
@@ -393,7 +421,7 @@ class SecurityAlert(BaseModel):
             acknowledged_by: Who is acknowledging
         """
         self.status = AlertStatus.ACKNOWLEDGED
-        self.acknowledged_at = datetime.utcnow()
+        self.acknowledged_at = datetime.now(UTC)
         self.acknowledged_by = acknowledged_by
 
     def investigate(self, investigated_by: str) -> None:
@@ -404,12 +432,12 @@ class SecurityAlert(BaseModel):
             investigated_by: Who is investigating
         """
         self.status = AlertStatus.INVESTIGATING
-        self.investigated_at = datetime.utcnow()
+        self.investigated_at = datetime.now(UTC)
         self.investigated_by = investigated_by
 
         # Auto-acknowledge if not already
         if not self.acknowledged_at:
-            self.acknowledged_at = datetime.utcnow()
+            self.acknowledged_at = datetime.now(UTC)
             self.acknowledged_by = investigated_by
 
     def resolve(
@@ -426,7 +454,7 @@ class SecurityAlert(BaseModel):
         self.status = (
             AlertStatus.FALSE_POSITIVE if is_false_positive else AlertStatus.RESOLVED
         )
-        self.resolved_at = datetime.utcnow()
+        self.resolved_at = datetime.now(UTC)
         self.resolved_by = resolved_by
         self.resolution_notes = resolution_notes
 
@@ -439,7 +467,7 @@ class SecurityAlert(BaseModel):
         """
         self.status = AlertStatus.ESCALATED
         self.escalated = True
-        self.escalated_at = datetime.utcnow()
+        self.escalated_at = datetime.now(UTC)
         self.escalated_to = escalated_to
 
     def add_evidence(self, evidence: dict[str, Any]) -> None:
@@ -468,7 +496,7 @@ class SecurityAlert(BaseModel):
         notification = {
             "channel": channel,
             "recipient": recipient,
-            "sent_at": datetime.utcnow().isoformat(),
+            "sent_at": datetime.now(UTC).isoformat(),
         }
 
         if self.notifications_sent:

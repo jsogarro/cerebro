@@ -4,14 +4,14 @@ Citation Tool for MCP.
 Provides citation formatting and DOI resolution capabilities.
 """
 
-import logging
 from typing import Any
 
 import httpx
+from structlog import get_logger
 
 from src.mcp.base import BaseMCPTool, ToolMetadata, ToolParameter
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CitationTool(BaseMCPTool):
@@ -98,7 +98,9 @@ class CitationTool(BaseMCPTool):
             logger.error(f"Citation operation failed: {e!s}")
             return {"success": False, "error": str(e)}
 
-    def _format_citations(self, sources: list[dict[str, Any]], style: str) -> dict[str, Any]:
+    def _format_citations(
+        self, sources: list[dict[str, Any]], style: str
+    ) -> dict[str, Any]:
         """Format citations in specified style."""
         citations = []
 
@@ -199,7 +201,7 @@ class CitationTool(BaseMCPTool):
 
         for i, source in enumerate(sources):
             entry_type = "@article" if source.get("journal") else "@book"
-            key = f"ref{i+1}"
+            key = f"ref{i + 1}"
 
             entry = f"{entry_type}{{{key},\n"
             if source.get("title"):
@@ -207,11 +209,11 @@ class CitationTool(BaseMCPTool):
             if source.get("authors"):
                 entry += f'  author = "{" and ".join(source["authors"])}",\n'
             if source.get("year"):
-                entry += f'  year = {source["year"]},\n'
+                entry += f"  year = {source['year']},\n"
             if source.get("journal"):
                 entry += f'  journal = "{source["journal"]}",\n'
             if source.get("volume"):
-                entry += f'  volume = {source["volume"]},\n'
+                entry += f"  volume = {source['volume']},\n"
             if source.get("pages"):
                 entry += f'  pages = "{source["pages"]}",\n'
             entry += "}"

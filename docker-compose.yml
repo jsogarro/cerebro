@@ -193,7 +193,10 @@ services:
         - VITE_API_URL=/api/v1  # Points via nginx if we had it, but actually the web's nginx proxies? Wait, no we serve static files. If it's static, /api/v1 works if we access the app via a reverse proxy that routes /api/v1 to `api` container, or the web's own nginx handles proxying. 
     container_name: research-web
     ports:
-      - "3000:80"
+      # Container nginx listens on 8080 so it can run as the unprivileged
+      # `nginx` user; host-side mapping keeps the same `localhost:3000`
+      # developer entrypoint.
+      - "3000:8080"
     depends_on:
       - api
     networks:

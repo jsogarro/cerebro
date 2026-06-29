@@ -3,24 +3,7 @@ name: E2E Tests
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, ready_for_review]
-  schedule:
-    - cron: '0 4 * * *'  # Daily at 4 AM UTC
-  workflow_dispatch:
-    inputs:
-      browsers:
-        description: 'Browsers to test'
-        required: false
-        default: 'chromium,firefox'
-        type: choice
-        options:
-          - chromium
-          - firefox
-          - webkit
-          - chromium,firefox
-          - chromium,firefox,webkit
+  workflow_dispatch:  # manual trigger only on PRs
 
 env:
   PYTHON_VERSION: '3.11'
@@ -44,7 +27,6 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
     
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -58,8 +40,8 @@ jobs:
     
     - name: Install dependencies
       run: |
-        uv pip install -e ".[dev]"
-        uv pip install playwright pytest-playwright
+        uv pip install --system -e ".[dev]"
+        uv pip install --system playwright pytest-playwright
     
     - name: Install Playwright browsers
       run: |
@@ -67,7 +49,7 @@ jobs:
     
     - name: Start services with Docker Compose
       run: |
-        docker-compose up -d
+        docker compose up -d
         
         # Wait for services to be ready
         timeout 60 bash -c 'until curl -s http://localhost:8000/health; do sleep 2; done'
@@ -117,7 +99,7 @@ jobs:
     - name: Stop services
       if: always()
       run: |
-        docker-compose down -v
+        docker compose down -v
 
   e2e-report:
     name: E2E Test Report

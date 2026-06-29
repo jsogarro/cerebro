@@ -1,6 +1,6 @@
-import logging
+from structlog import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 def main() -> None:

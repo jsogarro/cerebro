@@ -42,7 +42,9 @@ from src.cli.formatters import OutputFormatter
     help="Disable colored output",
 )
 @click.pass_context
-def cli(ctx: Context, api_url: str | None, format: str, verbose: bool, no_color: bool) -> None:
+def cli(
+    ctx: Context, api_url: str | None, format: str, verbose: bool, no_color: bool
+) -> None:
     """Research Platform CLI - Manage research projects from the command line."""
     # Update config with command line options
     if api_url:
@@ -76,7 +78,9 @@ def cli(ctx: Context, api_url: str | None, format: str, verbose: bool, no_color:
 @click.argument("key", required=False)
 @click.argument("value", required=False)
 @click.pass_context
-def config_command(ctx: Context, action: str, key: str | None, value: str | None) -> None:
+def config_command(
+    ctx: Context, action: str, key: str | None, value: str | None
+) -> None:
     """Manage CLI configuration."""
     cli_config = ctx.obj["config"]
 

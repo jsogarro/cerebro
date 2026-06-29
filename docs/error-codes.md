@@ -463,7 +463,7 @@ def create_error_response(error: ResearchPlatformError, status_code: int):
                 "code": error.code,
                 "message": error.message,
                 "details": error.details,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.now(UTC).isoformat()
             }
         }
     )

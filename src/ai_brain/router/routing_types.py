@@ -6,10 +6,10 @@ Shared dataclasses and enums used across the routing system.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class CollaborationMode(Enum):
+class CollaborationMode(StrEnum):
     """Agent collaboration modes for different query types."""
 
     DIRECT = "direct"  # Single agent handles everything
@@ -19,8 +19,9 @@ class CollaborationMode(Enum):
     ENSEMBLE = "ensemble"  # Multiple models/agents vote on result
 
 
-class RoutingStrategy(Enum):
-    """High-level routing strategies."""
+class RoutingStrategy(StrEnum):
+    """High-level routing strategies. Canonical definition; re-exported from
+    src.ai_brain.config.model_schemas for backward compatibility."""
 
     SPEED_FIRST = "speed_first"  # Minimize latency
     COST_EFFICIENT = "cost_efficient"  # Minimize cost

@@ -7,7 +7,7 @@ password history policies.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -118,7 +118,7 @@ class PasswordHistory(BaseModel):
 
         expires_at = None
         if expires_in_days:
-            expires_at = datetime.utcnow() + timedelta(days=expires_in_days)
+            expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
 
         return cls(
             user_id=user_id,
@@ -148,17 +148,21 @@ class PasswordHistory(BaseModel):
         """Check if this password has expired."""
         if self.expires_at is None:
             return False
-        return bool(datetime.utcnow() > self.expires_at)
+        return bool(datetime.now(UTC) > self.expires_at)
 
     @property
     def age_in_days(self) -> int:
         """Get age of password in days."""
-        delta = datetime.utcnow() - self.created_at
+        delta = datetime.now(UTC) - self.created_at
         return delta.days
 
     @classmethod
     def check_password_reuse(
-        cls, user_id: str, password: str, history_count: int = 5, session: Session | None = None
+        cls,
+        user_id: str,
+        password: str,
+        history_count: int = 5,
+        session: Session | None = None,
     ) -> bool:
         """
         Check if password has been used recently.
@@ -188,7 +192,9 @@ class PasswordHistory(BaseModel):
         return any(entry.verify_password(password) for entry in recent_passwords)
 
     @classmethod
-    def get_last_change(cls, user_id: str, session: Session | None = None) -> PasswordHistory | None:
+    def get_last_change(
+        cls, user_id: str, session: Session | None = None
+    ) -> PasswordHistory | None:
         """
         Get the most recent password change for a user.
 

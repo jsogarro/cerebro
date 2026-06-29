@@ -4,10 +4,15 @@ Revision ID: e1c02ed69b45
 Revises: 5bf6a31d1957
 Create Date: 2025-09-08 09:25:08.270031
 
+Fix: All sa.Enum() calls now pass create_type=False since the types are
+explicitly created via op.execute() at the start of upgrade(). This prevents
+DuplicateObjectError on fresh databases.
+
 """
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -21,9 +26,32 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Upgrade schema."""
     # Create enums
-    op.execute("CREATE TYPE experimentstatus AS ENUM ('draft', 'running', 'paused', 'completed', 'archived')")
-    op.execute("CREATE TYPE experimenttype AS ENUM ('prompt', 'routing', 'api_pattern', 'memory', 'supervisor', 'model', 'system')")
-    op.execute("CREATE TYPE allocationstrategy AS ENUM ('random', 'weighted', 'deterministic', 'adaptive', 'contextual')")
+    # Postgres has no CREATE TYPE ... IF NOT EXISTS; wrap each
+    # creation in a DO $$ EXCEPTION block so the migration is
+    # idempotent. SQLAlchemy's sa.Enum(..., create_type=False)
+    # below relies on these types existing.
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE experimentstatus AS ENUM
+                ('draft', 'running', 'paused', 'completed', 'archived');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE experimenttype AS ENUM
+                ('prompt', 'routing', 'api_pattern', 'memory',
+                 'supervisor', 'model', 'system');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE allocationstrategy AS ENUM
+                ('random', 'weighted', 'deterministic', 'adaptive', 'contextual');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
     
     # Create experiments table
     op.create_table(
@@ -31,9 +59,9 @@ def upgrade() -> None:
         sa.Column('id', sa.UUID(), nullable=False),
         sa.Column('name', sa.String(255), nullable=False),
         sa.Column('description', sa.Text(), nullable=True),
-        sa.Column('experiment_type', sa.Enum('prompt', 'routing', 'api_pattern', 'memory', 'supervisor', 'model', 'system', name='experimenttype'), nullable=False),
-        sa.Column('status', sa.Enum('draft', 'running', 'paused', 'completed', 'archived', name='experimentstatus'), nullable=True),
-        sa.Column('allocation_strategy', sa.Enum('random', 'weighted', 'deterministic', 'adaptive', 'contextual', name='allocationstrategy'), nullable=True),
+        sa.Column('experiment_type', postgresql.ENUM('prompt', 'routing', 'api_pattern', 'memory', 'supervisor', 'model', 'system', name='experimenttype', create_type=False), nullable=False),
+        sa.Column('status', postgresql.ENUM('draft', 'running', 'paused', 'completed', 'archived', name='experimentstatus', create_type=False), nullable=True),
+        sa.Column('allocation_strategy', postgresql.ENUM('random', 'weighted', 'deterministic', 'adaptive', 'contextual', name='allocationstrategy', create_type=False), nullable=True),
         sa.Column('traffic_percentage', sa.Float(), nullable=True),
         sa.Column('target_segments', sa.JSON(), nullable=True),
         sa.Column('start_date', sa.DateTime(), nullable=True),

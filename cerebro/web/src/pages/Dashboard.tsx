@@ -49,7 +49,7 @@ export function Dashboard() {
                         <Activity className="h-4 w-4 text-emerald-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">99.9%</div>
+                        <div className="text-3xl font-bold tracking-tight text-emerald-700 dark:text-emerald-300">99.9%</div>
                         <p className="text-xs text-muted-foreground mt-1 font-medium">All services operational</p>
                     </CardContent>
                 </Card>
@@ -97,7 +97,7 @@ export function Dashboard() {
                                                 />
                                             </div>
                                         </div>
-                                        <Badge variant={item.status === 'completed' ? 'default' : item.status === 'failed' ? 'destructive' : 'secondary'} className={`capitalize w-24 justify-center ${item.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 shadow-none border-none pointer-events-none' : ''}`}>
+                                        <Badge variant={item.status === 'completed' ? 'default' : item.status === 'failed' ? 'destructive' : 'secondary'} className={`capitalize w-24 justify-center ${item.status === 'completed' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 shadow-none border-none pointer-events-none' : ''}`}>
                                             {item.status}
                                         </Badge>
                                     </div>

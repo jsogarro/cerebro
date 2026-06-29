@@ -4,11 +4,11 @@ Tool registry for MCP server.
 Manages tool registration, discovery, and versioning.
 """
 
-import logging
+from structlog import get_logger
 
 from src.mcp.base import BaseMCPTool, ToolMetadata
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ToolRegistry:

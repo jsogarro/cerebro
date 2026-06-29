@@ -6,7 +6,7 @@ Manages API keys for service accounts and programmatic access.
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -147,7 +147,7 @@ class APIKey(BaseModel):
 
         expires_at = None
         if expires_in_days:
-            expires_at = datetime.utcnow() + timedelta(days=expires_in_days)
+            expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
 
         api_key = cls(
             key_hash=hashed_key,
@@ -180,7 +180,7 @@ class APIKey(BaseModel):
         Args:
             ip_address: IP address of the request
         """
-        self.last_used_at = datetime.utcnow()
+        self.last_used_at = datetime.now(UTC)
         self.use_count += 1
 
         if ip_address:
@@ -194,7 +194,7 @@ class APIKey(BaseModel):
             reason: Reason for revocation
         """
         self.is_active = False
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(UTC)
 
         if reason:
             self.revoked_reason = reason
@@ -215,7 +215,7 @@ class APIKey(BaseModel):
         if self.expires_at:
             self.expires_at += timedelta(days=days)
         else:
-            self.expires_at = datetime.utcnow() + timedelta(days=days)
+            self.expires_at = datetime.now(UTC) + timedelta(days=days)
 
     def has_permission(self, permission: str) -> bool:
         """
@@ -258,7 +258,7 @@ class APIKey(BaseModel):
         """Check if key is expired."""
         if not self.expires_at:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(UTC) > self.expires_at
 
     @property
     def is_valid(self) -> bool:
@@ -271,7 +271,7 @@ class APIKey(BaseModel):
         if not self.expires_at:
             return None
 
-        delta = self.expires_at - datetime.utcnow()
+        delta = self.expires_at - datetime.now(UTC)
         return max(0, delta.days)
 
     def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:

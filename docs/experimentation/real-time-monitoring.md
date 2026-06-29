@@ -71,7 +71,7 @@ class ExperimentWebSocketManager:
                 'type': 'experiment_update',
                 'experiment_id': experiment_id,
                 'data': update,
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.now(UTC).isoformat()
             })
             
             for client_id in self.experiment_subscriptions[experiment_id]:
@@ -607,7 +607,7 @@ class ExperimentSystemHealth:
             status=overall_status,
             components=checks,
             issues=issues,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
 ```
 

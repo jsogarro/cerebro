@@ -178,9 +178,7 @@ class AgentState:
         """Check if the agent is available for new tasks."""
         return self.status == "idle"
 
-    def with_new_status(
-        self, status: str, task_id: str | None = None
-    ) -> "AgentState":
+    def with_new_status(self, status: str, task_id: str | None = None) -> "AgentState":
         """
         Create a new state with updated status.
 

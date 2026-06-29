@@ -4,7 +4,8 @@ Agent Task database model.
 Represents agent tasks within research projects.
 """
 
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -52,6 +53,13 @@ class AgentTask(BaseModel):
         ForeignKey("research_projects.id"),
         nullable=False,
         index=True,
+    )
+
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(),
+        nullable=True,
+        index=True,
+        comment="Tenant organization boundary identifier",
     )
 
     agent_type: Mapped[str] = mapped_column(
@@ -109,6 +117,8 @@ class AgentTask(BaseModel):
 
     # Indexes
     __table_args__ = (
+        Index("idx_task_org_project_status", "organization_id", "project_id", "status"),
+        Index("idx_task_org_status", "organization_id", "status", "created_at"),
         Index("idx_task_project_status", "project_id", "status"),
         Index("idx_task_agent_status", "agent_type", "status"),
         Index("idx_task_priority", "priority", "status"),
@@ -119,7 +129,7 @@ class AgentTask(BaseModel):
         """Mark task as started."""
 
         self.status = TaskStatus.IN_PROGRESS
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(UTC)
 
     def complete(self, output_data: dict[str, Any]) -> None:
         """
@@ -131,7 +141,7 @@ class AgentTask(BaseModel):
 
         self.status = TaskStatus.COMPLETED
         self.output_data = output_data
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(UTC)
 
         if self.started_at:
             delta = self.completed_at - self.started_at
@@ -147,7 +157,7 @@ class AgentTask(BaseModel):
 
         self.status = TaskStatus.FAILED
         self.error_message = error_message
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(UTC)
 
         if self.started_at:
             delta = self.completed_at - self.started_at
@@ -168,7 +178,7 @@ class AgentTask(BaseModel):
 
         self.status = TaskStatus.CANCELLED
         if not self.completed_at:
-            self.completed_at = datetime.utcnow()
+            self.completed_at = datetime.now(UTC)
 
     @property
     def is_pending(self) -> bool:

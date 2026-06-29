@@ -153,9 +153,7 @@ class PromptTemplate(BaseModel):
     temperature: float = Field(0.7, description="Default temperature")
 
     # Advanced features
-    inherits_from: str | None = Field(
-        None, description="Base template to inherit from"
-    )
+    inherits_from: str | None = Field(None, description="Base template to inherit from")
     requires_refinement: bool = Field(
         False, description="Requires multi-round refinement"
     )

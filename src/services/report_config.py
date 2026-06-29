@@ -20,137 +20,138 @@ class ReportSettings(BaseSettings):
     report_storage_path: str = Field(
         default="./reports",
         description="Base path for storing generated reports",
-        validation_alias="REPORT_STORAGE_PATH"
+        validation_alias="REPORT_STORAGE_PATH",
     )
 
     max_report_size_mb: int = Field(
         default=100,
         description="Maximum report size in MB",
-        validation_alias="MAX_REPORT_SIZE_MB"
+        validation_alias="MAX_REPORT_SIZE_MB",
     )
 
     default_format: ReportFormat = Field(
         default=ReportFormat.HTML,
         description="Default report format",
-        validation_alias="DEFAULT_REPORT_FORMAT"
+        validation_alias="DEFAULT_REPORT_FORMAT",
     )
 
     default_citation_style: CitationStyle = Field(
         default=CitationStyle.APA,
         description="Default citation style",
-        validation_alias="DEFAULT_CITATION_STYLE"
+        validation_alias="DEFAULT_CITATION_STYLE",
     )
 
     enable_pdf_generation: bool = Field(
         default=True,
         description="Enable PDF generation",
-        validation_alias="ENABLE_PDF_GENERATION"
+        validation_alias="ENABLE_PDF_GENERATION",
     )
 
     enable_latex_generation: bool = Field(
         default=True,
         description="Enable LaTeX generation",
-        validation_alias="ENABLE_LATEX_GENERATION"
+        validation_alias="ENABLE_LATEX_GENERATION",
     )
 
     template_path: str = Field(
         default="./src/templates/reports",
         description="Path to report templates",
-        validation_alias="REPORT_TEMPLATE_PATH"
+        validation_alias="REPORT_TEMPLATE_PATH",
     )
 
     custom_css_path: str | None = Field(
         default=None,
         description="Path to custom CSS files",
-        validation_alias="CUSTOM_CSS_PATH"
+        validation_alias="CUSTOM_CSS_PATH",
     )
 
     generation_timeout_seconds: int = Field(
         default=300,
         description="Timeout for report generation in seconds",
-        validation_alias="REPORT_GENERATION_TIMEOUT"
+        validation_alias="REPORT_GENERATION_TIMEOUT",
     )
 
     parallel_generation: bool = Field(
         default=True,
         description="Enable parallel format generation",
-        validation_alias="PARALLEL_REPORT_GENERATION"
+        validation_alias="PARALLEL_REPORT_GENERATION",
     )
 
     max_concurrent_generations: int = Field(
         default=3,
         description="Maximum concurrent report generations",
-        validation_alias="MAX_CONCURRENT_GENERATIONS"
+        validation_alias="MAX_CONCURRENT_GENERATIONS",
     )
 
     enable_visualizations: bool = Field(
         default=True,
         description="Enable visualization generation",
-        validation_alias="ENABLE_VISUALIZATIONS"
+        validation_alias="ENABLE_VISUALIZATIONS",
     )
 
     max_visualizations_per_report: int = Field(
         default=20,
         description="Maximum visualizations per report",
-        validation_alias="MAX_VISUALIZATIONS_PER_REPORT"
+        validation_alias="MAX_VISUALIZATIONS_PER_REPORT",
     )
 
     default_chart_width: int = Field(
         default=800,
         description="Default chart width in pixels",
-        validation_alias="DEFAULT_CHART_WIDTH"
+        validation_alias="DEFAULT_CHART_WIDTH",
     )
 
     default_chart_height: int = Field(
         default=600,
         description="Default chart height in pixels",
-        validation_alias="DEFAULT_CHART_HEIGHT"
+        validation_alias="DEFAULT_CHART_HEIGHT",
     )
 
     enable_template_cache: bool = Field(
         default=True,
         description="Enable template caching",
-        validation_alias="ENABLE_TEMPLATE_CACHE"
+        validation_alias="ENABLE_TEMPLATE_CACHE",
     )
 
     template_cache_ttl_seconds: int = Field(
         default=3600,
         description="Template cache TTL in seconds",
-        validation_alias="TEMPLATE_CACHE_TTL"
+        validation_alias="TEMPLATE_CACHE_TTL",
     )
 
     min_word_count: int = Field(
         default=100,
         description="Minimum word count for valid reports",
-        validation_alias="MIN_REPORT_WORD_COUNT"
+        validation_alias="MIN_REPORT_WORD_COUNT",
     )
 
     min_sources: int = Field(
         default=1,
         description="Minimum number of sources required",
-        validation_alias="MIN_REPORT_SOURCES"
+        validation_alias="MIN_REPORT_SOURCES",
     )
 
     require_citations: bool = Field(
         default=True,
         description="Require citations in reports",
-        validation_alias="REQUIRE_CITATIONS"
+        validation_alias="REQUIRE_CITATIONS",
     )
 
     model_config = {
         "env_file": ".env",
-        "env_prefix": "RESEARCH_"
+        "env_prefix": "RESEARCH_",
+        "populate_by_name": True,
     }
 
 
 class ReportTemplateConfig:
     """Configuration for report templates with immutable settings."""
-    
+
     def __init__(self, settings: ReportSettings):
         """Initialize template configuration."""
         self._settings = settings
         self._template_configs = self._build_template_configs()
-    
+
     def _build_template_configs(self) -> dict[ReportType, dict[str, Any]]:
         """Build template configurations for each report type."""
         return {
@@ -158,7 +159,7 @@ class ReportTemplateConfig:
                 "template_name": "comprehensive_report.html.j2",
                 "sections": [
                     "executive_summary",
-                    "introduction", 
+                    "introduction",
                     "methodology",
                     "literature_review",
                     "findings",
@@ -167,7 +168,7 @@ class ReportTemplateConfig:
                     "conclusions",
                     "recommendations",
                     "limitations",
-                    "references"
+                    "references",
                 ],
                 "include_toc": True,
                 "include_visualizations": True,
@@ -176,11 +177,7 @@ class ReportTemplateConfig:
             },
             ReportType.EXECUTIVE_SUMMARY: {
                 "template_name": "executive_summary.html.j2",
-                "sections": [
-                    "key_findings",
-                    "strategic_insights", 
-                    "recommendations"
-                ],
+                "sections": ["key_findings", "strategic_insights", "recommendations"],
                 "include_toc": False,
                 "include_visualizations": True,
                 "include_appendices": False,
@@ -191,12 +188,12 @@ class ReportTemplateConfig:
                 "sections": [
                     "abstract",
                     "introduction",
-                    "literature_review", 
+                    "literature_review",
                     "methodology",
                     "results",
                     "discussion",
                     "conclusions",
-                    "references"
+                    "references",
                 ],
                 "include_toc": True,
                 "include_visualizations": True,
@@ -212,7 +209,7 @@ class ReportTemplateConfig:
                     "synthesis",
                     "gaps_identified",
                     "conclusions",
-                    "references"
+                    "references",
                 ],
                 "include_toc": True,
                 "include_visualizations": False,
@@ -229,7 +226,7 @@ class ReportTemplateConfig:
                     "validation",
                     "limitations",
                     "recommendations",
-                    "references"
+                    "references",
                 ],
                 "include_toc": True,
                 "include_visualizations": True,
@@ -245,30 +242,32 @@ class ReportTemplateConfig:
                     "synthesis",
                     "implications",
                     "recommendations",
-                    "references"
+                    "references",
                 ],
                 "include_toc": True,
                 "include_visualizations": True,
                 "include_appendices": False,
                 "estimated_pages": 8,
-            }
+            },
         }
-    
+
     def get_template_config(self, report_type: ReportType) -> dict[str, Any]:
         """Get template configuration for a specific report type."""
-        return self._template_configs.get(report_type, self._template_configs[ReportType.COMPREHENSIVE])
-    
+        return self._template_configs.get(
+            report_type, self._template_configs[ReportType.COMPREHENSIVE]
+        )
+
     def get_template_path(self, report_type: ReportType) -> str:
         """Get the template file path for a report type."""
         config = self.get_template_config(report_type)
         template_name = config["template_name"]
         return os.path.join(self._settings.template_path, template_name)
-    
+
     def get_required_sections(self, report_type: ReportType) -> list[str]:
         config = self.get_template_config(report_type)
         result: list[str] = config.get("sections", [])
         return result
-    
+
     def should_include_toc(self, report_type: ReportType) -> bool:
         config = self.get_template_config(report_type)
         result: bool = config.get("include_toc", True)
@@ -292,12 +291,12 @@ class ReportTemplateConfig:
 
 class ReportFormatConfig:
     """Configuration for different output formats."""
-    
+
     def __init__(self, settings: ReportSettings):
         """Initialize format configuration."""
         self._settings = settings
         self._format_configs = self._build_format_configs()
-    
+
     def _build_format_configs(self) -> dict[ReportFormat, dict[str, Any]]:
         """Build format-specific configurations."""
         return {
@@ -311,7 +310,7 @@ class ReportFormatConfig:
             },
             ReportFormat.PDF: {
                 "mime_type": "application/pdf",
-                "file_extension": ".pdf", 
+                "file_extension": ".pdf",
                 "encoding": "binary",
                 "supports_interactive": False,
                 "supports_css": True,
@@ -350,13 +349,13 @@ class ReportFormatConfig:
                 "supports_interactive": False,
                 "supports_css": False,
                 "supports_images": False,
-            }
+            },
         }
-    
+
     def get_format_config(self, format: ReportFormat) -> dict[str, Any]:
         """Get configuration for a specific format."""
         return self._format_configs.get(format, {})
-    
+
     def get_mime_type(self, format: ReportFormat) -> str:
         config = self.get_format_config(format)
         result: str = config.get("mime_type", "application/octet-stream")
@@ -390,11 +389,11 @@ class ReportFormatConfig:
 
 class ReportQualityConfig:
     """Configuration for report quality assessment."""
-    
+
     def __init__(self, settings: ReportSettings):
         """Initialize quality configuration."""
         self._settings = settings
-    
+
     def get_min_word_count(self, report_type: ReportType) -> int:
         """Get minimum word count for a report type."""
         minimums = {
@@ -406,7 +405,7 @@ class ReportQualityConfig:
             ReportType.COMPREHENSIVE: 2000,
         }
         return minimums.get(report_type, self._settings.min_word_count)
-    
+
     def get_min_sources(self, report_type: ReportType) -> int:
         """Get minimum number of sources for a report type."""
         minimums = {
@@ -418,11 +417,11 @@ class ReportQualityConfig:
             ReportType.COMPREHENSIVE: 10,
         }
         return minimums.get(report_type, self._settings.min_sources)
-    
+
     def requires_citations(self, report_type: ReportType) -> bool:
         """Check if citations are required for a report type."""
         return self._settings.require_citations
-    
+
     def get_quality_thresholds(self, report_type: ReportType) -> dict[str, float]:
         """Get quality score thresholds for a report type."""
         return {
@@ -439,7 +438,9 @@ def create_report_settings() -> ReportSettings:
     return ReportSettings()
 
 
-def create_template_config(settings: ReportSettings | None = None) -> ReportTemplateConfig:
+def create_template_config(
+    settings: ReportSettings | None = None,
+) -> ReportTemplateConfig:
     """Factory function to create template configuration."""
     if settings is None:
         settings = create_report_settings()
@@ -453,7 +454,9 @@ def create_format_config(settings: ReportSettings | None = None) -> ReportFormat
     return ReportFormatConfig(settings)
 
 
-def create_quality_config(settings: ReportSettings | None = None) -> ReportQualityConfig:
+def create_quality_config(
+    settings: ReportSettings | None = None,
+) -> ReportQualityConfig:
     """Factory function to create quality configuration."""
     if settings is None:
         settings = create_report_settings()

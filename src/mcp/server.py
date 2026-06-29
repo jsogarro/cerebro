@@ -4,16 +4,16 @@ MCP Server implementation using FastMCP.
 Provides the main MCP server that manages and exposes tools.
 """
 
-import logging
 from typing import Any
 
 from fastmcp import FastMCP
 from pydantic import BaseModel
+from structlog import get_logger
 
 from src.mcp.base import BaseMCPTool
 from src.mcp.registry import ToolRegistry
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class MCPServerConfig(BaseModel):
@@ -79,7 +79,9 @@ class MCPServer:
             """Wrapper function for MCP tool execution."""
             return await tool.execute(**kwargs)
 
-        _decorated_tool = self.mcp.tool(name=metadata.name, description=metadata.description)(tool_wrapper)
+        _decorated_tool = self.mcp.tool(
+            name=metadata.name, description=metadata.description
+        )(tool_wrapper)
 
         logger.info(f"Registered tool: {metadata.name}")
 

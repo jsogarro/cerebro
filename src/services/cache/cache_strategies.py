@@ -40,7 +40,9 @@ class CacheStrategy(ABC):
         """Called when a key is deleted."""
         pass
 
-    async def invalidate_dependencies(self, key: str, redis: aioredis.Redis[Any]) -> int:
+    async def invalidate_dependencies(
+        self, key: str, redis: aioredis.Redis[Any]
+    ) -> int:
         """Invalidate dependent keys."""
         return 0
 
@@ -209,7 +211,9 @@ class DependencyStrategy(CacheStrategy):
         # Delete dependency tracking
         await redis.delete(deps_key)
 
-    async def invalidate_dependencies(self, key: str, redis: aioredis.Redis[Any]) -> int:
+    async def invalidate_dependencies(
+        self, key: str, redis: aioredis.Redis[Any]
+    ) -> int:
         """
         Invalidate all keys dependent on the given key.
 
@@ -277,7 +281,9 @@ class HybridStrategy(CacheStrategy):
         for strategy in self.strategies:
             await strategy.on_delete(key, redis)
 
-    async def invalidate_dependencies(self, key: str, redis: aioredis.Redis[Any]) -> int:
+    async def invalidate_dependencies(
+        self, key: str, redis: aioredis.Redis[Any]
+    ) -> int:
         """Invalidate dependencies using all strategies."""
         total = 0
         for strategy in self.strategies:

@@ -166,7 +166,7 @@ class AgentTaskState:
             result=self.result,
             error=self.error,
             retry_count=self.retry_count,
-            started_at=datetime.utcnow() if status == AgentExecutionStatus.IN_PROGRESS else self.started_at,
+            started_at=datetime.now(UTC) if status == AgentExecutionStatus.IN_PROGRESS else self.started_at,
             completed_at=self.completed_at,
         )
 ```
@@ -823,7 +823,7 @@ class WorkflowCheckpointer:
             "checkpoint_id": checkpoint_id,
             "workflow_id": workflow_id,
             "state": state,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(UTC),
             "phase": state.current_phase,
             "progress": calculate_progress(state)
         }
@@ -930,7 +930,7 @@ class TemporalLangGraphBridge:
             domains=workflow_data["query"]["domains"],
             workflow_id=workflow_id,
             current_phase=WorkflowPhase.INITIALIZATION,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             agent_tasks={},
             completed_phases=set(),
             context={},
@@ -1065,7 +1065,7 @@ async def test_query_analysis_node():
         domains=["AI", "Healthcare"],
         workflow_id="test-workflow",
         current_phase=WorkflowPhase.INITIALIZATION,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
         agent_tasks={},
         completed_phases=set(),
         context={},

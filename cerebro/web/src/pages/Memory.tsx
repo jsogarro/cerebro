@@ -4,8 +4,16 @@ import { Badge } from "@/components/ui/badge";
 import { Search, Brain, Clock, Database } from "lucide-react";
 import { useMemoryNodes } from "@/api/memory";
 
+type MemoryNode = {
+    id: string;
+    content: string;
+    type: string;
+    timestamp: string;
+};
+
 export function Memory() {
     const { data: nodes, isLoading } = useMemoryNodes();
+    const memoryNodes = (nodes ?? []) as MemoryNode[];
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -17,8 +25,9 @@ export function Memory() {
             </div>
 
             <div className="flex items-center gap-2 max-w-md">
-                <Search className="h-4 w-4 text-muted-foreground absolute ml-3" />
+                <Search aria-hidden="true" className="h-4 w-4 text-muted-foreground absolute ml-3" />
                 <Input
+                    aria-label="Search memory nodes"
                     placeholder="Search memories by content or ID..."
                     className="pl-9"
                 />
@@ -38,7 +47,7 @@ export function Memory() {
                             {isLoading ? (
                                 <p className="text-sm text-muted-foreground animate-pulse">Loading nodes...</p>
                             ) : (
-                                nodes?.map((node: any) => (
+                                memoryNodes.map((node) => (
                                     <div key={node.id} className="flex items-start gap-4 p-4 border rounded-xl hover:bg-muted/30 transition-colors">
                                         <div className="h-10 w-10 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
                                             <Brain className="h-5 w-5 text-primary" />

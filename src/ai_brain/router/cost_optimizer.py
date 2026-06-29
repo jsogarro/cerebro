@@ -12,15 +12,16 @@ Optimizes model selection based on cost-performance trade-offs, analyzing:
 Now supports dynamic model configuration instead of hard-coded specifications.
 """
 
-import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
+from structlog import get_logger
+
 if TYPE_CHECKING:
     from ..config.model_config_manager import ModelConfigManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class OptimizationStrategy(Enum):
@@ -460,7 +461,9 @@ class CostOptimizer:
 
         return estimates
 
-    def _is_perfect_domain_fit(self, model: ModelSpec, complexity_analysis: Any) -> bool:
+    def _is_perfect_domain_fit(
+        self, model: ModelSpec, complexity_analysis: Any
+    ) -> bool:
         """Check if model is a perfect fit for the query domain."""
         # Check if model's strengths perfectly align with query requirements
         reasoning_types = complexity_analysis.reasoning_types

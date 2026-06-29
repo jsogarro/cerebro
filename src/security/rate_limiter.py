@@ -449,7 +449,11 @@ class RateLimiter:
         """
         # This would need to be implemented based on the specific
         # requirements and how you want to track/report status
-        status: dict[str, Any] = {"identifier": identifier, "endpoint": endpoint, "limits": []}
+        status: dict[str, Any] = {
+            "identifier": identifier,
+            "endpoint": endpoint,
+            "limits": [],
+        }
 
         # Find matching keys and get their status
         pattern = f"rate_limit:*{identifier}*"

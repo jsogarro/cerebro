@@ -39,14 +39,10 @@ class ModelCapability(StrEnum):
     TESTING = "testing"
 
 
-class RoutingStrategy(StrEnum):
-    """Available routing strategies."""
-
-    COST_EFFICIENT = "cost_efficient"
-    QUALITY_FOCUSED = "quality_focused"
-    SPEED_FIRST = "speed_first"
-    BALANCED = "balanced"
-    ADAPTIVE = "adaptive"
+# Canonical RoutingStrategy lives in src.ai_brain.router.routing_types.
+# Re-exported here to preserve the historical import path and avoid duplicate
+# enum identities (which caused 10 mypy arg-type errors across MASR boundaries).
+from src.ai_brain.router.routing_types import RoutingStrategy  # noqa: E402
 
 
 class ModelSpecification(BaseModel):
@@ -277,7 +273,9 @@ class ModelConfiguration(BaseModel):
 
     @field_validator("models")
     @classmethod
-    def validate_models_have_providers(cls, v: dict[str, ModelSpecification], info: ValidationInfo) -> dict[str, ModelSpecification]:
+    def validate_models_have_providers(
+        cls, v: dict[str, ModelSpecification], info: ValidationInfo
+    ) -> dict[str, ModelSpecification]:
         """Ensure all models reference valid providers."""
         # Skip validation if providers haven't been processed yet
         providers = info.data.get("providers")

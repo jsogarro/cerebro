@@ -5,7 +5,7 @@ Provides common fields and functionality for all SQLAlchemy models.
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import DateTime, String, TypeDecorator, func
@@ -80,7 +80,9 @@ class BaseModel(Base):
     )
 
     # Soft delete
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     # Audit fields
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -99,7 +101,7 @@ class BaseModel(Base):
         Args:
             deleted_by: User who deleted the record
         """
-        self.deleted_at = datetime.utcnow()
+        self.deleted_at = datetime.now(UTC)
         if deleted_by:
             self.updated_by = deleted_by
 

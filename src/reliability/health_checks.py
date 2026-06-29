@@ -8,11 +8,10 @@ liveness probes, readiness probes, and dependency health checks.
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -20,10 +19,11 @@ import asyncpg
 import redis.asyncio as redis
 from fastapi import FastAPI, Response, status
 from httpx import AsyncClient
+from structlog import get_logger
 
 from config import config
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class HealthStatus(Enum):
@@ -56,7 +56,7 @@ class HealthCheckResult:
     latency_ms: float
     message: str = ""
     details: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -78,7 +78,7 @@ class SystemHealth:
     components: list[HealthCheckResult]
     version: str
     uptime_seconds: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -115,7 +115,9 @@ class HealthChecker:
         """Register a health check function."""
         self.health_checks[name] = check_func
 
-    def register_dependency_check(self, name: str, check_func: Callable[..., Any]) -> None:
+    def register_dependency_check(
+        self, name: str, check_func: Callable[..., Any]
+    ) -> None:
         """Register a dependency check function."""
         self.dependency_checks[name] = check_func
 
@@ -595,7 +597,9 @@ def register_health_endpoints(app: FastAPI) -> None:
             return result.to_dict()
 
     @app.get("/health/{component}", tags=["health"])
-    async def component_health_check(component: str, response: Response) -> dict[str, Any]:
+    async def component_health_check(
+        component: str, response: Response
+    ) -> dict[str, Any]:
         """
         Check health of a specific component.
 

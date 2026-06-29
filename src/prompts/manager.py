@@ -14,7 +14,6 @@ Features:
 """
 
 import asyncio
-import logging
 import os
 import re
 import threading
@@ -24,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
+from structlog import get_logger
 
 try:
     from watchdog.events import FileSystemEventHandler
@@ -41,7 +41,19 @@ from .schemas import (
     PromptTemplate,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
+
+_CONTROL_CHARACTER_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_PROMPT_INJECTION_PATTERNS = (
+    re.compile(r"ignore\s+previous\s+instructions", flags=re.IGNORECASE),
+    re.compile(r"forget\s+everything", flags=re.IGNORECASE),
+    re.compile(r"pretend\s+you\s+are", flags=re.IGNORECASE),
+    re.compile(r"act\s+as\s+if", flags=re.IGNORECASE),
+    re.compile(r"system\s*:", flags=re.IGNORECASE),
+    re.compile(r"human\s*:", flags=re.IGNORECASE),
+    re.compile(r"assistant\s*:", flags=re.IGNORECASE),
+    re.compile(r"```+"),
+)
 
 
 class PromptChangeEvent:
@@ -612,6 +624,7 @@ class PromptManager:
             else:
                 var_str = str(var_value)
 
+            var_str = self._sanitize_template_variable(var_str)
             result = result.replace(f"{{{var_name}}}", var_str)
 
         # Handle conditional blocks {{#if variable}}...{{/if}}
@@ -621,6 +634,14 @@ class PromptManager:
         result = self._process_loop_blocks(result, variables)
 
         return result
+
+    def _sanitize_template_variable(self, value: str) -> str:
+        """Sanitize untrusted variable values before template substitution."""
+
+        sanitized = _CONTROL_CHARACTER_PATTERN.sub("", value)
+        for pattern in _PROMPT_INJECTION_PATTERNS:
+            sanitized = pattern.sub("", sanitized)
+        return sanitized.replace("{", "{{").replace("}", "}}")
 
     def _format_complex_variable(self, value: Any) -> str:
         """Format complex variables (dict, list) for templates."""
@@ -695,7 +716,9 @@ class PromptManager:
                 else:
                     raise ValueError(f"Required variable missing: {var_def.name}")
 
-    async def _compile_examples(self, examples: list[Any], variables: dict[str, Any]) -> str:
+    async def _compile_examples(
+        self, examples: list[Any], variables: dict[str, Any]
+    ) -> str:
         """Compile few-shot examples."""
 
         example_parts = []
@@ -826,7 +849,9 @@ class PromptManager:
             except Exception as e:
                 logger.error(f"Prompt change listener failed: {e}")
 
-    def add_change_listener(self, listener: Callable[[PromptChangeEvent], None]) -> None:
+    def add_change_listener(
+        self, listener: Callable[[PromptChangeEvent], None]
+    ) -> None:
         """Add listener for prompt changes."""
         self._change_listeners.append(listener)
 

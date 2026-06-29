@@ -347,7 +347,7 @@ class AgentResult(BaseModel):
     metadata: Dict[str, Any] = {}
     execution_time: Optional[float] = None
     sources: List[str] = []
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 ```
 
 ## Agent Factory Pattern

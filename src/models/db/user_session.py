@@ -7,7 +7,7 @@ monitoring and session management.
 
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -68,13 +68,9 @@ class UserSession(BaseModel):
     # Device information
     device_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    device_name: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
+    device_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    device_type: Mapped[str | None] = mapped_column(
-        String(50), nullable=True
-    )
+    device_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     os_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
@@ -91,17 +87,13 @@ class UserSession(BaseModel):
 
     country: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    region: Mapped[str | None] = mapped_column(
-        String(100), nullable=True
-    )
+    region: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     latitude: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    longitude: Mapped[str | None] = mapped_column(
-        String(20), nullable=True
-    )
+    longitude: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Activity tracking
     last_activity: Mapped[datetime] = mapped_column(
@@ -112,9 +104,7 @@ class UserSession(BaseModel):
 
     last_ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
 
-    request_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0
-    )
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Session security
     is_active: Mapped[bool] = mapped_column(
@@ -124,9 +114,7 @@ class UserSession(BaseModel):
         index=True,
     )
 
-    is_suspicious: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    is_suspicious: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     mfa_verified: Mapped[bool] = mapped_column(
         Boolean,
@@ -145,9 +133,7 @@ class UserSession(BaseModel):
         DateTime(timezone=True), nullable=True
     )
 
-    revoke_reason: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
+    revoke_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Additional metadata
     session_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -190,7 +176,7 @@ class UserSession(BaseModel):
         """
         session_token = secrets.token_urlsafe(32)
         refresh_token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
+        expires_at = datetime.now(UTC) + timedelta(hours=duration_hours)
 
         session = cls(
             user_id=user_id,
@@ -234,7 +220,7 @@ class UserSession(BaseModel):
             ip_address: Current IP address
             extend_duration: Whether to extend session duration
         """
-        self.last_activity = datetime.utcnow()
+        self.last_activity = datetime.now(UTC)
         self.request_count += 1
 
         if ip_address:
@@ -247,7 +233,7 @@ class UserSession(BaseModel):
         # Extend session if requested and not expired
         if extend_duration and not self.is_expired:
             # Extend by original duration
-            self.expires_at = datetime.utcnow() + timedelta(hours=24)
+            self.expires_at = datetime.now(UTC) + timedelta(hours=24)
 
     def revoke(self, reason: str | None = None) -> None:
         """
@@ -257,7 +243,7 @@ class UserSession(BaseModel):
             reason: Reason for revocation
         """
         self.is_active = False
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(UTC)
         self.revoke_reason = reason
 
     def refresh(self, duration_hours: int = 24) -> str:
@@ -273,8 +259,8 @@ class UserSession(BaseModel):
         new_token = secrets.token_urlsafe(32)
         self.session_token = new_token
         self.refresh_token = secrets.token_urlsafe(32)
-        self.expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
-        self.last_activity = datetime.utcnow()
+        self.expires_at = datetime.now(UTC) + timedelta(hours=duration_hours)
+        self.last_activity = datetime.now(UTC)
 
         return new_token
 
@@ -294,7 +280,7 @@ class UserSession(BaseModel):
     @property
     def is_expired(self) -> bool:
         """Check if session has expired."""
-        return bool(datetime.utcnow() > self.expires_at)
+        return bool(datetime.now(UTC) > self.expires_at)
 
     @property
     def is_valid(self) -> bool:
@@ -309,10 +295,14 @@ class UserSession(BaseModel):
     @property
     def idle_time(self) -> timedelta:
         """Get time since last activity."""
-        return timedelta(seconds=(datetime.utcnow() - self.last_activity).total_seconds())
+        return timedelta(
+            seconds=(datetime.now(UTC) - self.last_activity).total_seconds()
+        )
 
     @classmethod
-    def get_active_sessions(cls, user_id: str, session: Any = None) -> list["UserSession"]:
+    def get_active_sessions(
+        cls, user_id: str, session: Any = None
+    ) -> list["UserSession"]:
         """
         Get all active sessions for a user.
 
@@ -331,7 +321,7 @@ class UserSession(BaseModel):
             .filter(
                 cls.user_id == user_id,
                 cls.is_active,
-                cls.expires_at > datetime.utcnow(),
+                cls.expires_at > datetime.now(UTC),
                 cls.revoked_at.is_(None),
             )
             .all()

@@ -4,7 +4,7 @@ Authentication-related database models.
 Additional tables for authentication, sessions, and security features.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     ARRAY,
@@ -101,11 +101,11 @@ class UserSession(BaseModel):
     @property
     def is_expired(self) -> bool:
         """Check if session is expired."""
-        return bool(datetime.utcnow() > self.expires_at)
+        return bool(datetime.now(UTC) > self.expires_at)
 
     def update_activity(self) -> None:
         """Update last activity timestamp."""
-        current_time: datetime = datetime.utcnow()
+        current_time: datetime = datetime.now(UTC)
         self.last_activity = current_time
 
 

@@ -9,7 +9,6 @@ Now supports dynamic model configuration loading from YAML files instead of
 hard-coded specifications.
 """
 
-import logging
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
@@ -18,11 +17,15 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
+from structlog import get_logger
+
+from src.core.observability import LLMCallMetrics, record_llm_call
+
 if TYPE_CHECKING:
     from ..config.model_config_manager import ModelConfigManager
     from ..config.model_schemas import ModelSpecification, ProviderConfiguration
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ModelCapability(Enum):
@@ -205,7 +208,7 @@ class BaseProvider(ABC):
         self.last_health_check = datetime.now()
         self.health_status = ProviderHealthStatus(provider_name=self.provider_name)
 
-        logger.info(f"Initialized {self.provider_name} provider")
+        logger.info("Initialized provider", provider_name=self.provider_name)
 
     @abstractmethod
     def _get_provider_name(self) -> str:
@@ -219,7 +222,10 @@ class BaseProvider(ABC):
             # Fallback to legacy hard-coded configuration
             self.supported_capabilities = self._get_supported_capabilities_legacy()
             self.supported_models = self._get_supported_models_legacy()
-            logger.warning(f"Provider {self.provider_name} using legacy configuration")
+            logger.warning(
+                "Provider using legacy configuration",
+                provider_name=self.provider_name,
+            )
             return
 
         try:
@@ -276,17 +282,23 @@ class BaseProvider(ABC):
                                 legacy_capability_mapping[config_cap_enum]
                             )
                     except ValueError:
-                        logger.warning(f"Unknown capability: {config_cap}")
+                        logger.warning("Unknown capability", capability=config_cap)
 
             self._config_loaded = True
             logger.info(
-                f"Loaded configuration for {self.provider_name}: "
-                f"{len(self.supported_models)} models, "
-                f"{len(self.supported_capabilities)} capabilities"
+                "Loaded provider configuration",
+                provider_name=self.provider_name,
+                model_count=len(self.supported_models),
+                capability_count=len(self.supported_capabilities),
             )
 
         except Exception as e:
-            logger.error(f"Failed to load configuration for {self.provider_name}: {e}")
+            logger.error(
+                "Failed to load provider configuration",
+                provider_name=self.provider_name,
+                error=str(e),
+                exc_info=True,
+            )
             # Fallback to legacy configuration
             self.supported_capabilities = self._get_supported_capabilities_legacy()
             self.supported_models = self._get_supported_models_legacy()
@@ -371,7 +383,12 @@ class BaseProvider(ABC):
                 ]
 
         except Exception as e:
-            logger.error(f"Health check failed for {self.provider_name}: {e}")
+            logger.error(
+                "Health check failed",
+                provider_name=self.provider_name,
+                error=str(e),
+                exc_info=True,
+            )
             self.health_status.healthy = False
             self.health_status.last_error = str(e)
             self.health_status.last_check = datetime.now()
@@ -404,7 +421,7 @@ class BaseProvider(ABC):
 
         # Try to get from dynamic configuration first
         if self._config_loaded and model_name in self._model_specs:
-            return self._model_specs[model_name].context_window
+            return int(self._model_specs[model_name].context_window)
 
         # Fallback to legacy implementation
         return self._get_model_context_window_legacy(model_name)
@@ -414,7 +431,7 @@ class BaseProvider(ABC):
 
         # Try to get from dynamic configuration first
         if self._config_loaded and model_name in self._model_specs:
-            return self._model_specs[model_name].cost_per_1k_tokens
+            return float(self._model_specs[model_name].cost_per_1k_tokens)
 
         # Fallback to legacy implementation
         return self._get_model_cost_legacy(model_name)
@@ -478,6 +495,19 @@ class BaseProvider(ABC):
             self.health_status.avg_latency_ms = (
                 self.total_latency_ms / self.request_count
             )
+
+        record_llm_call(
+            LLMCallMetrics(
+                provider=response.provider or self.provider_name,
+                model=response.model_name,
+                prompt_tokens=response.prompt_tokens,
+                completion_tokens=response.completion_tokens,
+                latency_ms=response.latency_ms,
+                cost_usd=response.cost_estimate,
+                request_id=response.request_id,
+                success=response.success,
+            )
+        )
 
         return response
 

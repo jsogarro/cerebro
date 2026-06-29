@@ -5,14 +5,15 @@ This agent specializes in recommending and evaluating research methodologies.
 """
 
 import hashlib
-import logging
 from typing import Any
+
+from structlog import get_logger
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class MethodologyAgent(BaseAgent):
@@ -86,10 +87,9 @@ class MethodologyAgent(BaseAgent):
                 output=output,
                 confidence=confidence,
                 execution_time=0.0,
-                metadata={
-                    "agent_type": self.get_agent_type(),
-                    "methods_count": len(output["data_collection_methods"]),
-                },
+                metadata=self.build_execution_metadata(
+                    methods_count=len(output["data_collection_methods"]),
+                ),
             )
 
             # Cache the result
@@ -158,9 +158,9 @@ class MethodologyAgent(BaseAgent):
 
     def _build_prompt(self, input_data: dict[str, Any]) -> str:
         """Build prompt for Gemini."""
-        return f"""Design a research methodology for: {input_data.get('research_question')}
-        Type: {input_data.get('research_type', 'mixed')}
-        Scope: {input_data.get('scope', 'general')}
+        return f"""Design a research methodology for: {input_data.get("research_question")}
+        Type: {input_data.get("research_type", "mixed")}
+        Scope: {input_data.get("scope", "general")}
         
         Provide methodology recommendations in JSON format."""
 

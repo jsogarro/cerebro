@@ -133,7 +133,7 @@ class TestingConfig(BaseConfig):
     )
     
     # Feature flags for testing
-    features: dict = {
+    features: dict[str, bool] = {
         "mcp_tools": False,  # Use mocks
         "agent_pooling": False,
         "caching": False,
@@ -147,6 +147,3 @@ class TestingConfig(BaseConfig):
         "test_mode": True,  # Special flag for test-only features
     }
 
-
-# Create singleton instance
-testing_config = TestingConfig()

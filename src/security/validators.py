@@ -26,7 +26,7 @@ class SecurityValidator:
     # Patterns for detecting malicious input
     SQL_INJECTION_PATTERNS = [
         r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|CREATE|ALTER|EXEC|EXECUTE|SCRIPT|TRUNCATE)\b)",
-        r"(--|\||;|\/\*|\*\/|@@|@|xp_|sp_|0x)",
+        r"(--|\||;|\/\*|\*\/|@@|xp_|sp_|0x)",
         r"(\bOR\b\s*\d+\s*=\s*\d+)",
         r"(\bAND\b\s*\d+\s*=\s*\d+)",
         r"(\'|\"|`|´|'|'|\"|\")",  # noqa: RUF001
@@ -402,36 +402,6 @@ def validate_secure_string(v: str) -> str:
     return v
 
 
-class LoginRequest(BaseModel):
-    """Secure login request model."""
-
-    email: EmailStr = Field(..., description="User email address")
-    password: Annotated[str, Field(min_length=8, max_length=128)] = Field(
-        ..., description="User password"
-    )
-    mfa_code: Annotated[str, Field(pattern=r"^\d{6}$")] | None = Field(None, description="MFA code")
-    remember_me: bool = Field(False, description="Remember session")
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v: str) -> str:
-        return SecurityValidator.validate_email(v)
-
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        # Basic password validation - expand as needed
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("Password must contain uppercase letter")
-        if not re.search(r"[a-z]", v):
-            raise ValueError("Password must contain lowercase letter")
-        if not re.search(r"\d", v):
-            raise ValueError("Password must contain digit")
-        return v
-
-
 class RegisterRequest(BaseModel):
     """Secure registration request model."""
 
@@ -439,7 +409,9 @@ class RegisterRequest(BaseModel):
     username: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{3,32}$")] = Field(
         ..., description="Username"
     )
-    password: Annotated[str, Field(min_length=8, max_length=128)] = Field(..., description="Password")
+    password: Annotated[str, Field(min_length=8, max_length=128)] = Field(
+        ..., description="Password"
+    )
     full_name: SecureStringField | None = Field(None, max_length=255)
     organization: SecureStringField | None = Field(None, max_length=255)
     terms_accepted: bool = Field(..., description="Terms acceptance")

@@ -16,12 +16,14 @@ decisions about how to handle each query most effectively.
 from __future__ import annotations
 
 import asyncio
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from structlog import get_logger
+
+from src.core.pii_redactor import redact_pii
 from src.core.types import HealthCheckDict
 
 if TYPE_CHECKING:
@@ -40,6 +42,7 @@ from src.core.constants import (
     MIN_RETRY_ATTEMPTS,
     SHORT_TIMEOUT,
 )
+from src.reliability.retry_strategies import CircuitBreaker, CircuitBreakerConfig
 
 from .cost_optimizer import CostOptimizer, OptimizationResult, OptimizationStrategy
 from .query_analyzer import ComplexityAnalysis, ComplexityLevel, QueryComplexityAnalyzer
@@ -52,7 +55,7 @@ from .routing_types import (
     RoutingStrategy,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @dataclass
@@ -86,8 +89,6 @@ class RoutingDecision:
     memory_allocation: dict[str, int] = field(default_factory=dict)
 
 
-
-
 class MASRouter:
     """
     Multi-Agent System Router - The central intelligence of Cerebro.
@@ -113,9 +114,7 @@ class MASRouter:
             self.config.get("complexity_analyzer", {})
         )
         cost_opt_config = config.get("cost_optimizer", {}) if config else {}
-        self.cost_optimizer = CostOptimizer(
-            cost_opt_config, model_config_manager
-        )
+        self.cost_optimizer = CostOptimizer(cost_opt_config, model_config_manager)
 
         # Initialize cache manager
         cache_config = self.config.get("cache", {})
@@ -132,7 +131,9 @@ class MASRouter:
         self.metrics_collector = RoutingMetricsCollector(
             default_strategy=self.default_strategy,
             adaptation_window_hours=self.config.get("adaptation_window_hours", 24),
-            min_history_for_adaptation=self.config.get("min_history_for_adaptation", 100),
+            min_history_for_adaptation=self.config.get(
+                "min_history_for_adaptation", 100
+            ),
         )
 
         # Routing configuration
@@ -152,6 +153,19 @@ class MASRouter:
 
         # Learning parameters for adaptive routing
         self.learning_enabled = self.config.get("enable_learning", True)
+        self._routing_circuit_breaker = CircuitBreaker(
+            "masr_router",
+            CircuitBreakerConfig(
+                failure_threshold=self.config.get("circuit_failure_threshold", 5),
+                success_threshold=self.config.get("circuit_success_threshold", 2),
+                timeout=self.config.get("circuit_timeout_seconds", 60.0),
+            ),
+        )
+
+    @property
+    def routing_circuit_breaker(self) -> CircuitBreaker:
+        """Circuit breaker guarding MASR routing analysis and optimization."""
+        return self._routing_circuit_breaker
 
     async def route(
         self,
@@ -175,13 +189,16 @@ class MASRouter:
         start_time = datetime.now()
         query_id = str(uuid.uuid4())
 
-        logger.info(f"Routing query {query_id}: {query[:100]}...")
+        logger.info("Routing query %s: %s...", query_id, redact_pii(query)[:100])
 
         try:
+            await self._routing_circuit_breaker.call(lambda: None)
+
             # Check cache first if enabled
             cached_decision = self.cache_manager.check_cache(query, context)
             if cached_decision:
                 logger.info(f"Using cached routing for {query_id}")
+                await self._routing_circuit_breaker._on_success()
                 return cached_decision
 
             # Step 1: Analyze query complexity
@@ -243,7 +260,9 @@ class MASRouter:
 
             # Trigger adaptive learning if enabled
             if self.learning_enabled:
-                task = asyncio.create_task(self.metrics_collector.adapt_from_decision(decision))
+                task = asyncio.create_task(
+                    self.metrics_collector.adapt_from_decision(decision)
+                )
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
 
@@ -254,10 +273,12 @@ class MASRouter:
                 f"(processing: {processing_time:.1f}ms)"
             )
 
+            await self._routing_circuit_breaker._on_success()
             return decision
 
         except Exception as e:
             logger.error(f"Routing failed for {query_id}: {e}")
+            await self._routing_circuit_breaker._on_failure()
             # Return fallback routing decision
             return self._create_fallback_decision(query_id, query, e)
 
@@ -271,7 +292,10 @@ class MASRouter:
             return RoutingStrategy(context["routing_strategy"])
 
         # Use adaptive strategy if enabled and we have enough history
-        if self.enable_adaptive_routing and self.metrics_collector.get_history_size() > 100:
+        if (
+            self.enable_adaptive_routing
+            and self.metrics_collector.get_history_size() > 100
+        ):
             return self.metrics_collector.get_adaptive_strategy(complexity_analysis)
 
         # Strategy selection based on query characteristics
@@ -335,7 +359,9 @@ class MASRouter:
         """Determine optimal agent allocation with supervisor-based hierarchical routing."""
 
         # Get supervisor types based on domains
-        supervisor_types = self._get_domain_supervisor_types(complexity_analysis.domains)
+        supervisor_types = self._get_domain_supervisor_types(
+            complexity_analysis.domains
+        )
         primary_supervisor = supervisor_types[0] if supervisor_types else "research"
 
         # Base allocation by collaboration mode
@@ -409,7 +435,9 @@ class MASRouter:
 
         for domain in domains:
             domain_name = domain.value if hasattr(domain, "value") else str(domain)
-            supervisor_type = domain_supervisors.get(domain_name, "research")  # Default to research
+            supervisor_type = domain_supervisors.get(
+                domain_name, "research"
+            )  # Default to research
             if supervisor_type not in supervisor_types:
                 supervisor_types.append(supervisor_type)
 
@@ -515,7 +543,10 @@ class MASRouter:
 
     def _select_monitoring_level(self, complexity_analysis: Any) -> str:
         """Select monitoring level based on complexity."""
-        if complexity_analysis.level == ComplexityLevel.COMPLEX or complexity_analysis.uncertainty > 0.7:
+        if (
+            complexity_analysis.level == ComplexityLevel.COMPLEX
+            or complexity_analysis.uncertainty > 0.7
+        ):
             return "detailed"
         else:
             return "standard"
@@ -554,7 +585,6 @@ class MASRouter:
         allocation["cache_mb"] = 50 + (len(complexity_analysis.domains) * 25)
 
         return allocation
-
 
     def _create_fallback_decision(
         self, query_id: str, query: str, error: Exception
@@ -631,7 +661,6 @@ class MASRouter:
             fallback_strategy="error_recovery",
             monitoring_level="detailed",
         )
-
 
     async def get_metrics(self) -> RoutingMetrics:
         """Get current routing metrics."""

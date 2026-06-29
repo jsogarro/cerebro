@@ -5,7 +5,7 @@ Provides comprehensive security audit trail for all authentication
 and authorization events in the system.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -226,7 +226,9 @@ class AuditLog(BaseModel):
         DateTime(timezone=True), nullable=True, comment="When event was reviewed"
     )
 
-    reviewed_by: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Who reviewed the event")
+    reviewed_by: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Who reviewed the event"
+    )
 
     # Relationships
     user = relationship("User", back_populates="audit_logs", foreign_keys=[user_id])
@@ -328,8 +330,12 @@ class AuditLog(BaseModel):
     ) -> bool:
         """Determine if event is suspicious."""
         # Failed login attempts
-        if (event_type == AuditEventType.LOGIN_FAILED and result == "failure" and
-            metadata and metadata.get("attempt_count", 0) > 3):
+        if (
+            event_type == AuditEventType.LOGIN_FAILED
+            and result == "failure"
+            and metadata
+            and metadata.get("attempt_count", 0) > 3
+        ):
             return True
 
         # Suspicious activity events are always suspicious
@@ -341,8 +347,12 @@ class AuditLog(BaseModel):
             return True
 
         # Multiple MFA failures
-        return (event_type == AuditEventType.MFA_FAILED and result == "failure" and
-                metadata is not None and metadata.get("attempt_count", 0) > 2)
+        return (
+            event_type == AuditEventType.MFA_FAILED
+            and result == "failure"
+            and metadata is not None
+            and metadata.get("attempt_count", 0) > 2
+        )
 
     @classmethod
     def get_user_events(
@@ -372,7 +382,9 @@ class AuditLog(BaseModel):
         if event_types:
             query = query.filter(cls.event_type.in_(event_types))
 
-        results: list[AuditLog] = query.order_by(cls.created_at.desc()).limit(limit).all()
+        results: list[AuditLog] = (
+            query.order_by(cls.created_at.desc()).limit(limit).all()
+        )
         return results
 
     @classmethod
@@ -398,7 +410,9 @@ class AuditLog(BaseModel):
         if unreviewed_only:
             query = query.filter(cls.reviewed_at.is_(None))
 
-        results: list[AuditLog] = query.order_by(cls.created_at.desc()).limit(limit).all()
+        results: list[AuditLog] = (
+            query.order_by(cls.created_at.desc()).limit(limit).all()
+        )
         return results
 
     def mark_reviewed(self, reviewer: str) -> None:
@@ -408,7 +422,7 @@ class AuditLog(BaseModel):
         Args:
             reviewer: Username of reviewer
         """
-        self.reviewed_at = datetime.utcnow()
+        self.reviewed_at = datetime.now(UTC)
         self.reviewed_by = reviewer
         self.requires_review = False
 

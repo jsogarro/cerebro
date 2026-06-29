@@ -5,7 +5,7 @@ Pydantic models for authentication requests and responses.
 """
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -19,6 +19,7 @@ class TokenPayload(BaseModel):
     email: str | None = Field(None, description="User email")
     roles: list[str] = Field(default_factory=list, description="User roles")
     permissions: list[str] = Field(default_factory=list, description="User permissions")
+    organization_id: str | None = Field(None, description="Tenant organization ID")
     jti: str = Field(..., description="JWT ID (unique token identifier)")
     iat: datetime = Field(..., description="Issued at timestamp")
     exp: datetime = Field(..., description="Expiration timestamp")
@@ -42,7 +43,7 @@ class TokenPayload(BaseModel):
 
     def is_expired(self) -> bool:
         """Check if token is expired."""
-        return datetime.utcnow() > self.exp
+        return datetime.now(UTC) > self.exp
 
     model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
 
@@ -55,14 +56,16 @@ class TokenPair(BaseModel):
     token_type: str = Field(default="Bearer", description="Token type")
     expires_in: int = Field(..., description="Access token expiry in seconds")
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-            "refresh_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-            "token_type": "Bearer",
-            "expires_in": 900,
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "refresh_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "token_type": "Bearer",
+                "expires_in": 900,
+            }
         }
-    })
+    )
 
 
 class LoginRequest(BaseModel):
@@ -73,14 +76,16 @@ class LoginRequest(BaseModel):
     device_id: str | None = Field(None, description="Device fingerprint")
     remember_me: bool = Field(default=False, description="Extended session duration")
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "email": "user@example.com",
-            "password": "SecurePassword123!",
-            "device_id": "device-fingerprint-123",
-            "remember_me": False,
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "user@example.com",
+                "password": "SecurePassword123!",
+                "device_id": "device-fingerprint-123",
+                "remember_me": False,
+            }
         }
-    })
+    )
 
 
 class RegisterRequest(BaseModel):
@@ -93,9 +98,7 @@ class RegisterRequest(BaseModel):
     )
     confirm_password: str = Field(..., description="Password confirmation")
     full_name: str | None = Field(None, max_length=255, description="Full name")
-    organization: str | None = Field(
-        None, max_length=255, description="Organization"
-    )
+    organization: str | None = Field(None, max_length=255, description="Organization")
     accept_terms: bool = Field(..., description="Accept terms of service")
 
     @field_validator("username")
@@ -145,17 +148,19 @@ class RegisterRequest(BaseModel):
             raise ValueError("You must accept the terms of service")
         return v
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "email": "newuser@example.com",
-            "username": "newuser",
-            "password": "SecurePass123!@#",
-            "confirm_password": "SecurePass123!@#",
-            "full_name": "John Doe",
-            "organization": "Research Institute",
-            "accept_terms": True,
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "newuser@example.com",
+                "username": "newuser",
+                "password": "SecurePass123!@#",
+                "confirm_password": "SecurePass123!@#",
+                "full_name": "John Doe",
+                "organization": "Research Institute",
+                "accept_terms": True,
+            }
         }
-    })
+    )
 
 
 class RefreshRequest(BaseModel):
@@ -164,12 +169,14 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(..., description="Valid refresh token")
     device_id: str | None = Field(None, description="Device fingerprint")
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "refresh_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-            "device_id": "device-fingerprint-123",
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "refresh_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "device_id": "device-fingerprint-123",
+            }
         }
-    })
+    )
 
 
 class PasswordResetRequest(BaseModel):
@@ -177,7 +184,9 @@ class PasswordResetRequest(BaseModel):
 
     email: EmailStr = Field(..., description="Email address for password reset")
 
-    model_config = ConfigDict(json_schema_extra={"example": {"email": "user@example.com"}})
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"email": "user@example.com"}}
+    )
 
 
 class PasswordResetConfirm(BaseModel):
@@ -215,13 +224,15 @@ class PasswordResetConfirm(BaseModel):
             raise ValueError("Passwords do not match")
         return v
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "token": "reset-token-abc123",
-            "new_password": "NewSecurePass123!@#",
-            "confirm_password": "NewSecurePass123!@#",
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "token": "reset-token-abc123",
+                "new_password": "NewSecurePass123!@#",
+                "confirm_password": "NewSecurePass123!@#",
+            }
         }
-    })
+    )
 
 
 class ChangePasswordRequest(BaseModel):
@@ -274,7 +285,9 @@ class EmailVerificationRequest(BaseModel):
 
     token: str = Field(..., description="Email verification token")
 
-    model_config = ConfigDict(json_schema_extra={"example": {"token": "verification-token-xyz789"}})
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"token": "verification-token-xyz789"}}
+    )
 
 
 class UserResponse(BaseModel):
@@ -305,30 +318,32 @@ class AuthResponse(BaseModel):
     user: UserResponse = Field(..., description="User information")
     tokens: TokenPair = Field(..., description="Authentication tokens")
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "user": {
-                "id": "123e4567-e89b-12d3-a456-426614174000",
-                "email": "user@example.com",
-                "username": "johndoe",
-                "full_name": "John Doe",
-                "organization": "Research Institute",
-                "role": "researcher",
-                "is_active": True,
-                "is_verified": True,
-                "is_superuser": False,
-                "created_at": "2024-01-01T00:00:00Z",
-                "updated_at": "2024-01-01T00:00:00Z",
-                "last_login": "2024-01-15T10:30:00Z",
-            },
-            "tokens": {
-                "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-                "refresh_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-                "token_type": "Bearer",
-                "expires_in": 900,
-            },
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "user": {
+                    "id": "123e4567-e89b-12d3-a456-426614174000",
+                    "email": "user@example.com",
+                    "username": "johndoe",
+                    "full_name": "John Doe",
+                    "organization": "Research Institute",
+                    "role": "researcher",
+                    "is_active": True,
+                    "is_verified": True,
+                    "is_superuser": False,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "last_login": "2024-01-15T10:30:00Z",
+                },
+                "tokens": {
+                    "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+                    "refresh_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+                    "token_type": "Bearer",
+                    "expires_in": 900,
+                },
+            }
         }
-    })
+    )
 
 
 class SessionInfo(BaseModel):
@@ -340,12 +355,14 @@ class SessionInfo(BaseModel):
     ip_address: str | None = Field(None, description="IP address")
     user_agent: str | None = Field(None, description="User agent string")
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "device_id": "device-123",
-            "created_at": "2024-01-15T10:00:00Z",
-            "last_activity": "2024-01-15T11:30:00Z",
-            "ip_address": "192.168.1.1",
-            "user_agent": "Mozilla/5.0...",
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "device_id": "device-123",
+                "created_at": "2024-01-15T10:00:00Z",
+                "last_activity": "2024-01-15T11:30:00Z",
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0...",
+            }
         }
-    })
+    )

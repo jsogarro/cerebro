@@ -5,12 +5,20 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Terminal, Cpu, Activity, Zap, Play, Search, RefreshCcw } from "lucide-react";
 import { useAgents, useAgentLogs } from "@/api/agents";
 
+type AgentSummary = {
+    id: string;
+    name: string;
+    role: string;
+    status: string;
+};
+
 export function Agents() {
     const { data: agents, isLoading } = useAgents();
     const [selectedAgent, setSelectedAgent] = useState<string | null>("A-01");
 
     const { data: realLogs } = useAgentLogs(selectedAgent || "");
-    const logs = realLogs || [];
+    const agentList = (agents ?? []) as AgentSummary[];
+    const logs = (realLogs ?? []) as string[];
 
     if (isLoading) {
         return (
@@ -39,9 +47,11 @@ export function Agents() {
                     </CardHeader>
                     <CardContent className="p-0">
                         <div className="divide-y divide-border border-t">
-                            {agents?.map((agent: any) => (
+                            {agentList.map((agent) => (
                                 <button
                                     key={agent.id}
+                                    aria-pressed={selectedAgent === agent.id}
+                                    aria-label={`Show logs for ${agent.name}`}
                                     onClick={() => setSelectedAgent(agent.id)}
                                     className={`w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors text-left ${selectedAgent === agent.id ? 'bg-primary/5 border-l-2 border-primary' : ''}`}
                                 >
@@ -100,14 +110,14 @@ export function Agents() {
                         <CardHeader className="py-3 px-4 border-b flex-row items-center justify-between space-y-0">
                             <CardTitle className="text-sm font-mono flex items-center gap-2">
                                 <Terminal className="h-4 w-4" />
-                                {agents?.find((a: any) => a.id === selectedAgent)?.name || 'Terminal'} - Logs
+                                {agentList.find((a) => a.id === selectedAgent)?.name || 'Terminal'} - Logs
                             </CardTitle>
                             <div className="flex gap-2">
                                 <Badge variant="secondary" className="font-mono text-[10px] tracking-wider uppercase bg-primary/10 text-primary">Connected</Badge>
                             </div>
                         </CardHeader>
                         <CardContent className="p-0 flex-1 relative overflow-hidden bg-[#0A0B10] text-[#E2E8F0] font-mono text-xs p-4 rounded-b-lg">
-                            <ScrollArea className="h-full w-full pr-4">
+                            <ScrollArea aria-label="Agent log output" className="h-full w-full pr-4">
                                 <div className="space-y-1">
                                     {logs.map((log: string, idx: number) => {
                                         let colorClass = "text-[#E2E8F0]";

@@ -208,9 +208,13 @@ class ProductionValidation:
         validations["temporal_target_valid"] = bool(app_config.temporal.target)
 
         # Check security settings
-        validations["jwt_secret_secure"] = (
-            app_config.security.jwt_secret_key != "change-me-in-production"
-        )
+        from config.base import validate_production_jwt_secret
+
+        try:
+            validate_production_jwt_secret(app_config.security.jwt_secret_key)
+            validations["jwt_secret_secure"] = True
+        except ValueError:
+            validations["jwt_secret_secure"] = False
         validations["cors_configured"] = bool(app_config.security.cors_origins)
         validations["rate_limiting_enabled"] = app_config.security.rate_limiting_enabled
 

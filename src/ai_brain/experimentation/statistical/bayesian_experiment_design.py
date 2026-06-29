@@ -8,7 +8,6 @@ for continuous optimization.
 """
 
 import asyncio
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -23,13 +22,14 @@ from scipy.optimize import minimize
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel
+from structlog import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class AcquisitionFunction(Enum):
     """Acquisition functions for Bayesian optimization."""
-    
+
     EXPECTED_IMPROVEMENT = "expected_improvement"
     UPPER_CONFIDENCE_BOUND = "upper_confidence_bound"
     PROBABILITY_OF_IMPROVEMENT = "probability_of_improvement"
@@ -39,7 +39,7 @@ class AcquisitionFunction(Enum):
 
 class PriorType(Enum):
     """Prior distribution types for parameters."""
-    
+
     UNIFORM = "uniform"
     NORMAL = "normal"
     BETA = "beta"
@@ -58,13 +58,11 @@ class ParameterPrior:
     hyperparameters: dict[str, float] = field(default_factory=dict)
     is_discrete: bool = False
     allowed_values: list[Any] | None = None
-    
+
     def sample(self, n_samples: int = 1) -> np.ndarray:
         """Sample from the prior distribution."""
         if self.prior_type == PriorType.UNIFORM:
-            samples = np.random.uniform(
-                self.bounds[0], self.bounds[1], n_samples
-            )
+            samples = np.random.uniform(self.bounds[0], self.bounds[1], n_samples)
         elif self.prior_type == PriorType.NORMAL:
             mean = self.hyperparameters.get("mean", 0)
             std = self.hyperparameters.get("std", 1)
@@ -88,14 +86,14 @@ class ParameterPrior:
             samples = np.clip(samples, self.bounds[0], self.bounds[1])
         else:
             raise ValueError(f"Unsupported prior type: {self.prior_type}")
-        
+
         if self.is_discrete and self.allowed_values:
             # Map to nearest allowed value
             samples_list = [
                 min(self.allowed_values, key=lambda x: abs(x - s)) for s in samples
             ]
             samples = np.array(samples_list)
-        
+
         return samples
 
 
@@ -116,12 +114,12 @@ class BayesianOptimizationResult:
 class BayesianExperimentDesigner:
     """
     Bayesian optimization for experimental design and hyperparameter tuning.
-    
+
     This class provides sophisticated Bayesian methods for optimizing experiment
     parameters, including Gaussian Process models, various acquisition functions,
     and integration with PyMC for complex statistical modeling.
     """
-    
+
     def __init__(
         self,
         parameter_priors: list[ParameterPrior],
@@ -133,7 +131,7 @@ class BayesianExperimentDesigner:
     ) -> None:
         """
         Initialize Bayesian experiment designer.
-        
+
         Args:
             parameter_priors: Prior specifications for parameters
             objective_function: Function to optimize (can be set later)
@@ -147,19 +145,19 @@ class BayesianExperimentDesigner:
         self.acquisition_function = acquisition_function
         self.n_initial_points = n_initial_points
         self.random_state = random_state
-        
+
         # Initialize Gaussian Process
         self.gp_model = self._create_gp_model(kernel_type)
-        
+
         # Storage for observations
         self.X_observed: list[np.ndarray] = []
         self.y_observed: list[float] = []
 
         # Optimization history
         self.optimization_history: list[dict[str, Any]] = []
-        
+
         np.random.seed(random_state)
-    
+
     def _create_gp_model(self, kernel_type: str) -> GaussianProcessRegressor:
         """Create Gaussian Process model with specified kernel."""
         if kernel_type == "matern":
@@ -167,20 +165,20 @@ class BayesianExperimentDesigner:
         elif kernel_type == "rbf":
             kernel = RBF(length_scale=1.0) + WhiteKernel(noise_level=1e-5)
         elif kernel_type == "combined":
-            kernel = (Matern(length_scale=1.0, nu=2.5) * 
-                     RBF(length_scale=1.0) + 
-                     WhiteKernel(noise_level=1e-5))
+            kernel = Matern(length_scale=1.0, nu=2.5) * RBF(
+                length_scale=1.0
+            ) + WhiteKernel(noise_level=1e-5)
         else:
             raise ValueError(f"Unknown kernel type: {kernel_type}")
-        
+
         return GaussianProcessRegressor(
             kernel=kernel,
             n_restarts_optimizer=10,
             alpha=1e-6,
             normalize_y=True,
-            random_state=self.random_state
+            random_state=self.random_state,
         )
-    
+
     async def optimize(
         self,
         n_iterations: int = 50,
@@ -190,24 +188,24 @@ class BayesianExperimentDesigner:
     ) -> BayesianOptimizationResult:
         """
         Run Bayesian optimization to find optimal parameters.
-        
+
         Args:
             n_iterations: Number of optimization iterations
             objective_function: Function to optimize (overrides constructor)
             parallel_evaluations: Number of parallel function evaluations
             convergence_threshold: Threshold for convergence detection
-            
+
         Returns:
             BayesianOptimizationResult with optimization results
         """
         obj_func = objective_function or self.objective_function
         if not obj_func:
             raise ValueError("No objective function provided")
-        
+
         # Initial sampling from priors
         if len(self.X_observed) < self.n_initial_points:
             await self._initial_sampling(obj_func, self.n_initial_points)
-        
+
         # Main optimization loop
         for iteration in range(n_iterations):
             # Fit GP model to observations
@@ -215,48 +213,51 @@ class BayesianExperimentDesigner:
                 X = np.array(self.X_observed)  # noqa: N806
                 y = np.array(self.y_observed)
                 self.gp_model.fit(X, y)
-            
+
             # Get next points to evaluate
             next_points = await self._get_next_points(parallel_evaluations)
-            
+
             # Evaluate objective function
             if parallel_evaluations > 1:
                 # Parallel evaluation
-                tasks = [self._evaluate_async(obj_func, point) 
-                        for point in next_points]
+                tasks = [self._evaluate_async(obj_func, point) for point in next_points]
                 results = await asyncio.gather(*tasks)
             else:
                 # Sequential evaluation
                 results = [await self._evaluate_async(obj_func, next_points[0])]
-            
+
             # Update observations
             for point, value in zip(next_points, results, strict=True):
                 self.X_observed.append(point)
                 self.y_observed.append(value)
-                self.optimization_history.append({
-                    "iteration": iteration,
-                    "params": self._array_to_dict(point),
-                    "value": value
-                })
-            
+                self.optimization_history.append(
+                    {
+                        "iteration": iteration,
+                        "params": self._array_to_dict(point),
+                        "value": value,
+                    }
+                )
+
             # Check convergence
             if self._check_convergence(convergence_threshold):
                 logger.info(f"Converged after {iteration} iterations")
                 break
-            
+
             # Log progress
             if iteration % 10 == 0:
                 best_idx = np.argmax(self.y_observed)
-                logger.info(f"Iteration {iteration}: Best value = {self.y_observed[best_idx]}")
-        
+                logger.info(
+                    f"Iteration {iteration}: Best value = {self.y_observed[best_idx]}"
+                )
+
         # Get best result
         best_idx = np.argmax(self.y_observed)
         best_params = self._array_to_dict(self.X_observed[best_idx])
         best_value = self.y_observed[best_idx]
-        
+
         # Get posterior samples
         posterior_samples = self._sample_posterior(n_samples=1000)
-        
+
         return BayesianOptimizationResult(
             best_params=best_params,
             best_value=best_value,
@@ -264,9 +265,9 @@ class BayesianExperimentDesigner:
             all_values=self.y_observed,
             convergence_history=[h["value"] for h in self.optimization_history],
             posterior_samples=posterior_samples,
-            gp_model=self.gp_model
+            gp_model=self.gp_model,
         )
-    
+
     async def _initial_sampling(
         self, objective_function: Callable[..., Any], n_points: int
     ) -> None:
@@ -283,7 +284,7 @@ class BayesianExperimentDesigner:
 
             self.X_observed.append(point)
             self.y_observed.append(value)
-    
+
     async def _get_next_points(self, n_points: int) -> list[np.ndarray]:
         """Get next points to evaluate using acquisition function."""
         if len(self.X_observed) == 0:
@@ -304,7 +305,7 @@ class BayesianExperimentDesigner:
             points.append(point)
 
         return points
-    
+
     def _optimize_acquisition(self) -> np.ndarray:
         """Optimize acquisition function to get next point."""
         # Define bounds for optimization
@@ -337,7 +338,7 @@ class BayesianExperimentDesigner:
                 best_point = result.x
 
         return best_point if best_point is not None else np.array([])
-    
+
     def _compute_acquisition(self, x: np.ndarray) -> float:
         """Compute acquisition function value for a point."""
         x_reshaped = x.reshape(1, -1)
@@ -361,24 +362,28 @@ class BayesianExperimentDesigner:
             beta = 2.0  # Exploration parameter
             return float(mu_val + beta * sigma_val)
 
-        elif self.acquisition_function == AcquisitionFunction.PROBABILITY_OF_IMPROVEMENT:
+        elif (
+            self.acquisition_function == AcquisitionFunction.PROBABILITY_OF_IMPROVEMENT
+        ):
             # Probability of Improvement
             if len(self.y_observed) > 0:
                 best = np.max(self.y_observed)
                 z = (mu_val - best) / (sigma_val + 1e-9)
                 return float(norm.cdf(z))
             return 0.5
-        
+
         else:
-            raise ValueError(f"Unsupported acquisition function: {self.acquisition_function}")
-    
+            raise ValueError(
+                f"Unsupported acquisition function: {self.acquisition_function}"
+            )
+
     async def _evaluate_async(
         self, objective_function: Callable[..., Any], point: np.ndarray
     ) -> float:
         """Evaluate objective function asynchronously."""
         # Convert array to dict for function call
         params = self._array_to_dict(point)
-        
+
         # Run objective function
         if asyncio.iscoroutinefunction(objective_function):
             value = await objective_function(params)
@@ -386,7 +391,7 @@ class BayesianExperimentDesigner:
             # Run sync function in executor
             loop = asyncio.get_event_loop()
             value = await loop.run_in_executor(None, objective_function, params)
-        
+
         return float(value)
 
     def _array_to_dict(self, array: np.ndarray) -> dict[str, float]:
@@ -395,7 +400,7 @@ class BayesianExperimentDesigner:
         for i, name in enumerate(self.parameter_priors.keys()):
             params[name] = float(array[i])
         return params
-    
+
     def _check_convergence(self, threshold: float) -> bool:
         """Check if optimization has converged."""
         if len(self.optimization_history) < 10:
@@ -406,7 +411,7 @@ class BayesianExperimentDesigner:
         improvement = np.max(recent_values) - np.min(recent_values)
 
         return bool(improvement < threshold)
-    
+
     def _sample_posterior(self, n_samples: int = 1000) -> np.ndarray:
         """Sample from posterior distribution using GP model."""
         if len(self.X_observed) == 0:
@@ -430,7 +435,7 @@ class BayesianExperimentDesigner:
             samples.append(float(sample[0]))
 
         return np.array(samples)
-    
+
     async def run_pymc_optimization(
         self,
         model_builder: Callable[..., Any],
@@ -440,13 +445,13 @@ class BayesianExperimentDesigner:
     ) -> dict[str, Any]:
         """
         Run Bayesian optimization using PyMC for complex statistical models.
-        
+
         Args:
             model_builder: Function that builds PyMC model
             data: Data for the model
             n_samples: Number of MCMC samples
             n_chains: Number of MCMC chains
-            
+
         Returns:
             Dictionary with posterior samples and diagnostics
         """
@@ -454,18 +459,14 @@ class BayesianExperimentDesigner:
         with model_builder(data, self.parameter_priors) as _model:
             # Sample from posterior
             trace = pm.sample(
-                n_samples,
-                chains=n_chains,
-                return_inferencedata=True,
-                progressbar=True
+                n_samples, chains=n_chains, return_inferencedata=True, progressbar=True
             )
-            
+
             # Get posterior predictive samples
             posterior_predictive = pm.sample_posterior_predictive(
-                trace,
-                progressbar=True
+                trace, progressbar=True
             )
-        
+
         # Extract results
         results = {
             "trace": trace,
@@ -474,28 +475,26 @@ class BayesianExperimentDesigner:
             "diagnostics": {
                 "rhat": az.rhat(trace),
                 "ess": az.ess(trace),
-                "mcse": az.mcse(trace)
-            }
+                "mcse": az.mcse(trace),
+            },
         }
-        
+
         # Find best parameters (MAP estimate)
         posterior_means = {}
         for param in self.parameter_priors:
             if param in trace.posterior:
-                posterior_means[param] = float(
-                    trace.posterior[param].mean().values
-                )
-        
+                posterior_means[param] = float(trace.posterior[param].mean().values)
+
         results["best_params"] = posterior_means
-        
+
         return results
-    
+
     def update_posterior(
         self, new_observations: list[tuple[dict[str, float], float]]
     ) -> None:
         """
         Update posterior with new observations.
-        
+
         Args:
             new_observations: List of (parameters, value) tuples
         """
@@ -507,42 +506,41 @@ class BayesianExperimentDesigner:
 
             self.X_observed.append(np.array(point_list))
             self.y_observed.append(value)
-        
+
         # Refit GP model
         if len(self.X_observed) > 0:
             X = np.array(self.X_observed)  # noqa: N806
             y = np.array(self.y_observed)
             self.gp_model.fit(X, y)
-    
+
     def get_uncertainty_regions(
         self, confidence_level: float = 0.95
     ) -> dict[str, tuple[float, float]]:
         """
         Get uncertainty regions for parameters.
-        
+
         Args:
             confidence_level: Confidence level for intervals
-            
+
         Returns:
             Dictionary mapping parameter names to confidence intervals
         """
         if len(self.X_observed) == 0:
             # Return prior bounds if no observations
-            return {name: prior.bounds 
-                   for name, prior in self.parameter_priors.items()}
-        
+            return {name: prior.bounds for name, prior in self.parameter_priors.items()}
+
         # Compute confidence intervals from GP predictions
         intervals = {}
         for i, name in enumerate(self.parameter_priors.keys()):
             _values = [x[i] for x in self.X_observed]
-            
+
             # Use GP to predict over parameter range
             param_range = np.linspace(
                 self.parameter_priors[name].bounds[0],
                 self.parameter_priors[name].bounds[1],
-                100
+                100,
             )
-            
+
             # Create test points
             test_points_list: list[np.ndarray] = []
             for val in param_range:
@@ -552,21 +550,19 @@ class BayesianExperimentDesigner:
 
             test_points = np.array(test_points_list)
             mu, sigma = self.gp_model.predict(test_points, return_std=True)
-            
+
             # Compute confidence interval
             z_score = norm.ppf((1 + confidence_level) / 2)
             lower = mu - z_score * sigma
             _upper = mu + z_score * sigma
-            
+
             # Find parameter values at confidence bounds
             best_idx = np.argmax(mu)
-            confidence_range = param_range[
-                (lower >= lower[best_idx] - sigma[best_idx])
-            ]
-            
+            confidence_range = param_range[(lower >= lower[best_idx] - sigma[best_idx])]
+
             if len(confidence_range) > 0:
                 intervals[name] = (confidence_range.min(), confidence_range.max())
             else:
                 intervals[name] = self.parameter_priors[name].bounds
-        
+
         return intervals

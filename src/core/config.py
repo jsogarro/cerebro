@@ -108,10 +108,12 @@ class Settings(BaseSettings):
     # AI Brain General Settings
     AI_BRAIN_ENABLED: bool = True
     AI_BRAIN_MODE: str = "hybrid"  # hybrid, research_only, brain_only
-    
+
     # MASR (Multi-Agent System Router) Configuration
     MASR_ENABLED: bool = True
-    MASR_DEFAULT_STRATEGY: str = "balanced"  # cost_efficient, quality_focused, speed_first, balanced, adaptive
+    MASR_DEFAULT_STRATEGY: str = (
+        "balanced"  # cost_efficient, quality_focused, speed_first, balanced, adaptive
+    )
     MASR_ENABLE_CACHING: bool = True
     MASR_ENABLE_ADAPTIVE: bool = True
     MASR_COMPLEXITY_WEIGHTS: dict[str, float] = {
@@ -121,33 +123,33 @@ class Settings(BaseSettings):
         "data": 0.15,
         "output": 0.15,
         "time": 0.05,
-        "quality": 0.05
+        "quality": 0.05,
     }
     MASR_COMPLEXITY_THRESHOLDS: dict[str, float] = {
         "simple": 0.3,
         "moderate": 0.7,
-        "complex": 1.0
+        "complex": 1.0,
     }
 
     # Foundation Model Providers Configuration
     MODEL_PROVIDERS_ENABLED: bool = True
-    
+
     # DeepSeek Configuration
     DEEPSEEK_ENABLED: bool = False
     DEEPSEEK_API_KEY: str | None = None
     DEEPSEEK_ENDPOINT: str = "https://api.deepseek.com/v1"
     DEEPSEEK_DEFAULT_MODEL: str = "deepseek-v3"
-    
+
     # Llama Configuration (via Ollama)
     LLAMA_ENABLED: bool = False
     LLAMA_ENDPOINT: str = "http://localhost:11434"
     LLAMA_DEFAULT_MODEL: str = "llama3.3:70b"
     LLAMA_KEEP_ALIVE: str = "5m"
-    
+
     # Gemini Configuration (enhanced)
     GEMINI_ENABLED: bool = True  # Keep existing Gemini as default
     GEMINI_DEFAULT_MODEL: str = "gemini-pro"
-    
+
     # Model Router Configuration
     MODEL_ROUTER_HEALTH_CHECK_INTERVAL: int = 300  # 5 minutes
     MODEL_ROUTER_MAX_RETRIES: int = 3
@@ -167,7 +169,7 @@ class Settings(BaseSettings):
     WORKING_MEMORY_CONVERSATION_TTL: int = 7200  # 2 hours
     WORKING_MEMORY_MAX_MESSAGES_IN_CONTEXT: int = 50
 
-    # Episodic Memory Configuration  
+    # Episodic Memory Configuration
     EPISODIC_MEMORY_ENABLED: bool = True
     EPISODIC_MEMORY_RETENTION_DAYS: int = 90
     EPISODIC_MEMORY_MAX_SESSION_DURATION_HOURS: int = 24
@@ -217,7 +219,7 @@ class Settings(BaseSettings):
     FINE_TUNING_MIN_EXAMPLES: int = 100
     FINE_TUNING_QUALITY_THRESHOLD: float = 0.9
     FINE_TUNING_AUTO_TRIGGER: bool = False
-    
+
     # Google Cloud Run Configuration
     CLOUD_RUN_ENABLED: bool = False
     CLOUD_RUN_REGION: str = "us-central1"
@@ -225,19 +227,19 @@ class Settings(BaseSettings):
     CLOUD_RUN_MIN_INSTANCES: int = 1
     CLOUD_RUN_CPU_LIMIT: str = "2"
     CLOUD_RUN_MEMORY_LIMIT: str = "4Gi"
-    
+
     # Advanced Performance Settings
     PERF_ENABLE_PROFILING: bool = False
     PERF_METRICS_RETENTION_DAYS: int = 30
     PERF_SLOW_QUERY_THRESHOLD_MS: int = 1000
     PERF_ENABLE_QUERY_OPTIMIZATION: bool = True
-    
+
     # Cost Optimization Settings
     COST_OPTIMIZATION_ENABLED: bool = True
     COST_MAX_PER_REQUEST: float = 0.10  # USD
     COST_DAILY_BUDGET_LIMIT: float = 100.0  # USD
     COST_ENABLE_BUDGET_ALERTS: bool = True
-    
+
     # Development and Debug Settings
     DEV_ENABLE_AI_BRAIN_DEBUG: bool = False
     DEV_ENABLE_MEMORY_DEBUG: bool = False
@@ -274,7 +276,11 @@ class Settings(BaseSettings):
 
         if env == "production":
             # Check for common default credentials
-            dangerous_patterns = ["research:research123", "postgres:postgres", ":password@"]
+            dangerous_patterns = [
+                "research:research123",
+                "postgres:postgres",
+                ":password@",
+            ]
             for pattern in dangerous_patterns:
                 if pattern in v:
                     raise ValueError(
@@ -296,7 +302,6 @@ class Settings(BaseSettings):
                 "complexity_weights": self.MASR_COMPLEXITY_WEIGHTS,
                 "complexity_thresholds": self.MASR_COMPLEXITY_THRESHOLDS,
             },
-            
             # Model Providers Configuration
             "providers": {
                 "enabled": self.MODEL_PROVIDERS_ENABLED,
@@ -318,21 +323,18 @@ class Settings(BaseSettings):
                     "default_model": self.GEMINI_DEFAULT_MODEL,
                 },
             },
-            
             # Model Router Configuration
             "model_router": {
                 "health_check_interval": self.MODEL_ROUTER_HEALTH_CHECK_INTERVAL,
                 "max_retries": self.MODEL_ROUTER_MAX_RETRIES,
                 "enable_fallback": self.MODEL_ROUTER_ENABLE_FALLBACK,
             },
-            
             # Memory System Configuration
             "memory": {
                 "enabled": self.MEMORY_SYSTEM_ENABLED,
                 "enable_cross_tier": self.MEMORY_ENABLE_CROSS_TIER,
                 "max_recall_items": self.MEMORY_MAX_RECALL_ITEMS,
                 "consolidation_interval": self.MEMORY_CONSOLIDATION_INTERVAL,
-                
                 "working_memory": {
                     "enabled": self.WORKING_MEMORY_ENABLED,
                     "redis_url": self.REDIS_URL,
@@ -342,14 +344,12 @@ class Settings(BaseSettings):
                     "conversation_ttl": self.WORKING_MEMORY_CONVERSATION_TTL,
                     "max_messages_in_context": self.WORKING_MEMORY_MAX_MESSAGES_IN_CONTEXT,
                 },
-                
                 "episodic_memory": {
                     "enabled": self.EPISODIC_MEMORY_ENABLED,
                     "database_url": self.DATABASE_URL,
                     "retention_days": self.EPISODIC_MEMORY_RETENTION_DAYS,
                     "max_session_duration_hours": self.EPISODIC_MEMORY_MAX_SESSION_DURATION_HOURS,
                 },
-                
                 "semantic_memory": {
                     "enabled": self.SEMANTIC_MEMORY_ENABLED,
                     "vector_db_url": self.SEMANTIC_MEMORY_VECTOR_DB_URL,
@@ -357,7 +357,6 @@ class Settings(BaseSettings):
                     "embedding_model": self.SEMANTIC_MEMORY_EMBEDDING_MODEL,
                     "embedding_dimension": self.SEMANTIC_MEMORY_EMBEDDING_DIMENSION,
                 },
-                
                 "procedural_memory": {
                     "enabled": self.PROCEDURAL_MEMORY_ENABLED,
                     "storage_path": self.PROCEDURAL_MEMORY_STORAGE_PATH,
@@ -365,7 +364,6 @@ class Settings(BaseSettings):
                     "min_usage_promotion": self.PROCEDURAL_MEMORY_MIN_USAGE_PROMOTION,
                 },
             },
-            
             # Agent System Configuration
             "agents": {
                 "max_concurrent": self.AGENTS_MAX_CONCURRENT,
@@ -374,7 +372,6 @@ class Settings(BaseSettings):
                 "enable_dynamic_spawning": self.AGENTS_ENABLE_DYNAMIC_SPAWNING,
                 "default_timeout": self.AGENTS_DEFAULT_TIMEOUT,
                 "max_retries": self.AGENTS_MAX_RETRIES,
-                
                 "hierarchical": {
                     "enabled": self.HIERARCHICAL_AGENTS_ENABLED,
                     "max_depth": self.HIERARCHICAL_MAX_DEPTH,
@@ -382,7 +379,6 @@ class Settings(BaseSettings):
                     "scale_up_threshold": self.HIERARCHICAL_SCALE_UP_THRESHOLD,
                     "scale_down_threshold": self.HIERARCHICAL_SCALE_DOWN_THRESHOLD,
                 },
-                
                 "communication": {
                     "talkhier_enabled": self.TALKHIER_ENABLED,
                     "max_refinement_rounds": self.TALKHIER_MAX_REFINEMENT_ROUNDS,
@@ -390,7 +386,6 @@ class Settings(BaseSettings):
                     "enable_hierarchical_refinement": self.TALKHIER_ENABLE_HIERARCHICAL_REFINEMENT,
                 },
             },
-            
             # Learning and Improvement
             "learning": {
                 "self_improvement": {
@@ -399,7 +394,6 @@ class Settings(BaseSettings):
                     "performance_threshold": self.SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD,
                     "enable_prompt_optimization": self.SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION,
                 },
-                
                 "fine_tuning": {
                     "enabled": self.FINE_TUNING_ENABLED,
                     "min_examples": self.FINE_TUNING_MIN_EXAMPLES,
@@ -407,7 +401,6 @@ class Settings(BaseSettings):
                     "auto_trigger": self.FINE_TUNING_AUTO_TRIGGER,
                 },
             },
-            
             # Performance and Cost
             "performance": {
                 "enable_profiling": self.PERF_ENABLE_PROFILING,
@@ -415,14 +408,12 @@ class Settings(BaseSettings):
                 "slow_query_threshold_ms": self.PERF_SLOW_QUERY_THRESHOLD_MS,
                 "enable_query_optimization": self.PERF_ENABLE_QUERY_OPTIMIZATION,
             },
-            
             "cost_optimization": {
                 "enabled": self.COST_OPTIMIZATION_ENABLED,
                 "max_per_request": self.COST_MAX_PER_REQUEST,
                 "daily_budget_limit": self.COST_DAILY_BUDGET_LIMIT,
                 "enable_budget_alerts": self.COST_ENABLE_BUDGET_ALERTS,
             },
-            
             # Cloud Run Configuration
             "cloud_run": {
                 "enabled": self.CLOUD_RUN_ENABLED,
@@ -433,7 +424,7 @@ class Settings(BaseSettings):
                 "memory_limit": self.CLOUD_RUN_MEMORY_LIMIT,
             },
         }
-    
+
     def get_research_platform_config(self) -> dict[str, Any]:
         """Get legacy research platform configuration for backward compatibility."""
         return {
@@ -454,7 +445,7 @@ class Settings(BaseSettings):
     def is_ai_brain_mode(self) -> bool:
         """Check if running in AI Brain mode."""
         return self.AI_BRAIN_ENABLED and self.AI_BRAIN_MODE in ["hybrid", "brain_only"]
-    
+
     def is_research_only_mode(self) -> bool:
         """Check if running in research-only mode."""
         return self.AI_BRAIN_MODE == "research_only"

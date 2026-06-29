@@ -7,17 +7,18 @@ and bulkhead patterns for fault-tolerant operation execution.
 
 import asyncio
 import inspect
-import logging
 import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from functools import wraps
 from typing import Any, Optional, TypeVar
 
-logger = logging.getLogger(__name__)
+from structlog import get_logger
+
+logger = get_logger()
 
 T = TypeVar("T")
 
@@ -75,7 +76,7 @@ class RetryPolicy:
         """
         # Check retry budget if configured
         if self.retry_budget and not self.retry_budget.can_retry():
-            logger.warning("Retry budget exhausted")
+            logger.warning("retry_budget_exhausted")
             return False
 
         # Check max attempts
@@ -170,7 +171,7 @@ class CircuitBreaker:
         self._metrics = CircuitBreakerMetrics()
         self._lock = asyncio.Lock()
         self._half_open_counter = 0
-        self._state_changed_at = datetime.utcnow()
+        self._state_changed_at = datetime.now(UTC)
 
     @property
     def state(self) -> CircuitState:
@@ -187,23 +188,26 @@ class CircuitBreaker:
         if self._state != new_state:
             old_state = self._state
             self._state = new_state
-            self._state_changed_at = datetime.utcnow()
+            self._state_changed_at = datetime.now(UTC)
             self._metrics.state_transitions.append(
-                (old_state, new_state, datetime.utcnow())
+                (old_state, new_state, datetime.now(UTC))
             )
 
             if new_state == CircuitState.HALF_OPEN:
                 self._half_open_counter = 0
 
             logger.info(
-                f"Circuit breaker '{self.name}' transitioned from {old_state} to {new_state}"
+                "circuit_breaker_state_transitioned",
+                circuit_breaker=self.name,
+                old_state=old_state.value,
+                new_state=new_state.value,
             )
 
     async def _should_attempt_reset(self) -> bool:
         """Check if circuit should attempt reset."""
         return (
             self._state == CircuitState.OPEN
-            and (datetime.utcnow() - self._state_changed_at).total_seconds()
+            and (datetime.now(UTC) - self._state_changed_at).total_seconds()
             >= self.config.timeout
         )
 
@@ -269,8 +273,10 @@ class CircuitBreaker:
             self._metrics.consecutive_successes += 1
             self._metrics.consecutive_failures = 0
 
-            if (self._state == CircuitState.HALF_OPEN and
-                self._metrics.consecutive_successes >= self.config.success_threshold):
+            if (
+                self._state == CircuitState.HALF_OPEN
+                and self._metrics.consecutive_successes >= self.config.success_threshold
+            ):
                 await self._transition_to(CircuitState.CLOSED)
 
     async def _on_failure(self) -> None:
@@ -279,7 +285,7 @@ class CircuitBreaker:
             self._metrics.failed_calls += 1
             self._metrics.consecutive_failures += 1
             self._metrics.consecutive_successes = 0
-            self._metrics.last_failure_time = datetime.utcnow()
+            self._metrics.last_failure_time = datetime.now(UTC)
 
             if self._state == CircuitState.CLOSED:
                 if self._metrics.consecutive_failures >= self.config.failure_threshold:
@@ -347,14 +353,21 @@ class ExponentialBackoff:
 
                 # Check if should retry
                 if not self.policy.should_retry(e, attempt + 1):
-                    logger.error(f"Non-retryable exception: {e}")
+                    logger.error(
+                        "non_retryable_exception",
+                        error=str(e),
+                        attempt=attempt + 1,
+                    )
                     raise
 
                 # Calculate delay
                 if attempt < self.policy.max_attempts - 1:
                     delay = self.policy.get_delay(attempt)
                     logger.warning(
-                        f"Attempt {attempt + 1} failed, retrying in {delay:.2f}s: {e}"
+                        "retry_attempt_failed",
+                        attempt=attempt + 1,
+                        retry_delay_seconds=delay,
+                        error=str(e),
                     )
                     await asyncio.sleep(delay)
 
@@ -363,7 +376,10 @@ class ExponentialBackoff:
                         await self.policy.retry_budget.consume()
 
         # All retries exhausted
-        logger.error(f"All {self.policy.max_attempts} attempts failed")
+        logger.error(
+            "all_retry_attempts_failed",
+            max_attempts=self.policy.max_attempts,
+        )
         if last_exception:
             raise last_exception
         raise Exception("All retry attempts failed")
@@ -396,7 +412,9 @@ class BulkheadExecutor:
         self.name = name
         self.config = config or BulkheadConfig()
         self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
-        self._queue: asyncio.Queue[bool] = asyncio.Queue(maxsize=self.config.max_queue_size)
+        self._queue: asyncio.Queue[bool] = asyncio.Queue(
+            maxsize=self.config.max_queue_size
+        )
         self._active_tasks = 0
         self._total_executed = 0
         self._total_rejected = 0
@@ -450,7 +468,9 @@ class BulkheadExecutor:
 
                 except TimeoutError:
                     self._total_timeout += 1
-                    raise Exception(f"Bulkhead '{self.name}' execution timeout") from None
+                    raise Exception(
+                        f"Bulkhead '{self.name}' execution timeout"
+                    ) from None
                 finally:
                     self._active_tasks -= 1
         finally:
@@ -529,7 +549,9 @@ class RetryBudget:
         return self._tokens
 
 
-def with_retry(policy: RetryPolicy | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def with_retry(
+    policy: RetryPolicy | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for adding retry logic to functions.
 
@@ -557,7 +579,9 @@ def with_retry(policy: RetryPolicy | None = None) -> Callable[[Callable[..., Any
     return decorator
 
 
-def with_circuit_breaker(name: str, config: CircuitBreakerConfig | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def with_circuit_breaker(
+    name: str, config: CircuitBreakerConfig | None = None
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for adding circuit breaker to functions.
 
@@ -585,7 +609,9 @@ def with_circuit_breaker(name: str, config: CircuitBreakerConfig | None = None) 
     return decorator
 
 
-def with_bulkhead(name: str, config: BulkheadConfig | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def with_bulkhead(
+    name: str, config: BulkheadConfig | None = None
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for adding bulkhead isolation to functions.
 

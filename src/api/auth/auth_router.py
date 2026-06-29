@@ -293,7 +293,9 @@ async def forgot_password(
 
         # Store token
         await password_service.store_reset_token(
-            str(user.id), token, expires_in=3600  # 1 hour
+            str(user.id),
+            token,
+            expires_in=3600,  # 1 hour
         )
 
         # Send reset email (in background)
@@ -472,7 +474,9 @@ async def get_sessions(
     return [
         SessionInfo(
             device_id=session.get("device_id"),
-            created_at=str(session.get("created_at")) if session.get("created_at") else "",
+            created_at=str(session.get("created_at"))
+            if session.get("created_at")
+            else "",
             last_activity=session.get("last_activity"),
             ip_address=session.get("ip_address"),
             user_agent=session.get("user_agent"),

@@ -5,6 +5,8 @@ This module provides MCP tool servers for the research platform,
 enabling AI agents to interact with various data sources and tools.
 """
 
+from typing import Any
+
 from src.mcp.base import BaseMCPTool
 from src.mcp.registry import ToolRegistry
 
@@ -12,7 +14,7 @@ from src.mcp.registry import ToolRegistry
 # Use lazy import to avoid crashing when fastmcp is not installed.
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "MCPServer":
         from src.mcp.server import MCPServer
 

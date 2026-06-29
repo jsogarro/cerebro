@@ -5,20 +5,20 @@ This module provides comprehensive monitoring, metrics collection,
 and visualization for the orchestration system.
 """
 
-import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from prometheus_client import Counter, Gauge, Histogram, Summary
+from structlog import get_logger
 
 from src.orchestration.state import AgentExecutionStatus, WorkflowPhase
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 tracer = trace.get_tracer(__name__)
 
 
@@ -155,7 +155,7 @@ class OrchestrationMonitor:
 
         # Create metrics container
         metrics = WorkflowMetrics(
-            workflow_id=workflow_id, project_id=project_id, started_at=datetime.utcnow()
+            workflow_id=workflow_id, project_id=project_id, started_at=datetime.now(UTC)
         )
 
         self._active_workflows[workflow_id] = metrics
@@ -191,7 +191,7 @@ class OrchestrationMonitor:
             return
 
         metrics = self._active_workflows[workflow_id]
-        metrics.completed_at = datetime.utcnow()
+        metrics.completed_at = datetime.now(UTC)
         metrics.total_duration = (
             metrics.completed_at - metrics.started_at
         ).total_seconds()
@@ -302,7 +302,7 @@ class OrchestrationMonitor:
             "node_name": node_name,
             "duration": duration,
             "success": success,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         if error:
@@ -311,7 +311,7 @@ class OrchestrationMonitor:
                 {
                     "node": node_name,
                     "error": error,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
 
@@ -324,9 +324,7 @@ class OrchestrationMonitor:
         if self.enable_tracing and workflow_id in self._spans:
             _parent_span = self._spans[workflow_id]
 
-            with tracer.start_as_current_span(
-                f"node_{node_name}"
-            ) as node_span:
+            with tracer.start_as_current_span(f"node_{node_name}") as node_span:
                 node_span.set_attribute("node.name", node_name)
                 node_span.set_attribute("execution.duration", duration)
 
@@ -788,7 +786,9 @@ class WorkflowVisualizer:
         if metrics_result is None:
             return []
 
-        metrics_list = metrics_result if isinstance(metrics_result, list) else [metrics_result]
+        metrics_list = (
+            metrics_result if isinstance(metrics_result, list) else [metrics_result]
+        )
         for metrics in metrics_list:
             for error in metrics.errors:
                 all_errors.append(

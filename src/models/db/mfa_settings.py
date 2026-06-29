@@ -5,7 +5,7 @@ Manages MFA configuration including TOTP, SMS, email, and backup codes.
 """
 
 import secrets
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID as PyUUID  # noqa: N811
@@ -139,7 +139,9 @@ class MFASettings(BaseModel):
     )
 
     # Backup codes
-    backup_codes: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True, comment="Hashed backup codes")
+    backup_codes: Mapped[list[Any] | None] = mapped_column(
+        JSON, nullable=True, comment="Hashed backup codes"
+    )
 
     backup_codes_generated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -277,10 +279,10 @@ class MFASettings(BaseModel):
 
         if is_valid:
             self.totp_verified = True
-            self.totp_last_used = datetime.utcnow()
+            self.totp_last_used = datetime.now(UTC)
             self.totp_counter += 1
             self.successful_verifications += 1
-            self.last_verified_at = datetime.utcnow()
+            self.last_verified_at = datetime.now(UTC)
 
             # Enable MFA if this is the first verification
             if not self.is_enabled:
@@ -288,7 +290,7 @@ class MFASettings(BaseModel):
                 self.primary_method = MFAMethod.TOTP
         else:
             self.failed_attempts += 1
-            self.last_failed_at = datetime.utcnow()
+            self.last_failed_at = datetime.now(UTC)
 
         return is_valid
 
@@ -315,7 +317,7 @@ class MFASettings(BaseModel):
             hashed_codes.append(hashed)
 
         self.backup_codes = hashed_codes
-        self.backup_codes_generated_at = datetime.utcnow()
+        self.backup_codes_generated_at = datetime.now(UTC)
         self.backup_codes_used = []
 
         # Add to enabled methods
@@ -355,12 +357,12 @@ class MFASettings(BaseModel):
                     self.backup_codes_used = [i]
 
                 self.successful_verifications += 1
-                self.last_verified_at = datetime.utcnow()
+                self.last_verified_at = datetime.now(UTC)
 
                 return True
 
         self.failed_attempts += 1
-        self.last_failed_at = datetime.utcnow()
+        self.last_failed_at = datetime.now(UTC)
         return False
 
     def enable_sms(self, phone_number: str) -> str:
@@ -385,7 +387,7 @@ class MFASettings(BaseModel):
         else:
             self.enabled_methods = [MFAMethod.SMS.value]
 
-        self.sms_last_sent = datetime.utcnow()
+        self.sms_last_sent = datetime.now(UTC)
         self.sms_send_count += 1
 
         return code
@@ -400,8 +402,8 @@ class MFASettings(BaseModel):
         """
         trusted_device = {
             "device_id": device_id,
-            "added_at": datetime.utcnow().isoformat(),
-            "last_used": datetime.utcnow().isoformat(),
+            "added_at": datetime.now(UTC).isoformat(),
+            "last_used": datetime.now(UTC).isoformat(),
             **device_info,
         }
 
@@ -430,7 +432,7 @@ class MFASettings(BaseModel):
         for device in self.trusted_devices:
             if device.get("device_id") == device_id:
                 # Update last used
-                device["last_used"] = datetime.utcnow().isoformat()
+                device["last_used"] = datetime.now(UTC).isoformat()
                 return True
 
         return False

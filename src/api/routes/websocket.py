@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID
 
 import orjson
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from structlog import get_logger
 
 from src.api.websocket.auth import (
@@ -19,6 +19,8 @@ from src.api.websocket.auth import (
     verify_project_access,
 )
 from src.api.websocket.connection_manager import websocket_manager
+from src.auth.jwt_service import JWTService
+from src.middleware.auth_middleware import get_jwt_service
 from src.models.websocket_messages import (
     SubscriptionRequest,
     WSMessage,
@@ -34,6 +36,7 @@ router = APIRouter()
 async def websocket_endpoint(
     websocket: WebSocket,
     token: str | None = Query(None, description="JWT authentication token"),
+    jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
     """
     General purpose WebSocket endpoint for real-time updates.
@@ -51,6 +54,7 @@ async def websocket_endpoint(
         user_id, client_type = await authenticate_websocket_connection(
             token=token,
             user_agent=user_agent,
+            jwt_service=jwt_service,
         )
 
         # Establish connection
@@ -110,6 +114,12 @@ async def websocket_endpoint(
                     client_id=client_id,
                 )
 
+            except WebSocketDisconnect:
+                # Let the outer handler do the actual cleanup; if we swallow
+                # this here the while-loop will spin forever calling receive()
+                # against an already-disconnected socket.
+                raise
+
             except Exception as e:
                 logger.error(
                     "Error processing WebSocket message",
@@ -148,6 +158,7 @@ async def project_websocket_endpoint(
     websocket: WebSocket,
     project_id: UUID,
     token: str | None = Query(None, description="JWT authentication token"),
+    jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
     """
     Project-specific WebSocket endpoint for real-time project updates.
@@ -165,6 +176,7 @@ async def project_websocket_endpoint(
         user_id, client_type = await authenticate_websocket_connection(
             token=token,
             user_agent=user_agent,
+            jwt_service=jwt_service,
         )
 
         # Verify project access
@@ -227,6 +239,9 @@ async def project_websocket_endpoint(
                     project_id=str(project_id),
                 )
 
+            except WebSocketDisconnect:
+                raise
+
             except Exception as e:
                 logger.error(
                     "Error processing project WebSocket message",
@@ -270,6 +285,7 @@ async def cli_websocket_endpoint(
     project_id: UUID,
     token: str | None = Query(None, description="JWT authentication token"),
     format: str = Query("text", description="Output format for CLI"),
+    jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
     """
     CLI-optimized WebSocket endpoint for command-line tools.
@@ -284,6 +300,7 @@ async def cli_websocket_endpoint(
         user_id, _ = await authenticate_websocket_connection(
             token=token,
             user_agent="research-cli",  # Force CLI detection
+            jwt_service=jwt_service,
         )
 
         # Verify project access
@@ -340,6 +357,9 @@ async def cli_websocket_endpoint(
                     client_id=client_id,
                     project_id=str(project_id),
                 )
+
+            except WebSocketDisconnect:
+                raise
 
             except Exception as e:
                 logger.error(

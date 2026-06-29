@@ -1,9 +1,24 @@
+type WebSocketMessage = {
+    type: string;
+    data?: unknown;
+};
+
+function isWebSocketMessage(message: unknown): message is WebSocketMessage {
+    return (
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        typeof (message as { type?: unknown }).type === "string"
+    );
+}
+
 export class WebSocketManager {
     private ws: WebSocket | null = null;
     private url: string;
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 5;
-    private listeners: Map<string, Set<(data: any) => void>> = new Map();
+    private listeners: Map<string, Set<(data: unknown) => void>> = new Map();
+    private pendingMessages: WebSocketMessage[] = [];
 
     constructor(url: string) {
         this.url = url;
@@ -14,12 +29,15 @@ export class WebSocketManager {
 
         this.ws.onopen = () => {
             this.reconnectAttempts = 0;
+            this.flushPendingMessages();
             console.log('WebSocket connected');
         };
 
         this.ws.onmessage = (event) => {
-            const message = JSON.parse(event.data);
-            this.notifyListeners(message.type, message.data);
+            const message: unknown = JSON.parse(event.data);
+            if (isWebSocketMessage(message)) {
+                this.notifyListeners(message.type, message.data);
+            }
         };
 
         this.ws.onclose = () => {
@@ -38,23 +56,40 @@ export class WebSocketManager {
         }
     }
 
-    subscribe(type: string, callback: (data: any) => void) {
+    subscribe<TData = unknown>(type: string, callback: (data: TData) => void) {
         if (!this.listeners.has(type)) {
             this.listeners.set(type, new Set());
         }
-        this.listeners.get(type)!.add(callback);
+        const listener = callback as (data: unknown) => void;
+        this.listeners.get(type)!.add(listener);
 
         return () => {
-            this.listeners.get(type)?.delete(callback);
+            this.listeners.get(type)?.delete(listener);
         };
     }
 
-    private notifyListeners(type: string, data: any) {
+    private notifyListeners(type: string, data: unknown) {
         this.listeners.get(type)?.forEach((callback) => callback(data));
     }
 
-    send(message: any) {
-        this.ws?.send(JSON.stringify(message));
+    private flushPendingMessages() {
+        const ws = this.ws;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        const messages = [...this.pendingMessages];
+        this.pendingMessages = [];
+        messages.forEach((message) => ws.send(JSON.stringify(message)));
+    }
+
+    send(message: WebSocketMessage) {
+        if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(message));
+            return;
+        }
+
+        this.pendingMessages.push(message);
     }
 
     disconnect() {

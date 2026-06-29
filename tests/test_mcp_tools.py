@@ -260,6 +260,11 @@ class TestCitationTool:
 class TestStatisticsTool:
     """Test cases for Statistics Tool."""
 
+    # StatisticsTool depends on scipy (declared in pyproject.toml [stats]
+    # extra). Skip the whole class cleanly when the optional dep isn't
+    # installed instead of erroring at import time.
+    pytest.importorskip("scipy")
+
     @pytest.mark.asyncio
     async def test_descriptive_statistics(self):
         """Test descriptive statistics calculation."""

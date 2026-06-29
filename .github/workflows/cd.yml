@@ -77,7 +77,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev]"
+          uv pip install --system -e ".[dev]"
       
       - name: Run smoke tests
         run: |

@@ -3,7 +3,7 @@ Research Project models for the Research Platform.
 Implements domain models following TDD principles.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
@@ -92,12 +92,12 @@ class AgentTask(BaseModel):
     def start(self) -> None:
         """Mark task as started."""
         self.status = "in_progress"
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(UTC)
 
     def complete(self, result: dict[str, Any] | None = None) -> None:
         """Mark task as completed."""
         self.status = "completed"
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(UTC)
         if result:
             self.result = result
 
@@ -105,7 +105,7 @@ class AgentTask(BaseModel):
         """Mark task as failed."""
         self.status = "failed"
         self.error_message = error_message
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(UTC)
 
 
 class ResearchPlan(BaseModel):
@@ -115,7 +115,7 @@ class ResearchPlan(BaseModel):
     methodology: str = Field(..., description="Research methodology")
     tasks: list[AgentTask] = Field(default_factory=list)
     estimated_total_duration_seconds: int | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def add_task(self, task: AgentTask) -> None:
         """Add a task to the research plan."""
@@ -136,8 +136,8 @@ class ResearchProject(BaseModel):
     status: ResearchStatus = Field(default=ResearchStatus.PENDING)
     scope: ResearchScope | None = None
     plan: ResearchPlan | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error_message: str | None = None
@@ -149,23 +149,23 @@ class ResearchProject(BaseModel):
         if self.status != ResearchStatus.PENDING:
             raise ValueError(f"Cannot start planning from status: {self.status}")
         self.status = ResearchStatus.PLANNING
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def start_research(self) -> None:
         """Transition to in-progress status."""
         if self.status not in [ResearchStatus.PENDING, ResearchStatus.PLANNING]:
             raise ValueError(f"Cannot start research from status: {self.status}")
         self.status = ResearchStatus.IN_PROGRESS
-        self.started_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
+        self.started_at = datetime.now(UTC)
+        self.updated_at = datetime.now(UTC)
 
     def complete(self, results: dict[str, Any] | None = None) -> None:
         """Mark project as completed."""
         if self.status != ResearchStatus.IN_PROGRESS:
             raise ValueError(f"Cannot complete project from status: {self.status}")
         self.status = ResearchStatus.COMPLETED
-        self.completed_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
+        self.completed_at = datetime.now(UTC)
+        self.updated_at = datetime.now(UTC)
         if results:
             self.results = results
 
@@ -173,25 +173,25 @@ class ResearchProject(BaseModel):
         """Mark project as failed."""
         self.status = ResearchStatus.FAILED
         self.error_message = error_message
-        self.completed_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
+        self.completed_at = datetime.now(UTC)
+        self.updated_at = datetime.now(UTC)
 
     def cancel(self) -> None:
         """Cancel the project."""
         if self.status in [ResearchStatus.COMPLETED, ResearchStatus.FAILED]:
             raise ValueError(f"Cannot cancel project with status: {self.status}")
         self.status = ResearchStatus.CANCELLED
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def set_plan(self, plan: ResearchPlan) -> None:
         """Set the research plan for the project."""
         self.plan = plan
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def set_scope(self, scope: ResearchScope) -> None:
         """Set the research scope for the project."""
         self.scope = scope
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     @property
     def is_active(self) -> bool:
@@ -231,7 +231,7 @@ class ResearchProgress(BaseModel):
     estimated_time_remaining_seconds: int | None = None
     current_agent: str | None = None
     current_agent_activities: list[dict[str, Any]] = Field(default_factory=list)
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def update_from_tasks(self, tasks: list[AgentTask]) -> None:
         """Update progress from task list."""
@@ -244,4 +244,4 @@ class ResearchProgress(BaseModel):
         if self.total_tasks > 0:
             self.progress_percentage = (self.completed_tasks / self.total_tasks) * 100
 
-        self.last_updated = datetime.utcnow()
+        self.last_updated = datetime.now(UTC)

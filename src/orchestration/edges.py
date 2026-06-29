@@ -5,12 +5,13 @@ This module defines the conditional logic that determines how the workflow
 moves between different nodes based on the current state.
 """
 
-import logging
 from typing import Literal
+
+from structlog import get_logger
 
 from src.orchestration.state import AgentExecutionStatus, ResearchState, WorkflowPhase
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class EdgeConditions:
@@ -80,8 +81,10 @@ class EdgeConditions:
         parallel_agents = []
 
         # After literature review, we can run multiple agents
-        if (state.current_phase == WorkflowPhase.LITERATURE_REVIEW and
-            "literature_review" in state.completed_agents):
+        if (
+            state.current_phase == WorkflowPhase.LITERATURE_REVIEW
+            and "literature_review" in state.completed_agents
+        ):
             # These agents can run in parallel after literature review
             if "comparative_analysis" not in state.completed_agents:
                 parallel_agents.append("comparative_analysis")

@@ -4,16 +4,16 @@ Statistics Tool for MCP.
 Provides statistical analysis and visualization capabilities.
 """
 
-import logging
 from typing import Any
 
 import numpy as np
 import plotly.graph_objects as go
 from scipy import stats
+from structlog import get_logger
 
 from src.mcp.base import BaseMCPTool, ToolMetadata, ToolParameter
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class StatisticsTool(BaseMCPTool):

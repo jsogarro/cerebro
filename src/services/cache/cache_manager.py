@@ -5,16 +5,18 @@ This module provides a sophisticated cache manager with support for
 various caching strategies, compression, and batch operations.
 """
 
+from __future__ import annotations
+
 import gzip
-import logging
 from typing import Any
 
 from redis import asyncio as aioredis
+from structlog import get_logger
 
 from src.services.cache.cache_strategies import CacheStrategy, TTLStrategy
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CacheManager:

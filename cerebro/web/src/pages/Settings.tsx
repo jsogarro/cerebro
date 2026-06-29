@@ -47,9 +47,15 @@ export function Settings() {
                                 <h4 className="font-semibold text-sm">Strict Rate Limiting</h4>
                                 <p className="text-xs text-muted-foreground">Enforce conservative RPM limits globally.</p>
                             </div>
-                            <div className="h-5 w-9 bg-primary/20 rounded-full flex items-center px-0.5 cursor-pointer">
-                                <div className="h-4 w-4 rounded-full bg-primary shadow translate-x-4"></div>
-                            </div>
+                            <button
+                                aria-checked="true"
+                                aria-label="Toggle strict rate limiting"
+                                className="h-5 w-9 bg-primary/20 rounded-full flex items-center px-0.5 cursor-pointer"
+                                role="switch"
+                                type="button"
+                            >
+                                <span className="h-4 w-4 rounded-full bg-primary shadow translate-x-4" />
+                            </button>
                         </div>
                     </CardContent>
                 </Card>
