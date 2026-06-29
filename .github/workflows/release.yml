@@ -137,13 +137,13 @@ jobs:
       
       - name: Build wheel and sdist
         run: |
-          uv pip install build
+          uv pip install --system build
           python -m build
       
       - name: Build CLI binary
         run: |
-          uv pip install pyinstaller
-          uv pip install -e .
+          uv pip install --system pyinstaller
+          uv pip install --system -e .
           
           # Build standalone CLI binary
           pyinstaller \
@@ -248,7 +248,7 @@ jobs:
       
       - name: Build package
         run: |
-          uv pip install build
+          uv pip install --system build
           python -m build
       
       - name: Publish to PyPI

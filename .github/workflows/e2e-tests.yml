@@ -58,8 +58,8 @@ jobs:
     
     - name: Install dependencies
       run: |
-        uv pip install -e ".[dev]"
-        uv pip install playwright pytest-playwright
+        uv pip install --system -e ".[dev]"
+        uv pip install --system playwright pytest-playwright
     
     - name: Install Playwright browsers
       run: |
