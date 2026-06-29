@@ -3,7 +3,9 @@ name: Integration Tests
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # manual trigger only on PRs
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 env:
   PYTHON_VERSION: '3.11'

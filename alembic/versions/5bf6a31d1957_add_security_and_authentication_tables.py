@@ -4,6 +4,10 @@ Revision ID: 5bf6a31d1957
 Revises: 4141aabbf97d
 Create Date: 2025-08-17
 
+Fix: All postgresql.ENUM() calls now pass create_type=False since the types
+are explicitly created via op.execute() at the start of upgrade(). This
+prevents DuplicateObjectError on fresh databases.
+
 """
 from collections.abc import Sequence
 
@@ -23,13 +27,48 @@ def upgrade() -> None:
     """Add security and authentication tables."""
     
     # Create ENUMs
-    op.execute("CREATE TYPE audit_event_type AS ENUM ('login_success', 'login_failed', 'logout', 'password_change', 'password_reset_request', 'password_reset_complete', 'account_created', 'account_activated', 'account_deactivated', 'account_deleted', 'account_locked', 'account_unlocked', 'email_verified', 'email_changed', 'mfa_enabled', 'mfa_disabled', 'mfa_verified', 'mfa_failed', 'mfa_backup_used', 'oauth_connected', 'oauth_disconnected', 'oauth_login', 'session_created', 'session_refreshed', 'session_revoked', 'session_expired', 'api_key_created', 'api_key_revoked', 'api_key_used', 'permission_granted', 'permission_revoked', 'role_assigned', 'role_removed', 'suspicious_activity', 'rate_limit_exceeded', 'invalid_token', 'unauthorized_access', 'data_accessed', 'data_modified', 'data_deleted', 'data_exported')")
-    op.execute("CREATE TYPE audit_severity AS ENUM ('info', 'warning', 'error', 'critical')")
-    op.execute("CREATE TYPE oauth_provider AS ENUM ('google', 'github', 'microsoft', 'facebook', 'linkedin', 'twitter', 'apple', 'gitlab', 'bitbucket', 'okta', 'auth0')")
-    op.execute("CREATE TYPE mfa_method AS ENUM ('totp', 'sms', 'email', 'backup_codes', 'webauthn', 'push')")
-    op.execute("CREATE TYPE alert_type AS ENUM ('suspicious_login', 'failed_login_attempts', 'new_device_login', 'new_location_login', 'password_changed', 'password_reset', 'account_locked', 'account_unlocked', 'account_deactivated', 'privilege_escalation', 'mfa_disabled', 'mfa_method_changed', 'mfa_bypass_attempt', 'concurrent_sessions', 'session_hijacking', 'unusual_activity', 'api_rate_limit', 'api_key_compromised', 'unauthorized_api_access', 'bulk_data_access', 'sensitive_data_access', 'data_exfiltration', 'brute_force_attack', 'sql_injection_attempt', 'xss_attempt', 'system_breach')")
-    op.execute("CREATE TYPE alert_severity AS ENUM ('low', 'medium', 'high', 'critical')")
-    op.execute("CREATE TYPE alert_status AS ENUM ('new', 'acknowledged', 'investigating', 'resolved', 'false_positive', 'escalated')")
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE audit_event_type AS ENUM ('login_success', 'login_failed', 'logout', 'password_change', 'password_reset_request', 'password_reset_complete', 'account_created', 'account_activated', 'account_deactivated', 'account_deleted', 'account_locked', 'account_unlocked', 'email_verified', 'email_changed', 'mfa_enabled', 'mfa_disabled', 'mfa_verified', 'mfa_failed', 'mfa_backup_used', 'oauth_connected', 'oauth_disconnected', 'oauth_login', 'session_created', 'session_refreshed', 'session_revoked', 'session_expired', 'api_key_created', 'api_key_revoked', 'api_key_used', 'permission_granted', 'permission_revoked', 'role_assigned', 'role_removed', 'suspicious_activity', 'rate_limit_exceeded', 'invalid_token', 'unauthorized_access', 'data_accessed', 'data_modified', 'data_deleted', 'data_exported');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE audit_severity AS ENUM ('info', 'warning', 'error', 'critical');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE oauth_provider AS ENUM ('google', 'github', 'microsoft', 'facebook', 'linkedin', 'twitter', 'apple', 'gitlab', 'bitbucket', 'okta', 'auth0');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE mfa_method AS ENUM ('totp', 'sms', 'email', 'backup_codes', 'webauthn', 'push');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE alert_type AS ENUM ('suspicious_login', 'failed_login_attempts', 'new_device_login', 'new_location_login', 'password_changed', 'password_reset', 'account_locked', 'account_unlocked', 'account_deactivated', 'privilege_escalation', 'mfa_disabled', 'mfa_method_changed', 'mfa_bypass_attempt', 'concurrent_sessions', 'session_hijacking', 'unusual_activity', 'api_rate_limit', 'api_key_compromised', 'unauthorized_api_access', 'bulk_data_access', 'sensitive_data_access', 'data_exfiltration', 'brute_force_attack', 'sql_injection_attempt', 'xss_attempt', 'system_breach');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE alert_severity AS ENUM ('low', 'medium', 'high', 'critical');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE alert_status AS ENUM ('new', 'acknowledged', 'investigating', 'resolved', 'false_positive', 'escalated');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """)
     
     # Create password_history table
     op.create_table('password_history',
@@ -114,8 +153,8 @@ def upgrade() -> None:
         sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('created_by', sa.String(length=255), nullable=True),
         sa.Column('updated_by', sa.String(length=255), nullable=True),
-        sa.Column('event_type', postgresql.ENUM('login_success', 'login_failed', 'logout', 'password_change', 'password_reset_request', 'password_reset_complete', 'account_created', 'account_activated', 'account_deactivated', 'account_deleted', 'account_locked', 'account_unlocked', 'email_verified', 'email_changed', 'mfa_enabled', 'mfa_disabled', 'mfa_verified', 'mfa_failed', 'mfa_backup_used', 'oauth_connected', 'oauth_disconnected', 'oauth_login', 'session_created', 'session_refreshed', 'session_revoked', 'session_expired', 'api_key_created', 'api_key_revoked', 'api_key_used', 'permission_granted', 'permission_revoked', 'role_assigned', 'role_removed', 'suspicious_activity', 'rate_limit_exceeded', 'invalid_token', 'unauthorized_access', 'data_accessed', 'data_modified', 'data_deleted', 'data_exported', name='audit_event_type'), nullable=False, comment='Type of audit event'),
-        sa.Column('severity', postgresql.ENUM('info', 'warning', 'error', 'critical', name='audit_severity'), nullable=False, comment='Event severity level'),
+        sa.Column('event_type', postgresql.ENUM('login_success', 'login_failed', 'logout', 'password_change', 'password_reset_request', 'password_reset_complete', 'account_created', 'account_activated', 'account_deactivated', 'account_deleted', 'account_locked', 'account_unlocked', 'email_verified', 'email_changed', 'mfa_enabled', 'mfa_disabled', 'mfa_verified', 'mfa_failed', 'mfa_backup_used', 'oauth_connected', 'oauth_disconnected', 'oauth_login', 'session_created', 'session_refreshed', 'session_revoked', 'session_expired', 'api_key_created', 'api_key_revoked', 'api_key_used', 'permission_granted', 'permission_revoked', 'role_assigned', 'role_removed', 'suspicious_activity', 'rate_limit_exceeded', 'invalid_token', 'unauthorized_access', 'data_accessed', 'data_modified', 'data_deleted', 'data_exported', name='audit_event_type', create_type=False), nullable=False, comment='Type of audit event'),
+        sa.Column('severity', postgresql.ENUM('info', 'warning', 'error', 'critical', name='audit_severity', create_type=False), nullable=False, comment='Event severity level'),
         sa.Column('event_category', sa.String(length=50), nullable=True, comment='Event category for grouping'),
         sa.Column('user_id', postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column('username', sa.String(length=100), nullable=True, comment='Username at time of event (denormalized)'),
@@ -169,7 +208,7 @@ def upgrade() -> None:
         sa.Column('created_by', sa.String(length=255), nullable=True),
         sa.Column('updated_by', sa.String(length=255), nullable=True),
         sa.Column('user_id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('provider', postgresql.ENUM('google', 'github', 'microsoft', 'facebook', 'linkedin', 'twitter', 'apple', 'gitlab', 'bitbucket', 'okta', 'auth0', name='oauth_provider'), nullable=False, comment='OAuth provider name'),
+        sa.Column('provider', postgresql.ENUM('google', 'github', 'microsoft', 'facebook', 'linkedin', 'twitter', 'apple', 'gitlab', 'bitbucket', 'okta', 'auth0', name='oauth_provider', create_type=False), nullable=False, comment='OAuth provider name'),
         sa.Column('provider_user_id', sa.String(length=255), nullable=False, comment='User ID from OAuth provider'),
         sa.Column('provider_username', sa.String(length=255), nullable=True, comment='Username from OAuth provider'),
         sa.Column('provider_email', sa.String(length=255), nullable=True, comment='Email from OAuth provider'),
@@ -216,7 +255,7 @@ def upgrade() -> None:
         sa.Column('user_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('is_enabled', sa.Boolean(), nullable=False, comment='Whether MFA is enabled for the user'),
         sa.Column('is_enforced', sa.Boolean(), nullable=False, comment='Whether MFA is enforced (cannot be disabled by user)'),
-        sa.Column('primary_method', postgresql.ENUM('totp', 'sms', 'email', 'backup_codes', 'webauthn', 'push', name='mfa_method'), nullable=True, comment='Primary MFA method'),
+        sa.Column('primary_method', postgresql.ENUM('totp', 'sms', 'email', 'backup_codes', 'webauthn', 'push', name='mfa_method', create_type=False), nullable=True, comment='Primary MFA method'),
         sa.Column('enabled_methods', postgresql.ARRAY(sa.String()), nullable=True, comment='List of enabled MFA methods'),
         sa.Column('totp_secret', sa.String(length=255), nullable=True, comment='TOTP secret key (encrypted)'),
         sa.Column('totp_verified', sa.Boolean(), nullable=False, comment='Whether TOTP has been verified'),
@@ -260,9 +299,9 @@ def upgrade() -> None:
         sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('created_by', sa.String(length=255), nullable=True),
         sa.Column('updated_by', sa.String(length=255), nullable=True),
-        sa.Column('alert_type', postgresql.ENUM('suspicious_login', 'failed_login_attempts', 'new_device_login', 'new_location_login', 'password_changed', 'password_reset', 'account_locked', 'account_unlocked', 'account_deactivated', 'privilege_escalation', 'mfa_disabled', 'mfa_method_changed', 'mfa_bypass_attempt', 'concurrent_sessions', 'session_hijacking', 'unusual_activity', 'api_rate_limit', 'api_key_compromised', 'unauthorized_api_access', 'bulk_data_access', 'sensitive_data_access', 'data_exfiltration', 'brute_force_attack', 'sql_injection_attempt', 'xss_attempt', 'system_breach', name='alert_type'), nullable=False, comment='Type of security alert'),
-        sa.Column('severity', postgresql.ENUM('low', 'medium', 'high', 'critical', name='alert_severity'), nullable=False, comment='Alert severity level'),
-        sa.Column('status', postgresql.ENUM('new', 'acknowledged', 'investigating', 'resolved', 'false_positive', 'escalated', name='alert_status'), nullable=False, comment='Current alert status'),
+        sa.Column('alert_type', postgresql.ENUM('suspicious_login', 'failed_login_attempts', 'new_device_login', 'new_location_login', 'password_changed', 'password_reset', 'account_locked', 'account_unlocked', 'account_deactivated', 'privilege_escalation', 'mfa_disabled', 'mfa_method_changed', 'mfa_bypass_attempt', 'concurrent_sessions', 'session_hijacking', 'unusual_activity', 'api_rate_limit', 'api_key_compromised', 'unauthorized_api_access', 'bulk_data_access', 'sensitive_data_access', 'data_exfiltration', 'brute_force_attack', 'sql_injection_attempt', 'xss_attempt', 'system_breach', name='alert_type', create_type=False), nullable=False, comment='Type of security alert'),
+        sa.Column('severity', postgresql.ENUM('low', 'medium', 'high', 'critical', name='alert_severity', create_type=False), nullable=False, comment='Alert severity level'),
+        sa.Column('status', postgresql.ENUM('new', 'acknowledged', 'investigating', 'resolved', 'false_positive', 'escalated', name='alert_status', create_type=False), nullable=False, comment='Current alert status'),
         sa.Column('user_id', postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column('username', sa.String(length=100), nullable=True, comment='Username at time of alert (denormalized)'),
         sa.Column('email', sa.String(length=255), nullable=True, comment='Email at time of alert (denormalized)'),
