@@ -266,11 +266,7 @@ jobs:
         with:
           version: 'latest'
       
-      - name: Install kustomize
-        run: |
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-          sudo mv kustomize /usr/local/bin/
-      
+
       - name: Validate manifests
         run: |
           # kubectl --dry-run=client still hits the apiserver for resource
@@ -288,7 +284,7 @@ jobs:
         run: |
           # kustomize build will fail on any malformed kustomization,
           # giving us structural validation without needing a live apiserver.
-          kustomize build k8s/ > /tmp/rendered.yaml
+          kubectl kustomize k8s/ > /tmp/rendered.yaml
           yamllint -d "{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable, new-line-at-end-of-file: disable, comments: {min-spaces-from-content: 1}}}" /tmp/rendered.yaml
 
   frontend-ci:
