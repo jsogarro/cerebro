@@ -252,3 +252,6 @@ def downgrade() -> None:
     op.drop_index('idx_user_active', table_name='users')
     op.drop_table('users')
     # ### end Alembic commands ###
+
+    op.execute('DROP TYPE IF EXISTS taskstatus')
+    op.execute('DROP TYPE IF EXISTS projectstatus')
