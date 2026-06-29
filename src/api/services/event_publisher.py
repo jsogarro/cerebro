@@ -83,6 +83,45 @@ class EventPublisher:
 
         logger.info("Event publisher shutdown complete")
 
+    async def publish_project_event(
+        self, project_id: Any, event: dict[str, Any]
+    ) -> None:
+        """Publish a project-scoped event with an untyped dict payload.
+
+        Generic compatibility shim absorbed from the deleted
+        src/api/websocket/event_publisher.py stub. Used by
+        DirectExecutionService.publish_progress_update to broadcast
+        progress snapshots keyed by project_id. Logs only; migrate to the
+        typed publish_progress_update / publish_agent_* methods once each
+        caller can name the event type.
+        """
+        logger.debug(
+            "Project event published (untyped)",
+            project_id=str(project_id),
+            keys=list(event.keys()) if isinstance(event, dict) else type(event).__name__,
+        )
+
+    async def publish_event(
+        self,
+        event_type: str,
+        data: dict[str, Any],
+        target_clients: list[str] | None = None,
+    ) -> None:
+        """Publish a generic event, optionally targeted at specific clients.
+
+        Generic compatibility shim absorbed from the deleted
+        src/api/websocket/event_publisher.py stub. Used by
+        RealTimeDashboard._broadcast_to_dashboard. Logs only; targeted
+        delivery requires the websocket connection_manager —
+        see _publish_event for the broadcast pattern.
+        """
+        target_str = (
+            f" -> {len(target_clients)} client(s)"
+            if target_clients
+            else " (broadcast)"
+        )
+        logger.debug(f"Event published (untyped): {event_type}{target_str}")
+
     async def publish_progress_update(
         self,
         project_id: UUID,

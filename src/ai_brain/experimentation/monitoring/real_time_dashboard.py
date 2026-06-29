@@ -16,8 +16,8 @@ from typing import Any
 from fastapi import WebSocket
 from structlog import get_logger
 
+from src.api.services.event_publisher import EventPublisher
 from src.api.websocket.connection_manager import ConnectionManager
-from src.api.websocket.event_publisher import EventPublisher
 from src.utils.async_helpers import BackgroundTaskTracker
 
 logger = get_logger()

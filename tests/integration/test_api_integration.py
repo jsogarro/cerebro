@@ -39,12 +39,11 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.factories.project_factory import (  # noqa: F401  (kept for future un-skip)
+from tests.factories.project_factory import (
     ResearchProjectFactory,
 )
-from tests.factories.user_factory import UserFactory  # noqa: F401
-from tests.utils.auth_utils import TestAuthManager  # noqa: F401
-
+from tests.factories.user_factory import UserFactory
+from tests.utils.auth_utils import TestAuthManager
 
 _SKIP_REGISTER_SIDE_EFFECT = (
     "POST /api/v1/auth/register raises 'Read-only file system: /secrets' "

@@ -402,36 +402,6 @@ def validate_secure_string(v: str) -> str:
     return v
 
 
-class LoginRequest(BaseModel):
-    """Secure login request model."""
-
-    email: EmailStr = Field(..., description="User email address")
-    password: Annotated[str, Field(min_length=8, max_length=128)] = Field(
-        ..., description="User password"
-    )
-    mfa_code: Annotated[str, Field(pattern=r"^\d{6}$")] | None = Field(None, description="MFA code")
-    remember_me: bool = Field(False, description="Remember session")
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v: str) -> str:
-        return SecurityValidator.validate_email(v)
-
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        # Basic password validation - expand as needed
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("Password must contain uppercase letter")
-        if not re.search(r"[a-z]", v):
-            raise ValueError("Password must contain lowercase letter")
-        if not re.search(r"\d", v):
-            raise ValueError("Password must contain digit")
-        return v
-
-
 class RegisterRequest(BaseModel):
     """Secure registration request model."""
 

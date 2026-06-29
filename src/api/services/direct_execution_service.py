@@ -30,7 +30,7 @@ from ...agents.supervisors.supervisor_factory import SupervisorFactory
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.masr import MASRouter
 from ...models.research_project import ResearchProject
-from ..websocket.event_publisher import EventPublisher
+from .event_publisher import EventPublisher
 
 logger = get_logger()
 

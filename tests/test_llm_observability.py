@@ -30,10 +30,10 @@ MEMORY_DIR = SRC_DIR / "ai_brain" / "memory"
 API_SERVICE_WEBSOCKET_MODULES = [
     SRC_DIR / "api" / "services" / "agent_execution_service.py",
     SRC_DIR / "api" / "services" / "direct_execution_service.py",
+    SRC_DIR / "api" / "services" / "event_publisher.py",
     SRC_DIR / "api" / "services" / "supervisor_progress_tracker.py",
     SRC_DIR / "api" / "services" / "talkhier_session_manager.py",
     SRC_DIR / "api" / "services" / "talkhier_session_service.py",
-    SRC_DIR / "api" / "websocket" / "event_publisher.py",
     SRC_DIR / "api" / "websocket" / "talkhier_websocket_events.py",
 ]
 REPOSITORY_PROMPT_PLATFORM_MODULES = [

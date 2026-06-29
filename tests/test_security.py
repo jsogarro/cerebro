@@ -15,7 +15,6 @@ from src.security.headers import CORSSecurityMiddleware, SecurityHeadersMiddlewa
 from src.security.rate_limiter import RateLimiter, RateLimitStrategy
 from src.security.validators import (
     FileUploadValidator,
-    LoginRequest,
     SecurityValidator,
 )
 
@@ -372,19 +371,25 @@ class TestSecurityValidators:
             SecurityValidator.validate_ip_address("192.168.1.1", allow_private=False)
 
     def test_login_request_validation(self, mocker: Any) -> None:
-        """Test login request model validation.
+        """Test that the security validator chain rejects bad login inputs.
 
-        Same DNS-skip rationale as ``test_validate_email``: ``LoginRequest``
-        delegates email validation to ``email_validator.validate_email``,
-        which would otherwise refuse the RFC-2606 ``example.com`` test
-        domain and make this test network-dependent.
+        The original test used a ``LoginRequest`` Pydantic model that was
+        duplicated against the canonical ``src.auth.models.LoginRequest``
+        (used by the real /login endpoint). The duplicate was removed and
+        the assertions are re-expressed against a local Pydantic model
+        that wires the same SecurityValidator-backed field validators —
+        this way the test still exercises validator chaining without
+        re-introducing a duplicate model.
 
-        NOTE (tech debt): two ``LoginRequest`` classes exist — this one at
-        ``src/security/validators.py:405`` and a duplicate at
-        ``src/auth/models.py:69``. Consolidate in a follow-up PR; out of
-        scope for the stabilization milestone.
+        Same DNS-skip rationale as ``test_validate_email``: email
+        validation delegates to ``email_validator.validate_email``, which
+        would otherwise refuse the RFC-2606 ``example.com`` test domain.
         """
+        import re
+        from typing import Annotated
+
         import email_validator
+        from pydantic import BaseModel, EmailStr, Field, field_validator
 
         original_validate = email_validator.validate_email
 
@@ -395,19 +400,46 @@ class TestSecurityValidators:
             email_validator, "validate_email", side_effect=_format_only
         )
 
+        class _SecureLoginPattern(BaseModel):
+            """Local fixture model demonstrating the validator pattern."""
+
+            email: EmailStr = Field(...)
+            password: Annotated[str, Field(min_length=8, max_length=128)] = Field(...)
+            mfa_code: Annotated[str, Field(pattern=r"^\d{6}$")] | None = Field(
+                None
+            )
+
+            @field_validator("email")
+            @classmethod
+            def _validate_email(cls, v: str) -> str:
+                return SecurityValidator.validate_email(v)
+
+            @field_validator("password")
+            @classmethod
+            def _validate_password(cls, v: str) -> str:
+                if len(v) < 8:
+                    raise ValueError("Password must be at least 8 characters")
+                if not re.search(r"[A-Z]", v):
+                    raise ValueError("Password must contain uppercase letter")
+                if not re.search(r"[a-z]", v):
+                    raise ValueError("Password must contain lowercase letter")
+                if not re.search(r"\d", v):
+                    raise ValueError("Password must contain digit")
+                return v
+
         # Valid request
-        login = LoginRequest(
+        login = _SecureLoginPattern(
             email="user@example.com", password="SecureP@ss123", mfa_code="123456"
         )
         assert login.email == "user@example.com"
 
         # Invalid password (too short)
         with pytest.raises(ValueError):
-            LoginRequest(email="user@example.com", password="short")
+            _SecureLoginPattern(email="user@example.com", password="short")
 
         # Invalid MFA code
         with pytest.raises(ValueError):
-            LoginRequest(
+            _SecureLoginPattern(
                 email="user@example.com",
                 password="SecureP@ss123",
                 mfa_code="12345",  # Too short

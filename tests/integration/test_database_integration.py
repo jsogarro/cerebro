@@ -225,6 +225,8 @@ class TestDatabaseConstraints:
     @pytest.mark.asyncio
     async def test_unique_constraints(self, db_session: AsyncSession) -> None:
         """Test unique constraint enforcement."""
+        from sqlalchemy.exc import IntegrityError
+
         user1 = UserFactory(email="unique@example.com")
         user2 = UserFactory(email="unique@example.com")  # Same email
 
@@ -232,7 +234,7 @@ class TestDatabaseConstraints:
         await db_session.commit()
 
         db_session.add(user2)
-        with pytest.raises(Exception):  # IntegrityError
+        with pytest.raises(IntegrityError):
             await db_session.commit()
 
     @pytest.mark.asyncio
