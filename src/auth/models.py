@@ -72,9 +72,28 @@ class LoginRequest(BaseModel):
     """Login request with email and password."""
 
     email: EmailStr = Field(..., description="User email address")
-    password: str = Field(..., min_length=8, description="User password")
+    password: str = Field(..., min_length=12, description="User password")
     device_id: str | None = Field(None, description="Device fingerprint")
     remember_me: bool = Field(default=False, description="Extended session duration")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        """Validate password meets complexity policy (mirrors RegisterRequest)."""
+        if len(v) < 12:
+            raise ValueError("Password must be at least 12 characters long")
+
+        has_upper = any(c.isupper() for c in v)
+        has_lower = any(c.islower() for c in v)
+        has_digit = any(c.isdigit() for c in v)
+        has_special = any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in v)
+
+        if not (has_upper and has_lower and has_digit and has_special):
+            raise ValueError(
+                "Password must contain uppercase, lowercase, digit, and special character"
+            )
+
+        return v
 
     model_config = ConfigDict(
         json_schema_extra={
