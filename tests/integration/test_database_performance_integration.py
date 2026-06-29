@@ -65,19 +65,34 @@ class TestDatabasePerformance:
         assert indexed_time < 1
         assert non_indexed_time < 2
 
-    @pytest.mark.skip(
-        reason=(
-            "Original test built a parallel engine pointing at a hardcoded "
-            "localhost Postgres (not the testcontainer) and applied the sync "
-            "QueuePool to an async engine. To genuinely exercise pooling against "
-            "the test database, rewrite to obtain concurrent connections from the "
-            "shared test_engine fixture and assert no deadlock / no connection "
-            "leak; treat as new test rather than a salvage."
-        )
-    )
     @pytest.mark.asyncio
-    async def test_connection_pooling(self, db_session: AsyncSession) -> None:
-        """Test database connection pooling."""
+    async def test_connection_pooling(self, test_engine) -> None:
+        """Pool serves concurrent queries without deadlock and returns connections."""
+        import asyncio
+
+        from sqlalchemy import text
+
+        # test_engine is configured with pool_size=10, max_overflow=20; 15
+        # concurrent connections exercises both the base pool and the overflow.
+        concurrency = 15
+
+        async def _query_backend_pid() -> int:
+            async with test_engine.connect() as conn:
+                result = await conn.execute(text("SELECT pg_backend_pid()"))
+                return int(result.scalar_one())
+
+        pids = await asyncio.wait_for(
+            asyncio.gather(*(_query_backend_pid() for _ in range(concurrency))),
+            timeout=10,
+        )
+
+        assert len(pids) == concurrency
+        # Concurrent connections must come from distinct backends — proves the
+        # pool actually issued parallel connections rather than serializing.
+        assert len(set(pids)) >= 2
+
+        # All connections must be returned to the pool.
+        assert test_engine.pool.checkedout() == 0
 
 
 class TestDatabaseMigrations:
