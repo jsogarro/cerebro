@@ -34,7 +34,19 @@ async def set_postgres_tenant_context(
     session: AsyncSession,
     organization_id: str,
 ) -> None:
-    """Set the transaction-local tenant context used by Postgres RLS policies."""
+    """Set the transaction-local tenant context used by Postgres RLS policies.
+
+    No-op on non-Postgres dialects. RLS policies are Postgres-only — SQLite
+    test/dev databases don't enforce them, so silently skipping the
+    ``SET LOCAL`` statement lets local dev (``DATABASE_URL=sqlite+aiosqlite://``)
+    exercise the same code paths without tripping a syntax error. The tenant
+    boundary is still enforced at the repository layer (``user_id`` and
+    ``organization_id`` filters on every query).
+    """
+    bind = session.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+
     await session.execute(
         text("SET LOCAL app.current_org_id = :organization_id"),
         {"organization_id": organization_id},

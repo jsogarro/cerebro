@@ -31,9 +31,25 @@ def _token_payload(organization_id: str | None) -> TokenPayload:
     )
 
 
+class _FakeDialect:
+    """Minimal dialect stub — only the `name` attribute is read."""
+
+    def __init__(self, name: str = "postgresql") -> None:
+        self.name = name
+
+
+class _FakeBind:
+    def __init__(self, dialect_name: str = "postgresql") -> None:
+        self.dialect = _FakeDialect(dialect_name)
+
+
 class _CapturingSession:
-    def __init__(self) -> None:
+    def __init__(self, dialect_name: str = "postgresql") -> None:
         self.executed: list[tuple[Any, dict[str, str]]] = []
+        self._bind = _FakeBind(dialect_name)
+
+    def get_bind(self) -> _FakeBind:
+        return self._bind
 
     async def execute(self, statement: Any, parameters: dict[str, str]) -> None:
         self.executed.append((statement, parameters))
@@ -74,3 +90,19 @@ async def test_get_tenant_context_returns_context_and_sets_db_var() -> None:
 
     assert context == TenantContext(user_id="user-123", organization_id="org-789")
     assert session.executed[0][1] == {"organization_id": "org-789"}
+
+
+@pytest.mark.asyncio
+async def test_set_postgres_tenant_context_skips_non_postgres_dialects() -> None:
+    """SET LOCAL is a Postgres-only statement — skip on SQLite/MySQL/etc.
+
+    Local dev and the smoke-test script run against ``sqlite+aiosqlite://``,
+    which rejects ``SET LOCAL`` with a syntax error. The tenant boundary is
+    still enforced at the repository layer, so silently skipping the RLS
+    primitive here is safe — Postgres-only behavior degrades to ``None``.
+    """
+    session = _CapturingSession(dialect_name="sqlite")
+
+    await set_postgres_tenant_context(cast(AsyncSession, session), "org-456")
+
+    assert session.executed == []
