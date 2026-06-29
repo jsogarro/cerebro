@@ -68,9 +68,7 @@ class TestTalkHierSessionManager:
         assert metrics.final_consensus == 0.78
 
     @pytest.mark.asyncio
-    async def test_get_analytics(
-        self, session_manager: TalkHierSessionManager
-    ) -> None:
+    async def test_get_analytics(self, session_manager: TalkHierSessionManager) -> None:
         """Test analytics generation."""
         for i in range(5):
             session_id = f"test-session-{i:03d}"
@@ -78,9 +76,7 @@ class TestTalkHierSessionManager:
                 session_id,
                 {
                     "protocol_type": (
-                        ProtocolType.STANDARD
-                        if i % 2 == 0
-                        else ProtocolType.FAST_TRACK
+                        ProtocolType.STANDARD if i % 2 == 0 else ProtocolType.FAST_TRACK
                     )
                 },
             )

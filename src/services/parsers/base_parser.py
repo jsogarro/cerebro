@@ -157,9 +157,10 @@ def detect_language(text: str) -> str:
         " une ",
     ]
     french_count = sum(1 for word in french_words if word in text.lower())
-    if (french_count >= 2 or re.search(
-        r"[àâäáåãæçèéêëíîïñóôöøùúûüýÀÂÄÁÅÃÆÇÈÉÊËÍÎÏÑÓÔÖØÙÚÛÜÝ]", text
-    )) and french_count >= 2:
+    if (
+        french_count >= 2
+        or re.search(r"[àâäáåãæçèéêëíîïñóôöøùúûüýÀÂÄÁÅÃÆÇÈÉÊËÍÎÏÑÓÔÖØÙÚÛÜÝ]", text)
+    ) and french_count >= 2:
         languages_detected.append("fr")
 
     # Check for Spanish indicators

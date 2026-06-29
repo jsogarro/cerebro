@@ -106,9 +106,7 @@ class ComparisonMatrixBuilder:
         """Generate data for visual representation."""
         data_points: dict[str, list[float]] = {}
         for item, scores in matrix.items():
-            data_points[item] = [
-                scores.get(criterion, 0.0) for criterion in criteria
-            ]
+            data_points[item] = [scores.get(criterion, 0.0) for criterion in criteria]
 
         return {
             "chart_type": "radar",

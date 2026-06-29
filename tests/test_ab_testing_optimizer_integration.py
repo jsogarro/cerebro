@@ -220,10 +220,13 @@ class TestEndToEndIntegration:
         ):
             dashboard = RealTimeDashboard()
 
-        with patch(
-            "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.FeedbackLoopOptimizer._start_optimization_loop"
-        ), patch(
-            "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.AgentFrameworkExperimentor"
+        with (
+            patch(
+                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.FeedbackLoopOptimizer._start_optimization_loop"
+            ),
+            patch(
+                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.AgentFrameworkExperimentor"
+            ),
         ):
             optimizer = FeedbackLoopOptimizer()
 

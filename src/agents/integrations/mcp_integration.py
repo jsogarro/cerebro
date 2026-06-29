@@ -358,8 +358,8 @@ class MCPIntegration:
         for i in range(min(max_results, 5)):
             mock_sources.append(
                 {
-                    "title": f"Research Paper {i+1}: {query}",
-                    "authors": [f"Author {i+1}"],
+                    "title": f"Research Paper {i + 1}: {query}",
+                    "authors": [f"Author {i + 1}"],
                     "year": 2024 - i,
                     "journal": f"Journal of {query.split()[0] if query.split() else 'Research'}",
                     "abstract": f"This paper investigates {query} using systematic methodology...",
@@ -471,7 +471,9 @@ class MCPIntegration:
         }
 
 
-def create_mcp_integrated_agent(agent_class: type, config: dict[str, Any] | None = None) -> Any:
+def create_mcp_integrated_agent(
+    agent_class: type, config: dict[str, Any] | None = None
+) -> Any:
     """
     Factory function to create an agent with MCP integration.
 

@@ -165,10 +165,7 @@ def test_record_llm_call_updates_prometheus_metrics() -> None:
     )
 
     assert sample_value("llm_tokens_total", prompt_labels) == before_prompt + 7
-    assert (
-        sample_value("llm_tokens_total", completion_labels)
-        == before_completion + 11
-    )
+    assert sample_value("llm_tokens_total", completion_labels) == before_completion + 11
     assert sample_value("llm_call_duration_seconds_count", labels) == before_count + 1
     assert sample_value("llm_cost_usd_total", labels) == pytest.approx(
         before_cost + 0.012

@@ -5,7 +5,6 @@ Ported from tests/test_e2e_research_flow.py TestResearchFlow (skipped tests).
 These require JWT auth + Postgres testcontainer + dependency injection.
 """
 
-
 import pytest
 from httpx import AsyncClient
 

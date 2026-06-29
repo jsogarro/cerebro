@@ -37,14 +37,18 @@ class RoutingRequest(BaseModel):
     """Request model for MASR routing."""
 
     query: str = Field(..., description="Query to route")
-    context: dict[str, Any] | None = Field(default_factory=dict, description="Additional context")
+    context: dict[str, Any] | None = Field(
+        default_factory=dict, description="Additional context"
+    )
     strategy: str | None = Field(None, description="Routing strategy override")
-    constraints: dict[str, Any] | None = Field(default_factory=dict, description="Routing constraints")
+    constraints: dict[str, Any] | None = Field(
+        default_factory=dict, description="Routing constraints"
+    )
 
 
 class RoutingResponse(BaseModel):
     """Response model for MASR routing."""
-    
+
     query_id: str
     timestamp: str
     collaboration_mode: str
@@ -61,7 +65,7 @@ class RoutingResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Health check response model."""
-    
+
     status: str
     timestamp: str
     version: str = "1.0.0"
@@ -71,7 +75,7 @@ class HealthResponse(BaseModel):
 
 class MASRService:
     """MASR microservice implementation."""
-    
+
     def __init__(self) -> None:
         """Initialize MASR service."""
         self.app = FastAPI(
@@ -102,7 +106,7 @@ class MASRService:
 
     def _setup_middleware(self) -> None:
         """Setup FastAPI middleware."""
-        
+
         # CORS middleware
         self.app.add_middleware(
             CORSMiddleware,
@@ -111,7 +115,7 @@ class MASRService:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-        
+
         @self.app.middleware("http")
         async def logging_middleware(request: Any, call_next: Any) -> Any:
             start_time = datetime.now()
@@ -128,7 +132,7 @@ class MASRService:
 
     def _setup_routes(self) -> None:
         """Setup FastAPI routes."""
-        
+
         @self.app.get("/health", response_model=HealthResponse)
         async def health_check() -> HealthResponse:
             """Health check endpoint."""
@@ -137,7 +141,7 @@ class MASRService:
                 "masr_router": "healthy" if self.masr_router else "unavailable",
                 "redis": "healthy" if self.redis_client else "unavailable",
             }
-            
+
             # Test Redis connection if available
             if self.redis_client:
                 try:
@@ -145,36 +149,45 @@ class MASRService:
                     components_health["redis"] = "healthy"
                 except Exception:
                     components_health["redis"] = "unhealthy"
-            
+
             # Test MASR router if available
             if self.masr_router:
                 try:
                     masr_health = await self.masr_router.health_check()
-                    components_health["masr_router"] = masr_health.get("status", "unknown")
+                    components_health["masr_router"] = masr_health.get(
+                        "status", "unknown"
+                    )
                 except Exception:
                     components_health["masr_router"] = "unhealthy"
-            
-            overall_status = "healthy" if all(
-                status in ["healthy", "warning"] for status in components_health.values()
-            ) else "unhealthy"
-            
+
+            overall_status = (
+                "healthy"
+                if all(
+                    status in ["healthy", "warning"]
+                    for status in components_health.values()
+                )
+                else "unhealthy"
+            )
+
             return HealthResponse(
                 status=overall_status,
                 timestamp=datetime.now().isoformat(),
                 components=components_health,
                 metrics=self.service_stats,
             )
-        
+
         @self.app.post("/route", response_model=RoutingResponse)
         async def route_query(request: RoutingRequest) -> RoutingResponse:
             """Route a query using MASR intelligence."""
 
             if not self.masr_router:
                 raise HTTPException(status_code=503, detail="MASR router not available")
-            
+
             start_time = datetime.now()
-            self.service_stats["requests_total"] = int(self.service_stats["requests_total"]) + 1
-            
+            self.service_stats["requests_total"] = (
+                int(self.service_stats["requests_total"]) + 1
+            )
+
             try:
                 # Parse strategy if provided
                 strategy = None
@@ -183,10 +196,10 @@ class MASRService:
                         strategy = RoutingStrategy(request.strategy)
                     except ValueError:
                         raise HTTPException(
-                            status_code=400, 
-                            detail=f"Invalid routing strategy: {request.strategy}"
+                            status_code=400,
+                            detail=f"Invalid routing strategy: {request.strategy}",
                         ) from None
-                
+
                 # Get routing decision
                 routing_decision = await self.masr_router.route(
                     query=request.query,
@@ -194,11 +207,13 @@ class MASRService:
                     strategy=strategy,
                     constraints=request.constraints,
                 )
-                
+
                 process_time = (datetime.now() - start_time).total_seconds() * 1000
-                self.service_stats["requests_successful"] = int(self.service_stats["requests_successful"]) + 1
+                self.service_stats["requests_successful"] = (
+                    int(self.service_stats["requests_successful"]) + 1
+                )
                 self._update_average_response_time(process_time)
-                
+
                 # Build response
                 return RoutingResponse(
                     query_id=routing_decision.query_id,
@@ -216,33 +231,39 @@ class MASRService:
                         "level": routing_decision.complexity_analysis.level.value,
                         "score": routing_decision.complexity_analysis.score,
                         "uncertainty": routing_decision.complexity_analysis.uncertainty,
-                        "domains": [d.value if hasattr(d, 'value') else str(d) 
-                                  for d in routing_decision.complexity_analysis.domains],
+                        "domains": [
+                            d.value if hasattr(d, "value") else str(d)
+                            for d in routing_decision.complexity_analysis.domains
+                        ],
                         "subtask_count": routing_decision.complexity_analysis.subtask_count,
-                    }
+                    },
                 )
-                
+
             except Exception as e:
                 logger.error(
                     "Routing failed for query '%s...': %s",
                     redact_pii(request.query)[:100],
                     e,
                 )
-                self.service_stats["requests_failed"] = int(self.service_stats["requests_failed"]) + 1
-                raise HTTPException(status_code=500, detail=f"Routing failed: {e!s}") from e
-        
+                self.service_stats["requests_failed"] = (
+                    int(self.service_stats["requests_failed"]) + 1
+                )
+                raise HTTPException(
+                    status_code=500, detail=f"Routing failed: {e!s}"
+                ) from e
+
         @self.app.get("/metrics")
         async def get_metrics() -> dict[str, Any]:
             """Get service metrics."""
 
             metrics = self.service_stats.copy()
-            
+
             if self.masr_router:
                 masr_metrics = await self.masr_router.get_metrics()
                 metrics["masr_router"] = masr_metrics.__dict__
-            
+
             return metrics
-        
+
         @self.app.get("/stats")
         async def get_detailed_stats() -> dict[str, Any]:
             """Get detailed service statistics."""
@@ -252,75 +273,77 @@ class MASRService:
                 "service": self.service_stats.copy(),
                 "environment": self.environment,
                 "uptime_seconds": (
-                    datetime.now() -
-                    datetime.fromisoformat(started_at_str)
+                    datetime.now() - datetime.fromisoformat(started_at_str)
                 ).total_seconds(),
             }
-            
+
             if self.masr_router:
                 stats["masr_router"] = await self.masr_router.get_metrics()
-            
+
             return stats
 
     def _setup_shutdown_handlers(self) -> None:
         """Setup graceful shutdown handlers."""
-        
+
         @self.app.on_event("startup")
         async def startup_event() -> None:
             """Initialize service components on startup."""
             await self._initialize_components()
-        
+
         @self.app.on_event("shutdown")
         async def shutdown_event() -> None:
             """Cleanup on service shutdown."""
             await self._cleanup_components()
-    
+
     async def _initialize_components(self) -> None:
         """Initialize MASR service components."""
 
         logger.info("Initializing MASR service components...")
-        
+
         try:
             # Initialize Redis client
             redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/1")
             self.redis_client = redis.from_url(redis_url)
             await self.redis_client.ping()
             logger.info("Redis connection established")
-            
+
             # Initialize MASR router
             masr_config = {
                 "default_strategy": os.getenv("MASR_DEFAULT_STRATEGY", "balanced"),
-                "enable_adaptive": os.getenv("MASR_ENABLE_ADAPTIVE", "true").lower() == "true",
-                "enable_caching": os.getenv("MASR_ENABLE_CACHING", "true").lower() == "true",
+                "enable_adaptive": os.getenv("MASR_ENABLE_ADAPTIVE", "true").lower()
+                == "true",
+                "enable_caching": os.getenv("MASR_ENABLE_CACHING", "true").lower()
+                == "true",
                 "quality_threshold": float(os.getenv("MASR_QUALITY_THRESHOLD", "0.85")),
                 "max_agents": int(os.getenv("MASR_MAX_AGENTS", "10")),
-                "enable_learning": os.getenv("MASR_ENABLE_LEARNING", "true").lower() == "true",
+                "enable_learning": os.getenv("MASR_ENABLE_LEARNING", "true").lower()
+                == "true",
             }
-            
+
             self.masr_router = MASRouter(
                 config=masr_config,
-                model_config_manager=None  # Would be injected in full deployment
+                model_config_manager=None,  # Would be injected in full deployment
             )
-            
+
             logger.info("MASR router initialized successfully")
-            
+
             # Perform initial health check
             health = await self.masr_router.health_check()
             logger.info(f"MASR health check: {health['status']}")
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize MASR service components: {e}")
             raise
-    
+
     async def _cleanup_components(self) -> None:
         """Cleanup service components."""
 
         logger.info("Cleaning up MASR service components...")
-        
+
         if self.redis_client:
             await self.redis_client.close()
             logger.info("Redis connection closed")
-    
+
     def _update_average_response_time(self, response_time_ms: float) -> None:
         """Update average response time metric."""
 
@@ -330,14 +353,16 @@ class MASRService:
         if total_requests == 1:
             self.service_stats["average_response_time_ms"] = response_time_ms
         else:
-            new_avg = ((current_avg * (total_requests - 1)) + response_time_ms) / total_requests
+            new_avg = (
+                (current_avg * (total_requests - 1)) + response_time_ms
+            ) / total_requests
             self.service_stats["average_response_time_ms"] = new_avg
 
     def run(self) -> None:
         """Run MASR service."""
-        
+
         logger.info(f"Starting MASR service on {self.host}:{self.port}")
-        
+
         # Configure uvicorn
         uvicorn_config = {
             "host": self.host,
@@ -346,25 +371,29 @@ class MASRService:
             "access_log": True,
             "reload": self.environment == "development",
         }
-        
+
         # Production-specific settings
         if self.environment == "production":
-            uvicorn_config.update({
-                "workers": int(os.getenv("MASR_WORKERS", "2")),
-                "worker_class": "uvicorn.workers.UvicornWorker",
-                "max_requests": int(os.getenv("MASR_MAX_REQUESTS", "1000")),
-                "max_requests_jitter": int(os.getenv("MASR_MAX_REQUESTS_JITTER", "50")),
-            })
-        
+            uvicorn_config.update(
+                {
+                    "workers": int(os.getenv("MASR_WORKERS", "2")),
+                    "worker_class": "uvicorn.workers.UvicornWorker",
+                    "max_requests": int(os.getenv("MASR_MAX_REQUESTS", "1000")),
+                    "max_requests_jitter": int(
+                        os.getenv("MASR_MAX_REQUESTS_JITTER", "50")
+                    ),
+                }
+            )
+
         def signal_handler(signum: int, frame: Any) -> None:
             logger.info(f"Received signal {signum}, shutting down gracefully...")
             task = asyncio.create_task(self._cleanup_components())
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
-        
+
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGINT, signal_handler)
-        
+
         # Start service
         uvicorn.run(self.app, **uvicorn_config)  # type: ignore[arg-type]
 
@@ -380,11 +409,11 @@ async def main() -> None:
     logger.info("Cerebro MASR Service Starting...")
     logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
     logger.info(f"Port: {os.getenv('MASR_PORT', '9100')}")
-    
+
     try:
         # Run service
         masr_service.run()
-        
+
     except Exception as e:
         logger.error(f"MASR service failed to start: {e}")
         raise

@@ -124,19 +124,21 @@ class TalkHierConsensusEvaluator:
         """Generate minority opinion reports."""
         minority_reports = []
 
-        avg_confidence = sum(
-            r.get("confidence", 0) for r in results
-        ) / max(1, len(results))
+        avg_confidence = sum(r.get("confidence", 0) for r in results) / max(
+            1, len(results)
+        )
 
         for result in results:
             confidence = result.get("confidence", 0)
             if abs(confidence - avg_confidence) > 0.2:
-                minority_reports.append({
-                    "agent": result.get("agent"),
-                    "position": result.get("content"),
-                    "confidence": confidence,
-                    "deviation": confidence - avg_confidence,
-                })
+                minority_reports.append(
+                    {
+                        "agent": result.get("agent"),
+                        "position": result.get("content"),
+                        "confidence": confidence,
+                        "deviation": confidence - avg_confidence,
+                    }
+                )
 
         return minority_reports
 

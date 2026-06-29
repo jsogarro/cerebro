@@ -335,9 +335,7 @@ class TestSecurityValidators:
         def _format_only(email: str, **_: Any) -> Any:
             return original_validate(email, check_deliverability=False)
 
-        mocker.patch.object(
-            email_validator, "validate_email", side_effect=_format_only
-        )
+        mocker.patch.object(email_validator, "validate_email", side_effect=_format_only)
 
         # Valid emails
         assert (
@@ -410,18 +408,14 @@ class TestSecurityValidators:
         def _format_only(email: str, **_: Any) -> Any:
             return original_validate(email, check_deliverability=False)
 
-        mocker.patch.object(
-            email_validator, "validate_email", side_effect=_format_only
-        )
+        mocker.patch.object(email_validator, "validate_email", side_effect=_format_only)
 
         class _SecureLoginPattern(BaseModel):
             """Local fixture model demonstrating the validator pattern."""
 
             email: EmailStr = Field(...)
             password: Annotated[str, Field(min_length=8, max_length=128)] = Field(...)
-            mfa_code: Annotated[str, Field(pattern=r"^\d{6}$")] | None = Field(
-                None
-            )
+            mfa_code: Annotated[str, Field(pattern=r"^\d{6}$")] | None = Field(None)
 
             @field_validator("email")
             @classmethod
@@ -463,7 +457,9 @@ class TestSecurityValidators:
         """Test file upload validation."""
         # Valid document
         filename = FileUploadValidator.validate_file(
-            "document.pdf", "document", 1024 * 1024  # 1MB
+            "document.pdf",
+            "document",
+            1024 * 1024,  # 1MB
         )
         assert filename == "document.pdf"
 
@@ -474,7 +470,9 @@ class TestSecurityValidators:
         # File too large
         with pytest.raises(ValueError):
             FileUploadValidator.validate_file(
-                "large.pdf", "document", 20 * 1024 * 1024  # 20MB
+                "large.pdf",
+                "document",
+                20 * 1024 * 1024,  # 20MB
             )
 
         # Content validation

@@ -136,7 +136,10 @@ class DatabasePoolManager:
 
             # Create session factory
             from sqlalchemy.ext.asyncio import async_sessionmaker
-            self._sessionmaker = async_sessionmaker(self._engine, class_=AsyncSession, expire_on_commit=False)
+
+            self._sessionmaker = async_sessionmaker(
+                self._engine, class_=AsyncSession, expire_on_commit=False
+            )
 
             # Create asyncpg pool for direct queries
             self._pool = await asyncpg.create_pool(
@@ -240,7 +243,9 @@ class DatabasePoolManager:
         finally:
             self._metrics.active_connections -= 1
 
-    async def execute_query(self, query: str, *args: Any, timeout: float | None = None) -> list[Any]:
+    async def execute_query(
+        self, query: str, *args: Any, timeout: float | None = None
+    ) -> list[Any]:
         """
         Execute a query with automatic retry and timeout.
 

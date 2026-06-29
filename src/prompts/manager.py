@@ -716,7 +716,9 @@ class PromptManager:
                 else:
                     raise ValueError(f"Required variable missing: {var_def.name}")
 
-    async def _compile_examples(self, examples: list[Any], variables: dict[str, Any]) -> str:
+    async def _compile_examples(
+        self, examples: list[Any], variables: dict[str, Any]
+    ) -> str:
         """Compile few-shot examples."""
 
         example_parts = []
@@ -847,7 +849,9 @@ class PromptManager:
             except Exception as e:
                 logger.error(f"Prompt change listener failed: {e}")
 
-    def add_change_listener(self, listener: Callable[[PromptChangeEvent], None]) -> None:
+    def add_change_listener(
+        self, listener: Callable[[PromptChangeEvent], None]
+    ) -> None:
         """Add listener for prompt changes."""
         self._change_listeners.append(listener)
 

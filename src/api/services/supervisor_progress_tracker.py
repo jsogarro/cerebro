@@ -42,7 +42,9 @@ class SupervisorProgressTracker:
             self.supervisor_subscriptions[supervisor_type] = []
         self.supervisor_subscriptions[supervisor_type].append(websocket)
 
-    def unsubscribe_supervisor(self, supervisor_type: str, websocket: WebSocket) -> None:
+    def unsubscribe_supervisor(
+        self, supervisor_type: str, websocket: WebSocket
+    ) -> None:
         """Remove a WebSocket from supervisor-specific events."""
         if (
             supervisor_type in self.supervisor_subscriptions

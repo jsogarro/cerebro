@@ -311,9 +311,12 @@ class TestWebSocketEndpoints:
     @pytest.mark.asyncio
     async def test_supervisor_websocket_connection(self, app: FastAPI) -> None:
         """Test WebSocket connection for supervisor updates."""
-        with TestClient(app) as client, client.websocket_connect(
-            "/api/v1/supervisors/research/ws?client_id=test-client"
-        ) as websocket:
+        with (
+            TestClient(app) as client,
+            client.websocket_connect(
+                "/api/v1/supervisors/research/ws?client_id=test-client"
+            ) as websocket,
+        ):
             data = websocket.receive_json()
             assert data["event_type"] == "connection_established"
 
@@ -324,9 +327,12 @@ class TestWebSocketEndpoints:
     @pytest.mark.asyncio
     async def test_coordination_progress_websocket(self, app: FastAPI) -> None:
         """Test WebSocket for coordination progress updates."""
-        with TestClient(app) as client, client.websocket_connect(
-            "/api/v1/supervisors/coordination/ws?coordination_id=test-coord"
-        ) as websocket:
+        with (
+            TestClient(app) as client,
+            client.websocket_connect(
+                "/api/v1/supervisors/coordination/ws?coordination_id=test-coord"
+            ) as websocket,
+        ):
             data = websocket.receive_json()
             assert data["event_type"] == "connection_established"
             assert data["coordination_id"] == "test-coord"

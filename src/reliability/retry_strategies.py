@@ -273,8 +273,10 @@ class CircuitBreaker:
             self._metrics.consecutive_successes += 1
             self._metrics.consecutive_failures = 0
 
-            if (self._state == CircuitState.HALF_OPEN and
-                self._metrics.consecutive_successes >= self.config.success_threshold):
+            if (
+                self._state == CircuitState.HALF_OPEN
+                and self._metrics.consecutive_successes >= self.config.success_threshold
+            ):
                 await self._transition_to(CircuitState.CLOSED)
 
     async def _on_failure(self) -> None:
@@ -410,7 +412,9 @@ class BulkheadExecutor:
         self.name = name
         self.config = config or BulkheadConfig()
         self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
-        self._queue: asyncio.Queue[bool] = asyncio.Queue(maxsize=self.config.max_queue_size)
+        self._queue: asyncio.Queue[bool] = asyncio.Queue(
+            maxsize=self.config.max_queue_size
+        )
         self._active_tasks = 0
         self._total_executed = 0
         self._total_rejected = 0
@@ -464,7 +468,9 @@ class BulkheadExecutor:
 
                 except TimeoutError:
                     self._total_timeout += 1
-                    raise Exception(f"Bulkhead '{self.name}' execution timeout") from None
+                    raise Exception(
+                        f"Bulkhead '{self.name}' execution timeout"
+                    ) from None
                 finally:
                     self._active_tasks -= 1
         finally:
@@ -543,7 +549,9 @@ class RetryBudget:
         return self._tokens
 
 
-def with_retry(policy: RetryPolicy | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def with_retry(
+    policy: RetryPolicy | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for adding retry logic to functions.
 
@@ -571,7 +579,9 @@ def with_retry(policy: RetryPolicy | None = None) -> Callable[[Callable[..., Any
     return decorator
 
 
-def with_circuit_breaker(name: str, config: CircuitBreakerConfig | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def with_circuit_breaker(
+    name: str, config: CircuitBreakerConfig | None = None
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for adding circuit breaker to functions.
 
@@ -599,7 +609,9 @@ def with_circuit_breaker(name: str, config: CircuitBreakerConfig | None = None) 
     return decorator
 
 
-def with_bulkhead(name: str, config: BulkheadConfig | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def with_bulkhead(
+    name: str, config: BulkheadConfig | None = None
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for adding bulkhead isolation to functions.
 

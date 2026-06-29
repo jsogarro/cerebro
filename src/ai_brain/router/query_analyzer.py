@@ -542,7 +542,9 @@ class QueryComplexityAnalyzer:
 
         return estimated_tokens
 
-    def _determine_priority(self, query: str, context: dict[str, Any] | None = None) -> str:
+    def _determine_priority(
+        self, query: str, context: dict[str, Any] | None = None
+    ) -> str:
         """Determine query priority level."""
         for priority, pattern in self.priority_patterns.items():
             if re.search(pattern, query):

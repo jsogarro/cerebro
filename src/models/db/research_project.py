@@ -60,9 +60,7 @@ class ResearchProject(BaseModel):
         Float, nullable=True, comment="Overall quality score (0.0 to 1.0)"
     )
 
-    user_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, index=True
-    )
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         DBUUID(),
@@ -110,7 +108,13 @@ class ResearchProject(BaseModel):
 
     # Indexes
     __table_args__ = (
-        Index("idx_project_org_user_status", "organization_id", "user_id", "status", "created_at"),
+        Index(
+            "idx_project_org_user_status",
+            "organization_id",
+            "user_id",
+            "status",
+            "created_at",
+        ),
         Index("idx_project_user_status", "user_id", "status", "created_at"),
         Index("idx_project_org_status", "organization_id", "status", "created_at"),
         Index("idx_project_workflow", "workflow_id"),

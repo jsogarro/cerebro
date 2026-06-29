@@ -79,7 +79,9 @@ class MCPServer:
             """Wrapper function for MCP tool execution."""
             return await tool.execute(**kwargs)
 
-        _decorated_tool = self.mcp.tool(name=metadata.name, description=metadata.description)(tool_wrapper)
+        _decorated_tool = self.mcp.tool(
+            name=metadata.name, description=metadata.description
+        )(tool_wrapper)
 
         logger.info(f"Registered tool: {metadata.name}")
 

@@ -32,11 +32,14 @@ async def test_dispatcher_assigns_highest_scoring_parallel_workers() -> None:
     )
 
     assert len(assigned) == 3
-    assert assigned == sorted(
-        workers,
-        key=lambda worker: worker.performance_score or 0,
-        reverse=True,
-    )[:3]
+    assert (
+        assigned
+        == sorted(
+            workers,
+            key=lambda worker: worker.performance_score or 0,
+            reverse=True,
+        )[:3]
+    )
     assert all(worker.status == WorkerStatus.ASSIGNED for worker in assigned)
     assert all(worker.current_task == "x" * 50 for worker in assigned)
 

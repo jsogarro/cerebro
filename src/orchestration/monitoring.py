@@ -324,9 +324,7 @@ class OrchestrationMonitor:
         if self.enable_tracing and workflow_id in self._spans:
             _parent_span = self._spans[workflow_id]
 
-            with tracer.start_as_current_span(
-                f"node_{node_name}"
-            ) as node_span:
+            with tracer.start_as_current_span(f"node_{node_name}") as node_span:
                 node_span.set_attribute("node.name", node_name)
                 node_span.set_attribute("execution.duration", duration)
 
@@ -788,7 +786,9 @@ class WorkflowVisualizer:
         if metrics_result is None:
             return []
 
-        metrics_list = metrics_result if isinstance(metrics_result, list) else [metrics_result]
+        metrics_list = (
+            metrics_result if isinstance(metrics_result, list) else [metrics_result]
+        )
         for metrics in metrics_list:
             for error in metrics.errors:
                 all_errors.append(

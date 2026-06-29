@@ -205,4 +205,3 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def _is_excluded(self, request: Request) -> bool:
         return any(request.url.path.startswith(path) for path in self.exclude_paths)
-

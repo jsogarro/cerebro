@@ -209,7 +209,9 @@ class EpisodicMemoryManager:
         self.table_prefix: str = config.get("table_prefix", "cerebro_")
 
         # Memory configuration
-        self.max_session_duration_hours: int = config.get("max_session_duration_hours", 24)
+        self.max_session_duration_hours: int = config.get(
+            "max_session_duration_hours", 24
+        )
         self.retention_days: int = config.get("retention_days", 7)
         self.max_size: int = config.get("max_size", 10000)
         self.cleanup_interval: int = config.get("cleanup_interval", 300)
@@ -777,7 +779,9 @@ class EpisodicMemoryManager:
                 ),
             )
             self._fallback_storage = [
-                episode for episode in self._fallback_storage if episode.id != lru_episode.id
+                episode
+                for episode in self._fallback_storage
+                if episode.id != lru_episode.id
             ]
             self._fallback_accessed_at.pop(lru_episode.id, None)
 
@@ -853,7 +857,11 @@ class EpisodicMemoryManager:
                 {"cutoff": cutoff_date},
             )
             await session.commit()
-            return result.rowcount if hasattr(result, "rowcount") and result.rowcount else 0
+            return (
+                result.rowcount
+                if hasattr(result, "rowcount") and result.rowcount
+                else 0
+            )
 
     def _cleanup_old_episodes_fallback(self, cutoff_date: datetime) -> int:
         """Cleanup old episodes from fallback storage."""

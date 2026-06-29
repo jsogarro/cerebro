@@ -31,7 +31,9 @@ def agents_group() -> None:
     help="Query type",
 )
 @click.pass_context
-def query_command(ctx: Context, query_text: str, domains: tuple[str, ...], type: str) -> None:
+def query_command(
+    ctx: Context, query_text: str, domains: tuple[str, ...], type: str
+) -> None:
     """Execute intelligent MASR-routed query."""
     client_verbose: bool = ctx.obj["verbose"]
     console: Any = ctx.obj["console"]
@@ -44,7 +46,9 @@ def query_command(ctx: Context, query_text: str, domains: tuple[str, ...], type:
                 if domains:
                     payload["domains"] = list(domains)
 
-                with console.status(f"[bold green]Executing {type} query via MASR router..."):
+                with console.status(
+                    f"[bold green]Executing {type} query via MASR router..."
+                ):
                     result = await client.post(endpoint, payload)
 
                 print_success("Query completed successfully")
@@ -88,7 +92,9 @@ def route_command(ctx: Context, query_text: str, strategy: str) -> None:
                 table.add_column("Value", style="green")
 
                 table.add_row("Selected Model", result.get("selected_model", "N/A"))
-                table.add_row("Estimated Cost", f"${result.get('estimated_cost', 0):.4f}")
+                table.add_row(
+                    "Estimated Cost", f"${result.get('estimated_cost', 0):.4f}"
+                )
                 table.add_row("Strategy", result.get("strategy", "N/A"))
                 table.add_row("Agent Chain", ", ".join(result.get("agent_chain", [])))
 
@@ -127,8 +133,13 @@ def estimate_command(ctx: Context, query_text: str, domains: tuple[str, ...]) ->
                 table.add_column("Cost", style="green", justify="right")
 
                 table.add_row("Model Inference", f"${result.get('model_cost', 0):.4f}")
-                table.add_row("Agent Coordination", f"${result.get('coordination_cost', 0):.4f}")
-                table.add_row("[bold]Total Estimate[/bold]", f"[bold]${result.get('total_cost', 0):.4f}[/bold]")
+                table.add_row(
+                    "Agent Coordination", f"${result.get('coordination_cost', 0):.4f}"
+                )
+                table.add_row(
+                    "[bold]Total Estimate[/bold]",
+                    f"[bold]${result.get('total_cost', 0):.4f}[/bold]",
+                )
 
                 console.print(table)
 
@@ -144,7 +155,9 @@ def estimate_command(ctx: Context, query_text: str, domains: tuple[str, ...]) ->
 @click.argument("query_text")
 @click.option("--max-sources", type=int, help="Maximum sources (for literature-review)")
 @click.pass_context
-def execute_command(ctx: Context, agent_type: str, query_text: str, max_sources: int | None) -> None:
+def execute_command(
+    ctx: Context, agent_type: str, query_text: str, max_sources: int | None
+) -> None:
     """Direct agent execution (bypass MASR routing)."""
     client_verbose: bool = ctx.obj["verbose"]
     console: Any = ctx.obj["console"]
@@ -173,7 +186,9 @@ def execute_command(ctx: Context, agent_type: str, query_text: str, max_sources:
 
 @agents_group.command(name="chain")
 @click.argument("query_text")
-@click.option("--agents", "-a", multiple=True, required=True, help="Agent chain (in order)")
+@click.option(
+    "--agents", "-a", multiple=True, required=True, help="Agent chain (in order)"
+)
 @click.pass_context
 def chain_command(ctx: Context, query_text: str, agents: tuple[str, ...]) -> None:
     """Execute Chain-of-Agents workflow."""
@@ -219,7 +234,9 @@ def status_command(ctx: Context) -> None:
 
                 table.add_row("Status", result.get("status", "N/A"))
                 table.add_row("Total Queries", str(result.get("total_queries", 0)))
-                table.add_row("Avg Response Time", f"{result.get('avg_response_time', 0):.2f}s")
+                table.add_row(
+                    "Avg Response Time", f"{result.get('avg_response_time', 0):.2f}s"
+                )
                 table.add_row("Cost Savings", f"${result.get('cost_savings', 0):.2f}")
 
                 console.print(table)

@@ -140,25 +140,39 @@ class SecurityAlert(BaseModel):
     )
 
     # Alert details
-    title: Mapped[str] = mapped_column(String(255), nullable=False, comment="Alert title")
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False, comment="Alert title"
+    )
 
-    description: Mapped[str] = mapped_column(Text, nullable=False, comment="Detailed alert description")
+    description: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Detailed alert description"
+    )
 
     # Threat indicators
     ip_address: Mapped[str | None] = mapped_column(
         String(45), nullable=True, index=True, comment="Source IP address"
     )
 
-    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="User agent string")
+    user_agent: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="User agent string"
+    )
 
-    request_path: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Request path/endpoint")
+    request_path: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="Request path/endpoint"
+    )
 
-    request_method: Mapped[str | None] = mapped_column(String(10), nullable=True, comment="HTTP request method")
+    request_method: Mapped[str | None] = mapped_column(
+        String(10), nullable=True, comment="HTTP request method"
+    )
 
     # Location information
-    country: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="Country from IP geolocation")
+    country: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="Country from IP geolocation"
+    )
 
-    city: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="City from IP geolocation")
+    city: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="City from IP geolocation"
+    )
 
     is_known_location: Mapped[bool] = mapped_column(
         Boolean,
@@ -168,7 +182,9 @@ class SecurityAlert(BaseModel):
     )
 
     # Risk assessment
-    risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Calculated risk score (0-100)")
+    risk_score: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="Calculated risk score (0-100)"
+    )
 
     confidence_score: Mapped[int | None] = mapped_column(
         Integer, nullable=True, comment="Alert confidence score (0-100)"
@@ -182,16 +198,22 @@ class SecurityAlert(BaseModel):
     )
 
     # Related information
-    related_alerts: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True, comment="IDs of related alerts")
+    related_alerts: Mapped[list[Any] | None] = mapped_column(
+        JSON, nullable=True, comment="IDs of related alerts"
+    )
 
     affected_resources: Mapped[list[Any] | None] = mapped_column(
         JSON, nullable=True, comment="List of affected resources"
     )
 
-    evidence: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True, comment="Supporting evidence/logs")
+    evidence: Mapped[list[Any] | None] = mapped_column(
+        JSON, nullable=True, comment="Supporting evidence/logs"
+    )
 
     # Actions taken
-    actions_taken: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True, comment="List of actions taken")
+    actions_taken: Mapped[list[Any] | None] = mapped_column(
+        JSON, nullable=True, comment="List of actions taken"
+    )
 
     auto_remediated: Mapped[bool] = mapped_column(
         Boolean,
@@ -225,9 +247,13 @@ class SecurityAlert(BaseModel):
         DateTime(timezone=True), nullable=True, comment="When alert was resolved"
     )
 
-    resolved_by: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Who resolved the alert")
+    resolved_by: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Who resolved the alert"
+    )
 
-    resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Resolution notes")
+    resolution_notes: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Resolution notes"
+    )
 
     # Notification tracking
     notifications_sent: Mapped[list[Any] | None] = mapped_column(
@@ -266,7 +292,9 @@ class SecurityAlert(BaseModel):
     )
 
     # Alert metadata
-    alert_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="Additional alert metadata")
+    alert_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True, comment="Additional alert metadata"
+    )
 
     # Relationships
     user = relationship("User", back_populates="security_alerts")

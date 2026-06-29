@@ -122,7 +122,9 @@ def aggregate_sources(agent_results: dict[str, Any]) -> list[dict[str, Any]]:
     return all_sources
 
 
-def aggregate_findings(agent_results: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def aggregate_findings(
+    agent_results: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
     """
     Aggregate findings from all agents.
 
@@ -212,7 +214,11 @@ def aggregate_comparisons(agent_results: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Consolidated comparisons
     """
-    comparisons: dict[str, Any] = {"frameworks": [], "metrics": {}, "visualizations": []}
+    comparisons: dict[str, Any] = {
+        "frameworks": [],
+        "metrics": {},
+        "visualizations": [],
+    }
 
     # Check if comparative analysis agent was used
     if "comparative_analysis" in agent_results:
@@ -535,7 +541,11 @@ def calculate_quality_score(aggregated: dict[str, Any], state: ResearchState) ->
 
     # Source quality
     source_count = len(aggregated.get("sources", []))
-    quality_targets = state.research_plan.get("quality_targets", {}) if state.research_plan is not None else {}
+    quality_targets = (
+        state.research_plan.get("quality_targets", {})
+        if state.research_plan is not None
+        else {}
+    )
     min_sources = quality_targets.get("minimum_sources", 10)
     source_score = min(source_count / min_sources, 1.0)
     scores.append(source_score)
@@ -557,7 +567,9 @@ def calculate_quality_score(aggregated: dict[str, Any], state: ResearchState) ->
 
     # Agent success rate
     if state.metadata is not None:
-        success_rate = state.metadata.total_nodes_executed / max(len(state.agent_tasks), 1)
+        success_rate = state.metadata.total_nodes_executed / max(
+            len(state.agent_tasks), 1
+        )
         scores.append(success_rate)
 
     # Calculate weighted average

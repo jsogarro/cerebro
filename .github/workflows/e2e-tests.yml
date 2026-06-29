@@ -67,7 +67,7 @@ jobs:
     
     - name: Start services with Docker Compose
       run: |
-        docker-compose up -d
+        docker compose up -d
         
         # Wait for services to be ready
         timeout 60 bash -c 'until curl -s http://localhost:8000/health; do sleep 2; done'
@@ -117,7 +117,7 @@ jobs:
     - name: Stop services
       if: always()
       run: |
-        docker-compose down -v
+        docker compose down -v
 
   e2e-report:
     name: E2E Test Report

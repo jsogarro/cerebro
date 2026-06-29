@@ -116,7 +116,9 @@ async def quality_check_node(state: ResearchState) -> ResearchState:
         # Determine if quality standards are met
         min_quality_score = quality_criteria.get("minimum_quality_score", 0.7)
         error_issues = [i for i in issues_found if i.get("severity") == "error"]
-        quality_report["passed"] = quality_score >= min_quality_score and len(error_issues) == 0
+        quality_report["passed"] = (
+            quality_score >= min_quality_score and len(error_issues) == 0
+        )
 
         # Update state
         state.quality_score = quality_score
@@ -157,12 +159,20 @@ def check_completeness(
     """
     issues: list[dict[str, Any]] = []
     metrics: dict[str, Any] = {}
-    result: dict[str, Any] = {"check_name": "completeness", "passed": True, "issues": issues, "metrics": metrics}
+    result: dict[str, Any] = {
+        "check_name": "completeness",
+        "passed": True,
+        "issues": issues,
+        "metrics": metrics,
+    }
 
     completeness_criteria = criteria.get("completeness", {})
 
     # Check if all required agents executed
-    if completeness_criteria.get("all_agents_executed") and state.research_plan is not None:
+    if (
+        completeness_criteria.get("all_agents_executed")
+        and state.research_plan is not None
+    ):
         planned_agents = set(state.research_plan.get("agents", []))
         completed_agents = state.completed_agents
         missing_agents = planned_agents - completed_agents
@@ -215,7 +225,12 @@ def check_accuracy(results: dict[str, Any], criteria: dict[str, Any]) -> dict[st
     """
     issues: list[dict[str, Any]] = []
     metrics: dict[str, Any] = {}
-    result: dict[str, Any] = {"check_name": "accuracy", "passed": True, "issues": issues, "metrics": metrics}
+    result: dict[str, Any] = {
+        "check_name": "accuracy",
+        "passed": True,
+        "issues": issues,
+        "metrics": metrics,
+    }
 
     accuracy_criteria = criteria.get("accuracy", {})
 
@@ -269,7 +284,12 @@ def check_depth(results: dict[str, Any], criteria: dict[str, Any]) -> dict[str, 
     """
     issues: list[dict[str, Any]] = []
     metrics: dict[str, Any] = {}
-    result: dict[str, Any] = {"check_name": "depth", "passed": True, "issues": issues, "metrics": metrics}
+    result: dict[str, Any] = {
+        "check_name": "depth",
+        "passed": True,
+        "issues": issues,
+        "metrics": metrics,
+    }
 
     depth_criteria = criteria.get("depth", {})
 
@@ -326,7 +346,12 @@ def check_coherence(
     """
     issues: list[dict[str, Any]] = []
     metrics: dict[str, Any] = {}
-    result: dict[str, Any] = {"check_name": "coherence", "passed": True, "issues": issues, "metrics": metrics}
+    result: dict[str, Any] = {
+        "check_name": "coherence",
+        "passed": True,
+        "issues": issues,
+        "metrics": metrics,
+    }
 
     coherence_criteria = criteria.get("coherence", {})
 

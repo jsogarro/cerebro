@@ -21,6 +21,7 @@ class TestReportsAPI:
     def client(self) -> TestClient:
         """Create test client."""
         from src.api.main import app
+
         return TestClient(app)
 
     def test_create_report_endpoint(self, client: TestClient) -> None:

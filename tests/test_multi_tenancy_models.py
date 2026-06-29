@@ -90,10 +90,7 @@ def test_tenant_boundary_migration_adds_columns_and_indexes() -> None:
 
 def test_tenant_rls_migration_adds_postgres_policies() -> None:
     migration = (
-        REPO_ROOT
-        / "alembic"
-        / "versions"
-        / "b7a9c2d4e8f1_add_tenant_rls_policies.py"
+        REPO_ROOT / "alembic" / "versions" / "b7a9c2d4e8f1_add_tenant_rls_policies.py"
     ).read_text()
 
     assert 'down_revision: str | Sequence[str] | None = "9d8c7b6a5e4f"' in migration

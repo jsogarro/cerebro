@@ -243,7 +243,9 @@ class ResearchAPIClient:
 
     # Generic HTTP methods for agent framework
 
-    async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def get(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Generic GET request."""
         response = await self._request("GET", path, params=params)
         result: dict[str, Any] = response.json()

@@ -80,7 +80,9 @@ class BaseModel(Base):
     )
 
     # Soft delete
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     # Audit fields
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -273,7 +273,9 @@ class ModelConfigManager:
         config = await self.get_configuration()
         return config.get_enabled_providers()
 
-    def add_change_listener(self, listener: Callable[[ConfigurationChangeEvent], None]) -> None:
+    def add_change_listener(
+        self, listener: Callable[[ConfigurationChangeEvent], None]
+    ) -> None:
         """Add a listener for configuration changes."""
         self._change_listeners.append(listener)
 
@@ -370,7 +372,9 @@ class ModelConfigManager:
         """Merge base configuration with environment overrides."""
 
         # Deep merge function
-        def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+        def deep_merge(
+            base: dict[str, Any], override: dict[str, Any]
+        ) -> dict[str, Any]:
             result = base.copy()
 
             for key, value in override.items():

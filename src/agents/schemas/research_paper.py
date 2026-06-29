@@ -36,9 +36,7 @@ class ResearchPaper(BaseModel):
     """A complete graduate-level research paper."""
 
     title: str = Field(description="Paper title")
-    abstract: str = Field(
-        description="150-300 word abstract summarizing the research"
-    )
+    abstract: str = Field(description="150-300 word abstract summarizing the research")
     introduction: str = Field(
         description="Introduction establishing context, significance, and research questions"
     )

@@ -115,10 +115,18 @@ def test_research_claims_are_mapped_to_ab_test_execution_logs() -> None:
         )
     }
     experimentor.results_buffer = [
-        _experiment_result("routing_claim_test", "control", quality_score=0.80, total_cost=1.00),
-        _experiment_result("routing_claim_test", "control", quality_score=0.80, total_cost=1.00),
-        _experiment_result("routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50),
-        _experiment_result("routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50),
+        _experiment_result(
+            "routing_claim_test", "control", quality_score=0.80, total_cost=1.00
+        ),
+        _experiment_result(
+            "routing_claim_test", "control", quality_score=0.80, total_cost=1.00
+        ),
+        _experiment_result(
+            "routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50
+        ),
+        _experiment_result(
+            "routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50
+        ),
     ]
 
     validation = experimentor.validate_research_claims_against_logs()

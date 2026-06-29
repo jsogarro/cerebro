@@ -123,7 +123,9 @@ class ReportOutputGenerator:
         if report.citations:
             markdown += "## References\n\n"
             for citation in report.citations:
-                formatted = citation.format_citation(report.configuration.citation_style)
+                formatted = citation.format_citation(
+                    report.configuration.citation_style
+                )
                 markdown += f"- {formatted}\n"
 
         return ReportOutput(
@@ -154,7 +156,9 @@ class ReportOutputGenerator:
             try:
                 html_output = await self.generate_html(report)
                 if isinstance(html_output.content, str):
-                    return self._get_pdf_exporter().export_to_pdf(html_output.content, report)
+                    return self._get_pdf_exporter().export_to_pdf(
+                        html_output.content, report
+                    )
             except PDFExportError as e:
                 logger.warning(f"PDF export unavailable, using legacy placeholder: {e}")
 
@@ -174,7 +178,9 @@ class ReportOutputGenerator:
             try:
                 return self._get_latex_exporter().export_to_latex(report)
             except LaTeXExportError as e:
-                logger.warning(f"LaTeX export unavailable, using legacy placeholder: {e}")
+                logger.warning(
+                    f"LaTeX export unavailable, using legacy placeholder: {e}"
+                )
 
         latex_content = f"""\\documentclass{{article}}
 \\title{{{report.title}}}
@@ -250,7 +256,9 @@ class ReportOutputGenerator:
             html += f"<p>{section.content}</p>"
 
             for subsection in section.subsections:
-                html += f"<h{section.level + 2}>{subsection.title}</h{section.level + 2}>"
+                html += (
+                    f"<h{section.level + 2}>{subsection.title}</h{section.level + 2}>"
+                )
                 html += f"<p>{subsection.content}</p>"
 
             html += "</div>"
@@ -258,7 +266,9 @@ class ReportOutputGenerator:
         if report.citations:
             html += "<div class='section'><h2>References</h2><ul>"
             for citation in report.citations:
-                formatted = citation.format_citation(report.configuration.citation_style)
+                formatted = citation.format_citation(
+                    report.configuration.citation_style
+                )
                 html += f"<li>{formatted}</li>"
             html += "</ul></div>"
 

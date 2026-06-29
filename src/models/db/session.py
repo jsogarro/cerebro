@@ -304,7 +304,9 @@ class DatabaseManager:
             for row in rows
         }
 
-    async def get_slow_queries(self, min_duration_ms: int = 1000) -> list[dict[str, Any]]:
+    async def get_slow_queries(
+        self, min_duration_ms: int = 1000
+    ) -> list[dict[str, Any]]:
         """
         Get slow queries.
 

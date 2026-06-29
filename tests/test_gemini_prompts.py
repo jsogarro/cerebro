@@ -4,7 +4,6 @@ Test suite for Gemini prompt templates and generation.
 These tests verify prompt engineering functionality.
 """
 
-
 from src.models.research_project import ResearchDepth, ResearchQuery
 
 

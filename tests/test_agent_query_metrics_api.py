@@ -23,6 +23,7 @@ class TestIntelligentQueryAPI:
     def client(self) -> TestClient:
         """Create test client."""
         from src.api.main import app
+
         return TestClient(app)
 
     @patch("src.api.services.direct_execution_service.get_direct_execution_service")
@@ -164,6 +165,7 @@ class TestPerformanceAndMetrics:
     def client(self) -> TestClient:
         """Create test client."""
         from src.api.main import app
+
         return TestClient(app)
 
     def test_agent_metrics_structure(self, client: TestClient) -> None:
@@ -253,9 +255,9 @@ class TestAgentAPIIntegration:
 
         service.agent_metrics[AgentType.LITERATURE_REVIEW]["total_executions"] = 10
         service.agent_metrics[AgentType.LITERATURE_REVIEW]["successful_executions"] = 8
-        service.agent_metrics[AgentType.LITERATURE_REVIEW][
-            "total_execution_time"
-        ] = 450.0
+        service.agent_metrics[AgentType.LITERATURE_REVIEW]["total_execution_time"] = (
+            450.0
+        )
 
         metrics = await service.get_agent_metrics(AgentType.LITERATURE_REVIEW)
 

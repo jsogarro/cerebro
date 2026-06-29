@@ -86,9 +86,7 @@ class ResearchSupervisor(BaseSupervisor):
 
     def _register_worker_types(self) -> None:
         """Register research worker types."""
-        self.worker_definitions.update(
-            self.agent_selector.build_worker_definitions()
-        )
+        self.worker_definitions.update(self.agent_selector.build_worker_definitions())
 
     def _build_workflow_graph(self) -> None:
         """Build LangGraph workflow for research supervision."""
@@ -132,7 +130,9 @@ class ResearchSupervisor(BaseSupervisor):
 
         self.workflow_graph.add_node(
             "validate_sources",
-            self._create_langgraph_node("validate_sources", self._validate_sources_phase),
+            self._create_langgraph_node(
+                "validate_sources", self._validate_sources_phase
+            ),
         )
 
         self.workflow_graph.add_node(
@@ -184,7 +184,9 @@ class ResearchSupervisor(BaseSupervisor):
                 "accept": "evaluate_consensus",
             },
         )
-        self.workflow_graph.add_edge("revise_paper", "graduate_review")  # Loop back to review
+        self.workflow_graph.add_edge(
+            "revise_paper", "graduate_review"
+        )  # Loop back to review
 
         # Conditional edge for refinement
         self.workflow_graph.add_conditional_edges(
@@ -213,7 +215,9 @@ class ResearchSupervisor(BaseSupervisor):
 
         return state
 
-    async def _plan_research_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _plan_research_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Plan research execution and worker allocation."""
 
         state = langgraph_state["supervision_state"]
@@ -236,31 +240,45 @@ class ResearchSupervisor(BaseSupervisor):
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
-    async def _coordinate_literature_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _coordinate_literature_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Coordinate literature review worker."""
         return await self.execution_coordinator.coordinate_literature(langgraph_state)
 
-    async def _validate_sources_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _validate_sources_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate literature sources to catch hallucinated papers."""
         return await self.quality_validator.validate_sources(langgraph_state)
 
-    async def _coordinate_methodology_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _coordinate_methodology_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Coordinate methodology worker."""
         return await self.execution_coordinator.coordinate_methodology(langgraph_state)
 
-    async def _coordinate_analysis_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _coordinate_analysis_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Coordinate comparative analysis worker."""
         return await self.execution_coordinator.coordinate_analysis(langgraph_state)
 
-    async def _coordinate_synthesis_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _coordinate_synthesis_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Coordinate synthesis worker."""
         return await self.execution_coordinator.coordinate_synthesis(langgraph_state)
 
-    async def _coordinate_citation_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _coordinate_citation_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Coordinate citation worker."""
         return await self.execution_coordinator.coordinate_citation(langgraph_state)
 
-    async def _draft_paper_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _draft_paper_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Draft a graduate-level research paper from all worker results."""
 
         state = langgraph_state["supervision_state"]
@@ -285,17 +303,23 @@ class ResearchSupervisor(BaseSupervisor):
                         author_str = ", ".join(source.get("authors", ["Unknown"])[:2])
                         year = source.get("year", "N/A")
                         citations.append(f"{author_str}, {year}")
-                literature_findings = lit_result.content if hasattr(lit_result, "content") else ""
+                literature_findings = (
+                    lit_result.content if hasattr(lit_result, "content") else ""
+                )
 
         # Extract methodology design
         if "methodology" in state.worker_results:
             meth_result = state.worker_results["methodology"]
-            methodology_design = meth_result.content if hasattr(meth_result, "content") else ""
+            methodology_design = (
+                meth_result.content if hasattr(meth_result, "content") else ""
+            )
 
         # Extract synthesis findings
         if "synthesis" in state.worker_results:
             synth_result = state.worker_results["synthesis"]
-            synthesis_findings = synth_result.content if hasattr(synth_result, "content") else ""
+            synthesis_findings = (
+                synth_result.content if hasattr(synth_result, "content") else ""
+            )
 
         # Generate paper section-by-section to avoid token limit truncation
         try:
@@ -371,14 +395,38 @@ REFERENCES:
             return sections
 
         section_prompts = [
-            ("title", "Write a concise, descriptive academic title for a research paper on this topic. Return ONLY the title text, nothing else."),
-            ("abstract", "Write a 200-300 word academic abstract. Include: research question, methodology, key findings, and implications. Write in formal academic prose. Return ONLY the abstract text."),
-            ("introduction", "Write a 3-4 paragraph introduction. Establish the significance of the research, provide context, state the research questions, and outline the paper structure. Use formal academic prose with (Author, Year) citations. Return ONLY the introduction text."),
-            ("literature_review", "Write a critical literature review of 5-7 paragraphs. Do NOT just list studies — synthesize themes, identify debates between researchers, show how studies relate to each other, and identify gaps. Use (Author, Year) citations throughout. Return ONLY the literature review text."),
-            ("methodology", "Write a detailed methodology section of 3-5 paragraphs. Justify the research design, explain data collection and analysis methods, address validity and ethical considerations. Return ONLY the methodology text."),
-            ("findings", "Write a findings section of 3-5 paragraphs. Present key findings with supporting evidence. Use specific data points and citations. Organize thematically. Return ONLY the findings text."),
-            ("discussion", "Write a discussion section of 4-6 paragraphs. Interpret findings in relation to the research questions and existing literature. Discuss implications, acknowledge limitations, and suggest future research. Return ONLY the discussion text."),
-            ("conclusion", "Write a 2-3 paragraph conclusion. Summarize key contributions, restate the significance of the findings, and suggest directions for future research. Return ONLY the conclusion text."),
+            (
+                "title",
+                "Write a concise, descriptive academic title for a research paper on this topic. Return ONLY the title text, nothing else.",
+            ),
+            (
+                "abstract",
+                "Write a 200-300 word academic abstract. Include: research question, methodology, key findings, and implications. Write in formal academic prose. Return ONLY the abstract text.",
+            ),
+            (
+                "introduction",
+                "Write a 3-4 paragraph introduction. Establish the significance of the research, provide context, state the research questions, and outline the paper structure. Use formal academic prose with (Author, Year) citations. Return ONLY the introduction text.",
+            ),
+            (
+                "literature_review",
+                "Write a critical literature review of 5-7 paragraphs. Do NOT just list studies — synthesize themes, identify debates between researchers, show how studies relate to each other, and identify gaps. Use (Author, Year) citations throughout. Return ONLY the literature review text.",
+            ),
+            (
+                "methodology",
+                "Write a detailed methodology section of 3-5 paragraphs. Justify the research design, explain data collection and analysis methods, address validity and ethical considerations. Return ONLY the methodology text.",
+            ),
+            (
+                "findings",
+                "Write a findings section of 3-5 paragraphs. Present key findings with supporting evidence. Use specific data points and citations. Organize thematically. Return ONLY the findings text.",
+            ),
+            (
+                "discussion",
+                "Write a discussion section of 4-6 paragraphs. Interpret findings in relation to the research questions and existing literature. Discuss implications, acknowledge limitations, and suggest future research. Return ONLY the discussion text.",
+            ),
+            (
+                "conclusion",
+                "Write a 2-3 paragraph conclusion. Summarize key contributions, restate the significance of the findings, and suggest directions for future research. Return ONLY the conclusion text.",
+            ),
         ]
 
         for section_name, instruction in section_prompts:
@@ -407,11 +455,15 @@ Write in formal, graduate-level academic prose. No bullet points. Connected para
 
         return sections
 
-    async def _graduate_review_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _graduate_review_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Graduate-level critical review of the drafted paper."""
         return await self.quality_validator.graduate_review(langgraph_state)
 
-    async def _revise_paper_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _revise_paper_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Revise the paper based on reviewer feedback."""
         return await self.quality_validator.revise_paper(langgraph_state)
 
@@ -419,7 +471,9 @@ Write in formal, graduate-level academic prose. No bullet points. Connected para
         """Determine if the paper needs revision based on review."""
         return self.quality_validator.should_revise_paper(langgraph_state)
 
-    async def _evaluate_consensus_phase(self, langgraph_state: dict[str, Any]) -> dict[str, Any]:
+    async def _evaluate_consensus_phase(
+        self, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Evaluate consensus across all workers."""
         return await self.quality_validator.evaluate_consensus(langgraph_state)
 

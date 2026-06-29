@@ -43,42 +43,46 @@ router = APIRouter(prefix="/api/v1/agents")
 
 @router.get("", response_model=AgentListResponse)
 async def list_agents(
-    include_metrics: bool = Query(False, description="Include performance metrics")
+    include_metrics: bool = Query(False, description="Include performance metrics"),
 ) -> AgentListResponse:
     """
     List all available agents with capabilities.
-    
+
     Following research pattern: Agent capability discovery for optimal selection.
     """
     try:
         service = get_agent_execution_service()
         agents = await service.get_agent_list()
-        
+
         # Calculate system metrics
         system_stats = await service.get_service_stats()
         system_health = system_stats.get("system_health", "unknown")
-        
+
         response = AgentListResponse(
             agents=agents,
             total_agents=len(agents),
-            total_capabilities=len({cap for agent in agents for cap in agent.capabilities}),
-            supported_domains=list({domain for agent in agents for domain in agent.optimal_domains}),
+            total_capabilities=len(
+                {cap for agent in agents for cap in agent.capabilities}
+            ),
+            supported_domains=list(
+                {domain for agent in agents for domain in agent.optimal_domains}
+            ),
             supported_execution_modes=list(ExecutionMode),
             system_health=system_health,
             total_system_executions=sum(
-                metrics["total_executions"] 
+                metrics["total_executions"]
                 for metrics in system_stats.get("agent_metrics", {}).values()
             ),
             system_uptime_seconds=0.0,  # Would be calculated from service start time
         )
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Failed to list agents: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve agent list"
+            detail="Failed to retrieve agent list",
         ) from e
 
 
@@ -86,30 +90,32 @@ async def list_agents(
 async def get_agent_info(agent_type: AgentType) -> AgentInfo:
     """
     Get detailed information about a specific agent.
-    
+
     Provides agent capabilities, performance characteristics, and API endpoints.
     """
     try:
         service = get_agent_execution_service()
         agents = await service.get_agent_list()
-        
-        agent_info = next((agent for agent in agents if agent.agent_type == agent_type), None)
-        
+
+        agent_info = next(
+            (agent for agent in agents if agent.agent_type == agent_type), None
+        )
+
         if not agent_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Agent type {agent_type.value} not found"
+                detail=f"Agent type {agent_type.value} not found",
             )
-        
+
         return agent_info
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get agent info for {agent_type.value}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve agent information"
+            detail="Failed to retrieve agent information",
         ) from e
 
 
@@ -121,7 +127,7 @@ async def execute_agent(
 ) -> AgentExecutionResponse:
     """
     Execute single agent directly.
-    
+
     Following research pattern: Direct agent interaction with performance tracking.
     Supports TalkHier refinement for quality assurance.
     """
@@ -131,12 +137,12 @@ async def execute_agent(
             agent_type=agent_type.value,
             query_preview=redact_pii(request.query)[:100],
         )
-        
+
         service = get_agent_execution_service()
-        
+
         # Execute agent
         response = await service.execute_single_agent(agent_type, request)
-        
+
         logger.info(
             "Agent execution completed",
             agent_type=agent_type.value,
@@ -145,35 +151,39 @@ async def execute_agent(
             confidence=response.confidence,
             execution_time=response.execution_time_seconds,
         )
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Agent execution failed: {agent_type.value} - {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent execution failed: {e!s}"
+            detail=f"Agent execution failed: {e!s}",
         ) from e
 
 
 @router.post("/chain", response_model=ChainOfAgentsResponse)
-async def execute_chain_of_agents(request: ChainOfAgentsRequest) -> ChainOfAgentsResponse:
+async def execute_chain_of_agents(
+    request: ChainOfAgentsRequest,
+) -> ChainOfAgentsResponse:
     """
     Execute Chain-of-Agents (sequential execution pattern).
-    
+
     Based on "LLMs Working in Harmony" research: Sequential agent execution
     where each agent builds on the results of the previous agent.
-    
+
     Example chain: Literature Review → Methodology → Analysis → Synthesis
     """
     try:
-        logger.info(f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}")
-        
+        logger.info(
+            f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}"
+        )
+
         service = get_agent_execution_service()
-        
+
         # Execute chain
         response = await service.execute_chain_of_agents(request)
-        
+
         logger.info(
             "Chain-of-Agents completed",
             execution_id=response.execution_id,
@@ -183,35 +193,39 @@ async def execute_chain_of_agents(request: ChainOfAgentsRequest) -> ChainOfAgent
             total_time=response.total_execution_time_seconds,
             quality_improvement=response.quality_improvement,
         )
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Chain-of-Agents execution failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Chain execution failed: {e!s}"
+            detail=f"Chain execution failed: {e!s}",
         ) from e
 
 
 @router.post("/mixture", response_model=MixtureOfAgentsResponse)
-async def execute_mixture_of_agents(request: MixtureOfAgentsRequest) -> MixtureOfAgentsResponse:
+async def execute_mixture_of_agents(
+    request: MixtureOfAgentsRequest,
+) -> MixtureOfAgentsResponse:
     """
     Execute Mixture-of-Agents (parallel execution with aggregation).
-    
+
     Based on "LLMs Working in Harmony" research: Parallel agent execution
     with intelligent result aggregation and consensus building.
-    
+
     Example mixture: All agents process same query, results aggregated by consensus.
     """
     try:
-        logger.info(f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}")
-        
+        logger.info(
+            f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}"
+        )
+
         service = get_agent_execution_service()
-        
+
         # Execute mixture
         response = await service.execute_mixture_of_agents(request)
-        
+
         logger.info(
             "Mixture-of-Agents completed",
             execution_id=response.execution_id,
@@ -221,51 +235,59 @@ async def execute_mixture_of_agents(request: MixtureOfAgentsRequest) -> MixtureO
             parallel_efficiency=response.parallel_efficiency,
             total_time=response.total_execution_time_seconds,
         )
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Mixture-of-Agents execution failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Mixture execution failed: {e!s}"
+            detail=f"Mixture execution failed: {e!s}",
         ) from e
 
 
 @router.post("/{agent_type}/validate", response_model=AgentValidationResponse)
 async def validate_agent_input(
-    agent_type: AgentType,
-    request: AgentValidationRequest
+    agent_type: AgentType, request: AgentValidationRequest
 ) -> AgentValidationResponse:
     """
     Validate input for specific agent type.
-    
+
     Checks query suitability, parameter validation, and provides
     optimization suggestions before execution.
     """
     try:
         logger.info(f"Validating input for {agent_type.value}")
-        
+
         # Basic validation logic (would be enhanced with actual agent validation)
         query_length = len(request.query)
-        query_suitability = min(1.0, max(0.3, (query_length - 10) / 100))  # Simple heuristic
-        
+        query_suitability = min(
+            1.0, max(0.3, (query_length - 10) / 100)
+        )  # Simple heuristic
+
         # Parameter validation (simplified)
         parameter_validation = {}
         for key, value in request.parameters.items():
-            parameter_validation[key] = isinstance(value, (str, int, float, bool, list, dict))
-        
+            parameter_validation[key] = isinstance(
+                value, (str, int, float, bool, list, dict)
+            )
+
         validation_score = (
-            query_suitability * 0.6 +
-            (sum(parameter_validation.values()) / max(len(parameter_validation), 1)) * 0.4
+            query_suitability * 0.6
+            + (sum(parameter_validation.values()) / max(len(parameter_validation), 1))
+            * 0.4
         )
-        
+
         recommendations = []
         if query_length < 20:
-            recommendations.append("Consider providing more detailed query for better results")
+            recommendations.append(
+                "Consider providing more detailed query for better results"
+            )
         if query_length > 1000:
-            recommendations.append("Consider breaking down complex query into smaller parts")
-        
+            recommendations.append(
+                "Consider breaking down complex query into smaller parts"
+            )
+
         response = AgentValidationResponse(
             valid=validation_score >= 0.7,
             agent_type=agent_type,
@@ -276,16 +298,18 @@ async def validate_agent_input(
             estimated_cost=0.01,  # Would be calculated from MASR cost estimation
             recommendations=recommendations,
             parameter_suggestions={},
-            validation_issues=[] if validation_score >= 0.7 else ["Query or parameters need improvement"],
+            validation_issues=[]
+            if validation_score >= 0.7
+            else ["Query or parameters need improvement"],
         )
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Validation failed for {agent_type.value}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Validation failed"
+            detail="Validation failed",
         ) from e
 
 
@@ -293,23 +317,23 @@ async def validate_agent_input(
 async def get_agent_metrics(agent_type: AgentType) -> AgentMetricsResponse:
     """
     Get performance metrics for specific agent.
-    
+
     Provides comprehensive performance analytics following Anthropic
     engineering approach for agent evaluation and optimization.
     """
     try:
         service = get_agent_execution_service()
         metrics = await service.get_agent_metrics(agent_type)
-        
+
         logger.debug(f"Retrieved metrics for {agent_type.value}")
-        
+
         return metrics
-        
+
     except Exception as e:
         logger.error(f"Failed to get metrics for {agent_type.value}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve agent metrics"
+            detail="Failed to retrieve agent metrics",
         ) from e
 
 
@@ -317,23 +341,23 @@ async def get_agent_metrics(agent_type: AgentType) -> AgentMetricsResponse:
 async def get_agent_health(agent_type: AgentType) -> AgentHealthStatus:
     """
     Get health status for specific agent.
-    
+
     Provides real-time health monitoring with performance indicators
     and recovery information.
     """
     try:
         service = get_agent_execution_service()
         health = await service.get_agent_health(agent_type)
-        
+
         logger.debug(f"Retrieved health for {agent_type.value}: {health.status}")
-        
+
         return health
-        
+
     except Exception as e:
         logger.error(f"Failed to get health for {agent_type.value}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve agent health"
+            detail="Failed to retrieve agent health",
         ) from e
 
 
@@ -341,21 +365,21 @@ async def get_agent_health(agent_type: AgentType) -> AgentHealthStatus:
 async def get_system_stats() -> dict[str, Any]:
     """
     Get comprehensive system statistics.
-    
+
     Provides system-wide performance metrics and health information
     for monitoring and optimization.
     """
     try:
         service = get_agent_execution_service()
         stats = await service.get_service_stats()
-        
+
         return stats
-        
+
     except Exception as e:
         logger.error(f"Failed to get system stats: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve system statistics"
+            detail="Failed to retrieve system statistics",
         ) from e
 
 
@@ -363,40 +387,46 @@ async def get_system_stats() -> dict[str, Any]:
 async def get_active_executions() -> dict[str, Any]:
     """
     Get information about currently active agent executions.
-    
+
     Useful for monitoring system load and debugging performance issues.
     """
     try:
         service = get_agent_execution_service()
-        
+
         active_executions = []
         for execution_id, execution_data in service.active_executions.items():
-            active_executions.append({
-                "execution_id": execution_id,
-                "agent_type": execution_data.get("agent_type"),
-                "status": execution_data.get("status"),
-                "started_at": execution_data.get("started_at"),
-                "duration_seconds": (
-                    datetime.now() - execution_data["started_at"]
-                ).total_seconds() if execution_data.get("started_at") else 0,
-            })
-        
+            active_executions.append(
+                {
+                    "execution_id": execution_id,
+                    "agent_type": execution_data.get("agent_type"),
+                    "status": execution_data.get("status"),
+                    "started_at": execution_data.get("started_at"),
+                    "duration_seconds": (
+                        datetime.now() - execution_data["started_at"]
+                    ).total_seconds()
+                    if execution_data.get("started_at")
+                    else 0,
+                }
+            )
+
         return {
             "active_executions": active_executions,
             "total_active": len(active_executions),
-            "capacity_utilization": len(active_executions) / service.max_concurrent_executions,
+            "capacity_utilization": len(active_executions)
+            / service.max_concurrent_executions,
             "timestamp": datetime.now().isoformat(),
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to get active executions: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve active executions"
+            detail="Failed to retrieve active executions",
         ) from e
 
 
 # Agent-specific optimized endpoints
+
 
 @router.post("/literature-review/search", response_model=AgentExecutionResponse)
 async def literature_search(
@@ -406,7 +436,7 @@ async def literature_search(
 ) -> AgentExecutionResponse:
     """
     Optimized literature search endpoint.
-    
+
     Specialized endpoint for literature review agent with common parameters
     exposed as query parameters for convenience.
     """
@@ -419,7 +449,7 @@ async def literature_search(
         user_id=None,
         session_id=None,
     )
-    
+
     return await execute_agent(AgentType.LITERATURE_REVIEW, request, BackgroundTasks())
 
 
@@ -430,7 +460,7 @@ async def format_citations(
 ) -> AgentExecutionResponse:
     """
     Optimized citation formatting endpoint.
-    
+
     Specialized endpoint for citation agent with style selection.
     """
     request = AgentExecutionRequest(
@@ -442,18 +472,20 @@ async def format_citations(
         user_id=None,
         session_id=None,
     )
-    
+
     return await execute_agent(AgentType.CITATION, request, BackgroundTasks())
 
 
 @router.post("/synthesis/combine", response_model=AgentExecutionResponse)
 async def synthesize_findings(
     findings: list[dict[str, Any]] = Body(..., min_length=2),
-    synthesis_focus: str = Body("comprehensive", pattern="^(comprehensive|comparative|thematic)$"),
+    synthesis_focus: str = Body(
+        "comprehensive", pattern="^(comprehensive|comparative|thematic)$"
+    ),
 ) -> AgentExecutionResponse:
     """
     Optimized synthesis endpoint.
-    
+
     Specialized endpoint for synthesis agent with focus selection.
     """
     request = AgentExecutionRequest(
@@ -465,11 +497,12 @@ async def synthesize_findings(
         user_id=None,
         session_id=None,
     )
-    
+
     return await execute_agent(AgentType.SYNTHESIS, request, BackgroundTasks())
 
 
 # Research workflow convenience endpoints
+
 
 @router.post("/workflows/literature-analysis", response_model=ChainOfAgentsResponse)
 async def literature_analysis_workflow(
@@ -479,7 +512,7 @@ async def literature_analysis_workflow(
 ) -> ChainOfAgentsResponse:
     """
     Convenience endpoint for literature analysis workflow.
-    
+
     Implements Chain-of-Agents pattern: Literature Review → Citation → Synthesis
     """
     request = ChainOfAgentsRequest(
@@ -497,31 +530,35 @@ async def literature_analysis_workflow(
         pass_intermediate_results=True,
         early_stopping=False,
     )
-    
+
     return await execute_chain_of_agents(request)
 
 
-@router.post("/workflows/comprehensive-research", response_model=MixtureOfAgentsResponse)
+@router.post(
+    "/workflows/comprehensive-research", response_model=MixtureOfAgentsResponse
+)
 async def comprehensive_research_workflow(
     query: str = Query(..., min_length=10),
     domains: list[str] = Query(default=[]),
-    analysis_depth: str = Query("comprehensive", pattern="^(basic|comprehensive|exhaustive)$"),
+    analysis_depth: str = Query(
+        "comprehensive", pattern="^(basic|comprehensive|exhaustive)$"
+    ),
 ) -> MixtureOfAgentsResponse:
     """
     Convenience endpoint for comprehensive research workflow.
-    
+
     Implements Mixture-of-Agents pattern: All agents analyze query in parallel,
     results aggregated for comprehensive coverage.
     """
     # Select agents based on analysis depth
     agent_types = [AgentType.LITERATURE_REVIEW, AgentType.METHODOLOGY]
-    
+
     if analysis_depth in ["comprehensive", "exhaustive"]:
         agent_types.extend([AgentType.COMPARATIVE_ANALYSIS, AgentType.SYNTHESIS])
-    
+
     if analysis_depth == "exhaustive":
         agent_types.append(AgentType.CITATION)
-    
+
     request = MixtureOfAgentsRequest(
         query=query,
         agent_types=agent_types,
@@ -534,22 +571,23 @@ async def comprehensive_research_workflow(
         weight_by_confidence=True,
         consensus_threshold=0.8,
     )
-    
+
     return await execute_mixture_of_agents(request)
 
 
 # System monitoring endpoints
 
+
 @router.get("/health/summary")
 async def get_agents_health_summary() -> dict[str, Any]:
     """Get health summary for all agents."""
-    
+
     try:
         service = get_agent_execution_service()
-        
+
         health_statuses = {}
         overall_health_scores = []
-        
+
         for agent_type in AgentType:
             health = await service.get_agent_health(agent_type)
             health_statuses[agent_type.value] = {
@@ -558,53 +596,74 @@ async def get_agents_health_summary() -> dict[str, Any]:
                 "response_time": health.average_response_time_ms,
                 "issues": health.current_issues,
             }
-            
+
             # Convert status to numeric score for overall calculation
-            status_scores = {"healthy": 1.0, "degraded": 0.7, "unhealthy": 0.3, "unavailable": 0.0}
+            status_scores = {
+                "healthy": 1.0,
+                "degraded": 0.7,
+                "unhealthy": 0.3,
+                "unavailable": 0.0,
+            }
             overall_health_scores.append(status_scores.get(health.status, 0.0))
-        
+
         # Calculate overall system health
-        overall_health_score = statistics.mean(overall_health_scores) if overall_health_scores else 0.0
-        overall_status = "healthy" if overall_health_score >= 0.8 else "degraded" if overall_health_score >= 0.5 else "unhealthy"
-        
+        overall_health_score = (
+            statistics.mean(overall_health_scores) if overall_health_scores else 0.0
+        )
+        overall_status = (
+            "healthy"
+            if overall_health_score >= 0.8
+            else "degraded"
+            if overall_health_score >= 0.5
+            else "unhealthy"
+        )
+
         return {
             "overall_health": overall_status,
             "overall_health_score": overall_health_score,
             "agent_health": health_statuses,
             "total_agents": len(AgentType),
-            "healthy_agents": sum(1 for health in health_statuses.values() if health["status"] == "healthy"),
+            "healthy_agents": sum(
+                1
+                for health in health_statuses.values()
+                if health["status"] == "healthy"
+            ),
             "timestamp": datetime.now().isoformat(),
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to get health summary: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve health summary"
+            detail="Failed to retrieve health summary",
         ) from e
 
 
 # Performance analysis endpoints
 
+
 @router.get("/performance/comparison")
 async def compare_agent_performance(
-    metric: str = Query("quality_score", pattern="^(quality_score|execution_time|success_rate|cost_efficiency)$"),
+    metric: str = Query(
+        "quality_score",
+        pattern="^(quality_score|execution_time|success_rate|cost_efficiency)$",
+    ),
     time_period_hours: int = Query(24, ge=1, le=168),  # 1 hour to 1 week
 ) -> dict[str, Any]:
     """
     Compare performance across all agent types.
-    
+
     Enables optimization and A/B testing by providing comparative
     performance analysis across the agent ecosystem.
     """
     try:
         service = get_agent_execution_service()
-        
+
         comparison_data = {}
-        
+
         for agent_type in AgentType:
             metrics = await service.get_agent_metrics(agent_type)
-            
+
             if metric == "quality_score":
                 value = metrics.recent_average_quality
             elif metric == "execution_time":
@@ -615,25 +674,24 @@ async def compare_agent_performance(
                 value = metrics.cost_efficiency_score
             else:
                 value = 0.0
-            
+
             comparison_data[agent_type.value] = {
                 "value": value,
                 "total_executions": metrics.total_executions,
                 "recent_executions": metrics.recent_executions,
             }
-        
+
         # Calculate rankings
         sorted_agents = sorted(
             comparison_data.items(),
             key=lambda x: x[1]["value"],
-            reverse=metric != "execution_time"  # Lower is better for execution time
+            reverse=metric != "execution_time",  # Lower is better for execution time
         )
-        
+
         rankings = {
-            agent_type: rank + 1 
-            for rank, (agent_type, _) in enumerate(sorted_agents)
+            agent_type: rank + 1 for rank, (agent_type, _) in enumerate(sorted_agents)
         }
-        
+
         return {
             "metric": metric,
             "time_period_hours": time_period_hours,
@@ -642,12 +700,12 @@ async def compare_agent_performance(
             "best_performing": sorted_agents[0][0] if sorted_agents else None,
             "analysis_timestamp": datetime.now().isoformat(),
         }
-        
+
     except Exception as e:
         logger.error(f"Performance comparison failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Performance comparison failed"
+            detail="Performance comparison failed",
         ) from e
 
 

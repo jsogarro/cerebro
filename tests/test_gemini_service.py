@@ -116,7 +116,9 @@ class TestGeminiService:
         from src.services.gemini_service import GeminiService
 
         service = GeminiService(
-            api_key="test-key", rate_limit=2, rate_period=1  # 2 requests per second
+            api_key="test-key",
+            rate_limit=2,
+            rate_period=1,  # 2 requests per second
         )
         service.model = mock_gemini_model
         service.cache_client = redis_client  # Add cache client to avoid cache errors

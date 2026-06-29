@@ -307,7 +307,9 @@ class TestEventPublisher:
             assert args[1].type == WSMessageType.PROGRESS
 
     @pytest.mark.asyncio
-    async def test_agent_lifecycle_events(self, event_publisher: EventPublisher) -> None:
+    async def test_agent_lifecycle_events(
+        self, event_publisher: EventPublisher
+    ) -> None:
         """Test publishing agent lifecycle events."""
         project_id = uuid4()
 

@@ -115,7 +115,9 @@ class HealthChecker:
         """Register a health check function."""
         self.health_checks[name] = check_func
 
-    def register_dependency_check(self, name: str, check_func: Callable[..., Any]) -> None:
+    def register_dependency_check(
+        self, name: str, check_func: Callable[..., Any]
+    ) -> None:
         """Register a dependency check function."""
         self.dependency_checks[name] = check_func
 
@@ -595,7 +597,9 @@ def register_health_endpoints(app: FastAPI) -> None:
             return result.to_dict()
 
     @app.get("/health/{component}", tags=["health"])
-    async def component_health_check(component: str, response: Response) -> dict[str, Any]:
+    async def component_health_check(
+        component: str, response: Response
+    ) -> dict[str, Any]:
         """
         Check health of a specific component.
 

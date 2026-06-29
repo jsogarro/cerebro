@@ -76,6 +76,7 @@ class ConfigurationIntegrationService:
             # Register for configuration change notifications
             def listener(event: "ConfigurationChangeEvent") -> None:
                 self._bg_tasks.create_task(self._on_configuration_change(event))
+
             self.model_config_manager.add_change_listener(listener)
 
             # Initialize MASR with configuration manager
@@ -235,7 +236,9 @@ class ConfigurationIntegrationService:
 
             errors_list: list[str] = validation_results["errors"]
             warnings_list: list[str] = validation_results["warnings"]
-            component_status_dict: dict[str, Any] = validation_results["component_status"]
+            component_status_dict: dict[str, Any] = validation_results[
+                "component_status"
+            ]
 
             for model_name, model_spec in enabled_models.items():
                 if model_spec.provider not in enabled_providers:
@@ -252,9 +255,7 @@ class ConfigurationIntegrationService:
                 component_status_dict[provider_name] = component_status
 
                 if not component_status["reachable"]:
-                    warnings_list.append(
-                        f"Provider '{provider_name}' is not reachable"
-                    )
+                    warnings_list.append(f"Provider '{provider_name}' is not reachable")
 
             # Validate component health
             for component_name, component in self._components.items():

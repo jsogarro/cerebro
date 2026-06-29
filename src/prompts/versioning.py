@@ -186,15 +186,15 @@ class PromptVersionManager:
         self.config = config or {}
 
         # Version storage
-        self.versions: dict[str, dict[str, PromptTemplate]] = (
-            {}
-        )  # template_name -> {version -> template}
-        self.version_performance: dict[str, VersionPerformance] = (
-            {}
-        )  # template_name:version -> performance
-        self.version_status: dict[str, VersionStatus] = (
-            {}
-        )  # template_name:version -> status
+        self.versions: dict[
+            str, dict[str, PromptTemplate]
+        ] = {}  # template_name -> {version -> template}
+        self.version_performance: dict[
+            str, VersionPerformance
+        ] = {}  # template_name:version -> performance
+        self.version_status: dict[
+            str, VersionStatus
+        ] = {}  # template_name:version -> status
 
         # A/B testing
         self.active_ab_tests: dict[str, ABTestConfig] = {}  # test_name -> config
@@ -339,11 +339,10 @@ class PromptVersionManager:
 
         # Find relevant A/B tests
         for test_name, test_config in self.active_ab_tests.items():
-            if (template_name in test_config.test_name and
-                version in [
-                    test_config.champion_version,
-                    test_config.challenger_version,
-                ]):
+            if template_name in test_config.test_name and version in [
+                test_config.champion_version,
+                test_config.challenger_version,
+            ]:
                 await self._evaluate_ab_test_progress(test_name, test_config)
 
     async def _evaluate_ab_test_progress(
@@ -454,7 +453,6 @@ class PromptVersionManager:
             template_name in self.versions
             and test_config.challenger_version in self.versions[template_name]
         ):
-
             template = self.versions[template_name][test_config.challenger_version]
             template.metadata.champion_version = True
 

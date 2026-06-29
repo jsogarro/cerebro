@@ -365,8 +365,16 @@ class CommunicationProtocol:
 
         try:
             # Create validation messages based on Round 1 conflicts
-            conflicts = round_1.consensus_score.conflicts_detected if round_1.consensus_score else []
-            resolution_suggestions = round_1.consensus_score.resolution_suggestions if round_1.consensus_score else []
+            conflicts = (
+                round_1.consensus_score.conflicts_detected
+                if round_1.consensus_score
+                else []
+            )
+            resolution_suggestions = (
+                round_1.consensus_score.resolution_suggestions
+                if round_1.consensus_score
+                else []
+            )
 
             validation_messages = []
 
@@ -481,11 +489,15 @@ class CommunicationProtocol:
                 intermediate_outputs={
                     "all_previous_responses": [msg.to_dict() for msg in all_responses],
                     "consensus_progress": [
-                        r.consensus_score.overall_score for r in previous_rounds if r.consensus_score
+                        r.consensus_score.overall_score
+                        for r in previous_rounds
+                        if r.consensus_score
                     ],
                     "remaining_conflicts": previous_rounds[
                         -1
-                    ].consensus_score.disagreement_areas if previous_rounds[-1].consensus_score else [],
+                    ].consensus_score.disagreement_areas
+                    if previous_rounds[-1].consensus_score
+                    else [],
                 },
             )
 
@@ -561,14 +573,21 @@ class CommunicationProtocol:
             from ..models import AgentTask
 
             msg_content = message.talkhier_content
-            query_text = msg_content.content if hasattr(msg_content, "content") else str(msg_content)
+            query_text = (
+                msg_content.content
+                if hasattr(msg_content, "content")
+                else str(msg_content)
+            )
             task_input: dict[str, Any] = {
                 "query": query_text,
                 # Aliases used by different agents
                 "research_question": query_text,
                 "text": query_text,
             }
-            if hasattr(msg_content, "intermediate_outputs") and msg_content.intermediate_outputs:
+            if (
+                hasattr(msg_content, "intermediate_outputs")
+                and msg_content.intermediate_outputs
+            ):
                 task_input.update(msg_content.intermediate_outputs)
             if message.context:
                 task_input.update(message.context)
@@ -582,9 +601,15 @@ class CommunicationProtocol:
             agent_result = await agent.execute(agent_task)
 
             response_content = TalkHierContent(
-                content=agent_result.output.get("summary", str(agent_result.output)[:500]) if isinstance(agent_result.output, dict) else str(agent_result.output)[:500],
+                content=agent_result.output.get(
+                    "summary", str(agent_result.output)[:500]
+                )
+                if isinstance(agent_result.output, dict)
+                else str(agent_result.output)[:500],
                 background=f"Agent {agent.get_agent_type()} completed execution",
-                intermediate_outputs=agent_result.output if isinstance(agent_result.output, dict) else {"raw": str(agent_result.output)[:1000]},
+                intermediate_outputs=agent_result.output
+                if isinstance(agent_result.output, dict)
+                else {"raw": str(agent_result.output)[:1000]},
                 confidence_score=agent_result.confidence,
             )
 
@@ -647,8 +672,16 @@ class CommunicationProtocol:
         synthesized_response = await self._synthesize_final_response(rounds)
 
         # Calculate quality improvement
-        initial_quality = rounds[0].consensus_score.overall_score if rounds and rounds[0].consensus_score else 0.0
-        final_quality = final_round.consensus_score.overall_score if final_round.consensus_score else 0.0
+        initial_quality = (
+            rounds[0].consensus_score.overall_score
+            if rounds and rounds[0].consensus_score
+            else 0.0
+        )
+        final_quality = (
+            final_round.consensus_score.overall_score
+            if final_round.consensus_score
+            else 0.0
+        )
         quality_improvement = final_quality - initial_quality
 
         result = RefinementResult(
@@ -709,7 +742,9 @@ class CommunicationProtocol:
             intermediate_outputs={
                 "synthesis_method": "highest_confidence_selection",
                 "total_rounds": len(rounds),
-                "final_consensus": rounds[-1].consensus_score.overall_score if rounds[-1].consensus_score else 0.0,
+                "final_consensus": rounds[-1].consensus_score.overall_score
+                if rounds[-1].consensus_score
+                else 0.0,
                 "contributing_agents": [msg.from_agent for msg in final_messages],
             },
             confidence_score=statistics.mean(

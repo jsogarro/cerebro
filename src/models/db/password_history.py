@@ -158,7 +158,11 @@ class PasswordHistory(BaseModel):
 
     @classmethod
     def check_password_reuse(
-        cls, user_id: str, password: str, history_count: int = 5, session: Session | None = None
+        cls,
+        user_id: str,
+        password: str,
+        history_count: int = 5,
+        session: Session | None = None,
     ) -> bool:
         """
         Check if password has been used recently.
@@ -188,7 +192,9 @@ class PasswordHistory(BaseModel):
         return any(entry.verify_password(password) for entry in recent_passwords)
 
     @classmethod
-    def get_last_change(cls, user_id: str, session: Session | None = None) -> PasswordHistory | None:
+    def get_last_change(
+        cls, user_id: str, session: Session | None = None
+    ) -> PasswordHistory | None:
         """
         Get the most recent password change for a user.
 

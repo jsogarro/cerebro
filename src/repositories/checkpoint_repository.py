@@ -123,9 +123,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             raise RuntimeError("SQLAlchemy Result missing rowcount attribute")
         return int(rowcount)
 
-    async def get_recovery_point(
-        self, project_id: UUID
-    ) -> WorkflowCheckpoint | None:
+    async def get_recovery_point(self, project_id: UUID) -> WorkflowCheckpoint | None:
         """
         Find the best recovery checkpoint for a project.
 

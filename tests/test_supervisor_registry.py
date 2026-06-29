@@ -10,7 +10,9 @@ from src.models.supervisor_api_models import SupervisorType, WorkerStatus
 def test_registry_initializes_all_supervisor_types() -> None:
     registry = SupervisorRegistry()
 
-    assert set(registry.supervisors) == {supervisor.value for supervisor in SupervisorType}
+    assert set(registry.supervisors) == {
+        supervisor.value for supervisor in SupervisorType
+    }
     assert set(registry.workers) == set(registry.supervisors)
     assert set(registry.metrics) == set(registry.supervisors)
 

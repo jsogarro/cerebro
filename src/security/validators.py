@@ -409,7 +409,9 @@ class RegisterRequest(BaseModel):
     username: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{3,32}$")] = Field(
         ..., description="Username"
     )
-    password: Annotated[str, Field(min_length=8, max_length=128)] = Field(..., description="Password")
+    password: Annotated[str, Field(min_length=8, max_length=128)] = Field(
+        ..., description="Password"
+    )
     full_name: SecureStringField | None = Field(None, max_length=255)
     organization: SecureStringField | None = Field(None, max_length=255)
     terms_accepted: bool = Field(..., description="Terms acceptance")

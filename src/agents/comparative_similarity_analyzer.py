@@ -105,7 +105,9 @@ class SimilarityAnalyzer:
                     similarity = 0.0
                 else:
                     distance = sum(
-                        abs(matrix[left_item][criterion] - matrix[right_item][criterion])
+                        abs(
+                            matrix[left_item][criterion] - matrix[right_item][criterion]
+                        )
                         for criterion in shared_criteria
                     ) / len(shared_criteria)
                     similarity = max(0.0, 1.0 - distance)

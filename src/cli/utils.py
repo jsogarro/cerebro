@@ -133,11 +133,11 @@ def load_projects_from_file(file_path: Path) -> list[dict[str, Any]]:
     # Validate each project
     for i, project in enumerate(data):
         if "title" not in project:
-            raise click.BadParameter(f"Project {i+1}: Missing 'title'")
+            raise click.BadParameter(f"Project {i + 1}: Missing 'title'")
         if "query_text" not in project:
-            raise click.BadParameter(f"Project {i+1}: Missing 'query_text'")
+            raise click.BadParameter(f"Project {i + 1}: Missing 'query_text'")
         if "domains" not in project:
-            raise click.BadParameter(f"Project {i+1}: Missing 'domains'")
+            raise click.BadParameter(f"Project {i + 1}: Missing 'domains'")
 
         # Set defaults
         project.setdefault("depth_level", "comprehensive")

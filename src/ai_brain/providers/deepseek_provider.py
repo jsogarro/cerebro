@@ -212,7 +212,6 @@ class DeepSeekProvider(BaseProvider):
                 headers=self._get_headers(),
                 json=payload,
             ) as response:
-
                 if response.status_code != 200:
                     error_bytes = await response.aread()
                     error_text = error_bytes.decode("utf-8")
@@ -240,7 +239,9 @@ class DeepSeekProvider(BaseProvider):
             logger.error("DeepSeek streaming failed", error=str(e), exc_info=True)
             yield f"Error: {e!s}"
 
-    def _build_request_payload(self, request: ModelRequest, model_name: str) -> dict[str, Any]:
+    def _build_request_payload(
+        self, request: ModelRequest, model_name: str
+    ) -> dict[str, Any]:
         """Build API request payload."""
 
         # Convert messages or prompt to chat format
@@ -478,8 +479,12 @@ class DeepSeekProvider(BaseProvider):
             "provider": self.provider_name,
             "capabilities": self.supported_capabilities,
             "context_window": spec_dict.get("context_window") if spec_dict else None,
-            "cost_per_1k_tokens": spec_dict.get("cost_per_1k_tokens") if spec_dict else None,
-            "max_output_tokens": spec_dict.get("max_output_tokens") if spec_dict else None,
+            "cost_per_1k_tokens": spec_dict.get("cost_per_1k_tokens")
+            if spec_dict
+            else None,
+            "max_output_tokens": spec_dict.get("max_output_tokens")
+            if spec_dict
+            else None,
             "strengths": spec_dict.get("strengths", []) if spec_dict else [],
             "best_for": [
                 "Mathematical reasoning",

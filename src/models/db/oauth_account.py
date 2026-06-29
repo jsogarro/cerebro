@@ -435,7 +435,9 @@ class OAuthAccount(BaseModel):
             "is_verified": self.is_verified,
             "scopes": self.scopes,
             "first_connected_at": (
-                self.first_connected_at.isoformat() if self.first_connected_at is not None else None
+                self.first_connected_at.isoformat()
+                if self.first_connected_at is not None
+                else None
             ),
             "last_used_at": (
                 self.last_used_at.isoformat() if self.last_used_at is not None else None

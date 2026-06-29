@@ -98,7 +98,9 @@ class BaseMCPTool(ABC):
 
         for param in required_params:
             if param not in kwargs:
-                self.logger.error("mcp_tool_missing_required_parameter", parameter=param)
+                self.logger.error(
+                    "mcp_tool_missing_required_parameter", parameter=param
+                )
                 return False
 
         return True

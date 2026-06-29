@@ -107,7 +107,8 @@ class WorkerDispatcher:
             matching_workers = [
                 worker
                 for worker in available_workers
-                if worker.worker_type == worker_type and worker.status == WorkerStatus.IDLE
+                if worker.worker_type == worker_type
+                and worker.status == WorkerStatus.IDLE
             ]
 
             if matching_workers:

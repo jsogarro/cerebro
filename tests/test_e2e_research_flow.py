@@ -123,12 +123,18 @@ class TestAppBoot:
         from src.services import report_config
 
         # Verify the functions exist and have correct signatures
-        for fn_name in ("create_template_config", "create_format_config", "create_quality_config"):
+        for fn_name in (
+            "create_template_config",
+            "create_format_config",
+            "create_quality_config",
+        ):
             fn = getattr(report_config, fn_name)
             sig = inspect.signature(fn)
             # The first param 'settings' should accept None
             param = next(iter(sig.parameters.values()))
-            assert param.default is None, f"{fn_name} settings param should default to None"
+            assert param.default is None, (
+                f"{fn_name} settings param should default to None"
+            )
 
     @pytest.mark.asyncio
     async def test_masr_imports_resolve(self) -> None:

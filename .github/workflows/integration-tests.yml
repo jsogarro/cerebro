@@ -65,15 +65,6 @@ jobs:
       run: |
         uv pip install --system -e ".[dev]"
     
-    - name: Set up Temporal
-      run: |
-        docker run -d \
-          --name temporal \
-          -p 7233:7233 \
-          temporalio/auto-setup:latest
-        
-        # Wait for Temporal to be ready
-        timeout 60 bash -c 'until docker exec temporal tctl cluster health; do sleep 2; done'
     
     - name: Run database migrations
       env:
@@ -86,7 +77,6 @@ jobs:
         ENVIRONMENT: test
         DATABASE_URL: postgresql+asyncpg://test_user:test_password@localhost:5432/test_research_db
         REDIS_URL: redis://localhost:6379/0
-        TEMPORAL_HOST: localhost:7233
         SECRET_KEY: test-secret-key-for-ci
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |

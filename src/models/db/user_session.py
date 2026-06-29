@@ -68,13 +68,9 @@ class UserSession(BaseModel):
     # Device information
     device_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    device_name: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
+    device_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    device_type: Mapped[str | None] = mapped_column(
-        String(50), nullable=True
-    )
+    device_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     os_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
@@ -91,17 +87,13 @@ class UserSession(BaseModel):
 
     country: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    region: Mapped[str | None] = mapped_column(
-        String(100), nullable=True
-    )
+    region: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     latitude: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    longitude: Mapped[str | None] = mapped_column(
-        String(20), nullable=True
-    )
+    longitude: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Activity tracking
     last_activity: Mapped[datetime] = mapped_column(
@@ -112,9 +104,7 @@ class UserSession(BaseModel):
 
     last_ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
 
-    request_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0
-    )
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Session security
     is_active: Mapped[bool] = mapped_column(
@@ -124,9 +114,7 @@ class UserSession(BaseModel):
         index=True,
     )
 
-    is_suspicious: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    is_suspicious: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     mfa_verified: Mapped[bool] = mapped_column(
         Boolean,
@@ -145,9 +133,7 @@ class UserSession(BaseModel):
         DateTime(timezone=True), nullable=True
     )
 
-    revoke_reason: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
+    revoke_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Additional metadata
     session_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -309,10 +295,14 @@ class UserSession(BaseModel):
     @property
     def idle_time(self) -> timedelta:
         """Get time since last activity."""
-        return timedelta(seconds=(datetime.now(UTC) - self.last_activity).total_seconds())
+        return timedelta(
+            seconds=(datetime.now(UTC) - self.last_activity).total_seconds()
+        )
 
     @classmethod
-    def get_active_sessions(cls, user_id: str, session: Any = None) -> list["UserSession"]:
+    def get_active_sessions(
+        cls, user_id: str, session: Any = None
+    ) -> list["UserSession"]:
         """
         Get all active sessions for a user.
 

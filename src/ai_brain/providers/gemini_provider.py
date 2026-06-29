@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 # Import existing Gemini service from research platform
 try:
     from src.services.gemini_service import GeminiService as GeminiServiceClass
+
     GEMINI_SERVICE_AVAILABLE = True
 except ImportError:
     # Optional dep fallback: rebind name to None when the real class is unavailable.
@@ -275,7 +276,11 @@ class GeminiProvider(BaseProvider):
         # Multimodal requests (if supported)
         domain_str = request.domain if request.domain else ""
         if "vision" in domain_str or "image" in (request.prompt or "").lower():
-            model_name_meta = request.metadata.get("model_name", "") if hasattr(request, "metadata") else ""
+            model_name_meta = (
+                request.metadata.get("model_name", "")
+                if hasattr(request, "metadata")
+                else ""
+            )
             if "gemini-pro-vision" in model_name_meta:
                 base_confidence += 0.1  # Gemini Vision is strong
 

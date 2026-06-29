@@ -225,7 +225,16 @@ class ModelRouter:
             name
             for name, provider in self.registry.providers.items()
             if isinstance(self.registry.health_status.get(name), ProviderHealthStatus)
-            and self.registry.health_status.get(name, ProviderHealthStatus(provider_name=name, healthy=False, avg_latency_ms=0, last_check=datetime.now(), error_rate=0.0)).healthy
+            and self.registry.health_status.get(
+                name,
+                ProviderHealthStatus(
+                    provider_name=name,
+                    healthy=False,
+                    avg_latency_ms=0,
+                    last_check=datetime.now(),
+                    error_rate=0.0,
+                ),
+            ).healthy
         ]
 
         if not available_providers:
@@ -279,7 +288,6 @@ class ModelRouter:
         if not last_check or now - last_check > timedelta(
             seconds=self.health_check_interval
         ):
-
             provider = self.registry.providers.get(provider_name)
             if provider:
                 try:

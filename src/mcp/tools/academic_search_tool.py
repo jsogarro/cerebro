@@ -309,7 +309,9 @@ class AcademicSearchTool(BaseMCPTool):
                 )
 
                 url_text = (
-                    entry_id.text if entry_id is not None and entry_id.text is not None else ""
+                    entry_id.text
+                    if entry_id is not None and entry_id.text is not None
+                    else ""
                 )
 
                 results.append(

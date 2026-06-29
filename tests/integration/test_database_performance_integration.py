@@ -92,9 +92,7 @@ class TestDatabaseMigrations:
             inspector = inspect(sync_conn)
             return {
                 "tables": inspector.get_table_names(),
-                "user_columns": [
-                    col["name"] for col in inspector.get_columns("users")
-                ],
+                "user_columns": [col["name"] for col in inspector.get_columns("users")],
             }
 
         conn = await db_session.connection()

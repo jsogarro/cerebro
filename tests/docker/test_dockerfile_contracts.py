@@ -59,7 +59,9 @@ class TestRootDockerfileContract:
         froms = _from_lines(content)
         assert len(froms) == 4, f"Expected 4 FROM stages, got {len(froms)}: {froms}"
 
-    def test_stages_named_base_development_builder_production(self, content: str) -> None:
+    def test_stages_named_base_development_builder_production(
+        self, content: str
+    ) -> None:
         names = re.findall(r"AS\s+(\w+)", content, re.IGNORECASE)
         assert names == ["base", "development", "builder", "production"], names
 
@@ -71,12 +73,16 @@ class TestRootDockerfileContract:
     def test_uv_copied_from_astral(self, content: str) -> None:
         copy_froms = _copy_from_lines(content)
         uv_lines = [line for line in copy_froms if "astral-sh/uv" in line]
-        assert len(uv_lines) == 1, f"Expected exactly one uv COPY --from=, got {uv_lines}"
+        assert len(uv_lines) == 1, (
+            f"Expected exactly one uv COPY --from=, got {uv_lines}"
+        )
         assert "/uv /usr/local/bin/uv" in uv_lines[0]
 
     def test_production_runs_as_non_root_app_user(self, content: str) -> None:
         users = _instruction_lines(content, "USER")
-        assert any(u.split()[1] == "app" for u in users), f"Production must run as 'app', got {users}"
+        assert any(u.split()[1] == "app" for u in users), (
+            f"Production must run as 'app', got {users}"
+        )
 
     def test_workdir_is_app(self, content: str) -> None:
         workdirs = _instruction_lines(content, "WORKDIR")
@@ -88,7 +94,9 @@ class TestRootDockerfileContract:
     def test_healthcheck_curls_health_endpoint(self, content: str) -> None:
         healthchecks = _instruction_lines(content, "HEALTHCHECK")
         assert len(healthchecks) == 1
-        assert ("/health" in content and "curl" in healthchecks[0].lower()) or "curl" in content
+        assert (
+            "/health" in content and "curl" in healthchecks[0].lower()
+        ) or "curl" in content
 
     def test_production_cmd_unchanged(self, content: str) -> None:
         # Production stage uvicorn launch with 4 workers
@@ -104,7 +112,11 @@ class TestRootDockerfileContract:
         )
 
     def test_required_env_vars_set(self, content: str) -> None:
-        for var in ("PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1", "UV_SYSTEM_PYTHON=1"):
+        for var in (
+            "PYTHONDONTWRITEBYTECODE=1",
+            "PYTHONUNBUFFERED=1",
+            "UV_SYSTEM_PYTHON=1",
+        ):
             assert var in content, f"Missing required ENV: {var}"
 
     def test_apt_runtime_deps_present_on_production(self, content: str) -> None:
@@ -168,7 +180,15 @@ class TestMasrDockerfileContract:
 
     def test_apt_packages_unchanged(self, content: str) -> None:
         # MASR-specific deps must not be silently dropped
-        for pkg in ("gcc", "g++", "curl", "git", "libopenblas-dev", "liblapack-dev", "netcat-traditional"):
+        for pkg in (
+            "gcc",
+            "g++",
+            "curl",
+            "git",
+            "libopenblas-dev",
+            "liblapack-dev",
+            "netcat-traditional",
+        ):
             assert pkg in content, f"Missing apt package: {pkg}"
 
     def test_data_and_logs_dirs_created(self, content: str) -> None:
@@ -215,9 +235,9 @@ class TestWebDockerfileContract:
 
     def test_dist_copied_to_nginx_html(self, content: str) -> None:
         copy_lines = _copy_from_lines(content)
-        assert any(
-            "/app/dist /usr/share/nginx/html" in line for line in copy_lines
-        ), copy_lines
+        assert any("/app/dist /usr/share/nginx/html" in line for line in copy_lines), (
+            copy_lines
+        )
 
     def test_default_nginx_assets_removed(self, content: str) -> None:
         assert "rm -rf /usr/share/nginx/html/*" in content
@@ -225,8 +245,7 @@ class TestWebDockerfileContract:
     def test_nginx_conf_copied(self, content: str) -> None:
         copy_lines = _instruction_lines(content, "COPY")
         assert any(
-            "nginx.conf /etc/nginx/conf.d/default.conf" in line
-            for line in copy_lines
+            "nginx.conf /etc/nginx/conf.d/default.conf" in line for line in copy_lines
         ), copy_lines
 
     def test_expose_non_privileged_port(self, content: str) -> None:

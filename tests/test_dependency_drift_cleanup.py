@@ -99,7 +99,9 @@ class TestNoOrphanTemporalImports:
                 # Walk the parent chain by re-walking and matching.
                 # A simpler heuristic: any ImportFrom at column 0 is module-level.
                 if node.col_offset == 0:
-                    offenders.append(f"{py_file.relative_to(REPO_ROOT)}:{node.lineno} → {module}")
+                    offenders.append(
+                        f"{py_file.relative_to(REPO_ROOT)}:{node.lineno} → {module}"
+                    )
         assert not offenders, (
             "These src/ modules import the phantom src.temporal namespace at "
             "module top:\n  " + "\n  ".join(offenders)
@@ -114,7 +116,11 @@ class TestIntegrationConftestCollects:
         if not path.exists():
             pytest.skip("integration conftest absent")
         imports = _module_imports(path)
-        offenders = [imp for imp in imports if imp == "temporalio" or imp.startswith("temporalio.")]
+        offenders = [
+            imp
+            for imp in imports
+            if imp == "temporalio" or imp.startswith("temporalio.")
+        ]
         assert not offenders, (
             "tests/integration/conftest.py imports temporalio at module top, "
             "which crashes test collection on a fresh install where "

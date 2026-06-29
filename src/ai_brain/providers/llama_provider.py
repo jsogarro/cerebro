@@ -210,10 +210,13 @@ class LlamaProvider(BaseProvider):
                 headers=self._get_headers(),
                 json=payload,
             ) as response:
-
                 if response.status_code != 200:
                     error_text = await response.aread()
-                    error_str = error_text.decode('utf-8') if isinstance(error_text, bytes) else str(error_text)
+                    error_str = (
+                        error_text.decode("utf-8")
+                        if isinstance(error_text, bytes)
+                        else str(error_text)
+                    )
                     raise Exception(
                         f"Ollama error: {response.status_code} - {error_str}"
                     )
@@ -238,7 +241,9 @@ class LlamaProvider(BaseProvider):
             logger.error("Llama streaming failed", error=str(e), exc_info=True)
             yield f"Error: {e!s}"
 
-    def _build_request_payload(self, request: ModelRequest, model_name: str) -> dict[str, Any]:
+    def _build_request_payload(
+        self, request: ModelRequest, model_name: str
+    ) -> dict[str, Any]:
         """Build Ollama API request payload."""
 
         # Ollama uses a different format than OpenAI-style APIs
@@ -267,8 +272,8 @@ class LlamaProvider(BaseProvider):
 
         # Build payload for Ollama
         max_output = 4000
-        if hasattr(self, 'model_specs'):
-            spec = getattr(self, 'model_specs', {}).get(model_name, {})
+        if hasattr(self, "model_specs"):
+            spec = getattr(self, "model_specs", {}).get(model_name, {})
             max_output = spec.get("max_output_tokens", 4000)
 
         payload = {
@@ -332,7 +337,6 @@ class LlamaProvider(BaseProvider):
         async with self.client.stream(
             "POST", f"{self.ollama_endpoint}/api/pull", json=pull_payload
         ) as response:
-
             if response.status_code != 200:
                 raise Exception(f"Failed to pull model {model_name}")
 
@@ -368,10 +372,12 @@ class LlamaProvider(BaseProvider):
 
         if response.status_code != 200:
             error_detail = await response.aread()
-            error_str = error_detail.decode('utf-8') if isinstance(error_detail, bytes) else str(error_detail)
-            raise Exception(
-                f"Ollama API error: {response.status_code} - {error_str}"
+            error_str = (
+                error_detail.decode("utf-8")
+                if isinstance(error_detail, bytes)
+                else str(error_detail)
             )
+            raise Exception(f"Ollama API error: {response.status_code} - {error_str}")
 
         return response
 
@@ -455,7 +461,11 @@ class LlamaProvider(BaseProvider):
         )
 
     def _calculate_confidence_score(
-        self, content: str, done: bool, request: ModelRequest, response_data: dict[str, Any]
+        self,
+        content: str,
+        done: bool,
+        request: ModelRequest,
+        response_data: dict[str, Any],
     ) -> float:
         """Calculate confidence score for Llama response."""
 
@@ -548,7 +558,7 @@ class LlamaProvider(BaseProvider):
         if not self.supports_model(model_name):
             return None
 
-        spec = getattr(self, 'model_specs', {}).get(model_name, {})
+        spec = getattr(self, "model_specs", {}).get(model_name, {})
 
         return {
             "name": model_name,

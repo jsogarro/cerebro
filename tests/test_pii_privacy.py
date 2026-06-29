@@ -81,7 +81,9 @@ class FakeRedis:
         return 1 if self.values.pop(key, None) is not None else 0
 
 
-def test_working_memory_encrypts_redis_payload_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_working_memory_encrypts_redis_payload_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     async def run() -> None:
         monkeypatch.setenv("MEMORY_ENCRYPTION_KEY", Fernet.generate_key().decode())
         memory = WorkingMemoryManager({"key_prefix": "test:"})
@@ -96,7 +98,9 @@ def test_working_memory_encrypts_redis_payload_round_trip(monkeypatch: pytest.Mo
 
         stored = fake_redis.values["test:query"]
         assert "jane.doe@example.com" not in stored
-        assert await memory.retrieve("query") == {"query": "contact jane.doe@example.com"}
+        assert await memory.retrieve("query") == {
+            "query": "contact jane.doe@example.com"
+        }
 
     asyncio.run(run())
 

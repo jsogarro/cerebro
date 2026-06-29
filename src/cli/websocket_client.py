@@ -107,7 +107,9 @@ class CLIWebSocketClient:
             return True
 
         except InvalidStatus as e:
-            status_code = getattr(e, 'status_code', getattr(e.response, 'status_code', 0))
+            status_code = getattr(
+                e, "status_code", getattr(e.response, "status_code", 0)
+            )
             if status_code == 401:
                 print_error("Authentication failed. Please check your token.")
             elif status_code == 403:
@@ -409,7 +411,11 @@ class CLIWebSocketClient:
                 # Wait for response (with timeout)
                 try:
                     raw_response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-                    response = raw_response if isinstance(raw_response, str) else raw_response.decode('utf-8')
+                    response = (
+                        raw_response
+                        if isinstance(raw_response, str)
+                        else raw_response.decode("utf-8")
+                    )
                     self._log(f"Test response: {response}")
                     return True
                 except TimeoutError:

@@ -74,8 +74,7 @@ async def test_research_repository_applies_organization_scope_to_queries() -> No
 
     assert session.statements
     assert all(
-        "research_projects.organization_id" in _sql(stmt)
-        for stmt in session.statements
+        "research_projects.organization_id" in _sql(stmt) for stmt in session.statements
     )
 
 

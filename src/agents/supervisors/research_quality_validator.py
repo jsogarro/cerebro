@@ -379,31 +379,31 @@ If a paper exists but with slightly different details, mark exists=true and prov
 
     def _build_paper_text(self, paper_dict: dict[str, Any]) -> str:
         return f"""
-TITLE: {paper_dict.get('title', 'N/A')}
+TITLE: {paper_dict.get("title", "N/A")}
 
 ABSTRACT:
-{paper_dict.get('abstract', '')}
+{paper_dict.get("abstract", "")}
 
 INTRODUCTION:
-{paper_dict.get('introduction', '')}
+{paper_dict.get("introduction", "")}
 
 LITERATURE REVIEW:
-{paper_dict.get('literature_review', '')}
+{paper_dict.get("literature_review", "")}
 
 METHODOLOGY:
-{paper_dict.get('methodology', '')}
+{paper_dict.get("methodology", "")}
 
 FINDINGS:
-{paper_dict.get('findings', '')}
+{paper_dict.get("findings", "")}
 
 DISCUSSION:
-{paper_dict.get('discussion', '')}
+{paper_dict.get("discussion", "")}
 
 CONCLUSION:
-{paper_dict.get('conclusion', '')}
+{paper_dict.get("conclusion", "")}
 
 REFERENCES:
-{chr(10).join(paper_dict.get('references', []))}
+{chr(10).join(paper_dict.get("references", []))}
 """
 
     def _build_review_prompt(self, paper_text: str) -> str:
@@ -458,7 +458,7 @@ Be rigorous. A score of 9+ means the paper could be submitted to a graduate semi
         }
 
         feedback_context = f"""CRITICAL ISSUES:
-{chr(10).join(f'- {issue}' for issue in critical_issues)}
+{chr(10).join(f"- {issue}" for issue in critical_issues)}
 
 REQUIRED CHANGES:
 {required_changes_text}"""
@@ -477,10 +477,10 @@ REQUIRED CHANGES:
         for section in sections:
             original = paper_dict.get(section, "")
             section_feedback = self._build_section_feedback(section, section_reviews)
-            revision_prompt = f"""Revise the following {section.replace('_', ' ')} section of an academic paper.
+            revision_prompt = f"""Revise the following {section.replace("_", " ")} section of an academic paper.
 Target quality: 9/10 (publication-ready graduate level).
 
-ORIGINAL {section.upper().replace('_', ' ')}:
+ORIGINAL {section.upper().replace("_", " ")}:
 {original}
 
 REVIEWER FEEDBACK FOR THIS SECTION:{section_feedback}

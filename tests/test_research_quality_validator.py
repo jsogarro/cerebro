@@ -45,9 +45,7 @@ def test_quality_validator_accepts_high_scoring_paper() -> None:
     validator = build_validator()
     state = SupervisionState(
         worker_results={
-            "draft_paper": TalkHierContent(
-                intermediate_outputs={"revision_count": 0}
-            ),
+            "draft_paper": TalkHierContent(intermediate_outputs={"revision_count": 0}),
             "graduate_review": TalkHierContent(
                 intermediate_outputs={"overall_score": 9.1}
             ),
@@ -61,9 +59,7 @@ def test_quality_validator_revises_low_scoring_paper_under_revision_limit() -> N
     validator = build_validator()
     state = SupervisionState(
         worker_results={
-            "draft_paper": TalkHierContent(
-                intermediate_outputs={"revision_count": 2}
-            ),
+            "draft_paper": TalkHierContent(intermediate_outputs={"revision_count": 2}),
             "graduate_review": TalkHierContent(
                 intermediate_outputs={"overall_score": 8.9}
             ),
@@ -97,7 +93,10 @@ async def test_quality_validator_evaluates_consensus_from_worker_results() -> No
     assert state.consensus_score == 0.91
     assert state.quality_score == 0.84
     assert state.refinement_round == 2
-    assert [message.from_agent for message in communication_protocol.consensus_builder.messages] == [
+    assert [
+        message.from_agent
+        for message in communication_protocol.consensus_builder.messages
+    ] == [
         "draft_paper",
         "synthesis",
     ]

@@ -135,10 +135,12 @@ class TestTalkHierConsensusEvaluator:
         """Test agreement matrix values are based on confidence distance."""
         evaluator = TalkHierConsensusEvaluator()
 
-        matrix = await evaluator.calculate_agreement_matrix([
-            {"agent": "agent-1", "confidence": 0.9},
-            {"agent": "agent-2", "confidence": 0.6},
-        ])
+        matrix = await evaluator.calculate_agreement_matrix(
+            [
+                {"agent": "agent-1", "confidence": 0.9},
+                {"agent": "agent-2", "confidence": 0.6},
+            ]
+        )
 
         assert matrix["agent-1"]["agent-1"] == 1.0
         assert matrix["agent-1"]["agent-2"] == pytest.approx(0.7)
@@ -209,12 +211,12 @@ class TestTalkHierSessionCoordinator:
 
 class TestTalkHierSessionService:
     """Test TalkHier session service"""
-    
+
     @pytest.fixture
     def session_service(self) -> TalkHierSessionService:
         """Create session service instance"""
         return TalkHierSessionService()
-    
+
     @pytest.mark.asyncio
     async def test_create_session(
         self, session_service: TalkHierSessionService
@@ -226,24 +228,22 @@ class TestTalkHierSessionService:
             protocol_type=ProtocolType.STANDARD,
             refinement_strategy=RefinementStrategy.QUALITY_FOCUSED,
             max_rounds=3,
-            quality_threshold=0.85
+            quality_threshold=0.85,
         )
-        
-        with patch.object(session_service, '_get_routing_decision') as mock_routing:
+
+        with patch.object(session_service, "_get_routing_decision") as mock_routing:
             mock_routing.return_value = AsyncMock(
-                supervisor_allocations=[
-                    MagicMock(supervisor_type="research")
-                ],
+                supervisor_allocations=[MagicMock(supervisor_type="research")],
                 agent_allocation=MagicMock(
                     agents=[
                         MagicMock(agent_type="literature-review"),
-                        MagicMock(agent_type="synthesis")
+                        MagicMock(agent_type="synthesis"),
                     ]
-                )
+                ),
             )
-            
+
             response = await session_service.create_session(request)
-            
+
             assert response.session_id
             assert response.status == SessionStatus.ACTIVE
             assert response.protocol_type == ProtocolType.STANDARD
@@ -253,7 +253,7 @@ class TestTalkHierSessionService:
             assert len(response.participants) >= 2
             assert response.websocket_url
             assert response.estimated_duration_seconds > 0
-    
+
     @pytest.mark.asyncio
     async def test_execute_refinement_round(
         self, session_service: TalkHierSessionService
@@ -276,21 +276,17 @@ class TestTalkHierSessionService:
             consensus_threshold=0.8,
             timeout_seconds=300,
             participants=[],
-            started_at=datetime.now(UTC)
+            started_at=datetime.now(UTC),
         )
         session_service.sessions[session_id] = session
-        
+
         # Execute refinement round
         request = RefinementRoundRequest(
-            round_number=1,
-            refinement_focus="Improve evidence quality"
+            round_number=1, refinement_focus="Improve evidence quality"
         )
-        
-        response = await session_service.execute_refinement_round(
-            session_id,
-            request
-        )
-        
+
+        response = await session_service.execute_refinement_round(session_id, request)
+
         assert response.session_id == session_id
         assert response.round_number == 1
         assert response.round_status == "completed"
@@ -299,7 +295,7 @@ class TestTalkHierSessionService:
         assert isinstance(response.participant_responses, dict)
         assert isinstance(response.aggregated_result, dict)
         assert response.duration_ms > 0
-    
+
     @pytest.mark.asyncio
     async def test_check_consensus(
         self, session_service: TalkHierSessionService
@@ -321,23 +317,23 @@ class TestTalkHierSessionService:
             consensus_type=ConsensusType.WEIGHTED,
             consensus_threshold=0.8,
             timeout_seconds=300,
-            participants=[]
+            participants=[],
         )
         session_service.sessions[session_id] = session
-        
+
         # Check consensus
         request = ConsensusCheckRequest(
             round_results=[
                 {"agent": "agent1", "confidence": 0.85, "content": "Result 1"},
                 {"agent": "agent2", "confidence": 0.82, "content": "Result 2"},
-                {"agent": "agent3", "confidence": 0.88, "content": "Result 3"}
+                {"agent": "agent3", "confidence": 0.88, "content": "Result 3"},
             ],
             check_quality=True,
-            include_minority_report=False
+            include_minority_report=False,
         )
-        
+
         result = await session_service.check_consensus(session_id, request)
-        
+
         assert isinstance(result.has_consensus, bool)
         assert result.consensus_type == ConsensusType.WEIGHTED
         assert 0.0 <= result.consensus_score <= 1.0
@@ -345,11 +341,9 @@ class TestTalkHierSessionService:
         assert isinstance(result.quality_scores, dict)
         assert result.recommendation
         assert result.reasoning
-    
+
     @pytest.mark.asyncio
-    async def test_close_session(
-        self, session_service: TalkHierSessionService
-    ) -> None:
+    async def test_close_session(self, session_service: TalkHierSessionService) -> None:
         """Test session closure"""
         # Create session
         session_id = "test-session-789"
@@ -370,72 +364,75 @@ class TestTalkHierSessionService:
             participants=[],
             started_at=datetime.now(UTC),
             current_quality=0.87,
-            current_consensus=0.85
+            current_consensus=0.85,
         )
         session_service.sessions[session_id] = session
         session_service.session_metrics[session_id] = {
             "rounds_completed": 3,
             "quality_progression": [0.75, 0.82, 0.87],
             "consensus_progression": [0.70, 0.78, 0.85],
-            "message_count": 15
+            "message_count": 15,
         }
-        
+
         # Close session
-        request = SessionCloseRequest(
-            save_transcript=True,
-            generate_summary=True
-        )
-        
+        request = SessionCloseRequest(save_transcript=True, generate_summary=True)
+
         response = await session_service.close_session(session_id, request)
-        
+
         assert response.session_id == session_id
-        assert response.final_status in [SessionStatus.COMPLETED, SessionStatus.CANCELLED]
+        assert response.final_status in [
+            SessionStatus.COMPLETED,
+            SessionStatus.CANCELLED,
+        ]
         assert response.total_rounds >= 0
         assert response.total_duration_seconds >= 0
         assert response.final_quality == 0.87
         assert response.final_consensus == 0.85
         assert response.transcript_url or response.summary
         assert isinstance(response.performance_metrics, dict)
-    
+
     @pytest.mark.asyncio
     async def test_validate_protocol(
         self, session_service: TalkHierSessionService
     ) -> None:
         """Test protocol validation"""
         from src.models.talkhier_api_models import ProtocolValidationRequest
-        
+
         request = ProtocolValidationRequest(
             messages=[
                 {
                     "role": "supervisor",
                     "content": "Initial task description",
-                    "timestamp": "2025-01-08T10:00:00Z"
+                    "timestamp": "2025-01-08T10:00:00Z",
                 },
                 {
                     "role": "worker",
                     "content": "Response to task",
                     "timestamp": "2025-01-08T10:01:00Z",
-                    "confidence": 0.85
+                    "confidence": 0.85,
                 },
                 {
                     "role": "supervisor",
                     "content": "Refinement request",
-                    "timestamp": "2025-01-08T10:02:00Z"
-                }
+                    "timestamp": "2025-01-08T10:02:00Z",
+                },
             ],
             expected_protocol=ProtocolType.SUPERVISED,
             check_timing=True,
-            check_structure=True
+            check_structure=True,
         )
-        
+
         response = await session_service.validate_protocol(request)
-        
+
         assert isinstance(response.is_valid, bool)
         assert response.protocol_detected in list(ProtocolType)
         assert isinstance(response.structural_errors, list)
         assert isinstance(response.timing_errors, list)
         assert isinstance(response.role_errors, list)
-        assert response.quality_assessment is None or 0.0 <= response.quality_assessment <= 1.0
+        assert (
+            response.quality_assessment is None
+            or 0.0 <= response.quality_assessment <= 1.0
+        )
         assert isinstance(response.recommendations, list)
 
 
@@ -446,23 +443,24 @@ class TestTalkHierAPIIntegration:
     def client(self) -> TestClient:
         """Create test client"""
         from src.api.main import app
+
         return TestClient(app)
-    
+
     def test_list_protocols(self, client: TestClient) -> None:
         """Test protocol listing endpoint"""
         response = client.get("/api/v1/talkhier/protocols")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert "protocols" in data
         assert "default_protocol" in data
         assert "recommended_protocols" in data
         assert len(data["protocols"]) >= 5
-    
+
     def test_health_check(self, client: TestClient) -> None:
         """Test health check endpoint"""
         response = client.get("/api/v1/talkhier/health")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] in ["healthy", "unhealthy"]

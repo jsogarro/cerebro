@@ -362,9 +362,7 @@ class WorkflowCheckpointer:
         """
         return await self.storage.list_checkpoints(workflow_id)
 
-    async def get_latest_checkpoint(
-        self, workflow_id: str
-    ) -> StateCheckpoint | None:
+    async def get_latest_checkpoint(self, workflow_id: str) -> StateCheckpoint | None:
         """
         Get the latest checkpoint for a workflow.
 

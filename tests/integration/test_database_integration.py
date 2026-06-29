@@ -111,9 +111,7 @@ class TestRepositoryIntegration:
         )
     )
     @pytest.mark.asyncio
-    async def test_research_repository_queries(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_research_repository_queries(self, db_session: AsyncSession) -> None:
         """Test ResearchRepository complex queries."""
 
     @pytest.mark.skip(

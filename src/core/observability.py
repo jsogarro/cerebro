@@ -132,9 +132,7 @@ def record_llm_request_cost_drift(
     if drift_ratio is None or tracking.estimated_cost_usd is None:
         return tracking
 
-    llm_request_cost_drift_ratio.labels(method=method, route=route).observe(
-        drift_ratio
-    )
+    llm_request_cost_drift_ratio.labels(method=method, route=route).observe(drift_ratio)
     if drift_ratio > threshold_ratio:
         direction = (
             "over"

@@ -148,10 +148,13 @@ class TestCIWorkflowInvariants:
         assert ci["name"] == "CI Pipeline"
 
     def test_required_jobs_present(self, ci: dict[str, Any]) -> None:
+        # NB: ``test-temporal`` was removed when Temporal was deleted from
+        # the cerebro stack — the test file it referenced
+        # (tests/test_temporal_workflows.py) no longer exists, so the
+        # invariant tracks the post-removal job set.
         expected = {
             "lint",
             "test",
-            "test-temporal",
             "test-cli",
             "security",
             "validate-docker",
@@ -167,7 +170,6 @@ class TestCIWorkflowInvariants:
         assert needs == {
             "lint",
             "test",
-            "test-temporal",
             "test-cli",
             "security",
             "validate-docker",
@@ -195,13 +197,19 @@ class TestCIWorkflowInvariants:
     def test_validate_docker_lints_main_dockerfile(self, ci: dict[str, Any]) -> None:
         """Either an explicit reference to ``Dockerfile`` or a loop that would
         cover it. Locks in that hadolint targets the production Dockerfile."""
-        runs = "\n".join(s.get("run", "") for s in ci["jobs"]["validate-docker"]["steps"])
+        runs = "\n".join(
+            s.get("run", "") for s in ci["jobs"]["validate-docker"]["steps"]
+        )
         assert "Dockerfile" in runs
 
     def test_security_artifact_upload_present(self, ci: dict[str, Any]) -> None:
         steps = ci["jobs"]["security"]["steps"]
         upload = next(
-            (s for s in steps if s.get("uses", "").startswith("actions/upload-artifact")),
+            (
+                s
+                for s in steps
+                if s.get("uses", "").startswith("actions/upload-artifact")
+            ),
             None,
         )
         assert upload is not None
@@ -308,7 +316,9 @@ class TestCIBlockingGatesAcceptance:
             "survive a failing bandit/safety/pip-audit run"
         )
 
-    def test_hadolint_robust_to_missing_files(self, ci: dict[str, Any], ci_text: str) -> None:
+    def test_hadolint_robust_to_missing_files(
+        self, ci: dict[str, Any], ci_text: str
+    ) -> None:
         """Worker Dockerfile is currently missing from the repo. The hadolint
         invocation must not hard-fail purely because a target file is absent
         (that's an inventory issue, not a security finding). Acceptable
@@ -316,7 +326,9 @@ class TestCIBlockingGatesAcceptance:
         `[ -f ]` test."""
         runs = self._runs_in_job(ci, "validate-docker")
         # At least one defensive guard present
-        defensive_pattern = re.compile(r"\[\s*-f\s+|\[\s*-e\s+|test\s+-f\s+|test\s+-e\s+")
+        defensive_pattern = re.compile(
+            r"\[\s*-f\s+|\[\s*-e\s+|test\s+-f\s+|test\s+-e\s+"
+        )
         assert defensive_pattern.search(runs), (
             "hadolint invocation must guard against missing Dockerfiles "
             "(use `[ -f path ]` test or equivalent)"

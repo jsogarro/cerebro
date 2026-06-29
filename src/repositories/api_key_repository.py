@@ -166,9 +166,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
 
         return api_key
 
-    async def record_usage(
-        self, key_id: UUID, ip_address: str | None = None
-    ) -> None:
+    async def record_usage(self, key_id: UUID, ip_address: str | None = None) -> None:
         """
         Record API key usage.
 
@@ -371,7 +369,9 @@ class APIKeyRepository(BaseRepository[APIKey]):
         result = await self.session.execute(user_query)
         keys_per_user = [int(row[1]) for row in result]
         avg_keys_per_user: float = (
-            float(sum(keys_per_user)) / float(len(keys_per_user)) if keys_per_user else 0.0
+            float(sum(keys_per_user)) / float(len(keys_per_user))
+            if keys_per_user
+            else 0.0
         )
 
         return {

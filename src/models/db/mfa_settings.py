@@ -139,7 +139,9 @@ class MFASettings(BaseModel):
     )
 
     # Backup codes
-    backup_codes: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True, comment="Hashed backup codes")
+    backup_codes: Mapped[list[Any] | None] = mapped_column(
+        JSON, nullable=True, comment="Hashed backup codes"
+    )
 
     backup_codes_generated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

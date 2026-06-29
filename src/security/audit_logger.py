@@ -377,7 +377,9 @@ class AuditLogger:
                 AuditEventType.DATA_EXFILTRATION: AlertType.DATA_EXFILTRATION,
             }
             if isinstance(event_type_raw, AuditEventType):
-                alert_type = alert_type_map.get(event_type_raw, AlertType.UNUSUAL_ACTIVITY)
+                alert_type = alert_type_map.get(
+                    event_type_raw, AlertType.UNUSUAL_ACTIVITY
+                )
             else:
                 alert_type = AlertType.UNUSUAL_ACTIVITY
 
@@ -515,19 +517,39 @@ class AuditLogger:
 
             # Analyze logs for GDPR compliance
             report["summary"]["data_access_events"] = len(
-                [entry for entry in logs if entry.event_type == AuditEventType.DATA_ACCESSED]
+                [
+                    entry
+                    for entry in logs
+                    if entry.event_type == AuditEventType.DATA_ACCESSED
+                ]
             )
             report["summary"]["data_modifications"] = len(
-                [entry for entry in logs if entry.event_type == AuditEventType.DATA_MODIFIED]
+                [
+                    entry
+                    for entry in logs
+                    if entry.event_type == AuditEventType.DATA_MODIFIED
+                ]
             )
             report["summary"]["data_deletions"] = len(
-                [entry for entry in logs if entry.event_type == AuditEventType.DATA_DELETED]
+                [
+                    entry
+                    for entry in logs
+                    if entry.event_type == AuditEventType.DATA_DELETED
+                ]
             )
             report["summary"]["data_exports"] = len(
-                [entry for entry in logs if entry.event_type == AuditEventType.DATA_EXPORTED]
+                [
+                    entry
+                    for entry in logs
+                    if entry.event_type == AuditEventType.DATA_EXPORTED
+                ]
             )
             report["summary"]["account_deletions"] = len(
-                [entry for entry in logs if entry.event_type == AuditEventType.ACCOUNT_DELETED]
+                [
+                    entry
+                    for entry in logs
+                    if entry.event_type == AuditEventType.ACCOUNT_DELETED
+                ]
             )
 
             # Check for violations

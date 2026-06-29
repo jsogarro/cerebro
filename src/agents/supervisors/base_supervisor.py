@@ -215,7 +215,9 @@ class BaseSupervisor(BaseAgent, ABC):
                             config=self.config,
                         )
                         self.active_workers[worker_type] = worker
-                        logger.info("supervisor_worker_instantiated", worker_type=worker_type)
+                        logger.info(
+                            "supervisor_worker_instantiated", worker_type=worker_type
+                        )
                     except Exception as e:
                         logger.warning(
                             "supervisor_worker_instantiation_failed",
@@ -273,7 +275,9 @@ class BaseSupervisor(BaseAgent, ABC):
 
         return bool(quality_score >= self.quality_threshold)
 
-    def register_worker(self, worker_def: WorkerDefinition, worker_instance: BaseAgent) -> None:
+    def register_worker(
+        self, worker_def: WorkerDefinition, worker_instance: BaseAgent
+    ) -> None:
         """Register a worker agent with this supervisor."""
 
         self.worker_definitions[worker_def.worker_type] = worker_def
@@ -381,7 +385,7 @@ class BaseSupervisor(BaseAgent, ABC):
         if not self.workflow_graph:
             return state
 
-        if hasattr(self.workflow_graph, 'ainvoke'):
+        if hasattr(self.workflow_graph, "ainvoke"):
             final_langgraph_state = await self.workflow_graph.ainvoke(langgraph_state)
 
             # Extract final state
@@ -602,7 +606,9 @@ class BaseSupervisor(BaseAgent, ABC):
                 "active_workers": len(self.active_workers),
                 "worker_types": list(self.worker_definitions.keys()),
             },
-            "communication": dict(await self.communication_protocol.get_protocol_stats()),
+            "communication": dict(
+                await self.communication_protocol.get_protocol_stats()
+            ),
         }
 
     def _create_langgraph_node(self, node_name: str, node_func: Any) -> Any:
@@ -636,7 +642,9 @@ class BaseSupervisor(BaseAgent, ABC):
                 except Exception as e:
                     logger.warning(
                         "supervisor_worker_close_failed",
-                        worker_type=getattr(worker, "get_agent_type", lambda: "unknown")(),
+                        worker_type=getattr(
+                            worker, "get_agent_type", lambda: "unknown"
+                        )(),
                         error=str(e),
                     )
 

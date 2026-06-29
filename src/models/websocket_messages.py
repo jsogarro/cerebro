@@ -54,10 +54,12 @@ class WSMessage(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict, description="Message payload")
 
-    model_config = ConfigDict(json_encoders={
-        datetime: lambda v: v.isoformat(),
-        UUID: lambda v: str(v),
-    })
+    model_config = ConfigDict(
+        json_encoders={
+            datetime: lambda v: v.isoformat(),
+            UUID: lambda v: str(v),
+        }
+    )
 
 
 class ProgressUpdate(BaseModel):
@@ -118,9 +120,7 @@ class CLIWSMessage(WSMessage):
     formatted_text: str | None = Field(
         None, description="Pre-formatted text for terminal"
     )
-    progress_bar: CLIProgressBar | None = Field(
-        None, description="Progress bar data"
-    )
+    progress_bar: CLIProgressBar | None = Field(None, description="Progress bar data")
     clear_screen: bool = Field(False, description="Whether to clear terminal screen")
 
     def to_terminal_output(self) -> str:
@@ -198,6 +198,8 @@ class HeartbeatMessage(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     client_id: str
 
-    model_config = ConfigDict(json_encoders={
-        datetime: lambda v: v.isoformat(),
-    })
+    model_config = ConfigDict(
+        json_encoders={
+            datetime: lambda v: v.isoformat(),
+        }
+    )

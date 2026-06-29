@@ -53,7 +53,9 @@ class ReportStructureBuilder:
 
         for section_name in required_sections:
             if section_name in section_builders:
-                section = await section_builders[section_name](report, aggregated_results)
+                section = await section_builders[section_name](
+                    report, aggregated_results
+                )
                 if section:
                     report.sections.append(section)
 
@@ -64,7 +66,7 @@ class ReportStructureBuilder:
         content = f"""
         This research investigates the following question: "{report.query}"
 
-        The research spans across the following domains: {', '.join(report.domains)}.
+        The research spans across the following domains: {", ".join(report.domains)}.
 
         This report presents a comprehensive analysis of the available literature and
         synthesizes key findings to provide insights and recommendations.
@@ -99,7 +101,9 @@ class ReportStructureBuilder:
         """Build literature review section."""
         sources = results.get("sources", [])
 
-        content = f"## Literature Review\n\nThis review examines {len(sources)} sources.\n\n"
+        content = (
+            f"## Literature Review\n\nThis review examines {len(sources)} sources.\n\n"
+        )
 
         for source in sources[:10]:
             title = source.get("title", "Untitled")
@@ -139,7 +143,9 @@ class ReportStructureBuilder:
                     )
                     subsection_content += f"- {text}\n"
                     if isinstance(finding, dict) and finding.get("confidence"):
-                        subsection_content += f"  (Confidence: {finding['confidence']:.2f})\n"
+                        subsection_content += (
+                            f"  (Confidence: {finding['confidence']:.2f})\n"
+                        )
 
                 subsection = ReportSection(
                     title=category.replace("_", " ").title(),
@@ -157,7 +163,9 @@ class ReportStructureBuilder:
         comparisons = results.get("comparisons", {})
 
         content = "## Analysis\n\n"
-        content += "This section presents the analytical framework and key comparisons.\n\n"
+        content += (
+            "This section presents the analytical framework and key comparisons.\n\n"
+        )
 
         if comparisons.get("frameworks"):
             content += "### Comparison Frameworks\n"
@@ -206,8 +214,8 @@ class ReportStructureBuilder:
 
         content = f"""## Conclusions
 
-        This research synthesized findings from {metrics.get('total_sources', 0)} sources
-        and {metrics.get('total_citations', 0)} citations.
+        This research synthesized findings from {metrics.get("total_sources", 0)} sources
+        and {metrics.get("total_citations", 0)} citations.
 
         Overall confidence in findings: {confidence_score:.2%}
 
@@ -265,10 +273,10 @@ class ReportStructureBuilder:
 
         Methods: Comprehensive research approach across {len(report.domains)} domains.
 
-        Results: Analysis of {len(results.get('sources', []))} sources yielded
-        {sum(len(f) for f in results.get('findings', {}).values())} findings.
+        Results: Analysis of {len(results.get("sources", []))} sources yielded
+        {sum(len(f) for f in results.get("findings", {}).values())} findings.
 
-        Conclusions: {', '.join(results.get('recommendations', ['Further research recommended'])[:2])}
+        Conclusions: {", ".join(results.get("recommendations", ["Further research recommended"])[:2])}
         """.strip()
 
         return ReportSection(title="Abstract", content=content, level=1)
@@ -282,10 +290,10 @@ class ReportStructureBuilder:
         content = f"""## Results
 
         ### Quantitative Findings
-        - Total sources analyzed: {metrics.get('total_sources', 0)}
-        - Citations reviewed: {metrics.get('total_citations', 0)}
-        - Average confidence: {metrics.get('average_confidence', 0):.2%}
-        - Coverage score: {metrics.get('coverage_score', 0):.2%}
+        - Total sources analyzed: {metrics.get("total_sources", 0)}
+        - Citations reviewed: {metrics.get("total_citations", 0)}
+        - Average confidence: {metrics.get("average_confidence", 0):.2%}
+        - Coverage score: {metrics.get("coverage_score", 0):.2%}
         """.strip()
 
         return ReportSection(title="Results", content=content, level=1)
@@ -329,7 +337,9 @@ class ReportStructureBuilder:
 
         return ReportSection(title="Strategic Insights", content=content, level=1)
 
-    async def process_citations(self, report: Report, input_data: dict[str, Any]) -> None:
+    async def process_citations(
+        self, report: Report, input_data: dict[str, Any]
+    ) -> None:
         """Process and format citations from input data."""
         aggregated_results = input_data.get("aggregated_results", {})
         citations_data = aggregated_results.get("citations", [])
@@ -407,7 +417,9 @@ class ReportStructureBuilder:
             total_sources=len(aggregated_results.get("sources", [])),
             total_citations=len(aggregated_results.get("citations", [])),
             agents_used=metadata_input.get("agents_used", []),
-            quality_score=input_data.get("quality_report", {}).get("quality_score", 0.8),
+            quality_score=input_data.get("quality_report", {}).get(
+                "quality_score", 0.8
+            ),
             confidence_score=aggregated_results.get("confidence_score", 0.75),
             generation_time_seconds=0.0,
             word_count=0,
@@ -426,11 +438,11 @@ class ReportStructureBuilder:
 
 **Research Question:** {report.query}
 
-**Approach:** {report.configuration.type.value.replace('_', ' ').title()}
+**Approach:** {report.configuration.type.value.replace("_", " ").title()}
 
 **Key Outcomes:**
-- Analyzed {len(aggregated_results.get('sources', []))} sources
-- Identified {sum(len(f) for f in aggregated_results.get('findings', {}).values())} key findings
+- Analyzed {len(aggregated_results.get("sources", []))} sources
+- Identified {sum(len(f) for f in aggregated_results.get("findings", {}).values())} key findings
 - Quality Score: {report.metadata.quality_score:.2%}
 
 **Main Insights:**
@@ -456,12 +468,16 @@ class ReportStructureBuilder:
         word_count = report.get_word_count()
         min_words = self.quality_config.get_min_word_count(report_type)
         if word_count < min_words:
-            logger.warning(f"Report word count ({word_count}) below minimum ({min_words})")
+            logger.warning(
+                f"Report word count ({word_count}) below minimum ({min_words})"
+            )
 
         source_count = report.metadata.total_sources
         min_sources = self.quality_config.get_min_sources(report_type)
         if source_count < min_sources:
-            logger.warning(f"Report source count ({source_count}) below minimum ({min_sources})")
+            logger.warning(
+                f"Report source count ({source_count}) below minimum ({min_sources})"
+            )
 
         if self.quality_config.requires_citations(report_type) and not report.citations:
             logger.warning("Report missing required citations")

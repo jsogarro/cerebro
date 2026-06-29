@@ -81,8 +81,10 @@ class EdgeConditions:
         parallel_agents = []
 
         # After literature review, we can run multiple agents
-        if (state.current_phase == WorkflowPhase.LITERATURE_REVIEW and
-            "literature_review" in state.completed_agents):
+        if (
+            state.current_phase == WorkflowPhase.LITERATURE_REVIEW
+            and "literature_review" in state.completed_agents
+        ):
             # These agents can run in parallel after literature review
             if "comparative_analysis" not in state.completed_agents:
                 parallel_agents.append("comparative_analysis")

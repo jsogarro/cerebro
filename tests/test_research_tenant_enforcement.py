@@ -122,7 +122,9 @@ async def test_create_research_project_rejects_body_user_mismatch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_research_project_sets_tenant_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_create_research_project_sets_tenant_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = _Repo()
     monkeypatch.setattr(
         research,

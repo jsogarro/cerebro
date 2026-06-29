@@ -165,7 +165,7 @@ class TestDataSeeder:
         for user in users:
             for i in range(projects_per_user):
                 project = ResearchProjectFactory(
-                    user_id=user.id, title=f"{user.username} Project {i+1}"
+                    user_id=user.id, title=f"{user.username} Project {i + 1}"
                 )
                 self.session.add(project)
                 projects.append(project)

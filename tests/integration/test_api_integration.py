@@ -34,7 +34,6 @@ reason explaining exactly what would need to come back / be rewritten
 before un-skipping.
 """
 
-
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -432,10 +431,10 @@ class TestCompleteAPIWorkflow:
         projects = []
         for i in range(3):
             project_data = {
-                "title": f"Research Project {i+1}",
-                "description": f"Description {i+1}",
+                "title": f"Research Project {i + 1}",
+                "description": f"Description {i + 1}",
                 "query": {
-                    "text": f"Research question {i+1}",
+                    "text": f"Research question {i + 1}",
                     "domains": ["AI", "ML"],
                     "depth_level": "intermediate",
                 },

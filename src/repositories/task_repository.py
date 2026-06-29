@@ -216,9 +216,7 @@ class TaskRepository(BaseRepository[AgentTask]):
                 AgentTask.deleted_at.is_(None),
             )
         )
-        avg_time_query = self.apply_organization_scope(
-            avg_time_query, organization_id
-        )
+        avg_time_query = self.apply_organization_scope(avg_time_query, organization_id)
         result = await self.session.execute(avg_time_query)
         avg_execution_time = result.scalar() or 0
 

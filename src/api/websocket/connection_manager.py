@@ -358,16 +358,20 @@ class ConnectionManager:
         """Get connection statistics."""
         return {
             "total_connections": len(self.connections),
-            "connections_by_type": dict[str, int]({
-                client_type: len(
-                    [
-                        c
-                        for c in self.connections.values()
-                        if c.client_type == client_type
-                    ]
-                )
-                for client_type in {c.client_type for c in self.connections.values()}
-            }),
+            "connections_by_type": dict[str, int](
+                {
+                    client_type: len(
+                        [
+                            c
+                            for c in self.connections.values()
+                            if c.client_type == client_type
+                        ]
+                    )
+                    for client_type in {
+                        c.client_type for c in self.connections.values()
+                    }
+                }
+            ),
             "total_project_subscriptions": len(self.project_subscriptions),
             "total_user_subscriptions": len(self.user_subscriptions),
             "active_projects": list(self.project_subscriptions.keys()),

@@ -273,7 +273,8 @@ async def execute_single_agent(
                         "confidence": v.confidence,
                         "execution_time": v.execution_time,
                         "metadata": v.metadata,
-                    } for k, v in state.agent_results.items()
+                    }
+                    for k, v in state.agent_results.items()
                 },
             },
             context=state.context,

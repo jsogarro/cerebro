@@ -59,9 +59,7 @@ class SupervisorRegistry:
                 supervisor_type
             )
 
-    def get_supervisor_capabilities(
-        self, supervisor_type: SupervisorType
-    ) -> list[str]:
+    def get_supervisor_capabilities(self, supervisor_type: SupervisorType) -> list[str]:
         """Get capabilities for a supervisor type."""
         capabilities_map = {
             SupervisorType.RESEARCH: [

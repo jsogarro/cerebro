@@ -369,7 +369,10 @@ class ResearchState:
 
         return (
             self.current_phase in major_phases
-            or (self.metadata is not None and self.metadata.total_nodes_executed % 5 == 0)
+            or (
+                self.metadata is not None
+                and self.metadata.total_nodes_executed % 5 == 0
+            )
             or self.error_count > 0
         )
 
@@ -393,7 +396,9 @@ class ResearchState:
                 self.previous_phase.value if self.previous_phase else None
             ),
             "agent_tasks": {k: v.__dict__ for k, v in self.agent_tasks.items()},
-            "agent_results": {k: _agent_result_to_dict(v) for k, v in self.agent_results.items()},
+            "agent_results": {
+                k: _agent_result_to_dict(v) for k, v in self.agent_results.items()
+            },
             "pending_agents": list(self.pending_agents),
             "completed_agents": list(self.completed_agents),
             "failed_agents": list(self.failed_agents),

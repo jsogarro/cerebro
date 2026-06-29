@@ -95,7 +95,10 @@ class ComparativeInsightSynthesizer:
                 "entities_identified": len(entities),
                 "relationships_found": len(relationships),
                 "relationship_types": sorted(
-                    {relationship.get("type", "unknown") for relationship in relationships}
+                    {
+                        relationship.get("type", "unknown")
+                        for relationship in relationships
+                    }
                 ),
             }
 

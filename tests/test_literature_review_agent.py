@@ -15,8 +15,13 @@ from src.agents.schemas.literature_review import (
 )
 
 
-def _mock_gemini_two_call(sources, key_findings=None, research_gaps=None,
-                          methodologies_used=None, quality_assessment="Good"):
+def _mock_gemini_two_call(
+    sources,
+    key_findings=None,
+    research_gaps=None,
+    methodologies_used=None,
+    quality_assessment="Good",
+):
     """Build an AsyncMock for gemini_service whose generate_structured_content
     returns the source list on the first call and the analysis on the second.
 
@@ -28,15 +33,17 @@ def _mock_gemini_two_call(sources, key_findings=None, research_gaps=None,
     LiteratureAnalysisSchema satisfies both shapes (it has .sources too).
     """
     mock = AsyncMock()
-    mock.generate_structured_content = AsyncMock(side_effect=[
-        LiteratureAnalysisSchema(sources=sources),
-        LiteratureAnalysisSchema(
-            key_findings=key_findings or [],
-            research_gaps=research_gaps or [],
-            methodologies_used=methodologies_used or [],
-            quality_assessment=quality_assessment,
-        ),
-    ])
+    mock.generate_structured_content = AsyncMock(
+        side_effect=[
+            LiteratureAnalysisSchema(sources=sources),
+            LiteratureAnalysisSchema(
+                key_findings=key_findings or [],
+                research_gaps=research_gaps or [],
+                methodologies_used=methodologies_used or [],
+                quality_assessment=quality_assessment,
+            ),
+        ]
+    )
     return mock
 
 
@@ -50,8 +57,18 @@ class TestLiteratureReviewAgent:
 
         mock_gemini = _mock_gemini_two_call(
             sources=[
-                AcademicSource(title="AI in Healthcare", authors=["Smith J"], year=2024, relevance_score=0.95),
-                AcademicSource(title="Machine Learning Applications", authors=["Doe A"], year=2023, relevance_score=0.88),
+                AcademicSource(
+                    title="AI in Healthcare",
+                    authors=["Smith J"],
+                    year=2024,
+                    relevance_score=0.95,
+                ),
+                AcademicSource(
+                    title="Machine Learning Applications",
+                    authors=["Doe A"],
+                    year=2023,
+                    relevance_score=0.88,
+                ),
             ],
             key_findings=[
                 "AI improves diagnostic accuracy by 30%",
@@ -92,9 +109,15 @@ class TestLiteratureReviewAgent:
 
         mock_gemini = _mock_gemini_two_call(
             sources=[
-                AcademicSource(title="Paper C", authors=["C"], year=2020, relevance_score=0.5),
-                AcademicSource(title="Paper A", authors=["A"], year=2024, relevance_score=0.95),
-                AcademicSource(title="Paper B", authors=["B"], year=2023, relevance_score=0.75),
+                AcademicSource(
+                    title="Paper C", authors=["C"], year=2020, relevance_score=0.5
+                ),
+                AcademicSource(
+                    title="Paper A", authors=["A"], year=2024, relevance_score=0.95
+                ),
+                AcademicSource(
+                    title="Paper B", authors=["B"], year=2023, relevance_score=0.75
+                ),
             ],
             key_findings=["Finding 1"],
             methodologies_used=["Review"],
@@ -125,7 +148,9 @@ class TestLiteratureReviewAgent:
 
         mock_gemini = _mock_gemini_two_call(
             sources=[
-                AcademicSource(title="Study 1", authors=["Author1"], year=2024, relevance_score=0.9),
+                AcademicSource(
+                    title="Study 1", authors=["Author1"], year=2024, relevance_score=0.9
+                ),
             ],
             key_findings=["Current state of research"],
             methodologies_used=["Survey"],
@@ -184,7 +209,9 @@ class TestLiteratureReviewAgent:
 
         mock_gemini = _mock_gemini_two_call(
             sources=[
-                AcademicSource(title="Cached", authors=["A"], year=2024, relevance_score=0.9),
+                AcademicSource(
+                    title="Cached", authors=["A"], year=2024, relevance_score=0.9
+                ),
             ],
             key_findings=["Finding"],
             methodologies_used=["Method"],
@@ -217,7 +244,9 @@ class TestLiteratureReviewAgent:
 
         mock_gemini_high = _mock_gemini_two_call(
             sources=[
-                AcademicSource(title=f"Paper {i}", authors=["A"], year=2024, relevance_score=0.9)
+                AcademicSource(
+                    title=f"Paper {i}", authors=["A"], year=2024, relevance_score=0.9
+                )
                 for i in range(20)
             ],
             key_findings=["Finding 1", "Finding 2", "Finding 3"],
@@ -244,7 +273,9 @@ class TestLiteratureReviewAgent:
 
         mock_gemini_low = _mock_gemini_two_call(
             sources=[
-                AcademicSource(title="Paper 1", authors=["A"], year=2020, relevance_score=0.5),
+                AcademicSource(
+                    title="Paper 1", authors=["A"], year=2020, relevance_score=0.5
+                ),
             ],
             key_findings=["Finding 1"],
             methodologies_used=["Basic review"],
@@ -331,7 +362,9 @@ class TestLiteratureReviewAgent:
 
         mock_gemini = _mock_gemini_two_call(
             sources=[
-                AcademicSource(title=f"Paper {i}", authors=["A"], year=2024, relevance_score=0.8)
+                AcademicSource(
+                    title=f"Paper {i}", authors=["A"], year=2024, relevance_score=0.8
+                )
                 for i in range(100)
             ],
             key_findings=["Many findings"],

@@ -78,7 +78,9 @@ def test_regression_runner_fails_when_more_than_ten_percent_regresses() -> None:
     dataset = load_golden_dataset(DATASET_PATH)
     runner = GoldenDatasetRegressionRunner(dataset)
 
-    result = runner.run(lambda _case: AgentOutput(text="Unrelated answer.", citations=()))
+    result = runner.run(
+        lambda _case: AgentOutput(text="Unrelated answer.", citations=())
+    )
 
     assert result.passed is False
     assert result.degradation > 0.10

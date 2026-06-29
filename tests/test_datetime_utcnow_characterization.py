@@ -62,7 +62,9 @@ def _now_utc_naive_view() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _assert_close_to_now(dt: datetime, *, tolerance: timedelta = WALL_CLOCK_TOLERANCE) -> None:
+def _assert_close_to_now(
+    dt: datetime, *, tolerance: timedelta = WALL_CLOCK_TOLERANCE
+) -> None:
     """Assert wall-clock value of dt is within `tolerance` of current UTC, regardless of tzinfo."""
     delta = abs(_now_utc_naive_view() - _to_utc_naive_view(dt))
     assert delta <= tolerance, (
@@ -214,7 +216,10 @@ class TestSerializationRoundTrip:
         as_json = original.model_dump_json()
         as_dict = json.loads(as_json)
         rebuilt = WSMessage.model_validate(as_dict)
-        delta = abs(_to_utc_naive_view(rebuilt.timestamp) - _to_utc_naive_view(original.timestamp))
+        delta = abs(
+            _to_utc_naive_view(rebuilt.timestamp)
+            - _to_utc_naive_view(original.timestamp)
+        )
         assert delta < timedelta(seconds=1), (
             f"round-trip drifted by {delta}: {original.timestamp} vs {rebuilt.timestamp}"
         )

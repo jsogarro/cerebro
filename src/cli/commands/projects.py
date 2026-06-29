@@ -2,7 +2,6 @@
 Research project commands for CLI.
 """
 
-
 import asyncio
 from pathlib import Path
 from typing import Any
@@ -243,7 +242,9 @@ def list_projects(
     "--interval", "-i", default=5, help="Update interval in seconds (polling mode only)"
 )
 @click.pass_context
-def get_progress(ctx: Context, project_id: UUID, watch: bool, stream: bool, interval: int) -> None:
+def get_progress(
+    ctx: Context, project_id: UUID, watch: bool, stream: bool, interval: int
+) -> None:
     """Get project progress."""
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
@@ -364,7 +365,9 @@ def cancel_project(ctx: Context, project_id: UUID, force: bool) -> None:
     """Cancel a research project."""
     verbose = ctx.obj["verbose"]
 
-    if not force and not click.confirm(f"Are you sure you want to cancel project {project_id}?"):
+    if not force and not click.confirm(
+        f"Are you sure you want to cancel project {project_id}?"
+    ):
         print_info("Cancelled")
         return
 

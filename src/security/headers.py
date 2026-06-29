@@ -382,7 +382,9 @@ class CORSSecurityMiddleware:
                 preflight_response.headers["Access-Control-Max-Age"] = str(self.max_age)
 
                 if self.allow_credentials:
-                    preflight_response.headers["Access-Control-Allow-Credentials"] = "true"
+                    preflight_response.headers["Access-Control-Allow-Credentials"] = (
+                        "true"
+                    )
 
             return preflight_response
 

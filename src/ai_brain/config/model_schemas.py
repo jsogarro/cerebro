@@ -273,7 +273,9 @@ class ModelConfiguration(BaseModel):
 
     @field_validator("models")
     @classmethod
-    def validate_models_have_providers(cls, v: dict[str, ModelSpecification], info: ValidationInfo) -> dict[str, ModelSpecification]:
+    def validate_models_have_providers(
+        cls, v: dict[str, ModelSpecification], info: ValidationInfo
+    ) -> dict[str, ModelSpecification]:
         """Ensure all models reference valid providers."""
         # Skip validation if providers haven't been processed yet
         providers = info.data.get("providers")

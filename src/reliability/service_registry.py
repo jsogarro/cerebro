@@ -238,7 +238,10 @@ class ServiceRegistry:
             instance_id: Instance ID
         """
         # Remove from memory
-        if service_name in self._services and instance_id in self._services[service_name]:
+        if (
+            service_name in self._services
+            and instance_id in self._services[service_name]
+        ):
             del self._services[service_name][instance_id]
 
             if not self._services[service_name]:
@@ -435,9 +438,9 @@ class ServiceDiscovery:
         """
         self._registry = registry
         self._round_robin_counters: dict[str, int] = {}
-        self._circuit_breakers: dict[str, Any] = (
-            {}
-        )  # Would integrate with CircuitBreaker class
+        self._circuit_breakers: dict[
+            str, Any
+        ] = {}  # Would integrate with CircuitBreaker class
 
     async def discover(
         self,
@@ -728,7 +731,9 @@ _global_registry: ServiceRegistry | None = None
 _global_discovery: ServiceDiscovery | None = None
 
 
-async def initialize_service_registry(redis_client: redis.Redis[Any] | None = None) -> None:
+async def initialize_service_registry(
+    redis_client: redis.Redis[Any] | None = None,
+) -> None:
     """Initialize global service registry."""
     global _global_registry, _global_discovery
 

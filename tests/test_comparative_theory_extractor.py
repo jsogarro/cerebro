@@ -19,8 +19,7 @@ def test_theory_extractor_preserves_legacy_research_query_shape() -> None:
     )
 
     assert (
-        query
-        == "comparative analysis Method A vs Method B vs Method C "
+        query == "comparative analysis Method A vs Method B vs Method C "
         "Accuracy Speed Cost comparison study"
     )
 
@@ -103,6 +102,9 @@ def test_comparative_agent_initializes_theory_extractor() -> None:
     agent = ComparativeAnalysisAgent()
 
     assert isinstance(agent.theory_extractor, TheoryExtractor)
-    assert agent._fallback_comparative_research(
-        {"items": ["A", "B"], "criteria": ["Quality"]}
-    )["fallback"] is True
+    assert (
+        agent._fallback_comparative_research(
+            {"items": ["A", "B"], "criteria": ["Quality"]}
+        )["fallback"]
+        is True
+    )

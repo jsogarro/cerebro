@@ -90,7 +90,12 @@ class TestSupplyChainBaseline:
             for ref in _all_image_refs(_read(path)):
                 base = ref.split("@")[0]
                 all_refs.add(base)
-        expected = {"python:3.11-slim", "node:20-alpine", "nginx:alpine", "ghcr.io/astral-sh/uv:latest"}
+        expected = {
+            "python:3.11-slim",
+            "node:20-alpine",
+            "nginx:alpine",
+            "ghcr.io/astral-sh/uv:latest",
+        }
         assert all_refs == expected, f"Image set drifted: {all_refs} != {expected}"
 
 
@@ -113,7 +118,9 @@ class TestSupplyChainPinned:
             base, _, digest = ref.partition("@")
             if base in EXPECTED_DIGESTS:
                 expected = EXPECTED_DIGESTS[base]
-                assert digest == expected, f"{path}: {base} pinned to {digest}, expected {expected}"
+                assert digest == expected, (
+                    f"{path}: {base} pinned to {digest}, expected {expected}"
+                )
 
 
 # --------------------------------------------------------------------------- #
@@ -159,4 +166,6 @@ class TestDockerignorePresent:
         # development stage runs `COPY tests/ ./tests/` for in-image pytest runs.
         # Production stage uses selective COPY of src/ only, so tests/ never
         # ships to runtime images regardless.
-        assert required in patterns, f".dockerignore missing required pattern: {required}"
+        assert required in patterns, (
+            f".dockerignore missing required pattern: {required}"
+        )

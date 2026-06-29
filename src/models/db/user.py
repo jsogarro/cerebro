@@ -33,9 +33,13 @@ class User(BaseModel):
     __tablename__ = "users"
 
     # Authentication fields
-    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    email: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True, index=True
+    )
 
-    username: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
+    username: Mapped[str] = mapped_column(
+        String(100), nullable=False, unique=True, index=True
+    )
 
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -51,28 +55,26 @@ class User(BaseModel):
         comment="Tenant organization boundary identifier",
     )
 
-    role: Mapped[str | None] = mapped_column(
-        String(50), nullable=True
-    )
+    role: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Account status
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, index=True
+    )
 
     is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    is_verified: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Activity tracking
-    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Account limits
-    max_projects: Mapped[int | None] = mapped_column(
-        Integer, nullable=True
-    )
+    max_projects: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     api_rate_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

@@ -45,7 +45,9 @@ class TheoryExtractor:
                 log_info(f"Found {result.get('total_found', 0)} comparative studies")
                 return dict(result)
 
-            raise Exception(f"Comparative research search failed: {result.get('error')}")
+            raise Exception(
+                f"Comparative research search failed: {result.get('error')}"
+            )
 
         except Exception as exc:
             log_error(f"MCP comparative research search failed: {exc}")

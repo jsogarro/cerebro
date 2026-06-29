@@ -233,7 +233,9 @@ class GeminiService:
         try:
             if self.cache_client:
                 await self.cache_client.set(
-                    cache_key, serialize_for_cache(data).decode("utf-8"), ex=self.config.cache_ttl
+                    cache_key,
+                    serialize_for_cache(data).decode("utf-8"),
+                    ex=self.config.cache_ttl,
                 )
                 logger.debug("gemini_cache_write_completed", cache_key=cache_key)
         except Exception as e:

@@ -158,9 +158,9 @@ class MethodologyAgent(BaseAgent):
 
     def _build_prompt(self, input_data: dict[str, Any]) -> str:
         """Build prompt for Gemini."""
-        return f"""Design a research methodology for: {input_data.get('research_question')}
-        Type: {input_data.get('research_type', 'mixed')}
-        Scope: {input_data.get('scope', 'general')}
+        return f"""Design a research methodology for: {input_data.get("research_question")}
+        Type: {input_data.get("research_type", "mixed")}
+        Scope: {input_data.get("scope", "general")}
         
         Provide methodology recommendations in JSON format."""
 

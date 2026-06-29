@@ -49,13 +49,13 @@ async def report_generation_node(state: ResearchState) -> ResearchState:
     try:
         # Determine report configuration from state
         report_config = _build_report_configuration(state)
-        
+
         # Determine output formats
         requested_formats = _determine_output_formats(state)
-        
+
         # Prepare workflow data for report generation
         workflow_data = _prepare_workflow_data(state)
-        
+
         # Create report generation request
         generation_request = ReportGenerationRequest(
             project_id=None,
@@ -63,17 +63,19 @@ async def report_generation_node(state: ResearchState) -> ResearchState:
             configuration=report_config,
             formats=requested_formats,
             save_to_storage=state.context.get("save_report", True),
-            notify_completion=False
+            notify_completion=False,
         )
-        
+
         # Initialize report generator
         settings = create_report_settings()
         generator = ReportGenerator(settings)
-        
+
         # Generate the report
-        logger.info(f"Generating report with formats: {[f.value for f in requested_formats]}")
+        logger.info(
+            f"Generating report with formats: {[f.value for f in requested_formats]}"
+        )
         response = await generator.generate_report(generation_request)
-        
+
         if response.status == "completed":
             # Store successful generation results in state
             state.context["final_report_response"] = {
@@ -85,26 +87,30 @@ async def report_generation_node(state: ResearchState) -> ResearchState:
                 "page_count": response.page_count,
                 "download_urls": response.download_urls,
             }
-            
+
             # For backward compatibility, also store legacy format
             legacy_report = _convert_to_legacy_format(workflow_data, response)
             state.context["final_report"] = legacy_report
-            
+
             # Mark workflow as complete if quality passed
             quality_report = state.context.get("quality_report", {})
-            if quality_report.get("passed", True):  # Default to True if no quality report
+            if quality_report.get(
+                "passed", True
+            ):  # Default to True if no quality report
                 state.transition_to_phase(WorkflowPhase.COMPLETED)
-                logger.info(f"Report generation complete. Generated {len(response.formats_generated)} formats in {response.generation_time:.2f}s")
+                logger.info(
+                    f"Report generation complete. Generated {len(response.formats_generated)} formats in {response.generation_time:.2f}s"
+                )
             else:
                 logger.warning("Report generated but quality checks did not pass")
-        
+
         else:
             # Handle generation failure
             error_msg = f"Report generation failed: {', '.join(response.errors)}"
             logger.error(error_msg)
             state.validation_errors.append(error_msg)
             state.error_count += 1
-            
+
             # Store error information
             state.context["final_report_response"] = {
                 "status": response.status,
@@ -116,14 +122,16 @@ async def report_generation_node(state: ResearchState) -> ResearchState:
         logger.error(f"Error in advanced report generation: {e}")
         state.validation_errors.append(f"Advanced report generation failed: {e!s}")
         state.error_count += 1
-        
+
         # Fallback to legacy report generation
         logger.info("Falling back to legacy report generation")
         try:
             state = await _fallback_legacy_generation(state)
         except Exception as fallback_error:
             logger.error(f"Fallback report generation also failed: {fallback_error}")
-            state.validation_errors.append(f"All report generation methods failed: {fallback_error!s}")
+            state.validation_errors.append(
+                f"All report generation methods failed: {fallback_error!s}"
+            )
 
     return state
 
@@ -132,13 +140,13 @@ def _build_report_configuration(state: ResearchState) -> ReportConfiguration:
     """Build report configuration from workflow state."""
     # Extract configuration parameters from state context
     context = state.context
-    
+
     # Determine report type based on query complexity and domains
     report_type = _determine_report_type(state)
-    
+
     # Determine citation style
     citation_style = CitationStyle(context.get("citation_style", "APA"))
-    
+
     # Build configuration
     config = ReportConfiguration(
         format=ReportFormat.HTML,
@@ -156,14 +164,14 @@ def _build_report_configuration(state: ResearchState) -> ReportConfiguration:
         institution=context.get("institution"),
         language=context.get("language", "en"),
     )
-    
+
     return config
 
 
 def _determine_report_type(state: ResearchState) -> ReportType:
     """Determine appropriate report type based on state."""
     context = state.context
-    
+
     # Check if specific type is requested
     requested_type = context.get("report_type")
     if requested_type:
@@ -171,11 +179,11 @@ def _determine_report_type(state: ResearchState) -> ReportType:
             return ReportType(requested_type)
         except ValueError:
             logger.warning(f"Invalid report type requested: {requested_type}")
-    
+
     # Determine based on query complexity and agent results
     domain_count = len(state.domains) if state.domains else 0
     source_count = len(context.get("aggregated_results", {}).get("sources", []))
-    
+
     if domain_count >= 3 and source_count >= 20:
         return ReportType.COMPREHENSIVE
     elif source_count >= 10:
@@ -190,7 +198,7 @@ def _determine_output_formats(state: ResearchState) -> list[ReportFormat]:
     """Determine which output formats to generate."""
     context = state.context
     requested_formats = context.get("output_formats", ["html", "markdown"])
-    
+
     formats = []
     for format_name in requested_formats:
         try:
@@ -198,13 +206,13 @@ def _determine_output_formats(state: ResearchState) -> list[ReportFormat]:
             formats.append(format_enum)
         except ValueError:
             logger.warning(f"Unsupported output format: {format_name}")
-    
+
     # Ensure at least HTML is included
     if not formats:
         formats = [ReportFormat.HTML]
     elif ReportFormat.HTML not in formats:
         formats.insert(0, ReportFormat.HTML)
-    
+
     return formats
 
 
@@ -212,7 +220,7 @@ def _prepare_workflow_data(state: ResearchState) -> dict[str, Any]:
     """Prepare workflow data for the report generator."""
     aggregated_results = state.context.get("aggregated_results", {})
     quality_report = state.context.get("quality_report", {})
-    
+
     # Build comprehensive workflow data
     workflow_data = {
         "title": _generate_report_title(state),
@@ -227,9 +235,9 @@ def _prepare_workflow_data(state: ResearchState) -> dict[str, Any]:
             "total_sources": len(aggregated_results.get("sources", [])),
             "total_citations": len(aggregated_results.get("citations", [])),
             "generation_timestamp": datetime.now(UTC).isoformat(),
-        }
+        },
     }
-    
+
     return workflow_data
 
 
@@ -242,11 +250,11 @@ def _generate_report_title(state: ResearchState) -> str:
         title = context["report_title"]
         if isinstance(title, str):
             return title
-    
+
     # Generate title based on query and domains
     query = state.query
     domains = state.domains or []
-    
+
     if domains:
         domain_str = " and ".join(domains[:2])  # Use first two domains
         if len(domains) > 2:
@@ -256,7 +264,9 @@ def _generate_report_title(state: ResearchState) -> str:
         return f"Research Report: {query}"
 
 
-def _convert_to_legacy_format(workflow_data: dict[str, Any], response: Any) -> dict[str, Any]:
+def _convert_to_legacy_format(
+    workflow_data: dict[str, Any], response: Any
+) -> dict[str, Any]:
     """Convert new report response to legacy format for backward compatibility."""
     return {
         "title": workflow_data["title"],
@@ -277,7 +287,7 @@ def _convert_to_legacy_format(workflow_data: dict[str, Any], response: Any) -> d
 async def _fallback_legacy_generation(state: ResearchState) -> ResearchState:
     """Fallback to legacy report generation if advanced system fails."""
     logger.info("Using legacy report generation as fallback")
-    
+
     # Get aggregated results and quality report
     aggregated_results = state.context.get("aggregated_results", {})
     quality_report = state.context.get("quality_report", {})
@@ -347,9 +357,7 @@ def create_report_structure(
         "title": f"Research Report: {state.query}",
         "query": state.query,
         "domains": state.domains,
-        "research_approach": research_plan.get(
-            "research_approach", "comprehensive"
-        ),
+        "research_approach": research_plan.get("research_approach", "comprehensive"),
         "sections": [],
     }
 
@@ -409,12 +417,12 @@ def create_introduction_section(
         "content": f"""
 This research investigates the following question: "{state.query}"
 
-The research spans across the following domains: {', '.join(state.domains)}.
+The research spans across the following domains: {", ".join(state.domains)}.
 
-Key concepts identified: {', '.join(query_analysis.get('key_concepts', []))}
+Key concepts identified: {", ".join(query_analysis.get("key_concepts", []))}
 
-Research scope: {query_analysis.get('scope', 'moderate')}
-Query type: {query_analysis.get('query_type', 'exploratory')}
+Research scope: {query_analysis.get("scope", "moderate")}
+Query type: {query_analysis.get("query_type", "exploratory")}
         """.strip(),
         "subsections": [],
     }
@@ -537,7 +545,7 @@ def create_conclusions_section(results: dict[str, Any]) -> dict[str, Any]:
 
     content = f"""## Conclusions
 
-This research synthesized findings from {metrics.get('total_sources', 0)} sources and {metrics.get('total_citations', 0)} citations.
+This research synthesized findings from {metrics.get("total_sources", 0)} sources and {metrics.get("total_citations", 0)} citations.
 
 Overall confidence in findings: {confidence_score:.2%}
 
@@ -625,9 +633,9 @@ def create_summary_section(
         "content": f"""
 Research Question: {state.query}
 
-This research examined {len(results.get('sources', []))} sources and identified {sum(len(f) for f in results.get('findings', {}).values())} key findings.
+This research examined {len(results.get("sources", []))} sources and identified {sum(len(f) for f in results.get("findings", {}).values())} key findings.
 
-Confidence Score: {results.get('confidence_score', 0):.2%}
+Confidence Score: {results.get("confidence_score", 0):.2%}
         """.strip(),
         "subsections": [],
     }
@@ -644,11 +652,11 @@ def create_abstract_section(
         "content": f"""
 This study investigates: {state.query}
 
-Methods: {research_plan.get('research_approach', 'comprehensive')} research approach across {len(state.domains)} domains.
+Methods: {research_plan.get("research_approach", "comprehensive")} research approach across {len(state.domains)} domains.
 
-Results: Analysis of {len(results_dict.get('sources', []))} sources yielded {sum(len(f) for f in results_dict.get('findings', {}).values())} findings.
+Results: Analysis of {len(results_dict.get("sources", []))} sources yielded {sum(len(f) for f in results_dict.get("findings", {}).values())} findings.
 
-Conclusions: {', '.join(results_dict.get('recommendations', ['Further research recommended'])[:2])}
+Conclusions: {", ".join(results_dict.get("recommendations", ["Further research recommended"])[:2])}
         """.strip(),
         "subsections": [],
     }
@@ -661,10 +669,10 @@ def create_results_section(results: dict[str, Any]) -> dict[str, Any]:
     content = f"""## Results
 
 ### Quantitative Findings
-- Total sources analyzed: {metrics.get('total_sources', 0)}
-- Citations reviewed: {metrics.get('total_citations', 0)}
-- Average confidence: {metrics.get('average_confidence', 0):.2%}
-- Coverage score: {metrics.get('coverage_score', 0):.2%}
+- Total sources analyzed: {metrics.get("total_sources", 0)}
+- Citations reviewed: {metrics.get("total_citations", 0)}
+- Average confidence: {metrics.get("average_confidence", 0):.2%}
+- Coverage score: {metrics.get("coverage_score", 0):.2%}
     """.strip()
 
     return {"title": "Results", "content": content, "subsections": []}
@@ -682,17 +690,19 @@ def generate_executive_summary(report: dict[str, Any], state: ResearchState) -> 
         Executive summary text
     """
     research_plan = state.research_plan if state.research_plan is not None else {}
-    aggregated_results = state.context.get("aggregated_results", {}) if state.context is not None else {}
+    aggregated_results = (
+        state.context.get("aggregated_results", {}) if state.context is not None else {}
+    )
 
     summary = f"""# Executive Summary
 
 **Research Question:** {state.query}
 
-**Approach:** {research_plan.get('research_approach', 'comprehensive').replace('_', ' ').title()}
+**Approach:** {research_plan.get("research_approach", "comprehensive").replace("_", " ").title()}
 
 **Key Outcomes:**
-- Analyzed {len(aggregated_results.get('sources', []))} sources
-- Identified {sum(len(f) for f in aggregated_results.get('findings', {}).values())} key findings
+- Analyzed {len(aggregated_results.get("sources", []))} sources
+- Identified {sum(len(f) for f in aggregated_results.get("findings", {}).values())} key findings
 - Quality Score: {state.quality_score:.2%}
 
 **Main Insights:**
@@ -892,7 +902,7 @@ def generate_html_report(report: dict[str, Any]) -> str:
     html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>{report['title']}</title>
+    <title>{report["title"]}</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 40px; }}
         h1 {{ color: #333; }}
@@ -902,11 +912,11 @@ def generate_html_report(report: dict[str, Any]) -> str:
     </style>
 </head>
 <body>
-    <h1>{report['title']}</h1>
+    <h1>{report["title"]}</h1>
     
     <div class="metadata">
-        <strong>Generated:</strong> {report['metadata']['generated_at']}<br>
-        <strong>Quality Score:</strong> {report['metadata']['quality_score']:.2%}
+        <strong>Generated:</strong> {report["metadata"]["generated_at"]}<br>
+        <strong>Quality Score:</strong> {report["metadata"]["quality_score"]:.2%}
     </div>
 """
 

@@ -381,9 +381,7 @@ class LangGraphAgentNode:
                 logger.info(f"{self.agent_type} completed successfully")
             else:
                 error_msg = result.metadata.get("error", "Unknown error")
-                state.fail_agent_task(
-                    agent_task.task_id, error_msg
-                )
+                state.fail_agent_task(agent_task.task_id, error_msg)
                 logger.error(f"{self.agent_type} failed: {error_msg}")
 
         except Exception as e:

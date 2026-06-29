@@ -113,9 +113,7 @@ class TestSynthesisAgent:
                     "Pattern A identified across literature and methodology",
                     "Pattern B from comparative analysis",
                 ],
-                conflict_resolutions=[
-                    "Resolved conflict between Agent 1 and Agent 2"
-                ],
+                conflict_resolutions=["Resolved conflict between Agent 1 and Agent 2"],
                 meta_insights=["Higher-order insight from synthesis"],
                 comprehensive_narrative="Complete synthesis narrative...",
                 confidence_assessment="High confidence in synthesis",

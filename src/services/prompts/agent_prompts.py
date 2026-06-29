@@ -65,7 +65,7 @@ def generate_literature_agent_prompt(task: dict[str, Any]) -> str:
 
     task_description = f"""
 Conduct a systematic literature review on: {query}
-Research domains: {', '.join(domains)}
+Research domains: {", ".join(domains)}
 Target number of sources: {max_sources}
 
 Please provide a comprehensive literature analysis following systematic review protocols.

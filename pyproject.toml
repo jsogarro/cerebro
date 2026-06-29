@@ -121,6 +121,11 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "acceptance: refactorit acceptance specs (fail before refactor, pass after)",
+    "integration: integration tests requiring real Postgres / Redis testcontainers",
+    "unit: pure-unit tests (no I/O)",
+    "e2e: end-to-end tests against a live server",
+    "slow: tests that take more than a few seconds",
+    "asyncio: async tests (auto-applied by pytest-asyncio in asyncio_mode=auto)",
 ]
 
 [tool.mypy]

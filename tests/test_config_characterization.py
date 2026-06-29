@@ -136,8 +136,16 @@ def test_top_level_attributes_preserved(reload_config: Any) -> None:
     """BaseConfig top-level attribute paths are stable."""
     cfg = reload_config
     dev = cfg.DevelopmentConfig()
-    for attr in ["app_name", "app_version", "environment", "debug",
-                 "api_host", "api_port", "api_workers", "api_reload"]:
+    for attr in [
+        "app_name",
+        "app_version",
+        "environment",
+        "debug",
+        "api_host",
+        "api_port",
+        "api_workers",
+        "api_reload",
+    ]:
         assert hasattr(dev, attr), f"Missing top-level attribute: {attr}"
 
 
@@ -193,9 +201,7 @@ def test_redis_url_constructs_correctly_without_password(
 def test_redis_url_includes_password_when_set(reload_config: Any) -> None:
     from config.base import RedisConfig
 
-    redis_cfg = RedisConfig(
-        host="localhost", port=6379, db=0, password="secret"
-    )
+    redis_cfg = RedisConfig(host="localhost", port=6379, db=0, password="secret")
     assert "secret" in redis_cfg.url
 
 
@@ -464,12 +470,22 @@ def test_database_config_field_surface(reload_config: Any) -> None:
     cfg = reload_config
     dev = cfg.DevelopmentConfig()
     db_attrs = {
-        "host", "port", "database", "username", "password",
-        "pool_size", "max_overflow", "pool_timeout",
-        "pool_recycle", "pool_pre_ping",
-        "statement_timeout", "lock_timeout",
+        "host",
+        "port",
+        "database",
+        "username",
+        "password",
+        "pool_size",
+        "max_overflow",
+        "pool_timeout",
+        "pool_recycle",
+        "pool_pre_ping",
+        "statement_timeout",
+        "lock_timeout",
         "idle_in_transaction_timeout",
-        "auto_vacuum", "backup_enabled", "backup_retention_days",
+        "auto_vacuum",
+        "backup_enabled",
+        "backup_retention_days",
     }
     for attr in db_attrs:
         assert hasattr(dev.database, attr), f"DatabaseConfig missing: {attr}"
@@ -480,14 +496,25 @@ def test_security_config_field_surface(reload_config: Any) -> None:
     cfg = reload_config
     dev = cfg.DevelopmentConfig()
     sec_attrs = {
-        "jwt_secret_key", "jwt_algorithm", "jwt_expiration_minutes",
+        "jwt_secret_key",
+        "jwt_algorithm",
+        "jwt_expiration_minutes",
         "refresh_token_expiration_days",
-        "rate_limiting_enabled", "rate_limit_per_minute",
-        "rate_limit_per_hour", "rate_limit_per_day",
-        "cors_enabled", "cors_origins", "cors_methods", "cors_headers",
-        "security_headers_enabled", "csp_policy",
-        "secrets_provider", "vault_url", "vault_token",
-        "audit_logging_enabled", "audit_log_file",
+        "rate_limiting_enabled",
+        "rate_limit_per_minute",
+        "rate_limit_per_hour",
+        "rate_limit_per_day",
+        "cors_enabled",
+        "cors_origins",
+        "cors_methods",
+        "cors_headers",
+        "security_headers_enabled",
+        "csp_policy",
+        "secrets_provider",
+        "vault_url",
+        "vault_token",
+        "audit_logging_enabled",
+        "audit_log_file",
     }
     for attr in sec_attrs:
         assert hasattr(dev.security, attr), f"SecurityConfig missing: {attr}"

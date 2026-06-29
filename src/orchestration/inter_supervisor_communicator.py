@@ -65,7 +65,9 @@ class InterSupervisorCommunicator:
                 self.active_conversations[conversation_key] = []
             self.active_conversations[conversation_key].append(message)
 
-            logger.info(f"Coordinated handoff from {from_supervisor} to {to_supervisor}")
+            logger.info(
+                f"Coordinated handoff from {from_supervisor} to {to_supervisor}"
+            )
             return True
 
         except Exception as e:

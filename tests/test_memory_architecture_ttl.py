@@ -12,7 +12,9 @@ from src.ai_brain.memory.multi_tier_memory import MultiTierMemorySystem
 from src.ai_brain.memory.working_memory import WorkingMemoryManager
 
 
-def build_fallback_working_memory(config: dict[str, int] | None = None) -> WorkingMemoryManager:
+def build_fallback_working_memory(
+    config: dict[str, int] | None = None,
+) -> WorkingMemoryManager:
     manager = WorkingMemoryManager(config or {})
     manager.redis_client = None
     manager._memory_fallback = {}
@@ -54,7 +56,9 @@ def test_working_memory_default_bounds_match_plan() -> None:
     assert memory.cleanup_interval == 300
 
 
-def build_episodic_memory(config: dict[str, int] | None = None) -> EpisodicMemoryManager:
+def build_episodic_memory(
+    config: dict[str, int] | None = None,
+) -> EpisodicMemoryManager:
     return EpisodicMemoryManager(config or {})
 
 

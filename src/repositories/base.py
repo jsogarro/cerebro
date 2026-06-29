@@ -517,7 +517,11 @@ class BaseRepository(Generic[ModelType]):
 
         # Convert string to UUID if needed for comparison
         # TenantContext returns strings but DB columns may be UUID type
-        org_id_value = organization_id if isinstance(organization_id, UUID) else UUID(organization_id)
+        org_id_value = (
+            organization_id
+            if isinstance(organization_id, UUID)
+            else UUID(organization_id)
+        )
 
         return query.where(organization_column == org_id_value)
 

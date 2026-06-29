@@ -218,9 +218,12 @@ class MultiTierMemorySystem:
                 self.cross_tier_retrievals += 1
 
             # Wait for all retrievals
-            working_results, episodic_results, semantic_results, procedural_results = (
-                await asyncio.gather(*recall_tasks, return_exceptions=True)
-            )
+            (
+                working_results,
+                episodic_results,
+                semantic_results,
+                procedural_results,
+            ) = await asyncio.gather(*recall_tasks, return_exceptions=True)
 
             # Handle any exceptions
             for i, result in enumerate(
@@ -405,19 +408,19 @@ class MultiTierMemorySystem:
 
         try:
             # Clean up expired working memory
-            consolidation_results["working_cleaned"] = (
-                await self.working_memory.cleanup_expired()
-            )
+            consolidation_results[
+                "working_cleaned"
+            ] = await self.working_memory.cleanup_expired()
 
             # Clean up old episodic memories
-            consolidation_results["episodic_cleaned"] = (
-                await self.episodic_memory.cleanup_old_episodes()
-            )
+            consolidation_results[
+                "episodic_cleaned"
+            ] = await self.episodic_memory.cleanup_old_episodes()
 
             # Clean up old procedures
-            consolidation_results["procedures_optimized"] = (
-                await self.procedural_memory.cleanup_old_procedures()
-            )
+            consolidation_results[
+                "procedures_optimized"
+            ] = await self.procedural_memory.cleanup_old_procedures()
 
             # TODO: Implement semantic memory optimization
             # This could include:

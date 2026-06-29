@@ -54,7 +54,9 @@ class CreateResearchProjectRequest(BaseModel):
 
 
 @router.post(
-    "/projects", response_model=ResearchProject, status_code=http_status.HTTP_201_CREATED
+    "/projects",
+    response_model=ResearchProject,
+    status_code=http_status.HTTP_201_CREATED,
 )
 async def create_research_project(
     request: CreateResearchProjectRequest,
@@ -81,7 +83,11 @@ async def create_research_project(
             status=ProjectStatus.DRAFT,
         )
 
-        query_data = _json.loads(db_project.query) if isinstance(db_project.query, str) else db_project.query
+        query_data = (
+            _json.loads(db_project.query)
+            if isinstance(db_project.query, str)
+            else db_project.query
+        )
         project = ResearchProject(
             id=db_project.id,
             title=db_project.title,
@@ -156,7 +162,11 @@ async def get_research_project(
 
     import json as _json
 
-    query_data = _json.loads(db_project.query) if isinstance(db_project.query, str) else db_project.query
+    query_data = (
+        _json.loads(db_project.query)
+        if isinstance(db_project.query, str)
+        else db_project.query
+    )
     project = ResearchProject(
         id=db_project.id,
         title=db_project.title,
@@ -266,21 +276,23 @@ async def get_research_progress(
     # Fetch progress from direct execution service
     try:
         execution_service = get_direct_execution_service()
-        
+
         # Find execution for this project
         execution_status = None
         for execution in execution_service.active_executions.values():
             if execution.project_id == str(project_id):
                 execution_status = execution
                 break
-        
+
         if execution_status:
             # Calculate progress from execution status
             total_tasks = 4  # Typical research workflow phases
-            completed_tasks = int(execution_status.progress_percentage / 25)  # 25% per phase
+            completed_tasks = int(
+                execution_status.progress_percentage / 25
+            )  # 25% per phase
             in_progress = 1 if execution_status.status == "running" else 0
             pending_tasks = max(0, total_tasks - completed_tasks - in_progress)
-            
+
             progress = ResearchProgress(
                 project_id=project_id,
                 total_tasks=total_tasks,
@@ -302,9 +314,9 @@ async def get_research_progress(
                 progress_percentage=100.0 if is_completed else 0.0,
                 current_agent="completed" if is_completed else "pending",
             )
-        
+
         return progress
-        
+
     except Exception as e:
         logger.error(f"Failed to get progress: {e}")
         # Return default progress
@@ -318,7 +330,9 @@ async def get_research_progress(
         )
 
 
-@router.post("/projects/{project_id}/cancel", status_code=http_status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/projects/{project_id}/cancel", status_code=http_status.HTTP_204_NO_CONTENT
+)
 async def cancel_research_project(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
@@ -415,7 +429,10 @@ async def get_research_results(
     try:
         execution_service = get_direct_execution_service()
         for execution in execution_service.active_executions.values():
-            if execution.project_id == str(project_id) and execution.status == "completed":
+            if (
+                execution.project_id == str(project_id)
+                and execution.status == "completed"
+            ):
                 return {
                     "project_id": str(project_id),
                     "results": execution.agent_results or execution.final_output or {},

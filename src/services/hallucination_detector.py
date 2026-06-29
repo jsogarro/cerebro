@@ -40,7 +40,9 @@ class HallucinationReport:
 
     @property
     def supported_claims(self) -> tuple[ClaimCheck, ...]:
-        return tuple(check for check in self.claim_checks if check.status == "supported")
+        return tuple(
+            check for check in self.claim_checks if check.status == "supported"
+        )
 
     @property
     def unsupported_claims(self) -> tuple[ClaimCheck, ...]:
@@ -83,7 +85,9 @@ class HallucinationReport:
         )
 
 
-CitationInput: TypeAlias = ExpectedCitation | CitationReference | Mapping[str, object] | str
+CitationInput: TypeAlias = (
+    ExpectedCitation | CitationReference | Mapping[str, object] | str
+)
 TrustedSourceInput: TypeAlias = TrustedSource | Mapping[str, object]
 
 

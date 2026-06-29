@@ -79,7 +79,9 @@ class TalkHierSessionCoordinator:
         )
 
         domains = routing_decision.complexity_analysis.domains
-        domain = domains[0].value if domains and hasattr(domains[0], "value") else "research"
+        domain = (
+            domains[0].value if domains and hasattr(domains[0], "value") else "research"
+        )
         allocation = routing_decision.agent_allocation
 
         config = SupervisorConfiguration(
@@ -108,7 +110,9 @@ class TalkHierSessionCoordinator:
         if isinstance(supervisor_type, str):
             return supervisor_type
 
-        for supervisor_allocation in getattr(routing_decision, "supervisor_allocations", []):
+        for supervisor_allocation in getattr(
+            routing_decision, "supervisor_allocations", []
+        ):
             supervisor_type = getattr(supervisor_allocation, "supervisor_type", None)
             if isinstance(supervisor_type, str):
                 return supervisor_type
@@ -130,29 +134,35 @@ class TalkHierSessionCoordinator:
             if not isinstance(agent_ids, list):
                 agent_ids = [
                     agent.agent_type
-                    for agent in getattr(routing_decision.agent_allocation, "agents", [])
+                    for agent in getattr(
+                        routing_decision.agent_allocation, "agents", []
+                    )
                     if isinstance(getattr(agent, "agent_type", None), str)
                 ]
 
         for agent_id in agent_ids:
-            participants.append(ParticipantInfo(
-                agent_id=agent_id,
-                agent_type=agent_id,
-                role=MessageRole.WORKER,
-                confidence=0.5,
-                rounds_participated=0,
-                quality_scores=[],
-            ))
+            participants.append(
+                ParticipantInfo(
+                    agent_id=agent_id,
+                    agent_type=agent_id,
+                    role=MessageRole.WORKER,
+                    confidence=0.5,
+                    rounds_participated=0,
+                    quality_scores=[],
+                )
+            )
 
         if supervisor:
-            participants.append(ParticipantInfo(
-                agent_id="supervisor",
-                agent_type=supervisor.__class__.__name__,
-                role=MessageRole.SUPERVISOR,
-                confidence=0.8,
-                rounds_participated=0,
-                quality_scores=[],
-            ))
+            participants.append(
+                ParticipantInfo(
+                    agent_id="supervisor",
+                    agent_type=supervisor.__class__.__name__,
+                    role=MessageRole.SUPERVISOR,
+                    confidence=0.8,
+                    rounds_participated=0,
+                    quality_scores=[],
+                )
+            )
 
         return participants
 

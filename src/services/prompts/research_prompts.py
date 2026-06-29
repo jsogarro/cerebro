@@ -97,7 +97,9 @@ Your task is to create a comprehensive research plan that:
     return add_output_format(prompt, schema)
 
 
-def generate_literature_review_prompt(sources: list[str], focus: str | None = None) -> str:
+def generate_literature_review_prompt(
+    sources: list[str], focus: str | None = None
+) -> str:
     """
     Generate prompt for literature review analysis.
 

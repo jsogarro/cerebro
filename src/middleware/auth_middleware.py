@@ -56,7 +56,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/auth/verify-email",
         ]
 
-    async def dispatch(self, request: Request, call_next: Callable[..., Any]) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[..., Any]
+    ) -> Response:
         """
         Process request with authentication.
 

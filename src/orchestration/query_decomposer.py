@@ -56,7 +56,9 @@ class QueryDecomposer:
             elif domain == "content":
                 domain_subqueries[domain] = f"Create content for: {query}"
             elif domain == "analytics":
-                domain_subqueries[domain] = f"Analyze data and trends related to: {query}"
+                domain_subqueries[domain] = (
+                    f"Analyze data and trends related to: {query}"
+                )
             elif domain == "service":
                 domain_subqueries[domain] = f"Provide service guidance for: {query}"
 

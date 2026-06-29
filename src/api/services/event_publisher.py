@@ -110,7 +110,9 @@ class EventPublisher:
         logger.debug(
             "Project event published (untyped)",
             project_id=str(project_id),
-            keys=list(event.keys()) if isinstance(event, dict) else type(event).__name__,
+            keys=list(event.keys())
+            if isinstance(event, dict)
+            else type(event).__name__,
         )
 
     async def publish_event(
@@ -139,9 +141,7 @@ class EventPublisher:
           correct broadcast scope.
         """
         target_str = (
-            f" -> {len(target_clients)} client(s)"
-            if target_clients
-            else " (broadcast)"
+            f" -> {len(target_clients)} client(s)" if target_clients else " (broadcast)"
         )
         logger.debug(f"Event published (untyped): {event_type}{target_str}")
 

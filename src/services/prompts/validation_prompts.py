@@ -69,11 +69,11 @@ def generate_credibility_prompt(source: dict[str, Any]) -> str:
     )
 
     source_info = f"""
-Title: {source.get('title', 'Unknown')}
-Author(s): {source.get('author', 'Unknown')}
-Journal: {source.get('journal', 'Unknown')}
-Year: {source.get('year', 'Unknown')}
-DOI: {source.get('doi', 'Not provided')}
+Title: {source.get("title", "Unknown")}
+Author(s): {source.get("author", "Unknown")}
+Journal: {source.get("journal", "Unknown")}
+Year: {source.get("year", "Unknown")}
+DOI: {source.get("doi", "Not provided")}
 """
 
     task_description = f"""

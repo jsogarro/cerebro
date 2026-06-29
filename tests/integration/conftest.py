@@ -115,7 +115,9 @@ async def test_engine(postgres_container) -> AsyncEngine:
     """Create test database engine."""
     connection_url = postgres_container.get_connection_url()
     # Convert to async URL (testcontainers returns postgresql+psycopg2://)
-    async_url = connection_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
+    async_url = connection_url.replace(
+        "postgresql+psycopg2://", "postgresql+asyncpg://"
+    )
 
     engine = create_async_engine(
         async_url,
@@ -174,7 +176,7 @@ async def jwt_service(redis_client) -> JWTService:
     service = JWTService(
         redis_client=redis_client,
         private_key_path=None,  # Generate in-memory
-        public_key_path=None,   # Generate in-memory
+        public_key_path=None,  # Generate in-memory
     )
     return service
 
@@ -255,7 +257,8 @@ async def authenticated_client(
         # the test database doesn't have RLS policies configured
         return TenantContext(
             user_id=token_payload.sub,  # Use actual token user_id
-            organization_id=token_payload.organization_id or IntegrationTestConfig.TEST_ORG_ID,
+            organization_id=token_payload.organization_id
+            or IntegrationTestConfig.TEST_ORG_ID,
         )
 
     app.dependency_overrides[get_session] = override_get_session

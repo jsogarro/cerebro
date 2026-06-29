@@ -258,7 +258,7 @@ class TestUserGenerator:
             researcher = UserFactory.create_researcher(
                 username=f"{org_name.lower().replace(' ', '_')}_researcher_{i}",
                 email=f"researcher{i}@{org_name.lower().replace(' ', '')}.com",
-                full_name=f"{org_name} Researcher {i+1}",
+                full_name=f"{org_name} Researcher {i + 1}",
             )
             users.append(researcher)
 
@@ -267,7 +267,7 @@ class TestUserGenerator:
             viewer = UserFactory.create_viewer(
                 username=f"{org_name.lower().replace(' ', '_')}_viewer_{i}",
                 email=f"viewer{i}@{org_name.lower().replace(' ', '')}.com",
-                full_name=f"{org_name} Viewer {i+1}",
+                full_name=f"{org_name} Viewer {i + 1}",
             )
             users.append(viewer)
 

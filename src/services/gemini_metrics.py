@@ -287,7 +287,9 @@ class CircuitBreaker:
             self._on_failure()
             raise
 
-    async def async_call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    async def async_call(
+        self, func: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> Any:
         """
         Async version of call.
 

@@ -26,6 +26,7 @@ from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 try:
     import redis.asyncio as redis_module
     from redis.asyncio import Redis as RedisType
+
     REDIS_AVAILABLE = True
 except ImportError:
     redis_module = None  # type: ignore[assignment]
@@ -154,9 +155,8 @@ class WorkingMemoryManager:
             item = WorkingMemoryItem(
                 key=key,
                 value=value,
-                expires_at=datetime.now() + timedelta(
-                    seconds=self.default_ttl if ttl is None else ttl
-                ),
+                expires_at=datetime.now()
+                + timedelta(seconds=self.default_ttl if ttl is None else ttl),
                 tags=tags or [],
                 metadata=metadata or {},
             )
@@ -449,7 +449,11 @@ class WorkingMemoryManager:
                 expired_keys = []
 
                 for key, item in self._memory_fallback.items():
-                    if hasattr(item, "expires_at") and item.expires_at and now > item.expires_at:
+                    if (
+                        hasattr(item, "expires_at")
+                        and item.expires_at
+                        and now > item.expires_at
+                    ):
                         expired_keys.append(key)
 
                 for key in expired_keys:

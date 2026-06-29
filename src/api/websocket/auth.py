@@ -4,7 +4,6 @@ WebSocket authentication utilities.
 This module provides authentication and authorization for WebSocket connections.
 """
 
-
 from jose import JWTError
 from structlog import get_logger
 

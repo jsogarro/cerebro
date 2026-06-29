@@ -27,7 +27,9 @@ class TalkHierRoundExecutor:
     ) -> RefinementRoundResponse:
         """Execute a refinement round in an active session."""
         if session.status != SessionStatus.ACTIVE:
-            raise ValueError(f"Session {session_id} is not active (status: {session.status})")
+            raise ValueError(
+                f"Session {session_id} is not active (status: {session.status})"
+            )
         if request.round_number > session.max_rounds:
             raise ValueError(
                 f"Refinement round {request.round_number} exceeds max_rounds={session.max_rounds}"
@@ -183,13 +185,11 @@ class TalkHierRoundExecutor:
             return best_response[1]
 
         if strategy == RefinementStrategy.CONSENSUS_DRIVEN:
-            merged_content = "\n".join([
-                r.get("content", "")
-                for r in responses.values()
-            ])
+            merged_content = "\n".join(
+                [r.get("content", "") for r in responses.values()]
+            )
             avg_confidence = sum(
-                r.get("confidence", 0)
-                for r in responses.values()
+                r.get("confidence", 0) for r in responses.values()
             ) / max(1, len(responses))
 
             return {
@@ -229,7 +229,9 @@ class TalkHierRoundExecutor:
 
         if consensus_type == ConsensusType.MAJORITY:
             avg_confidence = sum(confidences) / len(confidences)
-            variance = sum((c - avg_confidence) ** 2 for c in confidences) / len(confidences)
+            variance = sum((c - avg_confidence) ** 2 for c in confidences) / len(
+                confidences
+            )
             consensus = 1.0 - min(1.0, variance)
         elif consensus_type == ConsensusType.WEIGHTED:
             weighted_sum = sum(c * c for c in confidences)
@@ -258,10 +260,7 @@ class TalkHierRoundExecutor:
             return False
 
         if len(session.rounds) >= 2:
-            recent_improvements = [
-                r.refinement_delta
-                for r in session.rounds[-2:]
-            ]
+            recent_improvements = [r.refinement_delta for r in session.rounds[-2:]]
             if all(delta < 0.01 for delta in recent_improvements):
                 return False
 
@@ -294,7 +293,9 @@ class TalkHierRoundExecutor:
             if resp.get("confidence", 0) < 0.7
         ]
         if low_confidence:
-            suggestions.append(f"Strengthen responses from: {', '.join(low_confidence)}")
+            suggestions.append(
+                f"Strengthen responses from: {', '.join(low_confidence)}"
+            )
 
         return " | ".join(suggestions) if suggestions else "Continue general refinement"
 

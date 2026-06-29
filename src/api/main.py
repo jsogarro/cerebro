@@ -87,9 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ]
             if _engine is not None and tables:
                 async with _engine.begin() as conn:
-                    await conn.run_sync(
-                        Base.metadata.create_all, tables=tables
-                    )
+                    await conn.run_sync(Base.metadata.create_all, tables=tables)
                 logger.info("Database tables created")
     except Exception as e:
         logger.warning(f"Database initialization failed: {e}")
@@ -177,12 +175,18 @@ app.include_router(users.router, prefix="/api/v1")
 app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
 # Agent Framework APIs (Research-Informed)
-app.include_router(query_api.router, tags=["intelligent-query"])  # Primary API - MASR routed
-app.include_router(agent_api.router, tags=["direct-agents"])     # Bypass API - Direct access
+app.include_router(
+    query_api.router, tags=["intelligent-query"]
+)  # Primary API - MASR routed
+app.include_router(
+    agent_api.router, tags=["direct-agents"]
+)  # Bypass API - Direct access
 # MASR Dynamic Routing API
-app.include_router(masr_api.router, tags=["masr-routing"])       # MASR routing intelligence
+app.include_router(masr_api.router, tags=["masr-routing"])  # MASR routing intelligence
 # Hierarchical Supervisor API (Week 3 - Talk Structurally, Act Hierarchically)
-app.include_router(supervisor_api.router, tags=["supervisors"])  # Supervisor coordination
+app.include_router(
+    supervisor_api.router, tags=["supervisors"]
+)  # Supervisor coordination
 app.include_router(talkhier_api.router, tags=["talkhier"])
 app.include_router(websocket.router, tags=["websocket"])
 

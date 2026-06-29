@@ -151,7 +151,6 @@ class TestWebSocketConnections:
         """Test WebSocket updates for project progress."""
         from httpx_ws import aconnect_ws
 
-
         # Get JWT token from authenticated client headers
         auth_header = authenticated_client.headers.get("Authorization")
         assert auth_header is not None
@@ -170,7 +169,9 @@ class TestWebSocketConnections:
             # (this validates auth + connection establishment)
 
     @pytest.mark.asyncio
-    async def test_websocket_authentication(self, authenticated_client: AsyncClient) -> None:
+    async def test_websocket_authentication(
+        self, authenticated_client: AsyncClient
+    ) -> None:
         """Test WebSocket authentication."""
         from httpx_ws import aconnect_ws
 

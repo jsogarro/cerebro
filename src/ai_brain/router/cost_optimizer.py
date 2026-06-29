@@ -461,7 +461,9 @@ class CostOptimizer:
 
         return estimates
 
-    def _is_perfect_domain_fit(self, model: ModelSpec, complexity_analysis: Any) -> bool:
+    def _is_perfect_domain_fit(
+        self, model: ModelSpec, complexity_analysis: Any
+    ) -> bool:
         """Check if model is a perfect fit for the query domain."""
         # Check if model's strengths perfectly align with query requirements
         reasoning_types = complexity_analysis.reasoning_types

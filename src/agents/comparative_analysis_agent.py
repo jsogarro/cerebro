@@ -104,9 +104,13 @@ class ComparativeAnalysisAgent(BaseAgent):
             )
 
             # Calculate rankings with statistical significance
-            rankings = self.matrix_builder.calculate_rankings(normalized_matrix, criteria)
-            statistical_rankings = await self.matrix_builder.calculate_statistical_rankings(
-                normalized_matrix, statistical_analysis
+            rankings = self.matrix_builder.calculate_rankings(
+                normalized_matrix, criteria
+            )
+            statistical_rankings = (
+                await self.matrix_builder.calculate_statistical_rankings(
+                    normalized_matrix, statistical_analysis
+                )
             )
 
             # Analyze trade-offs with relationship insights
@@ -206,7 +210,9 @@ class ComparativeAnalysisAgent(BaseAgent):
             )
 
             # Cache the result
-            await self.cache_result(cache_key, result, ttl=LONG_TERM_CACHE_TTL)  # 24 hours
+            await self.cache_result(
+                cache_key, result, ttl=LONG_TERM_CACHE_TTL
+            )  # 24 hours
 
             return result
 

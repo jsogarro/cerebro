@@ -13,6 +13,7 @@ class TestReportsAPIValidation:
     def client(self) -> TestClient:
         """Create test client."""
         from src.api.main import app
+
         return TestClient(app)
 
     def test_validation_errors(self, client: TestClient) -> None:

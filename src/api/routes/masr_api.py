@@ -32,8 +32,8 @@ router = APIRouter(
     tags=["MASR Routing Intelligence"],
     responses={
         404: {"description": "Not found"},
-        500: {"description": "Internal server error"}
-    }
+        500: {"description": "Internal server error"},
+    },
 )
 
 # Service instance (in production, use dependency injection)
@@ -51,18 +51,15 @@ routing_service = MASRRoutingService()
     responses={
         200: {
             "description": "Successful routing decision",
-            "model": RoutingDecisionResponse
+            "model": RoutingDecisionResponse,
         },
-        400: {
-            "description": "Invalid request",
-            "model": MASRErrorResponse
-        }
-    }
+        400: {"description": "Invalid request", "model": MASRErrorResponse},
+    },
 )
 async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionResponse:
     """
     Get intelligent routing decision for a query.
-    
+
     This endpoint analyzes the query complexity, selects the optimal routing strategy,
     allocates supervisors and workers, and provides cost/latency estimates.
     """
@@ -76,8 +73,8 @@ async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionRespon
                 error=str(e),
                 error_code="INVALID_REQUEST",
                 details={"request": request.dict()},
-                suggestions=["Check query format", "Verify strategy is valid"]
-            ).dict()
+                suggestions=["Check query format", "Verify strategy is valid"],
+            ).dict(),
         ) from e
     except Exception as e:
         raise HTTPException(
@@ -86,8 +83,8 @@ async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionRespon
                 error="Internal routing error",
                 error_code="ROUTING_ERROR",
                 details={"error": str(e)},
-                suggestions=["Retry request", "Contact support if issue persists"]
-            ).dict()
+                suggestions=["Retry request", "Contact support if issue persists"],
+            ).dict(),
         ) from e
 
 
@@ -98,12 +95,12 @@ async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionRespon
     description=(
         "Estimate the cost of executing a query with detailed breakdown. "
         "Includes model costs, coordination overhead, and confidence intervals."
-    )
+    ),
 )
 async def estimate_cost(request: CostEstimationRequest) -> CostEstimationResponse:
     """
     Estimate execution cost with breakdown.
-    
+
     Provides detailed cost analysis including:
     - Model inference costs
     - Coordination overhead
@@ -121,8 +118,8 @@ async def estimate_cost(request: CostEstimationRequest) -> CostEstimationRespons
                 error="Cost estimation failed",
                 error_code="ESTIMATION_ERROR",
                 details={"error": str(e)},
-                suggestions=["Try simpler query", "Check strategy selection"]
-            ).dict()
+                suggestions=["Try simpler query", "Check strategy selection"],
+            ).dict(),
         ) from e
 
 
@@ -133,14 +130,14 @@ async def estimate_cost(request: CostEstimationRequest) -> CostEstimationRespons
     description=(
         "Compare multiple routing strategies for a query. "
         "Returns pros, cons, and recommendations for each strategy."
-    )
+    ),
 )
 async def evaluate_strategies(
-    request: StrategyEvaluationRequest
+    request: StrategyEvaluationRequest,
 ) -> StrategyEvaluationResponse:
     """
     Evaluate and compare routing strategies.
-    
+
     Compares strategies based on:
     - Cost efficiency
     - Output quality
@@ -157,8 +154,8 @@ async def evaluate_strategies(
                 error="Strategy evaluation failed",
                 error_code="EVALUATION_ERROR",
                 details={"error": str(e)},
-                suggestions=["Reduce number of strategies", "Simplify query"]
-            ).dict()
+                suggestions=["Reduce number of strategies", "Simplify query"],
+            ).dict(),
         ) from e
 
 
@@ -169,14 +166,14 @@ async def evaluate_strategies(
     description=(
         "Analyze the complexity of a query with detailed feature breakdown. "
         "Provides routing recommendations based on complexity analysis."
-    )
+    ),
 )
 async def analyze_complexity(
-    request: ComplexityAnalysisRequest
+    request: ComplexityAnalysisRequest,
 ) -> ComplexityAnalysisResponse:
     """
     Analyze query complexity with features.
-    
+
     Returns:
     - Complexity level and score
     - Feature breakdown (reasoning depth, data requirements, etc.)
@@ -193,8 +190,8 @@ async def analyze_complexity(
                 error="Complexity analysis failed",
                 error_code="ANALYSIS_ERROR",
                 details={"error": str(e)},
-                suggestions=["Simplify query", "Break into sub-queries"]
-            ).dict()
+                suggestions=["Simplify query", "Break into sub-queries"],
+            ).dict(),
         ) from e
 
 
@@ -202,12 +199,12 @@ async def analyze_complexity(
     "/strategies",
     response_model=StrategiesListResponse,
     summary="List available strategies",
-    description="Get list of available routing strategies with their characteristics."
+    description="Get list of available routing strategies with their characteristics.",
 )
 async def get_strategies() -> StrategiesListResponse:
     """
     Get available routing strategies.
-    
+
     Returns information about each strategy including:
     - Optimization focus
     - Use cases
@@ -224,8 +221,8 @@ async def get_strategies() -> StrategiesListResponse:
                 error="Failed to retrieve strategies",
                 error_code="STRATEGY_LIST_ERROR",
                 details={"error": str(e)},
-                suggestions=["Retry request"]
-            ).dict()
+                suggestions=["Retry request"],
+            ).dict(),
         ) from e
 
 
@@ -233,12 +230,12 @@ async def get_strategies() -> StrategiesListResponse:
     "/models",
     response_model=ModelsListResponse,
     summary="List available models",
-    description="Get list of available models and their tier classifications."
+    description="Get list of available models and their tier classifications.",
 )
 async def get_models() -> ModelsListResponse:
     """
     Get available models and tiers.
-    
+
     Returns:
     - Model specifications
     - Tier classifications
@@ -255,8 +252,8 @@ async def get_models() -> ModelsListResponse:
                 error="Failed to retrieve models",
                 error_code="MODEL_LIST_ERROR",
                 details={"error": str(e)},
-                suggestions=["Retry request"]
-            ).dict()
+                suggestions=["Retry request"],
+            ).dict(),
         ) from e
 
 
@@ -267,12 +264,12 @@ async def get_models() -> ModelsListResponse:
     description=(
         "Submit feedback on routing decision performance. "
         "Used for continuous learning and optimization."
-    )
+    ),
 )
 async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
     """
     Submit feedback for routing learning.
-    
+
     Feedback is used to:
     - Improve cost predictions
     - Optimize routing strategies
@@ -289,8 +286,8 @@ async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
                 error=str(e),
                 error_code="INVALID_FEEDBACK",
                 details={"feedback": feedback.dict()},
-                suggestions=["Verify routing_id exists", "Check feedback format"]
-            ).dict()
+                suggestions=["Verify routing_id exists", "Check feedback format"],
+            ).dict(),
         ) from e
     except Exception as e:
         raise HTTPException(
@@ -299,8 +296,8 @@ async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
                 error="Feedback submission failed",
                 error_code="FEEDBACK_ERROR",
                 details={"error": str(e)},
-                suggestions=["Retry submission"]
-            ).dict()
+                suggestions=["Retry submission"],
+            ).dict(),
         ) from e
 
 
@@ -311,12 +308,12 @@ async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
     description=(
         "Get MASR router health and performance status. "
         "Includes metrics, model availability, and learning statistics."
-    )
+    ),
 )
 async def get_status() -> RouterStatus:
     """
     Get router health and performance.
-    
+
     Returns:
     - Overall health status
     - Performance metrics by strategy
@@ -334,8 +331,8 @@ async def get_status() -> RouterStatus:
                 error="Failed to retrieve status",
                 error_code="STATUS_ERROR",
                 details={"error": str(e)},
-                suggestions=["Check service health"]
-            ).dict()
+                suggestions=["Check service health"],
+            ).dict(),
         ) from e
 
 
@@ -344,7 +341,7 @@ async def get_status() -> RouterStatus:
 # async def websocket_endpoint(websocket: WebSocket):
 #     """
 #     WebSocket for real-time routing updates.
-#     
+#
 #     Future enhancement for:
 #     - Live routing decisions
 #     - Performance metrics streaming
