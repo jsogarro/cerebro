@@ -71,19 +71,59 @@ class TestTransactionManagement:
     async def test_transaction_rollback(self, db_session: AsyncSession) -> None:
         """Test transaction rollback on error."""
 
-    @pytest.mark.skip(
-        reason=(
-            "SQLAlchemy 2.0 propagates the exception raised inside begin_nested() "
-            "back through the enclosing begin(), so both transactions roll back "
-            "and the user is never persisted. The test asserts the older semantics "
-            "where the outer transaction survived. Rewrite to catch the inner "
-            "exception inside the nested block if you want to assert savepoint-only "
-            "rollback."
-        )
-    )
     @pytest.mark.asyncio
     async def test_nested_transactions(self, db_session: AsyncSession) -> None:
-        """Test nested transaction handling."""
+        """SAVEPOINT inside a session rolls back only the inner work."""
+        import uuid
+
+        from sqlalchemy.exc import IntegrityError
+
+        # Construct User directly to avoid UserFactory's bcrypt invocation,
+        # which is brittle under the current passlib + bcrypt combination
+        # (separate issue, unrelated to savepoint semantics).
+        shared_email = f"savepoint-{uuid.uuid4().hex[:8]}@example.com"
+        outer_user = User(
+            id=str(uuid.uuid4()),
+            email=shared_email,
+            username=f"outer-{uuid.uuid4().hex[:8]}",
+            hashed_password="$2b$12$placeholder-hash-for-savepoint-test-only",
+            is_active=True,
+            is_verified=True,
+            is_superuser=False,
+            login_count=0,
+        )
+        db_session.add(outer_user)
+        await db_session.flush()
+
+        # SQLAlchemy 2.0: begin_nested() opens a SAVEPOINT inside the existing
+        # transaction. An exception inside the block must be caught *here* —
+        # if it escapes, the outer transaction also rolls back. Catching it
+        # preserves savepoint-only rollback semantics.
+        try:
+            async with db_session.begin_nested():
+                duplicate = User(
+                    id=str(uuid.uuid4()),
+                    email=shared_email,
+                    username=f"inner-{uuid.uuid4().hex[:8]}",
+                    hashed_password="$2b$12$placeholder-hash-for-savepoint-test-only",
+                    is_active=True,
+                    is_verified=True,
+                    is_superuser=False,
+                    login_count=0,
+                )
+                db_session.add(duplicate)
+                await db_session.flush()
+        except IntegrityError:
+            pass
+
+        await db_session.commit()
+
+        result = await db_session.execute(
+            select(User).where(User.email == shared_email)
+        )
+        survivors = result.scalars().all()
+        assert len(survivors) == 1
+        assert str(survivors[0].id) == outer_user.id
 
 
 class TestRepositoryIntegration:
