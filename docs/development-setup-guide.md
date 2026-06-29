@@ -69,8 +69,11 @@ DEBUG=true
 LOG_LEVEL=INFO
 
 # Security
-SECRET_KEY=your-secret-key-here
-JWT_SECRET_KEY=your-jwt-secret-here
+SECRET_KEY=your-secret-key-here-must-be-32-chars-or-longer
+JWT_PRIVATE_KEY_PATH=/path/to/jwt_private.pem  # Optional: auto-generates if not provided
+JWT_PUBLIC_KEY_PATH=/path/to/jwt_public.pem     # Optional: auto-generates if not provided
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
+JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 ```
 
 ### 4. Start Services
@@ -317,14 +320,14 @@ DATABASE_URL=postgresql+asyncpg://prod_user:secure_pass@db.example.com:5432/rese
 #### 1. Code Formatting
 
 ```bash
-# Format code with Black
-black src tests
+# Format code with Ruff
+ruff format src tests
 
-# Sort imports with isort
-isort src tests
+# Sort imports (handled by ruff format)
+# No separate step needed
 
 # Run all formatting
-black src tests && isort src tests
+ruff format src tests
 ```
 
 #### 2. Linting

@@ -31,7 +31,7 @@ curl -X POST "/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
-    "password": "your_password"
+    "password": "your_password_8_chars_min"
   }'
 
 # Response
@@ -41,6 +41,8 @@ curl -X POST "/auth/login" \
   "token_type": "bearer",
   "expires_in": 900
 }
+
+# Note: Tokens are signed with RS256 (RSA) using PEM key files
 ```
 
 ## Content Types
@@ -673,10 +675,13 @@ Register a new user account.
 {
   "email": "user@example.com",
   "username": "username",
-  "password": "SecurePassword123!",
+  "password": "SecurePass123!@",
   "full_name": "John Doe",
   "organization": "Research Lab"
 }
+```
+
+> Password requirements for registration: minimum 12 characters with at least one uppercase, one lowercase, one digit, and one special character.
 ```
 
 **Response (201):**
@@ -698,11 +703,11 @@ Authenticate user and receive tokens.
 ```json
 {
   "email": "user@example.com",
-  "password": "SecurePassword123!",
-  "mfa_code": "123456",
-  "remember_me": false
+  "password": "your_password"
 }
 ```
+
+> **Note:** MFA (`mfa_code`) and `remember_me` fields are not currently implemented.
 
 **Response (200):**
 ```json
