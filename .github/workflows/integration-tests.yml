@@ -7,6 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 env:
   PYTHON_VERSION: '3.11'
   POSTGRES_VERSION: '16'
@@ -126,8 +130,3 @@ jobs:
             body: comment
           });
     
-    - name: Cleanup
-      if: always()
-      run: |
-        docker stop temporal || true
-        docker rm temporal || true
