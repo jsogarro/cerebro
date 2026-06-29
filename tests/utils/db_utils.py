@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from src.models.base import Base
-from src.models.db.research_project import ResearchProject
+from src.models.db.research_project import ProjectStatus, ResearchProject
 from src.models.db.research_result import ResearchResult
 from src.models.db.user import User
 
@@ -189,10 +189,10 @@ class TestDataSeeder:
         ]
 
         for project in projects:
-            if project.status == "completed":
+            if project.status == ProjectStatus.COMPLETED:
                 for agent in agents:
                     result = ResearchResultFactory(
-                        project_id=project.id, agent_name=agent
+                        project_id=project.id, agent_type=agent
                     )
                     self.session.add(result)
                     results.append(result)
