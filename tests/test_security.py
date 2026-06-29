@@ -370,16 +370,30 @@ class TestSecurityValidators:
         with pytest.raises(ValueError):
             SecurityValidator.validate_ip_address("192.168.1.1", allow_private=False)
 
-    def test_login_request_validation(self, mocker: Any) -> None:
-        """Test that the security validator chain rejects bad login inputs.
+    def test_secure_login_pattern_demo(self, mocker: Any) -> None:
+        """Demonstrate the SecurityValidator + Pydantic validator pattern.
 
-        The original test used a ``LoginRequest`` Pydantic model that was
-        duplicated against the canonical ``src.auth.models.LoginRequest``
-        (used by the real /login endpoint). The duplicate was removed and
-        the assertions are re-expressed against a local Pydantic model
-        that wires the same SecurityValidator-backed field validators —
-        this way the test still exercises validator chaining without
-        re-introducing a duplicate model.
+        **WARNING — read this before changing the test or relying on it:**
+        This test does NOT assert anything about the production login
+        endpoint at ``src.api.auth.auth_router.login`` or the canonical
+        ``src.auth.models.LoginRequest`` it consumes. Production
+        ``LoginRequest`` enforces only ``min_length=8`` on password,
+        accepts no ``mfa_code`` field, and applies no email
+        ``SecurityValidator`` check beyond Pydantic's ``EmailStr``.
+
+        The local ``_SecureLoginPattern`` fixture below ENFORCES password
+        complexity (uppercase + lowercase + digit) and an MFA pattern
+        because those validators are the unit under test — not because
+        production login does any of that. Do not infer production
+        guarantees from this test passing.
+
+        Background: an earlier version of this test imported a duplicate
+        ``LoginRequest`` from ``src/security/validators.py`` that did
+        enforce complexity + MFA, but it was only ever used by this
+        test — never wired into a production endpoint. That duplicate
+        was removed in commit ``d9d807d`` (PR #10, closes #13). The
+        production-side complexity gap is tracked separately as a
+        follow-up security issue.
 
         Same DNS-skip rationale as ``test_validate_email``: email
         validation delegates to ``email_validator.validate_email``, which

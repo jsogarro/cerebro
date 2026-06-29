@@ -89,11 +89,23 @@ class EventPublisher:
         """Publish a project-scoped event with an untyped dict payload.
 
         Generic compatibility shim absorbed from the deleted
-        src/api/websocket/event_publisher.py stub. Used by
-        DirectExecutionService.publish_progress_update to broadcast
-        progress snapshots keyed by project_id. Logs only; migrate to the
-        typed publish_progress_update / publish_agent_* methods once each
-        caller can name the event type.
+        ``src/api/websocket/event_publisher.py`` stub. Logs only — does
+        NOT broadcast over WebSocket. Behavior matches the original stub.
+
+        **Migration:** new code should call one of the typed methods
+        below, which both broadcast over WebSocket and publish to Redis:
+
+        - progress updates → ``publish_progress_update(project_id, ProgressUpdate)``
+        - agent lifecycle  → ``publish_agent_started`` / ``publish_agent_progress``
+                             / ``publish_agent_completed`` / ``publish_agent_failed``
+        - project lifecycle → ``publish_project_started`` / ``publish_project_completed``
+                              / ``publish_project_failed`` / ``publish_project_cancelled``
+        - workflow phases   → ``publish_workflow_phase_started``
+                              / ``publish_workflow_phase_completed``
+
+        Current callers to migrate:
+        - ``DirectExecutionService.publish_progress_update`` — should call
+          ``publish_progress_update`` with a typed ``ProgressUpdate`` model.
         """
         logger.debug(
             "Project event published (untyped)",
@@ -110,10 +122,21 @@ class EventPublisher:
         """Publish a generic event, optionally targeted at specific clients.
 
         Generic compatibility shim absorbed from the deleted
-        src/api/websocket/event_publisher.py stub. Used by
-        RealTimeDashboard._broadcast_to_dashboard. Logs only; targeted
-        delivery requires the websocket connection_manager —
-        see _publish_event for the broadcast pattern.
+        ``src/api/websocket/event_publisher.py`` stub. Logs only — does
+        NOT actually deliver to ``target_clients``. Behavior matches the
+        original stub.
+
+        **Migration:** the targeted-delivery feature this shim implies
+        is not yet implemented. Production-quality client targeting
+        needs the websocket ``connection_manager`` — see ``_publish_event``
+        below for the broadcast-to-project / broadcast-to-all pattern, and
+        ``connection_manager.broadcast_to_user`` for per-user delivery.
+
+        Current callers to migrate:
+        - ``RealTimeDashboard._broadcast_to_dashboard`` — once the
+          dashboard event type joins ``WSMessageType``, switch to
+          ``_publish_event(WSMessage(type=..., data=data))`` with the
+          correct broadcast scope.
         """
         target_str = (
             f" -> {len(target_clients)} client(s)"

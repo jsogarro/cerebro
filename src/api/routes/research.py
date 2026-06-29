@@ -38,11 +38,18 @@ from pydantic import BaseModel, Field  # noqa: E402
 
 
 class CreateResearchProjectRequest(BaseModel):
-    """Request model for creating a research project."""
+    """Request model for creating a research project.
 
-    title: str = Field(..., min_length=1, max_length=500)
+    Field constraints are intentionally tighter than the storage limits
+    on ``src.models.db.research_project.ResearchProject`` — the DB
+    accepts ``String(500)`` for title and ``String(255)`` for user_id,
+    but the public request schema rejects extremes upfront to limit
+    abuse (XSS via huge titles, garbage user_ids).
+    """
+
+    title: str = Field(..., min_length=1, max_length=200)
     query: ResearchQuery
-    user_id: str
+    user_id: str = Field(..., min_length=1, max_length=255)
     scope: ResearchScope | None = None
 
 
