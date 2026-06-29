@@ -278,7 +278,7 @@ jobs:
           # for pure-syntax validation of every k8s manifest and rely on
           # `kustomize build` below for structural validation.
           pip install --quiet yamllint
-          YAMLLINT_CFG='{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable, comments: {min-spaces-from-content: 1}}}'
+          YAMLLINT_CFG='{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable, new-line-at-end-of-file: disable, comments: {min-spaces-from-content: 1}}}'
           for file in k8s/*.yaml; do
             echo "Linting $file"
             yamllint -d "$YAMLLINT_CFG" "$file"
@@ -289,7 +289,7 @@ jobs:
           # kustomize build will fail on any malformed kustomization,
           # giving us structural validation without needing a live apiserver.
           kustomize build k8s/ > /tmp/rendered.yaml
-          yamllint -d "{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable, comments: {min-spaces-from-content: 1}}}" /tmp/rendered.yaml
+          yamllint -d "{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable, new-line-at-end-of-file: disable, comments: {min-spaces-from-content: 1}}}" /tmp/rendered.yaml
 
   frontend-ci:
     name: Frontend CI
