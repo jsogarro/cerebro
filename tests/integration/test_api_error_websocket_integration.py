@@ -53,14 +53,14 @@ class TestAPIErrorHandling:
         }
 
         response = await authenticated_client.post(
-            "/api/v1/projects", json=invalid_project
+            "/api/v1/research/projects", json=invalid_project
         )
 
         assert response.status_code == 422
-        error = response.json()
-        assert "detail" in error
+        envelope = response.json()
+        assert envelope["error"]["code"] == "VALIDATION_ERROR"
 
-        validations = error["detail"]
+        validations = envelope["error"]["details"]["errors"]
         assert any(v["loc"] == ["body", "title"] for v in validations)
 
     @pytest.mark.asyncio
@@ -71,6 +71,13 @@ class TestAPIErrorHandling:
             response = await authenticated_client.get("/api/v1/projects")
             responses.append(response)
 
+    @pytest.mark.skip(
+        reason=(
+            "Research projects have no update (PATCH/PUT) endpoint, so "
+            "concurrent-modification semantics can't be exercised. Un-skip "
+            "once an update endpoint is added to src/api/routes/research.py."
+        )
+    )
     @pytest.mark.asyncio
     async def test_concurrent_modifications(
         self, authenticated_client: AsyncClient, db_session: AsyncSession
@@ -87,7 +94,7 @@ class TestAPIErrorHandling:
         }
 
         response = await authenticated_client.post(
-            "/api/v1/projects", json=project_data
+            "/api/v1/research/projects", json=project_data
         )
 
         assert response.status_code == 201
@@ -97,7 +104,7 @@ class TestAPIErrorHandling:
 
         async def update_project(new_title: str) -> Response:
             return await authenticated_client.patch(
-                f"/api/v1/projects/{project_id}", json={"title": new_title}
+                f"/api/v1/research/projects/{project_id}", json={"title": new_title}
             )
 
         update_tasks = [update_project(f"Updated Title {i}") for i in range(5)]

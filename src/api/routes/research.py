@@ -34,13 +34,13 @@ async def get_research_repo(
     return ResearchRepository(session)
 
 
-from pydantic import BaseModel  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
 
 class CreateResearchProjectRequest(BaseModel):
     """Request model for creating a research project."""
 
-    title: str
+    title: str = Field(..., min_length=1, max_length=500)
     query: ResearchQuery
     user_id: str
     scope: ResearchScope | None = None
