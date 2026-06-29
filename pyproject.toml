@@ -131,6 +131,10 @@ markers = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
+# strict implies warn_unused_ignores = true; override because some
+# `# type: ignore[import-untyped]` comments are needed locally (stubs not
+# installed) but flagged as unused in CI where the stubs are present.
+warn_unused_ignores = false
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 warn_return_any = true

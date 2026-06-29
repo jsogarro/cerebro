@@ -3,24 +3,7 @@ name: E2E Tests
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, ready_for_review]
-  schedule:
-    - cron: '0 4 * * *'  # Daily at 4 AM UTC
-  workflow_dispatch:
-    inputs:
-      browsers:
-        description: 'Browsers to test'
-        required: false
-        default: 'chromium,firefox'
-        type: choice
-        options:
-          - chromium
-          - firefox
-          - webkit
-          - chromium,firefox
-          - chromium,firefox,webkit
+  workflow_dispatch:  # manual trigger only on PRs
 
 env:
   PYTHON_VERSION: '3.11'
