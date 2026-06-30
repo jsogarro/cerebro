@@ -3,7 +3,9 @@ name: E2E Tests
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # manual trigger only on PRs
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 env:
   PYTHON_VERSION: '3.11'
@@ -14,6 +16,11 @@ jobs:
     name: E2E Tests (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Disabled: this job runs `pytest tests/e2e/ --browser=...` expecting pytest-playwright
+    # tests, but no such tests exist (the JS Playwright specs at cerebro/web/tests/e2e/
+    # need `npx playwright test`, not pytest). Re-enable after either (a) writing
+    # pytest-playwright Python tests, or (b) rewriting this job to run the JS specs.
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -101,9 +108,81 @@ jobs:
       run: |
         docker compose down -v
 
+  e2e-python:
+    name: E2E Python Tests (docker-compose stack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        uv pip install --system -e ".[dev]"
+
+    - name: Start services with Docker Compose
+      env:
+        # Ephemeral test values so the api container can boot in CI.
+        # Local dev sources these from .env; CI doesn't have that file.
+        SECRET_KEY: ci-test-secret-key-32-bytes-of-entropy-for-jwt-signing-only
+        JWT_SECRET_KEY: ci-test-jwt-secret-key-32-bytes-of-entropy-for-signing
+        GEMINI_API_KEY: ci-test-gemini-key-not-used-by-e2e-suite
+      run: |
+        docker compose up -d
+        # Wait for API /health (no Playwright in this job)
+        timeout 90 bash -c 'until curl -fsS http://localhost:8000/health; do sleep 2; done'
+
+    - name: Run Python E2E tests
+      env:
+        BASE_URL: http://localhost:8000
+      run: |
+        pytest tests/e2e/ \
+          --junit-xml=test-results/python-e2e/results.xml \
+          -v
+
+    - name: Upload test artifacts on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-python-artifacts
+        path: test-results/
+        retention-days: 7
+
+    - name: Dump docker-compose logs on failure
+      if: failure()
+      run: |
+        docker compose ps
+        docker compose logs --no-color > docker-compose.log
+      continue-on-error: true
+
+    - name: Upload docker-compose logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-python-docker-logs
+        path: docker-compose.log
+        retention-days: 7
+
+    - name: Stop services
+      if: always()
+      run: |
+        docker compose down -v
+
+
   e2e-report:
     name: E2E Test Report
-    needs: e2e-tests
+    needs: e2e-python
     runs-on: ubuntu-latest
     if: always()
     
