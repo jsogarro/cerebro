@@ -48,15 +48,23 @@ class ResearchSupervisor(BaseSupervisor):
 
     def __init__(
         self,
+        supervisor_type: str = "research",
+        domain: str = "research",
         gemini_service: Any | None = None,
         cache_client: Any | None = None,
         config: dict[str, Any] | None = None,
     ):
-        """Initialize research supervisor."""
+        """Initialize research supervisor.
+
+        Accepts ``supervisor_type`` and ``domain`` to match the
+        ``BaseSupervisor`` signature used by the MASR supervisor bridge and
+        factory, which instantiate every supervisor uniformly. They default to
+        ``"research"`` so direct construction (and tests) need not pass them.
+        """
         self.agent_selector = ResearchAgentSelector()
         super().__init__(
-            supervisor_type="research",
-            domain="research",
+            supervisor_type=supervisor_type,
+            domain=domain,
             gemini_service=gemini_service,
             cache_client=cache_client,
             config=config,
