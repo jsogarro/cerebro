@@ -32,12 +32,14 @@ class CommunicationProtocol:
 
 def build_validator(
     communication_protocol: CommunicationProtocol | None = None,
+    max_revisions: int = 2,
 ) -> ResearchQualityValidator:
     return ResearchQualityValidator(
         gemini_service=None,
         communication_protocol=communication_protocol or CommunicationProtocol(),
         get_agent_type=lambda: "research_supervisor",
         quality_threshold=0.85,
+        max_revisions=max_revisions,
     )
 
 
@@ -56,7 +58,7 @@ def test_quality_validator_accepts_high_scoring_paper() -> None:
 
 
 def test_quality_validator_revises_low_scoring_paper_under_revision_limit() -> None:
-    validator = build_validator()
+    validator = build_validator(max_revisions=5)
     state = SupervisionState(
         worker_results={
             "draft_paper": TalkHierContent(intermediate_outputs={"revision_count": 2}),
@@ -67,6 +69,22 @@ def test_quality_validator_revises_low_scoring_paper_under_revision_limit() -> N
     )
 
     assert validator.should_revise_paper({"supervision_state": state}) == "revise"
+
+
+def test_quality_validator_accepts_when_revision_cap_reached() -> None:
+    # At the configured cap, a low-scoring paper is accepted rather than
+    # looping further (bounds the slow review/revise cycle).
+    validator = build_validator(max_revisions=2)
+    state = SupervisionState(
+        worker_results={
+            "draft_paper": TalkHierContent(intermediate_outputs={"revision_count": 2}),
+            "graduate_review": TalkHierContent(
+                intermediate_outputs={"overall_score": 6.0}
+            ),
+        }
+    )
+
+    assert validator.should_revise_paper({"supervision_state": state}) == "accept"
 
 
 @pytest.mark.asyncio
