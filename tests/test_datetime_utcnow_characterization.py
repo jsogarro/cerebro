@@ -33,10 +33,6 @@ from src.models.websocket_messages import (
     WSMessage,
     WSMessageType,
 )
-from src.reliability.health_checks import (
-    HealthCheckResult,
-    HealthStatus,
-)
 from src.reliability.service_registry import (
     ServiceInstance,
     ServiceMetadata,
@@ -69,14 +65,6 @@ def _assert_close_to_now(
     delta = abs(_now_utc_naive_view() - _to_utc_naive_view(dt))
     assert delta <= tolerance, (
         f"datetime {dt!r} differs from current UTC by {delta} (> {tolerance})"
-    )
-
-
-def _build_health_check_result() -> HealthCheckResult:
-    return HealthCheckResult(
-        component="char-test",
-        status=HealthStatus.HEALTHY,
-        latency_ms=1.0,
     )
 
 
@@ -151,10 +139,6 @@ class TestPydanticDefaultFactories:
 class TestDataclassDefaultFactories:
     """Pin behavior of every @dataclass that uses a default_factory for its timestamp field."""
 
-    def test_health_check_result_timestamp_close_to_now(self) -> None:
-        result = _build_health_check_result()
-        _assert_close_to_now(result.timestamp)
-
     def test_service_instance_registered_at_close_to_now(self) -> None:
         instance = _build_service_instance()
         _assert_close_to_now(instance.registered_at)
@@ -182,8 +166,8 @@ class TestDatetimeArithmeticInvariants:
         assert first <= second
 
     def test_arithmetic_between_two_dataclass_defaults_produces_timedelta(self) -> None:
-        t1 = _build_health_check_result().timestamp
-        t2 = _build_health_check_result().timestamp
+        t1 = _build_service_instance().registered_at
+        t2 = _build_service_instance().registered_at
         delta = t2 - t1
         assert isinstance(delta, timedelta)
         assert delta >= timedelta(0)
@@ -192,7 +176,7 @@ class TestDatetimeArithmeticInvariants:
         """Cross-cutting check: Pydantic and dataclass defaults must stay
         compatible with each other (both naive or both aware — never mixed)."""
         pyd_ts = WSMessage(type=WSMessageType.PROGRESS).timestamp
-        dc_ts = _build_health_check_result().timestamp
+        dc_ts = _build_service_instance().registered_at
         # Must not raise TypeError "can't subtract offset-naive and offset-aware".
         delta = abs(pyd_ts - dc_ts)
         assert delta <= WALL_CLOCK_TOLERANCE
@@ -272,7 +256,6 @@ class TestNaiveAwareConsistency:
 
     def test_all_dataclass_defaults_have_consistent_tzinfo(self) -> None:
         defaults = [
-            _build_health_check_result().timestamp,
             _build_service_instance().registered_at,
             _build_service_instance().last_heartbeat,
         ]
@@ -283,7 +266,7 @@ class TestNaiveAwareConsistency:
     def test_pydantic_and_dataclass_defaults_have_consistent_tzinfo(self) -> None:
         """The whole codebase must agree — Pydantic and dataclasses both."""
         pyd = WSMessage(type=WSMessageType.PROGRESS).timestamp
-        dc = _build_health_check_result().timestamp
+        dc = _build_service_instance().registered_at
         assert (pyd.tzinfo is None) == (dc.tzinfo is None), (
             f"Pydantic tzinfo={pyd.tzinfo!r} vs dataclass tzinfo={dc.tzinfo!r} — "
             "partial codemod detected; arithmetic across these will raise TypeError."

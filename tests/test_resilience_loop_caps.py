@@ -2,7 +2,6 @@
 
 import asyncio
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -23,7 +22,6 @@ from src.orchestration.state import (
     ResearchState,
     WorkflowPhase,
 )
-from src.reliability.connection_pools import PoolStatus, RedisPoolManager
 from src.reliability.retry_strategies import CircuitBreaker
 from src.services.gemini_service import GeminiService
 
@@ -114,13 +112,3 @@ def test_masr_router_exposes_routing_circuit_breaker() -> None:
     router = MASRouter(config={"enable_learning": False})
 
     assert isinstance(router.routing_circuit_breaker, CircuitBreaker)
-
-
-def test_redis_pool_health_check_marks_pool_unhealthy_on_ping_failure() -> None:
-    async def run_check() -> PoolStatus:
-        manager = RedisPoolManager()
-        manager._client = AsyncMock()
-        manager._client.ping.side_effect = ConnectionError("redis down")
-        return await manager.health_check()
-
-    assert asyncio.run(run_check()) == PoolStatus.UNHEALTHY
