@@ -16,6 +16,11 @@ jobs:
     name: E2E Tests (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Disabled: this job runs `pytest tests/e2e/ --browser=...` expecting pytest-playwright
+    # tests, but no such tests exist (the JS Playwright specs at cerebro/web/tests/e2e/
+    # need `npx playwright test`, not pytest). Re-enable after either (a) writing
+    # pytest-playwright Python tests, or (b) rewriting this job to run the JS specs.
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +132,12 @@ jobs:
         uv pip install --system -e ".[dev]"
 
     - name: Start services with Docker Compose
+      env:
+        # Ephemeral test values so the api container can boot in CI.
+        # Local dev sources these from .env; CI doesn't have that file.
+        SECRET_KEY: ci-test-secret-key-32-bytes-of-entropy-for-jwt-signing-only
+        JWT_SECRET_KEY: ci-test-jwt-secret-key-32-bytes-of-entropy-for-signing
+        GEMINI_API_KEY: ci-test-gemini-key-not-used-by-e2e-suite
       run: |
         docker compose up -d
         # Wait for API /health (no Playwright in this job)
@@ -171,7 +182,7 @@ jobs:
 
   e2e-report:
     name: E2E Test Report
-    needs: e2e-tests
+    needs: e2e-python
     runs-on: ubuntu-latest
     if: always()
     
