@@ -368,40 +368,16 @@ class TestSecurityValidators:
         with pytest.raises(ValueError):
             SecurityValidator.validate_ip_address("192.168.1.1", allow_private=False)
 
-    def test_secure_login_pattern_demo(self, mocker: Any) -> None:
-        """Demonstrate the SecurityValidator + Pydantic validator pattern.
+    def test_production_login_request_password_policy(self, mocker: Any) -> None:
+        """Production ``LoginRequest`` enforces full password complexity.
 
-        **WARNING — read this before changing the test or relying on it:**
-        This test does NOT assert anything about the production login
-        endpoint at ``src.api.auth.auth_router.login`` or the canonical
-        ``src.auth.models.LoginRequest`` it consumes. Production
-        ``LoginRequest`` enforces only ``min_length=8`` on password,
-        accepts no ``mfa_code`` field, and applies no email
-        ``SecurityValidator`` check beyond Pydantic's ``EmailStr``.
-
-        The local ``_SecureLoginPattern`` fixture below ENFORCES password
-        complexity (uppercase + lowercase + digit) and an MFA pattern
-        because those validators are the unit under test — not because
-        production login does any of that. Do not infer production
-        guarantees from this test passing.
-
-        Background: an earlier version of this test imported a duplicate
-        ``LoginRequest`` from ``src/security/validators.py`` that did
-        enforce complexity + MFA, but it was only ever used by this
-        test — never wired into a production endpoint. That duplicate
-        was removed in commit ``d9d807d`` (PR #10, closes #13). The
-        production-side complexity gap is tracked separately as a
-        follow-up security issue.
-
-        Same DNS-skip rationale as ``test_validate_email``: email
-        validation delegates to ``email_validator.validate_email``, which
-        would otherwise refuse the RFC-2606 ``example.com`` test domain.
+        Same DNS-skip rationale as ``test_validate_email``: ``EmailStr``
+        delegates to ``email_validator.validate_email``, which would
+        otherwise refuse the RFC-2606 ``example.com`` test domain.
         """
-        import re
-        from typing import Annotated
-
         import email_validator
-        from pydantic import BaseModel, EmailStr, Field, field_validator
+
+        from src.auth.models import LoginRequest
 
         original_validate = email_validator.validate_email
 
@@ -410,48 +386,29 @@ class TestSecurityValidators:
 
         mocker.patch.object(email_validator, "validate_email", side_effect=_format_only)
 
-        class _SecureLoginPattern(BaseModel):
-            """Local fixture model demonstrating the validator pattern."""
-
-            email: EmailStr = Field(...)
-            password: Annotated[str, Field(min_length=8, max_length=128)] = Field(...)
-            mfa_code: Annotated[str, Field(pattern=r"^\d{6}$")] | None = Field(None)
-
-            @field_validator("email")
-            @classmethod
-            def _validate_email(cls, v: str) -> str:
-                return SecurityValidator.validate_email(v)
-
-            @field_validator("password")
-            @classmethod
-            def _validate_password(cls, v: str) -> str:
-                if len(v) < 8:
-                    raise ValueError("Password must be at least 8 characters")
-                if not re.search(r"[A-Z]", v):
-                    raise ValueError("Password must contain uppercase letter")
-                if not re.search(r"[a-z]", v):
-                    raise ValueError("Password must contain lowercase letter")
-                if not re.search(r"\d", v):
-                    raise ValueError("Password must contain digit")
-                return v
-
-        # Valid request
-        login = _SecureLoginPattern(
-            email="user@example.com", password="SecureP@ss123", mfa_code="123456"
-        )
+        # Valid request satisfying all four complexity requirements.
+        login = LoginRequest(email="user@example.com", password="SecureP@ssw0rd!")
         assert login.email == "user@example.com"
 
-        # Invalid password (too short)
+        # Too short (under 12 chars).
         with pytest.raises(ValueError):
-            _SecureLoginPattern(email="user@example.com", password="short")
+            LoginRequest(email="user@example.com", password="Short1!")
 
-        # Invalid MFA code
+        # Missing uppercase.
         with pytest.raises(ValueError):
-            _SecureLoginPattern(
-                email="user@example.com",
-                password="SecureP@ss123",
-                mfa_code="12345",  # Too short
-            )
+            LoginRequest(email="user@example.com", password="securep@ssw0rd!")
+
+        # Missing lowercase.
+        with pytest.raises(ValueError):
+            LoginRequest(email="user@example.com", password="SECUREP@SSW0RD!")
+
+        # Missing digit.
+        with pytest.raises(ValueError):
+            LoginRequest(email="user@example.com", password="SecurePassword!")
+
+        # Missing special character.
+        with pytest.raises(ValueError):
+            LoginRequest(email="user@example.com", password="SecurePassw0rd1")
 
     def test_file_upload_validation(self) -> None:
         """Test file upload validation."""
