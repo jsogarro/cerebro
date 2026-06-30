@@ -111,9 +111,24 @@ class ConnectionManager:
         websocket: WebSocket,
         client_type: str = "web",
         user_id: str | None = None,
+        *,
+        accept: bool = True,
     ) -> str:
-        """Accept a new WebSocket connection."""
-        await websocket.accept()
+        """
+        Accept a new WebSocket connection.
+
+        Args:
+            websocket: WebSocket connection
+            client_type: Type of client (web, cli, etc.)
+            user_id: Optional user ID for authenticated connections
+            accept: Whether to call websocket.accept() (default True).
+                    Set to False if the caller already accepted the connection.
+
+        Returns:
+            Client ID for this connection
+        """
+        if accept:
+            await websocket.accept()
 
         client_id = str(uuid4())
         connection = WebSocketConnection(

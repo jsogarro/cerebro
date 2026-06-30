@@ -47,6 +47,9 @@ async def websocket_endpoint(
     client_id = None
 
     try:
+        # Accept connection BEFORE authentication so we can send proper WS close codes
+        await websocket.accept()
+
         # Get User-Agent for client type detection
         user_agent = websocket.headers.get("user-agent")
 
@@ -57,11 +60,12 @@ async def websocket_endpoint(
             jwt_service=jwt_service,
         )
 
-        # Establish connection
+        # Establish connection (accept=False since we already accepted above)
         client_id = await websocket_manager.connect(
             websocket=websocket,
             client_type=client_type,
             user_id=user_id,
+            accept=False,
         )
 
         logger.info(
@@ -169,6 +173,9 @@ async def project_websocket_endpoint(
     client_id = None
 
     try:
+        # Accept connection BEFORE authentication so we can send proper WS close codes
+        await websocket.accept()
+
         # Get User-Agent for client type detection
         user_agent = websocket.headers.get("user-agent")
 
@@ -183,11 +190,12 @@ async def project_websocket_endpoint(
         if not await verify_project_access(user_id, str(project_id)):
             raise WebSocketAuthError("Access denied to project")
 
-        # Establish connection
+        # Establish connection (accept=False since we already accepted above)
         client_id = await websocket_manager.connect(
             websocket=websocket,
             client_type=client_type,
             user_id=user_id,
+            accept=False,
         )
 
         # Auto-subscribe to project
@@ -296,6 +304,9 @@ async def cli_websocket_endpoint(
     client_id = None
 
     try:
+        # Accept connection BEFORE authentication so we can send proper WS close codes
+        await websocket.accept()
+
         # Force client type to CLI
         user_id, _ = await authenticate_websocket_connection(
             token=token,
@@ -307,11 +318,12 @@ async def cli_websocket_endpoint(
         if not await verify_project_access(user_id, str(project_id)):
             raise WebSocketAuthError("Access denied to project")
 
-        # Establish connection with CLI type
+        # Establish connection with CLI type (accept=False since we already accepted above)
         client_id = await websocket_manager.connect(
             websocket=websocket,
             client_type="cli",
             user_id=user_id,
+            accept=False,
         )
 
         # Auto-subscribe to project
