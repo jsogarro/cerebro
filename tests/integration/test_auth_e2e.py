@@ -231,7 +231,9 @@ class TestAuthE2E:
         """Accessing protected endpoint with expired token fails."""
         async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
             # Use a completely fake token that looks expired
-            fake_expired_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1MTYyMzkwMjJ9.invalid"
+            fake_expired_token = (
+                "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1MTYyMzkwMjJ9.invalid"
+            )
             response = await client.get(
                 "/api/v1/research/projects",
                 headers={"Authorization": f"Bearer {fake_expired_token}"},

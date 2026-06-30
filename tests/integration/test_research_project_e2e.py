@@ -76,7 +76,9 @@ class TestResearchProjectE2E:
                 f"Create failed: {create_response.status_code} - {create_response.text}"
             )
             project_data = create_response.json()
-            project_id = project_data.get("id") or project_data.get("project", {}).get("id")
+            project_id = project_data.get("id") or project_data.get("project", {}).get(
+                "id"
+            )
             assert project_id is not None
 
             # Get the project

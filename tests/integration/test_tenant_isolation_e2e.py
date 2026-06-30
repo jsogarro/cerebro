@@ -70,7 +70,9 @@ class TestTenantIsolationE2E:
 
             assert alice_create_response.status_code == 201
             alice_project = alice_create_response.json()
-            alice_project_id = alice_project.get("id") or alice_project.get("project", {}).get("id")
+            alice_project_id = alice_project.get("id") or alice_project.get(
+                "project", {}
+            ).get("id")
 
             # Bob tries to access Alice's project
             bob_access_response = await client.get(
@@ -107,7 +109,10 @@ class TestTenantIsolationE2E:
             )
 
             # If 403, tenant claim issue; if 200, verify isolation
-            if alice_list_response.status_code == 403 or bob_list_response.status_code == 403:
+            if (
+                alice_list_response.status_code == 403
+                or bob_list_response.status_code == 403
+            ):
                 pytest.skip("Tenant org claim required (known issue)")
 
             assert alice_list_response.status_code == 200
@@ -146,7 +151,9 @@ class TestTenantIsolationE2E:
 
             assert alice_create_response.status_code == 201
             alice_project = alice_create_response.json()
-            alice_project_id = alice_project.get("id") or alice_project.get("project", {}).get("id")
+            alice_project_id = alice_project.get("id") or alice_project.get(
+                "project", {}
+            ).get("id")
 
             # Bob tries to cancel Alice's project
             bob_cancel_response = await client.post(
