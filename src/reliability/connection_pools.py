@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import QueuePool
 from structlog import get_logger
 
-from config import config
+from src.core.config import settings
 
 logger = get_logger()
 

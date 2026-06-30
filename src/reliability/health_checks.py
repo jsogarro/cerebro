@@ -21,7 +21,7 @@ from fastapi import FastAPI, Response, status
 from httpx import AsyncClient
 from structlog import get_logger
 
-from config import config
+from src.core.config import settings
 
 logger = get_logger()
 
