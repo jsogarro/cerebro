@@ -66,7 +66,7 @@ class TestWebSocketE2E:
         async with (
             httpx.AsyncClient() as http_client,
             aconnect_ws(
-                f"{WS_BASE_URL}/api/v1/websocket/ws?token={access_token}",
+                f"{WS_BASE_URL}/ws?token={access_token}",
                 http_client,
             ) as ws,
         ):
@@ -98,7 +98,7 @@ class TestWebSocketE2E:
         async with httpx.AsyncClient() as http_client:
             try:
                 async with aconnect_ws(
-                    f"{WS_BASE_URL}/api/v1/websocket/ws",
+                    f"{WS_BASE_URL}/ws",
                     http_client,
                 ) as ws:
                     # In dev mode, anonymous connection succeeds
@@ -129,7 +129,7 @@ class TestWebSocketE2E:
         async with (
             httpx.AsyncClient() as http_client,
             aconnect_ws(
-                f"{WS_BASE_URL}/api/v1/websocket/ws?token={access_token}",
+                f"{WS_BASE_URL}/ws?token={access_token}",
                 http_client,
             ) as ws,
         ):
@@ -143,7 +143,7 @@ class TestWebSocketE2E:
         async with (
             httpx.AsyncClient() as http_client,
             aconnect_ws(
-                f"{WS_BASE_URL}/api/v1/websocket/ws?token={access_token}",
+                f"{WS_BASE_URL}/ws?token={access_token}",
                 http_client,
             ) as ws,
         ):
@@ -187,7 +187,7 @@ class TestWebSocketE2E:
         async with (
             httpx.AsyncClient() as http_client,
             aconnect_ws(
-                f"{WS_BASE_URL}/api/v1/websocket/ws/projects/{project_id}?token={access_token}",
+                f"{WS_BASE_URL}/ws/projects/{project_id}?token={access_token}",
                 http_client,
             ) as ws,
         ):
@@ -215,7 +215,7 @@ class TestWebSocketE2E:
         async with (
             httpx.AsyncClient() as http_client,
             aconnect_ws(
-                f"{WS_BASE_URL}/api/v1/websocket/ws?token={access_token}",
+                f"{WS_BASE_URL}/ws?token={access_token}",
                 http_client,
             ) as ws,
         ):
@@ -239,7 +239,7 @@ class TestWebSocketE2E:
             # Expected: handshake fails, or the server accepts then closes with 1008
             with contextlib.suppress(WebSocketUpgradeError, Exception):
                 async with aconnect_ws(
-                    f"{WS_BASE_URL}/api/v1/websocket/ws?token={malformed_token}",
+                    f"{WS_BASE_URL}/ws?token={malformed_token}",
                     http_client,
                 ) as ws:
                     # If connection somehow succeeds, expect server to close with error
@@ -257,7 +257,7 @@ class TestWebSocketE2E:
         async with (
             httpx.AsyncClient() as http_client,
             aconnect_ws(
-                f"{WS_BASE_URL}/api/v1/websocket/ws?token={access_token}",
+                f"{WS_BASE_URL}/ws?token={access_token}",
                 http_client,
             ) as ws,
         ):
