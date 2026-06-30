@@ -23,7 +23,7 @@ class GeminiConfig:
     """
 
     api_key: str
-    model_name: str = "gemini-2.0-flash"
+    model_name: str = "gemini-2.5-flash"
     temperature: float = 0.7
     top_p: float = 0.9
     top_k: int = 40
@@ -62,7 +62,7 @@ class GeminiConfig:
 
         return cls(
             api_key=api_key,
-            model_name=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+            model_name=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             temperature=float(os.getenv("GEMINI_TEMPERATURE", "0.7")),
             top_p=float(os.getenv("GEMINI_TOP_P", "0.9")),
             top_k=int(os.getenv("GEMINI_TOP_K", "40")),
