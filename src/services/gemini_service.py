@@ -39,7 +39,7 @@ class GeminiService:
     def __init__(
         self,
         api_key: str | None = None,
-        model_name: str = "gemini-2.0-flash",
+        model_name: str = "gemini-2.5-flash",
         config: GeminiConfig | None = None,
         cache_client: aioredis.Redis[Any] | None = None,
         **kwargs: Any,
