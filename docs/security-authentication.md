@@ -31,12 +31,13 @@ The Multi-Agent Research Platform implements enterprise-grade security and authe
 
 ### JWT Authentication
 
-The platform uses JWT tokens with RS256 (RSA signature with SHA-256) for secure authentication:
+The platform uses JWT tokens with **RS256 (RSA signature with SHA-256)** for secure authentication. Tokens are signed using RSA private/public key pairs loaded from PEM files (or auto-generated if not provided):
 
-- **Access Token**: Short-lived (15 minutes), contains user claims
-- **Refresh Token**: Long-lived (7 days), used to obtain new access tokens
+- **Access Token**: Short-lived (15 minutes default), contains user claims
+- **Refresh Token**: Long-lived (7 days default), used to obtain new access tokens
 - **Token Rotation**: Automatic rotation on refresh for enhanced security
 - **Blacklisting**: Redis-based token blacklist for immediate revocation
+- **Key Files**: `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH` environment variables point to PEM-encoded RSA keys
 
 #### Token Structure
 
@@ -56,7 +57,9 @@ The platform uses JWT tokens with RS256 (RSA signature with SHA-256) for secure 
 
 ### OAuth2 Integration
 
-Support for 11 OAuth providers:
+> **TODO (needs verification):** OAuth2 provider integrations listed below are planned but not currently implemented in production. The codebase currently supports only JWT-based email/password authentication.
+
+Planned support for OAuth providers:
 
 - **Google**: Google OAuth 2.0 with OpenID Connect
 - **GitHub**: GitHub OAuth with organization verification
@@ -72,7 +75,9 @@ Support for 11 OAuth providers:
 
 ### Multi-Factor Authentication (MFA)
 
-Multiple MFA methods supported:
+> **TODO (needs verification):** MFA is not currently implemented in production. The features listed below are planned.
+
+Planned MFA methods:
 
 1. **TOTP**: Time-based One-Time Passwords (Google Authenticator, Authy)
 2. **SMS**: Text message verification
@@ -159,11 +164,13 @@ Multiple layers of input validation:
 
 Strong password requirements:
 
-- **Minimum Length**: 12 characters
-- **Complexity**: Uppercase, lowercase, numbers, special characters
-- **History**: Prevents reuse of last 5 passwords
-- **Expiration**: Optional password expiration policy
-- **Breach Detection**: Checks against known breached passwords
+- **Login Minimum Length**: 8 characters (production default)
+- **Registration Minimum Length**: 12 characters with complexity (uppercase, lowercase, digit, special character)
+- **History**: Prevents reuse of last 5 passwords (planned)
+- **Expiration**: Optional password expiration policy (planned)
+- **Breach Detection**: Checks against known breached passwords (planned)
+
+> **TODO (needs verification):** PR #20 (open, not merged) proposes bumping login min_length to 12 with full complexity enforcement. Current production /login requires only min_length=8.
 
 Password hashing using bcrypt with 12 rounds.
 
@@ -311,14 +318,14 @@ Automatic remediation actions:
 JWT_ALGORITHM=RS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
-JWT_PRIVATE_KEY_PATH=/secrets/jwt_private.pem
-JWT_PUBLIC_KEY_PATH=/secrets/jwt_public.pem
+JWT_PRIVATE_KEY_PATH=/path/to/jwt_private.pem  # Auto-generated if missing
+JWT_PUBLIC_KEY_PATH=/path/to/jwt_public.pem    # Auto-generated if missing
 
 # Security Settings
 BCRYPT_ROUNDS=12
-PASSWORD_MIN_LENGTH=12
-PASSWORD_HISTORY_LIMIT=5
-CHECK_PASSWORD_BREACHES=true
+PASSWORD_MIN_LENGTH=8  # Production default for login; RegisterRequest requires 12+ with complexity
+PASSWORD_HISTORY_LIMIT=5  # Planned
+CHECK_PASSWORD_BREACHES=false  # Planned
 
 # Rate Limiting
 RATE_LIMIT_REQUESTS=100

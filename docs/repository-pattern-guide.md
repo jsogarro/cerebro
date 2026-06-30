@@ -110,6 +110,8 @@ async def delete_project(project_id: UUID):
 
 ### ResearchRepository
 
+> **Note:** As of PR #10, `ResearchProject.user_id` is an opaque `String(255)` field (not a typed FK to `users.id`). The multi-tenancy refactor supports external identity providers where user records may not exist in the local `users` table.
+
 ```python
 class ResearchRepository(BaseRepository[ResearchProject]):
     

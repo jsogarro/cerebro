@@ -69,7 +69,12 @@ uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 5. **Verify installation:**
 ```bash
 research-cli health
+
+# Or run the comprehensive smoke test
+./scripts/smoke_test.sh
 ```
+
+The smoke test boots the API against SQLite with ephemeral RSA keys, exercises 9 endpoint checks (health, research project CRUD, query), and reports pass/fail. Requires tmux, jq, curl, and openssl.
 
 ## CLI Documentation
 
@@ -200,7 +205,7 @@ pytest-watch
 
 ```bash
 # Format code
-black src tests
+ruff format src tests
 
 # Lint code
 ruff check src tests
@@ -209,7 +214,9 @@ ruff check src tests
 mypy src
 
 # All quality checks
-make quality
+pytest --cov=src --cov-report=html
+mypy src
+ruff check src tests
 ```
 
 ### Local Development
@@ -293,6 +300,9 @@ Key configuration variables:
 | `TEMPORAL_HOST` | Temporal server address | localhost:7233 |
 | `ENVIRONMENT` | Deployment environment | development |
 | `LOG_LEVEL` | Logging level | INFO |
+| `JWT_PRIVATE_KEY_PATH` | Path to RSA private key (PEM) | Auto-generated |
+| `JWT_PUBLIC_KEY_PATH` | Path to RSA public key (PEM) | Auto-generated |
+| `SECRET_KEY` | Application secret key | Required |
 
 ## Architecture
 
@@ -496,7 +506,7 @@ graph LR
 - Follow PEP 8 style guide
 - Use type hints
 - Write docstrings for all public functions
-- Maintain >80% test coverage
+- Maintain test coverage (current: ~27%, target: 80%)
 - Use semantic commit messages
 
 ### Commit Message Format
