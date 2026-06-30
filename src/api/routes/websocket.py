@@ -9,7 +9,6 @@ import asyncio
 from typing import Any
 from uuid import UUID
 
-import orjson
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from structlog import get_logger
 
@@ -31,6 +30,10 @@ from src.utils.serialization import deserialize
 logger = get_logger()
 router = APIRouter()
 
+# Stop a receive loop from spinning forever on a half-open/broken socket that
+# returns errors without raising WebSocketDisconnect.
+MAX_CONSECUTIVE_WS_ERRORS = 5
+
 
 @router.websocket("/ws")
 async def websocket_endpoint(
@@ -47,6 +50,9 @@ async def websocket_endpoint(
     client_id = None
 
     try:
+        # Accept connection BEFORE authentication so we can send proper WS close codes
+        await websocket.accept()
+
         # Get User-Agent for client type detection
         user_agent = websocket.headers.get("user-agent")
 
@@ -57,11 +63,12 @@ async def websocket_endpoint(
             jwt_service=jwt_service,
         )
 
-        # Establish connection
+        # Establish connection (accept=False since we already accepted above)
         client_id = await websocket_manager.connect(
             websocket=websocket,
             client_type=client_type,
             user_id=user_id,
+            accept=False,
         )
 
         logger.info(
@@ -72,6 +79,7 @@ async def websocket_endpoint(
         )
 
         # Handle messages
+        consecutive_errors = 0
         while True:
             try:
                 # Receive message from client
@@ -108,11 +116,7 @@ async def websocket_endpoint(
                         message_type=message_data.get("type"),
                     )
 
-            except orjson.JSONDecodeError:
-                logger.warning(
-                    "Invalid JSON received from WebSocket client",
-                    client_id=client_id,
-                )
+                consecutive_errors = 0
 
             except WebSocketDisconnect:
                 # Let the outer handler do the actual cleanup; if we swallow
@@ -121,11 +125,24 @@ async def websocket_endpoint(
                 raise
 
             except Exception as e:
+                # A half-open/dead socket can make receive_text() return bad
+                # data in a tight loop without ever raising WebSocketDisconnect,
+                # which spins this loop forever. Bail out after a few consecutive
+                # failures so a broken connection can't stall the worker.
+                consecutive_errors += 1
                 logger.error(
                     "Error processing WebSocket message",
                     client_id=client_id,
                     error=str(e),
+                    error_type=type(e).__name__,
                 )
+                if consecutive_errors >= MAX_CONSECUTIVE_WS_ERRORS:
+                    logger.error(
+                        "Closing WebSocket after repeated errors",
+                        client_id=client_id,
+                        consecutive_errors=consecutive_errors,
+                    )
+                    break
 
     except WebSocketAuthError as e:
         logger.warning(
@@ -169,6 +186,9 @@ async def project_websocket_endpoint(
     client_id = None
 
     try:
+        # Accept connection BEFORE authentication so we can send proper WS close codes
+        await websocket.accept()
+
         # Get User-Agent for client type detection
         user_agent = websocket.headers.get("user-agent")
 
@@ -183,11 +203,12 @@ async def project_websocket_endpoint(
         if not await verify_project_access(user_id, str(project_id)):
             raise WebSocketAuthError("Access denied to project")
 
-        # Establish connection
+        # Establish connection (accept=False since we already accepted above)
         client_id = await websocket_manager.connect(
             websocket=websocket,
             client_type=client_type,
             user_id=user_id,
+            accept=False,
         )
 
         # Auto-subscribe to project
@@ -205,6 +226,7 @@ async def project_websocket_endpoint(
         # TODO: Send current project status and progress
 
         # Handle messages (mainly heartbeats and additional subscriptions)
+        consecutive_errors = 0
         while True:
             try:
                 data = await websocket.receive_text()
@@ -232,23 +254,28 @@ async def project_websocket_endpoint(
                         response_message
                     )
 
-            except orjson.JSONDecodeError:
-                logger.warning(
-                    "Invalid JSON received from project WebSocket client",
-                    client_id=client_id,
-                    project_id=str(project_id),
-                )
+                consecutive_errors = 0
 
             except WebSocketDisconnect:
                 raise
 
             except Exception as e:
+                consecutive_errors += 1
                 logger.error(
                     "Error processing project WebSocket message",
                     client_id=client_id,
                     project_id=str(project_id),
                     error=str(e),
+                    error_type=type(e).__name__,
                 )
+                if consecutive_errors >= MAX_CONSECUTIVE_WS_ERRORS:
+                    logger.error(
+                        "Closing project WebSocket after repeated errors",
+                        client_id=client_id,
+                        project_id=str(project_id),
+                        consecutive_errors=consecutive_errors,
+                    )
+                    break
 
     except WebSocketAuthError as e:
         logger.warning(
@@ -296,6 +323,9 @@ async def cli_websocket_endpoint(
     client_id = None
 
     try:
+        # Accept connection BEFORE authentication so we can send proper WS close codes
+        await websocket.accept()
+
         # Force client type to CLI
         user_id, _ = await authenticate_websocket_connection(
             token=token,
@@ -307,11 +337,12 @@ async def cli_websocket_endpoint(
         if not await verify_project_access(user_id, str(project_id)):
             raise WebSocketAuthError("Access denied to project")
 
-        # Establish connection with CLI type
+        # Establish connection with CLI type (accept=False since we already accepted above)
         client_id = await websocket_manager.connect(
             websocket=websocket,
             client_type="cli",
             user_id=user_id,
+            accept=False,
         )
 
         # Auto-subscribe to project
@@ -337,6 +368,7 @@ async def cli_websocket_endpoint(
         await websocket_manager.connections[client_id].send_message(welcome_message)
 
         # Handle messages (mainly heartbeats)
+        consecutive_errors = 0
         while True:
             try:
                 # Set a timeout for CLI connections to be more responsive
@@ -347,27 +379,32 @@ async def cli_websocket_endpoint(
                 if message_data.get("type") == "heartbeat_response":
                     websocket_manager.connections[client_id].update_heartbeat()
 
+                consecutive_errors = 0
+
             except TimeoutError:
                 # Timeout is expected for CLI connections
                 continue
-
-            except orjson.JSONDecodeError:
-                logger.warning(
-                    "Invalid JSON received from CLI WebSocket client",
-                    client_id=client_id,
-                    project_id=str(project_id),
-                )
 
             except WebSocketDisconnect:
                 raise
 
             except Exception as e:
+                consecutive_errors += 1
                 logger.error(
                     "Error processing CLI WebSocket message",
                     client_id=client_id,
                     project_id=str(project_id),
                     error=str(e),
+                    error_type=type(e).__name__,
                 )
+                if consecutive_errors >= MAX_CONSECUTIVE_WS_ERRORS:
+                    logger.error(
+                        "Closing CLI WebSocket after repeated errors",
+                        client_id=client_id,
+                        project_id=str(project_id),
+                        consecutive_errors=consecutive_errors,
+                    )
+                    break
 
     except WebSocketAuthError as e:
         logger.warning(
