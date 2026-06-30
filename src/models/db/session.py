@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.pool import NullPool, QueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 from structlog import get_logger
 
 from src.core.config import settings
@@ -64,7 +64,8 @@ def create_engine(
         database_url = get_database_url()
 
     # Configure pool class
-    poolclass = NullPool if use_null_pool else QueuePool
+    # For async engines, use AsyncAdaptedQueuePool (default) or NullPool
+    poolclass = NullPool if use_null_pool else AsyncAdaptedQueuePool
 
     # Build engine kwargs
     engine_kwargs: dict[str, Any] = {
