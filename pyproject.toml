@@ -119,6 +119,10 @@ python_classes = "Test*"
 python_functions = "test_*"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# Fail a hung test fast with a stack dump instead of stalling the whole job.
+# thread method is required for asyncio tests.
+timeout = 120
+timeout_method = "thread"
 markers = [
     "acceptance: refactorit acceptance specs (fail before refactor, pass after)",
     "integration: integration tests requiring real Postgres / Redis testcontainers",
