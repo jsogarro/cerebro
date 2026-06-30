@@ -24,11 +24,17 @@ class ResearchQualityValidator:
         communication_protocol: Any,
         get_agent_type: Callable[[], str],
         quality_threshold: float,
+        max_revisions: int = 2,
     ) -> None:
         self.gemini_service = gemini_service
         self.communication_protocol = communication_protocol
         self.get_agent_type = get_agent_type
         self.quality_threshold = quality_threshold
+        # Cap on graduate-review -> revise-paper rounds before accepting the
+        # best draft. Each round is a slow thinking-model call, so the default
+        # is kept low; raise via the supervisor's max_paper_revisions config
+        # for higher-quality (slower) runs.
+        self.max_revisions = max_revisions
 
     async def validate_sources(
         self,
@@ -274,11 +280,12 @@ If a paper exists but with slightly different details, mark exists=true and prov
                 if score >= 9.0:
                     logger.info("research_paper_accepted", score=score)
                     return "accept"
-                if revision_count >= 5:
+                if revision_count >= self.max_revisions:
                     logger.warning(
                         "research_revision_max_reached",
                         score=score,
                         revision_count=revision_count,
+                        max_revisions=self.max_revisions,
                     )
                     return "accept"
 

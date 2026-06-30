@@ -76,6 +76,7 @@ class ResearchSupervisor(BaseSupervisor):
         )
         self.max_sources = config.get("max_sources", 50) if config else 50
         self.citation_style = config.get("citation_style", "APA") if config else "APA"
+        self.max_paper_revisions = config.get("max_paper_revisions", 2) if config else 2
         self.query_planner = ResearchQueryPlanner(
             self.research_depth,
             self.max_sources,
@@ -90,6 +91,7 @@ class ResearchSupervisor(BaseSupervisor):
             self.communication_protocol,
             self.get_agent_type,
             self.quality_threshold,
+            max_revisions=self.max_paper_revisions,
         )
 
     def _register_worker_types(self) -> None:
