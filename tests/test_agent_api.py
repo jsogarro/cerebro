@@ -340,3 +340,34 @@ class TestAgentAPI:
             200,
             500,
         ]  # 500 due to missing dependencies in test
+
+
+class TestAgentTypeResolution:
+    """Regression tests for the Bypass API agent-type -> factory-key mapping.
+
+    Previously ``agent_type_mapping`` held class names (e.g.
+    ``"LiteratureReviewAgent"``) while ``AgentFactory`` registers snake_case
+    keys (``"literature_review"``), so every direct/chain/mixture execution
+    failed with "Unknown agent type".
+    """
+
+    def test_agent_type_mapping_uses_valid_factory_keys(self) -> None:
+        from src.agents.factory import AgentFactory
+
+        service = AgentExecutionService()
+        valid_keys = set(AgentFactory.get_available_agent_types())
+
+        for agent_type in AgentType:
+            key = service.agent_type_mapping.get(agent_type)
+            assert key is not None, f"{agent_type} is not mapped"
+            assert key in valid_keys, (
+                f"{agent_type} -> {key!r} is not a registered factory key "
+                f"(valid: {sorted(valid_keys)})"
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_agent_instance_resolves_every_agent_type(self) -> None:
+        service = AgentExecutionService()
+        for agent_type in AgentType:
+            agent = await service._get_agent_instance(agent_type)
+            assert agent is not None

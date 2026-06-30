@@ -80,12 +80,15 @@ class AgentExecutionService:
         self.enable_performance_tracking = True
 
         # Agent type to class mapping
+        # Map the API enum to AgentFactory registry keys (snake_case), NOT class
+        # names. AgentFactory.create_agent looks up by registry key, so class
+        # names like "LiteratureReviewAgent" raise "Unknown agent type".
         self.agent_type_mapping = {
-            AgentType.LITERATURE_REVIEW: "LiteratureReviewAgent",
-            AgentType.CITATION: "CitationAgent",
-            AgentType.METHODOLOGY: "MethodologyAgent",
-            AgentType.COMPARATIVE_ANALYSIS: "ComparativeAnalysisAgent",
-            AgentType.SYNTHESIS: "SynthesisAgent",
+            AgentType.LITERATURE_REVIEW: "literature_review",
+            AgentType.CITATION: "citation",
+            AgentType.METHODOLOGY: "methodology",
+            AgentType.COMPARATIVE_ANALYSIS: "comparative_analysis",
+            AgentType.SYNTHESIS: "synthesis",
         }
 
     async def execute_single_agent(
