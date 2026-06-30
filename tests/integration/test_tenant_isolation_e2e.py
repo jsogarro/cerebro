@@ -15,7 +15,6 @@ import uuid
 import httpx
 import pytest
 
-
 BASE_URL = "http://localhost:8000"
 VALID_PASSWORD = "Xy9!zAbCdEfG"
 
