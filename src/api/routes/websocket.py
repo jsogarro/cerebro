@@ -11,6 +11,7 @@ from uuid import UUID
 
 import orjson
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from structlog import get_logger
 
 from src.api.websocket.auth import (
@@ -130,6 +131,12 @@ async def websocket_endpoint(
                     client_id=client_id,
                     error=str(e),
                 )
+                # A persistent receive error means the socket is already gone;
+                # without this guard the while-loop spins forever re-calling
+                # receive() against a dead connection (mirrors the
+                # WebSocketDisconnect handling above).
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    break
 
     except WebSocketAuthError as e:
         logger.warning(
@@ -257,6 +264,8 @@ async def project_websocket_endpoint(
                     project_id=str(project_id),
                     error=str(e),
                 )
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    break
 
     except WebSocketAuthError as e:
         logger.warning(
@@ -380,6 +389,8 @@ async def cli_websocket_endpoint(
                     project_id=str(project_id),
                     error=str(e),
                 )
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    break
 
     except WebSocketAuthError as e:
         logger.warning(
