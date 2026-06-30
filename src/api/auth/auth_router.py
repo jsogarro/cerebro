@@ -191,6 +191,7 @@ async def login(
     # Update login info
     user.record_login()
     await db.commit()
+    await db.refresh(user)  # Refresh to keep user attached after commit
 
     # Generate device ID if not provided
     device_id = request.device_id or f"web_{uuid4().hex[:8]}"

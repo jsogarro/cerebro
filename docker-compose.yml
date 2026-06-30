@@ -17,6 +17,8 @@ services:
       - DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-${SECRET_KEY}}
       - ENVIRONMENT=development
       - LOG_LEVEL=DEBUG
       # MASR Integration

@@ -38,9 +38,18 @@ RUN uv pip install -e ".[dev]"
 # Copy application code
 COPY src/ ./src/
 COPY tests/ ./tests/
+COPY alembic/ ./alembic/
+COPY alembic.ini .
+
+# Copy and set entrypoint script
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Expose ports
 EXPOSE 8000
+
+# Entrypoint runs migrations, then exec's CMD
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Development command
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
