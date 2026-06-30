@@ -14,6 +14,7 @@ Run with: pytest tests/e2e/test_websocket_e2e.py --no-cov -v
 """
 
 import asyncio
+import contextlib
 import uuid
 
 import httpx
@@ -183,23 +184,25 @@ class TestWebSocketE2E:
             project_id = project_data["id"]
 
         # Connect to project-specific WebSocket
-        async with httpx.AsyncClient() as http_client:
-            async with aconnect_ws(
+        async with (
+            httpx.AsyncClient() as http_client,
+            aconnect_ws(
                 f"{WS_BASE_URL}/api/v1/websocket/ws/projects/{project_id}?token={access_token}",
                 http_client,
-            ) as ws:
-                # Wait for initial welcome or subscription confirmation
-                try:
-                    message = await asyncio.wait_for(ws.receive_json(), timeout=3.0)
-                    # Verify message structure
-                    assert "type" in message or "project_id" in message
-                except TimeoutError:
-                    # No immediate message is acceptable
-                    pass
+            ) as ws,
+        ):
+            # Wait for initial welcome or subscription confirmation
+            try:
+                message = await asyncio.wait_for(ws.receive_json(), timeout=3.0)
+                # Verify message structure
+                assert "type" in message or "project_id" in message
+            except TimeoutError:
+                # No immediate message is acceptable
+                pass
 
-                # In a real scenario, we'd trigger project activity and verify events
-                # For now, just verify connection succeeded
-                await ws.close()
+            # In a real scenario, we'd trigger project activity and verify events
+            # For now, just verify connection succeeded
+            await ws.close()
 
     async def test_websocket_clean_disconnect(self):
         """
@@ -233,20 +236,15 @@ class TestWebSocketE2E:
         malformed_token = "not.a.valid.jwt.token"
 
         async with httpx.AsyncClient() as http_client:
-            try:
+            # Expected: handshake fails, or the server accepts then closes with 1008
+            with contextlib.suppress(WebSocketUpgradeError, Exception):
                 async with aconnect_ws(
                     f"{WS_BASE_URL}/api/v1/websocket/ws?token={malformed_token}",
                     http_client,
                 ) as ws:
                     # If connection somehow succeeds, expect server to close with error
-                    try:
+                    with contextlib.suppress(Exception):
                         await asyncio.wait_for(ws.receive_json(), timeout=2.0)
-                    except Exception:
-                        # Expected: connection fails or closes
-                        pass
-            except (WebSocketUpgradeError, Exception):
-                # Expected: handshake fails or connection rejected
-                pass
 
     async def test_websocket_subscribe_to_events(self):
         """
