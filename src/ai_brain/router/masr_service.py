@@ -369,7 +369,6 @@ class MASRService:
             "port": self.port,
             "log_level": os.getenv("LOG_LEVEL", "info").lower(),
             "access_log": True,
-            "reload": self.environment == "development",
         }
 
         # Production-specific settings
@@ -395,6 +394,9 @@ class MASRService:
         signal.signal(signal.SIGINT, signal_handler)
 
         # Start service
+        # Note: reload=True removed because it requires an import string when used with
+        # uvicorn.run(app_instance). For container deployments, hot-reload is not needed
+        # as the volume mount + container restart provides the same effect.
         uvicorn.run(self.app, **uvicorn_config)  # type: ignore[arg-type]
 
 
