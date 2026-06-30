@@ -405,7 +405,7 @@ masr_service = MASRService()
 
 
 # Entry point for module execution
-async def main() -> None:
+def main() -> None:
     """Main entry point for MASR service."""
 
     logger.info("Cerebro MASR Service Starting...")
@@ -413,7 +413,7 @@ async def main() -> None:
     logger.info(f"Port: {os.getenv('MASR_PORT', '9100')}")
 
     try:
-        # Run service
+        # Run service (uvicorn.run is synchronous and manages its own event loop)
         masr_service.run()
 
     except Exception as e:
@@ -426,4 +426,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
