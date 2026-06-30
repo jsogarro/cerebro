@@ -27,7 +27,11 @@ class GeminiConfig:
     temperature: float = 0.7
     top_p: float = 0.9
     top_k: int = 40
-    max_output_tokens: int = 8192
+    # gemini-2.5-flash spends output tokens on internal "thinking" (dynamic
+    # budget up to ~24576). 8192 total intermittently left too little for the
+    # structured-output JSON, truncating it and failing schema validation.
+    # 32768 covers max thinking plus the JSON payload.
+    max_output_tokens: int = 32768
 
     # Rate limiting settings
     rate_limit: int = 10  # requests per period
@@ -66,7 +70,7 @@ class GeminiConfig:
             temperature=float(os.getenv("GEMINI_TEMPERATURE", "0.7")),
             top_p=float(os.getenv("GEMINI_TOP_P", "0.9")),
             top_k=int(os.getenv("GEMINI_TOP_K", "40")),
-            max_output_tokens=int(os.getenv("GEMINI_MAX_TOKENS", "8192")),
+            max_output_tokens=int(os.getenv("GEMINI_MAX_TOKENS", "32768")),
             rate_limit=int(os.getenv("GEMINI_RATE_LIMIT", "10")),
             rate_period=int(os.getenv("GEMINI_RATE_PERIOD", "60")),
             max_concurrent=int(os.getenv("GEMINI_MAX_CONCURRENT", "5")),
