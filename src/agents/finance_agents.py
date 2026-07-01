@@ -27,6 +27,17 @@ class _FinanceAgentBase(BaseAgent):
         """Return the agent-specific prompt. Overridden by each agent."""
         raise NotImplementedError
 
+    def _precompute(self, task: AgentTask) -> dict[str, Any] | None:
+        """Optional hook for deterministic precomputation.
+
+        When a subclass returns a dict, the execute method will:
+        1. Append a formatted "Precomputed exact values:" block to the prompt
+        2. Merge the dict into output["computed"]
+
+        Returns None by default (no precomputation).
+        """
+        return None
+
     def _ensure_gemini_service(self) -> Any:
         """Lazily obtain a Gemini service when one was not injected.
 
@@ -52,7 +63,20 @@ class _FinanceAgentBase(BaseAgent):
         if not query:
             return self.handle_error(task, ValueError("Query cannot be empty"))
 
+        # Run optional precomputation hook
+        computed = self._precompute(task)
+
+        # Build base prompt
         prompt = self._build_prompt(query, task)
+
+        # Append precomputed values to prompt if present
+        if computed:
+            import json
+
+            computed_block = "\n\nPrecomputed exact values:\n" + json.dumps(
+                computed, indent=2
+            )
+            prompt += computed_block
 
         gemini = self.gemini_service or self._ensure_gemini_service()
         if gemini is None:
@@ -71,14 +95,19 @@ class _FinanceAgentBase(BaseAgent):
                 self.log_error(f"{self.agent_type} generation failed: {exc}")
                 return self.handle_error(task, exc)
 
+        # Build output with optional computed field
+        output: dict[str, Any] = {
+            "content": content,
+            "analysis": content,
+            "agent_type": self.agent_type,
+        }
+        if computed:
+            output["computed"] = computed
+
         result = AgentResult(
             task_id=task.id,
             status="success",
-            output={
-                "content": content,
-                "analysis": content,
-                "agent_type": self.agent_type,
-            },
+            output=output,
             confidence=confidence,
             execution_time=0.0,
             metadata=self.build_execution_metadata(agent_type=self.agent_type),
@@ -98,6 +127,22 @@ class FinancialAnalysisAgent(_FinanceAgentBase):
 
     agent_type = "financial_analysis"
 
+    def _precompute(self, task: AgentTask) -> dict[str, Any] | None:
+        """Compute exact financial ratios when structured parameters provided."""
+        params = task.input_data.get("parameters", {})
+        values = params.get("values")
+        if not isinstance(values, dict) or not values:
+            return None
+
+        try:
+            from src.agents.tools.finance_math import financial_ratios
+
+            result = financial_ratios(values)
+            return {"ratios": result.model_dump()}
+        except Exception:
+            # Silently fail on bad/missing inputs
+            return None
+
     def _build_prompt(self, query: str, task: AgentTask) -> str:
         return (
             "You are a financial analyst. Using ONLY the figures and facts "
@@ -115,6 +160,37 @@ class ValuationAgent(_FinanceAgentBase):
     """Produces a valuation from assumptions supplied in the query."""
 
     agent_type = "valuation"
+
+    def _precompute(self, task: AgentTask) -> dict[str, Any] | None:
+        """Compute exact DCF when structured parameters provided."""
+        params = task.input_data.get("parameters", {})
+
+        # Check for explicit operation dispatch
+        operation = params.get("operation")
+        if operation == "dcf":
+            try:
+                from src.agents.tools.finance_math import dcf_gordon_growth
+
+                result = dcf_gordon_growth(
+                    params["fcf_next"], params["growth_rate"], params["discount_rate"]
+                )
+                return {"dcf": result.model_dump()}
+            except (KeyError, ValueError, TypeError):
+                return None
+
+        # Auto-detect DCF inputs
+        if all(k in params for k in ("fcf_next", "growth_rate", "discount_rate")):
+            try:
+                from src.agents.tools.finance_math import dcf_gordon_growth
+
+                result = dcf_gordon_growth(
+                    params["fcf_next"], params["growth_rate"], params["discount_rate"]
+                )
+                return {"dcf": result.model_dump()}
+            except (ValueError, TypeError):
+                return None
+
+        return None
 
     def _build_prompt(self, query: str, task: AgentTask) -> str:
         return (
