@@ -337,12 +337,11 @@ graph TB
         TalkHier[TalkHier Protocol]
     end
 
-    subgraph Agents["Specialized Agents"]
-        LitReview[Literature Review]
-        CompAnalysis[Comparative Analysis]
-        Methodology[Methodology]
-        Synthesis[Synthesis]
-        Citation[Citation & Verification]
+    subgraph Agents["Specialized Agent Domains"]
+        Research[Research: lit review, comparative analysis, methodology, synthesis, citation]
+        Content[Content: planning, drafting, editing, optimization]
+        Analytics[Analytics: data analysis, statistical modeling, insight synthesis]
+        Finance[Finance: financial analysis, valuation, risk assessment]
     end
 
     subgraph Services["Support Services"]
