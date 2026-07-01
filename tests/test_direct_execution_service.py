@@ -7,7 +7,7 @@ the Temporal workflow system.
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -280,7 +280,7 @@ class TestDirectExecutionService:
         # Manually mark as completed and set old timestamp
         execution_status = execution_service.active_executions[execution_id]
         execution_status.status = "completed"
-        execution_status.completed_at = datetime.now()
+        execution_status.completed_at = datetime.now(UTC)
 
         # Test cleanup (with 0 hour limit to clean immediately)
         cleaned_count = await execution_service.cleanup_completed_executions(
