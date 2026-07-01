@@ -200,8 +200,12 @@ class MASRouter:
         try:
             await self._routing_circuit_breaker.call(lambda: None)
 
-            # Check cache first if enabled
-            cached_decision = self.cache_manager.check_cache(query, context)
+            # Check cache first if enabled. The strategy and constraints are
+            # part of the cache identity — the same query routes differently
+            # under a different strategy or cost/quality constraints.
+            cached_decision = self.cache_manager.check_cache(
+                query, context, strategy, constraints
+            )
             if cached_decision:
                 logger.info(f"Using cached routing for {query_id}")
                 await self._routing_circuit_breaker._on_success()
@@ -264,7 +268,9 @@ class MASRouter:
             )
 
             # Cache decision
-            self.cache_manager.cache_decision(query, context, decision)
+            self.cache_manager.cache_decision(
+                query, context, decision, strategy, constraints
+            )
 
             # Update metrics
             self.metrics_collector.update_metrics(decision)

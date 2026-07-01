@@ -41,7 +41,11 @@ class RoutingCacheManager:
         self.decision_cache: dict[str, RoutingDecision] = {}
 
     def check_cache(
-        self, query: str, context: dict[str, Any] | None
+        self,
+        query: str,
+        context: dict[str, Any] | None,
+        strategy: Any = None,
+        constraints: dict[str, Any] | None = None,
     ) -> RoutingDecision | None:
         """
         Check if we have a cached routing decision.
@@ -49,6 +53,8 @@ class RoutingCacheManager:
         Args:
             query: The query string
             context: Additional context for cache key generation
+            strategy: Requested routing strategy (part of the cache identity)
+            constraints: Custom routing constraints (part of the cache identity)
 
         Returns:
             Cached RoutingDecision if found, None otherwise
@@ -56,11 +62,16 @@ class RoutingCacheManager:
         if not self.enabled:
             return None
 
-        cache_key = self._generate_cache_key(query, context)
+        cache_key = self._generate_cache_key(query, context, strategy, constraints)
         return self.decision_cache.get(cache_key)
 
     def cache_decision(
-        self, query: str, context: dict[str, Any] | None, decision: RoutingDecision
+        self,
+        query: str,
+        context: dict[str, Any] | None,
+        decision: RoutingDecision,
+        strategy: Any = None,
+        constraints: dict[str, Any] | None = None,
     ) -> None:
         """
         Cache a routing decision.
@@ -69,24 +80,40 @@ class RoutingCacheManager:
             query: The query string
             context: Additional context for cache key generation
             decision: The routing decision to cache
+            strategy: Requested routing strategy (part of the cache identity)
+            constraints: Custom routing constraints (part of the cache identity)
         """
         if not self.enabled:
             return
 
-        cache_key = self._generate_cache_key(query, context)
+        cache_key = self._generate_cache_key(query, context, strategy, constraints)
         self.decision_cache[cache_key] = decision
 
         # Evict oldest entries if cache exceeds max size
         if len(self.decision_cache) > self.max_size:
             self._evict_oldest_entries()
 
-    def _generate_cache_key(self, query: str, context: dict[str, Any] | None) -> str:
+    def _generate_cache_key(
+        self,
+        query: str,
+        context: dict[str, Any] | None,
+        strategy: Any = None,
+        constraints: dict[str, Any] | None = None,
+    ) -> str:
         """
-        Generate a cache key for query and context.
+        Generate a cache key for query, context, strategy and constraints.
+
+        The strategy and constraints are part of the key because the same
+        query can route very differently under different strategies (e.g.
+        ``quality_focused`` vs ``cost_efficient``) or cost/quality/latency
+        constraints. Omitting them caused distinct requests to collide and
+        receive a stale decision from the first caller.
 
         Args:
             query: The query string
             context: Additional context (user_id, domain, etc.)
+            strategy: Requested routing strategy
+            constraints: Custom routing constraints
 
         Returns:
             MD5 hash string as cache key
@@ -96,6 +123,10 @@ class RoutingCacheManager:
             "query": query.lower().strip(),
             "user_id": context.get("user_id") if context else None,
             "domain": context.get("domain") if context else None,
+            # ``strategy`` may be an enum or a bare string; normalize to str so
+            # both forms hash identically.
+            "strategy": str(strategy) if strategy is not None else None,
+            "constraints": str(sorted(constraints.items())) if constraints else None,
         }
 
         cache_string = str(sorted(cache_data.items()))
