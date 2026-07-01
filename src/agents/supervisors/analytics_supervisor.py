@@ -16,6 +16,11 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 from structlog import get_logger
 
+from ..analytics_agents import (
+    DataAnalysisAgent,
+    InsightSynthesisAgent,
+    StatisticalModelingAgent,
+)
 from ..communication.talkhier_message import MessageType, TalkHierContent
 from ..models import AgentTask
 from .base_supervisor import BaseSupervisor, SupervisionState, WorkerDefinition
@@ -73,7 +78,7 @@ class AnalyticsSupervisor(BaseSupervisor):
             {
                 "data_analysis": WorkerDefinition(
                     worker_type="data_analysis",
-                    agent_class=type("DataAnalysisAgent", (), {}),  # Placeholder
+                    agent_class=DataAnalysisAgent,
                     specialization="Data exploration and statistical analysis",
                     capabilities=[
                         "descriptive_statistics",
@@ -88,7 +93,7 @@ class AnalyticsSupervisor(BaseSupervisor):
                 ),
                 "statistical_modeling": WorkerDefinition(
                     worker_type="statistical_modeling",
-                    agent_class=type("StatisticalModelingAgent", (), {}),  # Placeholder
+                    agent_class=StatisticalModelingAgent,
                     specialization="Statistical model building and validation",
                     capabilities=["model_building", "validation", "hypothesis_testing"],
                     required_for=["analytics", "modeling"],
@@ -99,7 +104,7 @@ class AnalyticsSupervisor(BaseSupervisor):
                 ),
                 "insight_synthesis": WorkerDefinition(
                     worker_type="insight_synthesis",
-                    agent_class=type("InsightSynthesisAgent", (), {}),  # Placeholder
+                    agent_class=InsightSynthesisAgent,
                     specialization="Pattern recognition and insight generation",
                     capabilities=[
                         "pattern_recognition",

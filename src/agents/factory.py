@@ -9,9 +9,20 @@ from typing import Any
 
 from structlog import get_logger
 
+from src.agents.analytics_agents import (
+    DataAnalysisAgent,
+    InsightSynthesisAgent,
+    StatisticalModelingAgent,
+)
 from src.agents.base import BaseAgent
 from src.agents.citation_agent import CitationAgent
 from src.agents.comparative_analysis_agent import ComparativeAnalysisAgent
+from src.agents.content_agents import (
+    ContentPlanningAgent,
+    DraftingAgent,
+    EditingAgent,
+    OptimizationAgent,
+)
 from src.agents.literature_review_agent import LiteratureReviewAgent
 from src.agents.methodology_agent import MethodologyAgent
 from src.agents.synthesis_agent import SynthesisAgent
@@ -33,6 +44,13 @@ class AgentFactory:
         "methodology": MethodologyAgent,
         "synthesis": SynthesisAgent,
         "citation": CitationAgent,
+        "content_planning": ContentPlanningAgent,
+        "drafting": DraftingAgent,
+        "editing": EditingAgent,
+        "optimization": OptimizationAgent,
+        "data_analysis": DataAnalysisAgent,
+        "statistical_modeling": StatisticalModelingAgent,
+        "insight_synthesis": InsightSynthesisAgent,
     }
 
     @classmethod
