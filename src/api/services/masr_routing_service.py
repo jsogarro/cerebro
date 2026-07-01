@@ -161,9 +161,7 @@ class MASRRoutingService:
                 routing_id=routing_id,
                 domain=domain,
                 complexity=complexity,
-                strategy=decision.optimization_result.strategy
-                if hasattr(decision.optimization_result, "strategy")
-                else RoutingStrategy.BALANCED,
+                strategy=decision.routing_strategy,
                 collaboration_mode=decision.collaboration_mode,
                 supervisor_allocations=supervisor_allocations,
                 selected_models=selected_models,
@@ -175,11 +173,7 @@ class MASRRoutingService:
             )
 
             # Update metrics
-            strategy_val = (
-                decision.optimization_result.strategy
-                if hasattr(decision.optimization_result, "strategy")
-                else RoutingStrategy.BALANCED
-            )
+            strategy_val = decision.routing_strategy
             self._update_metrics(strategy_val, success=True)
 
             return response
@@ -416,11 +410,7 @@ class MASRRoutingService:
         original_decision = self.routing_history[feedback.routing_id]
 
         # Update performance metrics
-        strategy = (
-            original_decision.optimization_result.strategy
-            if hasattr(original_decision.optimization_result, "strategy")
-            else RoutingStrategy.BALANCED
-        )
+        strategy = original_decision.routing_strategy
         self._update_performance_from_feedback(strategy, feedback)
 
         # Clean up old history entries (keep last 1000)
@@ -612,11 +602,7 @@ class MASRRoutingService:
         domain_str = (
             domains[0].value if domains and hasattr(domains[0], "value") else "general"
         )
-        strategy = (
-            decision.optimization_result.strategy
-            if hasattr(decision.optimization_result, "strategy")
-            else RoutingStrategy.BALANCED
-        )
+        strategy = decision.routing_strategy
         strategy_value = strategy.value if hasattr(strategy, "value") else str(strategy)
 
         reasoning = f"Query analyzed as {complexity_value} complexity "
@@ -638,11 +624,7 @@ class MASRRoutingService:
         """Get alternative routing options considered"""
         alternatives = []
 
-        current_strategy = (
-            decision.optimization_result.strategy
-            if hasattr(decision.optimization_result, "strategy")
-            else RoutingStrategy.BALANCED
-        )
+        current_strategy = decision.routing_strategy
 
         for strategy in RoutingStrategy:
             if strategy != current_strategy:
