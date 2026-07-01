@@ -331,7 +331,12 @@ class ConsensusBuilder:
                 total_weighted_score += response.confidence_score * evidence_weight
                 total_weight += evidence_weight
 
-            return total_weighted_score / max(total_weight, 1.0)
+            # If no evidence is available across all responses, fall back to simple average
+            # to avoid degenerate 0.0 scores when workers don't provide evidence lists
+            if total_weight == 0.0:
+                return statistics.mean([r.confidence_score for r in responses])
+
+            return total_weighted_score / total_weight
 
         else:  # VOTING
             # Simple majority voting based on high confidence
@@ -564,8 +569,11 @@ class ConsensusBuilder:
             evidence_count = len(response.evidence)
 
             # Quality based on evidence diversity and quantity
+            # When evidence is not explicitly provided but content/confidence exist,
+            # use confidence score as a proxy for quality rather than hard 0.0
             if evidence_count == 0:
-                score = 0.0
+                # Use confidence as baseline when evidence is absent
+                score = response.confidence_score * 0.5
             elif evidence_count <= 2:
                 score = 0.5
             elif evidence_count <= 5:
