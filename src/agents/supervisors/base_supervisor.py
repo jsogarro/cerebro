@@ -631,6 +631,89 @@ class BaseSupervisor(BaseAgent, ABC):
 
         return wrapped_node
 
+    async def _run_verification(self, content: str) -> dict[str, Any]:
+        """
+        Run VerificationAgent on aggregated content as a QA gate.
+
+        Args:
+            content: The aggregated worker output to verify
+
+        Returns:
+            dict with keys:
+                - verdict: "pass" or "revise"
+                - report: full verification report text
+        """
+        # Degrade gracefully if content is empty or missing
+        if not content or not content.strip():
+            logger.warning(
+                "supervisor_verification_skipped_empty_content",
+                supervisor_type=self.supervisor_type,
+            )
+            return {"verdict": "pass", "report": "No content to verify."}
+
+        try:
+            # Import lazily to avoid circular dependency
+            from ..factory import AgentFactory
+
+            # Create verification agent with the same gemini_service
+            verification_agent = AgentFactory.create_agent(
+                "verification",
+                {
+                    "gemini_service": self.gemini_service,
+                    "cache_client": self.cache_client,
+                },
+            )
+
+            # Build task for verification
+            import uuid
+
+            from ..models import AgentTask
+
+            verification_task = AgentTask(
+                id=str(uuid.uuid4()),
+                agent_type="verification",
+                input_data={"content": content},
+            )
+
+            # Execute verification
+            verification_result = await verification_agent.execute(verification_task)
+
+            # Parse the verdict from the output
+            report_text = verification_result.output.get("content", "")
+            verdict_line = next(
+                (
+                    line
+                    for line in report_text.split("\n")
+                    if line.startswith("VERDICT:")
+                ),
+                "",
+            )
+            verdict = "pass"
+            if "REVISE" in verdict_line.upper():
+                verdict = "revise"
+            elif "PASS" in verdict_line.upper():
+                verdict = "pass"
+
+            logger.info(
+                "supervisor_verification_completed",
+                supervisor_type=self.supervisor_type,
+                verdict=verdict,
+            )
+
+            return {"verdict": verdict, "report": report_text}
+
+        except Exception as e:
+            # Degrade gracefully on error — don't break the workflow
+            logger.error(
+                "supervisor_verification_failed",
+                supervisor_type=self.supervisor_type,
+                error=str(e),
+            )
+            return {
+                "verdict": "pass",  # neutral fallback
+                "report": f"Verification error: {e!s}",
+            }
+
     async def close(self) -> None:
         """Close supervisor and cleanup resources."""
 

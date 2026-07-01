@@ -320,13 +320,46 @@ class ContentSupervisor(BaseSupervisor):
         logger.info("content_supervisor_phase_started", phase="quality_evaluation")
         state.current_phase = "quality_evaluation"
 
-        # Simple quality scoring based on completion
-        completed_phases = len(state.worker_results)
-        state.quality_score = min(0.9, 0.5 + (completed_phases * 0.1))
+        # Aggregate worker outputs for verification
+        aggregated_content = self._aggregate_worker_content(state)
+
+        # Run verification QA gate
+        verification_result = await self._run_verification(aggregated_content)
+        state.context["verification"] = verification_result
+        state.worker_results["verification"] = verification_result
+
+        # Quality scoring based on completion
+        completed_phases = len(state.worker_results) - 1  # exclude verification
+        base_score = min(0.9, 0.5 + (completed_phases * 0.1))
+
+        # Reduce score if verification found issues
+        if verification_result["verdict"] == "revise":
+            state.quality_score = base_score * 0.85
+            logger.info(
+                "content_supervisor_verification_flagged_issues",
+                base_score=base_score,
+                adjusted_score=state.quality_score,
+            )
+        else:
+            state.quality_score = base_score
+
         state.consensus_score = state.quality_score
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
+
+    def _aggregate_worker_content(self, state: SupervisionState) -> str:
+        """Aggregate worker outputs into a single text for verification."""
+        parts = []
+        for worker_type in ["drafting", "editing", "optimization"]:
+            result = state.worker_results.get(worker_type)
+            if result:
+                content = result.get("content", "") if isinstance(result, dict) else ""
+                if hasattr(result, "content"):
+                    content = result.content
+                if content:
+                    parts.append(f"{worker_type.upper()}: {content}")
+        return "\n\n".join(parts) if parts else ""
 
 
 __all__ = ["ContentSupervisor"]
