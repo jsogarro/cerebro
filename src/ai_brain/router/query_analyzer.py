@@ -39,6 +39,7 @@ class QueryDomain(Enum):
     SERVICE = "service"
     GENERAL = "general"
     MULTIMODAL = "multimodal"
+    FINANCE = "finance"
 
 
 @dataclass
@@ -122,6 +123,12 @@ class QueryComplexityAnalyzer:
                 r"\b(?:image|video|audio|visual|multimedia)\b",
                 r"\b(?:picture|photo|diagram|chart|infographic)\b",
                 r"\b(?:voice|speech|sound|music|design)\b",
+            ],
+            QueryDomain.FINANCE: [
+                r"\b(?:valuation|dcf|discounted.cash.flow|npv|wacc|ebitda|intrinsic)\b",
+                r"\b(?:balance.sheet|income.statement|cash.flow|financial.statement)\b",
+                r"\b(?:portfolio|dividend|equity|bond|stock|invest(?:ment|or)?|hedge)\b",
+                r"\b(?:solvency|liquidity|leverage|p/?e ratio|debt.to.equity|margin)\b",
             ],
         }
 

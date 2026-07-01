@@ -27,6 +27,7 @@ from ..models import AgentTask
 from .analytics_supervisor import AnalyticsSupervisor
 from .base_supervisor import BaseSupervisor
 from .content_supervisor import ContentSupervisor
+from .finance_supervisor import FinanceSupervisor
 from .research_supervisor import ResearchSupervisor
 
 logger = get_logger()
@@ -41,6 +42,7 @@ class SupervisorCapability(Enum):
     ANALYTICS = "analytics"
     SERVICE = "service"
     MULTIMODAL = "multimodal"
+    FINANCE = "finance"
 
     # Functional capabilities
     LITERATURE_REVIEW = "literature_review"
@@ -495,6 +497,34 @@ class SupervisorFactory:
         )
 
         self.register_supervisor(analytics_spec)
+
+        # Finance Supervisor
+        finance_spec = SupervisorSpecification(
+            supervisor_type="finance",
+            supervisor_class=FinanceSupervisor,
+            domain="finance",
+            capabilities={
+                SupervisorCapability.FINANCE,
+                SupervisorCapability.DATA_ANALYSIS,
+                SupervisorCapability.QUALITY_ASSURANCE,
+                SupervisorCapability.TALKHIER_PROTOCOL,
+                SupervisorCapability.LANGGRAPH_WORKFLOWS,
+                SupervisorCapability.SEQUENTIAL_COORDINATION,
+                SupervisorCapability.CONSENSUS_BUILDING,
+            },
+            average_execution_time_ms=70000,
+            reliability_score=0.93,
+            quality_score=0.88,
+            cost_per_execution=0.011,
+            min_workers=2,
+            max_workers=4,
+            optimal_for_complexity=["moderate", "complex"],
+            optimal_for_strategies=["quality_focused", "balanced"],
+            description="Coordinates finance teams for statement analysis, valuation, and risk",
+            version="1.0.0",
+        )
+
+        self.register_supervisor(finance_spec)
 
     def register_supervisor(self, spec: SupervisorSpecification) -> None:
         """

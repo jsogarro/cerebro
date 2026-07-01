@@ -27,6 +27,7 @@ from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from ...agents.models import AgentTask
 from ...agents.supervisors.analytics_supervisor import AnalyticsSupervisor
 from ...agents.supervisors.content_supervisor import ContentSupervisor
+from ...agents.supervisors.finance_supervisor import FinanceSupervisor
 from ...agents.supervisors.research_supervisor import ResearchSupervisor
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
@@ -240,6 +241,7 @@ class DirectExecutionService:
                 "research": ResearchSupervisor,
                 "content": ContentSupervisor,
                 "analytics": AnalyticsSupervisor,
+                "finance": FinanceSupervisor,
             }
 
             execution_status.current_phase = "hierarchical_coordination"
