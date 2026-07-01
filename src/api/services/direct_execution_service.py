@@ -30,6 +30,7 @@ from ...agents.supervisors.supervisor_factory import SupervisorFactory
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.masr import MASRouter
 from ...models.research_project import ResearchProject
+from ...models.websocket_messages import ProgressUpdate
 from .event_publisher import EventPublisher
 
 logger = get_logger()
@@ -399,36 +400,40 @@ class DirectExecutionService:
         return len(executions_to_remove)
 
     async def _publish_progress_update(self, execution_status: ExecutionStatus) -> None:
-        """Publish progress update via WebSocket."""
+        """Broadcast a progress update to subscribed WebSocket clients.
+
+        Uses the typed ``EventPublisher.publish_progress_update`` path, which
+        actually fans out over WebSocket via
+        ``connection_manager.broadcast_to_project``. The previous
+        ``publish_project_event`` call was a logs-only compatibility shim, so
+        no PROGRESS event ever reached a subscribed ``/ws`` client during a
+        live query.
+        """
 
         if not self.event_publisher:
             return
 
+        # ``broadcast_to_project`` keys subscriptions by ``UUID``; the execution
+        # project_id is stored as a string, so coerce it and skip the update if
+        # it is not a valid UUID rather than crashing the execution loop.
         try:
-            progress_event = {
-                "event_type": "execution_progress",
-                "execution_id": execution_status.execution_id,
-                "project_id": execution_status.project_id,
-                "status": execution_status.status,
-                "progress_percentage": execution_status.progress_percentage,
-                "current_phase": execution_status.current_phase,
-                "supervisor_type": execution_status.supervisor_type,
-                "workers_used": execution_status.workers_used,
-                "execution_time": execution_status.execution_time_seconds,
-                "timestamp": datetime.now().isoformat(),
-            }
-
-            # Add errors if any
-            if execution_status.errors:
-                progress_event["errors"] = execution_status.errors
-
-            # Add quality scores if available
-            if execution_status.quality_scores:
-                progress_event["quality_scores"] = execution_status.quality_scores
-
-            await self.event_publisher.publish_project_event(
-                execution_status.project_id, progress_event
+            project_uuid = uuid.UUID(str(execution_status.project_id))
+        except (ValueError, TypeError):
+            logger.warning(
+                "Skipping progress broadcast for non-UUID project_id",
+                project_id=execution_status.project_id,
+                execution_id=execution_status.execution_id,
             )
+            return
+
+        try:
+            progress = ProgressUpdate(
+                progress_percentage=execution_status.progress_percentage,
+                current_phase=execution_status.current_phase,
+                current_agent=execution_status.supervisor_type,
+            )
+
+            await self.event_publisher.publish_progress_update(project_uuid, progress)
 
         except Exception as e:
             logger.warning(f"Failed to publish progress update: {e}")
