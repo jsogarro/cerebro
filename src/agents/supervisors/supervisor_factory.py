@@ -24,7 +24,9 @@ from src.core.types import FactoryStatsDict, HealthCheckDict, HealthReportDict
 
 from ...ai_brain.integration.masr_supervisor_bridge import SupervisorConfiguration
 from ..models import AgentTask
+from .analytics_supervisor import AnalyticsSupervisor
 from .base_supervisor import BaseSupervisor
+from .content_supervisor import ContentSupervisor
 from .research_supervisor import ResearchSupervisor
 
 logger = get_logger()
@@ -437,6 +439,62 @@ class SupervisorFactory:
         )
 
         self.register_supervisor(research_spec)
+
+        # Content Supervisor
+        content_spec = SupervisorSpecification(
+            supervisor_type="content",
+            supervisor_class=ContentSupervisor,
+            domain="content",
+            capabilities={
+                SupervisorCapability.CONTENT,
+                SupervisorCapability.CONTENT_CREATION,
+                SupervisorCapability.QUALITY_ASSURANCE,
+                SupervisorCapability.TALKHIER_PROTOCOL,
+                SupervisorCapability.LANGGRAPH_WORKFLOWS,
+                SupervisorCapability.PARALLEL_COORDINATION,
+                SupervisorCapability.CONSENSUS_BUILDING,
+            },
+            average_execution_time_ms=60000,
+            reliability_score=0.93,
+            quality_score=0.88,
+            cost_per_execution=0.010,
+            min_workers=2,
+            max_workers=5,
+            optimal_for_complexity=["simple", "moderate"],
+            optimal_for_strategies=["balanced", "cost_efficient"],
+            description="Coordinates content creation teams for writing, editing, and optimization",
+            version="1.0.0",
+        )
+
+        self.register_supervisor(content_spec)
+
+        # Analytics Supervisor
+        analytics_spec = SupervisorSpecification(
+            supervisor_type="analytics",
+            supervisor_class=AnalyticsSupervisor,
+            domain="analytics",
+            capabilities={
+                SupervisorCapability.ANALYTICS,
+                SupervisorCapability.DATA_ANALYSIS,
+                SupervisorCapability.QUALITY_ASSURANCE,
+                SupervisorCapability.TALKHIER_PROTOCOL,
+                SupervisorCapability.LANGGRAPH_WORKFLOWS,
+                SupervisorCapability.SEQUENTIAL_COORDINATION,
+                SupervisorCapability.CONSENSUS_BUILDING,
+            },
+            average_execution_time_ms=75000,
+            reliability_score=0.94,
+            quality_score=0.89,
+            cost_per_execution=0.012,
+            min_workers=2,
+            max_workers=6,
+            optimal_for_complexity=["moderate", "complex"],
+            optimal_for_strategies=["quality_focused", "balanced"],
+            description="Coordinates analytics teams for data analysis, modeling, and insights",
+            version="1.0.0",
+        )
+
+        self.register_supervisor(analytics_spec)
 
     def register_supervisor(self, spec: SupervisorSpecification) -> None:
         """
