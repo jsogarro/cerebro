@@ -731,6 +731,45 @@ class AgentExecutionService:
                 "reliability_score": 0.93,
                 "quality_score": 0.91,
             },
+            AgentType.FINANCIAL_ANALYSIS: {
+                "name": "Financial Analysis Agent",
+                "description": "Analyzes financial-statement figures and computes/interprets key ratios",
+                "capabilities": [
+                    AgentCapability.EVIDENCE_SYNTHESIS,
+                    AgentCapability.FRAMEWORK_COMPARISON,
+                ],
+                "complexity_handling": ["moderate", "complex"],
+                "optimal_domains": ["finance", "financial_analysis", "accounting"],
+                "average_execution_time_ms": 30000,
+                "reliability_score": 0.92,
+                "quality_score": 0.88,
+            },
+            AgentType.VALUATION: {
+                "name": "Valuation Agent",
+                "description": "Produces DCF/comparables valuations from provided assumptions",
+                "capabilities": [
+                    AgentCapability.EVIDENCE_SYNTHESIS,
+                    AgentCapability.INTEGRATION,
+                ],
+                "complexity_handling": ["moderate", "complex"],
+                "optimal_domains": ["finance", "valuation", "investment"],
+                "average_execution_time_ms": 35000,
+                "reliability_score": 0.90,
+                "quality_score": 0.87,
+            },
+            AgentType.RISK_ASSESSMENT: {
+                "name": "Risk Assessment Agent",
+                "description": "Qualitatively assesses risks of an investment thesis or portfolio",
+                "capabilities": [
+                    AgentCapability.BIAS_DETECTION,
+                    AgentCapability.EVIDENCE_SYNTHESIS,
+                ],
+                "complexity_handling": ["moderate", "complex"],
+                "optimal_domains": ["finance", "risk", "investment"],
+                "average_execution_time_ms": 25000,
+                "reliability_score": 0.93,
+                "quality_score": 0.89,
+            },
         }
 
         from typing import cast
