@@ -23,6 +23,11 @@ from src.agents.content_agents import (
     EditingAgent,
     OptimizationAgent,
 )
+from src.agents.finance_agents import (
+    FinancialAnalysisAgent,
+    RiskAssessmentAgent,
+    ValuationAgent,
+)
 from src.agents.literature_review_agent import LiteratureReviewAgent
 from src.agents.methodology_agent import MethodologyAgent
 from src.agents.synthesis_agent import SynthesisAgent
@@ -51,6 +56,9 @@ class AgentFactory:
         "data_analysis": DataAnalysisAgent,
         "statistical_modeling": StatisticalModelingAgent,
         "insight_synthesis": InsightSynthesisAgent,
+        "financial_analysis": FinancialAnalysisAgent,
+        "valuation": ValuationAgent,
+        "risk_assessment": RiskAssessmentAgent,
     }
 
     @classmethod
