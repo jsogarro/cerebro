@@ -43,12 +43,36 @@ class LLMWorkerAgentBase(BaseAgent):
             self.gemini_service = None
         return self.gemini_service
 
+    def _precompute(self, task: AgentTask) -> dict[str, Any] | None:
+        """Optional hook for deterministic precomputation.
+
+        When a subclass returns a dict, the execute method will:
+        1. Append a formatted "Precomputed exact values:" block to the prompt
+        2. Merge the dict into output["computed"]
+
+        Returns None by default (no precomputation).
+        """
+        return None
+
     async def execute(self, task: AgentTask) -> AgentResult:
         query = str(task.input_data.get("query", "")).strip()
         if not query:
             return self.handle_error(task, ValueError("Query cannot be empty"))
 
+        # Run optional precomputation hook
+        computed = self._precompute(task)
+
+        # Build base prompt
         prompt = self._build_prompt(query, task)
+
+        # Append precomputed values to prompt if present
+        if computed:
+            import json
+
+            computed_block = "\n\nPrecomputed exact values:\n" + json.dumps(
+                computed, indent=2
+            )
+            prompt += computed_block
 
         gemini = self._ensure_gemini_service()
         if gemini is None:
@@ -65,14 +89,19 @@ class LLMWorkerAgentBase(BaseAgent):
                 self.log_error(f"{self.agent_type} generation failed: {exc}")
                 return self.handle_error(task, exc)
 
+        # Build output with optional computed field
+        output: dict[str, Any] = {
+            "content": content,
+            "analysis": content,
+            "agent_type": self.agent_type,
+        }
+        if computed:
+            output["computed"] = computed
+
         return AgentResult(
             task_id=task.id,
             status="success",
-            output={
-                "content": content,
-                "analysis": content,
-                "agent_type": self.agent_type,
-            },
+            output=output,
             confidence=confidence,
             execution_time=0.0,
             metadata=self.build_execution_metadata(agent_type=self.agent_type),
