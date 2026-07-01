@@ -591,11 +591,50 @@ class SupervisorCoordinationService:
     async def _synthesize_results(
         self, results: dict[str, Any], priority_weights: dict[str, float]
     ) -> tuple[Any, bool]:
-        """Synthesize results from multiple supervisors"""
-        return await self.result_aggregator.synthesize_results(
-            results,
-            priority_weights,
+        """Synthesize results from multiple supervisors.
+
+        Produces a real cross-domain synthesis with the LLM, weighting each
+        supervisor by its priority. Consensus is derived from how closely the
+        supervisors' quality scores agree. Falls back to the deterministic
+        aggregator when no LLM is available or synthesis raises.
+        """
+        if not results:
+            return None, False
+
+        quality_scores = [
+            float(r.get("quality_score", 0.0)) for r in results.values()
+        ]
+        consensus = bool(quality_scores) and all(
+            abs(score - quality_scores[0]) < 0.15 for score in quality_scores
         )
+
+        gemini = self._get_gemini_service()
+        if gemini is None:
+            return await self.result_aggregator.synthesize_results(
+                results, priority_weights
+            )
+
+        parts = []
+        for supervisor_type, data in results.items():
+            weight = priority_weights.get(supervisor_type, 1.0)
+            parts.append(
+                f"[{supervisor_type}] (priority weight {weight}):\n{data.get('result')}"
+            )
+        prompt = (
+            "You are orchestrating multiple specialist supervisors. Synthesize "
+            "their outputs below into a single coherent, non-redundant response "
+            "that integrates their perspectives, giving more weight to "
+            "higher-priority sources. Explicitly note any agreements and "
+            "conflicts between them.\n\n" + "\n\n".join(parts)
+        )
+        try:
+            synthesized = await gemini.generate_content(prompt)
+        except Exception as exc:
+            logger.warning("multi_supervisor_synthesis_failed", error=str(exc))
+            return await self.result_aggregator.synthesize_results(
+                results, priority_weights
+            )
+        return synthesized, consensus
 
     def _calculate_consistency(self, results: dict[str, Any]) -> float:
         """Calculate consistency across supervisor results"""
