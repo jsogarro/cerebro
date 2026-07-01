@@ -267,19 +267,26 @@ class QueryComplexityAnalyzer:
         """Analyze linguistic complexity of the query."""
         complexity = 0.0
 
-        # Query length factor
+        # Query length factor. Real queries are short, so the tiers register
+        # from a modest length rather than only for very long prompts.
         word_count = len(query.split())
-        if word_count > 100:
+        if word_count > 60:
+            complexity += 0.4
+        elif word_count > 30:
             complexity += 0.3
-        elif word_count > 50:
+        elif word_count > 15:
             complexity += 0.2
-        elif word_count > 20:
+        elif word_count > 8:
             complexity += 0.1
 
-        # Sentence complexity
+        # Sentence / clause complexity
         sentence_count = len([s for s in query.split(".") if s.strip()])
-        if sentence_count > 5:
+        if sentence_count > 3:
             complexity += 0.2
+        elif sentence_count > 1:
+            complexity += 0.1
+        if query.count(",") >= 3:
+            complexity += 0.1
 
         # Advanced vocabulary indicators
         advanced_words = [
@@ -442,9 +449,12 @@ class QueryComplexityAnalyzer:
 
     def _determine_complexity_level(self, score: float) -> ComplexityLevel:
         """Determine complexity level from score."""
-        if score < 0.3:
+        # Thresholds calibrated to the realistic score distribution produced by
+        # the factor analyzers (a weighted average where few factors fire at
+        # once). The previous 0.3/0.7 cut-offs left almost every query "simple".
+        if score < 0.12:
             return ComplexityLevel.SIMPLE
-        elif score < 0.7:
+        elif score < 0.22:
             return ComplexityLevel.MODERATE
         else:
             return ComplexityLevel.COMPLEX
