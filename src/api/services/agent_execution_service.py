@@ -92,6 +92,7 @@ class AgentExecutionService:
             AgentType.FINANCIAL_ANALYSIS: "financial_analysis",
             AgentType.VALUATION: "valuation",
             AgentType.RISK_ASSESSMENT: "risk_assessment",
+            AgentType.FINANCIAL_CALCULATOR: "financial_calculator",
         }
 
     async def execute_single_agent(
@@ -769,6 +770,18 @@ class AgentExecutionService:
                 "average_execution_time_ms": 25000,
                 "reliability_score": 0.93,
                 "quality_score": 0.89,
+            },
+            AgentType.FINANCIAL_CALCULATOR: {
+                "name": "Financial Calculator Agent",
+                "description": "Deterministic financial/statistical calculations (DCF, NPV, ratios, amortization, stats)",
+                "capabilities": [
+                    AgentCapability.EVIDENCE_SYNTHESIS,
+                ],
+                "complexity_handling": ["simple", "moderate"],
+                "optimal_domains": ["finance", "calculation", "analytics"],
+                "average_execution_time_ms": 50,
+                "reliability_score": 1.0,
+                "quality_score": 1.0,
             },
         }
 

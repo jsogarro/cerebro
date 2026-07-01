@@ -24,6 +24,7 @@ class AgentType(StrEnum):
     FINANCIAL_ANALYSIS = "financial-analysis"
     VALUATION = "valuation"
     RISK_ASSESSMENT = "risk-assessment"
+    FINANCIAL_CALCULATOR = "financial-calculator"
 
 
 class ExecutionMode(StrEnum):
