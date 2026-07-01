@@ -332,3 +332,34 @@ class TestMASRBridgeIntegration:
         config = RoutingDecisionTranslator().translate(routing_decision)
         assert config.supervisor_type == "analytics"
         assert config.domain in ["analytics", "research"]  # May fall back to research
+
+
+class TestPrimaryPathRouting:
+    """MASR routes domain queries to the content/analytics supervisor types, and the
+    direct-execution registry can resolve them (not just fall back to research)."""
+
+    @pytest.mark.asyncio
+    async def test_router_routes_content_and_analytics_queries(self):
+        from src.ai_brain.router.masr import MASRouter
+
+        router = MASRouter()
+        content = await router.route(
+            "Write a blog post about the benefits of meditation", context={}
+        )
+        analytics = await router.route(
+            "Analyze quarterly sales data and identify revenue trends", context={}
+        )
+        assert content.agent_allocation.supervisor_type == "content"
+        assert analytics.agent_allocation.supervisor_type == "analytics"
+
+    def test_direct_execution_registry_includes_new_domains(self):
+        """The direct-execution supervisor registry must resolve content/analytics."""
+        import inspect
+
+        from src.api.services import direct_execution_service as des
+
+        source = inspect.getsource(
+            des.DirectExecutionService._execute_research_workflow
+        )
+        assert '"content": ContentSupervisor' in source
+        assert '"analytics": AnalyticsSupervisor' in source
