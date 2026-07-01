@@ -13,6 +13,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from structlog import get_logger
+
 from src.api.services.supervisor_registry import SupervisorMetrics, SupervisorRegistry
 from src.api.services.supervisor_result_aggregator import ResultAggregator
 from src.api.services.supervisor_worker_dispatcher import WorkerDispatcher
@@ -43,6 +45,8 @@ from src.models.supervisor_api_models import (
 
 __all__ = ["SupervisorCoordinationService", "SupervisorMetrics"]
 
+logger = get_logger()
+
 
 class SupervisorCoordinationService:
     """
@@ -64,6 +68,46 @@ class SupervisorCoordinationService:
         self.active_coordinations: dict[str, dict[str, Any]] = {}
         self.conflict_resolutions: dict[str, dict[str, Any]] = {}
         self.experiments: dict[str, dict[str, Any]] = {}
+
+        # Real execution dependencies (lazily initialized to avoid import
+        # cycles and to defer building the MASR bridge / Gemini client until an
+        # endpoint actually needs to execute).
+        self._real_executor: Any | None = None
+        self._gemini_service: Any | None = None
+
+    def _get_real_executor(self) -> Any:
+        """Lazily build the real supervisor executor (MASR-bridge backed)."""
+        if self._real_executor is None:
+            from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+            from src.agents.supervisors.content_supervisor import ContentSupervisor
+            from src.agents.supervisors.research_supervisor import ResearchSupervisor
+            from src.ai_brain.integration.masr_supervisor_bridge import (
+                MASRSupervisorBridge,
+            )
+            from src.api.services.real_supervisor_executor import RealSupervisorExecutor
+
+            registry = {
+                "research": ResearchSupervisor,
+                "content": ContentSupervisor,
+                "analytics": AnalyticsSupervisor,
+            }
+            self._real_executor = RealSupervisorExecutor(
+                registry, MASRSupervisorBridge()
+            )
+        return self._real_executor
+
+    def _get_gemini_service(self) -> Any:
+        """Lazily build a Gemini service for conflict adjudication; None on failure."""
+        if self._gemini_service is None:
+            try:
+                from src.core.config import settings
+                from src.services.gemini_service import GeminiService
+
+                self._gemini_service = GeminiService(api_key=settings.GEMINI_API_KEY)
+            except Exception as exc:  # pragma: no cover - env-dependent
+                logger.warning("gemini_service_unavailable", error=str(exc))
+                self._gemini_service = None
+        return self._gemini_service
 
     def _initialize_supervisors(self) -> None:
         """Initialize available supervisors based on domains"""
@@ -208,16 +252,38 @@ class SupervisorCoordinationService:
         quality_threshold: float,
         timeout_seconds: int,
     ) -> Any | None:
-        """Execute task with assigned workers"""
-        return await self.worker_dispatcher.execute_with_workers(
-            supervisor_type,
-            task,
-            workers,
-            strategy,
-            coordination_mode,
-            quality_threshold,
-            timeout_seconds,
-        )
+        """Execute a task with assigned workers via real supervisor execution.
+
+        Delegates to the MASR-bridge-backed executor so the supervisor actually
+        coordinates its worker agents, rather than returning a formatted stub
+        string. Falls back to the dispatcher only if real execution raises, so a
+        transient failure degrades gracefully instead of 500-ing the endpoint.
+        """
+        try:
+            return await self._get_real_executor().execute_with_workers(
+                supervisor_type,
+                task,
+                workers,
+                strategy,
+                coordination_mode,
+                quality_threshold,
+                timeout_seconds,
+            )
+        except Exception as exc:
+            logger.warning(
+                "real_supervisor_execution_failed_falling_back",
+                supervisor_type=supervisor_type,
+                error=str(exc),
+            )
+            return await self.worker_dispatcher.execute_with_workers(
+                supervisor_type,
+                task,
+                workers,
+                strategy,
+                coordination_mode,
+                quality_threshold,
+                timeout_seconds,
+            )
 
     def _calculate_quality_score(self, result: Any, threshold: float) -> float:
         """Calculate quality score for execution result"""
@@ -294,6 +360,31 @@ class SupervisorCoordinationService:
             or ConflictResolutionStrategy.SUPERVISOR_OVERRIDE,
         )
 
+        # Execute the coordinated workers for real and attach the result to the
+        # plan. A failure degrades to an initiated plan rather than 500-ing.
+        status = "completed"
+        try:
+            execution_result = await self._execute_with_workers(
+                supervisor_type,
+                request.task,
+                assigned_workers,
+                SupervisionStrategy.ITERATIVE
+                if (request.refinement_rounds or 1) > 1
+                else SupervisionStrategy.COLLABORATIVE,
+                request.coordination_mode,
+                0.8,
+                300,
+            )
+            coordination_plan["execution_result"] = execution_result
+        except Exception as exc:
+            logger.warning(
+                "worker_coordination_execution_failed",
+                coordination_id=coordination_id,
+                error=str(exc),
+            )
+            coordination_plan["execution_error"] = str(exc)
+            status = "initiated"
+
         # Store active coordination
         self.active_coordinations[coordination_id] = {
             "supervisor_type": supervisor_type,
@@ -315,7 +406,7 @@ class SupervisorCoordinationService:
             workers_assigned=assigned_workers,
             coordination_plan=coordination_plan,
             estimated_completion_time=estimated_time,
-            status="initiated",
+            status=status,
         )
 
     async def _assign_workers_for_coordination(
@@ -774,45 +865,22 @@ class SupervisorCoordinationService:
             "timestamp": datetime.now(UTC),
         }
 
-        # Resolve based on strategy
-        if (
-            request.resolution_strategy
-            == ConflictResolutionStrategy.SUPERVISOR_OVERRIDE
-        ):
-            resolved = request.supervisor_guidance or "Supervisor decision"
-            confidence = 0.95
-            reasoning = "Supervisor authority used to resolve conflict"
+        # Resolve based on strategy. The resolver handles the deterministic
+        # strategies (majority vote, quality-based, and supervisor override with
+        # explicit guidance) directly, and uses real supervisor/LLM adjudication
+        # for the remaining strategies (weighted consensus, debate resolution,
+        # and supervisor override with no guidance) instead of returning
+        # placeholder text.
+        from src.api.services.real_supervisor_executor import (
+            resolve_conflict_with_supervisor,
+        )
 
-        elif request.resolution_strategy == ConflictResolutionStrategy.MAJORITY_VOTE:
-            # Find most common output
-            outputs = [w["output"] for w in request.worker_outputs]
-            resolved = max(set(outputs), key=outputs.count)
-            confidence = outputs.count(resolved) / len(outputs)
-            reasoning = f"Majority vote selected output with {confidence:.2%} agreement"
-
-        elif request.resolution_strategy == ConflictResolutionStrategy.QUALITY_BASED:
-            # Select output with highest confidence
-            best_output = max(
-                request.worker_outputs, key=lambda x: x.get("confidence", 0)
-            )
-            resolved = best_output["output"]
-            confidence = best_output.get("confidence", 0.8)
-            reasoning = (
-                f"Selected output with highest confidence score of {confidence:.2f}"
-            )
-
-        elif (
-            request.resolution_strategy == ConflictResolutionStrategy.WEIGHTED_CONSENSUS
-        ):
-            # Weighted combination (simplified)
-            resolved = "Weighted consensus of all outputs"
-            confidence = 0.85
-            reasoning = "Combined outputs using weighted consensus"
-
-        else:  # DEBATE_RESOLUTION
-            resolved = "Resolution through structured debate"
-            confidence = 0.88
-            reasoning = "Workers engaged in structured debate to reach resolution"
+        resolved, confidence, reasoning = await resolve_conflict_with_supervisor(
+            request.worker_outputs,
+            request.resolution_strategy.value,
+            request.supervisor_guidance,
+            self._get_gemini_service(),
+        )
 
         # Calculate worker consensus
         worker_consensus = {
