@@ -28,6 +28,7 @@ from src.agents.finance_agents import (
     RiskAssessmentAgent,
     ValuationAgent,
 )
+from src.agents.financial_calculator_agent import FinancialCalculatorAgent
 from src.agents.literature_review_agent import LiteratureReviewAgent
 from src.agents.methodology_agent import MethodologyAgent
 from src.agents.synthesis_agent import SynthesisAgent
@@ -50,6 +51,7 @@ class AgentFactory:
         "methodology": MethodologyAgent,
         "synthesis": SynthesisAgent,
         "citation": CitationAgent,
+        "financial_calculator": FinancialCalculatorAgent,
         "content_planning": ContentPlanningAgent,
         "drafting": DraftingAgent,
         "editing": EditingAgent,
