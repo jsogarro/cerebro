@@ -3,6 +3,8 @@
 from datetime import UTC, datetime
 from typing import Any
 
+from structlog import get_logger
+
 from src.api.services.talkhier_state_manager import TalkHierStateManager
 from src.models.talkhier_api_models import (
     ConsensusType,
@@ -14,9 +16,14 @@ from src.models.talkhier_api_models import (
     SessionStatus,
 )
 
+logger = get_logger()
+
 
 class TalkHierRoundExecutor:
     """Executes refinement rounds and computes round-level outcomes."""
+
+    def __init__(self) -> None:
+        self._gemini_service: Any | None = None
 
     async def execute_refinement_round(
         self,
@@ -132,17 +139,8 @@ class TalkHierRoundExecutor:
         request: RefinementRoundRequest,
         round_record: RefinementRound,
     ) -> dict[str, Any]:
-        """Execute refinement through supervisor."""
-        responses = {}
-
-        for participant in session.participants:
-            if participant.role == MessageRole.WORKER:
-                responses[participant.agent_id] = {
-                    "content": f"Refined response from {participant.agent_id}",
-                    "confidence": 0.75 + (request.round_number * 0.05),
-                    "evidence": ["Evidence 1", "Evidence 2"],
-                }
-
+        """Execute refinement by invoking each worker's real agent."""
+        responses = await self._invoke_worker_agents(session, request)
         return {"responses": responses}
 
     async def execute_direct_refinement(
@@ -151,18 +149,134 @@ class TalkHierRoundExecutor:
         request: RefinementRoundRequest,
         round_record: RefinementRound,
     ) -> dict[str, dict[str, Any]]:
-        """Execute direct agent refinement without supervisor."""
-        responses = {}
+        """Execute direct agent refinement by invoking each worker's real agent."""
+        return await self._invoke_worker_agents(session, request)
 
+    async def _invoke_worker_agents(
+        self, session: Any, request: RefinementRoundRequest
+    ) -> dict[str, dict[str, Any]]:
+        """Run every worker participant's real agent for this round."""
+        responses: dict[str, dict[str, Any]] = {}
         for participant in session.participants:
-            if participant.role == MessageRole.WORKER:
-                responses[participant.agent_id] = {
-                    "content": f"Direct response from {participant.agent_id}",
-                    "confidence": 0.7 + (request.round_number * 0.05),
-                    "evidence": [],
-                }
-
+            if participant.role != MessageRole.WORKER:
+                continue
+            responses[participant.agent_id] = await self._invoke_worker_agent(
+                session, participant, request
+            )
         return responses
+
+    async def _invoke_worker_agent(
+        self, session: Any, participant: Any, request: RefinementRoundRequest
+    ) -> dict[str, Any]:
+        """Invoke a single worker's agent and extract its refinement response."""
+        from src.agents.factory import AgentFactory
+        from src.agents.models import AgentTask
+
+        agent_type = self._resolve_agent_type(participant.agent_type)
+        previous = ""
+        if session.current_result:
+            previous = str(session.current_result.get("content", ""))
+
+        try:
+            agent = AgentFactory.create_agent(
+                agent_type, {"gemini_service": self._get_gemini_service()}
+            )
+            task = AgentTask(
+                id=f"talkhier_{session.session_id}_{participant.agent_id}_r{request.round_number}",
+                agent_type=agent_type,
+                input_data={
+                    "query": session.query,
+                    "previous_result": previous,
+                    "refinement_focus": request.refinement_focus or "",
+                    "round_number": request.round_number,
+                },
+            )
+            result = await agent.execute(task)
+            return {
+                "content": self._extract_content(result.output),
+                "confidence": float(getattr(result, "confidence", 0.7)),
+                "evidence": self._extract_evidence(result.output),
+            }
+        except Exception as exc:
+            logger.warning(
+                "talkhier_worker_invocation_failed",
+                agent_id=participant.agent_id,
+                agent_type=agent_type,
+                error=str(exc),
+            )
+            return {
+                "content": "",
+                "confidence": 0.0,
+                "evidence": [],
+                "error": str(exc),
+            }
+
+    @staticmethod
+    def _resolve_agent_type(agent_type: str) -> str:
+        """Map a participant's agent type to a concrete agent-registry key."""
+        valid = {
+            "literature_review",
+            "comparative_analysis",
+            "methodology",
+            "synthesis",
+            "citation",
+        }
+        if agent_type in valid:
+            return agent_type
+        lowered = (agent_type or "").lower()
+        for key in valid:
+            if key.split("_")[0] in lowered:
+                return key
+        if "analy" in lowered:
+            return "comparative_analysis"
+        if "cit" in lowered:
+            return "citation"
+        if "method" in lowered:
+            return "methodology"
+        if "synth" in lowered:
+            return "synthesis"
+        # Default to a self-contained agent (literature review works standalone;
+        # synthesis needs prior agent outputs and would fail for a solo worker).
+        return "literature_review"
+
+    @staticmethod
+    def _extract_content(output: Any) -> str:
+        """Pull a human-readable content string out of an agent's output."""
+        if isinstance(output, str):
+            return output
+        if isinstance(output, dict):
+            for key in ("content", "summary", "narrative", "synthesis", "analysis"):
+                value = output.get(key)
+                if isinstance(value, str) and value:
+                    return value
+            findings = output.get("key_findings")
+            if isinstance(findings, list) and findings:
+                return " ".join(str(f) for f in findings)
+            return str(output)
+        return str(output)
+
+    @staticmethod
+    def _extract_evidence(output: Any) -> list[Any]:
+        """Pull an evidence/source list out of an agent's output, if present."""
+        if isinstance(output, dict):
+            for key in ("evidence", "sources", "sources_found", "citations"):
+                value = output.get(key)
+                if isinstance(value, list):
+                    return value
+        return []
+
+    def _get_gemini_service(self) -> Any:
+        """Lazily build a Gemini service for worker agents; None on failure."""
+        if self._gemini_service is None:
+            try:
+                from src.core.config import settings
+                from src.services.gemini_service import GeminiService
+
+                self._gemini_service = GeminiService(api_key=settings.GEMINI_API_KEY)
+            except Exception as exc:  # pragma: no cover - env-dependent
+                logger.warning("gemini_service_unavailable", error=str(exc))
+                self._gemini_service = None
+        return self._gemini_service
 
     async def aggregate_refinement_results(
         self,
