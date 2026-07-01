@@ -70,7 +70,7 @@ class AnalysisRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     analysis_type: str = Field(
         default="comprehensive",
-        pattern="^(basic|comprehensive|comparative|methodological)$",
+        pattern="^(basic|comprehensive|comparative|methodological|exhaustive)$",
     )
     domains: list[str] = Field(default_factory=list)
     depth: ResearchDepth = Field(default=ResearchDepth.COMPREHENSIVE)
