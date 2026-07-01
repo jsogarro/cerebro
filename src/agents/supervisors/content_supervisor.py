@@ -18,6 +18,12 @@ from langgraph.graph import END, StateGraph
 from structlog import get_logger
 
 from ..communication.talkhier_message import MessageType, TalkHierContent
+from ..content_agents import (
+    ContentPlanningAgent,
+    DraftingAgent,
+    EditingAgent,
+    OptimizationAgent,
+)
 from ..models import AgentTask
 from .base_supervisor import BaseSupervisor, SupervisionState, WorkerDefinition
 
@@ -75,7 +81,7 @@ class ContentSupervisor(BaseSupervisor):
             {
                 "content_planning": WorkerDefinition(
                     worker_type="content_planning",
-                    agent_class=type("ContentPlanningAgent", (), {}),  # Placeholder
+                    agent_class=ContentPlanningAgent,
                     specialization="Content strategy and topic research",
                     capabilities=[
                         "topic_research",
@@ -90,7 +96,7 @@ class ContentSupervisor(BaseSupervisor):
                 ),
                 "drafting": WorkerDefinition(
                     worker_type="drafting",
-                    agent_class=type("DraftingAgent", (), {}),  # Placeholder
+                    agent_class=DraftingAgent,
                     specialization="Content creation and writing",
                     capabilities=[
                         "writing",
@@ -105,7 +111,7 @@ class ContentSupervisor(BaseSupervisor):
                 ),
                 "editing": WorkerDefinition(
                     worker_type="editing",
-                    agent_class=type("EditingAgent", (), {}),  # Placeholder
+                    agent_class=EditingAgent,
                     specialization="Content editing and improvement",
                     capabilities=[
                         "grammar_check",
@@ -120,7 +126,7 @@ class ContentSupervisor(BaseSupervisor):
                 ),
                 "optimization": WorkerDefinition(
                     worker_type="optimization",
-                    agent_class=type("OptimizationAgent", (), {}),  # Placeholder
+                    agent_class=OptimizationAgent,
                     specialization="SEO and readability optimization",
                     capabilities=[
                         "seo_optimization",
