@@ -89,6 +89,9 @@ class AgentExecutionService:
             AgentType.METHODOLOGY: "methodology",
             AgentType.COMPARATIVE_ANALYSIS: "comparative_analysis",
             AgentType.SYNTHESIS: "synthesis",
+            AgentType.FINANCIAL_ANALYSIS: "financial_analysis",
+            AgentType.VALUATION: "valuation",
+            AgentType.RISK_ASSESSMENT: "risk_assessment",
         }
 
     async def execute_single_agent(

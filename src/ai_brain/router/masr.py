@@ -449,6 +449,7 @@ class MASRouter:
             "research": "research",
             "content": "content",
             "analytics": "analytics",
+            "finance": "finance",
             "service": "service",
             "multimodal": "content",  # Fallback to content supervisor for multimodal
         }
@@ -475,6 +476,7 @@ class MASRouter:
             "research": "research_specialist",
             "content": "content_specialist",
             "analytics": "analytics_specialist",
+            "finance": "financial_analysis",
             "service": "service_specialist",
             "multimodal": "multimodal_specialist",
         }

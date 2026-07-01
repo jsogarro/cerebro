@@ -21,6 +21,9 @@ class AgentType(StrEnum):
     METHODOLOGY = "methodology"
     COMPARATIVE_ANALYSIS = "comparative-analysis"
     SYNTHESIS = "synthesis"
+    FINANCIAL_ANALYSIS = "financial-analysis"
+    VALUATION = "valuation"
+    RISK_ASSESSMENT = "risk-assessment"
 
 
 class ExecutionMode(StrEnum):

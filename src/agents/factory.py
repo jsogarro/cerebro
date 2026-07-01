@@ -12,6 +12,11 @@ from structlog import get_logger
 from src.agents.base import BaseAgent
 from src.agents.citation_agent import CitationAgent
 from src.agents.comparative_analysis_agent import ComparativeAnalysisAgent
+from src.agents.finance_agents import (
+    FinancialAnalysisAgent,
+    RiskAssessmentAgent,
+    ValuationAgent,
+)
 from src.agents.literature_review_agent import LiteratureReviewAgent
 from src.agents.methodology_agent import MethodologyAgent
 from src.agents.synthesis_agent import SynthesisAgent
@@ -33,6 +38,9 @@ class AgentFactory:
         "methodology": MethodologyAgent,
         "synthesis": SynthesisAgent,
         "citation": CitationAgent,
+        "financial_analysis": FinancialAnalysisAgent,
+        "valuation": ValuationAgent,
+        "risk_assessment": RiskAssessmentAgent,
     }
 
     @classmethod
