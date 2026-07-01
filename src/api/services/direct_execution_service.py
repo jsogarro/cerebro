@@ -309,8 +309,13 @@ class DirectExecutionService:
             raise
 
         finally:
-            # Update completion time and metrics
-            execution_status.completed_at = datetime.now()
+            # Update completion time and metrics. Use timezone-aware UTC to
+            # match ``started_at`` (``datetime.now(UTC)``); a naive
+            # ``datetime.now()`` here raised "can't subtract offset-naive and
+            # offset-aware datetimes" from this finally block on every run,
+            # which — because it propagates even after the body succeeds —
+            # tripped the @retry wrapper and re-ran the whole workflow.
+            execution_status.completed_at = datetime.now(UTC)
             execution_status.execution_time_seconds = (
                 execution_status.completed_at - execution_status.started_at
             ).total_seconds()
@@ -380,7 +385,7 @@ class DirectExecutionService:
     async def cleanup_completed_executions(self, max_age_hours: int = 24) -> int:
         """Clean up old completed executions."""
 
-        cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
+        cutoff_time = datetime.now(UTC) - timedelta(hours=max_age_hours)
 
         executions_to_remove = [
             execution_id
@@ -451,7 +456,9 @@ class DirectExecutionService:
                     "status": execution.status,
                     "progress": execution.progress_percentage,
                     "current_phase": execution.current_phase,
-                    "duration": (datetime.now() - execution.started_at).total_seconds(),
+                    "duration": (
+                        datetime.now(UTC) - execution.started_at
+                    ).total_seconds(),
                 }
                 for execution in self.active_executions.values()
                 if execution.status in ["pending", "running"]
