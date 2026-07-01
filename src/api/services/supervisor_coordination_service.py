@@ -601,9 +601,7 @@ class SupervisorCoordinationService:
         if not results:
             return None, False
 
-        quality_scores = [
-            float(r.get("quality_score", 0.0)) for r in results.values()
-        ]
+        quality_scores = [float(r.get("quality_score", 0.0)) for r in results.values()]
         consensus = bool(quality_scores) and all(
             abs(score - quality_scores[0]) < 0.15 for score in quality_scores
         )
