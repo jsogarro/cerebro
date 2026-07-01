@@ -11,6 +11,7 @@ This is the RECOMMENDED API for most use cases, as it leverages
 Cerebro's full intelligence and learning capabilities.
 """
 
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -403,6 +404,51 @@ async def get_execution_results(execution_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve execution results",
+        ) from e
+
+
+@router.post("/execution/{project_id}/resume")
+async def resume_execution(project_id: str) -> dict[str, Any]:
+    """
+    Resume execution from the latest checkpoint for a project.
+
+    This endpoint loads the most recent recoverable checkpoint for the project
+    and resumes execution from that point. Returns the execution ID if successful.
+    """
+    try:
+        execution_service = get_direct_execution_service()
+
+        # Convert project_id string to UUID
+        try:
+            project_uuid = uuid.UUID(project_id)
+        except ValueError as ve:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid project_id format: {project_id}",
+            ) from ve
+
+        execution_id = await execution_service.resume_execution(project_uuid)
+
+        if not execution_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No recoverable checkpoint found for project {project_id}",
+            )
+
+        return {
+            "execution_id": execution_id,
+            "project_id": project_id,
+            "status": "resumed",
+            "message": "Execution resumed from checkpoint",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to resume execution: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to resume execution from checkpoint",
         ) from e
 
 

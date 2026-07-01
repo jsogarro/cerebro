@@ -23,6 +23,7 @@ from structlog import get_logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
+from src.repositories.checkpoint_repository import CheckpointRepository
 
 from ...agents.models import AgentTask
 from ...agents.supervisors.analytics_supervisor import AnalyticsSupervisor
@@ -85,6 +86,7 @@ class DirectExecutionService:
         supervisor_factory: SupervisorFactory | None = None,
         event_publisher: EventPublisher | None = None,
         gemini_service: Any | None = None,
+        session_factory: Any | None = None,
     ):
         """Initialize direct execution service."""
 
@@ -96,6 +98,7 @@ class DirectExecutionService:
         )
         self.supervisor_factory = supervisor_factory or SupervisorFactory()
         self.event_publisher = event_publisher
+        self.session_factory = session_factory
 
         # Execution tracking
         self.active_executions: dict[str, ExecutionStatus] = {}
@@ -117,6 +120,63 @@ class DirectExecutionService:
             "average_execution_time": 0.0,
             "concurrent_executions": 0,
         }
+
+    async def _checkpoint(self, execution_status: ExecutionStatus, phase: str) -> None:
+        """
+        Create a checkpoint for the current execution state.
+
+        Gracefully degrades when DB is unavailable — logs and continues.
+        """
+        if not self.session_factory:
+            return
+
+        try:
+            async with self.session_factory() as session:
+                repository = CheckpointRepository(session)
+
+                checkpoint_data = {
+                    "status": execution_status.status,
+                    "progress_percentage": execution_status.progress_percentage,
+                    "current_phase": execution_status.current_phase,
+                    "routing_decision": execution_status.routing_decision,
+                    "supervisor_type": execution_status.supervisor_type,
+                    "agent_results": execution_status.agent_results,
+                    "quality_scores": execution_status.quality_scores,
+                    "final_output": execution_status.final_output,
+                    "workers_used": execution_status.workers_used,
+                    "errors": execution_status.errors,
+                    "warnings": execution_status.warnings,
+                    "retry_count": execution_status.retry_count,
+                }
+
+                execution_metrics = {
+                    "started_at": execution_status.started_at.isoformat(),
+                    "execution_time_seconds": execution_status.execution_time_seconds,
+                }
+
+                await repository.create_checkpoint(
+                    workflow_id=execution_status.execution_id,
+                    project_id=uuid.UUID(execution_status.project_id),
+                    checkpoint_data=checkpoint_data,
+                    phase=phase,
+                    checkpoint_type="automatic",
+                    execution_metrics=execution_metrics,
+                )
+                await session.commit()
+
+                logger.debug(
+                    "Created checkpoint",
+                    execution_id=execution_status.execution_id,
+                    phase=phase,
+                )
+
+        except Exception as e:
+            logger.warning(
+                "Failed to create checkpoint (degrading gracefully)",
+                execution_id=execution_status.execution_id,
+                phase=phase,
+                error=str(e),
+            )
 
     async def start_research_execution(
         self, project: ResearchProject, context: dict[str, Any] | None = None
@@ -212,6 +272,7 @@ class DirectExecutionService:
             execution_status.progress_percentage = 20.0
 
             await self._publish_progress_update(execution_status)
+            await self._checkpoint(execution_status, "masr_routing")
 
             # Step 2: Supervisor Execution
             logger.info(
@@ -247,6 +308,7 @@ class DirectExecutionService:
             execution_status.current_phase = "hierarchical_coordination"
             execution_status.progress_percentage = 40.0
             await self._publish_progress_update(execution_status)
+            await self._checkpoint(execution_status, "supervisor_execution")
 
             # Execute via MASR-Supervisor bridge
             supervisor_result = await self.supervisor_bridge.execute_routing_decision(
@@ -282,6 +344,8 @@ class DirectExecutionService:
                 execution_status.current_phase = "completed"
 
                 self.execution_stats["successful_executions"] += 1
+
+                await self._checkpoint(execution_status, "completed")
 
                 logger.info(
                     f"Direct execution {execution_status.execution_id} completed successfully"
@@ -361,6 +425,86 @@ class DirectExecutionService:
                 "status": execution.status,
                 "progress": execution.progress_percentage,
             }
+
+    async def resume_execution(self, project_id: uuid.UUID) -> str | None:
+        """
+        Resume execution from the latest recoverable checkpoint.
+
+        Args:
+            project_id: Project UUID to resume
+
+        Returns:
+            Execution ID if resumed successfully, None otherwise
+        """
+        if not self.session_factory:
+            logger.warning(
+                "Cannot resume execution without database",
+                project_id=str(project_id),
+            )
+            return None
+
+        try:
+            async with self.session_factory() as session:
+                repository = CheckpointRepository(session)
+                checkpoint = await repository.get_recovery_point(project_id)
+
+                if not checkpoint:
+                    logger.info(
+                        "No recoverable checkpoint found",
+                        project_id=str(project_id),
+                    )
+                    return None
+
+                # Restore checkpoint data
+                restored_data = await repository.restore_from_checkpoint(checkpoint.id)
+
+                if not restored_data:
+                    logger.warning(
+                        "Failed to restore checkpoint data",
+                        checkpoint_id=str(checkpoint.id),
+                    )
+                    return None
+
+                # Rebuild ExecutionStatus from checkpoint
+                checkpoint_data = restored_data["checkpoint_data"]
+                execution_id: str = str(restored_data["workflow_id"])
+
+                execution_status = ExecutionStatus(
+                    execution_id=execution_id,
+                    project_id=str(project_id),
+                    status=checkpoint_data["status"],
+                    progress_percentage=checkpoint_data["progress_percentage"],
+                    current_phase=checkpoint_data["current_phase"],
+                    routing_decision=checkpoint_data.get("routing_decision"),
+                    supervisor_type=checkpoint_data.get("supervisor_type"),
+                    agent_results=checkpoint_data.get("agent_results", {}),
+                    quality_scores=checkpoint_data.get("quality_scores", {}),
+                    final_output=checkpoint_data.get("final_output"),
+                    workers_used=checkpoint_data.get("workers_used", 0),
+                    errors=checkpoint_data.get("errors", []),
+                    warnings=checkpoint_data.get("warnings", []),
+                    retry_count=checkpoint_data.get("retry_count", 0),
+                )
+
+                # Register in active executions
+                self.active_executions[execution_id] = execution_status
+
+                logger.info(
+                    "Resumed execution from checkpoint",
+                    execution_id=execution_id,
+                    project_id=str(project_id),
+                    phase=restored_data["phase"],
+                )
+
+                return execution_id
+
+        except Exception as e:
+            logger.error(
+                "Failed to resume execution",
+                project_id=str(project_id),
+                error=str(e),
+            )
+            return None
 
     async def cancel_execution(self, execution_id: str) -> bool:
         """Cancel active execution."""
