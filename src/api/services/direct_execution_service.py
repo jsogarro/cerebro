@@ -25,6 +25,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 
 from ...agents.models import AgentTask
+from ...agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+from ...agents.supervisors.content_supervisor import ContentSupervisor
 from ...agents.supervisors.research_supervisor import ResearchSupervisor
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
@@ -235,7 +237,9 @@ class DirectExecutionService:
             from ...agents.supervisors.base_supervisor import BaseSupervisor
 
             supervisor_registry: dict[str, type[BaseSupervisor]] = {
-                "research": ResearchSupervisor
+                "research": ResearchSupervisor,
+                "content": ContentSupervisor,
+                "analytics": AnalyticsSupervisor,
             }
 
             execution_status.current_phase = "hierarchical_coordination"
