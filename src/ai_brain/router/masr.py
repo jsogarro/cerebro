@@ -80,6 +80,12 @@ class RoutingDecision:
     estimated_quality: float
     confidence_score: float
 
+    # High-level routing strategy that produced this decision. Preserved
+    # explicitly because the forward map to ``OptimizationStrategy`` is lossy
+    # (both BALANCED and ADAPTIVE map to OptimizationStrategy.BALANCED), so it
+    # cannot be recovered from ``optimization_result.strategy_used``.
+    routing_strategy: RoutingStrategy = RoutingStrategy.BALANCED
+
     # Execution details
     fallback_strategy: str = "graceful_degradation"
     monitoring_level: str = "standard"  # minimal, standard, detailed
@@ -204,10 +210,17 @@ class MASRouter:
             # Step 1: Analyze query complexity
             complexity_analysis = await self.complexity_analyzer.analyze(query, context)
 
-            # Step 2: Optimize model selection
-            routing_strategy = strategy or self._select_routing_strategy(
-                complexity_analysis, context
-            )
+            # Step 2: Optimize model selection.
+            # ``strategy`` may arrive as a bare string when the caller used a
+            # Pydantic model with ``use_enum_values=True`` (e.g. RoutingRequest),
+            # so normalize to a RoutingStrategy member before it is stored on the
+            # decision and used for ``.value`` lookups downstream.
+            if strategy is not None:
+                routing_strategy = RoutingStrategy(strategy)
+            else:
+                routing_strategy = self._select_routing_strategy(
+                    complexity_analysis, context
+                )
             optimization_strategy = self._map_to_optimization_strategy(routing_strategy)
 
             optimization_result = await self.cost_optimizer.optimize(
@@ -235,6 +248,7 @@ class MASRouter:
                 timestamp=start_time,
                 complexity_analysis=complexity_analysis,
                 optimization_result=optimization_result,
+                routing_strategy=routing_strategy,
                 collaboration_mode=collaboration_mode,
                 agent_allocation=agent_allocation,
                 estimated_cost=predictions["cost"],
@@ -650,6 +664,7 @@ class MASRouter:
             timestamp=datetime.now(),
             complexity_analysis=fallback_analysis,
             optimization_result=fallback_optimization,
+            routing_strategy=self.default_strategy,
             collaboration_mode=CollaborationMode.DIRECT,
             agent_allocation=AgentAllocation(
                 supervisor_type="general", worker_count=1, worker_types=["general"]
