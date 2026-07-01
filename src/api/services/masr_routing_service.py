@@ -124,12 +124,19 @@ class MASRRoutingService:
                     )
                     supervisor_allocations.append(allocation)
 
-            # Get selected models info
-            model_tier = (
-                decision.optimization_result.model_tier
-                if hasattr(decision.optimization_result, "model_tier")
-                else ModelTier.STANDARD
-            )
+            # Get selected models info. The chosen tier lives on the optimization
+            # result's ``primary_model`` (a cost-optimizer ModelTier); there is no
+            # ``model_tier`` attribute, so the previous ``hasattr`` check always
+            # failed and every response defaulted to STANDARD. Map the primary
+            # model's tier to the service-level ModelTier by value.
+            model_tier = ModelTier.STANDARD
+            primary_model = getattr(decision.optimization_result, "primary_model", None)
+            raw_tier = getattr(primary_model, "tier", None)
+            if raw_tier is not None:
+                try:
+                    model_tier = ModelTier(raw_tier.value)
+                except ValueError:
+                    model_tier = ModelTier.STANDARD
             selected_models = self._get_model_info(model_tier)
 
             # Calculate confidence score
