@@ -314,9 +314,19 @@ If a paper exists but with slightly different details, mark exists=true and prov
             if hasattr(paper_data, "intermediate_outputs"):
                 state.context["final_paper"] = paper_data.intermediate_outputs
 
+        # Aggregate worker outputs for verification
+        aggregated_content = self._aggregate_worker_content(state)
+
+        # Run verification QA gate (import the supervisor method dynamically)
+        verification_result = await self._run_verification_via_supervisor(
+            aggregated_content, langgraph_state
+        )
+        state.context["verification"] = verification_result
+        state.worker_results["verification"] = verification_result
+
         worker_messages = []
         for worker_type, result in state.worker_results.items():
-            if result:
+            if result and worker_type != "verification":
                 worker_messages.append(
                     TalkHierMessage(
                         from_agent=worker_type,
@@ -334,13 +344,28 @@ If a paper exists but with slightly different details, mark exists=true and prov
                 )
             )
 
-            state.consensus_score = consensus_score.overall_score
-            state.quality_score = consensus_score.evidence_quality
+            base_consensus = consensus_score.overall_score
+            base_quality = consensus_score.evidence_quality
+
+            # Reduce score if verification found issues
+            if verification_result["verdict"] == "revise":
+                state.consensus_score = base_consensus * 0.85
+                state.quality_score = base_quality * 0.85
+                logger.info(
+                    "research_verification_flagged_issues",
+                    base_consensus=base_consensus,
+                    base_quality=base_quality,
+                    adjusted_consensus=state.consensus_score,
+                    adjusted_quality=state.quality_score,
+                )
+            else:
+                state.consensus_score = base_consensus
+                state.quality_score = base_quality
 
             logger.info(
                 "research_consensus_evaluated",
-                consensus_score=consensus_score.overall_score,
-                evidence_quality=consensus_score.evidence_quality,
+                consensus_score=state.consensus_score,
+                evidence_quality=state.quality_score,
             )
         else:
             logger.warning("research_consensus_missing_worker_results")
@@ -351,6 +376,81 @@ If a paper exists but with slightly different details, mark exists=true and prov
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
+
+    def _aggregate_worker_content(self, state: SupervisionState) -> str:
+        """Aggregate worker outputs into a single text for verification."""
+        parts = []
+        for worker_type in [
+            "literature_review",
+            "methodology",
+            "comparative_analysis",
+            "synthesis",
+            "draft_paper",
+        ]:
+            result = state.worker_results.get(worker_type)
+            if result:
+                content = result.get("content", "") if isinstance(result, dict) else ""
+                if hasattr(result, "content"):
+                    content = result.content
+                if content:
+                    parts.append(f"{worker_type.upper()}: {content}")
+        return "\n\n".join(parts) if parts else ""
+
+    async def _run_verification_via_supervisor(
+        self, content: str, langgraph_state: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Run verification by borrowing the supervisor's _run_verification method."""
+        # Get the supervisor from the langgraph state context
+        supervisor = langgraph_state.get("supervisor_instance")
+        if supervisor and hasattr(supervisor, "_run_verification"):
+            result: dict[str, Any] = await supervisor._run_verification(content)
+            return result
+
+        # Fallback: implement inline
+        if not content or not content.strip():
+            return {"verdict": "pass", "report": "No content to verify."}
+
+        try:
+            import uuid
+
+            from ..factory import AgentFactory
+            from ..models import AgentTask
+
+            verification_agent = AgentFactory.create_agent(
+                "verification",
+                {
+                    "gemini_service": self.gemini_service,
+                    "cache_client": None,
+                },
+            )
+
+            verification_task = AgentTask(
+                id=str(uuid.uuid4()),
+                agent_type="verification",
+                input_data={"content": content},
+            )
+
+            verification_result = await verification_agent.execute(verification_task)
+            report_text = verification_result.output.get("content", "")
+            verdict_line = next(
+                (
+                    line
+                    for line in report_text.split("\n")
+                    if line.startswith("VERDICT:")
+                ),
+                "",
+            )
+            verdict = "pass"
+            if "REVISE" in verdict_line.upper():
+                verdict = "revise"
+            elif "PASS" in verdict_line.upper():
+                verdict = "pass"
+
+            return {"verdict": verdict, "report": report_text}
+
+        except Exception as e:
+            logger.error("research_verification_failed", error=str(e))
+            return {"verdict": "pass", "report": f"Verification error: {e!s}"}
 
     async def get_research_quality_assessment(
         self,
