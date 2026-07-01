@@ -32,6 +32,7 @@ from src.agents.financial_calculator_agent import FinancialCalculatorAgent
 from src.agents.literature_review_agent import LiteratureReviewAgent
 from src.agents.methodology_agent import MethodologyAgent
 from src.agents.synthesis_agent import SynthesisAgent
+from src.agents.verification_agent import VerificationAgent
 
 logger = get_logger()
 
@@ -61,6 +62,7 @@ class AgentFactory:
         "financial_analysis": FinancialAnalysisAgent,
         "valuation": ValuationAgent,
         "risk_assessment": RiskAssessmentAgent,
+        "verification": VerificationAgent,
     }
 
     @classmethod

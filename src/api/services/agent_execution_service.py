@@ -93,6 +93,7 @@ class AgentExecutionService:
             AgentType.VALUATION: "valuation",
             AgentType.RISK_ASSESSMENT: "risk_assessment",
             AgentType.FINANCIAL_CALCULATOR: "financial_calculator",
+            AgentType.VERIFICATION: "verification",
         }
 
     async def execute_single_agent(
@@ -782,6 +783,19 @@ class AgentExecutionService:
                 "average_execution_time_ms": 50,
                 "reliability_score": 1.0,
                 "quality_score": 1.0,
+            },
+            AgentType.VERIFICATION: {
+                "name": "Verification Agent",
+                "description": "Reviews content for errors, unsupported claims, and hallucinations",
+                "capabilities": [
+                    AgentCapability.BIAS_DETECTION,
+                    AgentCapability.SOURCE_EVALUATION,
+                ],
+                "complexity_handling": ["simple", "moderate", "complex"],
+                "optimal_domains": ["verification", "quality_assurance", "review"],
+                "average_execution_time_ms": 20000,
+                "reliability_score": 0.94,
+                "quality_score": 0.9,
             },
         }
 
