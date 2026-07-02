@@ -35,15 +35,25 @@ class _AllocStub:
 
 
 @dataclass
+class _ComplexityAnalysisStub:
+    """Minimal complexity analysis stub for single-domain path."""
+
+    decomposition: None = None  # No decomposition = single-domain path
+
+
+@dataclass
 class _DecisionStub:
     """Minimal dataclass so ``asdict(routing_decision)`` works."""
 
     agent_allocation: _AllocStub
+    complexity_analysis: _ComplexityAnalysisStub
 
 
 def _make_service() -> DirectExecutionService:
     router = MagicMock()
-    router.route = AsyncMock(return_value=_DecisionStub(_AllocStub()))
+    router.route = AsyncMock(
+        return_value=_DecisionStub(_AllocStub(), _ComplexityAnalysisStub())
+    )
 
     bridge = MagicMock()
     bridge.execute_routing_decision = AsyncMock(

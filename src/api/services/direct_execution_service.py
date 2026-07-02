@@ -108,6 +108,7 @@ class DirectExecutionService:
         self.default_timeout_seconds = DEFAULT_AGENT_TIMEOUT
         self.enable_retry = True
         self.max_retries = MAX_RETRY_ATTEMPTS
+        self.max_domain_parallelism = 4  # Bounded multi-domain concurrency
 
         # Store background task references to prevent GC
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -223,6 +224,140 @@ class DirectExecutionService:
 
         return execution_id
 
+    async def _execute_domain_supervisor(
+        self,
+        domain: str,
+        sub_query: str,
+        project: ResearchProject,
+        routing_context: dict[str, Any],
+        supervisor_registry: dict[str, type[Any]],
+    ) -> dict[str, Any]:
+        """
+        Execute a single domain's sub-query via its supervisor.
+
+        Args:
+            domain: Domain name (research, content, analytics, finance)
+            sub_query: Domain-specific sub-query
+            project: Research project
+            routing_context: Routing context
+            supervisor_registry: Supervisor registry
+
+        Returns:
+            Domain result dict with output, quality_score, and metadata
+        """
+        try:
+            # Route domain-specific query
+            routing_decision = await self.masr_router.route(
+                query=sub_query, context={**routing_context, "domain": domain}
+            )
+
+            # Create task for this domain
+            agent_task = AgentTask(
+                id=f"{domain}_{project.id}_{uuid.uuid4()}",
+                agent_type=domain,
+                input_data={
+                    "query": sub_query,
+                    "domains": [domain],
+                    "context": routing_context,
+                    "project_data": {
+                        "title": project.title,
+                        "scope": project.scope.model_dump() if project.scope else {},
+                        "query": project.query.model_dump(),
+                    },
+                    "routing_decision": asdict(routing_decision),
+                },
+            )
+
+            # Execute via supervisor bridge
+            supervisor_result = await self.supervisor_bridge.execute_routing_decision(
+                routing_decision=routing_decision,
+                task=agent_task,
+                supervisor_registry=supervisor_registry,
+            )
+
+            # Return structured result
+            if (
+                supervisor_result.status.value == "completed"
+                and supervisor_result.agent_result
+            ):
+                return {
+                    "domain": domain,
+                    "status": "completed",
+                    "output": supervisor_result.agent_result.output,
+                    "quality_score": supervisor_result.quality_score,
+                    "consensus_score": supervisor_result.consensus_score,
+                    "workers_used": supervisor_result.workers_used,
+                    "execution_time_seconds": supervisor_result.execution_time_seconds,
+                }
+            else:
+                return {
+                    "domain": domain,
+                    "status": "failed",
+                    "errors": supervisor_result.errors,
+                }
+
+        except Exception as e:
+            logger.error(f"Domain supervisor execution failed for {domain}: {e}")
+            return {"domain": domain, "status": "failed", "errors": [str(e)]}
+
+    def _merge_domain_results(
+        self, domain_results: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """
+        Merge per-domain results into one coherent result.
+
+        Uses labeled concatenation by domain + combined metadata. Future versions
+        can replace with weighted synthesis or LLM-based merging.
+
+        Args:
+            domain_results: List of domain result dicts
+
+        Returns:
+            Merged result with combined outputs and aggregated metadata
+        """
+        merged_output = {}
+        quality_scores = {}
+        workers_used_total = 0
+        succeeded_domains = []
+        failed_domains = []
+        execution_time_max = 0.0
+
+        for result in domain_results:
+            domain = result["domain"]
+            if result["status"] == "completed":
+                succeeded_domains.append(domain)
+                # Store domain output under domain key
+                merged_output[domain] = result.get("output", {})
+                quality_scores[f"{domain}_quality"] = result.get("quality_score", 0.0)
+                quality_scores[f"{domain}_consensus"] = result.get(
+                    "consensus_score", 0.0
+                )
+                workers_used_total += result.get("workers_used", 0)
+                execution_time_max = max(
+                    execution_time_max, result.get("execution_time_seconds", 0.0)
+                )
+            else:
+                failed_domains.append(
+                    {"domain": domain, "errors": result.get("errors", [])}
+                )
+
+        # Add metadata summary
+        merged_output["_multi_domain_metadata"] = {
+            "succeeded_domains": succeeded_domains,
+            "failed_domains": failed_domains,
+            "total_workers_used": workers_used_total,
+            "max_execution_time_seconds": execution_time_max,
+            "merge_strategy": "labeled_concatenation",
+        }
+
+        return {
+            "output": merged_output,
+            "quality_scores": quality_scores,
+            "workers_used": workers_used_total,
+            "succeeded_domains": succeeded_domains,
+            "failed_domains": failed_domains,
+        }
+
     @retry(
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
     )
@@ -274,27 +409,6 @@ class DirectExecutionService:
             await self._publish_progress_update(execution_status)
             await self._checkpoint(execution_status, "masr_routing")
 
-            # Step 2: Supervisor Execution
-            logger.info(
-                f"Executing via {routing_decision.agent_allocation.supervisor_type} supervisor"
-            )
-
-            agent_task = AgentTask(
-                id=f"research_{project.id}_{execution_status.execution_id}",
-                agent_type="research",
-                input_data={
-                    "query": project.query.text,
-                    "domains": project.query.domains,
-                    "context": routing_context,
-                    "project_data": {
-                        "title": project.title,
-                        "scope": project.scope.model_dump() if project.scope else {},
-                        "query": project.query.model_dump(),
-                    },
-                    "routing_decision": asdict(routing_decision),
-                },
-            )
-
             # Get supervisor registry
             from ...agents.supervisors.base_supervisor import BaseSupervisor
 
@@ -305,63 +419,194 @@ class DirectExecutionService:
                 "finance": FinanceSupervisor,
             }
 
-            execution_status.current_phase = "hierarchical_coordination"
-            execution_status.progress_percentage = 40.0
-            await self._publish_progress_update(execution_status)
-            await self._checkpoint(execution_status, "supervisor_execution")
-
-            # Execute via MASR-Supervisor bridge
-            supervisor_result = await self.supervisor_bridge.execute_routing_decision(
-                routing_decision=routing_decision,
-                task=agent_task,
-                supervisor_registry=supervisor_registry,
+            # Detect multi-domain and branch execution
+            decomposition = routing_decision.complexity_analysis.decomposition
+            is_multi_domain = (
+                decomposition is not None and decomposition.is_multi_domain
             )
 
-            execution_status.progress_percentage = 80.0
-            execution_status.current_phase = "result_processing"
-            await self._publish_progress_update(execution_status)
+            if is_multi_domain and decomposition is not None:
+                # Type narrowing: decomposition is non-None here
+                logger.info(
+                    f"Multi-domain query detected: {decomposition.detected_domains}"
+                )
+                execution_status.current_phase = "multi_domain_execution"
+                execution_status.progress_percentage = 30.0
+                await self._publish_progress_update(execution_status)
 
-            # Process results
-            if (
-                supervisor_result.status.value == "completed"
-                and supervisor_result.agent_result
-            ):
-                execution_status.agent_results = supervisor_result.agent_result.output
-                execution_status.quality_scores = {
-                    "overall": supervisor_result.quality_score,
-                    "consensus": supervisor_result.consensus_score,
-                }
-                execution_status.workers_used = supervisor_result.workers_used
+                # Execute domain supervisors concurrently
+                semaphore = asyncio.Semaphore(self.max_domain_parallelism)
 
-                # Extract final output
-                if isinstance(supervisor_result.agent_result.output, dict):
-                    execution_status.final_output = (
-                        supervisor_result.agent_result.output
+                # Capture decomposition in closure for type narrowing
+                current_decomposition = decomposition
+
+                async def bounded_domain_execution(
+                    domain: str, sub_query: str
+                ) -> dict[str, Any]:
+                    async with semaphore:
+                        return await self._execute_domain_supervisor(
+                            domain=domain,
+                            sub_query=sub_query,
+                            project=project,
+                            routing_context=routing_context,
+                            supervisor_registry=supervisor_registry,
+                        )
+
+                # Dispatch all domain sub-queries concurrently
+                domain_tasks = [
+                    bounded_domain_execution(
+                        domain, current_decomposition.domain_subqueries[domain]
+                    )
+                    for domain in current_decomposition.detected_domains
+                ]
+
+                # Gather with return_exceptions to handle partial failures
+                domain_results = await asyncio.gather(
+                    *domain_tasks, return_exceptions=True
+                )
+
+                # Convert exceptions to error result dicts
+                processed_results: list[dict[str, Any]] = []
+                for i, result in enumerate(domain_results):
+                    if isinstance(result, BaseException):
+                        domain = current_decomposition.detected_domains[i]
+                        logger.error(f"Domain {domain} execution raised: {result}")
+                        processed_results.append(
+                            {
+                                "domain": domain,
+                                "status": "failed",
+                                "errors": [str(result)],
+                            }
+                        )
+                    else:
+                        # Type narrowing: result is dict[str, Any] here
+                        processed_results.append(result)
+
+                execution_status.progress_percentage = 80.0
+                execution_status.current_phase = "result_merging"
+                await self._publish_progress_update(execution_status)
+
+                # Merge domain results
+                merged = self._merge_domain_results(processed_results)
+
+                execution_status.agent_results = merged["output"]
+                execution_status.quality_scores = merged["quality_scores"]
+                execution_status.workers_used = merged["workers_used"]
+                execution_status.final_output = merged["output"]
+
+                # Determine overall status
+                if merged["succeeded_domains"]:
+                    execution_status.status = "completed"
+                    execution_status.progress_percentage = 100.0
+                    execution_status.current_phase = "completed"
+                    self.execution_stats["successful_executions"] += 1
+
+                    if merged["failed_domains"]:
+                        execution_status.warnings.append(
+                            f"Partial success: {len(merged['failed_domains'])} "
+                            f"domain(s) failed: {merged['failed_domains']}"
+                        )
+
+                    await self._checkpoint(execution_status, "completed")
+                    logger.info(
+                        f"Multi-domain execution {execution_status.execution_id} completed: "
+                        f"{len(merged['succeeded_domains'])} succeeded, "
+                        f"{len(merged['failed_domains'])} failed"
+                    )
+                else:
+                    execution_status.status = "failed"
+                    execution_status.errors.append("All domains failed")
+                    execution_status.current_phase = "failed"
+                    self.execution_stats["failed_executions"] += 1
+                    logger.error(
+                        f"Multi-domain execution {execution_status.execution_id} failed: all domains failed"
                     )
 
-                execution_status.status = "completed"
-                execution_status.progress_percentage = 100.0
-                execution_status.current_phase = "completed"
-
-                self.execution_stats["successful_executions"] += 1
-
-                await self._checkpoint(execution_status, "completed")
-
-                logger.info(
-                    f"Direct execution {execution_status.execution_id} completed successfully"
-                )
-
             else:
-                # Execution failed or incomplete
-                execution_status.status = "failed"
-                execution_status.errors.extend(supervisor_result.errors)
-                execution_status.current_phase = "failed"
-
-                self.execution_stats["failed_executions"] += 1
-
-                logger.error(
-                    f"Direct execution {execution_status.execution_id} failed: {supervisor_result.errors}"
+                # Single-domain execution (existing path)
+                logger.info(
+                    f"Executing via {routing_decision.agent_allocation.supervisor_type} supervisor"
                 )
+
+                agent_task = AgentTask(
+                    id=f"research_{project.id}_{execution_status.execution_id}",
+                    agent_type="research",
+                    input_data={
+                        "query": project.query.text,
+                        "domains": project.query.domains,
+                        "context": routing_context,
+                        "project_data": {
+                            "title": project.title,
+                            "scope": project.scope.model_dump()
+                            if project.scope
+                            else {},
+                            "query": project.query.model_dump(),
+                        },
+                        "routing_decision": asdict(routing_decision),
+                    },
+                )
+
+                execution_status.current_phase = "hierarchical_coordination"
+                execution_status.progress_percentage = 40.0
+                await self._publish_progress_update(execution_status)
+                await self._checkpoint(execution_status, "supervisor_execution")
+
+                # Execute via MASR-Supervisor bridge
+                supervisor_result = (
+                    await self.supervisor_bridge.execute_routing_decision(
+                        routing_decision=routing_decision,
+                        task=agent_task,
+                        supervisor_registry=supervisor_registry,
+                    )
+                )
+
+                execution_status.progress_percentage = 80.0
+                execution_status.current_phase = "result_processing"
+                await self._publish_progress_update(execution_status)
+
+                # Process results
+                if (
+                    supervisor_result.status.value == "completed"
+                    and supervisor_result.agent_result
+                ):
+                    execution_status.agent_results = (
+                        supervisor_result.agent_result.output
+                    )
+                    execution_status.quality_scores = {
+                        "overall": supervisor_result.quality_score,
+                        "consensus": supervisor_result.consensus_score,
+                    }
+                    execution_status.workers_used = supervisor_result.workers_used
+
+                    # Extract final output
+                    if isinstance(supervisor_result.agent_result.output, dict):
+                        execution_status.final_output = (
+                            supervisor_result.agent_result.output
+                        )
+
+                    execution_status.status = "completed"
+                    execution_status.progress_percentage = 100.0
+                    execution_status.current_phase = "completed"
+
+                    self.execution_stats["successful_executions"] += 1
+
+                    await self._checkpoint(execution_status, "completed")
+
+                    logger.info(
+                        f"Direct execution {execution_status.execution_id} completed successfully"
+                    )
+
+                else:
+                    # Execution failed or incomplete
+                    execution_status.status = "failed"
+                    execution_status.errors.extend(supervisor_result.errors)
+                    execution_status.current_phase = "failed"
+
+                    self.execution_stats["failed_executions"] += 1
+
+                    logger.error(
+                        f"Direct execution {execution_status.execution_id} failed: {supervisor_result.errors}"
+                    )
 
         except Exception as e:
             logger.error(
