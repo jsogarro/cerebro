@@ -41,10 +41,20 @@ class _FakeAgentAllocation:
 
 
 @dataclass
+class _FakeComplexityAnalysis:
+    """Minimal complexity analysis stub for single-domain path."""
+
+    decomposition: None = None  # No decomposition = single-domain path
+
+
+@dataclass
 class _FakeRoutingDecision:
     query_id: str = "test-query-123"
     collaboration_mode: str = "hierarchical"
     agent_allocation: _FakeAgentAllocation = field(default_factory=_FakeAgentAllocation)
+    complexity_analysis: _FakeComplexityAnalysis = field(
+        default_factory=_FakeComplexityAnalysis
+    )
     estimated_cost: float = 0.015
     estimated_latency_ms: int = 120000
     estimated_quality: float = 0.87
