@@ -39,6 +39,11 @@ from ..models import AgentResult, AgentTask
 
 logger = get_logger()
 
+# Bounded revision loop configuration
+MAX_VERIFICATION_REVISION_ROUNDS = (
+    2  # Total verification attempts (initial + 1 revision)
+)
+
 
 class SupervisionMode(Enum):
     """Modes of supervision for different scenarios."""
@@ -642,6 +647,7 @@ class BaseSupervisor(BaseAgent, ABC):
             dict with keys:
                 - verdict: "pass" or "revise"
                 - report: full verification report text
+                - issues: list of specific issues (empty if pass)
         """
         # Degrade gracefully if content is empty or missing
         if not content or not content.strip():
@@ -649,7 +655,7 @@ class BaseSupervisor(BaseAgent, ABC):
                 "supervisor_verification_skipped_empty_content",
                 supervisor_type=self.supervisor_type,
             )
-            return {"verdict": "pass", "report": "No content to verify."}
+            return {"verdict": "pass", "report": "No content to verify.", "issues": []}
 
         try:
             # Import lazily to avoid circular dependency
@@ -694,13 +700,17 @@ class BaseSupervisor(BaseAgent, ABC):
             elif "PASS" in verdict_line.upper():
                 verdict = "pass"
 
+            # Extract issues list from report
+            issues = self._extract_issues_from_report(report_text)
+
             logger.info(
                 "supervisor_verification_completed",
                 supervisor_type=self.supervisor_type,
                 verdict=verdict,
+                issue_count=len(issues),
             )
 
-            return {"verdict": verdict, "report": report_text}
+            return {"verdict": verdict, "report": report_text, "issues": issues}
 
         except Exception as e:
             # Degrade gracefully on error — don't break the workflow
@@ -712,7 +722,191 @@ class BaseSupervisor(BaseAgent, ABC):
             return {
                 "verdict": "pass",  # neutral fallback
                 "report": f"Verification error: {e!s}",
+                "issues": [],
             }
+
+    def _extract_issues_from_report(self, report: str) -> list[str]:
+        """Extract structured issues from verification report.
+
+        Args:
+            report: The full verification report text
+
+        Returns:
+            List of issue strings
+        """
+        issues = []
+        lines = report.split("\n")
+        in_issues_section = False
+
+        for line in lines:
+            stripped = line.strip()
+            # Look for the ISSUES section
+            if stripped.upper().startswith("ISSUES:"):
+                in_issues_section = True
+                # Check if "None" immediately follows
+                after_colon = stripped[len("ISSUES:") :].strip()
+                if after_colon.upper() == "NONE":
+                    break
+                continue
+
+            # If we're in the issues section, collect numbered items
+            if in_issues_section:
+                # Stop at next section or empty line
+                if not stripped or stripped.upper().startswith(
+                    ("VERDICT:", "SUMMARY:", "RECOMMENDATION:")
+                ):
+                    break
+                # Collect numbered items (e.g., "1. Issue description")
+                if stripped and (
+                    stripped[0].isdigit() or stripped.startswith(("-", "*", "•"))
+                ):
+                    issues.append(stripped)
+
+        return issues
+
+    async def _run_worker_with_verification_loop(
+        self,
+        worker_type: str,
+        message_type: MessageType,
+        content: TalkHierContent | str,
+        context: dict[str, Any] | None = None,
+        aggregate_func: Any = None,
+    ) -> tuple[TalkHierMessage | None, dict[str, Any]]:
+        """
+        Execute a worker with bounded verification revision loop.
+
+        Args:
+            worker_type: Type of worker to execute
+            message_type: Message type for TalkHier communication
+            content: Content to send to worker
+            context: Optional context dict
+            aggregate_func: Optional function to aggregate results for verification
+                          If None, uses worker response content directly
+
+        Returns:
+            Tuple of (final worker response, verification result dict)
+
+        The verification result dict contains:
+            - verdict: "pass" or "revise"
+            - report: full verification report
+            - issues: list of issues
+            - rounds: number of rounds executed
+        """
+        verification_result = {
+            "verdict": "pass",
+            "report": "",
+            "issues": [],
+            "rounds": 0,
+        }
+        worker_response = None
+
+        for round_num in range(1, MAX_VERIFICATION_REVISION_ROUNDS + 1):
+            logger.info(
+                "worker_verification_round_started",
+                worker_type=worker_type,
+                round=round_num,
+                max_rounds=MAX_VERIFICATION_REVISION_ROUNDS,
+            )
+
+            # Execute worker
+            worker_response = await self.send_talkhier_message(
+                worker_type, message_type, content, context
+            )
+
+            if not worker_response:
+                logger.warning(
+                    "worker_verification_no_response",
+                    worker_type=worker_type,
+                    round=round_num,
+                )
+                verification_result["verdict"] = "pass"  # Neutral fallback
+                verification_result["rounds"] = round_num
+                break
+
+            # Aggregate content for verification
+            if aggregate_func:
+                aggregated_content = aggregate_func(worker_response)
+            else:
+                aggregated_content = (
+                    worker_response.talkhier_content.content
+                    if hasattr(worker_response, "talkhier_content")
+                    and hasattr(worker_response.talkhier_content, "content")
+                    else str(worker_response)
+                )
+
+            # Run verification
+            verification_result = await self._run_verification(aggregated_content)
+            verification_result["rounds"] = round_num
+
+            issues_list = verification_result.get("issues", [])
+            logger.info(
+                "worker_verification_round_completed",
+                worker_type=worker_type,
+                round=round_num,
+                verdict=verification_result["verdict"],
+                issue_count=len(issues_list) if isinstance(issues_list, list) else 0,
+            )
+
+            # PASS → break with current response
+            if verification_result["verdict"] == "pass":
+                logger.info(
+                    "worker_verification_passed",
+                    worker_type=worker_type,
+                    round=round_num,
+                )
+                break
+
+            # REVISE on final round → apply penalty and break
+            if round_num >= MAX_VERIFICATION_REVISION_ROUNDS:
+                logger.warning(
+                    "worker_verification_max_rounds_reached",
+                    worker_type=worker_type,
+                    round=round_num,
+                    issues=verification_result.get("issues", []),
+                )
+                break
+
+            # REVISE with rounds remaining → append feedback and retry
+            logger.info(
+                "worker_verification_revision_needed",
+                worker_type=worker_type,
+                round=round_num,
+                remaining=MAX_VERIFICATION_REVISION_ROUNDS - round_num,
+            )
+
+            # Build revision content with feedback
+            feedback_text = f"\n\nREVISION FEEDBACK (Round {round_num}):\n" + str(
+                verification_result["report"]
+            )
+
+            if isinstance(content, str):
+                revised_content = TalkHierContent(
+                    content=content + feedback_text,
+                )
+            elif isinstance(content, TalkHierContent):
+                current_content = str(
+                    content.content if hasattr(content, "content") else ""
+                )
+                current_background = str(
+                    content.background if hasattr(content, "background") else ""
+                )
+                current_outputs = (
+                    content.intermediate_outputs
+                    if hasattr(content, "intermediate_outputs")
+                    else {}
+                )
+
+                revised_content = TalkHierContent(
+                    content=current_content + feedback_text,
+                    background=current_background,
+                    intermediate_outputs=current_outputs,
+                )
+            else:
+                revised_content = content
+
+            content = revised_content
+
+        return worker_response, verification_result
 
     async def close(self) -> None:
         """Close supervisor and cleanup resources."""
