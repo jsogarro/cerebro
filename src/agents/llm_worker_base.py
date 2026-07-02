@@ -5,16 +5,21 @@ the query (and any prior-stage context) with the Gemini service. Subclasses set
 ``agent_type`` and implement ``_build_prompt``. No external data sources.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
+
+if TYPE_CHECKING:
+    from src.ai_brain.memory import ProceduralMemoryManager
 
 
 class LLMWorkerAgentBase(BaseAgent):
     """Execute/validate scaffolding for prompt-driven LLM worker agents."""
 
     agent_type: str = "llm_worker"
+    # Procedural memory manager (injected externally, None = no memory)
+    procedural_memory: "ProceduralMemoryManager | None" = None
 
     def get_agent_type(self) -> str:
         return self.agent_type
@@ -54,6 +59,67 @@ class LLMWorkerAgentBase(BaseAgent):
         """
         return None
 
+    async def _get_procedural_context(self, task: AgentTask) -> str | None:
+        """Query procedural memory for relevant past approaches.
+
+        Returns a formatted context block with top successful procedures, or None
+        if memory is unavailable/disabled/empty.
+        """
+        try:
+            from src.core.config import settings
+
+            if not settings.MEMORY_INFORMED_ROUTING_ENABLED:
+                return None
+            if self.procedural_memory is None:
+                return None
+
+            from src.ai_brain.memory.procedural_memory import (
+                ProcedureQuery,
+                ProcedureType,
+            )
+
+            # Query for relevant procedures
+            query_domains = task.input_data.get("domains", [])
+            domain = query_domains[0] if query_domains else None
+
+            procedure_query = ProcedureQuery(
+                procedure_type=ProcedureType.STRATEGY,
+                domain=domain,
+                agent_type=self.agent_type,
+                min_confidence=0.6,
+                min_success_rate=0.7,
+                limit=settings.MEMORY_PROMPT_MAX_PROCEDURES,
+            )
+
+            procedures = await self.procedural_memory.retrieve_procedures(
+                procedure_query
+            )
+
+            if not procedures:
+                return None
+
+            # Format as a concise context block
+            lines = ["## Past Successful Approaches"]
+            for i, proc in enumerate(procedures, 1):
+                success_rate = proc.success_count / max(proc.usage_count, 1)
+                lines.append(
+                    f"{i}. {proc.name} (confidence: {proc.confidence:.2f}, "
+                    f"success: {success_rate:.1%}, used {proc.usage_count}x)"
+                )
+                if proc.parameters:
+                    # Truncate if too long
+                    params_str = str(proc.parameters)
+                    if len(params_str) > 100:
+                        params_str = params_str[:97] + "..."
+                    lines.append(f"   Parameters: {params_str}")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            # Resilient: log at debug and return None (no memory context)
+            self.log_warning(f"procedural_context_failed (graceful fallback): {e}")
+            return None
+
     async def execute(self, task: AgentTask) -> AgentResult:
         query = str(task.input_data.get("query", "")).strip()
         if not query:
@@ -64,6 +130,11 @@ class LLMWorkerAgentBase(BaseAgent):
 
         # Build base prompt
         prompt = self._build_prompt(query, task)
+
+        # Append procedural memory context if available (feature-flagged)
+        procedural_context = await self._get_procedural_context(task)
+        if procedural_context:
+            prompt += f"\n\n{procedural_context}\n"
 
         # Append precomputed values to prompt if present
         if computed:

@@ -187,6 +187,14 @@ class Settings(BaseSettings):
     PROCEDURAL_MEMORY_MIN_CONFIDENCE: float = 0.7
     PROCEDURAL_MEMORY_MIN_USAGE_PROMOTION: int = 5
 
+    # Memory-Informed Routing Configuration
+    MEMORY_INFORMED_ROUTING_ENABLED: bool = (
+        False  # Default OFF - preserves current behavior
+    )
+    MEMORY_ROUTING_MAX_WORKER_ADJUST: int = 2  # Max ±N from analytic baseline
+    MEMORY_ROUTING_FRESHNESS_DAYS: int = 30  # Decay weight for older history
+    MEMORY_PROMPT_MAX_PROCEDURES: int = 3  # Max procedural context items
+
     # Agent System Configuration
     AGENTS_MAX_CONCURRENT: int = 20
     AGENTS_MAX_SUPERVISORS: int = 5
