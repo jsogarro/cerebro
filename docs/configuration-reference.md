@@ -172,6 +172,24 @@ Single-domain queries bypass this path entirely (zero overhead).
 5. On `REVISE` at final round: accept output with ×0.85 quality penalty
 6. Total attempts = `MAX_VERIFICATION_REVISION_ROUNDS` (default 2 = initial + 1 revision)
 
+#### Parallel Worker Execution (PR #10)
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `MAX_PARALLEL_WORKERS` | integer | `5` | Maximum concurrent workers in PARALLEL supervision mode | No |
+
+**Purpose**: Bounds concurrent worker execution within supervisors operating in PARALLEL mode via an `asyncio.Semaphore`.
+
+**Behavior**: When `SupervisionMode.PARALLEL` is active:
+1. Allocated workers execute concurrently via `asyncio.gather(..., return_exceptions=True)`
+2. Concurrency bounded by semaphore with limit = `MAX_PARALLEL_WORKERS` (default 5)
+3. Worker failures are isolated: failed workers logged and excluded, successful workers proceed
+4. Partial results: if some workers fail, supervisor continues with successful results; failure metadata recorded
+5. All workers fail: graceful degradation (empty results dict), logged as error
+6. Sequential mode unchanged: workers execute one at a time in allocation order
+
+**Revision loop compatibility**: Re-runs after REVISE verdicts also respect the parallel/sequential mode.
+
 ### Authentication Configuration
 
 | Variable | Type | Default | Description | Required |
