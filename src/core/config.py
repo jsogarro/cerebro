@@ -150,6 +150,21 @@ class Settings(BaseSettings):
     GEMINI_ENABLED: bool = True  # Keep existing Gemini as default
     GEMINI_DEFAULT_MODEL: str = "gemini-pro"
 
+    # OpenRouter Configuration (multi-provider routing via single API)
+    OPENROUTER_ENABLED: bool = False
+    OPENROUTER_API_KEY: str | None = None
+    OPENROUTER_ENDPOINT: str = "https://openrouter.ai/api/v1/chat/completions"
+    OPENROUTER_TIER_MAPPING: dict[str, str] = {
+        "simple": "deepseek/deepseek-chat",  # Cost-minimized
+        "balanced": "anthropic/claude-3.5-sonnet",  # Mid-tier quality
+        "complex": "anthropic/claude-3.5-sonnet",  # Quality-focused
+    }
+
+    # Multi-Provider Routing Feature Flag
+    MULTI_PROVIDER_ROUTING_ENABLED: bool = (
+        False  # Default OFF - preserves current GeminiService behavior
+    )
+
     # Model Router Configuration
     MODEL_ROUTER_HEALTH_CHECK_INTERVAL: int = 300  # 5 minutes
     MODEL_ROUTER_MAX_RETRIES: int = 3
@@ -329,6 +344,12 @@ class Settings(BaseSettings):
                     "enabled": self.GEMINI_ENABLED,
                     "api_key": self.GEMINI_API_KEY,
                     "default_model": self.GEMINI_DEFAULT_MODEL,
+                },
+                "openrouter": {
+                    "enabled": self.OPENROUTER_ENABLED,
+                    "api_key": self.OPENROUTER_API_KEY,
+                    "endpoint": self.OPENROUTER_ENDPOINT,
+                    "tier_mapping": self.OPENROUTER_TIER_MAPPING,
                 },
             },
             # Model Router Configuration
