@@ -182,9 +182,13 @@ class TestCIWorkflowInvariants:
         runs = [s.get("run", "") for s in steps]
         assert any("bandit" in r for r in runs)
 
-    def test_security_job_invokes_safety(self, ci: dict[str, Any]) -> None:
+    def test_security_job_does_not_invoke_safety(self, ci: dict[str, Any]) -> None:
+        """The deprecated ``safety`` scanner was removed: it is redundant with
+        pip-audit and its transitive nltk dependency carries an unfixed
+        advisory (PYSEC-2026-597) that failed every scan. Lock in that it
+        stays out of the security job."""
         runs = [s.get("run", "") for s in ci["jobs"]["security"]["steps"]]
-        assert any("safety" in r for r in runs)
+        assert not any("safety" in r for r in runs)
 
     def test_security_job_invokes_pip_audit(self, ci: dict[str, Any]) -> None:
         runs = [s.get("run", "") for s in ci["jobs"]["security"]["steps"]]
