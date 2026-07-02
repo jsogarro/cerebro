@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from structlog import get_logger
@@ -28,6 +28,8 @@ from src.core.types import HealthCheckDict
 
 if TYPE_CHECKING:
     from src.ai_brain.config.model_config_manager import ModelConfigManager
+    from src.ai_brain.memory.episodic_memory import EpisodicMemoryManager
+    from src.ai_brain.memory.procedural_memory import ProceduralMemoryManager
 
 from src.core.constants import (
     DEFAULT_AGENT_TIMEOUT,
@@ -168,6 +170,23 @@ class MASRouter:
             ),
         )
 
+        # Memory-informed routing (feature-flagged, default OFF)
+        self.memory_informed_routing_enabled = self.config.get(
+            "memory_informed_routing_enabled", False
+        )
+        self.memory_routing_max_worker_adjust = self.config.get(
+            "memory_routing_max_worker_adjust", 2
+        )
+        self.memory_routing_freshness_days = self.config.get(
+            "memory_routing_freshness_days", 30
+        )
+        self.memory_prompt_max_procedures = self.config.get(
+            "memory_prompt_max_procedures", 3
+        )
+        # Memory managers injected externally (None = no memory influence)
+        self.episodic_memory: EpisodicMemoryManager | None = None
+        self.procedural_memory: ProceduralMemoryManager | None = None
+
     @property
     def routing_circuit_breaker(self) -> CircuitBreaker:
         """Circuit breaker guarding MASR routing analysis and optimization."""
@@ -236,9 +255,14 @@ class MASRouter:
                 complexity_analysis, optimization_result
             )
 
-            # Step 4: Allocate agents
+            # Step 3.5: Query episodic memory for routing prior (if enabled)
+            episodic_prior = await self._get_episodic_routing_prior(
+                complexity_analysis, query
+            )
+
+            # Step 4: Allocate agents (with optional memory-informed adjustment)
             agent_allocation = self._allocate_agents(
-                complexity_analysis, collaboration_mode
+                complexity_analysis, collaboration_mode, episodic_prior
             )
 
             # Step 5: Calculate performance predictions
@@ -371,12 +395,106 @@ class MASRouter:
         # Default to parallel for moderate complexity
         return CollaborationMode.PARALLEL
 
+    async def _get_episodic_routing_prior(
+        self, complexity_analysis: ComplexityAnalysis, query: str
+    ) -> int | None:
+        """Query episodic memory for past routing decisions on similar queries.
+
+        Returns suggested worker_count adjustment (positive or negative) or None if
+        memory is unavailable/disabled/empty.
+        """
+        if not self.memory_informed_routing_enabled:
+            return None
+        if self.episodic_memory is None:
+            return None
+
+        try:
+            from src.ai_brain.memory.episodic_memory import EpisodeQuery, EventType
+
+            # Query recent similar routing decisions
+            episode_query = EpisodeQuery(
+                event_types=[EventType.DECISION_MADE],
+                start_time=datetime.now()
+                - timedelta(days=self.memory_routing_freshness_days),
+                limit=10,
+            )
+            episodes = await self.episodic_memory.retrieve_episodes(episode_query)
+
+            if not episodes:
+                return None
+
+            # Extract worker_count and quality from past episodes
+            adjustments: list[float] = []
+            total_weight = 0.0
+            for episode in episodes:
+                event_data = episode.event_data or {}
+                worker_count = event_data.get("worker_count")
+                quality_score = episode.quality_score
+                age_days = (datetime.now() - episode.timestamp).days
+
+                if worker_count is None or quality_score is None:
+                    continue
+
+                # Freshness decay: exponential decay over freshness_days
+                freshness_weight = max(
+                    0.0, 1.0 - (age_days / self.memory_routing_freshness_days)
+                )
+                weighted_value = worker_count * quality_score * freshness_weight
+                adjustments.append(weighted_value)
+                total_weight += quality_score * freshness_weight
+
+            if not adjustments or total_weight == 0:
+                return None
+
+            # Weighted average
+            avg_worker_count = sum(adjustments) / total_weight
+            # The prior is a nudge, not a replacement: cap the adjustment
+            # (we'll apply this as a delta from the analytic baseline)
+            return round(avg_worker_count)
+
+        except Exception as e:
+            # Resilient: log and return None (no memory influence)
+            logger.debug(f"episodic_routing_prior failed (graceful fallback): {e}")
+            return None
+
+    def _apply_memory_adjustment(
+        self, analytic_count: int, episodic_prior: int | None
+    ) -> int:
+        """Apply bounded memory-informed adjustment to analytic worker_count.
+
+        Args:
+            analytic_count: The analytic baseline worker count
+            episodic_prior: The raw prior from episodic memory (or None)
+
+        Returns:
+            Adjusted worker_count, bounded to ± max_worker_adjust from baseline
+        """
+        if episodic_prior is None:
+            return analytic_count
+
+        # Compute the delta (capped)
+        delta: int = episodic_prior - analytic_count
+        max_adjust: int = self.memory_routing_max_worker_adjust
+        capped_delta: int = max(-max_adjust, min(max_adjust, delta))
+
+        adjusted: int = analytic_count + capped_delta
+        # Ensure we never go below 1
+        result: int = max(1, adjusted)
+        return result
+
     def _allocate_agents(
         self,
         complexity_analysis: ComplexityAnalysis,
         collaboration_mode: CollaborationMode,
+        episodic_prior: int | None = None,
     ) -> AgentAllocation:
-        """Determine optimal agent allocation with supervisor-based hierarchical routing."""
+        """Determine optimal agent allocation with supervisor-based hierarchical routing.
+
+        Args:
+            complexity_analysis: Query complexity analysis
+            collaboration_mode: Determined collaboration mode
+            episodic_prior: Optional episodic memory prior for worker_count (raw value)
+        """
 
         # Get supervisor types based on domains
         supervisor_types = self._get_domain_supervisor_types(
@@ -396,9 +514,11 @@ class MASRouter:
             )
 
         elif collaboration_mode == CollaborationMode.PARALLEL:
-            worker_count = min(
+            analytic_count = min(
                 len(complexity_analysis.domains) + 1, self.max_parallel_workers
             )
+            worker_count = self._apply_memory_adjustment(analytic_count, episodic_prior)
+            worker_count = min(worker_count, self.max_parallel_workers)  # Hard cap
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
                 worker_count=worker_count,
@@ -409,9 +529,11 @@ class MASRouter:
             )
 
         elif collaboration_mode == CollaborationMode.HIERARCHICAL:
-            worker_count = min(
+            analytic_count = min(
                 complexity_analysis.subtask_count, self.max_agents_per_query
             )
+            worker_count = self._apply_memory_adjustment(analytic_count, episodic_prior)
+            worker_count = min(worker_count, self.max_agents_per_query)  # Hard cap
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
                 worker_count=worker_count,
@@ -422,9 +544,10 @@ class MASRouter:
             )
 
         elif collaboration_mode == CollaborationMode.DEBATE:
+            # DEBATE is fixed at 3 (no memory adjustment)
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
-                worker_count=3,  # Typical debate size
+                worker_count=3,
                 worker_types=["analyst", "critic", "synthesizer"],
                 max_parallel=LOW_PARALLELISM,
                 timeout_seconds=LONG_TIMEOUT,
@@ -432,9 +555,12 @@ class MASRouter:
             )
 
         else:  # ENSEMBLE
+            analytic_count = 5
+            worker_count = self._apply_memory_adjustment(analytic_count, episodic_prior)
+            worker_count = max(3, min(worker_count, 7))  # Ensemble: 3-7 range
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
-                worker_count=5,
+                worker_count=worker_count,
                 worker_types=self._get_domain_worker_types(complexity_analysis.domains),
                 max_parallel=HIGH_PARALLELISM,
                 timeout_seconds=MEDIUM_TIMEOUT,
