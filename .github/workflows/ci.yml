@@ -179,15 +179,11 @@ jobs:
       
       - name: Install dependencies
         run: |
-          uv pip install --system bandit[toml] safety pip-audit
+          uv pip install --system bandit[toml] pip-audit
       
       - name: Run bandit
         run: |
           bandit -r src -f json -o bandit-report.json --exit-zero
-      
-      - name: Run safety check
-        run: |
-          uv pip freeze --system | safety check --stdin --json
       
       - name: Run pip-audit
         run: |
