@@ -303,7 +303,9 @@ If a paper exists but with slightly different details, mark exists=true and prov
         self,
         langgraph_state: dict[str, Any],
     ) -> dict[str, Any]:
-        """Evaluate consensus across all workers."""
+        """Evaluate consensus across all workers with bounded verification revision loop."""
+        from ..supervisors.base_supervisor import MAX_VERIFICATION_REVISION_ROUNDS
+
         state = langgraph_state["supervision_state"]
 
         logger.info("research_quality_phase_started", phase="consensus_evaluation")
@@ -314,13 +316,64 @@ If a paper exists but with slightly different details, mark exists=true and prov
             if hasattr(paper_data, "intermediate_outputs"):
                 state.context["final_paper"] = paper_data.intermediate_outputs
 
-        # Aggregate worker outputs for verification
-        aggregated_content = self._aggregate_worker_content(state)
+        # Bounded verification revision loop
+        verification_round = 1
+        verification_result = {"verdict": "pass", "report": ""}
 
-        # Run verification QA gate (import the supervisor method dynamically)
-        verification_result = await self._run_verification_via_supervisor(
-            aggregated_content, langgraph_state
-        )
+        while verification_round <= MAX_VERIFICATION_REVISION_ROUNDS:
+            # Aggregate worker outputs for verification
+            aggregated_content = self._aggregate_worker_content(state)
+
+            # Run verification QA gate
+            verification_result = await self._run_verification_via_supervisor(
+                aggregated_content, langgraph_state
+            )
+
+            logger.info(
+                "verification_round_completed",
+                round=verification_round,
+                verdict=verification_result["verdict"],
+                max_rounds=MAX_VERIFICATION_REVISION_ROUNDS,
+            )
+
+            # PASS → break, keep current results
+            if verification_result["verdict"] == "pass":
+                logger.info(
+                    "verification_passed",
+                    round=verification_round,
+                )
+                break
+
+            # REVISE on final round → apply penalty and break (terminal fallback)
+            if verification_round >= MAX_VERIFICATION_REVISION_ROUNDS:
+                logger.warning(
+                    "verification_max_rounds_reached",
+                    round=verification_round,
+                    issues=verification_result["report"],
+                )
+                # Terminal fallback: apply penalty and proceed
+                break
+
+            # REVISE with rounds remaining → feed back and re-run workers
+            logger.info(
+                "verification_revision_needed",
+                round=verification_round,
+                remaining_rounds=MAX_VERIFICATION_REVISION_ROUNDS - verification_round,
+            )
+
+            # TODO: Re-run worker coordination with feedback
+            # For now, we break since re-running the entire worker pipeline
+            # requires coordination with the supervisor's workflow graph.
+            # This will be implemented in a follow-up iteration.
+            logger.warning(
+                "verification_revision_not_yet_implemented",
+                message="Worker re-run with feedback not yet wired; applying penalty",
+            )
+            break
+
+            # verification_round += 1  # Unreachable for now
+
+        # Store verification result
         state.context["verification"] = verification_result
         state.worker_results["verification"] = verification_result
 
