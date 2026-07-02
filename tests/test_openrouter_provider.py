@@ -16,8 +16,8 @@ def openrouter_config():
         "endpoint": "https://openrouter.ai/api/v1/chat/completions",
         "tier_mapping": {
             "simple": "deepseek/deepseek-chat",
-            "balanced": "anthropic/claude-3.5-sonnet",
-            "complex": "anthropic/claude-3.5-sonnet",
+            "balanced": "anthropic/claude-sonnet-4.6",
+            "complex": "anthropic/claude-sonnet-4.6",
         },
     }
 
@@ -46,7 +46,7 @@ def mock_openrouter_response():
             "completion_tokens": 8,
             "total_tokens": 18,
         },
-        "model": "anthropic/claude-3.5-sonnet",
+        "model": "anthropic/claude-sonnet-4.6",
     }
 
 
@@ -70,10 +70,10 @@ class TestOpenRouterProviderInitialization:
         assert openrouter_provider.tier_mapping["simple"] == "deepseek/deepseek-chat"
         assert (
             openrouter_provider.tier_mapping["balanced"]
-            == "anthropic/claude-3.5-sonnet"
+            == "anthropic/claude-sonnet-4.6"
         )
         assert (
-            openrouter_provider.tier_mapping["complex"] == "anthropic/claude-3.5-sonnet"
+            openrouter_provider.tier_mapping["complex"] == "anthropic/claude-sonnet-4.6"
         )
 
     def test_supported_capabilities(self, openrouter_provider):
@@ -110,22 +110,22 @@ class TestModelSelection:
     def test_select_balanced_tier(self, openrouter_provider):
         """Balanced tier should map to mid-tier quality model."""
         model = openrouter_provider._select_model_from_tier("balanced")
-        assert model == "anthropic/claude-3.5-sonnet"
+        assert model == "anthropic/claude-sonnet-4.6"
 
     def test_select_complex_tier(self, openrouter_provider):
         """Complex tier should map to quality-focused model."""
         model = openrouter_provider._select_model_from_tier("complex")
-        assert model == "anthropic/claude-3.5-sonnet"
+        assert model == "anthropic/claude-sonnet-4.6"
 
     def test_select_invalid_tier_defaults_to_balanced(self, openrouter_provider):
         """Invalid tier should default to balanced."""
         model = openrouter_provider._select_model_from_tier("invalid_tier")
-        assert model == "anthropic/claude-3.5-sonnet"
+        assert model == "anthropic/claude-sonnet-4.6"
 
     def test_select_none_tier_defaults_to_balanced(self, openrouter_provider):
         """None tier should default to balanced."""
         model = openrouter_provider._select_model_from_tier(None)
-        assert model == "anthropic/claude-3.5-sonnet"
+        assert model == "anthropic/claude-sonnet-4.6"
 
 
 class TestRequestPayloadBuilding:
@@ -141,10 +141,10 @@ class TestRequestPayloadBuilding:
         )
 
         payload = openrouter_provider._build_request_payload(
-            request, "anthropic/claude-3.5-sonnet"
+            request, "anthropic/claude-sonnet-4.6"
         )
 
-        assert payload["model"] == "anthropic/claude-3.5-sonnet"
+        assert payload["model"] == "anthropic/claude-sonnet-4.6"
         assert len(payload["messages"]) == 1
         assert payload["messages"][0]["role"] == "user"
         assert payload["messages"][0]["content"] == "What is 2+2?"
@@ -161,7 +161,7 @@ class TestRequestPayloadBuilding:
         )
 
         payload = openrouter_provider._build_request_payload(
-            request, "anthropic/claude-3.5-sonnet"
+            request, "anthropic/claude-sonnet-4.6"
         )
 
         assert len(payload["messages"]) == 2
@@ -181,7 +181,7 @@ class TestRequestPayloadBuilding:
         )
 
         payload = openrouter_provider._build_request_payload(
-            request, "anthropic/claude-3.5-sonnet"
+            request, "anthropic/claude-sonnet-4.6"
         )
 
         assert len(payload["messages"]) == 3
@@ -193,7 +193,7 @@ class TestRequestPayloadBuilding:
         request = ModelRequest(prompt="Test", top_k=40)
 
         payload = openrouter_provider._build_request_payload(
-            request, "anthropic/claude-3.5-sonnet"
+            request, "anthropic/claude-sonnet-4.6"
         )
 
         assert payload["top_k"] == 40
@@ -270,7 +270,7 @@ class TestGeneration:
             # Verify complex tier selected Sonnet model
             call_args = mock_client.post.call_args
             payload = call_args.kwargs["json"]
-            assert payload["model"] == "anthropic/claude-3.5-sonnet"
+            assert payload["model"] == "anthropic/claude-sonnet-4.6"
 
     async def test_generate_api_error_handling(self, openrouter_provider):
         """API errors should return error response."""

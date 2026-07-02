@@ -156,8 +156,8 @@ class Settings(BaseSettings):
     OPENROUTER_ENDPOINT: str = "https://openrouter.ai/api/v1/chat/completions"
     OPENROUTER_TIER_MAPPING: dict[str, str] = {
         "simple": "deepseek/deepseek-chat",  # Cost-minimized
-        "balanced": "anthropic/claude-3.5-sonnet",  # Mid-tier quality
-        "complex": "anthropic/claude-3.5-sonnet",  # Quality-focused
+        "balanced": "anthropic/claude-sonnet-4.6",  # Mid-tier quality
+        "complex": "anthropic/claude-sonnet-4.6",  # Quality-focused
     }
 
     # Multi-Provider Routing Feature Flag

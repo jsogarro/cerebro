@@ -117,8 +117,8 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 ```python
 {
     "simple": "deepseek/deepseek-chat",        # Cost-minimized tier
-    "balanced": "anthropic/claude-3.5-sonnet", # Mid-tier quality
-    "complex": "anthropic/claude-3.5-sonnet"   # Quality-focused tier
+    "balanced": "anthropic/claude-sonnet-4.6", # Mid-tier quality
+    "complex": "anthropic/claude-sonnet-4.6"   # Quality-focused tier
 }
 ```
 

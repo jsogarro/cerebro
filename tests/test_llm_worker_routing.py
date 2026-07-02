@@ -51,7 +51,7 @@ def mock_model_response():
     return ModelResponse(
         request_id="test-req-001",
         content="Response from OpenRouter",
-        model_name="anthropic/claude-3.5-sonnet",
+        model_name="anthropic/claude-sonnet-4.6",
         provider="openrouter",
         completion_tokens=10,
         prompt_tokens=5,
@@ -124,8 +124,8 @@ class TestOpenRouterRouting:
             )
             mock_settings.OPENROUTER_TIER_MAPPING = {
                 "simple": "deepseek/deepseek-chat",
-                "balanced": "anthropic/claude-3.5-sonnet",
-                "complex": "anthropic/claude-3.5-sonnet",
+                "balanced": "anthropic/claude-sonnet-4.6",
+                "complex": "anthropic/claude-sonnet-4.6",
             }
 
             # Mock ModelRouter
@@ -157,8 +157,8 @@ class TestOpenRouterRouting:
             )
             mock_settings.OPENROUTER_TIER_MAPPING = {
                 "simple": "deepseek/deepseek-chat",
-                "balanced": "anthropic/claude-3.5-sonnet",
-                "complex": "anthropic/claude-3.5-sonnet",
+                "balanced": "anthropic/claude-sonnet-4.6",
+                "complex": "anthropic/claude-sonnet-4.6",
             }
 
             mock_router = MagicMock()
@@ -189,8 +189,8 @@ class TestOpenRouterRouting:
             )
             mock_settings.OPENROUTER_TIER_MAPPING = {
                 "simple": "deepseek/deepseek-chat",
-                "balanced": "anthropic/claude-3.5-sonnet",
-                "complex": "anthropic/claude-3.5-sonnet",
+                "balanced": "anthropic/claude-sonnet-4.6",
+                "complex": "anthropic/claude-sonnet-4.6",
             }
 
             mock_router = MagicMock()
@@ -221,8 +221,8 @@ class TestGracefulFallback:
             )
             mock_settings.OPENROUTER_TIER_MAPPING = {
                 "simple": "deepseek/deepseek-chat",
-                "balanced": "anthropic/claude-3.5-sonnet",
-                "complex": "anthropic/claude-3.5-sonnet",
+                "balanced": "anthropic/claude-sonnet-4.6",
+                "complex": "anthropic/claude-sonnet-4.6",
             }
             mock_settings.GEMINI_API_KEY = "test-gemini-key"
 
@@ -273,8 +273,8 @@ class TestGracefulFallback:
             )
             mock_settings.OPENROUTER_TIER_MAPPING = {
                 "simple": "deepseek/deepseek-chat",
-                "balanced": "anthropic/claude-3.5-sonnet",
-                "complex": "anthropic/claude-3.5-sonnet",
+                "balanced": "anthropic/claude-sonnet-4.6",
+                "complex": "anthropic/claude-sonnet-4.6",
             }
             mock_settings.GEMINI_API_KEY = "test-gemini-key"
 

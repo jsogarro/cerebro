@@ -22,8 +22,8 @@ MULTI_PROVIDER_ROUTING_ENABLED=true
 
 **Tier mapping** (configurable via `OPENROUTER_TIER_MAPPING`):
 - `simple`: `deepseek/deepseek-chat` (cost-minimized)
-- `balanced`: `anthropic/claude-3.5-sonnet` (mid-tier quality)
-- `complex`: `anthropic/claude-3.5-sonnet` (quality-focused)
+- `balanced`: `anthropic/claude-sonnet-4.6` (mid-tier quality)
+- `complex`: `anthropic/claude-sonnet-4.6` (quality-focused)
 
 ### How to go live
 
