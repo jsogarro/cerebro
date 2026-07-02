@@ -424,7 +424,7 @@ class MASRouter:
                 return None
 
             # Extract worker_count and quality from past episodes
-            adjustments = []
+            adjustments: list[float] = []
             total_weight = 0.0
             for episode in episodes:
                 event_data = episode.event_data or {}
