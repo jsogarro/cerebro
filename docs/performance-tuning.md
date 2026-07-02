@@ -422,16 +422,19 @@ async def get_project(
 
 ### Parallel Agent Execution
 
+Parallel execution is now handled through hierarchical supervisors coordinating worker agents:
+
 ```python
-# src/orchestration/parallel_executor.py
+# Supervisors coordinate parallel worker execution
 import asyncio
 from typing import List, Dict, Any
-from concurrent.futures import ThreadPoolExecutor
 
-class ParallelAgentExecutor:
-    def __init__(self, max_workers: int = 4):
-        self.max_workers = max_workers
-        self.executor = ThreadPoolExecutor(max_workers=max_workers)
+# Worker coordination within supervisors
+class SupervisorWorkflow:
+    async def parallel_worker_execution(self, workers: List[WorkerDefinition]):
+        """Execute multiple workers in parallel through LangGraph."""
+        tasks = [worker.execute() for worker in workers]
+        return await asyncio.gather(*tasks)
     
     async def execute_agents_parallel(
         self, 

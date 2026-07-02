@@ -772,21 +772,26 @@ async def test_agent_workflow_integration():
         "domains": ["AI", "Economics"]
     }
     
-    # Execute workflow
-    orchestrator = ResearchOrchestrator()
-    result = await orchestrator.execute_research(project_data)
+    # Execute workflow via DirectExecutionService
+    direct_execution = DirectExecutionService(
+        masr_router=masr_router,
+        supervisor_bridge=supervisor_bridge,
+        agent_task_factory=agent_task_factory,
+        supervisor_registry=supervisor_registry
+    )
+    result = await direct_execution.execute_query(
+        project_data["research_query"],
+        project_data["domains"]
+    )
     
-    # Verify all agents executed
-    assert "literature_review" in result.agent_results
-    assert "comparative_analysis" in result.agent_results
-    assert "methodology" in result.agent_results
-    assert "synthesis" in result.agent_results
-    assert "citation" in result.agent_results
+    # Verify execution completed successfully
+    assert result.success
+    assert result.status == "completed"
+    assert result.output is not None
     
-    # Verify data flow
-    lit_result = result.agent_results["literature_review"]
-    synth_result = result.agent_results["synthesis"]
-    assert lit_result.content["findings"] is not None
+    # Verify data flow through supervisor coordination
+    assert result.metadata.supervisor_id is not None
+    assert result.metadata.worker_results is not None
     assert synth_result.content["main_narrative"] is not None
 ```
 
