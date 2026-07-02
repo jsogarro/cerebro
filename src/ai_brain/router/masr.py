@@ -450,7 +450,7 @@ class MASRouter:
             avg_worker_count = sum(adjustments) / total_weight
             # The prior is a nudge, not a replacement: cap the adjustment
             # (we'll apply this as a delta from the analytic baseline)
-            return int(round(avg_worker_count))
+            return round(avg_worker_count)
 
         except Exception as e:
             # Resilient: log and return None (no memory influence)
