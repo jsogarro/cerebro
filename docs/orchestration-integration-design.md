@@ -2,8 +2,20 @@
 
 **Author:** Engineering Analysis  
 **Date:** 2026-07-02  
-**Status:** Design Document  
+**Status:** Implemented (2026-07-02)  
 **Purpose:** Assess the `src/orchestration/` LangGraph subsystem and determine integration strategy
+
+---
+
+## Outcome (2026-07-02)
+
+This design document's recommendation (Option C - Cannibalize Specific Components) was **executed** in PR #50 (merged to `main` at commit `b4b0551`):
+
+- **QueryDecomposer extracted** to `src/ai_brain/router/query_decomposer.py` and wired into `src/ai_brain/router/query_analyzer.py` for multi-domain query decomposition in MASR routing metadata.
+- **The rest of `src/orchestration/` deleted** (~8,961 lines, 20 files including `research_orchestrator.py`, `multi_supervisor_orchestrator.py`, `graph_builder.py`, `nodes/`, etc.).
+- **Active production path** is now unambiguously `DirectExecutionService → MASR → Supervisors → Workers` with no top-level graph orchestrator.
+
+This document is preserved as the **historical design record**.
 
 ---
 

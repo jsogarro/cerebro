@@ -852,7 +852,7 @@ class WorkflowCheckpointer:
 
 ```python
 async def recover_workflow(
-    orchestrator: ResearchOrchestrator,
+    direct_execution_service: DirectExecutionService,
     workflow_id: str,
     recovery_strategy: str = "latest"
 ) -> WorkflowResult:
@@ -860,7 +860,7 @@ async def recover_workflow(
     Recover a failed or interrupted workflow.
     
     Args:
-        orchestrator: Research orchestrator instance
+        direct_execution_service: Direct execution service instance
         workflow_id: ID of workflow to recover
         recovery_strategy: Recovery strategy (latest, best_quality, specific)
     
@@ -1098,25 +1098,26 @@ async def test_query_analysis_node():
 async def test_complete_workflow_execution():
     """Test complete workflow execution."""
     
-    # Create orchestrator
-    config = OrchestratorConfig(
-        enable_checkpointing=False,  # Disable for testing
-        enable_parallel_execution=True,
-        timeout_seconds=300
+    # Initialize direct execution service
+    direct_execution = DirectExecutionService(
+        masr_router=masr_router,
+        supervisor_bridge=supervisor_bridge,
+        agent_task_factory=agent_task_factory,
+        supervisor_registry=supervisor_registry
     )
-    orchestrator = ResearchOrchestrator(config)
     
-    # Create initial state
-    initial_state = create_test_research_state()
+    # Create query task
+    query = "Impact of AI on employment"
+    domains = ["ai", "economics"]
     
     # Execute workflow
-    result = await orchestrator.execute_research(initial_state)
+    result = await direct_execution.execute_query(query, domains)
     
     # Verify results
     assert result.success
-    assert result.final_state.current_phase == WorkflowPhase.COMPLETED
-    assert result.final_state.final_results is not None
-    assert result.quality_score > 0.0
+    assert result.status == "completed"
+    assert result.output is not None
+    assert result.metadata.quality_score > 0.0
 ```
 
 ## Best Practices

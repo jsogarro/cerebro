@@ -151,12 +151,13 @@ multi-agent-research-platform/
 │   │   ├── research_project.py
 │   │   ├── report.py
 │   │   └── websocket_messages.py
-│   ├── orchestration/          # LangGraph orchestration
-│   │   ├── research_orchestrator.py
-│   │   ├── graph_builder.py
-│   │   ├── state.py
-│   │   ├── nodes/             # Workflow nodes
-│   │   └── edges.py           # Conditional routing
+│   ├── ai_brain/               # AI routing and intelligence
+│   │   ├── router/             # MASR routing system
+│   │   │   ├── masr.py
+│   │   │   ├── query_analyzer.py
+│   │   │   ├── query_decomposer.py
+│   │   │   └── cost_optimizer.py
+│   │   └── supervisors/        # Hierarchical supervisors
 │   ├── repositories/           # Data access layer
 │   │   ├── base.py
 │   │   ├── research_repository.py
@@ -164,6 +165,7 @@ multi-agent-research-platform/
 │   ├── services/               # Business services
 │   │   ├── report_generator.py
 │   │   ├── gemini_service.py
+│   │   ├── direct_execution_service.py
 │   │   └── prompts/
 │   ├── temporal/               # Temporal workflows
 │   │   ├── client.py
