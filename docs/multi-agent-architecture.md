@@ -496,6 +496,140 @@ def build_research_graph() -> StateGraph:
     return workflow.compile()
 ```
 
+### Verification Revision Loop (PR #53)
+
+Supervisor verifiers now implement a **bounded revision loop** for quality assurance:
+
+```python
+# In src/agents/supervisors/base_supervisor.py
+MAX_VERIFICATION_REVISION_ROUNDS = 2  # Initial + 1 revision
+
+async def verify_with_revision(
+    self, worker_type: str, worker_response: Any
+) -> dict[str, Any]:
+    """Execute worker with bounded verification-revision loop."""
+    
+    for round_num in range(1, MAX_VERIFICATION_REVISION_ROUNDS + 1):
+        # Execute worker
+        worker_response = await self.send_talkhier_message(
+            worker_type, message_type, content, context
+        )
+        
+        # Run verification
+        verification_result = await self._run_verification(worker_response)
+        
+        # PASS → accept and break
+        if verification_result["verdict"] == "pass":
+            break
+        
+        # REVISE on final round → apply penalty and break
+        if round_num >= MAX_VERIFICATION_REVISION_ROUNDS:
+            # Terminal REVISE: apply 0.85 quality penalty
+            verification_result["quality_penalty"] = 0.85
+            break
+        
+        # REVISE with rounds remaining → append feedback and retry
+        feedback_text = f"\n\nREVISION FEEDBACK (Round {round_num}):\n"
+        feedback_text += str(verification_result["report"])
+        content = content + feedback_text  # Feed issues back to worker
+    
+    return verification_result
+```
+
+**Key behaviors**:
+- **Initial attempt + bounded revisions**: Default `MAX_VERIFICATION_REVISION_ROUNDS=2` means 1 initial + 1 revision
+- **PASS verdict**: Worker output accepted immediately, loop terminates
+- **REVISE verdict (rounds remaining)**: Append verification issues to worker prompt and re-run
+- **REVISE verdict (final round)**: Accept output with ×0.85 quality penalty (prevents infinite loops)
+- **Graceful degradation**: If worker returns no response, neutral fallback (`pass`)
+
+**Benefits**:
+- Iterative quality improvement without manual intervention
+- Bounded execution prevents runaway loops
+- Maintains supervisor QA gate while allowing refinement
+
+### Multi-Domain Sub-Query Execution (PR #54)
+
+Multi-domain queries are now decomposed and executed **concurrently with bounded parallelism**:
+
+```python
+# In src/api/services/direct_execution_service.py
+self.max_domain_parallelism = 4  # Bounded concurrency
+
+async def execute_multi_domain(
+    self, decomposition: QueryDecomposition, ...
+) -> dict[str, Any]:
+    """Execute per-domain sub-queries concurrently with bounded parallelism."""
+    
+    # Create semaphore for bounded concurrency
+    semaphore = asyncio.Semaphore(self.max_domain_parallelism)
+    
+    async def bounded_domain_execution(domain: str, sub_query: str):
+        async with semaphore:
+            return await self._execute_domain_supervisor(
+                domain=domain,
+                sub_query=sub_query,
+                ...
+            )
+    
+    # Dispatch all domain sub-queries concurrently
+    domain_tasks = [
+        bounded_domain_execution(domain, decomposition.domain_subqueries[domain])
+        for domain in decomposition.detected_domains
+    ]
+    
+    # Gather with return_exceptions for partial-failure resilience
+    domain_results = await asyncio.gather(*domain_tasks, return_exceptions=True)
+    
+    # Convert exceptions to error result dicts
+    processed_results = []
+    for result in domain_results:
+        if isinstance(result, BaseException):
+            processed_results.append({"status": "failed", "errors": [str(result)]})
+        else:
+            processed_results.append(result)
+    
+    # Merge domain results
+    return self._merge_domain_results(processed_results)
+
+def _merge_domain_results(self, domain_results: list[dict]) -> dict:
+    """Merge per-domain results via labeled concatenation.
+    
+    Future: replace with weighted synthesis or LLM-based merging.
+    """
+    merged_output = {}
+    succeeded_domains = []
+    failed_domains = []
+    
+    for result in domain_results:
+        domain = result["domain"]
+        if result["status"] == "completed":
+            succeeded_domains.append(domain)
+            merged_output[domain] = result.get("output", {})
+        else:
+            failed_domains.append({"domain": domain, "errors": result.get("errors", [])})
+    
+    return {
+        "output": merged_output,
+        "succeeded_domains": succeeded_domains,
+        "failed_domains": failed_domains,
+    }
+```
+
+**Key behaviors**:
+- **Single-domain path**: Bypasses multi-domain logic entirely (zero overhead)
+- **Multi-domain path**: Decomposes query into per-domain sub-queries
+- **Bounded concurrency**: `asyncio.Semaphore(max_domain_parallelism=4)` prevents resource exhaustion
+- **Partial-failure resilience**: `asyncio.gather(..., return_exceptions=True)` allows some domains to fail while others succeed
+- **Result merging**: Labeled concatenation by domain (future: LLM synthesis)
+- **Status determination**: Overall success if ≥1 domain succeeded; warnings for partial failures
+
+**Benefits**:
+- Concurrent execution reduces latency for multi-domain queries
+- Bounded parallelism prevents resource exhaustion
+- Graceful handling of partial failures
+- Preserves single-domain performance
+
 ## Agent Communication
 
 ### Message Passing

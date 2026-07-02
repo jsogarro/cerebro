@@ -101,6 +101,77 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 | `GEMINI_CACHE_ENABLED` | boolean | `true` | Enable response caching | No |
 | `GEMINI_CACHE_TTL` | integer | `3600` | Cache TTL (seconds) | No |
 
+### AI Brain Platform Configuration
+
+#### Multi-Provider Routing (PR #56)
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `MULTI_PROVIDER_ROUTING_ENABLED` | boolean | `false` | Enable multi-provider model routing via ModelRouter | No |
+| `OPENROUTER_ENABLED` | boolean | `false` | Enable OpenRouter multi-provider gateway | No |
+| `OPENROUTER_API_KEY` | string | - | OpenRouter API key for multi-provider access | No (required if enabled) |
+| `OPENROUTER_ENDPOINT` | string | `https://openrouter.ai/api/v1/chat/completions` | OpenRouter API endpoint | No |
+| `OPENROUTER_TIER_MAPPING` | dict | See below | Model selection by complexity tier | No |
+
+**OpenRouter Tier Mapping (default)**:
+```python
+{
+    "simple": "deepseek/deepseek-chat",        # Cost-minimized tier
+    "balanced": "anthropic/claude-3.5-sonnet", # Mid-tier quality
+    "complex": "anthropic/claude-3.5-sonnet"   # Quality-focused tier
+}
+```
+
+**How to enable**: Set `OPENROUTER_API_KEY` in environment, then set `MULTI_PROVIDER_ROUTING_ENABLED=true`. When disabled or API key is absent, all requests fall back to `GeminiService` with byte-for-byte prior behavior preserved.
+
+#### Memory-Informed Routing (PR #55)
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `MEMORY_INFORMED_ROUTING_ENABLED` | boolean | `false` | Enable episodic/procedural memory to influence routing decisions | No |
+| `MEMORY_ROUTING_MAX_WORKER_ADJUST` | integer | `2` | Maximum ±N worker count adjustment from analytic baseline | No |
+| `MEMORY_ROUTING_FRESHNESS_DAYS` | integer | `30` | Decay weight for older routing history (exponential decay) | No |
+| `MEMORY_PROMPT_MAX_PROCEDURES` | integer | `3` | Maximum procedural memory items to inject into worker prompts | No |
+
+**Behavior when enabled**:
+- Episodic memory nudges worker allocation based on past similar queries (bounded by `±MAX_WORKER_ADJUST`)
+- Procedural memory adds context to worker prompts with successful past approaches
+- Freshness decay: older history contributes less weight (exponential decay over `FRESHNESS_DAYS`)
+
+**Behavior when disabled** (default): Routing uses purely analytic complexity scoring; no memory influence. Worker prompts contain no procedural context.
+
+#### Multi-Domain Execution (PR #54)
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `MAX_DOMAIN_PARALLELISM` | integer | `4` | Maximum concurrent domain supervisors in multi-domain queries | No |
+
+**Note**: This is a code constant in `src/api/services/direct_execution_service.py`, not an environment variable. Multi-domain execution is always enabled; this constant bounds concurrency to prevent resource exhaustion.
+
+**Behavior**: When a query spans multiple domains, the system:
+1. Decomposes the query into per-domain sub-queries
+2. Dispatches up to `MAX_DOMAIN_PARALLELISM` domain supervisors concurrently (via `asyncio.Semaphore`)
+3. Merges results with `_merge_domain_results()` (labeled concatenation; future: LLM synthesis)
+4. Returns partial results if some domains fail (resilient to partial failure)
+
+Single-domain queries bypass this path entirely (zero overhead).
+
+#### Verification Revision Loop (PR #53)
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `MAX_VERIFICATION_REVISION_ROUNDS` | integer | `2` | Maximum verification attempts (initial + N revisions) | No |
+
+**Note**: This is a code constant in `src/agents/supervisors/base_supervisor.py`, not an environment variable.
+
+**Behavior**: Supervisor verifier QA now implements a bounded revision loop:
+1. Worker executes and returns output
+2. Verifier checks output → verdict: `PASS` or `REVISE` with issues
+3. On `PASS`: accept output and continue
+4. On `REVISE` with rounds remaining: append feedback to worker prompt and re-run
+5. On `REVISE` at final round: accept output with ×0.85 quality penalty
+6. Total attempts = `MAX_VERIFICATION_REVISION_ROUNDS` (default 2 = initial + 1 revision)
+
 ### Authentication Configuration
 
 | Variable | Type | Default | Description | Required |
