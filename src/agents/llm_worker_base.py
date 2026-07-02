@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
+from src.agents.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from src.ai_brain.memory import ProceduralMemoryManager
@@ -20,6 +21,8 @@ class LLMWorkerAgentBase(BaseAgent):
     agent_type: str = "llm_worker"
     # Procedural memory manager (injected externally, None = no memory)
     procedural_memory: "ProceduralMemoryManager | None" = None
+    # Tool registry (built on first access if not injected)
+    _tool_registry: ToolRegistry | None = None
 
     def get_agent_type(self) -> str:
         return self.agent_type
@@ -58,6 +61,32 @@ class LLMWorkerAgentBase(BaseAgent):
         Returns None by default (no precomputation).
         """
         return None
+
+    def _register_tools(self, registry: ToolRegistry) -> None:
+        """Optional hook for registering agent-specific tools.
+
+        Subclasses override this to register tools they want available.
+        Default: no tools registered.
+
+        Example:
+            def _register_tools(self, registry: ToolRegistry) -> None:
+                from src.agents.tools import ArithmeticTool
+                registry.register(ArithmeticTool())
+        """
+        pass
+
+    def _get_tool_registry(self) -> ToolRegistry:
+        """Get or create the tool registry for this agent.
+
+        Lazy initialization: builds registry on first access and caches it.
+        Subclasses call _register_tools() to declare their tools.
+        """
+        if self._tool_registry is None:
+            from src.agents.tools.registry import ToolRegistry
+
+            self._tool_registry = ToolRegistry()
+            self._register_tools(self._tool_registry)
+        return self._tool_registry
 
     async def _get_procedural_context(self, task: AgentTask) -> str | None:
         """Query procedural memory for relevant past approaches.
@@ -262,6 +291,15 @@ class LLMWorkerAgentBase(BaseAgent):
         procedural_context = await self._get_procedural_context(task)
         if procedural_context:
             prompt += f"\n\n{procedural_context}\n"
+
+        # Append tool availability context if tools are registered
+        registry = self._get_tool_registry()
+        if len(registry) > 0:
+            import json
+
+            tool_list = registry.list_tools()
+            tools_block = "\n\nAvailable tools:\n" + json.dumps(tool_list, indent=2)
+            prompt += tools_block
 
         # Append precomputed values to prompt if present
         if computed:

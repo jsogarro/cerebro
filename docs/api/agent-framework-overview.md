@@ -224,6 +224,62 @@ Real-time capabilities are built into both API tiers:
 
 🔌 **Third-Party Integration**: External systems with specific agent interaction requirements
 
+## Internal Tool Registry
+
+### Overview
+
+The Agent Framework includes a **tool registry** system that allows worker agents to declare and use deterministic, pure-internal tools. Tools are scoped strictly to **internal-only** operations (no network, no external APIs, no MCP) and provide validated, structured results that agents can reference in their reasoning.
+
+### Design Principles
+
+1. **Pure-Internal**: Tools are deterministic functions with no external dependencies
+2. **Validated Inputs**: All parameters validated via Pydantic models
+3. **Structured Results**: Tools return `ToolResult` with success/error indication
+4. **Safe Execution**: Tools never raise exceptions — errors become structured error results
+5. **Injection-Safe**: Arithmetic evaluation uses AST parsing with strict whitelisting (no `eval()`)
+
+### AgentTool Interface
+
+Each tool implements the `AgentTool` base class with:
+- `name`: Unique identifier (e.g., `arithmetic`, `datetime_info`)
+- `description`: One-line summary
+- `params_model`: Pydantic model for input validation
+- `_execute_impl`: The actual computation (async or sync)
+
+### Built-in Internal Tools
+
+1. **`arithmetic`**: Safe expression evaluation with AST parsing
+   - Supports: `+`, `-`, `*`, `/`, `**`, `//`, `%`, unary `+`/`-`
+   - Guards: division by zero, huge exponents, code injection
+   - Example: `{"expression": "(2 + 3) * 4 / 2"}` → `{"result": 10.0}`
+
+2. **`datetime_info`**: Current date/time, day-of-week, date arithmetic (UTC-aware)
+   - Operations: `current`, `day_of_week`, `add_days`, `diff_days`
+   - Example: `{"operation": "add_days", "date_iso": "2024-01-15", "days": 10}` → `{"result_date": "2024-01-25"}`
+
+3. **`unit_conversion`**: Deterministic table-driven conversions
+   - Supports: length, mass, temperature, data size
+   - Example: `{"value": 1000, "from_unit": "m", "to_unit": "km"}` → `{"result": 1.0}`
+
+### Worker Agent Registration
+
+Workers declare tools by overriding `_register_tools()`:
+
+```python
+class DataAnalysisAgent(LLMWorkerAgentBase):
+    def _register_tools(self, registry: ToolRegistry) -> None:
+        from src.agents.tools import ArithmeticTool
+        registry.register(ArithmeticTool())
+```
+
+When a worker has registered tools, the execution framework automatically appends an "Available tools:" block to the prompt with tool names and descriptions.
+
+### Scope and Limitations
+
+- **Strictly Internal**: No network, no filesystem, no subprocess, no external APIs
+- **No MCP Integration**: MCP tools are explicitly out of scope (product decision)
+- **Precompute-Style**: Tools currently inject metadata into prompts; full LLM tool-calling loop is not implemented
+
 ## Next Steps
 
 The Agent Framework APIs establish the foundation for:
