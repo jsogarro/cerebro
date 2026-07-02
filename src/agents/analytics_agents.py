@@ -2,6 +2,7 @@
 
 from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentTask
+from src.agents.tools.registry import ToolRegistry
 
 
 def _prior(task: AgentTask) -> str:
@@ -13,6 +14,12 @@ class DataAnalysisAgent(LLMWorkerAgentBase):
     """Analyzes the data/metrics described in the query."""
 
     agent_type = "data_analysis"
+
+    def _register_tools(self, registry: ToolRegistry) -> None:
+        """Register arithmetic tool for data analysis calculations."""
+        from src.agents.tools import ArithmeticTool
+
+        registry.register(ArithmeticTool())
 
     def _build_prompt(self, query: str, task: AgentTask) -> str:
         return (
