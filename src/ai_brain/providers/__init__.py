@@ -16,6 +16,7 @@ from .deepseek_provider import DeepSeekProvider
 from .gemini_provider import GeminiProvider
 from .llama_provider import LlamaProvider
 from .model_router import ModelRouter
+from .openrouter_provider import OpenRouterProvider
 
 __all__ = [
     "BaseProvider",
@@ -25,4 +26,5 @@ __all__ = [
     "ModelRequest",
     "ModelResponse",
     "ModelRouter",
+    "OpenRouterProvider",
 ]

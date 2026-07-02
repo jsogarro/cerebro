@@ -120,6 +120,133 @@ class LLMWorkerAgentBase(BaseAgent):
             self.log_warning(f"procedural_context_failed (graceful fallback): {e}")
             return None
 
+    async def _generate_with_routing(
+        self, prompt: str, task: AgentTask
+    ) -> tuple[str | None, float]:
+        """Generate content via ModelRouter or GeminiService with graceful fallback.
+
+        When MULTI_PROVIDER_ROUTING_ENABLED=True and OPENROUTER_API_KEY is set,
+        routes through ModelRouter/OpenRouterProvider. Otherwise falls back to
+        GeminiService (preserves current behavior).
+
+        Args:
+            prompt: The prompt to generate content for
+            task: AgentTask context (for metadata/tier information)
+
+        Returns:
+            Tuple of (content, confidence_score). Content is None on failure.
+        """
+        from src.core.config import settings
+
+        # Check if multi-provider routing is enabled
+        if (
+            not settings.MULTI_PROVIDER_ROUTING_ENABLED
+            or not settings.OPENROUTER_API_KEY
+        ):
+            # Fallback to GeminiService (current behavior)
+            return await self._generate_with_gemini(prompt)
+
+        # Route through ModelRouter with OpenRouter
+        try:
+            from src.ai_brain.providers import ModelRequest, ModelRouter
+
+            # Build ModelRequest
+            request = ModelRequest(
+                prompt=prompt,
+                max_tokens=2000,
+                temperature=0.7,
+                complexity_score=task.input_data.get("complexity_score", 0.5),
+                metadata={"tier": self._determine_tier(task)},
+            )
+
+            # Initialize ModelRouter (lazy, cached on instance)
+            if not hasattr(self, "_model_router"):
+                router_config = {
+                    "providers": {
+                        "openrouter": {
+                            "enabled": True,
+                            "api_key": settings.OPENROUTER_API_KEY,
+                            "endpoint": settings.OPENROUTER_ENDPOINT,
+                            "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
+                        }
+                    },
+                    "enable_fallback": True,
+                    "max_retries": 3,
+                }
+                self._model_router = ModelRouter(router_config)
+
+            # Route and generate via OpenRouter
+            response = await self._model_router.route_and_generate(
+                request,
+                routing_decision={
+                    "primary_model": {"provider": "openrouter", "name": None},
+                    "fallback_models": [],
+                },
+            )
+
+            if response.success:
+                return response.content, response.confidence_score
+
+            # OpenRouter failed, log and fall back to Gemini
+            self.log_warning(
+                f"OpenRouter generation failed: {response.error_message}, "
+                "falling back to GeminiService"
+            )
+
+        except Exception as exc:
+            self.log_warning(
+                f"ModelRouter routing failed: {exc}, falling back to GeminiService"
+            )
+
+        # Fallback to GeminiService on any error
+        return await self._generate_with_gemini(prompt)
+
+    async def _generate_with_gemini(self, prompt: str) -> tuple[str | None, float]:
+        """Generate content using GeminiService (current default path).
+
+        Args:
+            prompt: The prompt to generate content for
+
+        Returns:
+            Tuple of (content, confidence_score). Content is None on failure.
+        """
+        gemini = self._ensure_gemini_service()
+        if gemini is None:
+            content = (
+                f"[{self.agent_type}] No language model configured; unable to "
+                f"produce a full {self.agent_type.replace('_', ' ')}."
+            )
+            return content, 0.3
+
+        try:
+            content = await gemini.generate_content(prompt)
+            confidence = 0.85 if content and content.strip() else 0.3
+            return content, confidence
+        except Exception as exc:
+            self.log_error(f"{self.agent_type} generation failed: {exc}")
+            return None, 0.0
+
+    def _determine_tier(self, task: AgentTask) -> str:
+        """Determine routing tier based on task complexity.
+
+        Maps complexity score to tier (simple/balanced/complex) for OpenRouter
+        model selection.
+
+        Args:
+            task: AgentTask context
+
+        Returns:
+            Tier string: "simple", "balanced", or "complex"
+        """
+        complexity_score = task.input_data.get("complexity_score", 0.5)
+
+        if complexity_score < 0.3:
+            return "simple"
+        elif complexity_score < 0.7:
+            return "balanced"
+        else:
+            return "complex"
+
     async def execute(self, task: AgentTask) -> AgentResult:
         query = str(task.input_data.get("query", "")).strip()
         if not query:
@@ -145,20 +272,12 @@ class LLMWorkerAgentBase(BaseAgent):
             )
             prompt += computed_block
 
-        gemini = self._ensure_gemini_service()
-        if gemini is None:
-            content = (
-                f"[{self.agent_type}] No language model configured; unable to "
-                f"produce a full {self.agent_type.replace('_', ' ')}."
-            )
-            confidence = 0.3
-        else:
-            try:
-                content = await gemini.generate_content(prompt)
-                confidence = 0.85 if content and content.strip() else 0.3
-            except Exception as exc:
-                self.log_error(f"{self.agent_type} generation failed: {exc}")
-                return self.handle_error(task, exc)
+        # Route through ModelRouter if multi-provider routing is enabled,
+        # otherwise fall back to GeminiService (current behavior)
+        content, confidence = await self._generate_with_routing(prompt, task)
+
+        if content is None:
+            return self.handle_error(task, ValueError("Generation failed"))
 
         # Build output with optional computed field
         output: dict[str, Any] = {

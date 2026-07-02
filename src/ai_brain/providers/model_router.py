@@ -23,6 +23,7 @@ from .base_provider import (
 from .deepseek_provider import DeepSeekProvider
 from .gemini_provider import GeminiProvider
 from .llama_provider import LlamaProvider
+from .openrouter_provider import OpenRouterProvider
 
 logger = get_logger(__name__)
 
@@ -76,6 +77,7 @@ class ModelRouter:
             "deepseek": DeepSeekProvider,
             "llama": LlamaProvider,
             "gemini": GeminiProvider,
+            "openrouter": OpenRouterProvider,
         }
 
         # Performance tracking

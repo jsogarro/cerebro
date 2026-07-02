@@ -88,6 +88,7 @@ class ModelRequest:
     session_id: str | None = None
     domain: str | None = None
     complexity_score: float = 0.5
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
