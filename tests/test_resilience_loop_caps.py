@@ -1,4 +1,9 @@
-"""Resilience characterization tests for bounded workflow iteration."""
+"""Resilience characterization tests for bounded workflow iteration.
+
+NOTE: This file previously contained tests for the removed LangGraph orchestration
+subsystem (ResearchGraphBuilder, ResearchState). Those tests have been removed.
+Only tests for active systems (TalkHier, MASR, GeminiService) remain.
+"""
 
 import asyncio
 from datetime import UTC, datetime
@@ -16,64 +21,13 @@ from src.models.talkhier_api_models import (
     RefinementStrategy,
     SessionStatus,
 )
-from src.orchestration.graph_builder import GraphConfig, ResearchGraphBuilder
-from src.orchestration.state import (
-    MaxIterationsExceeded,
-    ResearchState,
-    WorkflowPhase,
-)
 from src.reliability.retry_strategies import CircuitBreaker
 from src.services.gemini_service import GeminiService
 
 
-def build_state() -> ResearchState:
-    return ResearchState(
-        project_id="project-1",
-        workflow_id="workflow-1",
-        query="bounded workflow",
-        domains=["general"],
-    )
-
-
-def test_research_state_tracks_iteration_count_and_raises_at_limit() -> None:
-    state = build_state()
-
-    state.increment_iteration(max_iterations=2, node_name="initialization")
-    state.increment_iteration(max_iterations=2, node_name="query_analysis")
-
-    assert state.iteration_count == 2
-    with pytest.raises(MaxIterationsExceeded, match="exceeded max_iterations=2"):
-        state.increment_iteration(max_iterations=2, node_name="plan_generation")
-
-
-def test_graph_builder_enforces_max_iterations_before_node_execution() -> None:
-    executed: list[str] = []
-
-    def handler(state: ResearchState) -> ResearchState:
-        executed.append("handler")
-        return state
-
-    builder = ResearchGraphBuilder(GraphConfig(max_iterations=1))
-    wrapped = builder._wrap_handler(
-        builder.add_node(
-            "initialization",
-            handler,
-            WorkflowPhase.INITIALIZATION,
-        ).nodes["initialization"]
-    )
-
-    state = build_state()
-    assert wrapped(state) is state
-    assert state.iteration_count == 1
-    assert executed == ["handler"]
-
-    with pytest.raises(MaxIterationsExceeded):
-        wrapped(state)
-
-    assert executed == ["handler"]
-
-
 def test_talkhier_refinement_round_rejects_rounds_past_max_rounds() -> None:
+    """TalkHier refinement rounds respect max_rounds cap."""
+
     async def execute_past_cap() -> None:
         await TalkHierRoundExecutor().execute_refinement_round(
             "session-1",
@@ -105,10 +59,12 @@ def test_talkhier_refinement_round_rejects_rounds_past_max_rounds() -> None:
 
 
 def test_gemini_api_call_uses_tenacity_retry_policy() -> None:
+    """GeminiService uses tenacity retry decorator."""
     assert hasattr(GeminiService._generate_content, "retry")
 
 
 def test_masr_router_exposes_routing_circuit_breaker() -> None:
+    """MASR router has circuit breaker for routing decisions."""
     router = MASRouter(config={"enable_learning": False})
 
     assert isinstance(router.routing_circuit_breaker, CircuitBreaker)

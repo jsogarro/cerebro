@@ -10,14 +10,19 @@ and optimal routing strategy based on multiple factors including:
 - Expected output format and quality requirements
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from structlog import get_logger
 
 from src.core.pii_redactor import redact_pii
+
+if TYPE_CHECKING:
+    from .query_decomposer import QueryDecomposition
 
 logger = get_logger()
 
@@ -69,6 +74,7 @@ class ComplexityAnalysis:
     recommended_agents: dict[str, int] = field(default_factory=dict)
     estimated_tokens: int = 1000  # Estimated token usage
     priority_level: str = "normal"  # Priority: low, normal, high, critical
+    decomposition: QueryDecomposition | None = None  # Multi-domain decomposition
 
 
 class QueryComplexityAnalyzer:
@@ -81,6 +87,8 @@ class QueryComplexityAnalyzer:
 
     def __init__(self, config: dict[str, Any] | None = None):
         """Initialize analyzer with configuration."""
+        from .query_decomposer import QueryDecomposer
+
         self.config = config or {}
 
         # Complexity weights for different factors
@@ -96,6 +104,9 @@ class QueryComplexityAnalyzer:
                 "quality": 0.05,
             },
         )
+
+        # Query decomposer for multi-domain queries
+        self.decomposer = QueryDecomposer(config=self.config.get("decomposer", {}))
 
         # Domain keywords for classification
         self.domain_patterns = {
@@ -197,6 +208,11 @@ class QueryComplexityAnalyzer:
         # Calculate uncertainty
         uncertainty = self._calculate_uncertainty(factors, domains)
 
+        # Decompose multi-domain queries
+        decomposition = None
+        if len(domains) > 1 and QueryDomain.GENERAL not in domains:
+            decomposition = self.decomposer.decompose_query(query)
+
         analysis = ComplexityAnalysis(
             score=score,
             level=level,
@@ -208,6 +224,7 @@ class QueryComplexityAnalyzer:
             recommended_agents=recommended_agents,
             estimated_tokens=estimated_tokens,
             priority_level=priority_level,
+            decomposition=decomposition,
         )
 
         logger.info(
