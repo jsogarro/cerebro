@@ -4,6 +4,8 @@
 
 The Multi-Agent Research Platform orchestrates 5 specialized AI agents working together to conduct comprehensive research. This document details the agent architecture, implementation patterns, and orchestration mechanisms.
 
+**Architecture Update (2026-07-02)**: All 17 agents across all domains (research, content, analytics, finance) now share `LLMWorkerAgentBase` as their common base class, providing uniform infrastructure for multi-provider routing, memory-informed prompts, and tool registry support. Research agents maintain their complex multi-step execution workflows while inheriting these shared capabilities.
+
 ## Architecture Diagram
 
 ```mermaid
@@ -77,7 +79,17 @@ graph TB
 
 **Implementation**:
 ```python
-class LiteratureReviewAgent(BaseAgent):
+class LiteratureReviewAgent(LLMWorkerAgentBase):
+    """
+    Now inherits from LLMWorkerAgentBase (as of 2026-07-02), gaining access to:
+    - Multi-provider routing via _generate_with_routing()
+    - Memory-informed prompts via _get_procedural_context()
+    - Tool registry via _get_tool_registry()
+    
+    Maintains custom execute() with complex multi-step workflow (MCP tools,
+    knowledge graphs, caching, structured output) while using base class's
+    _ensure_gemini_service() for lazy initialization.
+    """
     async def execute(self, task: AgentTask) -> AgentResult:
         # Search academic databases
         search_results = await self._search_databases(task.query)
@@ -116,7 +128,8 @@ class LiteratureReviewAgent(BaseAgent):
 
 **Implementation**:
 ```python
-class ComparativeAnalysisAgent(BaseAgent):
+class ComparativeAnalysisAgent(LLMWorkerAgentBase):
+    """Inherits from LLMWorkerAgentBase (2026-07-02)."""
     async def execute(self, task: AgentTask) -> AgentResult:
         # Extract approaches from literature findings
         approaches = await self._extract_approaches(task.input_data)
@@ -159,7 +172,8 @@ class ComparativeAnalysisAgent(BaseAgent):
 
 **Implementation**:
 ```python
-class MethodologyAgent(BaseAgent):
+class MethodologyAgent(LLMWorkerAgentBase):
+    """Inherits from LLMWorkerAgentBase (2026-07-02)."""
     async def execute(self, task: AgentTask) -> AgentResult:
         # Analyze research context
         context = await self._analyze_context(task.research_query)
