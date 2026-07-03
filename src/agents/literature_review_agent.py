@@ -10,7 +10,7 @@ from typing import Any
 
 from structlog import get_logger
 
-from src.agents.base import BaseAgent
+from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.models.research_project import ResearchDepth
@@ -20,7 +20,7 @@ from src.services.prompts.agent_prompts import generate_literature_agent_prompt
 logger = get_logger()
 
 
-class LiteratureReviewAgent(BaseAgent):
+class LiteratureReviewAgent(LLMWorkerAgentBase):
     """
     Agent specialized in conducting systematic literature reviews.
 
@@ -70,9 +70,11 @@ class LiteratureReviewAgent(BaseAgent):
                 }
             else:
                 # Fallback: Use original two-step process for testing
-                academic_sources = await self._search_academic_sources(task.input_data)
+                academic_sources = await self._search_academic_sources(
+                    task.input_data, task
+                )
                 literature_analysis_dict = await self._analyze_literature_with_gemini(
-                    task.input_data, academic_sources
+                    task.input_data, academic_sources, task
                 )
                 # Convert to structured format
                 from src.agents.schemas import LiteratureAnalysisSchema
@@ -441,13 +443,14 @@ class LiteratureReviewAgent(BaseAgent):
         }
 
     async def _search_academic_sources(
-        self, input_data: dict[str, Any]
+        self, input_data: dict[str, Any], task: AgentTask | None = None
     ) -> dict[str, Any]:
         """
         Search academic sources using MCP tools.
 
         Args:
             input_data: Task input data
+            task: Optional AgentTask for routing context
 
         Returns:
             Academic search results
@@ -456,7 +459,7 @@ class LiteratureReviewAgent(BaseAgent):
             self.log_warning(
                 "MCP integration not available, using Gemini source search"
             )
-            return await self._fallback_academic_search(input_data)
+            return await self._fallback_academic_search(input_data, task)
 
         query = input_data.get("query", "")
         domains = input_data.get("domains", [])
@@ -487,10 +490,13 @@ class LiteratureReviewAgent(BaseAgent):
 
         except Exception as e:
             self.log_error(f"MCP academic search failed: {e}")
-            return await self._fallback_academic_search(input_data)
+            return await self._fallback_academic_search(input_data, task)
 
     async def _analyze_literature_with_gemini(
-        self, input_data: dict[str, Any], academic_sources: dict[str, Any]
+        self,
+        input_data: dict[str, Any],
+        academic_sources: dict[str, Any],
+        task: AgentTask,
     ) -> dict[str, Any]:
         """
         Analyze literature using Gemini with real academic sources.
@@ -498,13 +504,11 @@ class LiteratureReviewAgent(BaseAgent):
         Args:
             input_data: Original task input
             academic_sources: Results from academic search
+            task: AgentTask for routing context
 
         Returns:
             Literature analysis from Gemini
         """
-        if not self.gemini_service:
-            return self._generate_mock_analysis_from_sources(academic_sources)
-
         # Prepare sources for Gemini analysis
         sources_text = self._prepare_sources_for_analysis(
             academic_sources.get("sources", [])
@@ -518,8 +522,12 @@ class LiteratureReviewAgent(BaseAgent):
         prompt = generate_literature_agent_prompt(enhanced_input)
 
         try:
-            response = await self.gemini_service.generate_content(prompt)
-            parsed_response = parse_json_response(response)
+            # Use routing instead of direct Gemini call
+            content, _confidence = await self._generate_with_routing(prompt, task)
+            if content is None:
+                return self._generate_mock_analysis_from_sources(academic_sources)
+
+            parsed_response = parse_json_response(content)
             result = parsed_response.get("literature_analysis", {})
             return dict(result) if isinstance(result, dict) else {}
         except Exception as e:
@@ -705,14 +713,13 @@ Requirements:
 - Include 2-3 sentence abstracts
 - Include DOI when known"""
 
-        if self.gemini_service is None:
+        gemini = self._ensure_gemini_service()
+        if gemini is None:
             self.log_error("Source search invoked without a configured gemini_service")
             return []
 
         try:
-            result = await self.gemini_service.generate_structured_content(
-                prompt, SourceListSchema
-            )
+            result = await gemini.generate_structured_content(prompt, SourceListSchema)
             self.log_info(f"Found {len(result.sources)} sources")
             return [s.model_dump() for s in result.sources]
         except Exception as e:
@@ -742,14 +749,15 @@ Analyze the literature and provide:
 3. methodologies_used: List of research methodologies observed across papers
 4. quality_assessment: Overall quality assessment of this literature corpus"""
 
-        if self.gemini_service is None:
+        gemini = self._ensure_gemini_service()
+        if gemini is None:
             self.log_error(
                 "Source analysis invoked without a configured gemini_service"
             )
             return {}
 
         try:
-            result = await self.gemini_service.generate_structured_content(
+            result = await gemini.generate_structured_content(
                 prompt, LiteratureAnalysisSchema
             )
             return {
@@ -814,7 +822,7 @@ Analyze the literature and provide:
         )
 
     async def _fallback_academic_search(
-        self, input_data: dict[str, Any]
+        self, input_data: dict[str, Any], task: AgentTask | None = None
     ) -> dict[str, Any]:
         """
         Fallback academic search using Gemini when MCP tools are unavailable.
@@ -824,6 +832,7 @@ Analyze the literature and provide:
 
         Args:
             input_data: Task input data
+            task: Optional AgentTask for routing context
 
         Returns:
             Search results with real academic sources identified by Gemini
@@ -831,9 +840,6 @@ Analyze the literature and provide:
         query = input_data.get("query", "")
         domains = input_data.get("domains", [])
         max_sources = input_data.get("max_sources", 10)
-
-        if not self.gemini_service:
-            return self._static_fallback_sources(query, domains)
 
         domains_str = ", ".join(domains) if domains else "general research"
         prompt = f"""You are an academic research librarian. Identify {max_sources} real, published academic papers
@@ -867,11 +873,24 @@ Requirements:
 
         try:
             self.log_info(f"Searching for sources via Gemini: {query[:80]}...")
-            response = await self.gemini_service.generate_content(prompt)
-            self.log_info(f"Gemini source response: {len(response)} chars")
+
+            # Create minimal task if not provided
+            if task is None:
+                task = AgentTask(
+                    id="fallback_search",
+                    agent_type="literature_review",
+                    input_data=input_data,
+                )
+
+            # Use routing instead of direct Gemini call
+            content, _confidence = await self._generate_with_routing(prompt, task)
+            if content is None:
+                return self._static_fallback_sources(query, domains)
+
+            self.log_info(f"Gemini source response: {len(content)} chars")
             from src.services.parsers.json_parser import parse_json_response
 
-            parsed = parse_json_response(response)
+            parsed = parse_json_response(content)
 
             # Handle various Gemini response formats
             if "sources" in parsed:

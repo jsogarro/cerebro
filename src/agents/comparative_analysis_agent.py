@@ -10,11 +10,11 @@ from typing import Any
 
 from structlog import get_logger
 
-from src.agents.base import BaseAgent
 from src.agents.comparative_insight_synthesizer import ComparativeInsightSynthesizer
 from src.agents.comparative_matrix_builder import ComparisonMatrixBuilder
 from src.agents.comparative_similarity_analyzer import SimilarityAnalyzer
 from src.agents.comparative_theory_extractor import TheoryExtractor
+from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.services.parsers.json_parser import parse_json_response
@@ -23,7 +23,7 @@ from src.services.prompts.agent_prompts import generate_comparative_agent_prompt
 logger = get_logger()
 
 
-class ComparativeAnalysisAgent(BaseAgent):
+class ComparativeAnalysisAgent(LLMWorkerAgentBase):
     """
     Agent specialized in comparative analysis of research items.
 
@@ -91,7 +91,7 @@ class ComparativeAnalysisAgent(BaseAgent):
 
             # Step 4: Generate analysis using Gemini with MCP-enhanced data
             analysis = await self._analyze_comparison_with_gemini(
-                task.input_data, comparative_research, statistical_analysis
+                task.input_data, comparative_research, statistical_analysis, task
             )
 
             # Process comparison matrix with MCP statistical enhancements
@@ -631,6 +631,7 @@ class ComparativeAnalysisAgent(BaseAgent):
         input_data: dict[str, Any],
         research_data: dict[str, Any],
         statistical_data: dict[str, Any],
+        task: AgentTask,
     ) -> dict[str, Any]:
         """
         Analyze comparison using Gemini with MCP-enhanced data.
@@ -639,15 +640,11 @@ class ComparativeAnalysisAgent(BaseAgent):
             input_data: Original task input
             research_data: Research results from MCP
             statistical_data: Statistical analysis from MCP
+            task: AgentTask for routing context
 
         Returns:
             Enhanced comparative analysis from Gemini
         """
-        if not self.gemini_service:
-            return self._generate_mock_analysis_with_mcp(
-                input_data, research_data, statistical_data
-            )
-
         # Enhance input with MCP data
         enhanced_input = input_data.copy()
         enhanced_input["research_findings"] = self._summarize_research_findings(
@@ -664,8 +661,14 @@ class ComparativeAnalysisAgent(BaseAgent):
         prompt = generate_comparative_agent_prompt(enhanced_input)
 
         try:
-            response = await self.gemini_service.generate_content(prompt)
-            parsed_response = parse_json_response(response)
+            # Use routing instead of direct Gemini call
+            content, _confidence = await self._generate_with_routing(prompt, task)
+            if content is None:
+                return self._generate_mock_analysis_with_mcp(
+                    input_data, research_data, statistical_data
+                )
+
+            parsed_response = parse_json_response(content)
             analysis = (
                 parsed_response.get("comparative_analysis")
                 or parsed_response.get("analysis")
