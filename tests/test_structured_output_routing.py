@@ -336,8 +336,11 @@ class TestSwappedAgentCallSites:
             input_data={"research_question": "test question"},
         )
 
-        with patch.object(agent, "_calculate_confidence", return_value=0.8), patch.object(agent, "get_cached_result", return_value=None):
-                await agent.execute(task)
+        with (
+            patch.object(agent, "_calculate_confidence", return_value=0.8),
+            patch.object(agent, "get_cached_result", return_value=None),
+        ):
+            await agent.execute(task)
 
         # Verify routing method was called with task
         assert mock_routing.called
@@ -370,8 +373,11 @@ class TestSwappedAgentCallSites:
             input_data={"agent_outputs": {"test": "data"}},
         )
 
-        with patch.object(agent, "_calculate_confidence", return_value=0.8), patch.object(agent, "get_cached_result", return_value=None):
-                await agent.execute(task)
+        with (
+            patch.object(agent, "_calculate_confidence", return_value=0.8),
+            patch.object(agent, "get_cached_result", return_value=None),
+        ):
+            await agent.execute(task)
 
         # Verify routing method was called with task
         assert mock_routing.called
