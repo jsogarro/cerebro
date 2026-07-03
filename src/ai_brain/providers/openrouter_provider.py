@@ -7,6 +7,7 @@ integration point with graceful fallback to GeminiService when unavailable.
 """
 
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +26,15 @@ if TYPE_CHECKING:
     from ..config.model_config_manager import ModelConfigManager
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class SlugValidationResult:
+    """Result of model slug validation against OpenRouter catalog."""
+
+    valid_slugs: dict[str, str]  # tier -> slug
+    invalid_slugs: dict[str, str]  # tier -> slug
+    validation_error: str | None = None
 
 
 class OpenRouterProvider(BaseProvider):
@@ -70,6 +80,10 @@ class OpenRouterProvider(BaseProvider):
             },
         )
 
+        # Slug validation configuration
+        self.validate_slugs_on_startup = config.get("validate_slugs_on_startup", True)
+        self.stale_slugs: dict[str, str] = {}  # tier -> invalid slug
+
         # Legacy model specifications (backward compatibility)
         self._legacy_model_specs = {
             "deepseek/deepseek-chat": {
@@ -110,6 +124,70 @@ class OpenRouterProvider(BaseProvider):
         """Legacy hard-coded models for backward compatibility."""
         return list(self._legacy_model_specs.keys())
 
+    async def validate_model_slugs(self) -> SlugValidationResult:
+        """Validate that all tier_mapping slugs exist in OpenRouter's catalog.
+
+        Fetches the live model catalog from OpenRouter and checks each slug
+        in tier_mapping against it. Returns a structured result with valid/invalid
+        slugs and any validation errors.
+
+        Network failures are non-fatal - they return a validation_error but don't
+        crash the provider initialization.
+
+        Returns:
+            SlugValidationResult with valid/invalid slug breakdown
+        """
+        valid_slugs: dict[str, str] = {}
+        invalid_slugs: dict[str, str] = {}
+        validation_error: str | None = None
+
+        try:
+            # Derive models endpoint from chat completions endpoint
+            # https://openrouter.ai/api/v1/chat/completions -> https://openrouter.ai/api/v1/models
+            models_url = self.api_endpoint.replace("/chat/completions", "/models")
+
+            if not self.client:
+                raise RuntimeError("HTTP client not initialized")
+
+            # Fetch the model catalog (no API key required for public catalog)
+            response = await self.client.get(models_url, timeout=10.0)
+            response.raise_for_status()
+            catalog_data: dict[str, Any] = response.json()
+
+            # Extract model IDs from catalog
+            # Response format: {"data": [{"id": "anthropic/claude-sonnet-4.6", ...}, ...]}
+            catalog_models = catalog_data.get("data", [])
+            available_slugs = {
+                model.get("id") for model in catalog_models if model.get("id")
+            }
+
+            # Check each tier_mapping slug against catalog
+            for tier, slug in self.tier_mapping.items():
+                if slug in available_slugs:
+                    valid_slugs[tier] = slug
+                else:
+                    invalid_slugs[tier] = slug
+
+        except httpx.HTTPError as e:
+            validation_error = f"Network error fetching model catalog: {e}"
+            logger.warning(
+                "OpenRouter model catalog fetch failed - skipping slug validation",
+                error=str(e),
+            )
+        except Exception as e:
+            validation_error = f"Unexpected validation error: {e}"
+            logger.warning(
+                "OpenRouter slug validation failed unexpectedly",
+                error=str(e),
+                exc_info=True,
+            )
+
+        return SlugValidationResult(
+            valid_slugs=valid_slugs,
+            invalid_slugs=invalid_slugs,
+            validation_error=validation_error,
+        )
+
     async def load_configuration(self) -> None:
         """Load OpenRouter-specific configuration."""
         # Load base configuration
@@ -147,6 +225,31 @@ class OpenRouterProvider(BaseProvider):
                 timeout=httpx.Timeout(60.0),
                 limits=httpx.Limits(max_keepalive_connections=10, max_connections=100),
             )
+
+        # Validate model slugs on startup if enabled and provider is ready
+        if self.validate_slugs_on_startup and self.api_key and self.client:
+            validation_result = await self.validate_model_slugs()
+
+            # Network/validation errors are warnings (non-blocking)
+            if validation_result.validation_error:
+                # Already logged by validate_model_slugs
+                pass
+            elif validation_result.invalid_slugs:
+                # LOUD ERROR-LEVEL LOGGING for stale slugs
+                # This is the critical diagnostic path - silent failures are forbidden
+                self.stale_slugs = validation_result.invalid_slugs
+                logger.error(
+                    "OpenRouter tier_mapping contains STALE MODEL SLUGS - these models are not available in the current catalog",
+                    stale_slugs=validation_result.invalid_slugs,
+                    valid_slugs=validation_result.valid_slugs,
+                    provider="openrouter",
+                )
+            else:
+                # All slugs valid
+                logger.info(
+                    "OpenRouter model slug validation passed",
+                    validated_tiers=list(validation_result.valid_slugs.keys()),
+                )
 
     def _get_model_context_window_legacy(self, model_name: str) -> int:
         """Legacy method using hard-coded specifications."""
@@ -414,6 +517,7 @@ class OpenRouterProvider(BaseProvider):
         """Perform OpenRouter-specific health check.
 
         Tests API connectivity with a simple generation request.
+        Also exposes stale_slugs state for monitoring.
 
         Returns:
             ProviderHealthStatus with current health information
@@ -445,6 +549,16 @@ class OpenRouterProvider(BaseProvider):
             else:
                 self.health_status.api_status = "error"
                 self.health_status.last_error = response.error_message
+
+            # Surface stale slugs in health status metadata for monitoring/alerting
+            if self.stale_slugs:
+                # Degrade status if stale slugs detected
+                if self.health_status.api_status == "operational":
+                    self.health_status.api_status = "degraded"
+                # Add to metadata (health_status has a metadata dict for extra info)
+                if not hasattr(self.health_status, "metadata"):
+                    self.health_status.metadata = {}  # type: ignore[attr-defined]
+                self.health_status.metadata["stale_slugs"] = self.stale_slugs  # type: ignore[attr-defined]
 
         except Exception as e:
             logger.error("OpenRouter health check failed", error=str(e), exc_info=True)
