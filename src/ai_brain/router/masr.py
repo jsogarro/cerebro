@@ -31,6 +31,11 @@ if TYPE_CHECKING:
     from src.ai_brain.memory.episodic_memory import EpisodicMemoryManager
     from src.ai_brain.memory.procedural_memory import ProceduralMemoryManager
 
+from src.ai_brain.experimentation.core.adaptive_allocation_engine import (
+    AdaptiveAllocationEngine,
+    AllocationConfig,
+    AllocationStrategy,
+)
 from src.core.constants import (
     DEFAULT_AGENT_TIMEOUT,
     DEFAULT_ESTIMATED_TOKENS,
@@ -187,6 +192,29 @@ class MASRouter:
         self.episodic_memory: EpisodicMemoryManager | None = None
         self.procedural_memory: ProceduralMemoryManager | None = None
 
+        # Adaptive routing (feature-flagged, default OFF)
+        self.adaptive_routing_enabled = self.config.get(
+            "adaptive_routing_enabled", False
+        )
+        self.adaptive_routing_min_history = self.config.get(
+            "adaptive_routing_min_history", 100
+        )
+        self.adaptive_routing_max_worker_adjust = self.config.get(
+            "adaptive_routing_max_worker_adjust", 2
+        )
+        self._adaptive_engine: AdaptiveAllocationEngine | None = None
+        if self.adaptive_routing_enabled:
+            self._adaptive_engine = AdaptiveAllocationEngine(
+                {
+                    "enable_safety": True,
+                    "global_min_allocation": 0.05,
+                    "global_max_allocation": 0.70,
+                    "update_interval_seconds": self.config.get(
+                        "adaptive_routing_update_interval_seconds", 300
+                    ),
+                }
+            )
+
     @property
     def routing_circuit_breaker(self) -> CircuitBreaker:
         """Circuit breaker guarding MASR routing analysis and optimization."""
@@ -260,9 +288,17 @@ class MASRouter:
                 complexity_analysis, query
             )
 
-            # Step 4: Allocate agents (with optional memory-informed adjustment)
-            agent_allocation = self._allocate_agents(
+            # Step 3.6: Query adaptive engine for allocation adjustment (if enabled)
+            adaptive_recommendation = await self._get_adaptive_allocation_adjustment(
                 complexity_analysis, collaboration_mode, episodic_prior
+            )
+
+            # Step 4: Allocate agents (with optional memory + adaptive adjustment)
+            agent_allocation = self._allocate_agents(
+                complexity_analysis,
+                collaboration_mode,
+                episodic_prior,
+                adaptive_recommendation,
             )
 
             # Step 5: Calculate performance predictions
@@ -457,6 +493,175 @@ class MASRouter:
             logger.debug(f"episodic_routing_prior failed (graceful fallback): {e}")
             return None
 
+    async def _get_adaptive_allocation_adjustment(
+        self,
+        complexity_analysis: ComplexityAnalysis,
+        collaboration_mode: CollaborationMode,
+        episodic_prior: int | None,
+    ) -> int | None:
+        """Query adaptive engine for worker_count adjustment (if enabled and warm).
+
+        Uses a 5-arm bandit (deltas: -2, -1, 0, +1, +2 from memory-adjusted baseline)
+        with Thompson Sampling. Reward signal is quality_score from routing_history.
+
+        Args:
+            complexity_analysis: Query complexity analysis
+            collaboration_mode: Determined collaboration mode
+            episodic_prior: Episodic memory prior (may be None)
+
+        Returns:
+            Recommended worker_count from adaptive engine, or None if:
+            - Flag is OFF
+            - History too small (cold start)
+            - Engine raises an error (graceful fallback)
+        """
+        # Guard: flag OFF → no-op (zero overhead)
+        if not self.adaptive_routing_enabled or self._adaptive_engine is None:
+            return None
+
+        # Guard: cold start → wait for history
+        history_size = self.metrics_collector.get_history_size()
+        if history_size < self.adaptive_routing_min_history:
+            logger.debug(
+                f"adaptive_routing: cold start, history {history_size} < {self.adaptive_routing_min_history}"
+            )
+            return None
+
+        try:
+            # Derive experiment_id from collaboration_mode
+            experiment_id = f"adaptive_allocation_{collaboration_mode.value}"
+
+            # Register experiment if not already registered (idempotent)
+            if experiment_id not in self._adaptive_engine.active_experiments:
+                # 5-arm bandit: deltas {-2, -1, 0, +1, +2} from memory-adjusted baseline
+                # Arm 0 = -2 workers, Arm 1 = -1, Arm 2 = 0 (no change), Arm 3 = +1, Arm 4 = +2
+                variants = ["-2", "-1", "0", "+1", "+2"]
+                initial_allocation = dict.fromkeys(variants, 0.2)  # Uniform start
+
+                config = AllocationConfig(
+                    strategy=AllocationStrategy.ADAPTIVE_BANDIT,
+                    initial_allocation=initial_allocation,
+                    min_allocation=0.05,
+                    max_allocation=0.70,
+                    exploration_rate=0.1,
+                    confidence_threshold=0.95,
+                    update_frequency_seconds=self.config.get(
+                        "adaptive_routing_update_interval_seconds", 300
+                    ),
+                    enable_guardrails=True,
+                    performance_threshold=0.95,
+                    safety_sample_size=10,  # Low threshold for faster learning in eval
+                )
+
+                await self._adaptive_engine.register_experiment(
+                    experiment_id, variants, config
+                )
+
+                logger.info(
+                    f"adaptive_routing: registered experiment {experiment_id} with 5 arms"
+                )
+
+            # Allocate variant (selects arm via Thompson Sampling)
+            decision = await self._adaptive_engine.allocate_variant(
+                experiment_id,
+                user_context={"collaboration_mode": collaboration_mode.value},
+            )
+
+            # Map selected variant (delta string) to worker_count adjustment
+            delta_map = {"-2": -2, "-1": -1, "0": 0, "+1": 1, "+2": 2}
+            selected_delta = delta_map[decision.variant_id]
+
+            # Compute baseline (analytic or memory-adjusted)
+            # We don't know the memory-adjusted count here, so we'll return the delta
+            # and let _apply_adaptive_adjustment apply it to the baseline
+            # But we need to return an absolute count, not a delta
+            # So we'll infer the baseline from the collaboration_mode
+            baseline = self._infer_baseline_worker_count(
+                complexity_analysis, collaboration_mode
+            )
+            recommended_count = max(1, baseline + selected_delta)
+
+            logger.debug(
+                f"adaptive_routing: experiment {experiment_id} selected arm {decision.variant_id} "
+                f"(delta {selected_delta}, baseline {baseline} → {recommended_count})"
+            )
+
+            return recommended_count
+
+        except Exception as e:
+            # Resilient: log and return None (routing proceeds with memory prior only)
+            logger.warning(
+                f"adaptive_allocation_adjustment failed (graceful fallback): {e}"
+            )
+            return None
+
+    def _infer_baseline_worker_count(
+        self,
+        complexity_analysis: ComplexityAnalysis,
+        collaboration_mode: CollaborationMode,
+    ) -> int:
+        """Infer analytic baseline worker_count for a given collaboration_mode.
+
+        This is a heuristic to reconstruct the baseline that _allocate_agents would
+        compute, so we can apply bandit deltas on top of it.
+        """
+        if collaboration_mode == CollaborationMode.DIRECT:
+            return 1
+        elif collaboration_mode == CollaborationMode.PARALLEL:
+            return int(
+                min(len(complexity_analysis.domains) + 1, self.max_parallel_workers)
+            )
+        elif collaboration_mode == CollaborationMode.HIERARCHICAL:
+            return int(
+                min(complexity_analysis.subtask_count, self.max_agents_per_query)
+            )
+        elif collaboration_mode == CollaborationMode.DEBATE:
+            return 3  # Fixed
+        else:  # ENSEMBLE
+            return 5
+
+    async def record_routing_outcome(
+        self, decision: RoutingDecision, quality_score: float, actual_cost: float
+    ) -> None:
+        """Record routing outcome for adaptive learning.
+
+        Args:
+            decision: The routing decision that was executed
+            quality_score: Observed quality score (0.0-1.0)
+            actual_cost: Actual cost incurred
+        """
+        if not self.adaptive_routing_enabled or self._adaptive_engine is None:
+            return
+
+        try:
+            experiment_id = f"adaptive_allocation_{decision.collaboration_mode.value}"
+
+            # Map actual worker_count back to arm (delta)
+            baseline = self._infer_baseline_worker_count(
+                decision.complexity_analysis, decision.collaboration_mode
+            )
+            actual_delta = decision.agent_allocation.worker_count - baseline
+
+            # Clamp delta to {-2, -1, 0, +1, +2} (may be clamped by hard caps)
+            clamped_delta = max(-2, min(2, actual_delta))
+            delta_to_variant = {-2: "-2", -1: "-1", 0: "0", 1: "+1", 2: "+2"}
+            variant_id = delta_to_variant.get(clamped_delta, "0")
+
+            # Reward is quality_score (higher is better)
+            reward = quality_score
+
+            await self._adaptive_engine.record_outcome(
+                experiment_id, variant_id, reward
+            )
+
+            logger.debug(
+                f"adaptive_routing: recorded outcome for {experiment_id} "
+                f"variant {variant_id} reward {reward:.3f}"
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to record adaptive routing outcome: {e}")
+
     def _apply_memory_adjustment(
         self, analytic_count: int, episodic_prior: int | None
     ) -> int:
@@ -482,11 +687,48 @@ class MASRouter:
         result: int = max(1, adjusted)
         return result
 
+    def _apply_adaptive_adjustment(
+        self, memory_adjusted_count: int, adaptive_recommendation: int | None
+    ) -> int:
+        """Apply bounded adaptive routing adjustment to memory-adjusted worker_count.
+
+        Args:
+            memory_adjusted_count: Worker count after memory adjustment (or analytic baseline)
+            adaptive_recommendation: The raw recommendation from adaptive engine (or None)
+
+        Returns:
+            Final adjusted worker_count, bounded to ± adaptive_max_worker_adjust from baseline
+        """
+        if adaptive_recommendation is None:
+            return memory_adjusted_count
+
+        # Compute the delta (capped)
+        delta: int = adaptive_recommendation - memory_adjusted_count
+        max_adjust: int = self.adaptive_routing_max_worker_adjust
+        capped_delta: int = max(-max_adjust, min(max_adjust, delta))
+
+        adjusted: int = memory_adjusted_count + capped_delta
+        # Ensure we never go below 1
+        result: int = max(1, adjusted)
+
+        # Log structured event when adaptation changes allocation
+        if capped_delta != 0:
+            logger.info(
+                "adaptive_routing_adjustment_applied",
+                memory_adjusted_baseline=memory_adjusted_count,
+                adaptive_recommendation=adaptive_recommendation,
+                adaptive_delta=capped_delta,
+                final_worker_count=result,
+            )
+
+        return result
+
     def _allocate_agents(
         self,
         complexity_analysis: ComplexityAnalysis,
         collaboration_mode: CollaborationMode,
         episodic_prior: int | None = None,
+        adaptive_recommendation: int | None = None,
     ) -> AgentAllocation:
         """Determine optimal agent allocation with supervisor-based hierarchical routing.
 
@@ -494,6 +736,7 @@ class MASRouter:
             complexity_analysis: Query complexity analysis
             collaboration_mode: Determined collaboration mode
             episodic_prior: Optional episodic memory prior for worker_count (raw value)
+            adaptive_recommendation: Optional adaptive engine recommendation (raw value)
         """
 
         # Get supervisor types based on domains
@@ -517,7 +760,13 @@ class MASRouter:
             analytic_count = min(
                 len(complexity_analysis.domains) + 1, self.max_parallel_workers
             )
-            worker_count = self._apply_memory_adjustment(analytic_count, episodic_prior)
+            # Sequential composition: memory first, then adaptive
+            memory_adjusted = self._apply_memory_adjustment(
+                analytic_count, episodic_prior
+            )
+            worker_count = self._apply_adaptive_adjustment(
+                memory_adjusted, adaptive_recommendation
+            )
             worker_count = min(worker_count, self.max_parallel_workers)  # Hard cap
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
@@ -532,7 +781,13 @@ class MASRouter:
             analytic_count = min(
                 complexity_analysis.subtask_count, self.max_agents_per_query
             )
-            worker_count = self._apply_memory_adjustment(analytic_count, episodic_prior)
+            # Sequential composition: memory first, then adaptive
+            memory_adjusted = self._apply_memory_adjustment(
+                analytic_count, episodic_prior
+            )
+            worker_count = self._apply_adaptive_adjustment(
+                memory_adjusted, adaptive_recommendation
+            )
             worker_count = min(worker_count, self.max_agents_per_query)  # Hard cap
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
@@ -556,7 +811,13 @@ class MASRouter:
 
         else:  # ENSEMBLE
             analytic_count = 5
-            worker_count = self._apply_memory_adjustment(analytic_count, episodic_prior)
+            # Sequential composition: memory first, then adaptive
+            memory_adjusted = self._apply_memory_adjustment(
+                analytic_count, episodic_prior
+            )
+            worker_count = self._apply_adaptive_adjustment(
+                memory_adjusted, adaptive_recommendation
+            )
             worker_count = max(3, min(worker_count, 7))  # Ensemble: 3-7 range
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
