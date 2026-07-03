@@ -182,7 +182,7 @@ class LLMWorkerAgentBase(BaseAgent):
             # Build ModelRequest
             request = ModelRequest(
                 prompt=prompt,
-                max_tokens=max_tokens,
+                max_tokens=2000,
                 temperature=0.7,
                 complexity_score=task.input_data.get("complexity_score", 0.5),
                 metadata={"tier": self._determine_tier(task)},
@@ -310,7 +310,7 @@ class LLMWorkerAgentBase(BaseAgent):
 
             request = ModelRequest(
                 prompt=enhanced_prompt,
-                max_tokens=2000,
+                max_tokens=max_tokens,
                 temperature=0.7,
                 complexity_score=task.input_data.get("complexity_score", 0.5)
                 if task
