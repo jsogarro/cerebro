@@ -255,6 +255,150 @@ class LLMWorkerAgentBase(BaseAgent):
             self.log_error(f"{self.agent_type} generation failed: {exc}")
             return None, 0.0
 
+    async def _generate_structured_with_routing(
+        self, prompt: str, schema: type[Any], task: AgentTask | None = None
+    ) -> Any:
+        """Generate structured content via ModelRouter or GeminiService with graceful fallback.
+
+        When MULTI_PROVIDER_ROUTING_ENABLED=True and OPENROUTER_API_KEY is set,
+        routes through ModelRouter/OpenRouterProvider using JSON mode. Otherwise
+        falls back to GeminiService (preserves current behavior).
+
+        Args:
+            prompt: The prompt to generate content for
+            schema: Pydantic model class for output validation
+            task: Optional AgentTask context (for metadata/tier information)
+
+        Returns:
+            Validated Pydantic model instance
+
+        Raises:
+            Exception: If generation and fallback both fail
+        """
+        from src.core.config import settings
+
+        # Check if multi-provider routing is enabled
+        if (
+            not settings.MULTI_PROVIDER_ROUTING_ENABLED
+            or not settings.OPENROUTER_API_KEY
+        ):
+            # Fallback to GeminiService (current behavior)
+            gemini = self._ensure_gemini_service()
+            if gemini is None:
+                raise ValueError("No language model configured")
+            return await gemini.generate_structured_content(prompt, schema)
+
+        # Route through ModelRouter with OpenRouter (JSON mode)
+        try:
+            from src.ai_brain.providers import ModelRequest, ModelRouter
+
+            # Embed JSON schema in the prompt (broadest model support)
+            schema_instructions = self._build_json_schema_instructions(schema)
+            enhanced_prompt = f"{prompt}\n\n{schema_instructions}"
+
+            # Build ModelRequest with JSON response format in metadata
+            metadata = {
+                "tier": self._determine_tier(task) if task else "balanced",
+                "response_format": {
+                    "type": "json_object"
+                },  # OpenAI-compatible JSON mode
+            }
+
+            request = ModelRequest(
+                prompt=enhanced_prompt,
+                max_tokens=2000,
+                temperature=0.7,
+                complexity_score=task.input_data.get("complexity_score", 0.5)
+                if task
+                else 0.5,
+                metadata=metadata,
+            )
+
+            # Initialize ModelRouter (lazy, cached on instance)
+            if not hasattr(self, "_model_router"):
+                router_config = {
+                    "providers": {
+                        "openrouter": {
+                            "enabled": True,
+                            "api_key": settings.OPENROUTER_API_KEY,
+                            "endpoint": settings.OPENROUTER_ENDPOINT,
+                            "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
+                        }
+                    },
+                    "enable_fallback": True,
+                    "max_retries": 3,
+                }
+                self._model_router = ModelRouter(router_config)
+
+            # Route and generate via OpenRouter
+            response = await self._model_router.route_and_generate(
+                request,
+                routing_decision={
+                    "primary_model": {"provider": "openrouter", "name": None},
+                    "fallback_models": [],
+                },
+            )
+
+            if response.success:
+                # Parse and validate JSON response with Pydantic schema
+                import json
+
+                try:
+                    parsed_data = json.loads(response.content)
+                    validated = schema.model_validate(parsed_data)
+                    return validated
+                except (json.JSONDecodeError, ValueError) as parse_err:
+                    self.log_warning(
+                        f"OpenRouter JSON parse/validation failed: {parse_err}, "
+                        "falling back to GeminiService"
+                    )
+
+            else:
+                # OpenRouter failed, log and fall back to Gemini
+                self.log_warning(
+                    f"OpenRouter generation failed: {response.error_message}, "
+                    "falling back to GeminiService"
+                )
+
+        except Exception as exc:
+            self.log_warning(
+                f"ModelRouter structured routing failed: {exc}, "
+                "falling back to GeminiService"
+            )
+
+        # Fallback to GeminiService on any error
+        gemini = self._ensure_gemini_service()
+        if gemini is None:
+            raise ValueError("No language model configured and OpenRouter failed")
+        return await gemini.generate_structured_content(prompt, schema)
+
+    def _build_json_schema_instructions(self, schema: type[Any]) -> str:
+        """Build JSON schema instructions for the prompt.
+
+        Embeds the JSON schema description in the prompt to guide model output.
+        Uses Pydantic's schema generation for broadest model compatibility.
+
+        Args:
+            schema: Pydantic model class
+
+        Returns:
+            Formatted schema instructions string
+        """
+        try:
+            schema_dict = schema.model_json_schema()
+            import json
+
+            schema_json = json.dumps(schema_dict, indent=2)
+            return (
+                f"Respond with valid JSON matching this schema:\n{schema_json}\n\n"
+                "Your response must be valid JSON that can be parsed and validated "
+                "against this schema."
+            )
+        except Exception as e:
+            # Fallback to basic instructions if schema generation fails
+            self.log_warning(f"Schema generation failed: {e}, using basic instructions")
+            return "Respond with valid JSON."
+
     def _determine_tier(self, task: AgentTask) -> str:
         """Determine routing tier based on task complexity.
 

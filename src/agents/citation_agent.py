@@ -329,10 +329,9 @@ Include all available metadata (authors, year, title, journal, DOI).
 Return formatted citations as structured JSON."""
 
         try:
-            gemini = self._ensure_gemini_service()
-            if gemini is None:
-                return self._generate_mock_citations(sources, style)
-            result = await gemini.generate_structured_content(prompt, CitationSchema)
+            result = await self._generate_structured_with_routing(
+                prompt, CitationSchema, task=None
+            )
 
             # Convert Pydantic model to expected dict format
             formatted_citations = [
@@ -352,7 +351,7 @@ Return formatted citations as structured JSON."""
             }
 
         except Exception as e:
-            self.log_error(f"Gemini citation formatting failed: {e}")
+            self.log_error(f"Citation formatting failed: {e}")
             return self._generate_mock_citations(sources, style)
 
     async def _verify_sources_with_mcp(
