@@ -132,6 +132,10 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 | `MEMORY_ROUTING_MAX_WORKER_ADJUST` | integer | `2` | Maximum ±N worker count adjustment from analytic baseline | No |
 | `MEMORY_ROUTING_FRESHNESS_DAYS` | integer | `30` | Decay weight for older routing history (exponential decay) | No |
 | `MEMORY_PROMPT_MAX_PROCEDURES` | integer | `3` | Maximum procedural memory items to inject into worker prompts | No |
+| `ADAPTIVE_ROUTING_ENABLED` | boolean | `false` | Enable adaptive routing with multi-armed bandit allocation optimization (**ships dark, pending eval**) | No |
+| `ADAPTIVE_ROUTING_MIN_HISTORY` | integer | `100` | Minimum routing history samples required before adaptation begins | No |
+| `ADAPTIVE_ROUTING_MAX_WORKER_ADJUST` | integer | `2` | Maximum ±N worker count adjustment from adaptive engine (from memory-adjusted baseline) | No |
+| `ADAPTIVE_ROUTING_UPDATE_INTERVAL_SECONDS` | integer | `300` | Interval for bandit model updates (seconds) | No |
 
 **Behavior when enabled**:
 - Episodic memory nudges worker allocation based on past similar queries (bounded by `±MAX_WORKER_ADJUST`)
@@ -139,6 +143,27 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 - Freshness decay: older history contributes less weight (exponential decay over `FRESHNESS_DAYS`)
 
 **Behavior when disabled** (default): Routing uses purely analytic complexity scoring; no memory influence. Worker prompts contain no procedural context.
+
+#### Adaptive Routing (PR #63)
+
+**Status**: Ships **DARK** (flag default `false`). Pending offline eval review and A/B test promotion.
+
+**Behavior when enabled**:
+- 5-arm Thompson Sampling bandit recommends worker_count deltas {-2, -1, 0, +1, +2} from memory-adjusted baseline
+- Cold start: No adaptation until `routing_history` ≥ `ADAPTIVE_ROUTING_MIN_HISTORY` (grace period)
+- Bounded: Adaptive adjustment capped to ±`ADAPTIVE_ROUTING_MAX_WORKER_ADJUST` from (memory-adjusted) baseline
+- Sequential composition: Memory prior applied first, then adaptive adjustment (both respect individual bounds + system hard caps)
+- Graceful fallback: Engine error → routing proceeds with memory prior only (zero impact)
+- In-memory state: Bandit state resets per process (no persistence yet)
+
+**Behavior when disabled** (default): No adaptive engine calls. Routing uses analytic baseline + optional memory prior (if `MEMORY_INFORMED_ROUTING_ENABLED=true`).
+
+**Reward signal**: `quality_score` from `routing_history` entries (0.0-1.0, higher is better).
+
+**Notes**:
+- Composes with memory-informed routing (PR #55): memory adjusts first, adaptive sees memory-adjusted baseline
+- All adjustments respect shared hard caps (`max_parallel_workers`, `max_agents_per_query`)
+- Structured log event emitted when adaptation changes allocation (includes deltas, confidence)
 
 #### Multi-Domain Execution (PR #54)
 

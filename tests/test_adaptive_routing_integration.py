@@ -18,7 +18,6 @@ import pytest
 from src.ai_brain.router.masr import MASRouter
 from src.ai_brain.router.query_analyzer import (
     ComplexityAnalysis,
-    ComplexityFactors,
     ComplexityLevel,
     QueryDomain,
 )
@@ -131,22 +130,23 @@ class TestAdaptiveRoutingColdStart:
     async def test_warm_history_allows_adaptation(
         self, router_config_flag_on, mock_complexity_analysis
     ):
-        """History >= min_history → adaptation is attempted."""
+        """History >= min_history → adaptation returns a recommendation."""
         router = MASRouter(config=router_config_flag_on)
 
         # Mock metrics collector to return sufficient history
         router.metrics_collector.get_history_size = MagicMock(return_value=150)
 
-        # For now, the method returns None (stub), but it should NOT early-return
-        # due to cold start guard
+        # Warm history should allow adaptation
         result = await router._get_adaptive_allocation_adjustment(
             complexity_analysis=mock_complexity_analysis,
             collaboration_mode=CollaborationMode.PARALLEL,
             episodic_prior=None,
         )
 
-        # STUB: currently returns None, but won't early-return for cold start
-        assert result is None  # Will change when bandit integration is complete
+        # Should return a worker_count recommendation (int)
+        assert result is not None
+        assert isinstance(result, int)
+        assert result >= 1  # Never below 1
 
 
 @pytest.mark.asyncio

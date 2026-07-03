@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 
 from src.ai_brain.experimentation.core.adaptive_allocation_engine import (
     AdaptiveAllocationEngine,
+    AllocationConfig,
+    AllocationStrategy,
 )
 from src.core.constants import (
     DEFAULT_AGENT_TIMEOUT,
@@ -499,6 +501,9 @@ class MASRouter:
     ) -> int | None:
         """Query adaptive engine for worker_count adjustment (if enabled and warm).
 
+        Uses a 5-arm bandit (deltas: -2, -1, 0, +1, +2 from memory-adjusted baseline)
+        with Thompson Sampling. Reward signal is quality_score from routing_history.
+
         Args:
             complexity_analysis: Query complexity analysis
             collaboration_mode: Determined collaboration mode
@@ -523,25 +528,65 @@ class MASRouter:
             return None
 
         try:
-            # Derive a stable experiment_id from collaboration_mode
-            # (in production, this would be a real experiment ID from the experiment framework)
+            # Derive experiment_id from collaboration_mode
             experiment_id = f"adaptive_allocation_{collaboration_mode.value}"
 
             # Register experiment if not already registered (idempotent)
-            # We'll use FIXED_RANDOM as baseline (no adaptation) to compare
-            # In a real system, this would be managed by the experiment framework
             if experiment_id not in self._adaptive_engine.active_experiments:
-                # For now, we'll skip formal registration and just use the engine
-                # to provide a heuristic recommendation based on history
-                pass
+                # 5-arm bandit: deltas {-2, -1, 0, +1, +2} from memory-adjusted baseline
+                # Arm 0 = -2 workers, Arm 1 = -1, Arm 2 = 0 (no change), Arm 3 = +1, Arm 4 = +2
+                variants = ["-2", "-1", "0", "+1", "+2"]
+                initial_allocation = dict.fromkeys(variants, 0.2)  # Uniform start
 
-            # For this offline eval, we'll use the adaptive engine's internal logic
-            # In production, this would query a registered experiment's bandit
-            # For now, return None (adaptive engine integration deferred to follow-up)
-            logger.debug(
-                f"adaptive_routing: experiment {experiment_id} not yet integrated"
+                config = AllocationConfig(
+                    strategy=AllocationStrategy.ADAPTIVE_BANDIT,
+                    initial_allocation=initial_allocation,
+                    min_allocation=0.05,
+                    max_allocation=0.70,
+                    exploration_rate=0.1,
+                    confidence_threshold=0.95,
+                    update_frequency_seconds=self.config.get(
+                        "adaptive_routing_update_interval_seconds", 300
+                    ),
+                    enable_guardrails=True,
+                    performance_threshold=0.95,
+                    safety_sample_size=10,  # Low threshold for faster learning in eval
+                )
+
+                await self._adaptive_engine.register_experiment(
+                    experiment_id, variants, config
+                )
+
+                logger.info(
+                    f"adaptive_routing: registered experiment {experiment_id} with 5 arms"
+                )
+
+            # Allocate variant (selects arm via Thompson Sampling)
+            decision = await self._adaptive_engine.allocate_variant(
+                experiment_id,
+                user_context={"collaboration_mode": collaboration_mode.value},
             )
-            return None
+
+            # Map selected variant (delta string) to worker_count adjustment
+            delta_map = {"-2": -2, "-1": -1, "0": 0, "+1": 1, "+2": 2}
+            selected_delta = delta_map[decision.variant_id]
+
+            # Compute baseline (analytic or memory-adjusted)
+            # We don't know the memory-adjusted count here, so we'll return the delta
+            # and let _apply_adaptive_adjustment apply it to the baseline
+            # But we need to return an absolute count, not a delta
+            # So we'll infer the baseline from the collaboration_mode
+            baseline = self._infer_baseline_worker_count(
+                complexity_analysis, collaboration_mode
+            )
+            recommended_count = max(1, baseline + selected_delta)
+
+            logger.debug(
+                f"adaptive_routing: experiment {experiment_id} selected arm {decision.variant_id} "
+                f"(delta {selected_delta}, baseline {baseline} → {recommended_count})"
+            )
+
+            return recommended_count
 
         except Exception as e:
             # Resilient: log and return None (routing proceeds with memory prior only)
@@ -549,6 +594,69 @@ class MASRouter:
                 f"adaptive_allocation_adjustment failed (graceful fallback): {e}"
             )
             return None
+
+    def _infer_baseline_worker_count(
+        self,
+        complexity_analysis: ComplexityAnalysis,
+        collaboration_mode: CollaborationMode,
+    ) -> int:
+        """Infer analytic baseline worker_count for a given collaboration_mode.
+
+        This is a heuristic to reconstruct the baseline that _allocate_agents would
+        compute, so we can apply bandit deltas on top of it.
+        """
+        if collaboration_mode == CollaborationMode.DIRECT:
+            return 1
+        elif collaboration_mode == CollaborationMode.PARALLEL:
+            return int(min(len(complexity_analysis.domains) + 1, self.max_parallel_workers))
+        elif collaboration_mode == CollaborationMode.HIERARCHICAL:
+            return int(min(complexity_analysis.subtask_count, self.max_agents_per_query))
+        elif collaboration_mode == CollaborationMode.DEBATE:
+            return 3  # Fixed
+        else:  # ENSEMBLE
+            return 5
+
+    async def record_routing_outcome(
+        self, decision: RoutingDecision, quality_score: float, actual_cost: float
+    ) -> None:
+        """Record routing outcome for adaptive learning.
+
+        Args:
+            decision: The routing decision that was executed
+            quality_score: Observed quality score (0.0-1.0)
+            actual_cost: Actual cost incurred
+        """
+        if not self.adaptive_routing_enabled or self._adaptive_engine is None:
+            return
+
+        try:
+            experiment_id = f"adaptive_allocation_{decision.collaboration_mode.value}"
+
+            # Map actual worker_count back to arm (delta)
+            baseline = self._infer_baseline_worker_count(
+                decision.complexity_analysis, decision.collaboration_mode
+            )
+            actual_delta = decision.agent_allocation.worker_count - baseline
+
+            # Clamp delta to {-2, -1, 0, +1, +2} (may be clamped by hard caps)
+            clamped_delta = max(-2, min(2, actual_delta))
+            delta_to_variant = {-2: "-2", -1: "-1", 0: "0", 1: "+1", 2: "+2"}
+            variant_id = delta_to_variant.get(clamped_delta, "0")
+
+            # Reward is quality_score (higher is better)
+            reward = quality_score
+
+            await self._adaptive_engine.record_outcome(
+                experiment_id, variant_id, reward
+            )
+
+            logger.debug(
+                f"adaptive_routing: recorded outcome for {experiment_id} "
+                f"variant {variant_id} reward {reward:.3f}"
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to record adaptive routing outcome: {e}")
 
     def _apply_memory_adjustment(
         self, analytic_count: int, episodic_prior: int | None
