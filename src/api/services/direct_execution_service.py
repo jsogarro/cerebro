@@ -22,6 +22,7 @@ from typing import Any
 from structlog import get_logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from src.core.config import get_settings
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.repositories.checkpoint_repository import CheckpointRepository
 
@@ -300,14 +301,82 @@ class DirectExecutionService:
             logger.error(f"Domain supervisor execution failed for {domain}: {e}")
             return {"domain": domain, "status": "failed", "errors": [str(e)]}
 
-    def _merge_domain_results(
+    async def _synthesize_domain_outputs(
+        self,
+        domain_outputs: dict[str, Any],
+        succeeded_domains: list[str],
+        failed_domains: list[dict[str, Any]],
+    ) -> tuple[str, float]:
+        """
+        Use LLM synthesis to compose per-domain outputs into one coherent answer.
+
+        Args:
+            domain_outputs: Dict mapping domain names to their outputs
+            succeeded_domains: List of domain names that succeeded
+            failed_domains: List of dicts with failed domain info
+
+        Returns:
+            Tuple of (synthesized_text, confidence_score)
+
+        Raises:
+            Exception: If synthesis fails (caller handles fallback)
+        """
+        settings = get_settings()
+        char_limit = settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT
+
+        # Truncate each domain's output to the char limit
+        truncated_outputs = {}
+        for domain in succeeded_domains:
+            output = domain_outputs.get(domain, {})
+            output_str = str(output)
+            if len(output_str) > char_limit:
+                truncated_outputs[domain] = output_str[:char_limit] + "..."
+            else:
+                truncated_outputs[domain] = output_str
+
+        # Build synthesis task input
+        synthesis_input = {
+            "agent_outputs": truncated_outputs,
+            "succeeded_domains": succeeded_domains,
+            "failed_domains": [fd["domain"] for fd in failed_domains],
+        }
+
+        # Use the synthesis agent via supervisor factory
+        from ...agents.synthesis_agent import SynthesisAgent
+
+        synthesis_agent = SynthesisAgent(
+            gemini_service=self.gemini_service,
+        )
+
+        task = AgentTask(
+            id=f"synthesis_{uuid.uuid4().hex[:8]}",
+            agent_type="synthesis",
+            input_data=synthesis_input,
+        )
+
+        result = await synthesis_agent.execute(task)
+
+        if result.status != "success":
+            raise ValueError(f"Synthesis agent returned status: {result.status}")
+
+        # Extract the comprehensive narrative as the primary synthesized output
+        comprehensive_narrative = result.output.get("comprehensive_narrative", "")
+        if not comprehensive_narrative:
+            raise ValueError("Synthesis agent returned empty comprehensive_narrative")
+
+        confidence = result.confidence or 0.5
+
+        return comprehensive_narrative, confidence
+
+    async def _merge_domain_results(
         self, domain_results: list[dict[str, Any]]
     ) -> dict[str, Any]:
         """
         Merge per-domain results into one coherent result.
 
-        Uses labeled concatenation by domain + combined metadata. Future versions
-        can replace with weighted synthesis or LLM-based merging.
+        Uses labeled concatenation (default) or LLM synthesis based on
+        MULTI_DOMAIN_MERGE_STRATEGY config. LLM synthesis composes per-domain
+        outputs into one coherent answer; falls back to concatenation on error.
 
         Args:
             domain_results: List of domain result dicts
@@ -315,6 +384,10 @@ class DirectExecutionService:
         Returns:
             Merged result with combined outputs and aggregated metadata
         """
+        settings = get_settings()
+        merge_strategy = settings.MULTI_DOMAIN_MERGE_STRATEGY
+
+        # Collect per-domain outputs and metadata
         merged_output = {}
         quality_scores = {}
         workers_used_total = 0
@@ -341,17 +414,47 @@ class DirectExecutionService:
                     {"domain": domain, "errors": result.get("errors", [])}
                 )
 
+        # Attempt LLM synthesis if configured
+        synthesis_confidence = None
+        if merge_strategy == "llm" and succeeded_domains:
+            try:
+                (
+                    synthesized_output,
+                    synthesis_confidence,
+                ) = await self._synthesize_domain_outputs(
+                    merged_output, succeeded_domains, failed_domains
+                )
+                # Use synthesized output as primary while preserving per-domain outputs
+                final_output = {
+                    "synthesis": synthesized_output,
+                    "per_domain": merged_output,
+                }
+                actual_strategy = "llm"
+            except Exception as e:
+                logger.warning(
+                    f"LLM synthesis failed, falling back to concatenation: {e!s}"
+                )
+                final_output = merged_output
+                actual_strategy = "concat_fallback"
+        else:
+            final_output = merged_output
+            actual_strategy = "concat"
+
         # Add metadata summary
-        merged_output["_multi_domain_metadata"] = {
+        metadata = {
             "succeeded_domains": succeeded_domains,
             "failed_domains": failed_domains,
             "total_workers_used": workers_used_total,
             "max_execution_time_seconds": execution_time_max,
-            "merge_strategy": "labeled_concatenation",
+            "merge_strategy": actual_strategy,
         }
+        if synthesis_confidence is not None:
+            metadata["synthesis_confidence"] = synthesis_confidence
+
+        final_output["_multi_domain_metadata"] = metadata
 
         return {
-            "output": merged_output,
+            "output": final_output,
             "quality_scores": quality_scores,
             "workers_used": workers_used_total,
             "succeeded_domains": succeeded_domains,
@@ -487,7 +590,7 @@ class DirectExecutionService:
                 await self._publish_progress_update(execution_status)
 
                 # Merge domain results
-                merged = self._merge_domain_results(processed_results)
+                merged = await self._merge_domain_results(processed_results)
 
                 execution_status.agent_results = merged["output"]
                 execution_status.quality_scores = merged["quality_scores"]

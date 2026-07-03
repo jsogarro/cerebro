@@ -244,6 +244,10 @@ class Settings(BaseSettings):
     HIERARCHICAL_SCALE_UP_THRESHOLD: float = 0.8
     HIERARCHICAL_SCALE_DOWN_THRESHOLD: float = 0.3
 
+    # Multi-Domain Merge Configuration
+    MULTI_DOMAIN_MERGE_STRATEGY: str = "concat"  # concat | llm
+    MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT: int = 4000
+
     # TalkHier Communication Configuration
     TALKHIER_ENABLED: bool = True
     TALKHIER_MAX_REFINEMENT_ROUNDS: int = 3
@@ -501,3 +505,8 @@ class Settings(BaseSettings):
 
 # Create settings instance
 settings = Settings()
+
+
+def get_settings() -> Settings:
+    """Get the settings instance."""
+    return settings

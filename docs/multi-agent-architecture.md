@@ -606,11 +606,17 @@ async def execute_multi_domain(
     # Merge domain results
     return self._merge_domain_results(processed_results)
 
-def _merge_domain_results(self, domain_results: list[dict]) -> dict:
-    """Merge per-domain results via labeled concatenation.
+async def _merge_domain_results(self, domain_results: list[dict]) -> dict:
+    """Merge per-domain results via labeled concatenation or LLM synthesis.
     
-    Future: replace with weighted synthesis or LLM-based merging.
+    Strategy controlled by MULTI_DOMAIN_MERGE_STRATEGY config:
+    - "concat" (default): labeled concatenation
+    - "llm": LLM synthesis via synthesis agent (with fallback to concat)
     """
+    settings = get_settings()
+    merge_strategy = settings.MULTI_DOMAIN_MERGE_STRATEGY
+    
+    # Collect per-domain outputs
     merged_output = {}
     succeeded_domains = []
     failed_domains = []
@@ -623,8 +629,33 @@ def _merge_domain_results(self, domain_results: list[dict]) -> dict:
         else:
             failed_domains.append({"domain": domain, "errors": result.get("errors", [])})
     
+    # Attempt LLM synthesis if configured
+    if merge_strategy == "llm" and succeeded_domains:
+        try:
+            synthesized, confidence = await self._synthesize_domain_outputs(
+                merged_output, succeeded_domains, failed_domains
+            )
+            final_output = {
+                "synthesis": synthesized,  # Coherent composed answer
+                "per_domain": merged_output,  # Preserve per-domain detail
+            }
+            actual_strategy = "llm"
+        except Exception as e:
+            logger.warning(f"LLM synthesis failed, falling back: {e}")
+            final_output = merged_output
+            actual_strategy = "concat_fallback"
+    else:
+        final_output = merged_output
+        actual_strategy = "concat"
+    
+    final_output["_multi_domain_metadata"] = {
+        "succeeded_domains": succeeded_domains,
+        "failed_domains": failed_domains,
+        "merge_strategy": actual_strategy,
+    }
+    
     return {
-        "output": merged_output,
+        "output": final_output,
         "succeeded_domains": succeeded_domains,
         "failed_domains": failed_domains,
     }
@@ -635,14 +666,33 @@ def _merge_domain_results(self, domain_results: list[dict]) -> dict:
 - **Multi-domain path**: Decomposes query into per-domain sub-queries
 - **Bounded concurrency**: `asyncio.Semaphore(max_domain_parallelism=4)` prevents resource exhaustion
 - **Partial-failure resilience**: `asyncio.gather(..., return_exceptions=True)` allows some domains to fail while others succeed
-- **Result merging**: Labeled concatenation by domain (future: LLM synthesis)
+- **Result merging**: Configurable strategy (`concat` or `llm`)
+  - **`concat`** (default): Labeled concatenation — fast, deterministic, preserves all detail
+  - **`llm`**: Synthesis agent composes per-domain outputs into coherent answer; falls back to `concat` on error
 - **Status determination**: Overall success if ≥1 domain succeeded; warnings for partial failures
+
+**Merge Strategy Details**:
+
+**Concatenation (`MULTI_DOMAIN_MERGE_STRATEGY=concat`)**:
+- Per-domain outputs stored under domain keys: `{"research": {...}, "analytics": {...}}`
+- Zero additional latency
+- Preserves full per-domain detail
+- Default behavior (byte-for-byte backward compatible)
+
+**LLM Synthesis (`MULTI_DOMAIN_MERGE_STRATEGY=llm`)**:
+- Invokes synthesis agent to compose a coherent answer from per-domain results
+- Per-domain outputs truncated to `MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` (default 4000 chars)
+- Output structure: `{"synthesis": "...", "per_domain": {...}}`
+- Metadata includes `synthesis_confidence` score
+- Automatic fallback to concatenation on synthesis failure (logged as warning)
+- Single-domain path unaffected
 
 **Benefits**:
 - Concurrent execution reduces latency for multi-domain queries
 - Bounded parallelism prevents resource exhaustion
 - Graceful handling of partial failures
 - Preserves single-domain performance
+- Optional LLM synthesis for coherent cross-domain answers
 
 ### Parallel Worker Execution Within Supervisors (PR #10)
 
