@@ -4,7 +4,7 @@
 
 The Multi-Agent Research Platform orchestrates 5 specialized AI agents working together to conduct comprehensive research. This document details the agent architecture, implementation patterns, and orchestration mechanisms.
 
-**Architecture Update (2026-07-02)**: All 17 agents across all domains (research, content, analytics, finance) now share `LLMWorkerAgentBase` as their common base class, providing uniform infrastructure for multi-provider routing, memory-informed prompts, and tool registry support. Research agents maintain their complex multi-step execution workflows while inheriting these shared capabilities.
+**Architecture Update (2026-07-02)**: All 17 agents across all domains (research, content, analytics, finance) now share `LLMWorkerAgentBase` as their common base class, providing uniform infrastructure for multi-provider routing, memory-informed prompts, and tool registry support. Research agents maintain their complex multi-step execution workflows while inheriting these shared capabilities. Plain-text LLM calls route through `_generate_with_routing` (multi-provider aware). One boundary remains: `generate_structured_content` calls (schema-validated structured output in literature_review, methodology, synthesis, and citation) still go directly to Gemini — routing structured output requires JSON-mode support in `OpenRouterProvider`, tracked as a follow-up.
 
 ## Architecture Diagram
 

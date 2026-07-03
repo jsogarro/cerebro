@@ -187,3 +187,20 @@ class TestResearchAgentsMigration:
         assert result.status == "success"
         assert "formatted_citations" in result.output
         assert result.confidence >= 0.0
+
+
+class TestNoDirectTextGeneration:
+    """Source-level guard: no migrated agent calls gemini.generate_content directly."""
+
+    def test_no_direct_text_generation_remains(self):
+        import inspect
+
+        import src.agents.citation_agent as cit
+        import src.agents.comparative_analysis_agent as comp
+        import src.agents.literature_review_agent as lit
+        import src.agents.methodology_agent as meth
+        import src.agents.synthesis_agent as syn
+
+        for module in (lit, comp, meth, syn, cit):
+            source = inspect.getsource(module)
+            assert "gemini.generate_content(" not in source, module.__name__
