@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     # Worker Configuration
     WORKER_CONCURRENCY: int = 10
     TASK_TIMEOUT_SECONDS: int = 300
+    MAX_PARALLEL_WORKERS: int = 5
 
     # MCP Configuration
     MCP_PORT: int = 9000

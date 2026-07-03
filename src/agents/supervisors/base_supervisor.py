@@ -13,6 +13,7 @@ Key Features:
 - Integration with MASR routing decisions
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -163,6 +164,9 @@ class BaseSupervisor(BaseAgent, ABC):
         self.default_timeout = config.get("default_timeout", 300) if config else 300
         self.quality_threshold = (
             config.get("quality_threshold", 0.85) if config else 0.85
+        )
+        self.max_parallel_workers = (
+            config.get("max_parallel_workers", 5) if config else 5
         )
 
         # Performance tracking
@@ -907,6 +911,135 @@ class BaseSupervisor(BaseAgent, ABC):
             content = revised_content
 
         return worker_response, verification_result
+
+    async def execute_workers_parallel(
+        self,
+        worker_specs: list[
+            tuple[str, MessageType, TalkHierContent | str, dict[str, Any] | None]
+        ],
+        supervision_mode: SupervisionMode,
+    ) -> dict[str, TalkHierMessage | None]:
+        """
+        Execute multiple workers based on supervision mode.
+
+        Args:
+            worker_specs: List of (worker_type, message_type, content, context) tuples
+            supervision_mode: Mode determining execution strategy (PARALLEL vs SEQUENTIAL)
+
+        Returns:
+            Dict mapping worker_type to worker response (or None on failure)
+
+        PARALLEL mode behavior:
+            - Executes all workers concurrently via asyncio.gather with return_exceptions=True
+            - Bounded by asyncio.Semaphore(self.max_parallel_workers)
+            - Failed workers are logged and excluded; successful workers proceed
+            - If ALL workers fail, returns empty dict (graceful degradation)
+
+        SEQUENTIAL mode behavior:
+            - Executes workers one at a time in list order
+            - Preserves existing sequential behavior byte-for-byte
+        """
+        if supervision_mode == SupervisionMode.PARALLEL:
+            # Create semaphore to bound parallelism
+            semaphore = asyncio.Semaphore(self.max_parallel_workers)
+
+            async def execute_with_semaphore(
+                worker_type: str,
+                message_type: MessageType,
+                content: TalkHierContent | str,
+                context: dict[str, Any] | None,
+            ) -> tuple[str, TalkHierMessage | None | Exception]:
+                """Execute single worker with semaphore bound."""
+                async with semaphore:
+                    try:
+                        response = await self.send_talkhier_message(
+                            worker_type, message_type, content, context
+                        )
+                        return (worker_type, response)
+                    except Exception as e:
+                        return (worker_type, e)
+
+            # Execute all workers concurrently with return_exceptions via gather
+            tasks = [
+                execute_with_semaphore(worker_type, msg_type, content, ctx)
+                for worker_type, msg_type, content, ctx in worker_specs
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Process results: separate successes from failures
+            worker_results: dict[str, TalkHierMessage | None] = {}
+            failed_workers = []
+
+            for result in results:
+                if isinstance(result, BaseException):
+                    # gather-level exception (shouldn't happen with our wrapper)
+                    logger.error(
+                        "supervisor_parallel_worker_gather_exception",
+                        error=str(result),
+                    )
+                    continue
+
+                if not isinstance(result, tuple) or len(result) != 2:
+                    logger.error(
+                        "supervisor_parallel_worker_invalid_result",
+                        result_type=type(result).__name__,
+                    )
+                    continue
+
+                worker_type, response_or_error = result
+
+                if isinstance(response_or_error, Exception):
+                    # Worker execution failed
+                    logger.error(
+                        "supervisor_parallel_worker_failed",
+                        worker_type=worker_type,
+                        error=str(response_or_error),
+                    )
+                    failed_workers.append(
+                        {"worker_type": worker_type, "error": str(response_or_error)}
+                    )
+                else:
+                    # Worker succeeded
+                    worker_results[worker_type] = response_or_error
+
+            # Log partial failure if some workers failed
+            if failed_workers:
+                logger.warning(
+                    "supervisor_parallel_execution_partial_failure",
+                    total_workers=len(worker_specs),
+                    successful_workers=len(worker_results),
+                    failed_workers=failed_workers,
+                )
+
+            # ALL workers failed → graceful degradation (empty dict)
+            if not worker_results and worker_specs:
+                logger.error(
+                    "supervisor_parallel_execution_all_workers_failed",
+                    total_workers=len(worker_specs),
+                    failed_workers=failed_workers,
+                )
+
+            return worker_results
+
+        else:
+            # SEQUENTIAL mode: preserve existing byte-for-byte behavior
+            sequential_results: dict[str, TalkHierMessage | None] = {}
+
+            for worker_type, message_type, content, context in worker_specs:
+                try:
+                    response = await self.send_talkhier_message(
+                        worker_type, message_type, content, context
+                    )
+                    sequential_results[worker_type] = response
+                except Exception as e:
+                    logger.error(
+                        "supervisor_sequential_worker_failed",
+                        worker_type=worker_type,
+                        error=str(e),
+                    )
+                    sequential_results[worker_type] = None
+
+            return sequential_results
 
     async def close(self) -> None:
         """Close supervisor and cleanup resources."""

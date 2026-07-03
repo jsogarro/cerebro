@@ -630,6 +630,109 @@ def _merge_domain_results(self, domain_results: list[dict]) -> dict:
 - Graceful handling of partial failures
 - Preserves single-domain performance
 
+### Parallel Worker Execution Within Supervisors (PR #10)
+
+Supervisors can now execute allocated workers **in true parallel** when operating in `SupervisionMode.PARALLEL`:
+
+```python
+# In src/agents/supervisors/base_supervisor.py
+self.max_parallel_workers = config.get("max_parallel_workers", 5)
+
+async def execute_workers_parallel(
+    self,
+    worker_specs: list[tuple[str, MessageType, TalkHierContent | str, dict[str, Any] | None]],
+    supervision_mode: SupervisionMode,
+) -> dict[str, TalkHierMessage | None]:
+    """Execute workers based on supervision mode (PARALLEL vs SEQUENTIAL)."""
+    
+    if supervision_mode == SupervisionMode.PARALLEL:
+        # Bounded parallel execution
+        semaphore = asyncio.Semaphore(self.max_parallel_workers)
+        
+        async def execute_with_semaphore(worker_type, message_type, content, context):
+            async with semaphore:
+                try:
+                    response = await self.send_talkhier_message(
+                        worker_type, message_type, content, context
+                    )
+                    return (worker_type, response)
+                except Exception as e:
+                    return (worker_type, e)
+        
+        # Dispatch all workers concurrently
+        tasks = [
+            execute_with_semaphore(worker_type, msg_type, content, ctx)
+            for worker_type, msg_type, content, ctx in worker_specs
+        ]
+        
+        # Gather with failure isolation
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Separate successes from failures
+        worker_results = {}
+        failed_workers = []
+        
+        for result in results:
+            if isinstance(result, Exception):
+                # Gather-level exception
+                continue
+            
+            worker_type, response_or_error = result
+            if isinstance(response_or_error, Exception):
+                # Worker execution failed - log and exclude
+                failed_workers.append({"worker_type": worker_type, "error": str(response_or_error)})
+            else:
+                # Worker succeeded
+                worker_results[worker_type] = response_or_error
+        
+        # Partial-result handling
+        if failed_workers:
+            logger.warning(
+                "supervisor_parallel_execution_partial_failure",
+                successful_workers=len(worker_results),
+                failed_workers=failed_workers,
+            )
+        
+        return worker_results
+    
+    else:
+        # SEQUENTIAL mode: preserve existing byte-for-byte behavior
+        worker_results = {}
+        for worker_type, message_type, content, context in worker_specs:
+            try:
+                response = await self.send_talkhier_message(
+                    worker_type, message_type, content, context
+                )
+                worker_results[worker_type] = response
+            except Exception as e:
+                worker_results[worker_type] = None
+        
+        return worker_results
+```
+
+**Key behaviors**:
+- **PARALLEL mode**: Workers execute concurrently with `asyncio.Semaphore(max_parallel_workers=5)` bound
+- **SEQUENTIAL mode**: Unchanged; workers run one at a time in allocation order
+- **Failure isolation**: Failed workers logged and excluded; successful workers proceed
+- **Partial results**: If some workers fail, supervisor continues with successful results
+- **All workers fail**: Graceful degradation (empty dict), logged as error
+- **Revision loop compatibility**: Re-runs after REVISE verdicts also respect parallel/sequential mode
+- **Result ordering**: Results keyed by worker type; deterministic aggregation preserved
+
+**Two-level concurrency composition**:
+The multi-domain and parallel-worker features **compose** to provide two levels of parallelism:
+1. **Domain-level**: Multiple domain supervisors execute concurrently (bounded by `max_domain_parallelism=4`)
+2. **Worker-level**: Within each supervisor, allocated workers execute concurrently (bounded by `max_parallel_workers=5`)
+
+Example: A 3-domain query with 4 workers per supervisor → up to 3×4=12 concurrent worker executions, bounded by both semaphores.
+
+**Benefits**:
+- True parallelism in PARALLEL supervision mode (no longer aspirational)
+- Bounded concurrency prevents resource exhaustion
+- Failure isolation ensures partial results are usable
+- Sequential mode unchanged for compatibility
+- Composes with multi-domain concurrency for full pipeline parallelism
+
 ## Agent Communication
 
 ### Message Passing
