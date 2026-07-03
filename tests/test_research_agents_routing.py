@@ -48,17 +48,14 @@ class TestResearchAgentsMigration:
         agent = CitationAgent()
         assert isinstance(agent, LLMWorkerAgentBase)
 
-    async def test_literature_review_uses_ensure_gemini_service(self):
-        """LiteratureReviewAgent uses _ensure_gemini_service for lazy init."""
+    async def test_literature_review_routes_through_generate_with_routing(self):
+        """LiteratureReviewAgent routes generation through _generate_with_routing."""
         agent = LiteratureReviewAgent()
-        mock_gemini = Mock()
-        mock_gemini.generate_structured_content = AsyncMock(
-            return_value=Mock(sources=[])
-        )
+        agent.gemini_service = None  # Force fallback path
 
         with patch.object(
-            agent, "_ensure_gemini_service", return_value=mock_gemini
-        ) as mock_ensure:
+            agent, "_generate_with_routing", return_value=('{"sources": []}', 0.8)
+        ) as mock_routing:
             task = AgentTask(
                 id="test",
                 agent_type="literature_review",
@@ -71,28 +68,39 @@ class TestResearchAgentsMigration:
 
             result = await agent.execute(task)
 
-            # Verify _ensure_gemini_service was called
-            assert mock_ensure.called
+            # Verify _generate_with_routing was called
+            assert mock_routing.called
             # Verify result has expected structure
             assert result.status == "success"
             assert "sources_found" in result.output
 
-    async def test_comparative_analysis_result_shape_preserved(self):
-        """ComparativeAnalysisAgent preserves result shape after migration."""
+    async def test_comparative_analysis_routes_through_generate_with_routing(self):
+        """ComparativeAnalysisAgent routes generation through _generate_with_routing."""
         agent = ComparativeAnalysisAgent()
-        task = AgentTask(
-            id="test",
-            agent_type="comparative_analysis",
-            input_data={"items": ["item1", "item2"], "criteria": ["criterion1"]},
-        )
 
-        result = await agent.execute(task)
+        with patch.object(
+            agent,
+            "_generate_with_routing",
+            return_value=(
+                '{"comparison_matrix": {}, "trade_offs": [], "recommendations": []}',
+                0.8,
+            ),
+        ) as mock_routing:
+            task = AgentTask(
+                id="test",
+                agent_type="comparative_analysis",
+                input_data={"items": ["item1", "item2"], "criteria": ["criterion1"]},
+            )
 
-        # Verify result has expected structure (shape contract preserved)
-        assert result.status == "success"
-        assert "comparison_matrix" in result.output
-        assert "recommendations" in result.output
-        assert result.confidence >= 0.0
+            result = await agent.execute(task)
+
+            # Verify _generate_with_routing was called
+            assert mock_routing.called
+            # Verify result has expected structure (shape contract preserved)
+            assert result.status == "success"
+            assert "comparison_matrix" in result.output
+            assert "recommendations" in result.output
+            assert result.confidence >= 0.0
 
     async def test_methodology_uses_ensure_gemini_service(self):
         """MethodologyAgent uses _ensure_gemini_service for lazy init."""

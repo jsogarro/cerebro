@@ -91,7 +91,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
             # Step 4: Generate analysis using Gemini with MCP-enhanced data
             analysis = await self._analyze_comparison_with_gemini(
-                task.input_data, comparative_research, statistical_analysis
+                task.input_data, comparative_research, statistical_analysis, task
             )
 
             # Process comparison matrix with MCP statistical enhancements
@@ -631,6 +631,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         input_data: dict[str, Any],
         research_data: dict[str, Any],
         statistical_data: dict[str, Any],
+        task: AgentTask,
     ) -> dict[str, Any]:
         """
         Analyze comparison using Gemini with MCP-enhanced data.
@@ -639,15 +640,11 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             input_data: Original task input
             research_data: Research results from MCP
             statistical_data: Statistical analysis from MCP
+            task: AgentTask for routing context
 
         Returns:
             Enhanced comparative analysis from Gemini
         """
-        if not self.gemini_service:
-            return self._generate_mock_analysis_with_mcp(
-                input_data, research_data, statistical_data
-            )
-
         # Enhance input with MCP data
         enhanced_input = input_data.copy()
         enhanced_input["research_findings"] = self._summarize_research_findings(
@@ -664,13 +661,14 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         prompt = generate_comparative_agent_prompt(enhanced_input)
 
         try:
-            gemini = self._ensure_gemini_service()
-            if gemini is None:
+            # Use routing instead of direct Gemini call
+            content, _confidence = await self._generate_with_routing(prompt, task)
+            if content is None:
                 return self._generate_mock_analysis_with_mcp(
                     input_data, research_data, statistical_data
                 )
-            response = await gemini.generate_content(prompt)
-            parsed_response = parse_json_response(response)
+
+            parsed_response = parse_json_response(content)
             analysis = (
                 parsed_response.get("comparative_analysis")
                 or parsed_response.get("analysis")
