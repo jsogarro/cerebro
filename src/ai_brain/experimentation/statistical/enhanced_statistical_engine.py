@@ -637,6 +637,11 @@ class MultiBanditOptimizer:
         self.epsilon = self.config.get("epsilon", 0.1)
         self.exploration_rate = self.config.get("exploration_rate", 0.2)
 
+        # Exploration decay (convergence lever)
+        self.posterior_temp_enabled = self.config.get("posterior_temp_enabled", False)
+        self.posterior_temp_threshold = self.config.get("posterior_temp_threshold", 200)
+        self.posterior_temp_factor = self.config.get("posterior_temp_factor", 1.5)
+
         # Bandit state
         self.arm_counts: list[int] = []
         self.arm_rewards: list[list[float]] = []
@@ -719,10 +724,25 @@ class MultiBanditOptimizer:
     async def _thompson_sampling_selection(self) -> BanditResult:
         """Thompson sampling arm selection."""
 
+        # Apply posterior temperature (exploration decay) if enabled and threshold met
+        total_samples = sum(self.arm_counts)
+        use_temp = (
+            self.posterior_temp_enabled
+            and total_samples >= self.posterior_temp_threshold
+        )
+
         # Sample from Beta distributions for each arm
         arm_samples = []
         for i in range(self.num_arms):
-            sample = np.random.beta(self.alpha_params[i], self.beta_params[i])
+            alpha, beta = self.alpha_params[i], self.beta_params[i]
+
+            # Exploration decay: sharpen posterior by raising (alpha, beta) to a power
+            # temp_factor > 1 concentrates the distribution around its mean
+            if use_temp:
+                alpha = alpha * self.posterior_temp_factor
+                beta = beta * self.posterior_temp_factor
+
+            sample = np.random.beta(alpha, beta)
             arm_samples.append(sample)
 
         selected_arm = int(np.argmax(arm_samples))
