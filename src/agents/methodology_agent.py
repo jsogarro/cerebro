@@ -52,18 +52,20 @@ class MethodologyAgent(LLMWorkerAgentBase):
                 return cached_result
 
             # Generate methodology using structured output
-            gemini = self._ensure_gemini_service()
-            if gemini:
-                from src.agents.schemas import MethodologySchema
+            from src.agents.schemas import MethodologySchema
 
+            try:
                 prompt = self._build_prompt(task.input_data)
-                schema_result = await gemini.generate_structured_content(
-                    prompt, MethodologySchema
+                schema_result = await self._generate_structured_with_routing(
+                    prompt, MethodologySchema, task=task
                 )
                 # Convert Pydantic model to dict for compatibility
                 analysis = schema_result.model_dump()
-            else:
-                # Fallback for testing without Gemini
+            except Exception as e:
+                # Fallback for testing without configured LLM
+                self.log_warning(
+                    f"Structured generation failed: {e}, using mock fallback"
+                )
                 analysis = self._generate_mock_analysis(task)
 
             # Calculate confidence score

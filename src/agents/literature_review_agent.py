@@ -713,13 +713,10 @@ Requirements:
 - Include 2-3 sentence abstracts
 - Include DOI when known"""
 
-        gemini = self._ensure_gemini_service()
-        if gemini is None:
-            self.log_error("Source search invoked without a configured gemini_service")
-            return []
-
         try:
-            result = await gemini.generate_structured_content(prompt, SourceListSchema)
+            result = await self._generate_structured_with_routing(
+                prompt, SourceListSchema, task=None
+            )
             self.log_info(f"Found {len(result.sources)} sources")
             return [s.model_dump() for s in result.sources]
         except Exception as e:
@@ -749,16 +746,9 @@ Analyze the literature and provide:
 3. methodologies_used: List of research methodologies observed across papers
 4. quality_assessment: Overall quality assessment of this literature corpus"""
 
-        gemini = self._ensure_gemini_service()
-        if gemini is None:
-            self.log_error(
-                "Source analysis invoked without a configured gemini_service"
-            )
-            return {}
-
         try:
-            result = await gemini.generate_structured_content(
-                prompt, LiteratureAnalysisSchema
+            result = await self._generate_structured_with_routing(
+                prompt, LiteratureAnalysisSchema, task=None
             )
             return {
                 "key_findings": result.key_findings,
@@ -793,16 +783,6 @@ Analyze the literature and provide:
         """
         from src.agents.schemas import LiteratureAnalysisSchema
         from src.agents.schemas.literature_review import AcademicSource
-
-        if not self.gemini_service:
-            # Should not reach here, but provide fallback
-            return LiteratureAnalysisSchema(
-                sources=[],
-                key_findings=["Gemini service unavailable"],
-                research_gaps=[],
-                methodologies_used=[],
-                quality_assessment="Unable to assess without Gemini",
-            )
 
         # Step 1: Find sources
         sources = await self._search_sources_structured(input_data)

@@ -54,18 +54,20 @@ class SynthesisAgent(LLMWorkerAgentBase):
                 return cached_result
 
             # Generate synthesis using structured output
-            gemini = self._ensure_gemini_service()
-            if gemini:
-                from src.agents.schemas import SynthesisSchema
+            from src.agents.schemas import SynthesisSchema
 
+            try:
                 prompt = self._build_prompt(agent_outputs)
-                schema_result = await gemini.generate_structured_content(
-                    prompt, SynthesisSchema
+                schema_result = await self._generate_structured_with_routing(
+                    prompt, SynthesisSchema, task=task
                 )
                 # Convert Pydantic model to dict for compatibility
                 synthesis = schema_result.model_dump()
-            else:
-                # Fallback for testing without Gemini
+            except Exception as e:
+                # Fallback for testing without configured LLM
+                self.log_warning(
+                    f"Structured generation failed: {e}, using mock fallback"
+                )
                 synthesis = self._generate_mock_synthesis(agent_outputs)
 
             # Calculate confidence score
