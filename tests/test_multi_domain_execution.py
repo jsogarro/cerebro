@@ -414,7 +414,8 @@ class TestMultiDomainExecution:
 class TestResultMerging:
     """Test suite for multi-domain result merging."""
 
-    def test_merge_all_success(self, multi_domain_service):
+    @pytest.mark.asyncio
+    async def test_merge_all_success(self, multi_domain_service):
         """Test merging when all domains succeed."""
         domain_results = [
             {
@@ -437,7 +438,7 @@ class TestResultMerging:
             },
         ]
 
-        merged = multi_domain_service._merge_domain_results(domain_results)
+        merged = await multi_domain_service._merge_domain_results(domain_results)
 
         assert merged["succeeded_domains"] == ["research", "content"]
         assert len(merged["failed_domains"]) == 0
@@ -454,7 +455,8 @@ class TestResultMerging:
 
         assert merged["workers_used"] == 4
 
-    def test_merge_partial_success(self, multi_domain_service):
+    @pytest.mark.asyncio
+    async def test_merge_partial_success(self, multi_domain_service):
         """Test merging with partial failures."""
         domain_results = [
             {
@@ -473,7 +475,7 @@ class TestResultMerging:
             },
         ]
 
-        merged = multi_domain_service._merge_domain_results(domain_results)
+        merged = await multi_domain_service._merge_domain_results(domain_results)
 
         assert merged["succeeded_domains"] == ["research"]
         assert len(merged["failed_domains"]) == 1
@@ -483,14 +485,15 @@ class TestResultMerging:
         assert "research" in output
         assert "content" not in output
 
-    def test_merge_all_fail(self, multi_domain_service):
+    @pytest.mark.asyncio
+    async def test_merge_all_fail(self, multi_domain_service):
         """Test merging when all domains fail."""
         domain_results = [
             {"domain": "research", "status": "failed", "errors": ["Error 1"]},
             {"domain": "content", "status": "failed", "errors": ["Error 2"]},
         ]
 
-        merged = multi_domain_service._merge_domain_results(domain_results)
+        merged = await multi_domain_service._merge_domain_results(domain_results)
 
         assert len(merged["succeeded_domains"]) == 0
         assert len(merged["failed_domains"]) == 2
