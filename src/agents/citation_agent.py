@@ -10,14 +10,14 @@ from typing import Any
 import orjson
 from structlog import get_logger
 
-from src.agents.base import BaseAgent
+from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 
 logger = get_logger()
 
 
-class CitationAgent(BaseAgent):
+class CitationAgent(LLMWorkerAgentBase):
     """
     Agent specialized in citation formatting and source verification.
 
@@ -187,7 +187,7 @@ class CitationAgent(BaseAgent):
         key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
 
-    def _build_prompt(self, sources: list[dict[str, Any]], style: str) -> str:
+    def _build_prompt(self, sources: list[dict[str, Any]], style: str) -> str:  # type: ignore[override]
         """Build prompt for Gemini."""
         sources_text = orjson.dumps(sources, option=orjson.OPT_INDENT_2).decode()
         return f"""Format the following sources according to {style} citation style:
@@ -329,9 +329,10 @@ Include all available metadata (authors, year, title, journal, DOI).
 Return formatted citations as structured JSON."""
 
         try:
-            result = await self.gemini_service.generate_structured_content(
-                prompt, CitationSchema
-            )
+            gemini = self._ensure_gemini_service()
+            if gemini is None:
+                return self._generate_mock_citations(sources, style)
+            result = await gemini.generate_structured_content(prompt, CitationSchema)
 
             # Convert Pydantic model to expected dict format
             formatted_citations = [

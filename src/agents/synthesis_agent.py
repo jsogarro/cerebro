@@ -9,14 +9,14 @@ from typing import Any
 
 from structlog import get_logger
 
-from src.agents.base import BaseAgent
+from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 
 logger = get_logger()
 
 
-class SynthesisAgent(BaseAgent):
+class SynthesisAgent(LLMWorkerAgentBase):
     """
     Agent specialized in synthesizing outputs from multiple research agents.
 
@@ -54,11 +54,12 @@ class SynthesisAgent(BaseAgent):
                 return cached_result
 
             # Generate synthesis using structured output
-            if self.gemini_service:
+            gemini = self._ensure_gemini_service()
+            if gemini:
                 from src.agents.schemas import SynthesisSchema
 
                 prompt = self._build_prompt(agent_outputs)
-                schema_result = await self.gemini_service.generate_structured_content(
+                schema_result = await gemini.generate_structured_content(
                     prompt, SynthesisSchema
                 )
                 # Convert Pydantic model to dict for compatibility
@@ -155,7 +156,7 @@ class SynthesisAgent(BaseAgent):
         key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
 
-    def _build_prompt(self, agent_outputs: dict[str, Any]) -> str:
+    def _build_prompt(self, agent_outputs: dict[str, Any]) -> str:  # type: ignore[override]
         """Build prompt for Gemini."""
         # Format agent outputs clearly for synthesis
         formatted_outputs = []

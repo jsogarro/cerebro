@@ -9,14 +9,14 @@ from typing import Any
 
 from structlog import get_logger
 
-from src.agents.base import BaseAgent
+from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 
 logger = get_logger()
 
 
-class MethodologyAgent(BaseAgent):
+class MethodologyAgent(LLMWorkerAgentBase):
     """
     Agent specialized in research methodology design and evaluation.
 
@@ -52,11 +52,12 @@ class MethodologyAgent(BaseAgent):
                 return cached_result
 
             # Generate methodology using structured output
-            if self.gemini_service:
+            gemini = self._ensure_gemini_service()
+            if gemini:
                 from src.agents.schemas import MethodologySchema
 
                 prompt = self._build_prompt(task.input_data)
-                schema_result = await self.gemini_service.generate_structured_content(
+                schema_result = await gemini.generate_structured_content(
                     prompt, MethodologySchema
                 )
                 # Convert Pydantic model to dict for compatibility
@@ -156,7 +157,7 @@ class MethodologyAgent(BaseAgent):
         key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
 
-    def _build_prompt(self, input_data: dict[str, Any]) -> str:
+    def _build_prompt(self, input_data: dict[str, Any]) -> str:  # type: ignore[override]
         """Build prompt for Gemini."""
         return f"""Design a research methodology for: {input_data.get("research_question")}
         Type: {input_data.get("research_type", "mixed")}

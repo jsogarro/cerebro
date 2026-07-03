@@ -10,11 +10,11 @@ from typing import Any
 
 from structlog import get_logger
 
-from src.agents.base import BaseAgent
 from src.agents.comparative_insight_synthesizer import ComparativeInsightSynthesizer
 from src.agents.comparative_matrix_builder import ComparisonMatrixBuilder
 from src.agents.comparative_similarity_analyzer import SimilarityAnalyzer
 from src.agents.comparative_theory_extractor import TheoryExtractor
+from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.services.parsers.json_parser import parse_json_response
@@ -23,7 +23,7 @@ from src.services.prompts.agent_prompts import generate_comparative_agent_prompt
 logger = get_logger()
 
 
-class ComparativeAnalysisAgent(BaseAgent):
+class ComparativeAnalysisAgent(LLMWorkerAgentBase):
     """
     Agent specialized in comparative analysis of research items.
 
@@ -664,7 +664,12 @@ class ComparativeAnalysisAgent(BaseAgent):
         prompt = generate_comparative_agent_prompt(enhanced_input)
 
         try:
-            response = await self.gemini_service.generate_content(prompt)
+            gemini = self._ensure_gemini_service()
+            if gemini is None:
+                return self._generate_mock_analysis_with_mcp(
+                    input_data, research_data, statistical_data
+                )
+            response = await gemini.generate_content(prompt)
             parsed_response = parse_json_response(response)
             analysis = (
                 parsed_response.get("comparative_analysis")

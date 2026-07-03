@@ -10,7 +10,7 @@ from typing import Any
 
 from structlog import get_logger
 
-from src.agents.base import BaseAgent
+from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.models.research_project import ResearchDepth
@@ -20,7 +20,7 @@ from src.services.prompts.agent_prompts import generate_literature_agent_prompt
 logger = get_logger()
 
 
-class LiteratureReviewAgent(BaseAgent):
+class LiteratureReviewAgent(LLMWorkerAgentBase):
     """
     Agent specialized in conducting systematic literature reviews.
 
@@ -502,7 +502,8 @@ class LiteratureReviewAgent(BaseAgent):
         Returns:
             Literature analysis from Gemini
         """
-        if not self.gemini_service:
+        gemini = self._ensure_gemini_service()
+        if gemini is None:
             return self._generate_mock_analysis_from_sources(academic_sources)
 
         # Prepare sources for Gemini analysis
@@ -518,7 +519,7 @@ class LiteratureReviewAgent(BaseAgent):
         prompt = generate_literature_agent_prompt(enhanced_input)
 
         try:
-            response = await self.gemini_service.generate_content(prompt)
+            response = await gemini.generate_content(prompt)
             parsed_response = parse_json_response(response)
             result = parsed_response.get("literature_analysis", {})
             return dict(result) if isinstance(result, dict) else {}
@@ -705,14 +706,13 @@ Requirements:
 - Include 2-3 sentence abstracts
 - Include DOI when known"""
 
-        if self.gemini_service is None:
+        gemini = self._ensure_gemini_service()
+        if gemini is None:
             self.log_error("Source search invoked without a configured gemini_service")
             return []
 
         try:
-            result = await self.gemini_service.generate_structured_content(
-                prompt, SourceListSchema
-            )
+            result = await gemini.generate_structured_content(prompt, SourceListSchema)
             self.log_info(f"Found {len(result.sources)} sources")
             return [s.model_dump() for s in result.sources]
         except Exception as e:
@@ -742,14 +742,15 @@ Analyze the literature and provide:
 3. methodologies_used: List of research methodologies observed across papers
 4. quality_assessment: Overall quality assessment of this literature corpus"""
 
-        if self.gemini_service is None:
+        gemini = self._ensure_gemini_service()
+        if gemini is None:
             self.log_error(
                 "Source analysis invoked without a configured gemini_service"
             )
             return {}
 
         try:
-            result = await self.gemini_service.generate_structured_content(
+            result = await gemini.generate_structured_content(
                 prompt, LiteratureAnalysisSchema
             )
             return {
@@ -867,7 +868,10 @@ Requirements:
 
         try:
             self.log_info(f"Searching for sources via Gemini: {query[:80]}...")
-            response = await self.gemini_service.generate_content(prompt)
+            gemini = self._ensure_gemini_service()
+            if gemini is None:
+                return self._static_fallback_sources(query, domains)
+            response = await gemini.generate_content(prompt)
             self.log_info(f"Gemini source response: {len(response)} chars")
             from src.services.parsers.json_parser import parse_json_response
 
