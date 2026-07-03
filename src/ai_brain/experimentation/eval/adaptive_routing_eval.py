@@ -96,11 +96,16 @@ class AdaptiveRoutingEvaluator:
         """
         corpus = []
 
-        # Distribution: 25% SIMPLE, 40% MODERATE, 35% COMPLEX
+        # Distribution: 25% SIMPLE, 40% MODERATE, 35% COMPLEX — scaled to
+        # num_queries (counts were previously hardcoded to a 200-query corpus,
+        # silently ignoring num_queries and invalidating horizon comparisons).
+        n_direct = max(1, round(num_queries * 0.25))
+        n_parallel = max(1, round(num_queries * 0.40))
+        n_hier = max(1, num_queries - n_direct - n_parallel)
         distributions = [
-            (ComplexityLevel.SIMPLE, CollaborationMode.DIRECT, 50, 1, 0.85),
-            (ComplexityLevel.MODERATE, CollaborationMode.PARALLEL, 80, 3, 0.80),
-            (ComplexityLevel.COMPLEX, CollaborationMode.HIERARCHICAL, 70, 5, 0.75),
+            (ComplexityLevel.SIMPLE, CollaborationMode.DIRECT, n_direct, 1, 0.85),
+            (ComplexityLevel.MODERATE, CollaborationMode.PARALLEL, n_parallel, 3, 0.80),
+            (ComplexityLevel.COMPLEX, CollaborationMode.HIERARCHICAL, n_hier, 5, 0.75),
         ]
 
         query_id = 0

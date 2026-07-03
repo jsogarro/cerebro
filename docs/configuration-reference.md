@@ -133,9 +133,12 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 | `MEMORY_ROUTING_FRESHNESS_DAYS` | integer | `30` | Decay weight for older routing history (exponential decay) | No |
 | `MEMORY_PROMPT_MAX_PROCEDURES` | integer | `3` | Maximum procedural memory items to inject into worker prompts | No |
 | `ADAPTIVE_ROUTING_ENABLED` | boolean | `false` | Enable adaptive routing with multi-armed bandit allocation optimization (**ships dark, pending eval**) | No |
-| `ADAPTIVE_ROUTING_MIN_HISTORY` | integer | `100` | Minimum routing history samples required before adaptation begins | No |
+| `ADAPTIVE_ROUTING_MIN_HISTORY` | integer | `300` | Minimum routing history samples required before adaptation begins (Hoeffding bound: ~450 samples across 15 mode-arm contexts for 95% confidence) | No |
 | `ADAPTIVE_ROUTING_MAX_WORKER_ADJUST` | integer | `2` | Maximum ±N worker count adjustment from adaptive engine (from memory-adjusted baseline) | No |
 | `ADAPTIVE_ROUTING_UPDATE_INTERVAL_SECONDS` | integer | `300` | Interval for bandit model updates (seconds) | No |
+| `ADAPTIVE_ROUTING_POSTERIOR_TEMP_ENABLED` | boolean | `true` | Convergence lever: sharpen Thompson posteriors after warm-up to shift exploration toward exploitation | No |
+| `ADAPTIVE_ROUTING_POSTERIOR_TEMP_THRESHOLD` | integer | `150` | Per-experiment sample count after which posterior sharpening activates | No |
+| `ADAPTIVE_ROUTING_POSTERIOR_TEMP_FACTOR` | float | `3.0` | Sharpening factor applied to Beta posterior parameters (higher = stronger exploitation) | No |
 
 **Behavior when enabled**:
 - Episodic memory nudges worker allocation based on past similar queries (bounded by `±MAX_WORKER_ADJUST`)

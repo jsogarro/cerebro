@@ -219,6 +219,17 @@ class MASRouter:
                     "update_interval_seconds": self.config.get(
                         "adaptive_routing_update_interval_seconds", 300
                     ),
+                    # Convergence lever: sharpen Thompson posteriors after
+                    # warm-up so exploitation ramps once arms are estimated.
+                    "posterior_temp_enabled": self.config.get(
+                        "adaptive_routing_posterior_temp_enabled", True
+                    ),
+                    "posterior_temp_threshold": self.config.get(
+                        "adaptive_routing_posterior_temp_threshold", 150
+                    ),
+                    "posterior_temp_factor": self.config.get(
+                        "adaptive_routing_posterior_temp_factor", 3.0
+                    ),
                 }
             )
 

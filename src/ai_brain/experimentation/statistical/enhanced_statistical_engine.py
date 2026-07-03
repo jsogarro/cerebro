@@ -639,8 +639,8 @@ class MultiBanditOptimizer:
 
         # Exploration decay (convergence lever)
         self.posterior_temp_enabled = self.config.get("posterior_temp_enabled", False)
-        self.posterior_temp_threshold = self.config.get("posterior_temp_threshold", 200)
-        self.posterior_temp_factor = self.config.get("posterior_temp_factor", 1.5)
+        self.posterior_temp_threshold = self.config.get("posterior_temp_threshold", 150)
+        self.posterior_temp_factor = self.config.get("posterior_temp_factor", 3.0)
 
         # Bandit state
         self.arm_counts: list[int] = []
