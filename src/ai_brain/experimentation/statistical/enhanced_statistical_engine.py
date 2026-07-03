@@ -637,6 +637,11 @@ class MultiBanditOptimizer:
         self.epsilon = self.config.get("epsilon", 0.1)
         self.exploration_rate = self.config.get("exploration_rate", 0.2)
 
+        # Exploration decay (convergence lever)
+        self.posterior_temp_enabled = self.config.get("posterior_temp_enabled", False)
+        self.posterior_temp_threshold = self.config.get("posterior_temp_threshold", 150)
+        self.posterior_temp_factor = self.config.get("posterior_temp_factor", 3.0)
+
         # Bandit state
         self.arm_counts: list[int] = []
         self.arm_rewards: list[list[float]] = []
@@ -719,10 +724,25 @@ class MultiBanditOptimizer:
     async def _thompson_sampling_selection(self) -> BanditResult:
         """Thompson sampling arm selection."""
 
+        # Apply posterior temperature (exploration decay) if enabled and threshold met
+        total_samples = sum(self.arm_counts)
+        use_temp = (
+            self.posterior_temp_enabled
+            and total_samples >= self.posterior_temp_threshold
+        )
+
         # Sample from Beta distributions for each arm
         arm_samples = []
         for i in range(self.num_arms):
-            sample = np.random.beta(self.alpha_params[i], self.beta_params[i])
+            alpha, beta = self.alpha_params[i], self.beta_params[i]
+
+            # Exploration decay: sharpen posterior by raising (alpha, beta) to a power
+            # temp_factor > 1 concentrates the distribution around its mean
+            if use_temp:
+                alpha = alpha * self.posterior_temp_factor
+                beta = beta * self.posterior_temp_factor
+
+            sample = np.random.beta(alpha, beta)
             arm_samples.append(sample)
 
         selected_arm = int(np.argmax(arm_samples))
@@ -802,10 +822,15 @@ class MultiBanditOptimizer:
 
         # Algorithm-specific updates
         if self.algorithm == BanditAlgorithm.THOMPSON_SAMPLING:
-            if reward > 0.5:  # Success (above threshold)
-                self.alpha_params[arm] += 1
-            else:  # Failure
-                self.beta_params[arm] += 1
+            # Continuous Beta update: treat reward as Bayesian success probability.
+            # This avoids the threshold misalignment issue where quality scores
+            # in [0.6, 0.9] would all score as "successes" with a 0.5 threshold,
+            # causing posterior means to collapse to ~0.98 for all arms.
+            # With continuous update, reward=0.9 -> alpha+=0.9, beta+=0.1 (strong success),
+            # reward=0.2 -> alpha+=0.2, beta+=0.8 (strong failure), allowing posteriors
+            # to properly separate based on relative performance.
+            self.alpha_params[arm] += reward
+            self.beta_params[arm] += 1.0 - reward
 
     def _calculate_arm_probabilities(self) -> list[float]:
         """Calculate current arm selection probabilities."""

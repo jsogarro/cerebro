@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from structlog import get_logger
 
 from src.core.pii_redactor import redact_pii
@@ -196,13 +197,19 @@ class MASRouter:
         self.adaptive_routing_enabled = self.config.get(
             "adaptive_routing_enabled", False
         )
+        # Min history raised to 300 (from 100) based on sample-complexity analysis:
+        # For 3 modes x 5 arms = 15 contexts with delta_mu=0.15, sigma=0.02, Hoeffding bound
+        # requires ~14 samples per arm for 95% confidence -> 450 total minimum.
+        # 300 provides reasonable cold-start horizon while staying below full bound.
         self.adaptive_routing_min_history = self.config.get(
-            "adaptive_routing_min_history", 100
+            "adaptive_routing_min_history", 300
         )
         self.adaptive_routing_max_worker_adjust = self.config.get(
             "adaptive_routing_max_worker_adjust", 2
         )
         self._adaptive_engine: AdaptiveAllocationEngine | None = None
+        # Per-mode quality baselines for advantage reward computation (EMA)
+        self._mode_quality_baselines: dict[CollaborationMode, float] = {}
         if self.adaptive_routing_enabled:
             self._adaptive_engine = AdaptiveAllocationEngine(
                 {
@@ -211,6 +218,17 @@ class MASRouter:
                     "global_max_allocation": 0.70,
                     "update_interval_seconds": self.config.get(
                         "adaptive_routing_update_interval_seconds", 300
+                    ),
+                    # Convergence lever: sharpen Thompson posteriors after
+                    # warm-up so exploitation ramps once arms are estimated.
+                    "posterior_temp_enabled": self.config.get(
+                        "adaptive_routing_posterior_temp_enabled", True
+                    ),
+                    "posterior_temp_threshold": self.config.get(
+                        "adaptive_routing_posterior_temp_threshold", 150
+                    ),
+                    "posterior_temp_factor": self.config.get(
+                        "adaptive_routing_posterior_temp_factor", 3.0
                     ),
                 }
             )
@@ -647,8 +665,25 @@ class MASRouter:
             delta_to_variant = {-2: "-2", -1: "-1", 0: "0", 1: "+1", 2: "+2"}
             variant_id = delta_to_variant.get(clamped_delta, "0")
 
-            # Reward is quality_score (higher is better)
-            reward = quality_score
+            # Compute advantage reward (baseline-relative per collaboration_mode).
+            # This isolates the allocation improvement signal from mode-intrinsic
+            # quality differences (e.g., DIRECT queries naturally score higher than
+            # HIERARCHICAL queries due to inherent complexity, not worker_count).
+            mode = decision.collaboration_mode
+            if mode not in self._mode_quality_baselines:
+                # Initialize with midpoint of typical quality range [0.6, 0.9]
+                self._mode_quality_baselines[mode] = 0.75
+
+            quality_baseline = self._mode_quality_baselines[mode]
+            advantage = quality_score - quality_baseline
+
+            # Update baseline with exponential moving average (alpha=0.05 for stability)
+            self._mode_quality_baselines[mode] = float(
+                0.95 * quality_baseline + 0.05 * quality_score
+            )
+
+            # Shift advantage to [0, 1] range for Thompson Sampling Beta update
+            reward = float(np.clip(advantage + 0.5, 0.0, 1.0))
 
             await self._adaptive_engine.record_outcome(
                 experiment_id, variant_id, reward

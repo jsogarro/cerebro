@@ -158,7 +158,18 @@ class AdaptiveAllocationEngine:
             AllocationStrategy.BAYESIAN_OPTIMAL,
         ]:
             bandit = MultiBanditOptimizer(
-                {"exploration_rate": allocation_config.exploration_rate}
+                {
+                    "exploration_rate": allocation_config.exploration_rate,
+                    "posterior_temp_enabled": self.config.get(
+                        "posterior_temp_enabled", False
+                    ),
+                    "posterior_temp_threshold": self.config.get(
+                        "posterior_temp_threshold", 150
+                    ),
+                    "posterior_temp_factor": self.config.get(
+                        "posterior_temp_factor", 3.0
+                    ),
+                }
             )
             await bandit.initialize_bandit(
                 num_arms=len(variants),
@@ -451,6 +462,8 @@ class AdaptiveAllocationEngine:
         await bandit.update_bandit(arm_index, reward)
 
         # Update statistics
+        # Note: With advantage-based reward shaping (reward = advantage + 0.5),
+        # this threshold correctly identifies arms that beat the mode baseline.
         if reward > 0.5:  # Consider above 0.5 as success
             self.allocation_stats["successful_adaptations"] += 1
 

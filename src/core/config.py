@@ -214,12 +214,19 @@ class Settings(BaseSettings):
     # Adaptive Routing Configuration (multi-armed bandit allocation optimization)
     ADAPTIVE_ROUTING_ENABLED: bool = False  # Default OFF - preserves current behavior
     ADAPTIVE_ROUTING_MIN_HISTORY: int = (
-        100  # Minimum routing_history samples before adaptation
+        # Hoeffding bound: ~450 samples across 15 mode-arm contexts for 95%
+        # confidence; 300 is the practical floor before adaptation engages.
+        300
     )
     ADAPTIVE_ROUTING_MAX_WORKER_ADJUST: int = (
         2  # Max ±N from (memory-adjusted) baseline
     )
     ADAPTIVE_ROUTING_UPDATE_INTERVAL_SECONDS: int = 300  # 5 minutes
+    # Convergence lever: after N samples per experiment, Thompson posteriors are
+    # sharpened (alpha,beta scaled by the factor) to shift exploration -> exploitation.
+    ADAPTIVE_ROUTING_POSTERIOR_TEMP_ENABLED: bool = True
+    ADAPTIVE_ROUTING_POSTERIOR_TEMP_THRESHOLD: int = 150
+    ADAPTIVE_ROUTING_POSTERIOR_TEMP_FACTOR: float = 3.0
 
     # Agent System Configuration
     AGENTS_MAX_CONCURRENT: int = 20
