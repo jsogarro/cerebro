@@ -65,8 +65,8 @@ class OpenRouterProvider(BaseProvider):
             "tier_mapping",
             {
                 "simple": "deepseek/deepseek-chat",  # Cost-minimized
-                "balanced": "anthropic/claude-3.5-sonnet",  # Mid-tier
-                "complex": "anthropic/claude-3.5-sonnet",  # Quality-focused
+                "balanced": "anthropic/claude-sonnet-4.6",  # Mid-tier
+                "complex": "anthropic/claude-sonnet-4.6",  # Quality-focused
             },
         )
 
@@ -78,7 +78,7 @@ class OpenRouterProvider(BaseProvider):
                 "max_output_tokens": 8000,
                 "strengths": ["cost_efficient", "fast", "general"],
             },
-            "anthropic/claude-3.5-sonnet": {
+            "anthropic/claude-sonnet-4.6": {
                 "context_window": 200000,
                 "cost_per_1k_tokens": 0.015,
                 "max_output_tokens": 8000,
@@ -176,7 +176,7 @@ class OpenRouterProvider(BaseProvider):
             return str(self.tier_mapping[tier])
         # Default to balanced tier
         default_model: str = str(
-            self.tier_mapping.get("balanced", "anthropic/claude-3.5-sonnet")
+            self.tier_mapping.get("balanced", "anthropic/claude-sonnet-4.6")
         )
         return default_model
 
@@ -416,7 +416,10 @@ class OpenRouterProvider(BaseProvider):
         try:
             # Test with a simple request
             test_request = ModelRequest(
-                prompt="What is 2+2?", max_tokens=10, timeout_seconds=15
+                prompt="What is 2+2?",
+                max_tokens=10,
+                timeout_seconds=15,
+                metadata={"tier": "simple"},  # health probe uses the cheap tier
             )
 
             start_time = datetime.now()
