@@ -260,6 +260,11 @@ class OpenRouterProvider(BaseProvider):
         if request.top_k is not None:
             payload["top_k"] = request.top_k
 
+        # Add response_format if specified (structured output support)
+        # Prefer metadata["response_format"] for OpenAI-compatible dict format
+        if hasattr(request, "metadata") and request.metadata.get("response_format"):
+            payload["response_format"] = request.metadata["response_format"]
+
         return payload
 
     async def _make_api_request(self, payload: dict[str, Any]) -> dict[str, Any]:
