@@ -25,6 +25,13 @@ MULTI_PROVIDER_ROUTING_ENABLED=true
 - `balanced`: `anthropic/claude-sonnet-4.6` (mid-tier quality)
 - `complex`: `anthropic/claude-sonnet-4.6` (quality-focused)
 
+**Model slug validation** (enabled by default via `OPENROUTER_VALIDATE_SLUGS_ON_STARTUP=true`):
+- At provider initialization, fetches the live OpenRouter model catalog and validates that every slug in `OPENROUTER_TIER_MAPPING` exists
+- Stale slugs (models no longer available) trigger **ERROR-level** logs naming each invalid tier→slug pair and mark the provider's health status as `degraded` for monitoring visibility
+- Prevents silent fallback failures when model slugs change (real incident: `anthropic/claude-3.5-sonnet` no longer exists → 404 → silent Gemini fallback while all mocked tests stayed green)
+- Validation is non-blocking: network failures skip with a warning, stale slugs do not crash the provider
+- Set `OPENROUTER_VALIDATE_SLUGS_ON_STARTUP=false` to skip validation (e.g., air-gapped dev environments)
+
 ### How to go live
 
 1. Obtain an OpenRouter API key (provides access to Claude, DeepSeek, Llama, etc. via single key)

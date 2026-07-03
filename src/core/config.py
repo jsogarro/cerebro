@@ -160,6 +160,7 @@ class Settings(BaseSettings):
         "balanced": "anthropic/claude-sonnet-4.6",  # Mid-tier quality
         "complex": "anthropic/claude-sonnet-4.6",  # Quality-focused
     }
+    OPENROUTER_VALIDATE_SLUGS_ON_STARTUP: bool = True
 
     # Multi-Provider Routing Feature Flag
     MULTI_PROVIDER_ROUTING_ENABLED: bool = (

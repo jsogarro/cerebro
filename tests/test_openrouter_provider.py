@@ -429,3 +429,247 @@ class TestResourceCleanup:
 
         mock_client.aclose.assert_called_once()
         assert openrouter_provider.client is None
+
+
+@pytest.mark.asyncio
+class TestModelSlugValidation:
+    """Test model slug validation against OpenRouter catalog."""
+
+    @pytest.fixture
+    def mock_catalog_response_valid(self):
+        """Mock catalog response where all tier_mapping slugs are valid."""
+        return {
+            "data": [
+                {"id": "deepseek/deepseek-chat", "name": "DeepSeek Chat"},
+                {"id": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4.6"},
+                {"id": "google/gemini-pro-1.5", "name": "Gemini Pro 1.5"},
+            ]
+        }
+
+    @pytest.fixture
+    def mock_catalog_response_stale(self):
+        """Mock catalog response where one tier_mapping slug is stale."""
+        return {
+            "data": [
+                {"id": "deepseek/deepseek-chat", "name": "DeepSeek Chat"},
+                # Missing: anthropic/claude-sonnet-4.6 (stale slug)
+                {"id": "anthropic/claude-sonnet-4.7", "name": "Claude Sonnet 4.7"},
+                {"id": "google/gemini-pro-1.5", "name": "Gemini Pro 1.5"},
+            ]
+        }
+
+    async def test_validate_model_slugs_all_valid(
+        self, openrouter_provider, mock_catalog_response_valid
+    ):
+        """All tier_mapping slugs present in catalog should pass validation."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = mock_catalog_response_valid
+        mock_response.raise_for_status = MagicMock()
+
+        # Mock the client
+        openrouter_provider.client = AsyncMock()
+        openrouter_provider.client.get = AsyncMock(return_value=mock_response)
+
+        result = await openrouter_provider.validate_model_slugs()
+
+        # All slugs should be valid
+        assert len(result.valid_slugs) == 3
+        assert "simple" in result.valid_slugs
+        assert "balanced" in result.valid_slugs
+        assert "complex" in result.valid_slugs
+        assert result.valid_slugs["simple"] == "deepseek/deepseek-chat"
+        assert result.valid_slugs["balanced"] == "anthropic/claude-sonnet-4.6"
+
+        # No invalid slugs
+        assert len(result.invalid_slugs) == 0
+        assert result.validation_error is None
+
+    async def test_validate_model_slugs_stale_detected(
+        self, openrouter_provider, mock_catalog_response_stale
+    ):
+        """Stale slugs should be detected and reported in invalid_slugs."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = mock_catalog_response_stale
+        mock_response.raise_for_status = MagicMock()
+
+        openrouter_provider.client = AsyncMock()
+        openrouter_provider.client.get = AsyncMock(return_value=mock_response)
+
+        result = await openrouter_provider.validate_model_slugs()
+
+        # Only simple tier should be valid
+        assert len(result.valid_slugs) == 1
+        assert result.valid_slugs["simple"] == "deepseek/deepseek-chat"
+
+        # Balanced and complex should be invalid (both point to same stale slug)
+        assert len(result.invalid_slugs) == 2
+        assert "balanced" in result.invalid_slugs
+        assert "complex" in result.invalid_slugs
+        assert result.invalid_slugs["balanced"] == "anthropic/claude-sonnet-4.6"
+        assert result.invalid_slugs["complex"] == "anthropic/claude-sonnet-4.6"
+
+        assert result.validation_error is None
+
+    async def test_validate_model_slugs_network_error(self, openrouter_provider):
+        """Network errors should be non-fatal and return validation_error."""
+        import httpx
+
+        openrouter_provider.client = AsyncMock()
+        openrouter_provider.client.get = AsyncMock(
+            side_effect=httpx.HTTPError("Connection failed")
+        )
+
+        result = await openrouter_provider.validate_model_slugs()
+
+        # Should have validation_error set
+        assert result.validation_error is not None
+        assert "Network error" in result.validation_error
+
+        # No slugs validated (error path)
+        assert len(result.valid_slugs) == 0
+        assert len(result.invalid_slugs) == 0
+
+    async def test_validate_model_slugs_unexpected_error(self, openrouter_provider):
+        """Unexpected errors should be caught and logged."""
+        openrouter_provider.client = AsyncMock()
+        openrouter_provider.client.get = AsyncMock(
+            side_effect=Exception("Unexpected error")
+        )
+
+        result = await openrouter_provider.validate_model_slugs()
+
+        # Should have validation_error set
+        assert result.validation_error is not None
+        assert "Unexpected validation error" in result.validation_error
+
+        # No slugs validated
+        assert len(result.valid_slugs) == 0
+        assert len(result.invalid_slugs) == 0
+
+    async def test_load_configuration_calls_validation_when_enabled(
+        self, openrouter_config, mock_catalog_response_valid
+    ):
+        """load_configuration should call validate_model_slugs when enabled."""
+        # Enable validation explicitly
+        openrouter_config["validate_slugs_on_startup"] = True
+
+        provider = OpenRouterProvider(config=openrouter_config)
+
+        # Mock the catalog response
+        mock_response = MagicMock()
+        mock_response.json.return_value = mock_catalog_response_valid
+        mock_response.raise_for_status = MagicMock()
+
+        # Mock client and catalog fetch
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.aclose = AsyncMock()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await provider.load_configuration()
+
+        # Validation should have been called (catalog GET)
+        mock_client.get.assert_called_once()
+        call_args = mock_client.get.call_args
+        assert "/models" in call_args.args[0]
+
+        # No stale_slugs recorded (all valid)
+        assert len(provider.stale_slugs) == 0
+
+    async def test_load_configuration_skips_validation_when_disabled(
+        self, openrouter_config
+    ):
+        """load_configuration should skip validation when disabled."""
+        # Disable validation explicitly
+        openrouter_config["validate_slugs_on_startup"] = False
+
+        provider = OpenRouterProvider(config=openrouter_config)
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock()  # Should NOT be called
+        mock_client.aclose = AsyncMock()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await provider.load_configuration()
+
+        # Validation should NOT have been called
+        mock_client.get.assert_not_called()
+
+    async def test_load_configuration_logs_error_on_stale_slugs(
+        self, openrouter_config, mock_catalog_response_stale
+    ):
+        """load_configuration should log ERROR when stale slugs detected."""
+        provider = OpenRouterProvider(config=openrouter_config)
+
+        # Mock catalog response with stale slug
+        mock_response = MagicMock()
+        mock_response.json.return_value = mock_catalog_response_stale
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.aclose = AsyncMock()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await provider.load_configuration()
+
+        # Should have recorded stale_slugs
+        assert len(provider.stale_slugs) == 2
+        assert "balanced" in provider.stale_slugs
+        assert "complex" in provider.stale_slugs
+        assert provider.stale_slugs["balanced"] == "anthropic/claude-sonnet-4.6"
+        assert provider.stale_slugs["complex"] == "anthropic/claude-sonnet-4.6"
+
+    async def test_load_configuration_skips_validation_when_no_api_key(
+        self, openrouter_config
+    ):
+        """Validation should be skipped if no API key configured."""
+        openrouter_config["api_key"] = None
+        openrouter_config["validate_slugs_on_startup"] = True
+
+        provider = OpenRouterProvider(config=openrouter_config)
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock()  # Should NOT be called
+        mock_client.aclose = AsyncMock()
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await provider.load_configuration()
+
+        # Validation skipped (no API key)
+        mock_client.get.assert_not_called()
+
+    async def test_health_check_surfaces_stale_slugs(
+        self, openrouter_provider, mock_openrouter_response
+    ):
+        """health_check should surface stale_slugs in metadata."""
+        # Simulate stale slugs detected during load_configuration
+        openrouter_provider.stale_slugs = {
+            "balanced": "anthropic/claude-sonnet-4.6",
+            "complex": "anthropic/claude-sonnet-4.6",
+        }
+
+        # Mock successful health check response
+        health_response = mock_openrouter_response.copy()
+        health_response["choices"][0]["message"]["content"] = "4"
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = health_response
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(openrouter_provider, "client", create=True) as mock_client:
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            health_status = await openrouter_provider.health_check()
+
+        # Health check should succeed but be degraded due to stale_slugs
+        assert health_status.healthy is True
+        assert health_status.api_status == "degraded"
+
+        # Stale slugs should be in metadata
+        assert hasattr(health_status, "metadata")
+        assert "stale_slugs" in health_status.metadata
+        assert (
+            health_status.metadata["stale_slugs"]["balanced"]
+            == "anthropic/claude-sonnet-4.6"
+        )

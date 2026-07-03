@@ -112,6 +112,7 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 | `OPENROUTER_API_KEY` | string | - | OpenRouter API key for multi-provider access | No (required if enabled) |
 | `OPENROUTER_ENDPOINT` | string | `https://openrouter.ai/api/v1/chat/completions` | OpenRouter API endpoint | No |
 | `OPENROUTER_TIER_MAPPING` | dict | See below | Model selection by complexity tier | No |
+| `OPENROUTER_VALIDATE_SLUGS_ON_STARTUP` | boolean | `true` | Validate tier_mapping model slugs against live OpenRouter catalog at startup | No |
 
 **OpenRouter Tier Mapping (default)**:
 ```python
@@ -121,6 +122,8 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
     "complex": "anthropic/claude-sonnet-4.6"   # Quality-focused tier
 }
 ```
+
+**Model slug validation**: When `OPENROUTER_VALIDATE_SLUGS_ON_STARTUP` is enabled (default), the provider fetches the live model catalog from OpenRouter at initialization and validates that every slug in `OPENROUTER_TIER_MAPPING` exists in the catalog. If stale slugs are detected (models no longer available), an **ERROR-level** log event is emitted naming each invalid tier→slug pair, and the provider's health status is marked as `degraded` to surface the issue in monitoring. This prevents silent fallback failures when model slugs change (e.g., `anthropic/claude-3.5-sonnet` → `anthropic/claude-sonnet-4.6`). The validation is non-blocking — network failures skip validation with a warning, and stale slugs do not crash the provider (runtime fallback still handles failures). Set to `false` to skip validation entirely (e.g., air-gapped dev environments).
 
 **How to enable**: Set `OPENROUTER_API_KEY` in environment, then set `MULTI_PROVIDER_ROUTING_ENABLED=true`. When disabled or API key is absent, all requests fall back to `GeminiService` with byte-for-byte prior behavior preserved.
 
