@@ -304,6 +304,28 @@ Single-domain queries bypass this path entirely (zero overhead).
 | `WEBSOCKET_PING_TIMEOUT` | integer | `10` | Ping timeout (seconds) | No |
 | `WEBSOCKET_MESSAGE_MAX_SIZE` | integer | `1048576` | Maximum message size (bytes) | No |
 
+### Multi-Domain Merge Configuration
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `MULTI_DOMAIN_MERGE_STRATEGY` | string | `concat` | Multi-domain result merge strategy (`concat` or `llm`) | No |
+| `MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` | integer | `4000` | Character limit per domain when using LLM synthesis | No |
+
+**Merge Strategies:**
+
+- **`concat`** (default): Labeled concatenation by domain. Each domain's output is stored under its domain key. Fast, deterministic, preserves all per-domain detail.
+- **`llm`**: LLM synthesis composes per-domain outputs into one coherent answer. Uses the synthesis agent to integrate findings across domains. Falls back to `concat` on synthesis failure.
+
+**Example:**
+```bash
+# Use default concatenation (fast, preserves all detail)
+MULTI_DOMAIN_MERGE_STRATEGY=concat
+
+# Use LLM synthesis for composed answers
+MULTI_DOMAIN_MERGE_STRATEGY=llm
+MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT=4000
+```
+
 ### Security Configuration
 
 | Variable | Type | Default | Description | Required |
