@@ -451,6 +451,8 @@ class AdaptiveAllocationEngine:
         await bandit.update_bandit(arm_index, reward)
 
         # Update statistics
+        # Note: With advantage-based reward shaping (reward = advantage + 0.5),
+        # this threshold correctly identifies arms that beat the mode baseline.
         if reward > 0.5:  # Consider above 0.5 as success
             self.allocation_stats["successful_adaptations"] += 1
 

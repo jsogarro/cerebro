@@ -802,10 +802,15 @@ class MultiBanditOptimizer:
 
         # Algorithm-specific updates
         if self.algorithm == BanditAlgorithm.THOMPSON_SAMPLING:
-            if reward > 0.5:  # Success (above threshold)
-                self.alpha_params[arm] += 1
-            else:  # Failure
-                self.beta_params[arm] += 1
+            # Continuous Beta update: treat reward as Bayesian success probability.
+            # This avoids the threshold misalignment issue where quality scores
+            # in [0.6, 0.9] would all score as "successes" with a 0.5 threshold,
+            # causing posterior means to collapse to ~0.98 for all arms.
+            # With continuous update, reward=0.9 -> alpha+=0.9, beta+=0.1 (strong success),
+            # reward=0.2 -> alpha+=0.2, beta+=0.8 (strong failure), allowing posteriors
+            # to properly separate based on relative performance.
+            self.alpha_params[arm] += reward
+            self.beta_params[arm] += 1.0 - reward
 
     def _calculate_arm_probabilities(self) -> list[float]:
         """Calculate current arm selection probabilities."""
