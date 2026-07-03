@@ -18,11 +18,11 @@ PURPOSE:
 """
 
 import asyncio
-import contextlib
 import json
 import random
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -65,7 +65,7 @@ class EvalMetrics:
     adaptive_worker_dist: dict[int, int]
     adaptation_rate: float  # % of queries where adaptive changed allocation
     bound_hit_rate: float  # % of queries where adaptive hit ±2 cap
-    cumulative_regret: float  # Bandit regret (not yet implemented in this stub)
+    cumulative_regret: float  # Sum of (optimal-quality - achieved-quality) over queries
     num_queries: int
 
 
@@ -172,49 +172,86 @@ class AdaptiveRoutingEvaluator:
         worker_dist: dict[int, int] = {}
         adaptation_count = 0
         bound_hit_count = 0
+        reward_failures = 0
+        cumulative_regret = 0.0
+
+        # Warm the router's cold-start guard: it only checks history LENGTH,
+        # so seed sentinel entries (documented synthetic-eval shortcut).
+        min_history = config["adaptive_routing_min_history"]
+        router.metrics_collector.routing_history.extend(
+            SimpleNamespace(sentinel=True)  # type: ignore[misc]
+            for _ in range(min_history)
+        )
+
+        def _analysis_for(query: SyntheticQuery) -> SimpleNamespace:
+            # Lightweight stand-in exposing the two fields the router's
+            # baseline inference reads (domains, subtask_count).
+            n = max(1, query.analytic_worker_count)
+            return SimpleNamespace(
+                domains=[f"domain_{i}" for i in range(max(1, n - 1))],
+                subtask_count=n,
+            )
 
         for query in corpus:
             # Get baseline (what static would use)
             baseline = query.analytic_worker_count
+            analysis = _analysis_for(query)
 
-            # Simulate routing history to warm up the router
-            if len(allocations) >= config["adaptive_routing_min_history"]:
-                # Get adaptive recommendation
-                try:
-                    recommended = await router._get_adaptive_allocation_adjustment(
-                        complexity_analysis=None,  # type: ignore
-                        collaboration_mode=query.collaboration_mode,
-                        episodic_prior=None,
-                    )
+            # Get adaptive recommendation through the REAL router hook
+            recommended = await router._get_adaptive_allocation_adjustment(
+                complexity_analysis=analysis,  # type: ignore[arg-type]
+                collaboration_mode=query.collaboration_mode,
+                episodic_prior=None,
+            )
 
-                    if recommended is not None:
-                        allocated = recommended
-                        if allocated != baseline:
-                            adaptation_count += 1
-                        if abs(allocated - baseline) == 2:
-                            bound_hit_count += 1
-                    else:
-                        allocated = baseline
-                except Exception as e:
-                    logger.debug(f"Adaptive failed: {e}")
-                    allocated = baseline
+            if recommended is not None:
+                allocated = recommended
+                if allocated != baseline:
+                    adaptation_count += 1
+                if abs(allocated - baseline) == 2:
+                    bound_hit_count += 1
             else:
-                # Cold start: use baseline
                 allocated = baseline
 
             allocations.append(allocated)
             worker_dist[allocated] = worker_dist.get(allocated, 0) + 1
 
-            # Simulate outcome and record for learning
+            # Simulate outcome and feed the reward through the REAL
+            # record_routing_outcome path (delta -> variant -> bandit reward).
             outcome = self.simulate_outcome(query, allocated)
-            with contextlib.suppress(Exception):
-                # Record outcome for bandit learning (quality_score as reward)
-                # Note: Passing None for decision (simplified for eval)
+            decision_stub = SimpleNamespace(
+                collaboration_mode=query.collaboration_mode,
+                complexity_analysis=analysis,
+                agent_allocation=SimpleNamespace(worker_count=allocated),
+            )
+            try:
                 await router.record_routing_outcome(
-                    decision=None,  # type: ignore[arg-type]
+                    decision=decision_stub,  # type: ignore[arg-type]
                     quality_score=outcome.quality_score,
                     actual_cost=outcome.cost,
                 )
+            except Exception as e:
+                reward_failures += 1
+                logger.warning(f"reward recording failed: {e}")
+
+            # Bandit regret: quality at the known-optimal allocation minus achieved
+            optimal_outcome = self.simulate_outcome(query, query.optimal_worker_count)
+            cumulative_regret += max(
+                0.0, optimal_outcome.quality_score - outcome.quality_score
+            )
+
+        # Validity guards: an eval whose learning loop never engaged is
+        # meaningless — fail loudly instead of reporting a vacuous 0.0%.
+        if reward_failures == len(corpus):
+            raise RuntimeError(
+                "adaptive eval invalid: every reward recording failed - "
+                "the bandit never received feedback"
+            )
+        if adaptation_count == 0:
+            raise RuntimeError(
+                "adaptive eval invalid: adaptation rate is 0.0% after warm-up - "
+                "the adaptive hook never engaged (check guards/wiring)"
+            )
 
         # Compute MAE from optimal
         mae = np.mean(
@@ -233,6 +270,7 @@ class AdaptiveRoutingEvaluator:
             "worker_dist": worker_dist,
             "adaptation_rate": adaptation_rate,
             "bound_hit_rate": bound_hit_rate,
+            "cumulative_regret": cumulative_regret,
         }
 
     async def evaluate(self, num_queries: int = 200) -> EvalMetrics:
@@ -257,7 +295,7 @@ class AdaptiveRoutingEvaluator:
             adaptive_worker_dist=adaptive_results["worker_dist"],
             adaptation_rate=adaptation_rate,
             bound_hit_rate=bound_hit_rate,
-            cumulative_regret=0.0,  # Could compute from quality deltas
+            cumulative_regret=adaptive_results.get("cumulative_regret", 0.0),
             num_queries=num_queries,
         )
 
@@ -265,6 +303,23 @@ class AdaptiveRoutingEvaluator:
         return metrics
 
     def generate_report(self, metrics: EvalMetrics) -> str:
+        delta = metrics.adaptive_mae - metrics.static_mae
+        if delta <= -0.01:
+            verdict = (
+                "Adaptive allocation OUTPERFORMS static on this synthetic corpus - "
+                "candidate for live A/B validation."
+            )
+        elif delta < 0.01:
+            verdict = (
+                "Adaptive allocation matches static on this synthetic corpus - "
+                "no evidence of harm, no evidence of benefit yet."
+            )
+        else:
+            verdict = (
+                "Adaptive allocation UNDERPERFORMS static on this synthetic corpus - "
+                "DO NOT PROMOTE. Exploration cost exceeds learned gains at this "
+                "horizon; revisit reward shaping or exploration schedule first."
+            )
         """Generate markdown report."""
         report = f"""# Adaptive Routing Offline Evaluation Report
 
@@ -296,24 +351,23 @@ This is a **synthetic evaluation** with the following limitations:
 
 ## Conclusion
 
-**Status**: Adaptive routing is **LEARNING** via 5-arm Thompson Sampling bandit.
+**Verdict**: {verdict}
 
 **Observations**:
-- Adaptation rate shows bandit is actively exploring/exploiting after cold start
-- Bound hit rate indicates ±2 cap is functioning as designed
-- MAE improvement (if any) demonstrates learning effectiveness on synthetic corpus
+- Adaptation rate {metrics.adaptation_rate:.1%} confirms the bandit loop engaged
+  (arm selection + reward feedback are live end-to-end)
+- Bound hit rate {metrics.bound_hit_rate:.1%} shows the ±2 cap functioning
+- MAE delta (adaptive - static): {metrics.adaptive_mae - metrics.static_mae:+.3f}
+  (negative = adaptive better)
 
 **Limitations**:
 - Synthetic quality function cannot validate real LLM improvements
 - In-memory state (no persistence across restarts)
-- Small corpus may not show statistical significance
+- Corpus may not show statistical significance
 
-**Next steps**:
-1. Enable flag for canary traffic (10%) in production
-2. Monitor real quality_score distributions and adaptation patterns
-3. A/B test: adaptive vs static allocation over live queries
-4. Scale to 50% if metrics stable, full rollout if improved
-
+**Next steps**: keep `ADAPTIVE_ROUTING_ENABLED=False`; do not promote until an
+eval (or live A/B in the experimentation harness) shows adaptive matching or
+beating static allocation.
 """
         return report
 

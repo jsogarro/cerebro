@@ -608,9 +608,13 @@ class MASRouter:
         if collaboration_mode == CollaborationMode.DIRECT:
             return 1
         elif collaboration_mode == CollaborationMode.PARALLEL:
-            return int(min(len(complexity_analysis.domains) + 1, self.max_parallel_workers))
+            return int(
+                min(len(complexity_analysis.domains) + 1, self.max_parallel_workers)
+            )
         elif collaboration_mode == CollaborationMode.HIERARCHICAL:
-            return int(min(complexity_analysis.subtask_count, self.max_agents_per_query))
+            return int(
+                min(complexity_analysis.subtask_count, self.max_agents_per_query)
+            )
         elif collaboration_mode == CollaborationMode.DEBATE:
             return 3  # Fixed
         else:  # ENSEMBLE
