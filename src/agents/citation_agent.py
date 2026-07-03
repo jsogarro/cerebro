@@ -312,10 +312,6 @@ class CitationAgent(LLMWorkerAgentBase):
         Returns:
             Citation formatting results
         """
-        if not self.gemini_service:
-            self.log_warning("Gemini service not available, using mock citations")
-            return self._generate_mock_citations(sources, style)
-
         from src.agents.schemas import CitationSchema
 
         prompt = f"""Format the following academic sources in {style} citation style:

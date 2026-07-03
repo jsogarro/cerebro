@@ -340,14 +340,16 @@ class LLMWorkerAgentBase(BaseAgent):
             )
 
             if response.success:
-                # Parse and validate JSON response with Pydantic schema
-                import json
+                # Parse and validate JSON response with Pydantic schema.
+                # Models frequently wrap json_object output in markdown fences,
+                # so use the fence-tolerant parser rather than bare json.loads.
+                from src.services.parsers.json_parser import parse_json_response
 
                 try:
-                    parsed_data = json.loads(response.content)
+                    parsed_data = parse_json_response(response.content)
                     validated = schema.model_validate(parsed_data)
                     return validated
-                except (json.JSONDecodeError, ValueError) as parse_err:
+                except (ValueError, TypeError) as parse_err:
                     self.log_warning(
                         f"OpenRouter JSON parse/validation failed: {parse_err}, "
                         "falling back to GeminiService"

@@ -422,3 +422,61 @@ class TestSchemaInstructionsGeneration:
         # Should return basic fallback instructions
         assert "JSON" in instructions
         assert len(instructions) > 0
+
+
+class TestFenceTolerantParsing:
+    """Models frequently wrap json_object output in markdown fences; the
+    routed structured parser must tolerate them (bare json.loads regressed
+    to a silent per-call Gemini fallback in live runs)."""
+
+    @pytest.mark.asyncio
+    @patch("src.core.config.settings")
+    async def test_fenced_json_parses_without_fallback(self, mock_settings):
+        mock_settings.MULTI_PROVIDER_ROUTING_ENABLED = True
+        mock_settings.OPENROUTER_API_KEY = "test-key"
+
+        worker = StructuredTestAgent()
+        fenced = "```json\n" + json.dumps({"message": "Ada", "count": 36}) + "\n```"
+        mock_response = MagicMock(success=True, content=fenced)
+        mock_router = AsyncMock()
+        mock_router.route_and_generate = AsyncMock(return_value=mock_response)
+        worker._model_router = mock_router
+
+        gemini_fallback = AsyncMock()
+        with patch.object(
+            worker,
+            "_ensure_gemini_service",
+            return_value=MagicMock(generate_structured_content=gemini_fallback),
+        ):
+            result = await worker._generate_structured_with_routing(
+                "Describe Ada.", SimpleSchema, None
+            )
+
+        assert isinstance(result, SimpleSchema)
+        assert result.message == "Ada"
+        gemini_fallback.assert_not_awaited()
+
+
+class TestStaleGuardsRemoved:
+    """Lazy-init means self.gemini_service is None until ensured; pre-routing
+    guards on it made mock/static fallbacks unconditional and routing
+    unreachable (found by live end-to-end verification)."""
+
+    @pytest.mark.asyncio
+    async def test_citation_formatting_reaches_routing_without_service(self):
+        from src.agents.citation_agent import CitationAgent
+
+        agent = CitationAgent()
+        agent.mcp_integration = None
+        assert agent.gemini_service is None  # lazy init precondition
+
+        with patch.object(
+            agent, "_generate_structured_with_routing", new=AsyncMock()
+        ) as routed:
+            from src.agents.schemas import CitationSchema
+
+            routed.return_value = CitationSchema(citations=[])
+            await agent._format_citations_with_gemini(
+                [{"title": "T", "authors": ["A"], "year": 2020}], "APA"
+            )
+        routed.assert_awaited_once()

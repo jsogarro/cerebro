@@ -784,16 +784,6 @@ Analyze the literature and provide:
         from src.agents.schemas import LiteratureAnalysisSchema
         from src.agents.schemas.literature_review import AcademicSource
 
-        if not self.gemini_service:
-            # Should not reach here, but provide fallback
-            return LiteratureAnalysisSchema(
-                sources=[],
-                key_findings=["Gemini service unavailable"],
-                research_gaps=[],
-                methodologies_used=[],
-                quality_assessment="Unable to assess without Gemini",
-            )
-
         # Step 1: Find sources
         sources = await self._search_sources_structured(input_data)
 
