@@ -182,7 +182,7 @@ class LLMWorkerAgentBase(BaseAgent):
             # Build ModelRequest
             request = ModelRequest(
                 prompt=prompt,
-                max_tokens=2000,
+                max_tokens=max_tokens,
                 temperature=0.7,
                 complexity_score=task.input_data.get("complexity_score", 0.5),
                 metadata={"tier": self._determine_tier(task)},
@@ -256,7 +256,11 @@ class LLMWorkerAgentBase(BaseAgent):
             return None, 0.0
 
     async def _generate_structured_with_routing(
-        self, prompt: str, schema: type[Any], task: AgentTask | None = None
+        self,
+        prompt: str,
+        schema: type[Any],
+        task: AgentTask | None = None,
+        max_tokens: int = 4000,
     ) -> Any:
         """Generate structured content via ModelRouter or GeminiService with graceful fallback.
 
