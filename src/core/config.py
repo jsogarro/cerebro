@@ -211,6 +211,16 @@ class Settings(BaseSettings):
     MEMORY_ROUTING_FRESHNESS_DAYS: int = 30  # Decay weight for older history
     MEMORY_PROMPT_MAX_PROCEDURES: int = 3  # Max procedural context items
 
+    # Adaptive Routing Configuration (multi-armed bandit allocation optimization)
+    ADAPTIVE_ROUTING_ENABLED: bool = False  # Default OFF - preserves current behavior
+    ADAPTIVE_ROUTING_MIN_HISTORY: int = (
+        100  # Minimum routing_history samples before adaptation
+    )
+    ADAPTIVE_ROUTING_MAX_WORKER_ADJUST: int = (
+        2  # Max ±N from (memory-adjusted) baseline
+    )
+    ADAPTIVE_ROUTING_UPDATE_INTERVAL_SECONDS: int = 300  # 5 minutes
+
     # Agent System Configuration
     AGENTS_MAX_CONCURRENT: int = 20
     AGENTS_MAX_SUPERVISORS: int = 5
