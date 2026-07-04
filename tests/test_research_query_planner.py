@@ -59,7 +59,7 @@ def test_research_supervisor_initializes_query_planner_from_config() -> None:
             "research_depth": "rapid",
             "max_sources": 12,
             "citation_style": "Chicago",
-        }
+        },
     )
 
     assert supervisor.query_planner.build_research_context() == {

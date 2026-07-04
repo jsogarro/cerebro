@@ -1,5 +1,4 @@
-"""
-Academic Search Tool for MCP.
+"""Academic Search Tool for MCP.
 
 Provides search capabilities across multiple academic databases.
 """
@@ -16,8 +15,7 @@ logger = get_logger()
 
 
 class AcademicSearchTool(BaseMCPTool):
-    """
-    MCP tool for searching academic databases.
+    """MCP tool for searching academic databases.
 
     Supports PubMed, arXiv, and Semantic Scholar searches.
     """
@@ -72,20 +70,20 @@ class AcademicSearchTool(BaseMCPTool):
                     "query": "machine learning healthcare",
                     "databases": ["pubmed", "arxiv"],
                     "max_results": 20,
-                }
+                },
             ],
             tags=["academic", "search", "research", "papers"],
         )
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute academic search.
+        """Execute academic search.
 
         Args:
             **kwargs: Search parameters
 
         Returns:
             Search results
+
         """
         try:
             query = kwargs.get("query", "")
@@ -113,7 +111,7 @@ class AcademicSearchTool(BaseMCPTool):
                     results = await self._search_arxiv(query, max_results, filters)
                 elif db == "semantic_scholar":
                     results = await self._search_semantic_scholar(
-                        query, max_results, filters
+                        query, max_results, filters,
                     )
                 else:
                     continue
@@ -130,24 +128,22 @@ class AcademicSearchTool(BaseMCPTool):
                     "query": query,
                     "total": len(all_results),
                 }
-            else:
-                return {
-                    "success": True,
-                    "results": all_results,
-                    "sources": sources_used,
-                    "query": query,
-                    "total": len(all_results),
-                }
+            return {
+                "success": True,
+                "results": all_results,
+                "sources": sources_used,
+                "query": query,
+                "total": len(all_results),
+            }
 
         except Exception as e:
             logger.error(f"Academic search failed: {e!s}")
             return {"success": False, "error": str(e)}
 
     async def _search_pubmed(
-        self, query: str, max_results: int, filters: dict[str, Any]
+        self, query: str, max_results: int, filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """
-        Search PubMed database.
+        """Search PubMed database.
 
         Args:
             query: Search query
@@ -156,6 +152,7 @@ class AcademicSearchTool(BaseMCPTool):
 
         Returns:
             List of results
+
         """
         try:
             # Build query with filters
@@ -220,7 +217,7 @@ class AcademicSearchTool(BaseMCPTool):
                             "journal": article.get("source", ""),
                             "doi": article.get("doi", ""),
                             "source": "pubmed",
-                        }
+                        },
                     )
 
             return results
@@ -230,10 +227,9 @@ class AcademicSearchTool(BaseMCPTool):
             return []
 
     async def _search_arxiv(
-        self, query: str, max_results: int, filters: dict[str, Any]
+        self, query: str, max_results: int, filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """
-        Search arXiv database.
+        """Search arXiv database.
 
         Args:
             query: Search query
@@ -242,6 +238,7 @@ class AcademicSearchTool(BaseMCPTool):
 
         Returns:
             List of results
+
         """
         try:
             # Build query parameters
@@ -323,7 +320,7 @@ class AcademicSearchTool(BaseMCPTool):
                         "year": year,
                         "url": url_text,
                         "source": "arxiv",
-                    }
+                    },
                 )
 
             return results
@@ -333,10 +330,9 @@ class AcademicSearchTool(BaseMCPTool):
             return []
 
     async def _search_semantic_scholar(
-        self, query: str, max_results: int, filters: dict[str, Any]
+        self, query: str, max_results: int, filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """
-        Search Semantic Scholar database.
+        """Search Semantic Scholar database.
 
         Args:
             query: Search query
@@ -345,6 +341,7 @@ class AcademicSearchTool(BaseMCPTool):
 
         Returns:
             List of results
+
         """
         try:
             # Search papers
@@ -388,7 +385,7 @@ class AcademicSearchTool(BaseMCPTool):
                         "venue": paper.get("venue", ""),
                         "citations": paper.get("citationCount", 0),
                         "source": "semantic_scholar",
-                    }
+                    },
                 )
 
             return results

@@ -38,7 +38,7 @@ def mock_gemini_service():
     """Mock GeminiService for fallback testing."""
     mock_service = MagicMock()
     mock_service.generate_content = AsyncMock(
-        return_value="Response from GeminiService"
+        return_value="Response from GeminiService",
     )
     return mock_service
 
@@ -70,7 +70,7 @@ class TestDefaultBehavior:
 
     @pytest.mark.asyncio
     async def test_flag_off_uses_gemini(
-        self, test_agent, test_task, mock_gemini_service
+        self, test_agent, test_task, mock_gemini_service,
     ):
         """With flag OFF, should route through GeminiService (current behavior)."""
         with patch("src.core.config.settings") as mock_settings:
@@ -89,7 +89,7 @@ class TestDefaultBehavior:
 
     @pytest.mark.asyncio
     async def test_no_api_key_uses_gemini(
-        self, test_agent, test_task, mock_gemini_service
+        self, test_agent, test_task, mock_gemini_service,
     ):
         """Without OPENROUTER_API_KEY, should route through GeminiService."""
         with patch("src.core.config.settings") as mock_settings:
@@ -113,7 +113,7 @@ class TestOpenRouterRouting:
 
     @pytest.mark.asyncio
     async def test_flag_on_with_key_uses_openrouter(
-        self, test_agent, test_task, mock_model_response
+        self, test_agent, test_task, mock_model_response,
     ):
         """With flag ON + API key, should route through OpenRouter."""
         with patch("src.core.config.settings") as mock_settings:
@@ -210,7 +210,7 @@ class TestGracefulFallback:
 
     @pytest.mark.asyncio
     async def test_openrouter_failure_falls_back_to_gemini(
-        self, test_agent, test_task, mock_gemini_service
+        self, test_agent, test_task, mock_gemini_service,
     ):
         """OpenRouter failure should fall back to GeminiService."""
         with patch("src.core.config.settings") as mock_settings:
@@ -229,7 +229,7 @@ class TestGracefulFallback:
             # Mock ModelRouter to raise exception
             mock_router = MagicMock()
             mock_router.route_and_generate = AsyncMock(
-                side_effect=Exception("OpenRouter API error")
+                side_effect=Exception("OpenRouter API error"),
             )
 
             with (
@@ -248,7 +248,7 @@ class TestGracefulFallback:
 
     @pytest.mark.asyncio
     async def test_openrouter_error_response_falls_back(
-        self, test_agent, test_task, mock_gemini_service
+        self, test_agent, test_task, mock_gemini_service,
     ):
         """OpenRouter error response should trigger fallback."""
         from src.ai_brain.providers.base_provider import ModelResponse
@@ -329,7 +329,7 @@ class TestTierDetermination:
     def test_determine_tier_default(self, test_agent):
         """Missing complexity_score should default to balanced."""
         task = AgentTask(
-            id="test", agent_type="test_worker", input_data={"query": "Test"}
+            id="test", agent_type="test_worker", input_data={"query": "Test"},
         )
         assert test_agent._determine_tier(task) == "balanced"
 
@@ -339,7 +339,7 @@ class TestRegressionGuard:
 
     @pytest.mark.asyncio
     async def test_default_config_uses_gemini_only(
-        self, test_agent, test_task, mock_gemini_service
+        self, test_agent, test_task, mock_gemini_service,
     ):
         """Default config (flag OFF, no key) should use only GeminiService."""
         with patch("src.core.config.settings") as mock_settings:

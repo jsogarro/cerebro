@@ -1,5 +1,4 @@
-"""
-JWT Token Service for authentication.
+"""JWT Token Service for authentication.
 
 Handles token generation, validation, and management using RS256 algorithm.
 """
@@ -27,8 +26,7 @@ logger = structlog.get_logger(__name__)
 
 
 class JWTService:
-    """
-    JWT Token service for secure authentication.
+    """JWT Token service for secure authentication.
 
     Features:
     - RS256 algorithm for enhanced security
@@ -44,13 +42,13 @@ class JWTService:
         private_key_path: str | None = None,
         public_key_path: str | None = None,
     ):
-        """
-        Initialize JWT service.
+        """Initialize JWT service.
 
         Args:
             redis_client: Redis client for token blacklisting
             private_key_path: Path to RSA private key
             public_key_path: Path to RSA public key
+
         """
         self.redis_client = redis_client
         self.algorithm = "RS256"
@@ -81,12 +79,12 @@ class JWTService:
         if key_path and os.path.exists(key_path):
             with open(key_path, "rb") as f:
                 private_key = serialization.load_pem_private_key(
-                    f.read(), password=None, backend=default_backend()
+                    f.read(), password=None, backend=default_backend(),
                 )
         else:
             # Generate new RSA key pair
             private_key = rsa.generate_private_key(
-                public_exponent=65537, key_size=2048, backend=default_backend()
+                public_exponent=65537, key_size=2048, backend=default_backend(),
             )
 
             # Best-effort persist if path provided
@@ -99,7 +97,7 @@ class JWTService:
                                 encoding=serialization.Encoding.PEM,
                                 format=serialization.PrivateFormat.PKCS8,
                                 encryption_algorithm=serialization.NoEncryption(),
-                            )
+                            ),
                         )
                 except OSError as err:
                     logger.warning(
@@ -125,12 +123,12 @@ class JWTService:
         if key_path and os.path.exists(key_path):
             with open(key_path, "rb") as f:
                 public_key = serialization.load_pem_public_key(
-                    f.read(), backend=default_backend()
+                    f.read(), backend=default_backend(),
                 )
         else:
             # Extract public key from private key
             private_key_obj = serialization.load_pem_private_key(
-                self.private_key.encode(), password=None, backend=default_backend()
+                self.private_key.encode(), password=None, backend=default_backend(),
             )
             public_key = private_key_obj.public_key()
 
@@ -145,7 +143,7 @@ class JWTService:
                             public_key.public_bytes(
                                 encoding=serialization.Encoding.PEM,
                                 format=serialization.PublicFormat.SubjectPublicKeyInfo,
-                            )
+                            ),
                         )
                 except OSError:
                     pass
@@ -168,8 +166,7 @@ class JWTService:
         organization_id: str | None = None,
         additional_claims: dict[str, Any] | None = None,
     ) -> TokenPair:
-        """
-        Generate access and refresh token pair.
+        """Generate access and refresh token pair.
 
         Args:
             user_id: User identifier
@@ -182,6 +179,7 @@ class JWTService:
 
         Returns:
             TokenPair with access and refresh tokens
+
         """
         # Generate unique token ID
         jti = str(uuid4())
@@ -225,11 +223,11 @@ class JWTService:
 
         # Generate tokens
         access_token = jwt.encode(
-            access_payload, self.private_key, algorithm=self.algorithm
+            access_payload, self.private_key, algorithm=self.algorithm,
         )
 
         refresh_token = jwt.encode(
-            refresh_payload, self.private_key, algorithm=self.algorithm
+            refresh_payload, self.private_key, algorithm=self.algorithm,
         )
 
         # Store refresh token in Redis for validation
@@ -248,7 +246,7 @@ class JWTService:
             )
 
         logger.info(
-            "Generated token pair", user_id=user_id, jti=jti, device_id=device_id
+            "Generated token pair", user_id=user_id, jti=jti, device_id=device_id,
         )
 
         return TokenPair(
@@ -264,8 +262,7 @@ class JWTService:
         token_type: str = "access",
         verify_blacklist: bool = True,
     ) -> TokenPayload:
-        """
-        Validate and decode JWT token.
+        """Validate and decode JWT token.
 
         Args:
             token: JWT token to validate
@@ -277,6 +274,7 @@ class JWTService:
 
         Raises:
             JWTError: If token is invalid
+
         """
         try:
             # Decode token
@@ -322,8 +320,7 @@ class JWTService:
         refresh_token: str,
         device_id: str | None = None,
     ) -> TokenPair:
-        """
-        Refresh token pair using refresh token.
+        """Refresh token pair using refresh token.
 
         Args:
             refresh_token: Valid refresh token
@@ -334,6 +331,7 @@ class JWTService:
 
         Raises:
             JWTError: If refresh token is invalid
+
         """
         # Validate refresh token
         refresh_payload = await self.validate_token(refresh_token, token_type="refresh")
@@ -369,14 +367,14 @@ class JWTService:
         )
 
     async def revoke_token(self, token: str) -> bool:
-        """
-        Revoke a token by adding to blacklist.
+        """Revoke a token by adding to blacklist.
 
         Args:
             token: Token to revoke
 
         Returns:
             True if successfully revoked
+
         """
         try:
             # Decode token to get JTI
@@ -413,14 +411,14 @@ class JWTService:
             return False
 
     async def revoke_all_user_tokens(self, user_id: str) -> int:
-        """
-        Revoke all tokens for a user.
+        """Revoke all tokens for a user.
 
         Args:
             user_id: User identifier
 
         Returns:
             Number of tokens revoked
+
         """
         if not self.redis_client:
             return 0
@@ -433,7 +431,7 @@ class JWTService:
 
         while True:
             cursor, keys = await self.redis_client.scan(
-                cursor, match=pattern, count=100
+                cursor, match=pattern, count=100,
             )
 
             for key in keys:
@@ -454,14 +452,14 @@ class JWTService:
         return count
 
     async def _is_token_blacklisted(self, jti: str) -> bool:
-        """
-        Check if token is blacklisted.
+        """Check if token is blacklisted.
 
         Args:
             jti: Token ID
 
         Returns:
             True if blacklisted
+
         """
         if not self.redis_client:
             return False
@@ -470,14 +468,14 @@ class JWTService:
         return await self.redis_client.exists(blacklist_key) > 0
 
     async def get_active_sessions(self, user_id: str) -> list[dict[str, Any]]:
-        """
-        Get all active sessions for a user.
+        """Get all active sessions for a user.
 
         Args:
             user_id: User identifier
 
         Returns:
             List of active sessions
+
         """
         if not self.redis_client:
             return []
@@ -488,7 +486,7 @@ class JWTService:
 
         while True:
             cursor, keys = await self.redis_client.scan(
-                cursor, match=pattern, count=100
+                cursor, match=pattern, count=100,
             )
 
             for key in keys:
@@ -504,7 +502,7 @@ class JWTService:
                                     "key": (
                                         key.decode() if isinstance(key, bytes) else key
                                     ),
-                                }
+                                },
                             )
                     except json.JSONDecodeError:
                         continue
@@ -515,11 +513,11 @@ class JWTService:
         return sessions
 
     async def cleanup_expired_tokens(self) -> int:
-        """
-        Clean up expired tokens from blacklist.
+        """Clean up expired tokens from blacklist.
 
         Returns:
             Number of tokens cleaned
+
         """
         # Redis automatically expires keys with TTL
         # This method is for manual cleanup if needed

@@ -1,5 +1,4 @@
-"""
-Comprehensive tests for Hierarchical Supervisor API
+"""Comprehensive tests for Hierarchical Supervisor API
 
 Tests all supervisor coordination endpoints including execution, worker management,
 multi-supervisor orchestration, and advanced features like conflict resolution
@@ -48,7 +47,7 @@ class TestSupervisorExecution:
     """Test supervisor task execution endpoints"""
 
     def test_execute_supervisor_task_success(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test successful supervisor task execution"""
         # Setup mock response
@@ -66,7 +65,7 @@ class TestSupervisorExecution:
         }
 
         mock_supervisor_service.execute_supervisor_task = AsyncMock(
-            return_value=Mock(**mock_response)
+            return_value=Mock(**mock_response),
         )
 
         # Make request
@@ -79,7 +78,7 @@ class TestSupervisorExecution:
         }
 
         response = client.post(
-            "/api/v1/supervisors/research/execute", json=request_data
+            "/api/v1/supervisors/research/execute", json=request_data,
         )
 
         # Assert response
@@ -94,13 +93,13 @@ class TestSupervisorExecution:
         request_data = {"query": "Test query", "supervision_strategy": "direct"}
 
         response = client.post(
-            "/api/v1/supervisors/invalid_type/execute", json=request_data
+            "/api/v1/supervisors/invalid_type/execute", json=request_data,
         )
 
         assert response.status_code == 422  # Validation error
 
     def test_execute_with_timeout(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test execution with timeout parameter"""
         mock_supervisor_service.execute_supervisor_task = AsyncMock(
@@ -115,13 +114,13 @@ class TestSupervisorExecution:
                 execution_time_ms=5000,
                 refinement_rounds=1,
                 metadata={},
-            )
+            ),
         )
 
         request_data = {"query": "Complex analysis task", "timeout_seconds": 30}
 
         response = client.post(
-            "/api/v1/supervisors/research/execute", json=request_data
+            "/api/v1/supervisors/research/execute", json=request_data,
         )
 
         assert response.status_code == 200
@@ -132,7 +131,7 @@ class TestSupervisorManagement:
     """Test supervisor listing and information endpoints"""
 
     def test_list_all_supervisors(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test listing all available supervisors"""
         mock_supervisors = [
@@ -157,7 +156,7 @@ class TestSupervisorManagement:
         ]
 
         mock_supervisor_service.get_all_supervisors = AsyncMock(
-            return_value=mock_supervisors
+            return_value=mock_supervisors,
         )
 
         response = client.get("/api/v1/supervisors")
@@ -169,7 +168,7 @@ class TestSupervisorManagement:
         assert len(data["supervisors"]) == 2
 
     def test_get_supervisor_info(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test getting specific supervisor information"""
         mock_info = Mock(
@@ -193,7 +192,7 @@ class TestSupervisorManagement:
         assert "literature_review" in data["capabilities"]
 
     def test_get_supervisor_workers(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test getting workers for a supervisor"""
         mock_workers = [
@@ -216,7 +215,7 @@ class TestSupervisorManagement:
         ]
 
         mock_supervisor_service.get_supervisor_workers = AsyncMock(
-            return_value=mock_workers
+            return_value=mock_workers,
         )
 
         response = client.get("/api/v1/supervisors/research/workers")
@@ -232,7 +231,7 @@ class TestSupervisorMetrics:
     """Test supervisor metrics and health endpoints"""
 
     def test_get_supervisor_stats(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test getting supervisor statistics"""
         mock_stats = Mock(
@@ -248,7 +247,7 @@ class TestSupervisorMetrics:
         )
 
         mock_supervisor_service.get_supervisor_stats = AsyncMock(
-            return_value=mock_stats
+            return_value=mock_stats,
         )
 
         response = client.get("/api/v1/supervisors/research/stats")
@@ -260,7 +259,7 @@ class TestSupervisorMetrics:
         assert data["worker_utilization"] == 0.75
 
     def test_get_supervisor_health(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test getting supervisor health status"""
         mock_health = Mock(
@@ -275,7 +274,7 @@ class TestSupervisorMetrics:
         )
 
         mock_supervisor_service.get_supervisor_health = AsyncMock(
-            return_value=mock_health
+            return_value=mock_health,
         )
 
         response = client.get("/api/v1/supervisors/research/health")
@@ -291,11 +290,11 @@ class TestErrorHandling:
     """Test error handling in supervisor API"""
 
     def test_invalid_supervisor_type_404(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test 404 for invalid supervisor type"""
         mock_supervisor_service.get_supervisor_info = AsyncMock(
-            side_effect=ValueError("Supervisor type 'invalid' not found")
+            side_effect=ValueError("Supervisor type 'invalid' not found"),
         )
 
         response = client.get("/api/v1/supervisors/invalid")
@@ -303,17 +302,17 @@ class TestErrorHandling:
         assert response.status_code == 422  # FastAPI validation error
 
     def test_internal_server_error_500(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test 500 internal server error handling"""
         mock_supervisor_service.execute_supervisor_task = AsyncMock(
-            side_effect=Exception("Internal error")
+            side_effect=Exception("Internal error"),
         )
 
         request_data = {"query": "Test query"}
 
         response = client.post(
-            "/api/v1/supervisors/research/execute", json=request_data
+            "/api/v1/supervisors/research/execute", json=request_data,
         )
 
         assert response.status_code == 500
@@ -329,7 +328,7 @@ class TestErrorHandling:
         }
 
         response = client.post(
-            "/api/v1/supervisors/research/execute", json=request_data
+            "/api/v1/supervisors/research/execute", json=request_data,
         )
 
         assert response.status_code == 422
@@ -339,7 +338,7 @@ class TestIntegrationScenarios:
     """Test complete integration scenarios"""
 
     def test_complete_supervisor_workflow(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test complete workflow from execution to stats"""
         # Step 1: Execute task
@@ -355,11 +354,11 @@ class TestIntegrationScenarios:
                 execution_time_ms=3000,
                 refinement_rounds=2,
                 metadata={},
-            )
+            ),
         )
 
         response = client.post(
-            "/api/v1/supervisors/research/execute", json={"query": "Analyze trends"}
+            "/api/v1/supervisors/research/execute", json={"query": "Analyze trends"},
         )
         assert response.status_code == 200
 
@@ -374,7 +373,7 @@ class TestIntegrationScenarios:
                 last_execution=datetime.now(UTC),
                 issues=[],
                 recommendations=[],
-            )
+            ),
         )
 
         response = client.get("/api/v1/supervisors/research/health")
@@ -393,7 +392,7 @@ class TestIntegrationScenarios:
                 top_worker_types=["analyst"],
                 recent_performance_trend="stable",
                 cost_metrics={},
-            )
+            ),
         )
 
         response = client.get("/api/v1/supervisors/research/stats")

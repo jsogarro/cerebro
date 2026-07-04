@@ -1,5 +1,4 @@
-"""
-Offline Evaluation Harness for Adaptive Routing
+"""Offline Evaluation Harness for Adaptive Routing
 
 This module provides a deterministic, synthetic evaluation of the adaptive
 routing system. It generates a corpus of realistic routing scenarios and
@@ -79,7 +78,7 @@ class AdaptiveRoutingEvaluator:
         np.random.seed(seed)
 
     def generate_corpus(
-        self, num_queries: int = 200, bias_mode: str = "calibrated"
+        self, num_queries: int = 200, bias_mode: str = "calibrated",
     ) -> list[SyntheticQuery]:
         """Generate synthetic query corpus with realistic complexity distribution.
 
@@ -93,6 +92,7 @@ class AdaptiveRoutingEvaluator:
         - DIRECT: analytic ≈ optimal (unchanged, as baseline is already clamped to 1)
 
         This tests whether adaptive routing can recover from systematic baseline errors.
+
         """
         corpus = []
 
@@ -134,7 +134,7 @@ class AdaptiveRoutingEvaluator:
                         analytic_worker_count=analytic,
                         optimal_worker_count=optimal_workers,
                         base_quality=base_quality,
-                    )
+                    ),
                 )
                 query_id += 1
 
@@ -143,14 +143,14 @@ class AdaptiveRoutingEvaluator:
         return corpus
 
     def simulate_outcome(
-        self, query: SyntheticQuery, allocated_workers: int
+        self, query: SyntheticQuery, allocated_workers: int,
     ) -> SimulatedOutcome:
         """Simulate outcome based on allocation quality."""
         # Quality penalty: quadratic distance from optimal
         worker_delta = abs(allocated_workers - query.optimal_worker_count)
         quality_penalty = 0.05 * (worker_delta**2)
         quality = max(
-            0.1, query.base_quality - quality_penalty + np.random.normal(0, 0.02)
+            0.1, query.base_quality - quality_penalty + np.random.normal(0, 0.02),
         )
         quality = min(1.0, quality)  # Cap at 1.0
 
@@ -161,7 +161,7 @@ class AdaptiveRoutingEvaluator:
         cost = 0.01 * allocated_workers + np.random.normal(0, 0.002)
 
         return SimulatedOutcome(
-            latency_ms=max(100, latency), cost=max(0.001, cost), quality_score=quality
+            latency_ms=max(100, latency), cost=max(0.001, cost), quality_score=quality,
         )
 
     def run_static_baseline(self, corpus: list[SyntheticQuery]) -> dict[str, Any]:
@@ -181,7 +181,7 @@ class AdaptiveRoutingEvaluator:
             [
                 abs(alloc - q.optimal_worker_count)
                 for alloc, q in zip(allocations, corpus, strict=True)
-            ]
+            ],
         )
 
         return {"allocations": allocations, "mae": mae, "worker_dist": worker_dist}
@@ -269,7 +269,7 @@ class AdaptiveRoutingEvaluator:
             # Bandit regret: quality at the known-optimal allocation minus achieved
             optimal_outcome = self.simulate_outcome(query, query.optimal_worker_count)
             cumulative_regret += max(
-                0.0, optimal_outcome.quality_score - outcome.quality_score
+                0.0, optimal_outcome.quality_score - outcome.quality_score,
             )
 
         # Validity guards: an eval whose learning loop never engaged is
@@ -277,12 +277,12 @@ class AdaptiveRoutingEvaluator:
         if reward_failures == len(corpus):
             raise RuntimeError(
                 "adaptive eval invalid: every reward recording failed - "
-                "the bandit never received feedback"
+                "the bandit never received feedback",
             )
         if adaptation_count == 0:
             raise RuntimeError(
                 "adaptive eval invalid: adaptation rate is 0.0% after warm-up - "
-                "the adaptive hook never engaged (check guards/wiring)"
+                "the adaptive hook never engaged (check guards/wiring)",
             )
 
         # Compute MAE from optimal
@@ -290,7 +290,7 @@ class AdaptiveRoutingEvaluator:
             [
                 abs(alloc - q.optimal_worker_count)
                 for alloc, q in zip(allocations, corpus, strict=True)
-            ]
+            ],
         )
 
         adaptation_rate = adaptation_count / len(corpus) if corpus else 0.0

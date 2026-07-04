@@ -1,5 +1,4 @@
-"""
-Tests for JWT authentication service.
+"""Tests for JWT authentication service.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -96,7 +95,7 @@ class TestJWTService:
 
         # Validate token
         payload = await jwt_service.validate_token(
-            token_pair.access_token, token_type="access"
+            token_pair.access_token, token_type="access",
         )
 
         assert isinstance(payload, TokenPayload)
@@ -108,7 +107,7 @@ class TestJWTService:
 
     @pytest.mark.asyncio
     async def test_refresh_tokens_preserves_organization_id(
-        self, jwt_service, redis_mock
+        self, jwt_service, redis_mock,
     ):
         """Test refreshed tokens keep the tenant organization claim."""
         initial_pair = await jwt_service.generate_token_pair(
@@ -124,7 +123,7 @@ class TestJWTService:
         )
 
         new_pair = await jwt_service.refresh_tokens(
-            initial_pair.refresh_token, device_id="device-123"
+            initial_pair.refresh_token, device_id="device-123",
         )
 
         access_payload = jwt.decode(
@@ -146,13 +145,13 @@ class TestJWTService:
         """Test token validation with wrong type."""
         # Generate token
         token_pair = await jwt_service.generate_token_pair(
-            user_id="test-user-123", email="test@example.com"
+            user_id="test-user-123", email="test@example.com",
         )
 
         # Try to validate access token as refresh token
         with pytest.raises(JWTError, match="Invalid token type"):
             await jwt_service.validate_token(
-                token_pair.access_token, token_type="refresh"
+                token_pair.access_token, token_type="refresh",
             )
 
     @pytest.mark.asyncio
@@ -169,7 +168,7 @@ class TestJWTService:
         }
 
         expired_token = jwt.encode(
-            expired_payload, jwt_service.private_key, algorithm=jwt_service.algorithm
+            expired_payload, jwt_service.private_key, algorithm=jwt_service.algorithm,
         )
 
         # Try to validate expired token
@@ -181,7 +180,7 @@ class TestJWTService:
         """Test validation of blacklisted token."""
         # Generate token
         token_pair = await jwt_service.generate_token_pair(
-            user_id="test-user-123", email="test@example.com"
+            user_id="test-user-123", email="test@example.com",
         )
 
         # Mock token as blacklisted
@@ -196,7 +195,7 @@ class TestJWTService:
         """Test token refresh."""
         # Generate initial tokens
         initial_pair = await jwt_service.generate_token_pair(
-            user_id="test-user-123", email="test@example.com", device_id="device-123"
+            user_id="test-user-123", email="test@example.com", device_id="device-123",
         )
 
         # Mock refresh token in Redis
@@ -206,7 +205,7 @@ class TestJWTService:
 
         # Refresh tokens
         new_pair = await jwt_service.refresh_tokens(
-            initial_pair.refresh_token, device_id="device-123"
+            initial_pair.refresh_token, device_id="device-123",
         )
 
         assert isinstance(new_pair, TokenPair)
@@ -221,13 +220,13 @@ class TestJWTService:
         """Test token refresh with device mismatch."""
         # Generate tokens
         token_pair = await jwt_service.generate_token_pair(
-            user_id="test-user-123", email="test@example.com", device_id="device-123"
+            user_id="test-user-123", email="test@example.com", device_id="device-123",
         )
 
         # Try to refresh with different device
         with pytest.raises(JWTError, match="Device mismatch"):
             await jwt_service.refresh_tokens(
-                token_pair.refresh_token, device_id="different-device"
+                token_pair.refresh_token, device_id="different-device",
             )
 
     @pytest.mark.asyncio
@@ -235,7 +234,7 @@ class TestJWTService:
         """Test token revocation."""
         # Generate token
         token_pair = await jwt_service.generate_token_pair(
-            user_id="test-user-123", email="test@example.com"
+            user_id="test-user-123", email="test@example.com",
         )
 
         # Revoke token
@@ -282,7 +281,7 @@ class TestJWTService:
         """Test token expiration times."""
         # Generate tokens
         token_pair = await jwt_service.generate_token_pair(
-            user_id="test-user-123", email="test@example.com"
+            user_id="test-user-123", email="test@example.com",
         )
 
         # Decode tokens to check expiration

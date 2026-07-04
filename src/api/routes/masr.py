@@ -1,5 +1,4 @@
-"""
-MASR Dynamic Routing API endpoints.
+"""MASR Dynamic Routing API endpoints.
 
 This module exposes the MASR (Multi-Agent System Router) intelligence
 as REST API endpoints for cost optimization, routing decisions, and
@@ -29,10 +28,10 @@ class RoutingRequest(BaseModel):
 
     query: str = Field(..., description="The query to route")
     context: dict[str, Any] = Field(
-        default_factory=dict, description="Additional context for routing decision"
+        default_factory=dict, description="Additional context for routing decision",
     )
     strategy_override: RoutingStrategy | None = Field(
-        None, description="Override default routing strategy"
+        None, description="Override default routing strategy",
     )
     max_cost_usd: float | None = Field(None, description="Maximum cost limit in USD")
 
@@ -59,10 +58,10 @@ class CostEstimateRequest(BaseModel):
 
     query: str = Field(..., description="The query to estimate cost for")
     strategy: RoutingStrategy | None = Field(
-        None, description="Routing strategy to use for estimation"
+        None, description="Routing strategy to use for estimation",
     )
     include_breakdown: bool = Field(
-        False, description="Include detailed cost breakdown"
+        False, description="Include detailed cost breakdown",
     )
 
 
@@ -112,7 +111,7 @@ class RoutingFeedback(BaseModel):
     """Model for providing routing feedback."""
 
     routing_id: str = Field(
-        ..., description="The routing ID from the original decision"
+        ..., description="The routing ID from the original decision",
     )
     actual_cost_usd: float = Field(..., description="Actual cost incurred")
     actual_latency_ms: int = Field(..., description="Actual latency in milliseconds")
@@ -155,8 +154,7 @@ async def get_routing_decision(
     request: RoutingRequest,
     current_user: User | None = Depends(get_current_user_optional),
 ) -> RoutingResponse:
-    """
-    Get intelligent routing decision for a query.
+    """Get intelligent routing decision for a query.
 
     This endpoint uses the MASR router to determine the optimal
     supervisor, agents, and models for handling a query based on
@@ -214,8 +212,7 @@ async def estimate_cost(
     request: CostEstimateRequest,
     current_user: User | None = Depends(get_current_user_optional),
 ) -> CostEstimateResponse:
-    """
-    Estimate cost for processing a query.
+    """Estimate cost for processing a query.
 
     Provides cost estimation with confidence intervals and optional
     breakdown by component (models, coordination, memory operations).
@@ -263,8 +260,7 @@ async def evaluate_strategies(
     request: StrategyEvaluationRequest,
     current_user: User | None = Depends(get_current_user_optional),
 ) -> StrategyEvaluationResponse:
-    """
-    Evaluate and compare routing strategies for a query.
+    """Evaluate and compare routing strategies for a query.
 
     Analyzes different routing strategies and provides recommendations
     based on cost, quality, and latency trade-offs.
@@ -330,8 +326,7 @@ async def analyze_complexity(
     request: ComplexityAnalysisRequest,
     current_user: User | None = Depends(get_current_user_optional),
 ) -> ComplexityAnalysisResponse:
-    """
-    Analyze query complexity and domain.
+    """Analyze query complexity and domain.
 
     Provides detailed analysis of query characteristics that influence
     routing decisions and cost optimization.
@@ -402,8 +397,7 @@ async def submit_routing_feedback(
     feedback: RoutingFeedback,
     current_user: User | None = Depends(get_current_user_optional),
 ) -> JSONResponse:
-    """
-    Submit feedback on routing performance.
+    """Submit feedback on routing performance.
 
     This feedback is used to improve the MASR router's learning
     algorithms and optimize future routing decisions.
@@ -438,8 +432,7 @@ async def submit_routing_feedback(
 async def get_router_status(
     current_user: User | None = Depends(get_current_user_optional),
 ) -> RouterStatusResponse:
-    """
-    Get MASR router status and performance metrics.
+    """Get MASR router status and performance metrics.
 
     Returns current router configuration, performance metrics,
     and recent optimization activities.
@@ -487,8 +480,7 @@ async def get_router_status(
 async def get_available_models(
     current_user: User | None = Depends(get_current_user_optional),
 ) -> JSONResponse:
-    """
-    Get list of available models and their characteristics.
+    """Get list of available models and their characteristics.
 
     Returns information about models available for routing,
     including cost, performance, and capability metrics.

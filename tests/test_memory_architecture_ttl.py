@@ -81,7 +81,7 @@ def test_episodic_memory_fallback_evicts_least_recently_used_episode() -> None:
         assert await memory.store_episode(first)
         assert await memory.store_episode(second)
         assert await memory.retrieve_episodes(
-            EpisodeQuery(limit=1, offset=0, order_direction="asc")
+            EpisodeQuery(limit=1, offset=0, order_direction="asc"),
         )
         assert await memory.store_episode(third)
 

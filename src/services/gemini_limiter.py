@@ -1,5 +1,4 @@
-"""
-Rate limiting for Gemini API calls.
+"""Rate limiting for Gemini API calls.
 
 Implements token bucket algorithm for rate limiting following functional principles.
 """
@@ -12,8 +11,7 @@ from typing import Any
 
 
 class RateLimiter:
-    """
-    Rate limiter using token bucket algorithm.
+    """Rate limiter using token bucket algorithm.
 
     This class manages rate limiting state but exposes functional interfaces.
     """
@@ -24,13 +22,13 @@ class RateLimiter:
         rate_period: int = 60,
         max_concurrent: int = 5,
     ):
-        """
-        Initialize rate limiter.
+        """Initialize rate limiter.
 
         Args:
             rate_limit: Maximum requests per period
             rate_period: Period in seconds
             max_concurrent: Maximum concurrent requests
+
         """
         self.rate_limit = rate_limit
         self.rate_period = rate_period
@@ -45,8 +43,7 @@ class RateLimiter:
         self._semaphore = asyncio.Semaphore(max_concurrent)
 
     def _calculate_tokens_to_add(self, current_time: float) -> float:
-        """
-        Calculate tokens to add based on elapsed time.
+        """Calculate tokens to add based on elapsed time.
 
         Pure function that calculates token refill.
         """
@@ -55,8 +52,7 @@ class RateLimiter:
         return time_elapsed * refill_rate
 
     async def _refill_tokens(self) -> None:
-        """
-        Refill tokens based on elapsed time.
+        """Refill tokens based on elapsed time.
 
         Side effect: Updates token state.
         """
@@ -67,8 +63,7 @@ class RateLimiter:
         self._last_refill = current_time
 
     async def _acquire_token(self) -> None:
-        """
-        Acquire a token, waiting if necessary.
+        """Acquire a token, waiting if necessary.
 
         Side effect: Updates token state and may wait.
         """
@@ -90,8 +85,7 @@ class RateLimiter:
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[None]:
-        """
-        Context manager for rate-limited operations.
+        """Context manager for rate-limited operations.
 
         Ensures both rate limiting and concurrency control.
         """
@@ -107,8 +101,7 @@ class RateLimiter:
                 pass
 
     def get_current_tokens(self) -> float:
-        """
-        Get current number of available tokens.
+        """Get current number of available tokens.
 
         Pure function that calculates current tokens.
         """
@@ -117,8 +110,7 @@ class RateLimiter:
         return min(self.rate_limit, self._tokens + tokens_to_add)
 
     def get_wait_time(self) -> float:
-        """
-        Get estimated wait time for next available token.
+        """Get estimated wait time for next available token.
 
         Pure function that calculates wait time.
         """
@@ -133,8 +125,7 @@ class RateLimiter:
 
 
 class CircuitBreaker:
-    """
-    Circuit breaker for handling API failures.
+    """Circuit breaker for handling API failures.
 
     Implements circuit breaker pattern with three states:
     - Closed: Normal operation
@@ -148,13 +139,13 @@ class CircuitBreaker:
         recovery_timeout: int = 60,
         expected_exception: type[BaseException] = Exception,
     ):
-        """
-        Initialize circuit breaker.
+        """Initialize circuit breaker.
 
         Args:
             failure_threshold: Number of failures before opening
             recovery_timeout: Seconds before attempting recovery
             expected_exception: Exception type to track
+
         """
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
@@ -167,8 +158,7 @@ class CircuitBreaker:
         self._lock = asyncio.Lock()
 
     def _should_attempt_reset(self) -> bool:
-        """
-        Check if circuit breaker should attempt reset.
+        """Check if circuit breaker should attempt reset.
 
         Pure function that determines reset eligibility.
         """
@@ -181,8 +171,7 @@ class CircuitBreaker:
         return (time.time() - self._last_failure_time) >= self.recovery_timeout
 
     async def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """
-        Call function with circuit breaker protection.
+        """Call function with circuit breaker protection.
 
         Args:
             func: Async function to call
@@ -194,6 +183,7 @@ class CircuitBreaker:
 
         Raises:
             Exception: If circuit is open or function fails
+
         """
         async with self._lock:
             # Check if circuit should attempt reset
@@ -232,8 +222,7 @@ class CircuitBreaker:
         return self._state
 
     def reset(self) -> None:
-        """
-        Reset circuit breaker to closed state.
+        """Reset circuit breaker to closed state.
 
         Side effect: Resets internal state.
         """

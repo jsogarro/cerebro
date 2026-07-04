@@ -1,5 +1,4 @@
-"""
-Database model for generated reports.
+"""Database model for generated reports.
 
 This module defines the SQLAlchemy model for storing generated research reports,
 following the repository pattern established in the codebase.
@@ -35,16 +34,16 @@ class GeneratedReport(BaseModel):
 
     # Primary key and relationships
     id: Mapped[UUID] = mapped_column(
-        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4,
     )
     project_id: Mapped[UUID | None] = mapped_column(
-        PostgresUUID(as_uuid=True), ForeignKey("research_projects.id"), nullable=True
+        PostgresUUID(as_uuid=True), ForeignKey("research_projects.id"), nullable=True,
     )
     workflow_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, index=True
+        String(255), nullable=True, index=True,
     )
     user_id: Mapped[UUID | None] = mapped_column(
-        PostgresUUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+        PostgresUUID(as_uuid=True), ForeignKey("users.id"), nullable=True,
     )
 
     # Report metadata
@@ -59,7 +58,7 @@ class GeneratedReport(BaseModel):
 
     # Quality metrics
     quality_score: Mapped[float | None] = mapped_column(
-        Float, nullable=True, index=True
+        Float, nullable=True, index=True,
     )
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_sources: Mapped[int] = mapped_column(Integer, default=0)
@@ -69,13 +68,13 @@ class GeneratedReport(BaseModel):
 
     # Generation tracking
     generation_status: Mapped[str] = mapped_column(
-        String(50), default="pending", index=True
+        String(50), default="pending", index=True,
     )
     generation_started_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True
+        DateTime, nullable=True,
     )
     generation_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True
+        DateTime, nullable=True,
     )
     generation_time_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     generation_errors: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
@@ -125,7 +124,7 @@ class GeneratedReport(BaseModel):
         """Get generation duration in seconds."""
         if self.generation_time_seconds:
             return self.generation_time_seconds
-        elif self.generation_started_at and self.generation_completed_at:
+        if self.generation_started_at and self.generation_completed_at:
             delta = self.generation_completed_at - self.generation_started_at
             return delta.total_seconds()
         return None
@@ -163,7 +162,7 @@ class GeneratedReport(BaseModel):
         if self.generation_errors is None:
             self.generation_errors = []
         self.generation_errors.append(
-            {"message": error_message, "timestamp": datetime.now(UTC).isoformat()}
+            {"message": error_message, "timestamp": datetime.now(UTC).isoformat()},
         )
 
     def mark_generation_started(self) -> None:
@@ -241,7 +240,7 @@ class GeneratedReport(BaseModel):
                     "executive_summary": self.executive_summary,
                     "content_preview": self.content_preview,
                     "key_findings": self.key_findings,
-                }
+                },
             )
 
         return data
@@ -283,7 +282,7 @@ class ReportFormat(BaseModel):
 
     # Primary key and relationships
     id: Mapped[UUID] = mapped_column(
-        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4,
     )
     report_id: Mapped[UUID] = mapped_column(
         PostgresUUID(as_uuid=True),
@@ -308,7 +307,7 @@ class ReportFormat(BaseModel):
 
     # Generation information
     generated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None),
     )
     generation_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     generator_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -337,15 +336,15 @@ class ReportFormat(BaseModel):
         """Get content as bytes."""
         if self.content_binary:
             return self.content_binary
-        elif self.content_text:
-            encoding = self.encoding if self.encoding else "utf-8"
+        if self.content_text:
+            encoding = self.encoding or "utf-8"
             return self.content_text.encode(encoding)
-        elif self.file_path and self.file_exists:
+        if self.file_path and self.file_exists:
             with open(self.file_path, "rb") as f:
                 return f.read()
         else:
             raise FileNotFoundError(
-                f"No content available for format {self.format_type}"
+                f"No content available for format {self.format_type}",
             )
 
     def set_content(self, content: bytes, calculate_hash: bool = True) -> None:

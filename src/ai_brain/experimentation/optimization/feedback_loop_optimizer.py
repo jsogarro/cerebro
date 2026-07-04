@@ -1,5 +1,4 @@
-"""
-Feedback Loop Optimizer for Continuous Improvement
+"""Feedback Loop Optimizer for Continuous Improvement
 
 This module implements feedback loops that automatically apply experiment
 learnings back to the Agent Framework, enabling Cerebro to continuously
@@ -81,8 +80,7 @@ class FeedbackLoopConfig:
 
 
 class FeedbackLoopOptimizer:
-    """
-    Implements continuous optimization through feedback loops.
+    """Implements continuous optimization through feedback loops.
 
     This class analyzes experiment results and automatically applies
     learnings to improve the Agent Framework's performance over time.
@@ -157,7 +155,7 @@ class FeedbackLoopOptimizer:
 
             # Get experiment results
             results = await self.experimentor.get_experiment_results(
-                exp_id, include_statistical_analysis=True
+                exp_id, include_statistical_analysis=True,
             )
 
             # Check if experiment is ready for evaluation
@@ -178,7 +176,7 @@ class FeedbackLoopOptimizer:
         return not (p_value is None or p_value > 0.1)
 
     async def _process_experiment_results(
-        self, experiment_id: str, experiment_type: str, results: dict[str, Any]
+        self, experiment_id: str, experiment_type: str, results: dict[str, Any],
     ) -> None:
         """Process experiment results and extract learnings."""
         stats = results.get("statistical_analysis", {})
@@ -203,7 +201,7 @@ class FeedbackLoopOptimizer:
     # ==================== Learning Processing ====================
 
     async def _process_routing_learnings(
-        self, winning_config: dict[str, Any], stats: dict[str, Any]
+        self, winning_config: dict[str, Any], stats: dict[str, Any],
     ) -> None:
         """Process learnings from routing strategy experiments."""
         strategy = winning_config.get("routing_strategy")
@@ -214,7 +212,7 @@ class FeedbackLoopOptimizer:
         # which requires routing_decision and execution_result objects.
         # For now, we'll just log and store in baseline_performance
         logger.info(
-            f"Learned optimal routing strategy: {strategy} with params {parameters}"
+            f"Learned optimal routing strategy: {strategy} with params {parameters}",
         )
 
         self.baseline_performance["routing"] = {
@@ -226,7 +224,7 @@ class FeedbackLoopOptimizer:
         }
 
     async def _process_api_pattern_learnings(
-        self, winning_config: dict[str, Any], stats: dict[str, Any]
+        self, winning_config: dict[str, Any], stats: dict[str, Any],
     ) -> None:
         """Process learnings from API pattern experiments."""
         primary_weight = winning_config.get("primary_weight", 0.9)
@@ -240,11 +238,11 @@ class FeedbackLoopOptimizer:
         }
 
         logger.info(
-            f"Learned optimal API pattern: {primary_weight:.0%} primary, switch at {switch_threshold}"
+            f"Learned optimal API pattern: {primary_weight:.0%} primary, switch at {switch_threshold}",
         )
 
     async def _process_talkhier_learnings(
-        self, winning_config: dict[str, Any], stats: dict[str, Any]
+        self, winning_config: dict[str, Any], stats: dict[str, Any],
     ) -> None:
         """Process learnings from TalkHier protocol experiments."""
         max_rounds = winning_config.get("max_rounds", 3)
@@ -258,7 +256,7 @@ class FeedbackLoopOptimizer:
         }
 
         logger.info(
-            f"Learned optimal TalkHier: {max_rounds} rounds, {consensus_threshold} consensus"
+            f"Learned optimal TalkHier: {max_rounds} rounds, {consensus_threshold} consensus",
         )
 
     # ==================== Optimization Decision Generation ====================
@@ -331,7 +329,7 @@ class FeedbackLoopOptimizer:
         """Generate supervisor configuration optimization decision."""
         # Analyze supervisor performance across experiments
         supervisor_data: dict[str, Any] = self.baseline_performance.get(
-            "supervisor", {}
+            "supervisor", {},
         )
 
         if not supervisor_data:
@@ -493,7 +491,7 @@ class FeedbackLoopOptimizer:
 
                 if degradation > self.config.performance_degradation_threshold:
                     logger.warning(
-                        f"Performance degradation detected for {target}: {degradation:.1%}"
+                        f"Performance degradation detected for {target}: {degradation:.1%}",
                     )
                     await self._rollback_optimization(decision)
 
@@ -513,7 +511,7 @@ class FeedbackLoopOptimizer:
                     risk_level="low",
                     rationale="Rollback due to performance degradation",
                     experiment_evidence=[],
-                )
+                ),
             )
 
         # Remove from active optimizations
@@ -554,14 +552,14 @@ class FeedbackLoopOptimizer:
         }
 
     async def _get_variant_config(
-        self, experiment_id: str, variant_id: str
+        self, experiment_id: str, variant_id: str,
     ) -> dict[str, Any]:
         """Get configuration for a specific variant."""
         # Would retrieve from experiment manager
         return {}
 
     async def _apply_partial_optimization(
-        self, decision: OptimizationDecision, percentage: float
+        self, decision: OptimizationDecision, percentage: float,
     ) -> None:
         """Apply optimization to a percentage of traffic."""
         logger.info(f"Applying {decision.target.value} to {percentage}% of traffic")

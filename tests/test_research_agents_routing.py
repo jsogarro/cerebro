@@ -54,7 +54,7 @@ class TestResearchAgentsMigration:
         agent.gemini_service = None  # Force fallback path
 
         with patch.object(
-            agent, "_generate_with_routing", return_value=('{"sources": []}', 0.8)
+            agent, "_generate_with_routing", return_value=('{"sources": []}', 0.8),
         ) as mock_routing:
             task = AgentTask(
                 id="test",
@@ -116,12 +116,12 @@ class TestResearchAgentsMigration:
                     "analysis_approaches": [],
                     "limitations": [],
                     "ethical_considerations": [],
-                }
-            )
+                },
+            ),
         )
 
         with patch.object(
-            agent, "_ensure_gemini_service", return_value=mock_gemini
+            agent, "_ensure_gemini_service", return_value=mock_gemini,
         ) as mock_ensure:
             task = AgentTask(
                 id="test",
@@ -148,12 +148,12 @@ class TestResearchAgentsMigration:
                     "consensus_points": [],
                     "conflicts_identified": [],
                     "synthesis_narrative": "test",
-                }
-            )
+                },
+            ),
         )
 
         with patch.object(
-            agent, "_ensure_gemini_service", return_value=mock_gemini
+            agent, "_ensure_gemini_service", return_value=mock_gemini,
         ) as mock_ensure:
             task = AgentTask(
                 id="test",

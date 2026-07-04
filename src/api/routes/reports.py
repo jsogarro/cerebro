@@ -1,5 +1,4 @@
-"""
-Reports API endpoints for Research Platform.
+"""Reports API endpoints for Research Platform.
 
 This module provides REST API endpoints for report generation, retrieval,
 and management, following functional programming principles.
@@ -42,7 +41,7 @@ class CreateReportRequest(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=200, description="Report title")
     query: str = Field(
-        ..., min_length=1, max_length=1000, description="Research question"
+        ..., min_length=1, max_length=1000, description="Research question",
     )
     domains: list[str] = Field(default_factory=list, description="Research domains")
     project_id: UUID | None = Field(None, description="Associated project ID")
@@ -50,37 +49,37 @@ class CreateReportRequest(BaseModel):
 
     # Report configuration
     report_type: ReportType = Field(
-        default=ReportType.COMPREHENSIVE, description="Type of report"
+        default=ReportType.COMPREHENSIVE, description="Type of report",
     )
     citation_style: CitationStyle = Field(
-        default=CitationStyle.APA, description="Citation style"
+        default=CitationStyle.APA, description="Citation style",
     )
     formats: list[ReportFormat] = Field(
-        default=[ReportFormat.HTML, ReportFormat.MARKDOWN], description="Output formats"
+        default=[ReportFormat.HTML, ReportFormat.MARKDOWN], description="Output formats",
     )
 
     # Optional configuration
     include_toc: bool = Field(default=True, description="Include table of contents")
     include_executive_summary: bool = Field(
-        default=True, description="Include executive summary"
+        default=True, description="Include executive summary",
     )
     include_visualizations: bool = Field(
-        default=True, description="Include visualizations"
+        default=True, description="Include visualizations",
     )
     include_citations: bool = Field(default=True, description="Include citations")
     include_methodology: bool = Field(
-        default=True, description="Include methodology section"
+        default=True, description="Include methodology section",
     )
 
     # Workflow data
     workflow_data: dict[str, Any] = Field(
-        default_factory=dict, description="Research workflow data"
+        default_factory=dict, description="Research workflow data",
     )
 
     # Settings
     save_to_storage: bool = Field(default=True, description="Save report to storage")
     notify_completion: bool = Field(
-        default=False, description="Send notification on completion"
+        default=False, description="Send notification on completion",
     )
 
 
@@ -103,7 +102,7 @@ class ReportResponse(BaseModel):
 
     @classmethod
     def from_db_report(
-        cls, report: GeneratedReport, base_url: str = ""
+        cls, report: GeneratedReport, base_url: str = "",
     ) -> "ReportResponse":
         """Create response from database report."""
         download_urls = {}
@@ -146,7 +145,7 @@ class ReportSearchRequest(BaseModel):
     user_id: UUID | None = Field(None, description="Filter by user ID")
     report_type: str | None = Field(None, description="Filter by report type")
     min_quality_score: float | None = Field(
-        None, ge=0.0, le=1.0, description="Minimum quality score"
+        None, ge=0.0, le=1.0, description="Minimum quality score",
     )
     limit: int = Field(default=20, ge=1, le=100, description="Maximum results")
     offset: int = Field(default=0, ge=0, description="Results offset")
@@ -187,13 +186,12 @@ def get_report_services() -> tuple[Any, Any, Any, Any]:
 
 
 @router.post(
-    "/generate", response_model=ReportResponse, status_code=status.HTTP_202_ACCEPTED
+    "/generate", response_model=ReportResponse, status_code=status.HTTP_202_ACCEPTED,
 )
 async def generate_report(
-    request: CreateReportRequest, background_tasks: BackgroundTasks
+    request: CreateReportRequest, background_tasks: BackgroundTasks,
 ) -> ReportResponse:
-    """
-    Generate a new report asynchronously.
+    """Generate a new report asynchronously.
 
     This endpoint accepts a report generation request and returns immediately
     with a report ID. The actual generation happens in the background.
@@ -374,7 +372,7 @@ async def download_report(report_id: UUID, format_type: str) -> StreamingRespons
 
         # Retrieve report content
         content_result = await storage_service.retrieve_report_content(
-            report_id, format_type
+            report_id, format_type,
         )
 
         if not content_result:
@@ -436,7 +434,7 @@ async def list_reports(
 
         if user_id:
             reports = await storage_service.list_user_reports(
-                user_id, limit=page_size + 1, status_filter=status_filter
+                user_id, limit=page_size + 1, status_filter=status_filter,
             )
         else:
             # For public listing, you might want different logic

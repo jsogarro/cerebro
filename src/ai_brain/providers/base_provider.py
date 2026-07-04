@@ -1,5 +1,4 @@
-"""
-Base Provider Interface for Foundation Models
+"""Base Provider Interface for Foundation Models
 
 Defines the abstract interface that all foundation model providers must implement.
 This ensures consistent behavior across different model providers while allowing
@@ -165,8 +164,7 @@ class ProviderHealthStatus:
 
 
 class BaseProvider(ABC):
-    """
-    Abstract base class for all foundation model providers.
+    """Abstract base class for all foundation model providers.
 
     Defines the interface that must be implemented by all provider classes
     to ensure consistent behavior and enable the model router to work
@@ -180,12 +178,12 @@ class BaseProvider(ABC):
         config: dict[str, Any],
         model_config_manager: Optional["ModelConfigManager"] = None,
     ):
-        """
-        Initialize the provider with configuration.
+        """Initialize the provider with configuration.
 
         Args:
             config: Provider-specific configuration
             model_config_manager: Optional model configuration manager
+
         """
         self.config = config
         self.model_config_manager = model_config_manager
@@ -214,11 +212,9 @@ class BaseProvider(ABC):
     @abstractmethod
     def _get_provider_name(self) -> str:
         """Return the name of this provider."""
-        pass
 
     async def load_configuration(self) -> None:
         """Load model configurations for this provider."""
-
         if not self.model_config_manager:
             # Fallback to legacy hard-coded configuration
             self.supported_capabilities = self._get_supported_capabilities_legacy()
@@ -233,13 +229,13 @@ class BaseProvider(ABC):
             # Load provider configuration
             self._provider_config = (
                 await self.model_config_manager.get_provider_configuration(
-                    self.provider_name
+                    self.provider_name,
                 )
             )
 
             if not self._provider_config or not self._provider_config.enabled:
                 logger.warning(
-                    f"Provider {self.provider_name} is disabled or not configured"
+                    f"Provider {self.provider_name} is disabled or not configured",
                 )
                 self.supported_models = []
                 self.supported_capabilities = []
@@ -248,7 +244,7 @@ class BaseProvider(ABC):
 
             # Load model specifications for this provider
             self._model_specs = await self.model_config_manager.get_models_for_provider(
-                self.provider_name
+                self.provider_name,
             )
 
             # Update supported models and capabilities
@@ -280,7 +276,7 @@ class BaseProvider(ABC):
                         config_cap_enum = ConfigCapability(config_cap)
                         if config_cap_enum in legacy_capability_mapping:
                             self.supported_capabilities.append(
-                                legacy_capability_mapping[config_cap_enum]
+                                legacy_capability_mapping[config_cap_enum],
                             )
                     except ValueError:
                         logger.warning("Unknown capability", capability=config_cap)
@@ -305,25 +301,22 @@ class BaseProvider(ABC):
             self.supported_models = self._get_supported_models_legacy()
 
     def _get_supported_capabilities_legacy(self) -> list[ModelCapability]:
-        """
-        Legacy method for hard-coded capabilities.
+        """Legacy method for hard-coded capabilities.
         Should be implemented by subclasses for backward compatibility.
         """
         return []
 
     def _get_supported_models_legacy(self) -> list[str]:
-        """
-        Legacy method for hard-coded models.
+        """Legacy method for hard-coded models.
         Should be implemented by subclasses for backward compatibility.
         """
         return []
 
     @abstractmethod
     async def generate(
-        self, request: ModelRequest, model_name: str | None = None
+        self, request: ModelRequest, model_name: str | None = None,
     ) -> ModelResponse:
-        """
-        Generate a response using the specified model.
+        """Generate a response using the specified model.
 
         Args:
             request: The model request to process
@@ -331,14 +324,13 @@ class BaseProvider(ABC):
 
         Returns:
             ModelResponse with generated content and metadata
+
         """
-        pass
 
     async def stream(
-        self, request: ModelRequest, model_name: str | None = None
+        self, request: ModelRequest, model_name: str | None = None,
     ) -> AsyncGenerator[str, None]:
-        """
-        Stream a response using the specified model.
+        """Stream a response using the specified model.
 
         Args:
             request: The model request to process
@@ -346,22 +338,23 @@ class BaseProvider(ABC):
 
         Yields:
             Partial response content as it's generated
+
         """
         # Default implementation falls back to non-streaming
         response = await self.generate(request, model_name)
         yield response.content
 
     async def health_check(self) -> ProviderHealthStatus:
-        """
-        Check the health status of this provider.
+        """Check the health status of this provider.
 
         Returns:
             ProviderHealthStatus with current health information
+
         """
         try:
             # Basic health check with a simple request
             test_request = ModelRequest(
-                prompt="Hello", max_tokens=5, timeout_seconds=10
+                prompt="Hello", max_tokens=5, timeout_seconds=10,
             )
 
             start_time = datetime.now()
@@ -376,7 +369,7 @@ class BaseProvider(ABC):
             if not response.success:
                 self.health_status.last_error = response.error_message
                 self.health_status.recent_errors.append(
-                    f"{datetime.now()}: {response.error_message}"
+                    f"{datetime.now()}: {response.error_message}",
                 )
                 # Keep only recent errors (last 10)
                 self.health_status.recent_errors = self.health_status.recent_errors[
@@ -419,7 +412,6 @@ class BaseProvider(ABC):
 
     def _get_model_context_window(self, model_name: str) -> int:
         """Get context window size for a specific model."""
-
         # Try to get from dynamic configuration first
         if self._config_loaded and model_name in self._model_specs:
             return int(self._model_specs[model_name].context_window)
@@ -429,7 +421,6 @@ class BaseProvider(ABC):
 
     def _get_model_cost(self, model_name: str) -> float:
         """Get cost per 1K tokens for a specific model."""
-
         # Try to get from dynamic configuration first
         if self._config_loaded and model_name in self._model_specs:
             return float(self._model_specs[model_name].cost_per_1k_tokens)
@@ -446,10 +437,9 @@ class BaseProvider(ABC):
         return 0.001
 
     def get_model_specification(
-        self, model_name: str
+        self, model_name: str,
     ) -> Optional["ModelSpecification"]:
         """Get complete model specification from configuration."""
-
         if self._config_loaded and model_name in self._model_specs:
             return self._model_specs[model_name]
 
@@ -461,13 +451,11 @@ class BaseProvider(ABC):
 
     async def ensure_configuration_loaded(self) -> None:
         """Ensure configuration is loaded before operations."""
-
         if not self._config_loaded:
             await self.load_configuration()
 
     async def reload_configuration(self) -> None:
         """Reload configuration from the manager."""
-
         self._config_loaded = False
         await self.load_configuration()
 
@@ -477,7 +465,7 @@ class BaseProvider(ABC):
         return request
 
     async def _postprocess_response(
-        self, response: ModelResponse, request: ModelRequest
+        self, response: ModelResponse, request: ModelRequest,
     ) -> ModelResponse:
         """Postprocess response before returning."""
         # Update performance metrics
@@ -488,7 +476,7 @@ class BaseProvider(ABC):
 
         # Calculate success rate
         self.health_status.success_rate = (self.request_count - self.error_count) / max(
-            self.request_count, 1
+            self.request_count, 1,
         )
 
         # Calculate average latency
@@ -507,13 +495,13 @@ class BaseProvider(ABC):
                 cost_usd=response.cost_estimate,
                 request_id=response.request_id,
                 success=response.success,
-            )
+            ),
         )
 
         return response
 
     def _calculate_cost(
-        self, prompt_tokens: int, completion_tokens: int, model_name: str
+        self, prompt_tokens: int, completion_tokens: int, model_name: str,
     ) -> float:
         """Calculate cost for token usage."""
         total_tokens = prompt_tokens + completion_tokens
@@ -521,7 +509,7 @@ class BaseProvider(ABC):
         return (total_tokens / 1000) * cost_per_1k
 
     def _create_error_response(
-        self, request: ModelRequest, error: Exception, error_type: str = "unknown"
+        self, request: ModelRequest, error: Exception, error_type: str = "unknown",
     ) -> ModelResponse:
         """Create an error response."""
         return ModelResponse(

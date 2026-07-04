@@ -35,11 +35,11 @@ class TalkHierRoundExecutor:
         """Execute a refinement round in an active session."""
         if session.status != SessionStatus.ACTIVE:
             raise ValueError(
-                f"Session {session_id} is not active (status: {session.status})"
+                f"Session {session_id} is not active (status: {session.status})",
             )
         if request.round_number > session.max_rounds:
             raise ValueError(
-                f"Refinement round {request.round_number} exceeds max_rounds={session.max_rounds}"
+                f"Refinement round {request.round_number} exceeds max_rounds={session.max_rounds}",
             )
 
         session.status = SessionStatus.REFINING
@@ -153,7 +153,7 @@ class TalkHierRoundExecutor:
         return await self._invoke_worker_agents(session, request)
 
     async def _invoke_worker_agents(
-        self, session: Any, request: RefinementRoundRequest
+        self, session: Any, request: RefinementRoundRequest,
     ) -> dict[str, dict[str, Any]]:
         """Run every worker participant's real agent for this round."""
         responses: dict[str, dict[str, Any]] = {}
@@ -161,12 +161,12 @@ class TalkHierRoundExecutor:
             if participant.role != MessageRole.WORKER:
                 continue
             responses[participant.agent_id] = await self._invoke_worker_agent(
-                session, participant, request
+                session, participant, request,
             )
         return responses
 
     async def _invoke_worker_agent(
-        self, session: Any, participant: Any, request: RefinementRoundRequest
+        self, session: Any, participant: Any, request: RefinementRoundRequest,
     ) -> dict[str, Any]:
         """Invoke a single worker's agent and extract its refinement response."""
         from src.agents.factory import AgentFactory
@@ -179,7 +179,7 @@ class TalkHierRoundExecutor:
 
         try:
             agent = AgentFactory.create_agent(
-                agent_type, {"gemini_service": self._get_gemini_service()}
+                agent_type, {"gemini_service": self._get_gemini_service()},
             )
             task = AgentTask(
                 id=f"talkhier_{session.session_id}_{participant.agent_id}_r{request.round_number}",
@@ -300,7 +300,7 @@ class TalkHierRoundExecutor:
 
         if strategy == RefinementStrategy.CONSENSUS_DRIVEN:
             merged_content = "\n".join(
-                [r.get("content", "") for r in responses.values()]
+                [r.get("content", "") for r in responses.values()],
             )
             avg_confidence = sum(
                 r.get("confidence", 0) for r in responses.values()
@@ -344,7 +344,7 @@ class TalkHierRoundExecutor:
         if consensus_type == ConsensusType.MAJORITY:
             avg_confidence = sum(confidences) / len(confidences)
             variance = sum((c - avg_confidence) ** 2 for c in confidences) / len(
-                confidences
+                confidences,
             )
             consensus = 1.0 - min(1.0, variance)
         elif consensus_type == ConsensusType.WEIGHTED:
@@ -408,7 +408,7 @@ class TalkHierRoundExecutor:
         ]
         if low_confidence:
             suggestions.append(
-                f"Strengthen responses from: {', '.join(low_confidence)}"
+                f"Strengthen responses from: {', '.join(low_confidence)}",
             )
 
         return " | ".join(suggestions) if suggestions else "Continue general refinement"

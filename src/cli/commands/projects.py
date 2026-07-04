@@ -1,5 +1,4 @@
-"""
-Research project commands for CLI.
+"""Research project commands for CLI.
 """
 
 import asyncio
@@ -39,7 +38,6 @@ from src.models.research_project import ResearchProgress, ResearchProject
 @click.pass_context
 def projects_group(ctx: Context) -> None:
     """Manage research projects."""
-    pass
 
 
 @projects_group.command(name="create")
@@ -114,7 +112,7 @@ def create_project(
 
             for i, project_data in enumerate(projects_data, 1):
                 print_info(
-                    f"Creating project {i}/{len(projects_data)}: {project_data['title']}"
+                    f"Creating project {i}/{len(projects_data)}: {project_data['title']}",
                 )
                 try:
                     project = await _create_single_project(project_data)
@@ -138,7 +136,7 @@ def create_project(
             # Command line mode
             if not title or not query or not domains:
                 print_error(
-                    "Missing required arguments. Use --interactive or provide --title, --query, and --domains"
+                    "Missing required arguments. Use --interactive or provide --title, --query, and --domains",
                 )
                 raise Exit(1)
 
@@ -233,17 +231,17 @@ def list_projects(
 @projects_group.command(name="progress")
 @click.argument("project_id", callback=validate_uuid)
 @click.option(
-    "--watch", "-w", is_flag=True, help="Watch progress in real-time (polling mode)"
+    "--watch", "-w", is_flag=True, help="Watch progress in real-time (polling mode)",
 )
 @click.option(
-    "--stream", "-s", is_flag=True, help="Stream progress via WebSocket (real-time)"
+    "--stream", "-s", is_flag=True, help="Stream progress via WebSocket (real-time)",
 )
 @click.option(
-    "--interval", "-i", default=5, help="Update interval in seconds (polling mode only)"
+    "--interval", "-i", default=5, help="Update interval in seconds (polling mode only)",
 )
 @click.pass_context
 def get_progress(
-    ctx: Context, project_id: UUID, watch: bool, stream: bool, interval: int
+    ctx: Context, project_id: UUID, watch: bool, stream: bool, interval: int,
 ) -> None:
     """Get project progress."""
     formatter = ctx.obj["formatter"]
@@ -283,7 +281,7 @@ def get_progress(
                 )
                 if not connection_ok:
                     print_warning(
-                        "WebSocket connection test failed, falling back to polling mode"
+                        "WebSocket connection test failed, falling back to polling mode",
                     )
                     await _watch_progress()
                     return
@@ -298,7 +296,7 @@ def get_progress(
 
             if not success:
                 print_warning(
-                    "WebSocket streaming failed, falling back to polling mode"
+                    "WebSocket streaming failed, falling back to polling mode",
                 )
                 await _watch_progress()
 
@@ -325,13 +323,11 @@ def get_progress(
                         live.update(
                             Panel(
                                 (
-                                    output
-                                    if output
-                                    else f"Progress: {progress.progress_percentage:.1f}%"
+                                    output or f"Progress: {progress.progress_percentage:.1f}%"
                                 ),
                                 title=f"Project {project_id}",
                                 border_style="green",
-                            )
+                            ),
                         )
 
                         # Check if completed
@@ -366,7 +362,7 @@ def cancel_project(ctx: Context, project_id: UUID, force: bool) -> None:
     verbose = ctx.obj["verbose"]
 
     if not force and not click.confirm(
-        f"Are you sure you want to cancel project {project_id}?"
+        f"Are you sure you want to cancel project {project_id}?",
     ):
         print_info("Cancelled")
         return

@@ -1,5 +1,4 @@
-"""
-E2E regression tests for the research flow.
+"""E2E regression tests for the research flow.
 
 Each test documents a specific bug found during the E2E bug bash session
 and ensures the fix holds. Tests use the async_client fixture from conftest.py

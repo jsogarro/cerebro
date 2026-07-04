@@ -1,5 +1,4 @@
-"""
-Authentication and security module for the Research Platform.
+"""Authentication and security module for the Research Platform.
 
 This module provides comprehensive authentication, authorization, and security
 features including JWT tokens, OAuth2, rate limiting, and audit logging.

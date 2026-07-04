@@ -1,5 +1,4 @@
-"""
-Load testing configuration for Research Platform using Locust.
+"""Load testing configuration for Research Platform using Locust.
 
 Usage:
     locust -f tests/load/locustfile.py --host=http://localhost:8000
@@ -40,7 +39,6 @@ class ResearchPlatformUser(HttpUser):
     def on_stop(self):
         """Called when a user stops."""
         # Cleanup if needed
-        pass
 
     def register_and_login(self):
         """Register a new user and login to get access token."""
@@ -53,7 +51,7 @@ class ResearchPlatformUser(HttpUser):
         }
 
         with self.client.post(
-            "/api/v1/auth/register", json=register_data, catch_response=True
+            "/api/v1/auth/register", json=register_data, catch_response=True,
         ) as response:
             if response.status_code == 201:
                 data = response.json()
@@ -71,7 +69,7 @@ class ResearchPlatformUser(HttpUser):
             return
 
         with self.client.get(
-            "/api/v1/projects", headers=self._auth_headers(), catch_response=True
+            "/api/v1/projects", headers=self._auth_headers(), catch_response=True,
         ) as response:
             if response.status_code == 200:
                 response.success()
@@ -90,10 +88,10 @@ class ResearchPlatformUser(HttpUser):
             "query": {
                 "text": f"Research question about {random.choice(['AI', 'ML', 'Ethics', 'Biology'])}",
                 "domains": random.sample(
-                    ["AI", "ML", "Ethics", "Biology", "Physics"], k=2
+                    ["AI", "ML", "Ethics", "Biology", "Physics"], k=2,
                 ),
                 "depth_level": random.choice(
-                    ["basic", "intermediate", "comprehensive"]
+                    ["basic", "intermediate", "comprehensive"],
                 ),
             },
         }
@@ -272,7 +270,6 @@ class WebSocketUser(HttpUser):
         """Establish WebSocket connection."""
         # Note: Locust doesn't natively support WebSocket
         # This is a placeholder for WebSocket-like behavior
-        pass
 
     @task
     def simulate_websocket_ping(self):

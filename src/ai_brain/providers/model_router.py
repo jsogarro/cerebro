@@ -1,5 +1,4 @@
-"""
-Model Router Implementation
+"""Model Router Implementation
 
 Intelligent routing system that selects the optimal model provider based on
 MASR decisions, handles fallback strategies, and manages provider health
@@ -50,8 +49,7 @@ class RoutingDecision:
 
 
 class ModelRouter:
-    """
-    Intelligent model router that executes MASR routing decisions.
+    """Intelligent model router that executes MASR routing decisions.
 
     Manages multiple model providers, handles fallback strategies,
     monitors provider health, and provides unified access to all
@@ -67,7 +65,7 @@ class ModelRouter:
 
         # Routing configuration
         self.health_check_interval = config.get(
-            "health_check_interval", 300
+            "health_check_interval", 300,
         )  # 5 minutes
         self.max_retries = config.get("max_retries", 3)
         self.fallback_enabled = config.get("enable_fallback", True)
@@ -90,7 +88,6 @@ class ModelRouter:
 
     def _initialize_providers(self) -> None:
         """Initialize all configured providers."""
-
         provider_configs = self.config.get("providers", {})
 
         for provider_name, provider_config in provider_configs.items():
@@ -121,10 +118,9 @@ class ModelRouter:
                 )
 
     async def route_and_generate(
-        self, request: ModelRequest, routing_decision: dict[str, Any] | None = None
+        self, request: ModelRequest, routing_decision: dict[str, Any] | None = None,
     ) -> ModelResponse:
-        """
-        Route request and generate response using optimal provider.
+        """Route request and generate response using optimal provider.
 
         Args:
             request: The model request to process
@@ -132,8 +128,8 @@ class ModelRouter:
 
         Returns:
             ModelResponse from the selected provider
-        """
 
+        """
         self.request_count += 1
 
         try:
@@ -148,7 +144,7 @@ class ModelRouter:
 
             # Attempt generation with primary provider
             response = await self._try_provider(
-                request, primary_provider, primary_model
+                request, primary_provider, primary_model,
             )
 
             if response.success:
@@ -168,7 +164,7 @@ class ModelRouter:
 
                     try:
                         response = await self._try_provider(
-                            request, fallback_provider, fallback_model_name
+                            request, fallback_provider, fallback_model_name,
                         )
 
                         if response.success:
@@ -193,10 +189,9 @@ class ModelRouter:
             return self._create_failure_response(request, str(e))
 
     async def _try_provider(
-        self, request: ModelRequest, provider_name: str, model_name: str
+        self, request: ModelRequest, provider_name: str, model_name: str,
     ) -> ModelResponse:
         """Try to generate response using specific provider."""
-
         provider = self.registry.providers.get(provider_name)
         if not provider:
             raise ValueError(f"Provider not available: {provider_name}")
@@ -212,14 +207,13 @@ class ModelRouter:
         # Update health status based on response
         if not response.success:
             health_status.recent_errors.append(
-                f"{datetime.now()}: {response.error_message}"
+                f"{datetime.now()}: {response.error_message}",
             )
 
         return response
 
     async def _make_routing_decision(self, request: ModelRequest) -> dict[str, Any]:
         """Make routing decision when not provided by MASR."""
-
         # Simple fallback routing logic
         # In production, this would integrate with MASR
 
@@ -261,14 +255,13 @@ class ModelRouter:
                 primary_provider = available_providers[0]
                 primary_model = None
 
+        # General query - prefer Llama for cost efficiency
+        elif "llama" in available_providers:
+            primary_provider = "llama"
+            primary_model = "llama3.3:70b"
         else:
-            # General query - prefer Llama for cost efficiency
-            if "llama" in available_providers:
-                primary_provider = "llama"
-                primary_model = "llama3.3:70b"
-            else:
-                primary_provider = available_providers[0]
-                primary_model = None
+            primary_provider = available_providers[0]
+            primary_model = None
 
         # Create fallback list
         fallback_providers = [p for p in available_providers if p != primary_provider]
@@ -282,13 +275,12 @@ class ModelRouter:
 
     async def _get_provider_health(self, provider_name: str) -> ProviderHealthStatus:
         """Get provider health status with caching."""
-
         now = datetime.now()
         last_check = self.registry.last_health_check.get(provider_name)
 
         # Check if we need to refresh health status
         if not last_check or now - last_check > timedelta(
-            seconds=self.health_check_interval
+            seconds=self.health_check_interval,
         ):
             provider = self.registry.providers.get(provider_name)
             if provider:
@@ -305,7 +297,7 @@ class ModelRouter:
                     )
                     # Create error status
                     health_status = ProviderHealthStatus(
-                        provider_name=provider_name, healthy=False, last_error=str(e)
+                        provider_name=provider_name, healthy=False, last_error=str(e),
                     )
                     self.registry.health_status[provider_name] = health_status
 
@@ -315,7 +307,7 @@ class ModelRouter:
         )
 
     def _create_failure_response(
-        self, request: ModelRequest, error_message: str
+        self, request: ModelRequest, error_message: str,
     ) -> ModelResponse:
         """Create a failure response."""
         return ModelResponse(
@@ -329,7 +321,6 @@ class ModelRouter:
 
     async def get_available_models(self) -> dict[str, list[str]]:
         """Get all available models from all providers."""
-
         available_models = {}
 
         for provider_name, provider in self.registry.providers.items():
@@ -341,10 +332,9 @@ class ModelRouter:
         return available_models
 
     async def get_model_info(
-        self, provider_name: str, model_name: str
+        self, provider_name: str, model_name: str,
     ) -> dict[str, Any] | None:
         """Get detailed information about a specific model."""
-
         provider = self.registry.providers.get(provider_name)
         if not provider:
             return None
@@ -353,7 +343,6 @@ class ModelRouter:
 
     async def get_provider_metrics(self) -> dict[str, Any]:
         """Get metrics for all providers."""
-
         providers_dict: dict[str, Any] = {}
         metrics: dict[str, Any] = {
             "router": {
@@ -383,21 +372,19 @@ class ModelRouter:
 
     async def health_check_all_providers(self) -> dict[str, ProviderHealthStatus]:
         """Perform health check on all providers."""
-
         health_results = {}
 
         for provider_name in self.registry.providers:
             health_results[provider_name] = await self._get_provider_health(
-                provider_name
+                provider_name,
             )
 
         return health_results
 
     async def stream_response(
-        self, request: ModelRequest, routing_decision: dict[str, Any] | None = None
+        self, request: ModelRequest, routing_decision: dict[str, Any] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream response using optimal provider."""
-
         try:
             # Determine routing if not provided
             if not routing_decision:
@@ -428,7 +415,6 @@ class ModelRouter:
 
     def add_provider(self, provider_name: str, provider_config: dict[str, Any]) -> None:
         """Dynamically add a new provider."""
-
         try:
             provider_class = self.provider_classes.get(provider_name)
             if not provider_class:
@@ -452,7 +438,6 @@ class ModelRouter:
 
     def remove_provider(self, provider_name: str) -> None:
         """Remove a provider from the registry."""
-
         if provider_name in self.registry.providers:
             del self.registry.providers[provider_name]
             del self.registry.provider_configs[provider_name]
@@ -467,7 +452,6 @@ class ModelRouter:
 
     async def close(self) -> None:
         """Clean up all provider resources."""
-
         for provider in self.registry.providers.values():
             if hasattr(provider, "close"):
                 try:

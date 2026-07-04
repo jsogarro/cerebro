@@ -1,5 +1,4 @@
-"""
-Multi-factor authentication settings database model.
+"""Multi-factor authentication settings database model.
 
 Manages MFA configuration including TOTP, SMS, email, and backup codes.
 """
@@ -42,8 +41,7 @@ class MFAMethod(StrEnum):
 
 
 class MFASettings(BaseModel):
-    """
-    MFA settings model.
+    """MFA settings model.
 
     Stores multi-factor authentication configuration and
     recovery options for user accounts.
@@ -78,25 +76,25 @@ class MFASettings(BaseModel):
 
     # Primary MFA method
     primary_method: Mapped[MFAMethod | None] = mapped_column(
-        ENUM(MFAMethod, name="mfa_method"), nullable=True, comment="Primary MFA method"
+        ENUM(MFAMethod, name="mfa_method"), nullable=True, comment="Primary MFA method",
     )
 
     # Enabled methods
     enabled_methods: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String), nullable=True, default=[], comment="List of enabled MFA methods"
+        ARRAY(String), nullable=True, default=[], comment="List of enabled MFA methods",
     )
 
     # TOTP settings
     totp_secret: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="TOTP secret key (encrypted)"
+        String(255), nullable=True, comment="TOTP secret key (encrypted)",
     )
 
     totp_verified: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, comment="Whether TOTP has been verified"
+        Boolean, nullable=False, default=False, comment="Whether TOTP has been verified",
     )
 
     totp_last_used: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Last time TOTP was used"
+        DateTime(timezone=True), nullable=True, comment="Last time TOTP was used",
     )
 
     totp_counter: Mapped[int] = mapped_column(
@@ -108,7 +106,7 @@ class MFASettings(BaseModel):
 
     # SMS settings
     sms_phone_number: Mapped[str | None] = mapped_column(
-        String(20), nullable=True, comment="Phone number for SMS (encrypted)"
+        String(20), nullable=True, comment="Phone number for SMS (encrypted)",
     )
 
     sms_verified: Mapped[bool] = mapped_column(
@@ -119,11 +117,11 @@ class MFASettings(BaseModel):
     )
 
     sms_last_sent: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Last time SMS was sent"
+        DateTime(timezone=True), nullable=True, comment="Last time SMS was sent",
     )
 
     sms_send_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, comment="Number of SMS codes sent"
+        Integer, nullable=False, default=0, comment="Number of SMS codes sent",
     )
 
     # Email settings (uses user's email)
@@ -135,12 +133,12 @@ class MFASettings(BaseModel):
     )
 
     email_last_sent: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Last time email code was sent"
+        DateTime(timezone=True), nullable=True, comment="Last time email code was sent",
     )
 
     # Backup codes
     backup_codes: Mapped[list[Any] | None] = mapped_column(
-        JSON, nullable=True, comment="Hashed backup codes"
+        JSON, nullable=True, comment="Hashed backup codes",
     )
 
     backup_codes_generated_at: Mapped[datetime | None] = mapped_column(
@@ -150,21 +148,21 @@ class MFASettings(BaseModel):
     )
 
     backup_codes_used: Mapped[list[Any] | None] = mapped_column(
-        JSON, nullable=True, default=[], comment="List of used backup code indices"
+        JSON, nullable=True, default=[], comment="List of used backup code indices",
     )
 
     # WebAuthn settings
     webauthn_credentials: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="WebAuthn credential data"
+        JSON, nullable=True, comment="WebAuthn credential data",
     )
 
     # Recovery settings
     recovery_email: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Alternative email for recovery (encrypted)"
+        String(255), nullable=True, comment="Alternative email for recovery (encrypted)",
     )
 
     recovery_phone: Mapped[str | None] = mapped_column(
-        String(20), nullable=True, comment="Alternative phone for recovery (encrypted)"
+        String(20), nullable=True, comment="Alternative phone for recovery (encrypted)",
     )
 
     # Security settings
@@ -176,16 +174,16 @@ class MFASettings(BaseModel):
     )
 
     trusted_devices: Mapped[list[Any] | None] = mapped_column(
-        JSON, nullable=True, default=[], comment="List of trusted device IDs"
+        JSON, nullable=True, default=[], comment="List of trusted device IDs",
     )
 
     # Usage statistics
     successful_verifications: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, comment="Total successful MFA verifications"
+        Integer, nullable=False, default=0, comment="Total successful MFA verifications",
     )
 
     failed_attempts: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, comment="Total failed MFA attempts"
+        Integer, nullable=False, default=0, comment="Total failed MFA attempts",
     )
 
     last_verified_at: Mapped[datetime | None] = mapped_column(
@@ -195,16 +193,16 @@ class MFASettings(BaseModel):
     )
 
     last_failed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Last failed MFA attempt"
+        DateTime(timezone=True), nullable=True, comment="Last failed MFA attempt",
     )
 
     # Temporary codes for setup/recovery
     temp_setup_code: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Temporary code for MFA setup"
+        String(255), nullable=True, comment="Temporary code for MFA setup",
     )
 
     temp_setup_expires: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="When temp setup code expires"
+        DateTime(timezone=True), nullable=True, comment="When temp setup code expires",
     )
 
     # Relationships
@@ -218,26 +216,26 @@ class MFASettings(BaseModel):
 
     @classmethod
     def create_settings(cls, user_id: str) -> "MFASettings":
-        """
-        Create default MFA settings for a user.
+        """Create default MFA settings for a user.
 
         Args:
             user_id: User ID
 
         Returns:
             MFASettings instance
+
         """
         return cls(user_id=user_id)
 
     def enable_totp(self, issuer: str = "Research Platform") -> tuple[str, str]:
-        """
-        Enable TOTP authentication.
+        """Enable TOTP authentication.
 
         Args:
             issuer: Issuer name for TOTP
 
         Returns:
             Tuple of (secret, provisioning_uri)
+
         """
         # Generate secret
         secret = pyotp.random_base32()
@@ -246,7 +244,7 @@ class MFASettings(BaseModel):
         # Generate provisioning URI for QR code
         totp = pyotp.TOTP(secret)
         provisioning_uri = totp.provisioning_uri(
-            name=self.user.email, issuer_name=issuer
+            name=self.user.email, issuer_name=issuer,
         )
 
         # Add to enabled methods
@@ -259,8 +257,7 @@ class MFASettings(BaseModel):
         return secret, provisioning_uri
 
     def verify_totp(self, code: str, window: int = 1) -> bool:
-        """
-        Verify a TOTP code.
+        """Verify a TOTP code.
 
         Args:
             code: TOTP code to verify
@@ -268,6 +265,7 @@ class MFASettings(BaseModel):
 
         Returns:
             True if code is valid
+
         """
         if not self.totp_secret:
             return False
@@ -295,14 +293,14 @@ class MFASettings(BaseModel):
         return is_valid
 
     def generate_backup_codes(self, count: int = 10) -> list[str]:
-        """
-        Generate backup codes.
+        """Generate backup codes.
 
         Args:
             count: Number of codes to generate
 
         Returns:
             List of backup codes
+
         """
         codes = []
         hashed_codes = []
@@ -330,14 +328,14 @@ class MFASettings(BaseModel):
         return codes
 
     def verify_backup_code(self, code: str) -> bool:
-        """
-        Verify a backup code.
+        """Verify a backup code.
 
         Args:
             code: Backup code to verify
 
         Returns:
             True if code is valid and unused
+
         """
         if not self.backup_codes:
             return False
@@ -366,14 +364,14 @@ class MFASettings(BaseModel):
         return False
 
     def enable_sms(self, phone_number: str) -> str:
-        """
-        Enable SMS authentication.
+        """Enable SMS authentication.
 
         Args:
             phone_number: Phone number for SMS
 
         Returns:
             Verification code
+
         """
         self.sms_phone_number = phone_number  # Should be encrypted
 
@@ -393,12 +391,12 @@ class MFASettings(BaseModel):
         return code
 
     def add_trusted_device(self, device_id: str, device_info: dict[str, Any]) -> None:
-        """
-        Add a trusted device.
+        """Add a trusted device.
 
         Args:
             device_id: Device identifier
             device_info: Device information
+
         """
         trusted_device = {
             "device_id": device_id,
@@ -417,14 +415,14 @@ class MFASettings(BaseModel):
             self.trusted_devices = [trusted_device]
 
     def is_trusted_device(self, device_id: str) -> bool:
-        """
-        Check if device is trusted.
+        """Check if device is trusted.
 
         Args:
             device_id: Device identifier
 
         Returns:
             True if device is trusted
+
         """
         if not self.trusted_devices:
             return False
@@ -480,14 +478,14 @@ class MFASettings(BaseModel):
         return self.is_enabled and not self.enabled_methods
 
     def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:
-        """
-        Convert to dictionary.
+        """Convert to dictionary.
 
         Args:
             include_sensitive: Include sensitive information
 
         Returns:
             Dictionary representation
+
         """
         data = {
             "user_id": str(self.user_id),

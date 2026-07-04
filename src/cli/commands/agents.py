@@ -1,5 +1,4 @@
-"""
-Agent Framework CLI commands.
+"""Agent Framework CLI commands.
 """
 
 import asyncio
@@ -17,7 +16,6 @@ from src.cli.formatters import print_error, print_success
 @click.group(name="agents")
 def agents_group() -> None:
     """Agent Framework API commands."""
-    pass
 
 
 @agents_group.command(name="query")
@@ -32,7 +30,7 @@ def agents_group() -> None:
 )
 @click.pass_context
 def query_command(
-    ctx: Context, query_text: str, domains: tuple[str, ...], type: str
+    ctx: Context, query_text: str, domains: tuple[str, ...], type: str,
 ) -> None:
     """Execute intelligent MASR-routed query."""
     client_verbose: bool = ctx.obj["verbose"]
@@ -47,7 +45,7 @@ def query_command(
                     payload["domains"] = list(domains)
 
                 with console.status(
-                    f"[bold green]Executing {type} query via MASR router..."
+                    f"[bold green]Executing {type} query via MASR router...",
                 ):
                     result = await client.post(endpoint, payload)
 
@@ -93,7 +91,7 @@ def route_command(ctx: Context, query_text: str, strategy: str) -> None:
 
                 table.add_row("Selected Model", result.get("selected_model", "N/A"))
                 table.add_row(
-                    "Estimated Cost", f"${result.get('estimated_cost', 0):.4f}"
+                    "Estimated Cost", f"${result.get('estimated_cost', 0):.4f}",
                 )
                 table.add_row("Strategy", result.get("strategy", "N/A"))
                 table.add_row("Agent Chain", ", ".join(result.get("agent_chain", [])))
@@ -134,7 +132,7 @@ def estimate_command(ctx: Context, query_text: str, domains: tuple[str, ...]) ->
 
                 table.add_row("Model Inference", f"${result.get('model_cost', 0):.4f}")
                 table.add_row(
-                    "Agent Coordination", f"${result.get('coordination_cost', 0):.4f}"
+                    "Agent Coordination", f"${result.get('coordination_cost', 0):.4f}",
                 )
                 table.add_row(
                     "[bold]Total Estimate[/bold]",
@@ -156,7 +154,7 @@ def estimate_command(ctx: Context, query_text: str, domains: tuple[str, ...]) ->
 @click.option("--max-sources", type=int, help="Maximum sources (for literature-review)")
 @click.pass_context
 def execute_command(
-    ctx: Context, agent_type: str, query_text: str, max_sources: int | None
+    ctx: Context, agent_type: str, query_text: str, max_sources: int | None,
 ) -> None:
     """Direct agent execution (bypass MASR routing)."""
     client_verbose: bool = ctx.obj["verbose"]
@@ -187,7 +185,7 @@ def execute_command(
 @agents_group.command(name="chain")
 @click.argument("query_text")
 @click.option(
-    "--agents", "-a", multiple=True, required=True, help="Agent chain (in order)"
+    "--agents", "-a", multiple=True, required=True, help="Agent chain (in order)",
 )
 @click.pass_context
 def chain_command(ctx: Context, query_text: str, agents: tuple[str, ...]) -> None:
@@ -235,7 +233,7 @@ def status_command(ctx: Context) -> None:
                 table.add_row("Status", result.get("status", "N/A"))
                 table.add_row("Total Queries", str(result.get("total_queries", 0)))
                 table.add_row(
-                    "Avg Response Time", f"{result.get('avg_response_time', 0):.2f}s"
+                    "Avg Response Time", f"{result.get('avg_response_time', 0):.2f}s",
                 )
                 table.add_row("Cost Savings", f"${result.get('cost_savings', 0):.2f}")
 

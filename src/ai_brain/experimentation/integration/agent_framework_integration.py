@@ -1,5 +1,4 @@
-"""
-Agent Framework API A/B Testing Integration
+"""Agent Framework API A/B Testing Integration
 
 This module integrates the completed Agent Framework APIs (Direct Agent, MASR,
 Supervisor, TalkHier) with the A/B Testing System to enable systematic
@@ -109,7 +108,7 @@ class AgentExperimentConfig:
             "total_cost",
             "token_usage",
             "success_rate",
-        ]
+        ],
     )
     allocation_strategy: str = "thompson_sampling"
     initial_exploration_rate: float = 0.2
@@ -145,8 +144,7 @@ class AgentExperimentResult:
 
 
 class AgentFrameworkExperimentor:
-    """
-    Central integration service for A/B testing with Agent Framework APIs.
+    """Central integration service for A/B testing with Agent Framework APIs.
 
     This class orchestrates experiments across all agent framework components,
     enabling systematic optimization of routing, execution patterns, and
@@ -175,7 +173,7 @@ class AgentFrameworkExperimentor:
         """Start background tasks for result processing and optimization."""
         self._flush_task = asyncio.create_task(self._flush_results_periodically())
         self._allocations_task = asyncio.create_task(
-            self._update_allocations_periodically()
+            self._update_allocations_periodically(),
         )
 
     async def _flush_results_periodically(self) -> None:
@@ -199,8 +197,7 @@ class AgentFrameworkExperimentor:
         target_domains: list[str] | None = None,
         duration_days: int = 7,
     ) -> str:
-        """
-        Create an experiment to test different MASR routing strategies.
+        """Create an experiment to test different MASR routing strategies.
 
         Args:
             name: Experiment name
@@ -210,6 +207,7 @@ class AgentFrameworkExperimentor:
 
         Returns:
             Experiment ID
+
         """
         experiment_id = f"routing_{uuid4().hex[:8]}"
 
@@ -240,11 +238,11 @@ class AgentFrameworkExperimentor:
                 "experiment_type": "routing",
                 "variants": list(variants.keys()),
                 "config": config.__dict__,
-            }
+            },
         )
 
         logger.info(
-            f"Created routing experiment {experiment_id} with strategies: {strategies}"
+            f"Created routing experiment {experiment_id} with strategies: {strategies}",
         )
         return experiment_id
 
@@ -255,8 +253,7 @@ class AgentFrameworkExperimentor:
         bypass_weight: float = 0.1,
         complexity_threshold: str = "medium",
     ) -> str:
-        """
-        Create an experiment to optimize Primary vs Bypass API usage.
+        """Create an experiment to optimize Primary vs Bypass API usage.
 
         Args:
             name: Experiment name
@@ -266,6 +263,7 @@ class AgentFrameworkExperimentor:
 
         Returns:
             Experiment ID
+
         """
         experiment_id = f"api_pattern_{uuid4().hex[:8]}"
 
@@ -303,10 +301,9 @@ class AgentFrameworkExperimentor:
         return experiment_id
 
     async def create_talkhier_optimization_experiment(
-        self, name: str, min_rounds: int = 1, max_rounds: int = 5
+        self, name: str, min_rounds: int = 1, max_rounds: int = 5,
     ) -> str:
-        """
-        Create an experiment to optimize TalkHier refinement rounds.
+        """Create an experiment to optimize TalkHier refinement rounds.
 
         Args:
             name: Experiment name
@@ -315,6 +312,7 @@ class AgentFrameworkExperimentor:
 
         Returns:
             Experiment ID
+
         """
         experiment_id = f"talkhier_{uuid4().hex[:8]}"
 
@@ -352,8 +350,7 @@ class AgentFrameworkExperimentor:
         context: dict[str, Any],
         experiment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """
-        Execute a query while running A/B experiments.
+        """Execute a query while running A/B experiments.
 
         This is the main entry point that intercepts regular API calls
         and applies experimental variations.
@@ -366,12 +363,13 @@ class AgentFrameworkExperimentor:
 
         Returns:
             Execution result with experiment metadata
+
         """
         request_id = str(uuid4())
         start_time = datetime.now(UTC)
 
         applicable_experiments = await self._get_applicable_experiments(
-            query, context, experiment_ids
+            query, context, experiment_ids,
         )
 
         assignments: dict[str, str] = {}
@@ -450,7 +448,7 @@ class AgentFrameworkExperimentor:
         return applicable
 
     async def _assign_variant(
-        self, experiment_id: str, user_id: str, context: dict[str, Any]
+        self, experiment_id: str, user_id: str, context: dict[str, Any],
     ) -> str:
         """Assign user to a variant using the allocation strategy."""
         import random
@@ -462,7 +460,7 @@ class AgentFrameworkExperimentor:
             or config.allocation_strategy == "epsilon_greedy"
         ):
             allocation_decision = await self.allocation_engine.allocate_variant(
-                experiment_id=experiment_id, user_context=context
+                experiment_id=experiment_id, user_context=context,
             )
             variant = str(allocation_decision.variant_id)
         else:
@@ -471,7 +469,7 @@ class AgentFrameworkExperimentor:
         return variant
 
     async def _build_execution_config(
-        self, assignments: dict[str, str]
+        self, assignments: dict[str, str],
     ) -> dict[str, Any]:
         """Build execution configuration from variant assignments."""
         config: dict[str, Any] = {}
@@ -503,7 +501,7 @@ class AgentFrameworkExperimentor:
         return config
 
     async def _execute_with_config(
-        self, query: str, context: dict[str, Any], config: dict[str, Any]
+        self, query: str, context: dict[str, Any], config: dict[str, Any],
     ) -> dict[str, Any]:
         """Execute query with experimental configuration."""
         api_pattern = str(config.get("api_pattern", "primary"))
@@ -522,7 +520,7 @@ class AgentFrameworkExperimentor:
                 context=dict(config.get("routing_params", {})),
             )
             routing_result = await self.masr_service.get_routing_decision(
-                routing_request
+                routing_request,
             )
 
             supervisor_request = SupervisorExecuteRequest(
@@ -540,7 +538,7 @@ class AgentFrameworkExperimentor:
                 else "research"
             )
             supervisor_result = await self.supervisor_service.execute_supervisor_task(
-                supervisor_type=primary_supervisor, request=supervisor_request
+                supervisor_type=primary_supervisor, request=supervisor_request,
             )
 
             return {
@@ -557,33 +555,32 @@ class AgentFrameworkExperimentor:
                 "result": supervisor_result.result,
             }
 
-        else:
-            from src.models.base_models import AgentType
+        from src.models.base_models import AgentType
 
-            from src.models.agent_api_models import AgentExecutionRequest
+        from src.models.agent_api_models import AgentExecutionRequest
 
-            agent_type = AgentType(config.get("agent_type", "RESEARCH"))
-            agent_request = AgentExecutionRequest(
-                query=query,
-                context=context,
-                parameters=dict(config.get("agent_params", {})),
-                user_id=None,
-                session_id=None,
-            )
-            agent_result = await self.agent_service.execute_single_agent(
-                agent_type=agent_type, request=agent_request
-            )
+        agent_type = AgentType(config.get("agent_type", "RESEARCH"))
+        agent_request = AgentExecutionRequest(
+            query=query,
+            context=context,
+            parameters=dict(config.get("agent_params", {})),
+            user_id=None,
+            session_id=None,
+        )
+        agent_result = await self.agent_service.execute_single_agent(
+            agent_type=agent_type, request=agent_request,
+        )
 
-            return {
-                "success": True,
-                "routing_decision": None,
-                "supervisor": None,
-                "agents_used": [agent_type.value],
-                "quality_score": agent_result.quality_score,
-                "total_cost": agent_result.cost_estimate or 0.0,
-                "token_usage": agent_result.tokens_used or 0,
-                "result": agent_result.output,
-            }
+        return {
+            "success": True,
+            "routing_decision": None,
+            "supervisor": None,
+            "agents_used": [agent_type.value],
+            "quality_score": agent_result.quality_score,
+            "total_cost": agent_result.cost_estimate or 0.0,
+            "token_usage": agent_result.tokens_used or 0,
+            "result": agent_result.output,
+        }
 
     # ==================== Results Analysis ====================
 
@@ -671,10 +668,9 @@ class AgentFrameworkExperimentor:
                 await self.allocation_engine.update_allocations()
 
     async def get_experiment_results(
-        self, experiment_id: str, include_statistical_analysis: bool = True
+        self, experiment_id: str, include_statistical_analysis: bool = True,
     ) -> dict[str, Any]:
-        """
-        Get current results and analysis for an experiment.
+        """Get current results and analysis for an experiment.
 
         Args:
             experiment_id: Experiment to analyze
@@ -682,6 +678,7 @@ class AgentFrameworkExperimentor:
 
         Returns:
             Experiment results and analysis
+
         """
         if experiment_id not in self.active_experiments:
             raise ValueError(f"Experiment {experiment_id} not found")
@@ -712,7 +709,7 @@ class AgentFrameworkExperimentor:
         if include_statistical_analysis and len(results["variants"]) > 1:
             experiment_data: dict[str, list[float]] = {}
             samples: dict[str, dict[str, list[float]]] = self.variant_samples.get(
-                experiment_id, {}
+                experiment_id, {},
             )
             metric_key = {
                 "quality_score": "quality",
@@ -724,17 +721,16 @@ class AgentFrameworkExperimentor:
                 experiment_data[variant_id] = variant_samples.get(metric_key, [])
 
             analysis = await self.statistical_engine.comprehensive_analysis(
-                experiment_data=experiment_data
+                experiment_data=experiment_data,
             )
             results["statistical_analysis"] = analysis
 
         return results
 
     async def stop_experiment(
-        self, experiment_id: str, reason: str = "manual_stop"
+        self, experiment_id: str, reason: str = "manual_stop",
     ) -> dict[str, Any]:
-        """
-        Stop an active experiment and get final results.
+        """Stop an active experiment and get final results.
 
         Args:
             experiment_id: Experiment to stop
@@ -742,12 +738,13 @@ class AgentFrameworkExperimentor:
 
         Returns:
             Final experiment results
+
         """
         if experiment_id not in self.active_experiments:
             raise ValueError(f"Experiment {experiment_id} not found")
 
         final_results = await self.get_experiment_results(
-            experiment_id, include_statistical_analysis=True
+            experiment_id, include_statistical_analysis=True,
         )
 
         del self.active_experiments[experiment_id]
@@ -765,14 +762,12 @@ class AgentFrameworkExperimentor:
     # ==================== Helper Methods ====================
 
     def validate_research_claims_against_logs(self) -> dict[str, dict[str, Any]]:
-        """
-        Map paper performance claims to A/B test IDs backed by execution logs.
+        """Map paper performance claims to A/B test IDs backed by execution logs.
 
         The validation is intentionally conservative: an experiment only supports
         a claim when logged control/treatment averages land within the stated
         claim range.
         """
-
         experiment_summaries = self._summarize_experiment_execution_logs()
         validation: dict[str, dict[str, Any]] = {}
 
@@ -803,7 +798,6 @@ class AgentFrameworkExperimentor:
 
     def _summarize_experiment_execution_logs(self) -> dict[str, dict[str, float]]:
         """Summarize A/B execution logs into claim-validation percentages."""
-
         logs_by_experiment: dict[str, list[AgentExperimentResult]] = {}
         for result in self.results_buffer:
             logs_by_experiment.setdefault(result.experiment_id, []).append(result)
@@ -847,15 +841,14 @@ class AgentFrameworkExperimentor:
         return summaries
 
     def _average_metrics_by_variant(
-        self, results: list[AgentExperimentResult]
+        self, results: list[AgentExperimentResult],
     ) -> dict[str, dict[str, float]]:
         """Average quality and cost metrics from execution logs by variant."""
-
         totals: dict[str, dict[str, float]] = {}
         counts: dict[str, int] = {}
         for result in results:
             metrics = totals.setdefault(
-                result.variant_id, {"quality_score": 0.0, "total_cost": 0.0}
+                result.variant_id, {"quality_score": 0.0, "total_cost": 0.0},
             )
             metrics["quality_score"] += result.quality_score
             metrics["total_cost"] += result.total_cost
@@ -870,7 +863,6 @@ class AgentFrameworkExperimentor:
 
     async def _run_power_preflight(self, config: AgentExperimentConfig) -> list[str]:
         """Warn when configured samples are below power-analysis requirements."""
-
         baseline_metric = self._baseline_metric_for_power(config.primary_metric)
         metric_type = self._metric_type_for_power(config.primary_metric)
         significance_level = max(0.0, min(1.0, 1.0 - config.confidence_level))
@@ -900,7 +892,6 @@ class AgentFrameworkExperimentor:
 
     def _baseline_metric_for_power(self, primary_metric: str) -> float:
         """Return conservative baseline values for experiment power checks."""
-
         if primary_metric in {"success", "success_rate"}:
             return 0.8
         if primary_metric == "total_cost":
@@ -911,7 +902,6 @@ class AgentFrameworkExperimentor:
 
     def _metric_type_for_power(self, primary_metric: str) -> str:
         """Map experiment metrics to statistical power-analysis metric types."""
-
         if primary_metric in {"success", "success_rate"}:
             return "proportion"
         return "continuous"
@@ -955,7 +945,7 @@ class AgentFrameworkExperimentor:
                     "primary_metric": config.primary_metric,
                     "optimization_goal": config.optimization_goal,
                     "sample_sizes": sample_sizes,
-                }
+                },
             )
         return experiments
 

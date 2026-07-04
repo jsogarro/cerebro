@@ -197,7 +197,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         request._receive = receive
         response = await call_next(request)
         response_body = b"".join(
-            [chunk async for chunk in cast(Any, response).body_iterator]
+            [chunk async for chunk in cast("Any", response).body_iterator],
         )
 
         replay = Response(

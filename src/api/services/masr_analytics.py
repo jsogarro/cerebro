@@ -1,5 +1,4 @@
-"""
-MASR Performance Analytics Service
+"""MASR Performance Analytics Service
 
 Advanced analytics and performance monitoring for MASR routing intelligence.
 Provides real-time metrics, trend analysis, and optimization recommendations.
@@ -103,8 +102,7 @@ class StrategyPerformance:
 
 
 class MASRAnalyticsService:
-    """
-    Advanced analytics service for MASR routing performance.
+    """Advanced analytics service for MASR routing performance.
 
     Provides:
     - Real-time performance metrics
@@ -128,20 +126,20 @@ class MASRAnalyticsService:
         # Metrics tracking
         self.metrics: dict[str, PerformanceMetric] = {
             "routing_latency_ms": PerformanceMetric(
-                "routing_latency_ms", 0, 0, 0, 0, 0, "stable", 0
+                "routing_latency_ms", 0, 0, 0, 0, 0, "stable", 0,
             ),
             "cost_per_query": PerformanceMetric(
-                "cost_per_query", 0, 0, 0, 0, 0, "stable", 0
+                "cost_per_query", 0, 0, 0, 0, 0, "stable", 0,
             ),
             "quality_score": PerformanceMetric(
-                "quality_score", 0, 0, 0, 0, 0, "stable", 0
+                "quality_score", 0, 0, 0, 0, 0, "stable", 0,
             ),
             "supervisor_utilization": PerformanceMetric(
-                "supervisor_utilization", 0, 0, 0, 0, 0, "stable", 0
+                "supervisor_utilization", 0, 0, 0, 0, 0, "stable", 0,
             ),
             "error_rate": PerformanceMetric("error_rate", 0, 0, 0, 0, 0, "stable", 0),
             "cache_hit_rate": PerformanceMetric(
-                "cache_hit_rate", 0, 0, 0, 0, 0, "stable", 0
+                "cache_hit_rate", 0, 0, 0, 0, 0, "stable", 0,
             ),
         }
 
@@ -157,7 +155,7 @@ class MASRAnalyticsService:
                 "total_latency_ms": 0,
                 "total_tokens": 0,
                 "total_cost": 0,
-            }
+            },
         )
 
         # Anomaly detection thresholds
@@ -181,8 +179,7 @@ class MASRAnalyticsService:
         estimated_latency_ms: float,
         supervisor_count: int,
     ) -> None:
-        """
-        Record a routing decision for analytics.
+        """Record a routing decision for analytics.
 
         Args:
             routing_id: Unique routing ID
@@ -192,6 +189,7 @@ class MASRAnalyticsService:
             estimated_cost: Estimated cost
             estimated_latency_ms: Estimated latency
             supervisor_count: Number of supervisors allocated
+
         """
         # Update strategy performance
         perf = self.strategy_performance[strategy]
@@ -201,7 +199,7 @@ class MASRAnalyticsService:
         self.metrics["routing_latency_ms"].update(estimated_latency_ms)
         self.metrics["cost_per_query"].update(estimated_cost)
         self.metrics["supervisor_utilization"].update(
-            supervisor_count / 5.0
+            supervisor_count / 5.0,
         )  # Normalize to 0-1
 
         # Record hourly stats
@@ -222,8 +220,7 @@ class MASRAnalyticsService:
         quality_score: float,
         error_occurred: bool = False,
     ) -> None:
-        """
-        Record feedback from completed routing.
+        """Record feedback from completed routing.
 
         Args:
             routing_id: Routing ID
@@ -232,6 +229,7 @@ class MASRAnalyticsService:
             actual_latency_ms: Actual latency
             quality_score: Quality score (0-1)
             error_occurred: Whether an error occurred
+
         """
         # Update strategy performance
         perf = self.strategy_performance[strategy]
@@ -241,7 +239,7 @@ class MASRAnalyticsService:
             self.metrics["error_rate"].update(
                 perf.failed_routes / perf.total_requests
                 if perf.total_requests > 0
-                else 0
+                else 0,
             )
         else:
             perf.successful_routes += 1
@@ -257,11 +255,11 @@ class MASRAnalyticsService:
                 perf.quality_scores = perf.quality_scores[-100:]
 
     async def get_performance_summary(self) -> dict[str, Any]:
-        """
-        Get comprehensive performance summary.
+        """Get comprehensive performance summary.
 
         Returns:
             Performance summary with metrics and recommendations
+
         """
         # Calculate overall statistics
         total_requests = sum(
@@ -300,7 +298,7 @@ class MASRAnalyticsService:
                         p.average_cost
                         for p in self.strategy_performance.values()
                         if p.total_requests > 0
-                    ]
+                    ],
                 )
                 if any(p.total_requests > 0 for p in self.strategy_performance.values())
                 else 0,
@@ -309,7 +307,7 @@ class MASRAnalyticsService:
                         p.average_quality
                         for p in self.strategy_performance.values()
                         if p.quality_scores
-                    ]
+                    ],
                 )
                 if any(p.quality_scores for p in self.strategy_performance.values())
                 else 0,
@@ -343,11 +341,11 @@ class MASRAnalyticsService:
         }
 
     async def get_cost_analysis(self) -> dict[str, Any]:
-        """
-        Get detailed cost analysis and optimization opportunities.
+        """Get detailed cost analysis and optimization opportunities.
 
         Returns:
             Cost analysis with breakdown and recommendations
+
         """
         # Calculate cost breakdown by strategy
         strategy_costs = {}
@@ -391,7 +389,7 @@ class MASRAnalyticsService:
                     "potential_savings": quality_perf.total_cost
                     * 0.3,  # Assume 30% reduction possible
                     "recommendation": "Use balanced strategy for moderate complexity queries",
-                }
+                },
             )
 
         # Check for cost-efficient underutilization
@@ -407,7 +405,7 @@ class MASRAnalyticsService:
                     * 0.1
                     * 0.2,  # 10% more queries at 20% lower cost
                     "recommendation": "Route simple queries to cost-efficient strategy",
-                }
+                },
             )
 
         return {
@@ -428,8 +426,7 @@ class MASRAnalyticsService:
         domain: QueryDomain,
         constraints: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Get strategy recommendations for specific query characteristics.
+        """Get strategy recommendations for specific query characteristics.
 
         Args:
             complexity: Query complexity
@@ -438,25 +435,26 @@ class MASRAnalyticsService:
 
         Returns:
             Strategy recommendations with reasoning
+
         """
         recommendations = []
 
         # Analyze historical performance for similar queries
         relevant_performance = await self._get_performance_for_characteristics(
-            complexity, domain
+            complexity, domain,
         )
 
         # Score each strategy
         strategy_scores = {}
         for strategy in RoutingStrategy:
             score = await self._score_strategy(
-                strategy, complexity, domain, relevant_performance, constraints or {}
+                strategy, complexity, domain, relevant_performance, constraints or {},
             )
             strategy_scores[strategy] = score
 
         # Sort by score
         sorted_strategies = sorted(
-            strategy_scores.items(), key=lambda x: x[1], reverse=True
+            strategy_scores.items(), key=lambda x: x[1], reverse=True,
         )
 
         # Generate recommendations
@@ -467,15 +465,15 @@ class MASRAnalyticsService:
                     "strategy": strategy.value,
                     "score": score,
                     "reasoning": self._generate_strategy_reasoning(
-                        strategy, complexity, domain, perf
+                        strategy, complexity, domain, perf,
                     ),
                     "expected_cost": perf.average_cost,
                     "expected_quality": perf.average_quality,
                     "expected_latency_ms": perf.average_latency_ms,
                     "confidence": min(
-                        0.95, perf.total_requests / 100
+                        0.95, perf.total_requests / 100,
                     ),  # Confidence based on data
-                }
+                },
             )
 
         return {
@@ -494,11 +492,11 @@ class MASRAnalyticsService:
         }
 
     async def get_model_performance(self) -> dict[str, Any]:
-        """
-        Get model-specific performance metrics.
+        """Get model-specific performance metrics.
 
         Returns:
             Model performance analysis
+
         """
         model_stats = []
 
@@ -513,7 +511,7 @@ class MASRAnalyticsService:
                         "avg_tokens": stats["total_tokens"] / stats["requests"],
                         "total_cost": stats["total_cost"],
                         "cost_per_request": stats["total_cost"] / stats["requests"],
-                    }
+                    },
                 )
 
         # Sort by requests
@@ -526,7 +524,7 @@ class MASRAnalyticsService:
             if model_stats
             else None,
             "most_cost_effective": min(
-                model_stats, key=lambda x: x["cost_per_request"]
+                model_stats, key=lambda x: x["cost_per_request"],
             )["model_id"]
             if model_stats
             else None,
@@ -541,35 +539,35 @@ class MASRAnalyticsService:
         error_metric = self.metrics["error_rate"]
         if error_metric.current_value > 0.05:
             recommendations.append(
-                f"High error rate ({error_metric.current_value:.1%}). Consider enabling fallback mechanisms."
+                f"High error rate ({error_metric.current_value:.1%}). Consider enabling fallback mechanisms.",
             )
 
         # Check latency trend
         latency_metric = self.metrics["routing_latency_ms"]
         if latency_metric.trend == "increasing":
             recommendations.append(
-                "Latency is increasing. Consider scaling supervisor pool or using speed-optimized strategy."
+                "Latency is increasing. Consider scaling supervisor pool or using speed-optimized strategy.",
             )
 
         # Check cost efficiency
         cost_metric = self.metrics["cost_per_query"]
         if cost_metric.average > 0.5:
             recommendations.append(
-                f"Average cost (${cost_metric.average:.2f}) is high. Increase use of cost-efficient strategy."
+                f"Average cost (${cost_metric.average:.2f}) is high. Increase use of cost-efficient strategy.",
             )
 
         # Check quality scores
         quality_metric = self.metrics["quality_score"]
         if quality_metric.average < 0.8:
             recommendations.append(
-                f"Quality scores averaging {quality_metric.average:.2f}. Consider using quality-focused strategy for critical queries."
+                f"Quality scores averaging {quality_metric.average:.2f}. Consider using quality-focused strategy for critical queries.",
             )
 
         # Check cache utilization
         cache_metric = self.metrics["cache_hit_rate"]
         if cache_metric.average < 0.3:
             recommendations.append(
-                "Low cache hit rate. Consider implementing query result caching."
+                "Low cache hit rate. Consider implementing query result caching.",
             )
 
         return recommendations
@@ -595,22 +593,21 @@ class MASRAnalyticsService:
                                 if metric.current_value > threshold * 0.8
                                 else "critical",
                                 "message": f"{metric_name} below acceptable threshold",
-                            }
+                            },
                         )
-                else:
-                    # For others, alert if above threshold
-                    if metric.current_value > threshold:
-                        anomalies.append(
-                            {
-                                "metric": metric_name,
-                                "current_value": metric.current_value,
-                                "threshold": threshold,
-                                "severity": "warning"
-                                if metric.current_value < threshold * 1.5
-                                else "critical",
-                                "message": f"{metric_name} exceeds acceptable threshold",
-                            }
-                        )
+                # For others, alert if above threshold
+                elif metric.current_value > threshold:
+                    anomalies.append(
+                        {
+                            "metric": metric_name,
+                            "current_value": metric.current_value,
+                            "threshold": threshold,
+                            "severity": "warning"
+                            if metric.current_value < threshold * 1.5
+                            else "critical",
+                            "message": f"{metric_name} exceeds acceptable threshold",
+                        },
+                    )
 
         return anomalies
 
@@ -664,7 +661,7 @@ class MASRAnalyticsService:
                         / stats.get("requests", 1)
                         if stats.get("requests", 0) > 0
                         else 0,
-                    }
+                    },
                 )
 
         return hourly_costs
@@ -680,7 +677,7 @@ class MASRAnalyticsService:
         }
 
     async def _get_performance_for_characteristics(
-        self, complexity: QueryComplexity, domain: QueryDomain
+        self, complexity: QueryComplexity, domain: QueryDomain,
     ) -> dict[RoutingStrategy, dict[str, float]]:
         """Get historical performance for query characteristics"""
         # In production, this would query a database
@@ -776,7 +773,7 @@ class MASRAnalyticsService:
         return reasoning
 
     def _generate_model_recommendations(
-        self, model_stats: list[dict[str, Any]]
+        self, model_stats: list[dict[str, Any]],
     ) -> list[str]:
         """Generate model-specific recommendations"""
         recommendations = []
@@ -788,7 +785,7 @@ class MASRAnalyticsService:
         for model in model_stats:
             if model["error_rate"] > 0.1:
                 recommendations.append(
-                    f"Model {model['model_id']} has high error rate ({model['error_rate']:.1%}). Consider fallback options."
+                    f"Model {model['model_id']} has high error rate ({model['error_rate']:.1%}). Consider fallback options.",
                 )
 
         # Check for cost optimization
@@ -801,13 +798,11 @@ class MASRAnalyticsService:
                     most_used["cost_per_request"] - cheapest["cost_per_request"]
                 ) * most_used["requests"]
                 recommendations.append(
-                    f"Consider using {cheapest['model_id']} more often. Potential savings: ${potential_savings:.2f}"
+                    f"Consider using {cheapest['model_id']} more often. Potential savings: ${potential_savings:.2f}",
                 )
 
         return (
-            recommendations
-            if recommendations
-            else ["Model performance is within acceptable parameters"]
+            recommendations or ["Model performance is within acceptable parameters"]
         )
 
 

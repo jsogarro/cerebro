@@ -1,5 +1,4 @@
-"""
-Episodic Memory Manager
+"""Episodic Memory Manager
 
 Manages episodic memory for storing interaction history, user experiences,
 and contextual episodes. Uses PostgreSQL for persistent, structured storage
@@ -190,8 +189,7 @@ class EpisodeQuery:
 
 
 class EpisodicMemoryManager:
-    """
-    Manages episodic memory for storing and retrieving interaction history.
+    """Manages episodic memory for storing and retrieving interaction history.
 
     Episodic memory provides:
     - Persistent storage of user interactions
@@ -210,7 +208,7 @@ class EpisodicMemoryManager:
 
         # Memory configuration
         self.max_session_duration_hours: int = config.get(
-            "max_session_duration_hours", 24
+            "max_session_duration_hours", 24,
         )
         self.retention_days: int = config.get("retention_days", 7)
         self.max_size: int = config.get("max_size", 10000)
@@ -231,19 +229,18 @@ class EpisodicMemoryManager:
 
     async def initialize(self) -> None:
         """Initialize the episodic memory system."""
-
         if self.database_url and HAS_SQLALCHEMY:
             try:
                 # Create async engine
                 self.engine = create_async_engine(
-                    self.database_url, echo=self.config.get("sql_debug", False)
+                    self.database_url, echo=self.config.get("sql_debug", False),
                 )
 
                 # Create session factory
                 from sqlalchemy.ext.asyncio import async_sessionmaker
 
                 self.session_factory = async_sessionmaker(
-                    bind=self.engine, class_=AsyncSession, expire_on_commit=False
+                    bind=self.engine, class_=AsyncSession, expire_on_commit=False,
                 )
 
                 # Create tables
@@ -255,7 +252,7 @@ class EpisodicMemoryManager:
 
             except Exception as e:
                 logger.error(
-                    f"Failed to initialize PostgreSQL for episodic memory: {e}"
+                    f"Failed to initialize PostgreSQL for episodic memory: {e}",
                 )
                 self.engine = None
 
@@ -263,16 +260,15 @@ class EpisodicMemoryManager:
             logger.warning("Using fallback storage for episodic memory")
 
     async def store_episode(self, episode: Episode) -> bool:
-        """
-        Store an episode in episodic memory.
+        """Store an episode in episodic memory.
 
         Args:
             episode: Episode to store
 
         Returns:
             True if stored successfully
-        """
 
+        """
         try:
             if self.engine and self.session_factory:
                 await self._store_episode_db(episode)
@@ -288,16 +284,15 @@ class EpisodicMemoryManager:
             return False
 
     async def retrieve_episodes(self, query: EpisodeQuery) -> list[Episode]:
-        """
-        Retrieve episodes based on query parameters.
+        """Retrieve episodes based on query parameters.
 
         Args:
             query: Query parameters
 
         Returns:
             List of matching episodes
-        """
 
+        """
         try:
             if self.engine and self.session_factory:
                 episodes = await self._retrieve_episodes_db(query)
@@ -314,12 +309,10 @@ class EpisodicMemoryManager:
 
     async def get_session_summary(self, session_id: str) -> dict[str, Any] | None:
         """Get summary statistics for a session."""
-
         try:
             if self.engine and self.session_factory:
                 return await self._get_session_summary_db(session_id)
-            else:
-                return self._get_session_summary_fallback(session_id)
+            return self._get_session_summary_fallback(session_id)
 
         except Exception as e:
             logger.error(f"Failed to get session summary for {session_id}: {e}")
@@ -331,8 +324,7 @@ class EpisodicMemoryManager:
         similarity_threshold: float = 0.7,
         limit: int = 10,
     ) -> list[tuple[Episode, float]]:
-        """
-        Find episodes similar to a reference episode.
+        """Find episodes similar to a reference episode.
 
         Args:
             reference_episode: Episode to find similar ones to
@@ -341,8 +333,8 @@ class EpisodicMemoryManager:
 
         Returns:
             List of (episode, similarity_score) tuples
-        """
 
+        """
         # Query recent episodes of similar type
         query = EpisodeQuery(
             event_types=[reference_episode.event_type],
@@ -375,8 +367,7 @@ class EpisodicMemoryManager:
         agent_id: str | None = None,
         days: int = 30,
     ) -> dict[str, Any]:
-        """
-        Analyze patterns in episodic memory.
+        """Analyze patterns in episodic memory.
 
         Args:
             user_id: Analyze patterns for specific user
@@ -385,8 +376,8 @@ class EpisodicMemoryManager:
 
         Returns:
             Pattern analysis results
-        """
 
+        """
         start_time = datetime.now() - timedelta(days=days)
 
         query = EpisodeQuery(
@@ -455,30 +446,28 @@ class EpisodicMemoryManager:
         ]
 
         patterns["common_tags"] = dict(
-            sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+            sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:10],
         )
 
         return patterns
 
     async def cleanup_old_episodes(self, retention_days: int | None = None) -> int:
-        """
-        Clean up old episodes beyond retention period.
+        """Clean up old episodes beyond retention period.
 
         Args:
             retention_days: Days to retain (None = use config default)
 
         Returns:
             Number of episodes cleaned up
-        """
 
+        """
         retention_days = retention_days or self.retention_days
         cutoff_date = datetime.now() - timedelta(days=retention_days)
 
         try:
             if self.engine and self.session_factory:
                 return await self._cleanup_old_episodes_db(cutoff_date)
-            else:
-                return self._cleanup_old_episodes_fallback(cutoff_date)
+            return self._cleanup_old_episodes_fallback(cutoff_date)
 
         except Exception as e:
             logger.error(f"Failed to cleanup old episodes: {e}")
@@ -486,7 +475,6 @@ class EpisodicMemoryManager:
 
     async def get_memory_stats(self) -> dict[str, Any]:
         """Get episodic memory statistics."""
-
         stats = {
             "write_count": self.write_count,
             "read_count": self.read_count,
@@ -498,13 +486,13 @@ class EpisodicMemoryManager:
                 async with self.session_factory() as session:
                     # Get episode count
                     result = await session.execute(
-                        text("SELECT COUNT(*) FROM episodic_events")
+                        text("SELECT COUNT(*) FROM episodic_events"),
                     )
                     stats["total_episodes"] = result.scalar() or 0
 
                     # Get session count
                     result = await session.execute(
-                        text("SELECT COUNT(*) FROM episodic_sessions")
+                        text("SELECT COUNT(*) FROM episodic_sessions"),
                     )
                     stats["total_sessions"] = result.scalar() or 0
 
@@ -512,7 +500,7 @@ class EpisodicMemoryManager:
                     recent_date = datetime.now() - timedelta(days=7)
                     result = await session.execute(
                         text(
-                            "SELECT COUNT(*) FROM episodic_events WHERE timestamp > :date"
+                            "SELECT COUNT(*) FROM episodic_events WHERE timestamp > :date",
                         ),
                         {"date": recent_date},
                     )
@@ -523,7 +511,7 @@ class EpisodicMemoryManager:
                     {
                         "total_episodes": len(self._fallback_storage),
                         "database_connected": False,
-                    }
+                    },
                 )
 
         except Exception as e:
@@ -533,7 +521,6 @@ class EpisodicMemoryManager:
 
     async def _store_episode_db(self, episode: Episode) -> None:
         """Store episode in PostgreSQL database."""
-
         assert self.session_factory is not None
         stored_episode = self._encrypt_episode_for_storage(episode)
         async with self.session_factory() as session:
@@ -560,7 +547,6 @@ class EpisodicMemoryManager:
 
     async def _retrieve_episodes_db(self, query: EpisodeQuery) -> list[Episode]:
         """Retrieve episodes from PostgreSQL database."""
-
         assert self.session_factory is not None
         from sqlalchemy import select
 
@@ -580,7 +566,7 @@ class EpisodicMemoryManager:
             if query.event_types:
                 event_type_values = [et.value for et in query.event_types]
                 db_query = db_query.where(
-                    EpisodicEvent.event_type.in_(event_type_values)
+                    EpisodicEvent.event_type.in_(event_type_values),
                 )
 
             if query.start_time:
@@ -591,17 +577,17 @@ class EpisodicMemoryManager:
 
             if query.min_quality_score:
                 db_query = db_query.where(
-                    EpisodicEvent.quality_score >= query.min_quality_score
+                    EpisodicEvent.quality_score >= query.min_quality_score,
                 )
 
             # Order by
             if query.order_direction == "desc":
                 db_query = db_query.order_by(
-                    desc(getattr(EpisodicEvent, query.order_by))
+                    desc(getattr(EpisodicEvent, query.order_by)),
                 )
             else:
                 db_query = db_query.order_by(
-                    asc(getattr(EpisodicEvent, query.order_by))
+                    asc(getattr(EpisodicEvent, query.order_by)),
                 )
 
             # Limit and offset
@@ -647,7 +633,7 @@ class EpisodicMemoryManager:
                         metadata=dict(db_episode.event_metadata)
                         if db_episode.event_metadata
                         else {},
-                    )
+                    ),
                 )
                 episodes.append(episode)
 
@@ -661,7 +647,6 @@ class EpisodicMemoryManager:
 
     def _retrieve_episodes_fallback(self, query: EpisodeQuery) -> list[Episode]:
         """Retrieve episodes from fallback storage."""
-
         episodes = list(self._fallback_storage)
 
         # Apply filters
@@ -703,7 +688,6 @@ class EpisodicMemoryManager:
 
     async def delete_by_user_id(self, user_id: str) -> int:
         """Delete episodic memory associated with a user."""
-
         try:
             if self.engine and self.session_factory:
                 return await self._delete_by_user_id_db(user_id)
@@ -714,7 +698,6 @@ class EpisodicMemoryManager:
 
     async def _delete_by_user_id_db(self, user_id: str) -> int:
         """Delete episodic database rows for a user."""
-
         assert self.session_factory is not None
         async with self.session_factory() as session:
             events = await session.execute(
@@ -730,7 +713,6 @@ class EpisodicMemoryManager:
 
     def _delete_by_user_id_fallback(self, user_id: str) -> int:
         """Delete fallback episodes for a user."""
-
         original_count = len(self._fallback_storage)
         self._fallback_storage = [
             episode for episode in self._fallback_storage if episode.user_id != user_id
@@ -745,7 +727,6 @@ class EpisodicMemoryManager:
 
     def _encrypt_episode_for_storage(self, episode: Episode) -> Episode:
         """Return an episode copy with sensitive payload fields encrypted."""
-
         return replace(
             episode,
             event_data=self._encryption.encrypt_data(episode.event_data),
@@ -756,7 +737,6 @@ class EpisodicMemoryManager:
 
     def _decrypt_episode_from_storage(self, episode: Episode) -> Episode:
         """Return an episode copy with sensitive payload fields decrypted."""
-
         event_data = self._encryption.decrypt_data(episode.event_data)
         context = self._encryption.decrypt_data(episode.context)
         metadata = self._encryption.decrypt_data(episode.metadata)
@@ -786,10 +766,9 @@ class EpisodicMemoryManager:
             self._fallback_accessed_at.pop(lru_episode.id, None)
 
     def _calculate_episode_similarity(
-        self, episode1: Episode, episode2: Episode
+        self, episode1: Episode, episode2: Episode,
     ) -> float:
         """Calculate similarity score between two episodes."""
-
         similarity = 0.0
 
         # Event type similarity

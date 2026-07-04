@@ -1,5 +1,4 @@
-"""
-Caching strategies for different use cases.
+"""Caching strategies for different use cases.
 
 This module provides various caching strategies including TTL, LRU,
 and dependency-based invalidation.
@@ -22,7 +21,6 @@ class CacheStrategy(ABC):
     @abstractmethod
     async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Called when a key is accessed."""
-        pass
 
     @abstractmethod
     async def on_set(
@@ -33,39 +31,35 @@ class CacheStrategy(ABC):
         dependencies: list[str] | None = None,
     ) -> None:
         """Called when a key is set."""
-        pass
 
     @abstractmethod
     async def on_delete(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Called when a key is deleted."""
-        pass
 
     async def invalidate_dependencies(
-        self, key: str, redis: aioredis.Redis[Any]
+        self, key: str, redis: aioredis.Redis[Any],
     ) -> int:
         """Invalidate dependent keys."""
         return 0
 
 
 class TTLStrategy(CacheStrategy):
-    """
-    Time-to-live caching strategy.
+    """Time-to-live caching strategy.
 
     Simple expiration-based caching.
     """
 
     def __init__(self, ttl: int = 3600):
-        """
-        Initialize TTL strategy.
+        """Initialize TTL strategy.
 
         Args:
             ttl: Default time-to-live in seconds
+
         """
         self.default_ttl = ttl
 
     async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """No action needed on get for TTL strategy."""
-        pass
 
     async def on_set(
         self,
@@ -81,23 +75,21 @@ class TTLStrategy(CacheStrategy):
 
     async def on_delete(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """No additional action needed on delete."""
-        pass
 
 
 class LRUStrategy(CacheStrategy):
-    """
-    Least Recently Used caching strategy.
+    """Least Recently Used caching strategy.
 
     Maintains access timestamps and evicts least recently used items.
     """
 
     def __init__(self, max_items: int = 1000, ttl: int = 3600):
-        """
-        Initialize LRU strategy.
+        """Initialize LRU strategy.
 
         Args:
             max_items: Maximum number of items in cache
             ttl: Time-to-live for items
+
         """
         self.max_items = max_items
         self.ttl = ttl
@@ -146,25 +138,23 @@ class LRUStrategy(CacheStrategy):
 
 
 class DependencyStrategy(CacheStrategy):
-    """
-    Dependency-based caching strategy.
+    """Dependency-based caching strategy.
 
     Allows cache invalidation based on dependencies between keys.
     """
 
     def __init__(self, ttl: int = 3600):
-        """
-        Initialize dependency strategy.
+        """Initialize dependency strategy.
 
         Args:
             ttl: Default time-to-live
+
         """
         self.ttl = ttl
         self.deps_prefix = "deps:"
 
     async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """No action needed on get."""
-        pass
 
     async def on_set(
         self,
@@ -212,10 +202,9 @@ class DependencyStrategy(CacheStrategy):
         await redis.delete(deps_key)
 
     async def invalidate_dependencies(
-        self, key: str, redis: aioredis.Redis[Any]
+        self, key: str, redis: aioredis.Redis[Any],
     ) -> int:
-        """
-        Invalidate all keys dependent on the given key.
+        """Invalidate all keys dependent on the given key.
 
         Args:
             key: Key whose dependents should be invalidated
@@ -223,6 +212,7 @@ class DependencyStrategy(CacheStrategy):
 
         Returns:
             Number of keys invalidated
+
         """
         reverse_key = f"{self.deps_prefix}reverse:{key}"
         dependents = await redis.smembers(reverse_key)
@@ -245,18 +235,17 @@ class DependencyStrategy(CacheStrategy):
 
 
 class HybridStrategy(CacheStrategy):
-    """
-    Hybrid caching strategy combining multiple strategies.
+    """Hybrid caching strategy combining multiple strategies.
 
     Applies multiple strategies in sequence.
     """
 
     def __init__(self, strategies: list[CacheStrategy]):
-        """
-        Initialize hybrid strategy.
+        """Initialize hybrid strategy.
 
         Args:
             strategies: List of strategies to apply
+
         """
         self.strategies = strategies
 
@@ -282,7 +271,7 @@ class HybridStrategy(CacheStrategy):
             await strategy.on_delete(key, redis)
 
     async def invalidate_dependencies(
-        self, key: str, redis: aioredis.Redis[Any]
+        self, key: str, redis: aioredis.Redis[Any],
     ) -> int:
         """Invalidate dependencies using all strategies."""
         total = 0
@@ -292,18 +281,17 @@ class HybridStrategy(CacheStrategy):
 
 
 class VersionedCacheStrategy(CacheStrategy):
-    """
-    Versioned caching strategy.
+    """Versioned caching strategy.
 
     Maintains versions of cached data for cache busting.
     """
 
     def __init__(self, ttl: int = 3600):
-        """
-        Initialize versioned strategy.
+        """Initialize versioned strategy.
 
         Args:
             ttl: Default time-to-live
+
         """
         self.ttl = ttl
         self.version_key = "cache:versions"
@@ -311,7 +299,6 @@ class VersionedCacheStrategy(CacheStrategy):
     async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Check version on get."""
         # Could implement version checking here if needed
-        pass
 
     async def on_set(
         self,
@@ -342,8 +329,7 @@ class VersionedCacheStrategy(CacheStrategy):
         await redis.hdel(self.version_key, key)
 
     async def increment_version(self, key: str, redis: aioredis.Redis[Any]) -> int:
-        """
-        Increment version to invalidate cache.
+        """Increment version to invalidate cache.
 
         Args:
             key: Key to increment version for
@@ -351,5 +337,6 @@ class VersionedCacheStrategy(CacheStrategy):
 
         Returns:
             New version number
+
         """
         return await redis.hincrby(self.version_key, key, 1)

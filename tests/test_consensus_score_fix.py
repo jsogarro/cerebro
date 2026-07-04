@@ -17,8 +17,7 @@ from src.agents.communication.talkhier_message import (
 
 @pytest.mark.asyncio
 async def test_consensus_without_evidence_lists():
-    """
-    Test that consensus scoring works when workers don't provide evidence lists.
+    """Test that consensus scoring works when workers don't provide evidence lists.
 
     This reproduces the production bug where research workers returned valid
     TalkHierContent without populating the evidence field, causing:

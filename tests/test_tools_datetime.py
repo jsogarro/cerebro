@@ -36,7 +36,7 @@ class TestDatetimeTool:
         """Test day of week operation."""
         # 2024-01-15 is a Monday
         result = await datetime_tool.execute(
-            {"operation": "day_of_week", "date_iso": "2024-01-15"}
+            {"operation": "day_of_week", "date_iso": "2024-01-15"},
         )
         assert result.success is True
         assert result.value["day_of_week"] == "Monday"
@@ -46,7 +46,7 @@ class TestDatetimeTool:
     async def test_add_days_positive(self, datetime_tool):
         """Test adding positive days."""
         result = await datetime_tool.execute(
-            {"operation": "add_days", "date_iso": "2024-01-15", "days": 10}
+            {"operation": "add_days", "date_iso": "2024-01-15", "days": 10},
         )
         assert result.success is True
         assert result.value["result_date"] == "2024-01-25"
@@ -56,7 +56,7 @@ class TestDatetimeTool:
     async def test_add_days_negative(self, datetime_tool):
         """Test adding negative days (subtraction)."""
         result = await datetime_tool.execute(
-            {"operation": "add_days", "date_iso": "2024-01-15", "days": -5}
+            {"operation": "add_days", "date_iso": "2024-01-15", "days": -5},
         )
         assert result.success is True
         assert result.value["result_date"] == "2024-01-10"
@@ -70,7 +70,7 @@ class TestDatetimeTool:
                 "operation": "diff_days",
                 "date_iso": "2024-01-15",
                 "other_date_iso": "2024-01-25",
-            }
+            },
         )
         assert result.success is True
         assert result.value["difference_days"] == 10
@@ -83,7 +83,7 @@ class TestDatetimeTool:
                 "operation": "diff_days",
                 "date_iso": "2024-01-25",
                 "other_date_iso": "2024-01-15",
-            }
+            },
         )
         assert result.success is True
         assert result.value["difference_days"] == -10
@@ -92,7 +92,7 @@ class TestDatetimeTool:
     async def test_date_with_timezone(self, datetime_tool):
         """Test date parsing with explicit timezone."""
         result = await datetime_tool.execute(
-            {"operation": "day_of_week", "date_iso": "2024-01-15T10:00:00+00:00"}
+            {"operation": "day_of_week", "date_iso": "2024-01-15T10:00:00+00:00"},
         )
         assert result.success is True
         assert result.value["day_of_week"] == "Monday"
@@ -115,7 +115,7 @@ class TestDatetimeTool:
     async def test_add_days_missing_days(self, datetime_tool):
         """Test add_days without days parameter."""
         result = await datetime_tool.execute(
-            {"operation": "add_days", "date_iso": "2024-01-15"}
+            {"operation": "add_days", "date_iso": "2024-01-15"},
         )
         assert result.success is False
         assert "days are required" in result.error
@@ -124,7 +124,7 @@ class TestDatetimeTool:
     async def test_diff_days_missing_other_date(self, datetime_tool):
         """Test diff_days without other_date parameter."""
         result = await datetime_tool.execute(
-            {"operation": "diff_days", "date_iso": "2024-01-15"}
+            {"operation": "diff_days", "date_iso": "2024-01-15"},
         )
         assert result.success is False
         assert "other_date_iso are required" in result.error
@@ -133,7 +133,7 @@ class TestDatetimeTool:
     async def test_invalid_date_format(self, datetime_tool):
         """Test invalid date format is rejected."""
         result = await datetime_tool.execute(
-            {"operation": "day_of_week", "date_iso": "not-a-date"}
+            {"operation": "day_of_week", "date_iso": "not-a-date"},
         )
         assert result.success is False
         assert "Execution error" in result.error

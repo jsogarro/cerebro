@@ -1,5 +1,4 @@
-"""
-Query Decomposer for Multi-Domain Queries
+"""Query Decomposer for Multi-Domain Queries
 
 Decomposes complex queries that span multiple domains into domain-specific
 sub-queries. This enables intelligent routing where a single query like
@@ -24,8 +23,7 @@ class QueryDecomposition:
         cross_domain_dependencies: list[tuple[str, str]],
         coordination_complexity: int,
     ):
-        """
-        Initialize decomposition results.
+        """Initialize decomposition results.
 
         Args:
             detected_domains: List of domains detected in the query
@@ -33,6 +31,7 @@ class QueryDecomposition:
             domain_subqueries: Domain-specific sub-query for each domain
             cross_domain_dependencies: Pairs of (source, target) dependencies
             coordination_complexity: Measure of cross-domain complexity
+
         """
         self.detected_domains = detected_domains
         self.domain_relevance = domain_relevance
@@ -70,16 +69,15 @@ class QueryDecomposer:
         }
 
     def decompose_query(self, query: str) -> QueryDecomposition:
-        """
-        Decompose complex query into domain-specific components.
+        """Decompose complex query into domain-specific components.
 
         Args:
             query: Original complex query
 
         Returns:
             QueryDecomposition with domain assignments and sub-queries
-        """
 
+        """
         query_lower = query.lower()
 
         # Detect domains

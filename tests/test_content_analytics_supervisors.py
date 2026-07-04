@@ -1,5 +1,4 @@
-"""
-Tests for Content and Analytics Supervisors
+"""Tests for Content and Analytics Supervisors
 
 Validates that content and analytics supervisors:
 1. Instantiate correctly with the BaseSupervisor signature
@@ -336,7 +335,8 @@ class TestMASRBridgeIntegration:
 
 class TestPrimaryPathRouting:
     """MASR routes domain queries to the content/analytics supervisor types, and the
-    direct-execution registry can resolve them (not just fall back to research)."""
+    direct-execution registry can resolve them (not just fall back to research).
+    """
 
     @pytest.mark.asyncio
     async def test_router_routes_content_and_analytics_queries(self):
@@ -344,10 +344,10 @@ class TestPrimaryPathRouting:
 
         router = MASRouter()
         content = await router.route(
-            "Write a blog post about the benefits of meditation", context={}
+            "Write a blog post about the benefits of meditation", context={},
         )
         analytics = await router.route(
-            "Analyze quarterly sales data and identify revenue trends", context={}
+            "Analyze quarterly sales data and identify revenue trends", context={},
         )
         assert content.agent_allocation.supervisor_type == "content"
         assert analytics.agent_allocation.supervisor_type == "analytics"
@@ -359,7 +359,7 @@ class TestPrimaryPathRouting:
         from src.api.services import direct_execution_service as des
 
         source = inspect.getsource(
-            des.DirectExecutionService._execute_research_workflow
+            des.DirectExecutionService._execute_research_workflow,
         )
         assert '"content": ContentSupervisor' in source
         assert '"analytics": AnalyticsSupervisor' in source

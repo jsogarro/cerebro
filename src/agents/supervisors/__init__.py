@@ -1,5 +1,4 @@
-"""
-Supervisor Agents Package
+"""Supervisor Agents Package
 
 Implements hierarchical supervisor agents that coordinate teams of specialized
 worker agents using LangGraph orchestration and TalkHier communication protocols.

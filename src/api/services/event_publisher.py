@@ -1,5 +1,4 @@
-"""
-Event publishing service for WebSocket real-time updates.
+"""Event publishing service for WebSocket real-time updates.
 
 This service provides a centralized way to publish events that trigger
 WebSocket notifications. It integrates with Redis pub/sub for scalability
@@ -29,8 +28,7 @@ logger = get_logger()
 
 
 class EventPublisher:
-    """
-    Centralized event publishing service.
+    """Centralized event publishing service.
 
     Publishes events both locally (to WebSocket connections) and to Redis
     for distribution across multiple server instances.
@@ -84,7 +82,7 @@ class EventPublisher:
         logger.info("Event publisher shutdown complete")
 
     async def publish_project_event(
-        self, project_id: Any, event: dict[str, Any]
+        self, project_id: Any, event: dict[str, Any],
     ) -> None:
         """Publish a project-scoped event with an untyped dict payload.
 
@@ -436,11 +434,11 @@ class EventPublisher:
         )
 
     async def _publish_event(self, message: WSMessage) -> None:
-        """
-        Publish an event both locally and to Redis.
+        """Publish an event both locally and to Redis.
 
         Args:
             message: WebSocket message to publish
+
         """
         # Publish locally to WebSocket connections
         if message.project_id:
@@ -486,7 +484,7 @@ class EventPublisher:
                         # (Skip Redis publishing to avoid loops)
                         if ws_message.project_id:
                             await websocket_manager.broadcast_to_project(
-                                ws_message.project_id, ws_message
+                                ws_message.project_id, ws_message,
                             )
                         else:
                             await websocket_manager.broadcast_to_all(ws_message)

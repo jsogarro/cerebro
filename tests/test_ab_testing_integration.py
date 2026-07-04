@@ -1,5 +1,4 @@
-"""
-Integration tests for A/B Testing System with Agent Framework APIs.
+"""Integration tests for A/B Testing System with Agent Framework APIs.
 
 These tests verify that the A/B testing integration properly connects
 with the completed Agent Framework APIs and enables systematic optimization.
@@ -25,19 +24,19 @@ class TestAgentFrameworkExperimentor:
         """Create an experimentor instance for testing."""
         with (
             patch(
-                "src.ai_brain.experimentation.integration.agent_framework_integration.AgentExecutionService"
+                "src.ai_brain.experimentation.integration.agent_framework_integration.AgentExecutionService",
             ),
             patch(
-                "src.ai_brain.experimentation.integration.agent_framework_integration.MASRRoutingService"
+                "src.ai_brain.experimentation.integration.agent_framework_integration.MASRRoutingService",
             ),
             patch(
-                "src.ai_brain.experimentation.integration.agent_framework_integration.SupervisorCoordinationService"
+                "src.ai_brain.experimentation.integration.agent_framework_integration.SupervisorCoordinationService",
             ),
             patch(
-                "src.ai_brain.experimentation.integration.agent_framework_integration.TalkHierSessionService"
+                "src.ai_brain.experimentation.integration.agent_framework_integration.TalkHierSessionService",
             ),
             patch(
-                "src.ai_brain.experimentation.integration.agent_framework_integration.AgentFrameworkExperimentor._start_background_tasks"
+                "src.ai_brain.experimentation.integration.agent_framework_integration.AgentFrameworkExperimentor._start_background_tasks",
             ),
         ):
             experimentor = AgentFrameworkExperimentor()
@@ -46,7 +45,7 @@ class TestAgentFrameworkExperimentor:
 
     @pytest.mark.asyncio
     async def test_create_routing_experiment(
-        self, experimentor: AgentFrameworkExperimentor
+        self, experimentor: AgentFrameworkExperimentor,
     ) -> None:
         """Test creating a routing strategy experiment."""
         # Create experiment
@@ -70,11 +69,11 @@ class TestAgentFrameworkExperimentor:
 
     @pytest.mark.asyncio
     async def test_create_api_pattern_experiment(
-        self, experimentor: AgentFrameworkExperimentor
+        self, experimentor: AgentFrameworkExperimentor,
     ) -> None:
         """Test creating an API pattern experiment."""
         exp_id = await experimentor.create_api_pattern_experiment(
-            name="Test API Pattern", primary_weight=0.9, bypass_weight=0.1
+            name="Test API Pattern", primary_weight=0.9, bypass_weight=0.1,
         )
 
         assert exp_id.startswith("api_pattern_")
@@ -87,11 +86,11 @@ class TestAgentFrameworkExperimentor:
 
     @pytest.mark.asyncio
     async def test_create_talkhier_experiment(
-        self, experimentor: AgentFrameworkExperimentor
+        self, experimentor: AgentFrameworkExperimentor,
     ) -> None:
         """Test creating a TalkHier optimization experiment."""
         exp_id = await experimentor.create_talkhier_optimization_experiment(
-            name="Test TalkHier", min_rounds=1, max_rounds=3
+            name="Test TalkHier", min_rounds=1, max_rounds=3,
         )
 
         assert exp_id.startswith("talkhier_")
@@ -101,15 +100,15 @@ class TestAgentFrameworkExperimentor:
 
     @pytest.mark.asyncio
     async def test_execute_with_experiment(
-        self, experimentor: AgentFrameworkExperimentor
+        self, experimentor: AgentFrameworkExperimentor,
     ) -> None:
         """Test executing a query with active experiments."""
         # Create a routing experiment
         exp_id = await experimentor.create_routing_experiment(
-            name="Test Execution", strategies=["balanced", "cost_efficient"]
+            name="Test Execution", strategies=["balanced", "cost_efficient"],
         )
         experimentor.allocation_engine.allocate_variant = AsyncMock(
-            return_value=SimpleNamespace(variant_id="balanced")
+            return_value=SimpleNamespace(variant_id="balanced"),
         )
 
         experimentor.masr_service.get_routing_decision = AsyncMock(
@@ -117,13 +116,13 @@ class TestAgentFrameworkExperimentor:
                 supervisor_allocations=[SimpleNamespace(supervisor_type="research")],
                 estimated_cost=0.01,
                 model_dump=lambda: {"supervisor_type": "research"},
-            )
+            ),
         )
         experimentor.supervisor_service.execute_supervisor_task = AsyncMock(
             return_value=SimpleNamespace(
                 quality_score=0.85,
                 result="Test result",
-            )
+            ),
         )
 
         # Execute with experiment
@@ -147,19 +146,19 @@ class TestAgentFrameworkExperimentor:
 
     @pytest.mark.asyncio
     async def test_variant_assignment(
-        self, experimentor: AgentFrameworkExperimentor
+        self, experimentor: AgentFrameworkExperimentor,
     ) -> None:
         """Test variant assignment using allocation strategies."""
         # Create experiment with thompson sampling
         exp_id = await experimentor.create_routing_experiment(
-            name="Test Assignment", strategies=["strategy_a", "strategy_b"]
+            name="Test Assignment", strategies=["strategy_a", "strategy_b"],
         )
 
         config = experimentor.active_experiments[exp_id]
         config.allocation_strategy = "thompson_sampling"
 
         experimentor.allocation_engine.allocate_variant = AsyncMock(
-            return_value=SimpleNamespace(variant_id="strategy_a")
+            return_value=SimpleNamespace(variant_id="strategy_a"),
         )
 
         # Assign variant
@@ -170,12 +169,12 @@ class TestAgentFrameworkExperimentor:
 
     @pytest.mark.asyncio
     async def test_get_experiment_results(
-        self, experimentor: AgentFrameworkExperimentor
+        self, experimentor: AgentFrameworkExperimentor,
     ) -> None:
         """Test getting experiment results with statistical analysis."""
         # Create experiment and add mock performance data
         exp_id = await experimentor.create_routing_experiment(
-            name="Test Results", strategies=["control", "treatment"]
+            name="Test Results", strategies=["control", "treatment"],
         )
 
         # Add mock performance data
@@ -205,12 +204,12 @@ class TestAgentFrameworkExperimentor:
                 "effect_size": 0.15,
                 "winning_variant": "treatment",
                 "confidence_interval": [0.05, 0.25],
-            }
+            },
         )
 
         # Get results
         results: dict[str, Any] = await experimentor.get_experiment_results(
-            exp_id, include_statistical_analysis=True
+            exp_id, include_statistical_analysis=True,
         )
 
         assert results["experiment_id"] == exp_id

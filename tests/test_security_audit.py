@@ -48,7 +48,7 @@ def mock_request() -> Request:
         "X-Request-ID": "test-request-123",
     }
     request.state = Mock()
-    return cast(Request, request)
+    return cast("Request", request)
 
 
 class TestAuditLogger:
@@ -79,10 +79,10 @@ class TestAuditLogger:
         logger = AuditLogger(db_session=db_session, buffer_size=2)
 
         await logger.log_event(
-            event_type=AuditEventType.LOGIN_SUCCESS, action="login", user_id="user1"
+            event_type=AuditEventType.LOGIN_SUCCESS, action="login", user_id="user1",
         )
         await logger.log_event(
-            event_type=AuditEventType.LOGOUT, action="logout", user_id="user1"
+            event_type=AuditEventType.LOGOUT, action="logout", user_id="user1",
         )
 
         await logger.flush_buffer()
@@ -96,7 +96,7 @@ class TestAuditLogger:
     async def test_alert_generation(self, db_session: Any) -> None:
         """Test security alert generation."""
         logger = AuditLogger(
-            db_session=db_session, alert_threshold={"failed_login_attempts": 3}
+            db_session=db_session, alert_threshold={"failed_login_attempts": 3},
         )
         query_result = Mock()
         query_result.scalar.return_value = 5
@@ -142,7 +142,7 @@ class TestSecurityAuditIntegration:
 
     @pytest.mark.asyncio
     async def test_rate_limit_with_audit(
-        self, redis_client: Any, db_session: Any, mock_request: Request
+        self, redis_client: Any, db_session: Any, mock_request: Request,
     ) -> None:
         """Test rate limiting with audit logging."""
         rate_limiter = RateLimiter(redis_client, default_limit=2, default_window=60)
@@ -155,7 +155,7 @@ class TestSecurityAuditIntegration:
         db_session.execute.return_value = query_result
 
         allowed, metadata = await rate_limiter.check_rate_limit(
-            mock_request, identifier="user123"
+            mock_request, identifier="user123",
         )
 
         if not allowed:

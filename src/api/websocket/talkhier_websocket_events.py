@@ -1,5 +1,4 @@
-"""
-TalkHier WebSocket Events Handler
+"""TalkHier WebSocket Events Handler
 
 Manages real-time WebSocket communication for TalkHier protocol sessions,
 including live updates, interactive dialogue, and multi-session coordination.
@@ -30,8 +29,7 @@ logger = get_logger()
 
 
 class TalkHierWebSocketHandler:
-    """
-    Handles WebSocket events for TalkHier protocol sessions
+    """Handles WebSocket events for TalkHier protocol sessions
     """
 
     def __init__(self) -> None:
@@ -45,7 +43,7 @@ class TalkHierWebSocketHandler:
     # ================================
 
     async def register_session_connection(
-        self, session_id: str, connection_id: str, websocket: WebSocket
+        self, session_id: str, connection_id: str, websocket: WebSocket,
     ) -> None:
         """Register a WebSocket connection for session updates"""
         if session_id not in self.session_connections:
@@ -57,7 +55,7 @@ class TalkHierWebSocketHandler:
         logger.info(f"Registered connection {connection_id} for session {session_id}")
 
     async def unregister_session_connection(
-        self, session_id: str, connection_id: str
+        self, session_id: str, connection_id: str,
     ) -> None:
         """Unregister a WebSocket connection from session"""
         if session_id in self.session_connections:
@@ -70,7 +68,7 @@ class TalkHierWebSocketHandler:
             del self.connections[connection_id]
 
         logger.info(
-            f"Unregistered connection {connection_id} from session {session_id}"
+            f"Unregistered connection {connection_id} from session {session_id}",
         )
 
     # ================================
@@ -78,7 +76,7 @@ class TalkHierWebSocketHandler:
     # ================================
 
     async def broadcast_round_started(
-        self, session_id: str, round_number: int, participants: list[str]
+        self, session_id: str, round_number: int, participants: list[str],
     ) -> None:
         """Broadcast round started event"""
         event = RoundStartedEvent(
@@ -92,7 +90,7 @@ class TalkHierWebSocketHandler:
         await self._broadcast_to_session(session_id, event.dict())
 
     async def broadcast_round_completed(
-        self, session_id: str, round_response: RefinementRoundResponse
+        self, session_id: str, round_response: RefinementRoundResponse,
     ) -> None:
         """Broadcast round completion event"""
         event = TalkHierWebSocketEvent(
@@ -133,7 +131,7 @@ class TalkHierWebSocketHandler:
         await self._broadcast_to_session(session_id, event.dict())
 
     async def broadcast_consensus_update(
-        self, session_id: str, consensus_result: ConsensusResult
+        self, session_id: str, consensus_result: ConsensusResult,
     ) -> None:
         from typing import Literal
 
@@ -185,7 +183,7 @@ class TalkHierWebSocketHandler:
         await self._broadcast_to_session(session_id, event.dict())
 
     async def broadcast_session_completed(
-        self, session_id: str, close_response: SessionCloseResponse
+        self, session_id: str, close_response: SessionCloseResponse,
     ) -> None:
         """Broadcast session completion event"""
         event = SessionCompletedEvent(
@@ -211,7 +209,7 @@ class TalkHierWebSocketHandler:
     # ================================
 
     async def register_interactive_session(
-        self, session_id: str, connection_id: str, websocket: WebSocket
+        self, session_id: str, connection_id: str, websocket: WebSocket,
     ) -> None:
         """Register an interactive session"""
         if session_id not in self.interactive_sessions:
@@ -221,11 +219,11 @@ class TalkHierWebSocketHandler:
         self.connections[connection_id] = websocket
 
         logger.info(
-            f"Registered interactive session {session_id} for connection {connection_id}"
+            f"Registered interactive session {session_id} for connection {connection_id}",
         )
 
     async def join_interactive_session(
-        self, session_id: str, connection_id: str, websocket: WebSocket
+        self, session_id: str, connection_id: str, websocket: WebSocket,
     ) -> None:
         """Join an existing interactive session"""
         if session_id not in self.interactive_sessions:
@@ -246,7 +244,7 @@ class TalkHierWebSocketHandler:
         )
 
     async def leave_interactive_session(
-        self, session_id: str, connection_id: str
+        self, session_id: str, connection_id: str,
     ) -> None:
         """Leave an interactive session"""
         if session_id in self.interactive_sessions:
@@ -269,7 +267,7 @@ class TalkHierWebSocketHandler:
             del self.connections[connection_id]
 
     async def handle_interactive_message(
-        self, session_id: str, connection_id: str, message: InteractiveMessage
+        self, session_id: str, connection_id: str, message: InteractiveMessage,
     ) -> None:
         """Handle an interactive message"""
         # Broadcast message to all participants
@@ -298,7 +296,7 @@ class TalkHierWebSocketHandler:
         )
 
     async def handle_interactive_command(
-        self, session_id: str, connection_id: str, command: InteractiveCommand
+        self, session_id: str, connection_id: str, command: InteractiveCommand,
     ) -> None:
         """Handle an interactive command"""
         # Process command
@@ -314,7 +312,7 @@ class TalkHierWebSocketHandler:
                     "success": command_result.get("success", False),
                     "result": command_result,
                     "timestamp": datetime.now(UTC).isoformat(),
-                }
+                },
             )
 
         # Broadcast command effect to all participants
@@ -334,7 +332,7 @@ class TalkHierWebSocketHandler:
     # ================================
 
     async def register_coordination_monitor(
-        self, coordination_id: str, connection_id: str, websocket: WebSocket
+        self, coordination_id: str, connection_id: str, websocket: WebSocket,
     ) -> None:
         """Register a coordination monitor"""
         if coordination_id not in self.coordination_monitors:
@@ -346,7 +344,7 @@ class TalkHierWebSocketHandler:
         logger.info(f"Registered coordination monitor for {coordination_id}")
 
     async def unregister_coordination_monitor(
-        self, coordination_id: str, connection_id: str
+        self, coordination_id: str, connection_id: str,
     ) -> None:
         """Unregister a coordination monitor"""
         if coordination_id in self.coordination_monitors:
@@ -359,7 +357,7 @@ class TalkHierWebSocketHandler:
             del self.connections[connection_id]
 
     async def broadcast_coordination_update(
-        self, coordination_id: str, update_data: dict[str, Any]
+        self, coordination_id: str, update_data: dict[str, Any],
     ) -> None:
         """Broadcast coordination update"""
         if coordination_id in self.coordination_monitors:
@@ -373,7 +371,7 @@ class TalkHierWebSocketHandler:
                                 "coordination_id": coordination_id,
                                 "data": update_data,
                                 "timestamp": datetime.now(UTC).isoformat(),
-                            }
+                            },
                         )
                     except Exception as e:
                         logger.error(f"Failed to send coordination update: {e!s}")
@@ -383,7 +381,7 @@ class TalkHierWebSocketHandler:
     # ================================
 
     async def _broadcast_to_session(
-        self, session_id: str, event_data: dict[str, Any]
+        self, session_id: str, event_data: dict[str, Any],
     ) -> None:
         """Broadcast event to all session connections"""
         if session_id in self.session_connections:
@@ -413,11 +411,11 @@ class TalkHierWebSocketHandler:
                         await websocket.send_json(data)
                     except Exception as e:
                         logger.error(
-                            f"Failed to send to interactive participant {connection_id}: {e!s}"
+                            f"Failed to send to interactive participant {connection_id}: {e!s}",
                         )
 
     async def _process_interactive_command(
-        self, session_id: str, command: InteractiveCommand
+        self, session_id: str, command: InteractiveCommand,
     ) -> dict[str, Any]:
         """Process an interactive command"""
         result = {"success": False, "effect": ""}

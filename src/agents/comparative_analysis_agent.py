@@ -1,5 +1,4 @@
-"""
-Comparative Analysis Agent implementation.
+"""Comparative Analysis Agent implementation.
 
 This agent specializes in comparing different approaches, methods, or solutions
 across multiple criteria to provide recommendations.
@@ -24,8 +23,7 @@ logger = get_logger()
 
 
 class ComparativeAnalysisAgent(LLMWorkerAgentBase):
-    """
-    Agent specialized in comparative analysis of research items.
+    """Agent specialized in comparative analysis of research items.
 
     This agent compares different approaches, methods, or solutions,
     creates comparison matrices, identifies trade-offs, and provides
@@ -44,7 +42,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         return "comparative_analysis"
 
     def _handle_insufficient_items(
-        self, task: AgentTask, items: list[dict[str, Any]]
+        self, task: AgentTask, items: list[dict[str, Any]],
     ) -> AgentResult:
         """Return a structured success for <2 comparison items (no hard error)."""
         item_count = len(items) if items else 0
@@ -81,14 +79,14 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         )
 
     async def execute(self, task: AgentTask) -> AgentResult:
-        """
-        Execute a comparative analysis task.
+        """Execute a comparative analysis task.
 
         Args:
             task: The comparative analysis task to execute
 
         Returns:
             AgentResult containing comparison matrix and recommendations
+
         """
         try:
             # Validate input
@@ -101,7 +99,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
             if not criteria:
                 return self.handle_error(
-                    task, ValueError("Comparison criteria required")
+                    task, ValueError("Comparison criteria required"),
                 )
 
             # Check cache first
@@ -113,52 +111,52 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
             # Step 1: Gather comparative research using MCP tools
             comparative_research = await self._search_comparative_studies(
-                task.input_data
+                task.input_data,
             )
 
             # Step 2: Perform statistical analysis using MCP tools
             statistical_analysis = await self._perform_statistical_comparison(
-                task.input_data
+                task.input_data,
             )
 
             # Step 3: Build knowledge graph for relationship analysis
             relationship_graph = await self._build_comparison_knowledge_graph(
-                task.input_data, comparative_research
+                task.input_data, comparative_research,
             )
 
             # Step 4: Generate analysis using Gemini with MCP-enhanced data
             analysis = await self._analyze_comparison_with_gemini(
-                task.input_data, comparative_research, statistical_analysis, task
+                task.input_data, comparative_research, statistical_analysis, task,
             )
 
             # Process comparison matrix with MCP statistical enhancements
             matrix = analysis.get("comparison_matrix", {})
             enhanced_matrix = await self.matrix_builder.enhance_matrix_with_statistics(
-                matrix, statistical_analysis
+                matrix, statistical_analysis,
             )
             normalized_matrix = self.matrix_builder.normalize_comparison_matrix(
-                enhanced_matrix
+                enhanced_matrix,
             )
 
             # Calculate rankings with statistical significance
             rankings = self.matrix_builder.calculate_rankings(
-                normalized_matrix, criteria
+                normalized_matrix, criteria,
             )
             statistical_rankings = (
                 await self.matrix_builder.calculate_statistical_rankings(
-                    normalized_matrix, statistical_analysis
+                    normalized_matrix, statistical_analysis,
                 )
             )
 
             # Analyze trade-offs with relationship insights
             trade_offs = analysis.get("trade_offs", [])
             trade_off_analysis = self._analyze_trade_offs_with_relationships(
-                trade_offs, normalized_matrix, relationship_graph
+                trade_offs, normalized_matrix, relationship_graph,
             )
 
             # Generate citations for comparative methodologies
             methodology_citations = await self._cite_comparison_methodologies(
-                comparative_research
+                comparative_research,
             )
 
             # Calculate confidence score with MCP data quality
@@ -166,7 +164,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                 items_count=len(items),
                 criteria_count=len(criteria),
                 matrix_completeness=self.matrix_builder.assess_matrix_completeness(
-                    normalized_matrix
+                    normalized_matrix,
                 ),
                 trade_offs=trade_offs,
                 recommendations=analysis.get("recommendations", []),
@@ -194,10 +192,10 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                 "data_sources": {
                     "research_papers": comparative_research.get("total_found", 0),
                     "statistical_tests": len(
-                        statistical_analysis.get("tests_performed", [])
+                        statistical_analysis.get("tests_performed", []),
                     ),
                     "relationship_entities": len(
-                        relationship_graph.get("entities", [])
+                        relationship_graph.get("entities", []),
                     ),
                 },
                 "data_source": (
@@ -207,7 +205,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                             comparative_research.get("success"),
                             statistical_analysis.get("success"),
                             relationship_graph.get("success"),
-                        ]
+                        ],
                     )
                     else "fallback"
                 ),
@@ -222,16 +220,16 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             # Add visual data if requested
             if task.input_data.get("generate_visual"):
                 output["visual_data"] = self.matrix_builder.generate_visual_data(
-                    normalized_matrix, criteria
+                    normalized_matrix, criteria,
                 )
 
             # Add contextual analysis if context provided
             if "context" in task.input_data:
                 output["context_considerations"] = analysis.get(
-                    "context_considerations", []
+                    "context_considerations", [],
                 )
                 output["contextual_recommendation"] = analysis.get(
-                    "contextual_recommendation", ""
+                    "contextual_recommendation", "",
                 )
 
             result = AgentResult(
@@ -248,7 +246,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
             # Cache the result
             await self.cache_result(
-                cache_key, result, ttl=LONG_TERM_CACHE_TTL
+                cache_key, result, ttl=LONG_TERM_CACHE_TTL,
             )  # 24 hours
 
             return result
@@ -258,14 +256,14 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             return self.handle_error(task, e)
 
     async def validate_result(self, result: AgentResult) -> bool:
-        """
-        Validate the comparative analysis result.
+        """Validate the comparative analysis result.
 
         Args:
             result: The result to validate
 
         Returns:
             True if valid, False otherwise
+
         """
         if result.status != "success":
             return result.status == "failed"  # Failed results are valid
@@ -289,24 +287,23 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         return not (not isinstance(items, list) or len(items) < 2)
 
     def _normalize_comparison_matrix(
-        self, matrix: dict[str, dict[str, float]]
+        self, matrix: dict[str, dict[str, float]],
     ) -> dict[str, dict[str, float]]:
-        """
-        Normalize comparison matrix values to 0-1 range.
+        """Normalize comparison matrix values to 0-1 range.
 
         Args:
             matrix: Raw comparison matrix
 
         Returns:
             Normalized matrix
+
         """
         return self.matrix_builder.normalize_comparison_matrix(matrix)
 
     def _calculate_rankings(
-        self, matrix: dict[str, dict[str, float]], criteria: list[str]
+        self, matrix: dict[str, dict[str, float]], criteria: list[str],
     ) -> dict[str, list[str]]:
-        """
-        Calculate rankings for each criterion and overall.
+        """Calculate rankings for each criterion and overall.
 
         Args:
             matrix: Normalized comparison matrix
@@ -314,14 +311,14 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Rankings dictionary
+
         """
         return self.matrix_builder.calculate_rankings(matrix, criteria)
 
     def _analyze_trade_offs(
-        self, trade_offs: list[str], matrix: dict[str, dict[str, float]]
+        self, trade_offs: list[str], matrix: dict[str, dict[str, float]],
     ) -> dict[str, Any]:
-        """
-        Analyze trade-offs between compared items.
+        """Analyze trade-offs between compared items.
 
         Args:
             trade_offs: List of identified trade-offs
@@ -329,26 +326,26 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Trade-off analysis
+
         """
         return self.insight_synthesizer.analyze_trade_offs(trade_offs, matrix)
 
     def _categorize_trade_offs(self, trade_offs: list[str]) -> dict[str, list[str]]:
-        """
-        Categorize trade-offs by type.
+        """Categorize trade-offs by type.
 
         Args:
             trade_offs: List of trade-off descriptions
 
         Returns:
             Categorized trade-offs
+
         """
         return self.insight_synthesizer.categorize_trade_offs(trade_offs)
 
     def _assess_trade_off_severity(
-        self, trade_offs: list[str], matrix: dict[str, dict[str, float]]
+        self, trade_offs: list[str], matrix: dict[str, dict[str, float]],
     ) -> str:
-        """
-        Assess the severity of trade-offs.
+        """Assess the severity of trade-offs.
 
         Args:
             trade_offs: List of trade-offs
@@ -356,18 +353,19 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Severity assessment
+
         """
         return self.insight_synthesizer.assess_trade_off_severity(trade_offs, matrix)
 
     def _assess_matrix_completeness(self, matrix: dict[str, dict[str, float]]) -> float:
-        """
-        Assess how complete the comparison matrix is.
+        """Assess how complete the comparison matrix is.
 
         Args:
             matrix: Comparison matrix
 
         Returns:
             Completeness score (0-1)
+
         """
         return self.matrix_builder.assess_matrix_completeness(matrix)
 
@@ -379,8 +377,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         trade_offs: list[str],
         recommendations: list[str],
     ) -> float:
-        """
-        Calculate confidence score based on analysis completeness.
+        """Calculate confidence score based on analysis completeness.
 
         Args:
             items_count: Number of items compared
@@ -391,6 +388,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Confidence score between 0.0 and 1.0
+
         """
         return self.similarity_analyzer.calculate_confidence(
             items_count,
@@ -409,8 +407,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         recommendations: list[str],
         mcp_data_quality: dict[str, bool],
     ) -> float:
-        """
-        Calculate confidence score with MCP data quality factors.
+        """Calculate confidence score with MCP data quality factors.
 
         Args:
             items_count: Number of items compared
@@ -422,6 +419,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Confidence score between 0.0 and 1.0
+
         """
         return self.similarity_analyzer.calculate_confidence_with_mcp(
             items_count,
@@ -433,22 +431,21 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         )
 
     def _calculate_matrix_similarity(
-        self, matrix: dict[str, dict[str, float]]
+        self, matrix: dict[str, dict[str, float]],
     ) -> dict[str, Any]:
-        """
-        Calculate pairwise similarity between compared matrix items.
+        """Calculate pairwise similarity between compared matrix items.
 
         Args:
             matrix: Comparison matrix
 
         Returns:
             Pairwise similarity summary
+
         """
         return self.similarity_analyzer.calculate_matrix_similarity(matrix)
 
     def _calculate_text_similarity(self, first: str, second: str) -> float:
-        """
-        Calculate text similarity using deterministic token overlap.
+        """Calculate text similarity using deterministic token overlap.
 
         Args:
             first: First text value
@@ -456,14 +453,14 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Similarity score between 0.0 and 1.0
+
         """
         return self.similarity_analyzer.calculate_text_similarity(first, second)
 
     def _generate_visual_data(
-        self, matrix: dict[str, dict[str, float]], criteria: list[str]
+        self, matrix: dict[str, dict[str, float]], criteria: list[str],
     ) -> dict[str, Any]:
-        """
-        Generate data for visual representation.
+        """Generate data for visual representation.
 
         Args:
             matrix: Comparison matrix
@@ -471,20 +468,21 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Visual data dictionary
+
         """
         return self.matrix_builder.generate_visual_data(matrix, criteria)
 
     async def _search_comparative_studies(
-        self, input_data: dict[str, Any]
+        self, input_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Search for comparative studies using MCP academic search tool.
+        """Search for comparative studies using MCP academic search tool.
 
         Args:
             input_data: Task input data
 
         Returns:
             Comparative research results
+
         """
         return await self.theory_extractor.search_comparative_studies(
             input_data,
@@ -495,16 +493,16 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         )
 
     async def _perform_statistical_comparison(
-        self, input_data: dict[str, Any]
+        self, input_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Perform statistical analysis of comparison data using MCP statistics tool.
+        """Perform statistical analysis of comparison data using MCP statistics tool.
 
         Args:
             input_data: Task input data
 
         Returns:
             Statistical analysis results
+
         """
         if not self.mcp_integration:
             self.log_warning("MCP integration not available for statistical analysis")
@@ -519,7 +517,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             # Perform descriptive statistics if numerical data available
             if comparison_data:
                 descriptive_result = await self.mcp_integration.analyze_statistics(
-                    operation="descriptive", data=list(comparison_data.values())
+                    operation="descriptive", data=list(comparison_data.values()),
                 )
                 if descriptive_result.get("success"):
                     tests_performed.append("descriptive_statistics")
@@ -528,7 +526,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             criteria = input_data.get("criteria", [])
             if len(criteria) >= 2 and comparison_data:
                 correlation_result = await self.mcp_integration.analyze_statistics(
-                    operation="correlation", variables=criteria[:2]
+                    operation="correlation", variables=criteria[:2],
                 )
                 if correlation_result.get("success"):
                     tests_performed.append("correlation_analysis")
@@ -550,10 +548,9 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             return self._fallback_statistical_analysis(input_data)
 
     async def _build_comparison_knowledge_graph(
-        self, input_data: dict[str, Any], research_data: dict[str, Any]
+        self, input_data: dict[str, Any], research_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Build knowledge graph for comparison relationships using MCP tools.
+        """Build knowledge graph for comparison relationships using MCP tools.
 
         Args:
             input_data: Task input data
@@ -561,6 +558,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Knowledge graph data
+
         """
         if not self.mcp_integration:
             return {"success": False, "error": "MCP integration not available"}
@@ -580,33 +578,32 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         try:
             result = await self.mcp_integration.build_knowledge_graph(
-                text=text_for_analysis
+                text=text_for_analysis,
             )
 
             if result.get("success"):
                 entities = result.get("entities", [])
                 self.log_info(
-                    f"Built comparison knowledge graph with {len(entities)} entities"
+                    f"Built comparison knowledge graph with {len(entities)} entities",
                 )
                 return dict(result)
-            else:
-                raise Exception(
-                    f"Knowledge graph building failed: {result.get('error')}"
-                )
+            raise Exception(
+                f"Knowledge graph building failed: {result.get('error')}",
+            )
 
         except Exception as e:
             self.log_error(f"Comparison knowledge graph building failed: {e}")
             return {"success": False, "error": str(e)}
 
     def _generate_cache_key(self, task: AgentTask) -> str:
-        """
-        Generate a cache key for the task.
+        """Generate a cache key for the task.
 
         Args:
             task: The task to generate key for
 
         Returns:
             Cache key string
+
         """
         key_parts = [
             self.get_agent_type(),
@@ -618,14 +615,14 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         return hashlib.md5(key_string.encode()).hexdigest()
 
     def _generate_mock_analysis(self, task: AgentTask) -> dict[str, Any]:
-        """
-        Generate mock analysis for testing without Gemini.
+        """Generate mock analysis for testing without Gemini.
 
         Args:
             task: The task to analyze
 
         Returns:
             Mock comparative analysis
+
         """
         items = task.input_data.get("items", [])
         criteria = task.input_data.get("criteria", [])
@@ -670,8 +667,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         statistical_data: dict[str, Any],
         task: AgentTask,
     ) -> dict[str, Any]:
-        """
-        Analyze comparison using Gemini with MCP-enhanced data.
+        """Analyze comparison using Gemini with MCP-enhanced data.
 
         Args:
             input_data: Original task input
@@ -681,14 +677,15 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Enhanced comparative analysis from Gemini
+
         """
         # Enhance input with MCP data
         enhanced_input = input_data.copy()
         enhanced_input["research_findings"] = self._summarize_research_findings(
-            research_data
+            research_data,
         )
         enhanced_input["statistical_insights"] = statistical_data.get(
-            "tests_performed", []
+            "tests_performed", [],
         )
         enhanced_input["data_quality"] = {
             "research_sources": research_data.get("total_found", 0),
@@ -702,7 +699,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             content, _confidence = await self._generate_with_routing(prompt, task)
             if content is None:
                 return self._generate_mock_analysis_with_mcp(
-                    input_data, research_data, statistical_data
+                    input_data, research_data, statistical_data,
                 )
 
             parsed_response = parse_json_response(content)
@@ -724,14 +721,13 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         except Exception as e:
             self.log_error(f"Gemini analysis with MCP data failed: {e}")
             return self._generate_mock_analysis_with_mcp(
-                input_data, research_data, statistical_data
+                input_data, research_data, statistical_data,
             )
 
     async def _enhance_matrix_with_statistics(
-        self, matrix: dict[str, dict[str, float]], statistical_data: dict[str, Any]
+        self, matrix: dict[str, dict[str, float]], statistical_data: dict[str, Any],
     ) -> dict[str, dict[str, float]]:
-        """
-        Enhance comparison matrix with statistical insights.
+        """Enhance comparison matrix with statistical insights.
 
         Args:
             matrix: Original comparison matrix
@@ -739,16 +735,16 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Enhanced matrix with statistical adjustments
+
         """
         return await self.matrix_builder.enhance_matrix_with_statistics(
-            matrix, statistical_data
+            matrix, statistical_data,
         )
 
     async def _calculate_statistical_rankings(
-        self, matrix: dict[str, dict[str, float]], statistical_data: dict[str, Any]
+        self, matrix: dict[str, dict[str, float]], statistical_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Calculate statistically-informed rankings.
+        """Calculate statistically-informed rankings.
 
         Args:
             matrix: Normalized comparison matrix
@@ -756,16 +752,16 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Statistical rankings with confidence intervals
+
         """
         return await self.matrix_builder.calculate_statistical_rankings(
-            matrix, statistical_data
+            matrix, statistical_data,
         )
 
     def _calculate_ranking_confidence(
-        self, scores: dict[str, float], statistical_data: dict[str, Any]
+        self, scores: dict[str, float], statistical_data: dict[str, Any],
     ) -> float:
-        """
-        Calculate confidence for individual item ranking.
+        """Calculate confidence for individual item ranking.
 
         Args:
             scores: Item's scores across criteria
@@ -773,9 +769,10 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Confidence score for ranking
+
         """
         return self.matrix_builder.calculate_ranking_confidence(
-            scores, statistical_data
+            scores, statistical_data,
         )
 
     def _analyze_trade_offs_with_relationships(
@@ -784,8 +781,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         matrix: dict[str, dict[str, float]],
         relationship_graph: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Analyze trade-offs enhanced with relationship insights.
+        """Analyze trade-offs enhanced with relationship insights.
 
         Args:
             trade_offs: List of identified trade-offs
@@ -794,22 +790,23 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Enhanced trade-off analysis
+
         """
         return self.insight_synthesizer.analyze_trade_offs_with_relationships(
-            trade_offs, matrix, relationship_graph
+            trade_offs, matrix, relationship_graph,
         )
 
     async def _cite_comparison_methodologies(
-        self, research_data: dict[str, Any]
+        self, research_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Generate citations for comparison methodologies using MCP citation tool.
+        """Generate citations for comparison methodologies using MCP citation tool.
 
         Args:
             research_data: Research results from academic search
 
         Returns:
             Formatted citations for methodologies
+
         """
         return await self.insight_synthesizer.cite_comparison_methodologies(
             research_data,
@@ -819,56 +816,56 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         )
 
     def _summarize_research_findings(self, research_data: dict[str, Any]) -> str:
-        """
-        Summarize research findings for Gemini analysis.
+        """Summarize research findings for Gemini analysis.
 
         Args:
             research_data: Research results from MCP
 
         Returns:
             Summary text of research findings
+
         """
         return self.insight_synthesizer.summarize_research_findings(research_data)
 
     def _extract_theories_from_sources(
-        self, research_data: dict[str, Any]
+        self, research_data: dict[str, Any],
     ) -> list[dict[str, str]]:
-        """
-        Extract theory/framework hints from comparative research sources.
+        """Extract theory/framework hints from comparative research sources.
 
         Args:
             research_data: Research results from MCP
 
         Returns:
             Extracted theory metadata
+
         """
         return self.theory_extractor.extract_theories_from_sources(research_data)
 
     def _fallback_comparative_research(
-        self, input_data: dict[str, Any]
+        self, input_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Fallback comparative research when MCP tools unavailable.
+        """Fallback comparative research when MCP tools unavailable.
 
         Args:
             input_data: Task input data
 
         Returns:
             Mock research results
+
         """
         return self.theory_extractor.fallback_comparative_research(input_data)
 
     def _fallback_statistical_analysis(
-        self, input_data: dict[str, Any]
+        self, input_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Fallback statistical analysis when MCP tools unavailable.
+        """Fallback statistical analysis when MCP tools unavailable.
 
         Args:
             input_data: Task input data
 
         Returns:
             Mock statistical analysis
+
         """
         return self.insight_synthesizer.fallback_statistical_analysis(input_data)
 
@@ -878,8 +875,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         research_data: dict[str, Any],
         statistical_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Generate mock analysis enhanced with MCP data.
+        """Generate mock analysis enhanced with MCP data.
 
         Args:
             input_data: Task input data
@@ -888,6 +884,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         Returns:
             Enhanced mock analysis
+
         """
         fake_task = AgentTask(
             id="mock",

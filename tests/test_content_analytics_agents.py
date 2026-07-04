@@ -51,7 +51,7 @@ def test_agents_registered_in_factory(agent_type, cls) -> None:
 async def test_agent_execute_returns_real_content() -> None:
     agent = DraftingAgent(gemini_service=_FakeGemini())
     result = await agent.execute(
-        AgentTask(id="t", agent_type="drafting", input_data={"query": "write X"})
+        AgentTask(id="t", agent_type="drafting", input_data={"query": "write X"}),
     )
     assert result.status == "success"
     assert result.output["content"] == "Real generated content for the request."

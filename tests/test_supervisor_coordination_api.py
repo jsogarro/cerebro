@@ -1,5 +1,4 @@
-"""
-Tests for supervisor coordination, orchestration, and real-time endpoints.
+"""Tests for supervisor coordination, orchestration, and real-time endpoints.
 """
 
 from collections.abc import Generator
@@ -39,7 +38,7 @@ class TestWorkerCoordination:
     """Test worker coordination endpoints."""
 
     def test_coordinate_workers(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test worker coordination request."""
         mock_response = Mock(
@@ -52,7 +51,7 @@ class TestWorkerCoordination:
                     "capabilities": [],
                     "performance_score": 0.9,
                     "current_task": None,
-                }
+                },
             ],
             coordination_plan={"phases": [{"phase": 1, "action": "analyze"}]},
             estimated_completion_time=30,
@@ -60,7 +59,7 @@ class TestWorkerCoordination:
         )
 
         mock_supervisor_service.coordinate_workers = AsyncMock(
-            return_value=mock_response
+            return_value=mock_response,
         )
 
         request_data = {
@@ -81,7 +80,7 @@ class TestWorkerCoordination:
         assert data["estimated_completion_time"] == 30
 
     def test_coordinate_with_conflict_resolution(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test coordination with conflict resolution strategy."""
         mock_supervisor_service.coordinate_workers = AsyncMock(
@@ -91,7 +90,7 @@ class TestWorkerCoordination:
                 coordination_plan={},
                 estimated_completion_time=45,
                 status="initiated",
-            )
+            ),
         )
 
         request_data = {
@@ -113,7 +112,7 @@ class TestMultiSupervisorOrchestration:
     """Test multi-supervisor orchestration endpoints."""
 
     def test_orchestrate_multi_supervisor(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test multi-supervisor orchestration."""
         mock_response = Mock(
@@ -127,10 +126,10 @@ class TestMultiSupervisorOrchestration:
                     worker_count=5,
                     active_tasks=1,
                     performance_metrics={},
-                )
+                ),
             ],
             individual_results={
-                "research": {"result": "Research findings", "quality_score": 0.9}
+                "research": {"result": "Research findings", "quality_score": 0.9},
             },
             synthesized_result="Combined analysis",
             orchestration_time_ms=5000,
@@ -139,7 +138,7 @@ class TestMultiSupervisorOrchestration:
         )
 
         mock_supervisor_service.orchestrate_multi_supervisor = AsyncMock(
-            return_value=mock_response
+            return_value=mock_response,
         )
 
         request_data = {
@@ -165,7 +164,7 @@ class TestAdvancedCoordination:
     """Test advanced coordination features."""
 
     def test_optimize_worker_allocation(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test worker allocation optimization."""
         mock_response = Mock(
@@ -178,7 +177,7 @@ class TestAdvancedCoordination:
         )
 
         mock_supervisor_service.optimize_worker_allocation = AsyncMock(
-            return_value=mock_response
+            return_value=mock_response,
         )
 
         request_data = {
@@ -202,7 +201,7 @@ class TestAdvancedCoordination:
         assert "specialist" in data["recommended_allocation"]
 
     def test_resolve_conflicts(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test conflict resolution between workers."""
         mock_response = Mock(
@@ -236,7 +235,7 @@ class TestAdvancedCoordination:
         assert data["resolution_strategy"] == "quality_based"
 
     def test_compare_supervisor_performance(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test comparing performance across supervisors."""
         mock_response = Mock(
@@ -252,7 +251,7 @@ class TestAdvancedCoordination:
         )
 
         mock_supervisor_service.compare_supervisor_performance = AsyncMock(
-            return_value=mock_response
+            return_value=mock_response,
         )
 
         response = client.get(
@@ -266,7 +265,7 @@ class TestAdvancedCoordination:
         assert "research" in data["performance_metrics"]
 
     def test_run_coordination_experiment(
-        self, client: TestClient, mock_supervisor_service: Mock
+        self, client: TestClient, mock_supervisor_service: Mock,
     ) -> None:
         """Test running coordination strategy experiments."""
         mock_response = Mock(
@@ -314,7 +313,7 @@ class TestWebSocketEndpoints:
         with (
             TestClient(app) as client,
             client.websocket_connect(
-                "/api/v1/supervisors/research/ws?client_id=test-client"
+                "/api/v1/supervisors/research/ws?client_id=test-client",
             ) as websocket,
         ):
             data = websocket.receive_json()
@@ -330,7 +329,7 @@ class TestWebSocketEndpoints:
         with (
             TestClient(app) as client,
             client.websocket_connect(
-                "/api/v1/supervisors/coordination/ws?coordination_id=test-coord"
+                "/api/v1/supervisors/coordination/ws?coordination_id=test-coord",
             ) as websocket,
         ):
             data = websocket.receive_json()

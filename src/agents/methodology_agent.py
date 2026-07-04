@@ -1,5 +1,4 @@
-"""
-Methodology Agent implementation.
+"""Methodology Agent implementation.
 
 This agent specializes in recommending and evaluating research methodologies.
 """
@@ -17,8 +16,7 @@ logger = get_logger()
 
 
 class MethodologyAgent(LLMWorkerAgentBase):
-    """
-    Agent specialized in research methodology design and evaluation.
+    """Agent specialized in research methodology design and evaluation.
 
     This agent recommends appropriate research methods, identifies biases,
     and ensures methodological rigor.
@@ -29,14 +27,14 @@ class MethodologyAgent(LLMWorkerAgentBase):
         return "methodology"
 
     async def execute(self, task: AgentTask) -> AgentResult:
-        """
-        Execute a methodology analysis task.
+        """Execute a methodology analysis task.
 
         Args:
             task: The methodology task to execute
 
         Returns:
             AgentResult containing methodology recommendations
+
         """
         try:
             # Validate input
@@ -57,14 +55,14 @@ class MethodologyAgent(LLMWorkerAgentBase):
             try:
                 prompt = self._build_prompt(task.input_data)
                 schema_result = await self._generate_structured_with_routing(
-                    prompt, MethodologySchema, task=task
+                    prompt, MethodologySchema, task=task,
                 )
                 # Convert Pydantic model to dict for compatibility
                 analysis = schema_result.model_dump()
             except Exception as e:
                 # Fallback for testing without configured LLM
                 self.log_warning(
-                    f"Structured generation failed: {e}, using mock fallback"
+                    f"Structured generation failed: {e}, using mock fallback",
                 )
                 analysis = self._generate_mock_analysis(task)
 
@@ -105,14 +103,14 @@ class MethodologyAgent(LLMWorkerAgentBase):
             return self.handle_error(task, e)
 
     async def validate_result(self, result: AgentResult) -> bool:
-        """
-        Validate the methodology result.
+        """Validate the methodology result.
 
         Args:
             result: The result to validate
 
         Returns:
             True if valid, False otherwise
+
         """
         if result.status != "success":
             return result.status == "failed"

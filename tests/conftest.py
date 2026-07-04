@@ -1,5 +1,4 @@
-"""
-Pytest configuration and fixtures for Research Platform tests.
+"""Pytest configuration and fixtures for Research Platform tests.
 """
 
 import asyncio
@@ -75,7 +74,7 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
     if db_session_mod._engine is not None and sqlite_compatible_tables:
         async with db_session_mod._engine.begin() as conn:
             await conn.run_sync(
-                Base.metadata.create_all, tables=sqlite_compatible_tables
+                Base.metadata.create_all, tables=sqlite_compatible_tables,
             )
 
     # Import app AFTER DB init so any module-level dependencies see ready state.
@@ -125,7 +124,7 @@ def mock_gemini_client(mocker):
     """Mock Gemini API client for testing."""
     mock_client = mocker.Mock()
     mock_client.generate_content.return_value = mocker.Mock(
-        text="Mocked Gemini response"
+        text="Mocked Gemini response",
     )
     return mock_client
 

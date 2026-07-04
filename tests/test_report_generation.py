@@ -59,7 +59,7 @@ class TestReportIntegration:
 
     @pytest.mark.asyncio
     async def test_end_to_end_report_generation(
-        self, temp_environment: ReportSettings
+        self, temp_environment: ReportSettings,
     ) -> None:
         """Test complete end-to-end report generation."""
         generator = ReportGenerator(temp_environment)
@@ -93,7 +93,7 @@ class TestReportIntegration:
                                 "performance by 25%"
                             ),
                             "confidence": 0.85,
-                        }
+                        },
                     ],
                     "efficiency_gains": [
                         {
@@ -101,7 +101,7 @@ class TestReportIntegration:
                                 "Automated grading reduces teacher workload by 40%"
                             ),
                             "confidence": 0.78,
-                        }
+                        },
                     ],
                 },
                 "citations": [
@@ -111,7 +111,7 @@ class TestReportIntegration:
                         "title": "Machine Learning in Educational Systems",
                         "year": 2023,
                         "journal": "Educational Technology Review",
-                    }
+                    },
                 ],
                 "recommendations": [
                     "Implement AI tutoring systems in high schools",
@@ -122,7 +122,7 @@ class TestReportIntegration:
                     {
                         "text": "AI adoption in education is accelerating globally",
                         "importance": "high",
-                    }
+                    },
                 ],
             },
             "quality_report": {

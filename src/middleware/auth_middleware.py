@@ -1,5 +1,4 @@
-"""
-Authentication middleware for request authentication and authorization.
+"""Authentication middleware for request authentication and authorization.
 
 Provides JWT validation, user context injection, and permission checking.
 """
@@ -29,19 +28,18 @@ security = HTTPBearer(auto_error=False)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """
-    Authentication middleware for all requests.
+    """Authentication middleware for all requests.
 
     Validates JWT tokens and adds user context to requests.
     """
 
     def __init__(self, app: Any, exclude_paths: list[str] | None = None) -> None:
-        """
-        Initialize authentication middleware.
+        """Initialize authentication middleware.
 
         Args:
             app: FastAPI application
             exclude_paths: Paths to exclude from authentication
+
         """
         super().__init__(app)
         self.exclude_paths = exclude_paths or [
@@ -57,10 +55,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         ]
 
     async def dispatch(
-        self, request: Request, call_next: Callable[..., Any]
+        self, request: Request, call_next: Callable[..., Any],
     ) -> Response:
-        """
-        Process request with authentication.
+        """Process request with authentication.
 
         Args:
             request: Incoming request
@@ -68,6 +65,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         Returns:
             Response from endpoint
+
         """
         # NOTE: This middleware no longer performs JWT validation directly.
         # JWT validation happens via the get_current_token dependency in endpoints.
@@ -84,8 +82,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 async def get_jwt_service() -> JWTService:
-    """
-    Get JWT service instance.
+    """Get JWT service instance.
 
     This is a dependency that can be overridden in tests.
     """
@@ -101,8 +98,7 @@ async def get_current_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> TokenPayload:
-    """
-    Get current token payload from request.
+    """Get current token payload from request.
 
     Args:
         credentials: HTTP authorization credentials
@@ -113,6 +109,7 @@ async def get_current_token(
 
     Raises:
         HTTPException: If token is invalid or missing
+
     """
     if not credentials:
         raise HTTPException(
@@ -141,8 +138,7 @@ async def get_current_user(
     token_payload: TokenPayload = Depends(get_current_token),
     db: AsyncSession = Depends(get_session),
 ) -> User:
-    """
-    Get current authenticated user.
+    """Get current authenticated user.
 
     Args:
         token_payload: Decoded token payload
@@ -153,13 +149,14 @@ async def get_current_user(
 
     Raises:
         HTTPException: If user not found
+
     """
     user_repo = UserRepository(db)
     user = await user_repo.get(token_payload.sub)
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found",
         )
 
     return user
@@ -168,8 +165,7 @@ async def get_current_user(
 async def get_current_active_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """
-    Get current active user.
+    """Get current active user.
 
     Args:
         current_user: Current authenticated user
@@ -179,24 +175,25 @@ async def get_current_active_user(
 
     Raises:
         HTTPException: If user is not active
+
     """
     if not current_user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled",
         )
 
     return current_user
 
 
 def require_roles(roles: list[str]) -> Callable[..., Any]:
-    """
-    Dependency to require specific roles.
+    """Dependency to require specific roles.
 
     Args:
         roles: List of required roles (user must have at least one)
 
     Returns:
         Dependency function
+
     """
 
     async def role_checker(
@@ -227,14 +224,14 @@ def require_roles(roles: list[str]) -> Callable[..., Any]:
 
 
 def require_permissions(permissions: list[str]) -> Callable[..., Any]:
-    """
-    Dependency to require specific permissions.
+    """Dependency to require specific permissions.
 
     Args:
         permissions: List of required permissions (user must have all)
 
     Returns:
         Dependency function
+
     """
 
     async def permission_checker(
@@ -270,11 +267,11 @@ def require_permissions(permissions: list[str]) -> Callable[..., Any]:
 
 
 def require_superuser() -> Callable[..., Any]:
-    """
-    Dependency to require superuser privileges.
+    """Dependency to require superuser privileges.
 
     Returns:
         Dependency function
+
     """
 
     async def superuser_checker(
@@ -283,7 +280,7 @@ def require_superuser() -> Callable[..., Any]:
         """Check if user is superuser."""
         if not current_user.is_superuser:
             logger.warning(
-                "Access denied - superuser required", user_id=str(current_user.id)
+                "Access denied - superuser required", user_id=str(current_user.id),
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -296,13 +293,13 @@ def require_superuser() -> Callable[..., Any]:
 
 
 def optional_user() -> Callable[..., Any]:
-    """
-    Dependency for optional authentication.
+    """Dependency for optional authentication.
 
     Returns user if authenticated, None otherwise.
 
     Returns:
         Dependency function
+
     """
 
     async def optional_user_getter(
@@ -331,8 +328,7 @@ def optional_user() -> Callable[..., Any]:
 
 
 class RateLimitMiddleware:
-    """
-    Rate limiting middleware based on user or IP.
+    """Rate limiting middleware based on user or IP.
 
     Integrates with authentication to apply user-specific limits.
     """
@@ -342,12 +338,12 @@ class RateLimitMiddleware:
         requests_per_minute: int = 60,
         requests_per_hour: int = 1000,
     ):
-        """
-        Initialize rate limit middleware.
+        """Initialize rate limit middleware.
 
         Args:
             requests_per_minute: Max requests per minute
             requests_per_hour: Max requests per hour
+
         """
         self.requests_per_minute = requests_per_minute
         self.requests_per_hour = requests_per_hour
@@ -357,8 +353,7 @@ class RateLimitMiddleware:
         request: Request,
         current_user: User | None = Depends(optional_user()),
     ) -> None:
-        """
-        Check rate limits for request.
+        """Check rate limits for request.
 
         Args:
             request: Incoming request
@@ -366,6 +361,7 @@ class RateLimitMiddleware:
 
         Raises:
             HTTPException: If rate limit exceeded
+
         """
         # Get identifier (user ID or IP)
         if current_user:

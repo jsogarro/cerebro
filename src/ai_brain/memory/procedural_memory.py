@@ -1,5 +1,4 @@
-"""
-Procedural Memory Manager
+"""Procedural Memory Manager
 
 Manages procedural memory for storing learned workflows, patterns, and
 optimization data. This enables agents to learn and improve their
@@ -91,8 +90,7 @@ class ProcedureQuery:
 
 
 class ProceduralMemoryManager:
-    """
-    Manages procedural memory for learned workflows and optimizations.
+    """Manages procedural memory for learned workflows and optimizations.
 
     Procedural memory provides:
     - Storage of learned behavioral patterns
@@ -124,7 +122,6 @@ class ProceduralMemoryManager:
 
     async def initialize(self) -> None:
         """Initialize the procedural memory system."""
-
         try:
             # Load existing procedures
             await self._load_procedures()
@@ -136,16 +133,15 @@ class ProceduralMemoryManager:
             self.procedures = {}
 
     async def store_procedure(self, procedure: Procedure) -> bool:
-        """
-        Store a procedure in procedural memory.
+        """Store a procedure in procedural memory.
 
         Args:
             procedure: Procedure to store
 
         Returns:
             True if stored successfully
-        """
 
+        """
         try:
             # Update timestamp
             procedure.last_updated = datetime.now()
@@ -165,16 +161,15 @@ class ProceduralMemoryManager:
             return False
 
     async def retrieve_procedures(self, query: ProcedureQuery) -> list[Procedure]:
-        """
-        Retrieve procedures based on query parameters.
+        """Retrieve procedures based on query parameters.
 
         Args:
             query: Query parameters
 
         Returns:
             List of matching procedures
-        """
 
+        """
         try:
             matching_procedures = []
 
@@ -214,7 +209,7 @@ class ProceduralMemoryManager:
 
             # Sort by confidence and performance
             matching_procedures.sort(
-                key=lambda p: (p.confidence, p.avg_performance_score), reverse=True
+                key=lambda p: (p.confidence, p.avg_performance_score), reverse=True,
             )
 
             self.retrieve_count += 1
@@ -226,7 +221,6 @@ class ProceduralMemoryManager:
 
     async def delete_by_user_id(self, user_id: str) -> int:
         """Delete procedures associated with a user."""
-
         procedure_ids = [
             procedure_id
             for procedure_id, procedure in self.procedures.items()
@@ -239,10 +233,9 @@ class ProceduralMemoryManager:
         return len(procedure_ids)
 
     async def learn_from_episode(
-        self, episode_data: dict[str, Any], performance_score: float, success: bool
+        self, episode_data: dict[str, Any], performance_score: float, success: bool,
     ) -> str | None:
-        """
-        Learn a new procedure from an episode.
+        """Learn a new procedure from an episode.
 
         Args:
             episode_data: Episode data containing steps and context
@@ -251,8 +244,8 @@ class ProceduralMemoryManager:
 
         Returns:
             ID of learned procedure or None if learning failed
-        """
 
+        """
         try:
             # Extract procedural knowledge from episode
             steps = episode_data.get("steps", [])
@@ -277,7 +270,7 @@ class ProceduralMemoryManager:
                 last_used=datetime.now(),
                 learned_from=[episode_data.get("episode_id", "unknown")],
                 confidence=self._calculate_initial_confidence(
-                    performance_score, success
+                    performance_score, success,
                 ),
             )
 
@@ -296,10 +289,9 @@ class ProceduralMemoryManager:
             return None
 
     async def update_procedure_performance(
-        self, procedure_id: str, performance_score: float, success: bool
+        self, procedure_id: str, performance_score: float, success: bool,
     ) -> bool:
-        """
-        Update procedure performance based on usage.
+        """Update procedure performance based on usage.
 
         Args:
             procedure_id: ID of procedure to update
@@ -308,8 +300,8 @@ class ProceduralMemoryManager:
 
         Returns:
             True if updated successfully
-        """
 
+        """
         try:
             procedure = self.procedures.get(procedure_id)
             if not procedure:
@@ -349,10 +341,9 @@ class ProceduralMemoryManager:
             return False
 
     async def optimize_procedure(
-        self, procedure_id: str, optimization_data: dict[str, Any]
+        self, procedure_id: str, optimization_data: dict[str, Any],
     ) -> bool:
-        """
-        Optimize an existing procedure based on new insights.
+        """Optimize an existing procedure based on new insights.
 
         Args:
             procedure_id: ID of procedure to optimize
@@ -360,8 +351,8 @@ class ProceduralMemoryManager:
 
         Returns:
             True if optimized successfully
-        """
 
+        """
         try:
             procedure = self.procedures.get(procedure_id)
             if not procedure:
@@ -387,7 +378,7 @@ class ProceduralMemoryManager:
             optimized_procedure.usage_count = 0
             optimized_procedure.success_count = 0
             optimized_procedure.confidence = max(
-                procedure.confidence * 0.8, 0.5
+                procedure.confidence * 0.8, 0.5,
             )  # Slight confidence decrease for unproven optimization
 
             # Store optimized version
@@ -409,7 +400,6 @@ class ProceduralMemoryManager:
         agent_type: str | None = None,
     ) -> Procedure | None:
         """Get the best procedure for a specific task."""
-
         query = ProcedureQuery(
             procedure_type=ProcedureType.WORKFLOW,
             domain=domain,
@@ -424,7 +414,6 @@ class ProceduralMemoryManager:
 
     async def cleanup_old_procedures(self, retention_days: int = 30) -> int:
         """Remove old, unused procedures."""
-
         cutoff_date = datetime.now() - timedelta(days=retention_days)
         removed_count = 0
 
@@ -451,7 +440,6 @@ class ProceduralMemoryManager:
 
     async def get_memory_stats(self) -> dict[str, Any]:
         """Get procedural memory statistics."""
-
         stats: dict[str, Any] = {
             "store_count": self.store_count,
             "retrieve_count": self.retrieve_count,
@@ -473,7 +461,7 @@ class ProceduralMemoryManager:
                     "high_confidence_procedures": sum(
                         1 for p in self.procedures.values() if p.confidence > 0.8
                     ),
-                }
+                },
             )
 
             # Type distribution
@@ -487,10 +475,9 @@ class ProceduralMemoryManager:
         return stats
 
     def _calculate_initial_confidence(
-        self, performance_score: float, success: bool
+        self, performance_score: float, success: bool,
     ) -> float:
         """Calculate initial confidence for a learned procedure."""
-
         base_confidence = 0.5
 
         # Adjust based on performance
@@ -504,7 +491,6 @@ class ProceduralMemoryManager:
 
     async def _load_procedures(self) -> None:
         """Load procedures from persistent storage."""
-
         if self.storage_backend == "json_file":
             try:
                 import os
@@ -517,14 +503,14 @@ class ProceduralMemoryManager:
                     for proc_id, proc_data in data.items():
                         # Handle enum conversion
                         proc_data["procedure_type"] = ProcedureType(
-                            proc_data["procedure_type"]
+                            proc_data["procedure_type"],
                         )
 
                         # Handle datetime conversion
                         for date_field in ["created_at", "last_updated", "last_used"]:
                             if proc_data.get(date_field):
                                 proc_data[date_field] = datetime.fromisoformat(
-                                    proc_data[date_field]
+                                    proc_data[date_field],
                                 )
 
                         procedure = Procedure(**proc_data)
@@ -535,7 +521,6 @@ class ProceduralMemoryManager:
 
     async def _persist_procedures(self) -> None:
         """Persist procedures to storage."""
-
         if self.storage_backend == "json_file":
             try:
                 import os
@@ -562,7 +547,7 @@ class ProceduralMemoryManager:
 
             except Exception as e:
                 logger.error(
-                    f"Failed to persist procedures to {self.storage_path}: {e}"
+                    f"Failed to persist procedures to {self.storage_path}: {e}",
                 )
 
 

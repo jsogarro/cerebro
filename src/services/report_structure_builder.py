@@ -54,13 +54,13 @@ class ReportStructureBuilder:
         for section_name in required_sections:
             if section_name in section_builders:
                 section = await section_builders[section_name](
-                    report, aggregated_results
+                    report, aggregated_results,
                 )
                 if section:
                     report.sections.append(section)
 
     async def build_introduction_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build introduction section."""
         content = f"""
@@ -75,7 +75,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Introduction", content=content, level=1)
 
     async def build_methodology_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build methodology section."""
         methodologies = results.get("methodologies", {})
@@ -96,7 +96,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Methodology", content=content, level=1)
 
     async def build_literature_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build literature review section."""
         sources = results.get("sources", [])
@@ -115,7 +115,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Literature Review", content=content, level=1)
 
     async def build_findings_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build findings section."""
         findings = results.get("findings", {})
@@ -157,7 +157,7 @@ class ReportStructureBuilder:
         return section
 
     async def build_analysis_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build analysis section."""
         comparisons = results.get("comparisons", {})
@@ -180,7 +180,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Analysis", content=content, level=1)
 
     async def build_discussion_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build discussion section."""
         insights = results.get("insights", [])
@@ -206,7 +206,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Discussion", content=content, level=1)
 
     async def build_conclusions_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build conclusions section."""
         confidence_score = results.get("confidence_score", 0.7)
@@ -226,7 +226,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Conclusions", content=content, level=1)
 
     async def build_recommendations_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build recommendations section."""
         recommendations = results.get("recommendations", [])
@@ -242,7 +242,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Recommendations", content=content, level=1)
 
     async def build_limitations_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build limitations section."""
         limitations = results.get("limitations", [])
@@ -265,7 +265,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Limitations", content=content, level=1)
 
     async def build_abstract_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build abstract section for academic papers."""
         content = f"""
@@ -282,7 +282,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Abstract", content=content, level=1)
 
     async def build_results_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build results section for academic papers."""
         metrics = results.get("metrics", {})
@@ -299,7 +299,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Results", content=content, level=1)
 
     async def build_key_findings_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build key findings section for executive summary."""
         findings = results.get("findings", {})
@@ -319,7 +319,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Key Findings", content=content, level=1)
 
     async def build_insights_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build insights section."""
         insights = results.get("insights", [])
@@ -338,7 +338,7 @@ class ReportStructureBuilder:
         return ReportSection(title="Strategic Insights", content=content, level=1)
 
     async def process_citations(
-        self, report: Report, input_data: dict[str, Any]
+        self, report: Report, input_data: dict[str, Any],
     ) -> None:
         """Process and format citations from input data."""
         aggregated_results = input_data.get("aggregated_results", {})
@@ -364,7 +364,7 @@ class ReportStructureBuilder:
                 report.add_citation(citation)
 
     async def generate_visualizations(
-        self, report: Report, input_data: dict[str, Any]
+        self, report: Report, input_data: dict[str, Any],
     ) -> None:
         """Generate visualization specifications."""
         aggregated_results = input_data.get("aggregated_results", {})
@@ -418,7 +418,7 @@ class ReportStructureBuilder:
             total_citations=len(aggregated_results.get("citations", [])),
             agents_used=metadata_input.get("agents_used", []),
             quality_score=input_data.get("quality_report", {}).get(
-                "quality_score", 0.8
+                "quality_score", 0.8,
             ),
             confidence_score=aggregated_results.get("confidence_score", 0.75),
             generation_time_seconds=0.0,
@@ -427,7 +427,7 @@ class ReportStructureBuilder:
         )
 
     async def generate_executive_summary(
-        self, report: Report, input_data: dict[str, Any]
+        self, report: Report, input_data: dict[str, Any],
     ) -> None:
         """Generate executive summary for the report."""
         aggregated_results = input_data.get("aggregated_results", {})
@@ -469,14 +469,14 @@ class ReportStructureBuilder:
         min_words = self.quality_config.get_min_word_count(report_type)
         if word_count < min_words:
             logger.warning(
-                f"Report word count ({word_count}) below minimum ({min_words})"
+                f"Report word count ({word_count}) below minimum ({min_words})",
             )
 
         source_count = report.metadata.total_sources
         min_sources = self.quality_config.get_min_sources(report_type)
         if source_count < min_sources:
             logger.warning(
-                f"Report source count ({source_count}) below minimum ({min_sources})"
+                f"Report source count ({source_count}) below minimum ({min_sources})",
             )
 
         if self.quality_config.requires_citations(report_type) and not report.citations:

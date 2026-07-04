@@ -1,5 +1,4 @@
-"""
-Main CLI entry point for Research Platform.
+"""Main CLI entry point for Research Platform.
 """
 
 from typing import Any
@@ -43,7 +42,7 @@ from src.cli.formatters import OutputFormatter
 )
 @click.pass_context
 def cli(
-    ctx: Context, api_url: str | None, format: str, verbose: bool, no_color: bool
+    ctx: Context, api_url: str | None, format: str, verbose: bool, no_color: bool,
 ) -> None:
     """Research Platform CLI - Manage research projects from the command line."""
     # Update config with command line options
@@ -79,7 +78,7 @@ def cli(
 @click.argument("value", required=False)
 @click.pass_context
 def config_command(
-    ctx: Context, action: str, key: str | None, value: str | None
+    ctx: Context, action: str, key: str | None, value: str | None,
 ) -> None:
     """Manage CLI configuration."""
     cli_config = ctx.obj["config"]
@@ -190,21 +189,21 @@ def show_completion(shell: str) -> None:
             """
 # Add this to your ~/.bashrc or ~/.bash_profile:
 eval "$(_RESEARCH_CLI_COMPLETE=bash_source research-cli)"
-        """
+        """,
         )
     elif shell == "zsh":
         click.echo(
             """
 # Add this to your ~/.zshrc:
 eval "$(_RESEARCH_CLI_COMPLETE=zsh_source research-cli)"
-        """
+        """,
         )
     elif shell == "fish":
         click.echo(
             """
 # Add this to your ~/.config/fish/config.fish:
 eval (env _RESEARCH_CLI_COMPLETE=fish_source research-cli)
-        """
+        """,
         )
 
 

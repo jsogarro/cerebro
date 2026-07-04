@@ -1,5 +1,4 @@
-"""
-Supervision Feedback Learning System
+"""Supervision Feedback Learning System
 
 Advanced learning system that collects feedback from supervisor executions
 to continuously improve MASR routing decisions and cost predictions.
@@ -120,10 +119,10 @@ class RoutingStrategyAnalyzer:
 
         # Strategy performance tracking
         self.strategy_metrics: dict[str, PerformanceMetrics] = defaultdict(
-            PerformanceMetrics
+            PerformanceMetrics,
         )
         self.strategy_events: dict[str, deque[FeedbackEvent]] = defaultdict(
-            lambda: deque(maxlen=1000)
+            lambda: deque(maxlen=1000),
         )
 
         # Analysis configuration
@@ -131,10 +130,9 @@ class RoutingStrategyAnalyzer:
         self.min_samples_for_analysis = self.config.get("min_samples", 10)
 
     def record_strategy_feedback(
-        self, strategy: RoutingStrategy, feedback: FeedbackEvent
+        self, strategy: RoutingStrategy, feedback: FeedbackEvent,
     ) -> None:
         """Record feedback for a specific routing strategy."""
-
         strategy_name = strategy.value if hasattr(strategy, "value") else str(strategy)
 
         # Add to event history
@@ -164,14 +162,13 @@ class RoutingStrategyAnalyzer:
         metrics.last_updated = datetime.now()
 
         logger.debug(
-            f"Updated metrics for strategy {strategy_name}: success_rate={metrics.success_rate:.3f}"
+            f"Updated metrics for strategy {strategy_name}: success_rate={metrics.success_rate:.3f}",
         )
 
     def analyze_strategy_performance(
-        self, time_window_hours: int | None = None
+        self, time_window_hours: int | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Analyze performance across all routing strategies."""
-
         window_hours = time_window_hours or self.analysis_window_hours
         cutoff_time = datetime.now() - timedelta(hours=window_hours)
 
@@ -204,7 +201,7 @@ class RoutingStrategyAnalyzer:
                     if len(cost_accuracies) > 1
                     else 0.0,
                     "trend": self._calculate_trend(
-                        [e.cost_accuracy for e in recent_events[-10:]]
+                        [e.cost_accuracy for e in recent_events[-10:]],
                     ),
                 },
                 "quality_performance": {
@@ -270,7 +267,7 @@ class RoutingStrategyAnalyzer:
             [
                 min(e.predicted_latency_ms / max(e.actual_latency_ms, 1), 1.0)
                 for e in events
-            ]
+            ],
         )
 
         overall_score = (
@@ -283,10 +280,9 @@ class RoutingStrategyAnalyzer:
         return overall_score
 
     def get_optimal_strategy_recommendation(
-        self, context: dict[str, Any]
+        self, context: dict[str, Any],
     ) -> tuple[str, float]:
         """Get optimal strategy recommendation based on context."""
-
         analysis = self.analyze_strategy_performance()
 
         if not analysis:
@@ -379,7 +375,7 @@ class CostPredictionOptimizer:
         # Ensure factors stay within reasonable bounds
         for factor_name in self.cost_factors:
             self.cost_factors[factor_name] = max(
-                0.5, min(2.0, self.cost_factors[factor_name])
+                0.5, min(2.0, self.cost_factors[factor_name]),
             )
 
         logger.info(f"Updated cost factors: {self.cost_factors}")
@@ -413,8 +409,7 @@ class CostPredictionOptimizer:
 
 
 class SupervisionFeedbackLearner:
-    """
-    Main feedback learning system that coordinates all learning components.
+    """Main feedback learning system that coordinates all learning components.
 
     Integrates routing strategy analysis, cost prediction optimization,
     and supervisor performance tracking to continuously improve MASR decisions.
@@ -426,23 +421,23 @@ class SupervisionFeedbackLearner:
 
         # Initialize learning components
         self.strategy_analyzer = RoutingStrategyAnalyzer(
-            self.config.get("strategy_analyzer", {})
+            self.config.get("strategy_analyzer", {}),
         )
         self.cost_optimizer = CostPredictionOptimizer(
-            self.config.get("cost_optimizer", {})
+            self.config.get("cost_optimizer", {}),
         )
 
         # Feedback storage
         self.feedback_events: deque[FeedbackEvent] = deque(
-            maxlen=self.config.get("max_events", 10000)
+            maxlen=self.config.get("max_events", 10000),
         )
         self.supervisor_performance: dict[str, PerformanceMetrics] = defaultdict(
-            PerformanceMetrics
+            PerformanceMetrics,
         )
 
         # Learning configuration
         self.enable_adaptive_learning = self.config.get(
-            "enable_adaptive_learning", True
+            "enable_adaptive_learning", True,
         )
         self.learning_interval_hours = self.config.get("learning_interval_hours", 6)
         self.auto_optimization_enabled = self.config.get("auto_optimization", True)
@@ -465,27 +460,26 @@ class SupervisionFeedbackLearner:
         execution_result: SupervisorExecutionResult,
         user_feedback: dict[str, Any] | None = None,
     ) -> None:
-        """
-        Record comprehensive feedback from a supervisor execution.
+        """Record comprehensive feedback from a supervisor execution.
 
         Args:
             routing_decision: Original MASR routing decision
             execution_result: Supervisor execution result
             user_feedback: Optional user satisfaction feedback
-        """
 
+        """
         # Calculate accuracy metrics
         cost_accuracy = 1.0 - abs(
-            execution_result.actual_cost - routing_decision.estimated_cost
+            execution_result.actual_cost - routing_decision.estimated_cost,
         ) / max(routing_decision.estimated_cost, 0.001)
 
         quality_accuracy = 1.0 - abs(
-            execution_result.quality_score - routing_decision.estimated_quality
+            execution_result.quality_score - routing_decision.estimated_quality,
         ) / max(routing_decision.estimated_quality, 0.001)
 
         latency_accuracy = 1.0 - abs(
             execution_result.execution_time_seconds * 1000
-            - routing_decision.estimated_latency_ms
+            - routing_decision.estimated_latency_ms,
         ) / max(routing_decision.estimated_latency_ms, 1)
 
         # Create feedback event
@@ -529,7 +523,7 @@ class SupervisionFeedbackLearner:
 
         # Update component learners
         routing_strategy_value = routing_decision.__dict__.get(
-            "routing_strategy", "balanced"
+            "routing_strategy", "balanced",
         )
         routing_strategy = (
             RoutingStrategy(routing_strategy_value)
@@ -537,10 +531,10 @@ class SupervisionFeedbackLearner:
             else routing_strategy_value
         )
         self.strategy_analyzer.record_strategy_feedback(
-            routing_strategy, feedback_event
+            routing_strategy, feedback_event,
         )
         self.cost_optimizer.record_cost_feedback(
-            routing_decision.estimated_cost, execution_result.actual_cost
+            routing_decision.estimated_cost, execution_result.actual_cost,
         )
 
         # Update supervisor performance
@@ -567,12 +561,11 @@ class SupervisionFeedbackLearner:
 
         logger.info(
             f"Recorded feedback for {execution_result.supervisor_type} supervisor: "
-            f"cost_accuracy={cost_accuracy:.3f}, quality_accuracy={quality_accuracy:.3f}"
+            f"cost_accuracy={cost_accuracy:.3f}, quality_accuracy={quality_accuracy:.3f}",
         )
 
     async def perform_learning_cycle(self) -> dict[str, Any]:
         """Perform a complete learning cycle to update routing strategies."""
-
         learning_start = datetime.now()
         improvements = {"routing": 0, "cost": 0, "supervisor": 0}
 
@@ -620,7 +613,7 @@ class SupervisionFeedbackLearner:
             logger.info(
                 f"Learning cycle completed in {learning_duration:.2f}s: "
                 f"routing={improvements['routing']}, cost={improvements['cost']}, "
-                f"supervisor={improvements['supervisor']}"
+                f"supervisor={improvements['supervisor']}",
             )
 
             return {
@@ -643,7 +636,6 @@ class SupervisionFeedbackLearner:
 
     def _generate_supervisor_performance_report(self) -> dict[str, dict[str, Any]]:
         """Generate comprehensive supervisor performance report."""
-
         report = {}
 
         for supervisor_type, metrics in self.supervisor_performance.items():
@@ -677,10 +669,10 @@ class SupervisionFeedbackLearner:
                 },
                 "trends": {
                     "quality_trend": self.strategy_analyzer._calculate_trend(
-                        recent_quality[-10:]
+                        recent_quality[-10:],
                     ),
                     "cost_accuracy_trend": self.strategy_analyzer._calculate_trend(
-                        recent_cost_accuracy[-10:]
+                        recent_cost_accuracy[-10:],
                     ),
                 },
             }
@@ -689,7 +681,6 @@ class SupervisionFeedbackLearner:
 
     def get_routing_recommendations(self, context: dict[str, Any]) -> dict[str, Any]:
         """Get routing recommendations based on learned patterns."""
-
         # Get optimal strategy
         optimal_strategy, confidence = (
             self.strategy_analyzer.get_optimal_strategy_recommendation(context)
@@ -716,10 +707,9 @@ class SupervisionFeedbackLearner:
         }
 
     def _rank_supervisors_for_context(
-        self, context: dict[str, Any]
+        self, context: dict[str, Any],
     ) -> list[dict[str, Any]]:
         """Rank supervisors based on context and performance history."""
-
         domain = context.get("domain", "research")
         complexity = context.get("complexity", "moderate")
 
@@ -747,7 +737,7 @@ class SupervisionFeedbackLearner:
                         e.actual_quality
                         for e in supervisor_events
                         if e.complexity_level == complexity
-                    ]
+                    ],
                 )
                 if supervisor_events
                 else 0.5
@@ -762,16 +752,15 @@ class SupervisionFeedbackLearner:
                     "executions": metrics.total_executions,
                     "success_rate": metrics.success_rate,
                     "complexity_performance": complexity_performance,
-                }
+                },
             )
 
         return sorted(rankings, key=lambda x: x["score"], reverse=True)
 
     def _explain_strategy_selection(
-        self, strategy: str, context: dict[str, Any]
+        self, strategy: str, context: dict[str, Any],
     ) -> str:
         """Explain why a particular strategy was selected."""
-
         explanations = {
             "speed_first": "Optimized for low latency based on priority requirements",
             "cost_efficient": "Selected for cost optimization with acceptable quality trade-offs",
@@ -781,7 +770,7 @@ class SupervisionFeedbackLearner:
         }
 
         base_explanation = explanations.get(
-            strategy, "Selected based on performance history"
+            strategy, "Selected based on performance history",
         )
 
         # Add context-specific reasoning
@@ -795,7 +784,6 @@ class SupervisionFeedbackLearner:
 
     def _calculate_learning_confidence(self) -> float:
         """Calculate confidence in learning recommendations."""
-
         # Base confidence on amount of feedback data
         total_events = len(self.feedback_events)
         data_confidence = min(total_events / 1000, 1.0)  # Max confidence at 1000 events
@@ -807,7 +795,7 @@ class SupervisionFeedbackLearner:
             if event.timestamp >= datetime.now() - timedelta(hours=48)
         )
         recency_confidence = min(
-            recent_events / 100, 1.0
+            recent_events / 100, 1.0,
         )  # Max confidence at 100 recent events
 
         # Calculate overall confidence
@@ -817,7 +805,6 @@ class SupervisionFeedbackLearner:
 
     async def get_learning_stats(self) -> dict[str, Any]:
         """Get comprehensive learning system statistics."""
-
         return {
             "learning_stats": self.learning_stats,
             "feedback_events": len(self.feedback_events),
@@ -835,7 +822,6 @@ class SupervisionFeedbackLearner:
 
     async def save_learning_state(self, file_path: str) -> None:
         """Save learning state to file."""
-
         state = {
             "feedback_events": [asdict(event) for event in self.feedback_events],
             "strategy_metrics": {
@@ -857,7 +843,6 @@ class SupervisionFeedbackLearner:
 
     async def load_learning_state(self, file_path: str) -> None:
         """Load learning state from file."""
-
         try:
             with open(file_path, "rb") as f:
                 state = pickle.load(f)
@@ -865,7 +850,7 @@ class SupervisionFeedbackLearner:
             # Restore state (simplified restoration)
             self.learning_stats = state.get("learning_stats", self.learning_stats)
             self.cost_optimizer.cost_factors = state.get(
-                "cost_factors", self.cost_optimizer.cost_factors
+                "cost_factors", self.cost_optimizer.cost_factors,
             )
 
             logger.info(f"Loaded learning state from {file_path}")

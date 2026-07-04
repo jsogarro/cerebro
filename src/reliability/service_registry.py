@@ -1,5 +1,4 @@
-"""
-Service registry and discovery system.
+"""Service registry and discovery system.
 
 This module provides service registration, discovery, and load balancing
 for microservices architecture with health-aware routing.
@@ -121,15 +120,15 @@ class ServiceInstance:
         instance.status = ServiceStatus(data.get("status", "starting"))
         instance.health_check_url = data.get("health_check_url")
         instance.registered_at = datetime.fromisoformat(
-            data.get("registered_at", datetime.now(UTC).isoformat())
+            data.get("registered_at", datetime.now(UTC).isoformat()),
         )
         instance.last_heartbeat = datetime.fromisoformat(
-            data.get("last_heartbeat", datetime.now(UTC).isoformat())
+            data.get("last_heartbeat", datetime.now(UTC).isoformat()),
         )
 
         if data.get("last_health_check"):
             instance.last_health_check = datetime.fromisoformat(
-                data["last_health_check"]
+                data["last_health_check"],
             )
 
         instance.health_check_failures = data.get("health_check_failures", 0)
@@ -158,8 +157,7 @@ class ServiceInstance:
 
 
 class ServiceRegistry:
-    """
-    Service registry for service registration and management.
+    """Service registry for service registration and management.
 
     Features:
     - Service registration with TTL
@@ -169,11 +167,11 @@ class ServiceRegistry:
     """
 
     def __init__(self, redis_client: redis.Redis[Any] | None = None):
-        """
-        Initialize service registry.
+        """Initialize service registry.
 
         Args:
             redis_client: Optional Redis client for persistence
+
         """
         self._services: dict[str, dict[str, ServiceInstance]] = {}
         self._redis_client = redis_client
@@ -189,8 +187,7 @@ class ServiceRegistry:
         health_check_url: str | None = None,
         ttl: int | None = None,
     ) -> ServiceInstance:
-        """
-        Register a service instance.
+        """Register a service instance.
 
         Args:
             service: Service metadata
@@ -199,6 +196,7 @@ class ServiceRegistry:
 
         Returns:
             Registered service instance
+
         """
         instance = ServiceInstance(
             metadata=service,
@@ -216,7 +214,7 @@ class ServiceRegistry:
         if self._redis_client:
             key = f"{self._registry_prefix}{service.name}:{service.instance_id}"
             await self._redis_client.setex(
-                key, ttl or self._ttl, serialize_for_cache(instance.to_dict())
+                key, ttl or self._ttl, serialize_for_cache(instance.to_dict()),
             )
 
         logger.info(
@@ -230,12 +228,12 @@ class ServiceRegistry:
         return instance
 
     async def deregister(self, service_name: str, instance_id: str) -> None:
-        """
-        Deregister a service instance.
+        """Deregister a service instance.
 
         Args:
             service_name: Service name
             instance_id: Instance ID
+
         """
         # Remove from memory
         if (
@@ -259,12 +257,12 @@ class ServiceRegistry:
         )
 
     async def heartbeat(self, service_name: str, instance_id: str) -> None:
-        """
-        Update service heartbeat.
+        """Update service heartbeat.
 
         Args:
             service_name: Service name
             instance_id: Instance ID
+
         """
         if (
             service_name in self._services
@@ -277,19 +275,19 @@ class ServiceRegistry:
             if self._redis_client:
                 key = f"{self._registry_prefix}{service_name}:{instance_id}"
                 await self._redis_client.setex(
-                    key, self._ttl, serialize_for_cache(instance.to_dict())
+                    key, self._ttl, serialize_for_cache(instance.to_dict()),
                 )
 
     async def update_status(
-        self, service_name: str, instance_id: str, status: ServiceStatus
+        self, service_name: str, instance_id: str, status: ServiceStatus,
     ) -> None:
-        """
-        Update service status.
+        """Update service status.
 
         Args:
             service_name: Service name
             instance_id: Instance ID
             status: New status
+
         """
         if (
             service_name in self._services
@@ -302,7 +300,7 @@ class ServiceRegistry:
             if self._redis_client:
                 key = f"{self._registry_prefix}{service_name}:{instance_id}"
                 await self._redis_client.setex(
-                    key, self._ttl, serialize_for_cache(instance.to_dict())
+                    key, self._ttl, serialize_for_cache(instance.to_dict()),
                 )
 
             logger.info(
@@ -313,10 +311,9 @@ class ServiceRegistry:
             )
 
     async def get_service(
-        self, service_name: str, instance_id: str
+        self, service_name: str, instance_id: str,
     ) -> ServiceInstance | None:
-        """
-        Get a specific service instance.
+        """Get a specific service instance.
 
         Args:
             service_name: Service name
@@ -324,6 +321,7 @@ class ServiceRegistry:
 
         Returns:
             Service instance or None
+
         """
         # Check memory first
         if (
@@ -350,14 +348,14 @@ class ServiceRegistry:
         return None
 
     async def get_all_instances(self, service_name: str) -> list[ServiceInstance]:
-        """
-        Get all instances of a service.
+        """Get all instances of a service.
 
         Args:
             service_name: Service name
 
         Returns:
             List of service instances
+
         """
         instances: list[ServiceInstance] = []
 
@@ -385,14 +383,14 @@ class ServiceRegistry:
         return instances
 
     async def get_healthy_instances(self, service_name: str) -> list[ServiceInstance]:
-        """
-        Get healthy instances of a service.
+        """Get healthy instances of a service.
 
         Args:
             service_name: Service name
 
         Returns:
             List of healthy service instances
+
         """
         all_instances = await self.get_all_instances(service_name)
         return [i for i in all_instances if i.is_available()]
@@ -419,8 +417,7 @@ class ServiceRegistry:
 
 
 class ServiceDiscovery:
-    """
-    Service discovery with load balancing.
+    """Service discovery with load balancing.
 
     Features:
     - Multiple load balancing strategies
@@ -430,16 +427,16 @@ class ServiceDiscovery:
     """
 
     def __init__(self, registry: ServiceRegistry):
-        """
-        Initialize service discovery.
+        """Initialize service discovery.
 
         Args:
             registry: Service registry instance
+
         """
         self._registry = registry
         self._round_robin_counters: dict[str, int] = {}
         self._circuit_breakers: dict[
-            str, Any
+            str, Any,
         ] = {}  # Would integrate with CircuitBreaker class
 
     async def discover(
@@ -449,8 +446,7 @@ class ServiceDiscovery:
         tags: list[str] | None = None,
         capabilities: list[str] | None = None,
     ) -> ServiceInstance | None:
-        """
-        Discover a service instance.
+        """Discover a service instance.
 
         Args:
             service_name: Service name
@@ -460,6 +456,7 @@ class ServiceDiscovery:
 
         Returns:
             Selected service instance or None
+
         """
         # Get healthy instances
         instances = await self._registry.get_healthy_instances(service_name)
@@ -503,8 +500,7 @@ class ServiceDiscovery:
         instances: list[ServiceInstance],
         strategy: LoadBalancingStrategy,
     ) -> ServiceInstance:
-        """
-        Select an instance based on load balancing strategy.
+        """Select an instance based on load balancing strategy.
 
         Args:
             service_name: Service name
@@ -513,28 +509,28 @@ class ServiceDiscovery:
 
         Returns:
             Selected instance
+
         """
         if strategy == LoadBalancingStrategy.ROUND_ROBIN:
             return self._round_robin_select(service_name, instances)
 
-        elif strategy == LoadBalancingStrategy.LEAST_CONNECTIONS:
+        if strategy == LoadBalancingStrategy.LEAST_CONNECTIONS:
             return min(instances, key=lambda i: i.active_connections)
 
-        elif strategy == LoadBalancingStrategy.WEIGHTED:
+        if strategy == LoadBalancingStrategy.WEIGHTED:
             return self._weighted_select(instances)
 
-        elif strategy == LoadBalancingStrategy.RANDOM:
+        if strategy == LoadBalancingStrategy.RANDOM:
             return random.choice(instances)
 
-        elif strategy == LoadBalancingStrategy.IP_HASH:
+        if strategy == LoadBalancingStrategy.IP_HASH:
             # Would need client IP for proper implementation
             return instances[hash(service_name) % len(instances)]
 
-        else:
-            return instances[0]
+        return instances[0]
 
     def _round_robin_select(
-        self, service_name: str, instances: list[ServiceInstance]
+        self, service_name: str, instances: list[ServiceInstance],
     ) -> ServiceInstance:
         """Round-robin selection."""
         if service_name not in self._round_robin_counters:
@@ -558,8 +554,7 @@ class ServiceDiscovery:
         strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN,
         **kwargs: Any,
     ) -> Any:
-        """
-        Call a service with automatic discovery and load balancing.
+        """Call a service with automatic discovery and load balancing.
 
         Args:
             service_name: Service name
@@ -570,6 +565,7 @@ class ServiceDiscovery:
 
         Returns:
             Service response
+
         """
         instance = await self.discover(service_name, strategy)
 
@@ -605,8 +601,7 @@ class ServiceDiscovery:
 
 
 class LoadBalancer:
-    """
-    Advanced load balancer with health checks and failover.
+    """Advanced load balancer with health checks and failover.
 
     Features:
     - Multiple backend support
@@ -621,13 +616,13 @@ class LoadBalancer:
         discovery: ServiceDiscovery,
         strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN,
     ):
-        """
-        Initialize load balancer.
+        """Initialize load balancer.
 
         Args:
             service_name: Service name to balance
             discovery: Service discovery instance
             strategy: Load balancing strategy
+
         """
         self.service_name = service_name
         self._discovery = discovery
@@ -637,10 +632,9 @@ class LoadBalancer:
         self._max_failures = 3
 
     async def execute(
-        self, endpoint: str, method: str = "GET", max_retries: int = 3, **kwargs: Any
+        self, endpoint: str, method: str = "GET", max_retries: int = 3, **kwargs: Any,
     ) -> Any:
-        """
-        Execute request with load balancing and retry.
+        """Execute request with load balancing and retry.
 
         Args:
             endpoint: API endpoint
@@ -650,6 +644,7 @@ class LoadBalancer:
 
         Returns:
             Service response
+
         """
         last_error = None
 
@@ -663,7 +658,7 @@ class LoadBalancer:
 
                 # Call the service
                 result = await self._discovery.call_service(
-                    self.service_name, endpoint, method, self._strategy, **kwargs
+                    self.service_name, endpoint, method, self._strategy, **kwargs,
                 )
 
                 # Reset failure count on success
@@ -702,7 +697,7 @@ class LoadBalancer:
     async def _get_instance(self) -> ServiceInstance | None:
         """Get an instance excluding failed ones."""
         instances = await self._discovery._registry.get_healthy_instances(
-            self.service_name
+            self.service_name,
         )
 
         # Filter out failed instances

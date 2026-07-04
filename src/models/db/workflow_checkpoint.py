@@ -1,5 +1,4 @@
-"""
-Workflow Checkpoint database model.
+"""Workflow Checkpoint database model.
 
 Stores workflow checkpoints for recovery and analysis.
 """
@@ -14,8 +13,7 @@ from src.models.db.base import UUID, BaseModel
 
 
 class WorkflowCheckpoint(BaseModel):
-    """
-    Workflow checkpoint model.
+    """Workflow checkpoint model.
 
     Stores checkpoint data for Temporal and LangGraph workflows,
     enabling recovery and workflow analysis.
@@ -61,12 +59,12 @@ class WorkflowCheckpoint(BaseModel):
     )
 
     recovery_metadata: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True
+        JSON, nullable=True,
     )
 
     # Performance metrics at checkpoint
     execution_metrics: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True
+        JSON, nullable=True,
     )
 
     # Relationships
@@ -80,8 +78,7 @@ class WorkflowCheckpoint(BaseModel):
     )
 
     def get_state(self, key: str, default: Any = None) -> Any:
-        """
-        Get a value from checkpoint data.
+        """Get a value from checkpoint data.
 
         Args:
             key: State key
@@ -89,49 +86,49 @@ class WorkflowCheckpoint(BaseModel):
 
         Returns:
             State value
+
         """
         if not self.checkpoint_data:
             return default
         return self.checkpoint_data.get(key, default)
 
     def set_state(self, key: str, value: Any) -> None:
-        """
-        Set a value in checkpoint data.
+        """Set a value in checkpoint data.
 
         Args:
             key: State key
             value: State value
+
         """
         if self.checkpoint_data is None:
             self.checkpoint_data = {}
         self.checkpoint_data[key] = value
 
     def update_state(self, state_updates: dict[str, Any]) -> None:
-        """
-        Update multiple state values.
+        """Update multiple state values.
 
         Args:
             state_updates: Dictionary of state updates
+
         """
         if self.checkpoint_data is None:
             self.checkpoint_data = {}
         self.checkpoint_data.update(state_updates)
 
     def add_metric(self, metric_name: str, metric_value: Any) -> None:
-        """
-        Add execution metric.
+        """Add execution metric.
 
         Args:
             metric_name: Name of the metric
             metric_value: Metric value
+
         """
         if self.execution_metrics is None:
             self.execution_metrics = {}
         self.execution_metrics[metric_name] = metric_value
 
     def get_metric(self, metric_name: str, default: Any = None) -> Any:
-        """
-        Get execution metric.
+        """Get execution metric.
 
         Args:
             metric_name: Name of the metric
@@ -139,17 +136,18 @@ class WorkflowCheckpoint(BaseModel):
 
         Returns:
             Metric value
+
         """
         if not self.execution_metrics:
             return default
         return self.execution_metrics.get(metric_name, default)
 
     def mark_as_error_checkpoint(self, error_info: dict[str, Any]) -> None:
-        """
-        Mark checkpoint as error checkpoint.
+        """Mark checkpoint as error checkpoint.
 
         Args:
             error_info: Information about the error
+
         """
         self.checkpoint_type = "error"
         self.is_recoverable = True

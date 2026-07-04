@@ -1,5 +1,4 @@
-"""
-Security alert database model.
+"""Security alert database model.
 
 Manages security alerts and notifications for suspicious activities,
 policy violations, and security incidents.
@@ -91,8 +90,7 @@ class AlertStatus(StrEnum):
 
 
 class SecurityAlert(BaseModel):
-    """
-    Security alert model.
+    """Security alert model.
 
     Tracks security incidents, suspicious activities, and
     policy violations requiring attention.
@@ -132,46 +130,46 @@ class SecurityAlert(BaseModel):
     )
 
     username: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="Username at time of alert (denormalized)"
+        String(100), nullable=True, comment="Username at time of alert (denormalized)",
     )
 
     email: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Email at time of alert (denormalized)"
+        String(255), nullable=True, comment="Email at time of alert (denormalized)",
     )
 
     # Alert details
     title: Mapped[str] = mapped_column(
-        String(255), nullable=False, comment="Alert title"
+        String(255), nullable=False, comment="Alert title",
     )
 
     description: Mapped[str] = mapped_column(
-        Text, nullable=False, comment="Detailed alert description"
+        Text, nullable=False, comment="Detailed alert description",
     )
 
     # Threat indicators
     ip_address: Mapped[str | None] = mapped_column(
-        String(45), nullable=True, index=True, comment="Source IP address"
+        String(45), nullable=True, index=True, comment="Source IP address",
     )
 
     user_agent: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, comment="User agent string"
+        String(500), nullable=True, comment="User agent string",
     )
 
     request_path: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, comment="Request path/endpoint"
+        String(500), nullable=True, comment="Request path/endpoint",
     )
 
     request_method: Mapped[str | None] = mapped_column(
-        String(10), nullable=True, comment="HTTP request method"
+        String(10), nullable=True, comment="HTTP request method",
     )
 
     # Location information
     country: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="Country from IP geolocation"
+        String(100), nullable=True, comment="Country from IP geolocation",
     )
 
     city: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="City from IP geolocation"
+        String(100), nullable=True, comment="City from IP geolocation",
     )
 
     is_known_location: Mapped[bool] = mapped_column(
@@ -183,11 +181,11 @@ class SecurityAlert(BaseModel):
 
     # Risk assessment
     risk_score: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, comment="Calculated risk score (0-100)"
+        Integer, nullable=True, comment="Calculated risk score (0-100)",
     )
 
     confidence_score: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, comment="Alert confidence score (0-100)"
+        Integer, nullable=True, comment="Alert confidence score (0-100)",
     )
 
     is_automated: Mapped[bool] = mapped_column(
@@ -199,20 +197,20 @@ class SecurityAlert(BaseModel):
 
     # Related information
     related_alerts: Mapped[list[Any] | None] = mapped_column(
-        JSON, nullable=True, comment="IDs of related alerts"
+        JSON, nullable=True, comment="IDs of related alerts",
     )
 
     affected_resources: Mapped[list[Any] | None] = mapped_column(
-        JSON, nullable=True, comment="List of affected resources"
+        JSON, nullable=True, comment="List of affected resources",
     )
 
     evidence: Mapped[list[Any] | None] = mapped_column(
-        JSON, nullable=True, comment="Supporting evidence/logs"
+        JSON, nullable=True, comment="Supporting evidence/logs",
     )
 
     # Actions taken
     actions_taken: Mapped[list[Any] | None] = mapped_column(
-        JSON, nullable=True, comment="List of actions taken"
+        JSON, nullable=True, comment="List of actions taken",
     )
 
     auto_remediated: Mapped[bool] = mapped_column(
@@ -223,41 +221,41 @@ class SecurityAlert(BaseModel):
     )
 
     remediation_steps: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Recommended remediation steps"
+        Text, nullable=True, comment="Recommended remediation steps",
     )
 
     # Response tracking
     acknowledged_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="When alert was acknowledged"
+        DateTime(timezone=True), nullable=True, comment="When alert was acknowledged",
     )
 
     acknowledged_by: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Who acknowledged the alert"
+        String(255), nullable=True, comment="Who acknowledged the alert",
     )
 
     investigated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="When investigation started"
+        DateTime(timezone=True), nullable=True, comment="When investigation started",
     )
 
     investigated_by: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Who investigated the alert"
+        String(255), nullable=True, comment="Who investigated the alert",
     )
 
     resolved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="When alert was resolved"
+        DateTime(timezone=True), nullable=True, comment="When alert was resolved",
     )
 
     resolved_by: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Who resolved the alert"
+        String(255), nullable=True, comment="Who resolved the alert",
     )
 
     resolution_notes: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Resolution notes"
+        Text, nullable=True, comment="Resolution notes",
     )
 
     # Notification tracking
     notifications_sent: Mapped[list[Any] | None] = mapped_column(
-        JSON, nullable=True, default=[], comment="List of sent notifications"
+        JSON, nullable=True, default=[], comment="List of sent notifications",
     )
 
     email_sent: Mapped[bool] = mapped_column(
@@ -284,16 +282,16 @@ class SecurityAlert(BaseModel):
     )
 
     escalated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="When alert was escalated"
+        DateTime(timezone=True), nullable=True, comment="When alert was escalated",
     )
 
     escalated_to: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Who/where alert was escalated to"
+        String(255), nullable=True, comment="Who/where alert was escalated to",
     )
 
     # Alert metadata
     alert_metadata: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="Additional alert metadata"
+        JSON, nullable=True, comment="Additional alert metadata",
     )
 
     # Relationships
@@ -320,8 +318,7 @@ class SecurityAlert(BaseModel):
         auto_remediate: bool = False,
         **kwargs: Any,
     ) -> "SecurityAlert":
-        """
-        Create a security alert.
+        """Create a security alert.
 
         Args:
             alert_type: Type of alert
@@ -336,6 +333,7 @@ class SecurityAlert(BaseModel):
 
         Returns:
             SecurityAlert instance
+
         """
         # Calculate risk score based on type and severity
         risk_score = cls._calculate_risk_score(alert_type, severity)
@@ -414,22 +412,22 @@ class SecurityAlert(BaseModel):
             self.actions_taken = actions
 
     def acknowledge(self, acknowledged_by: str) -> None:
-        """
-        Acknowledge the alert.
+        """Acknowledge the alert.
 
         Args:
             acknowledged_by: Who is acknowledging
+
         """
         self.status = AlertStatus.ACKNOWLEDGED
         self.acknowledged_at = datetime.now(UTC)
         self.acknowledged_by = acknowledged_by
 
     def investigate(self, investigated_by: str) -> None:
-        """
-        Mark alert as under investigation.
+        """Mark alert as under investigation.
 
         Args:
             investigated_by: Who is investigating
+
         """
         self.status = AlertStatus.INVESTIGATING
         self.investigated_at = datetime.now(UTC)
@@ -441,15 +439,15 @@ class SecurityAlert(BaseModel):
             self.acknowledged_by = investigated_by
 
     def resolve(
-        self, resolved_by: str, resolution_notes: str, is_false_positive: bool = False
+        self, resolved_by: str, resolution_notes: str, is_false_positive: bool = False,
     ) -> None:
-        """
-        Resolve the alert.
+        """Resolve the alert.
 
         Args:
             resolved_by: Who is resolving
             resolution_notes: Resolution notes
             is_false_positive: Whether this was a false positive
+
         """
         self.status = (
             AlertStatus.FALSE_POSITIVE if is_false_positive else AlertStatus.RESOLVED
@@ -459,11 +457,11 @@ class SecurityAlert(BaseModel):
         self.resolution_notes = resolution_notes
 
     def escalate(self, escalated_to: str) -> None:
-        """
-        Escalate the alert.
+        """Escalate the alert.
 
         Args:
             escalated_to: Who/where to escalate to
+
         """
         self.status = AlertStatus.ESCALATED
         self.escalated = True
@@ -471,11 +469,11 @@ class SecurityAlert(BaseModel):
         self.escalated_to = escalated_to
 
     def add_evidence(self, evidence: dict[str, Any]) -> None:
-        """
-        Add evidence to the alert.
+        """Add evidence to the alert.
 
         Args:
             evidence: Evidence to add
+
         """
         if self.evidence:
             if isinstance(self.evidence, list):
@@ -486,12 +484,12 @@ class SecurityAlert(BaseModel):
             self.evidence = [evidence]
 
     def send_notification(self, channel: str, recipient: str) -> None:
-        """
-        Record notification sent.
+        """Record notification sent.
 
         Args:
             channel: Notification channel (email, sms, etc.)
             recipient: Notification recipient
+
         """
         notification = {
             "channel": channel,
@@ -544,8 +542,7 @@ class SecurityAlert(BaseModel):
         limit: int = 100,
         session: Any = None,
     ) -> list["SecurityAlert"]:
-        """
-        Get active alerts.
+        """Get active alerts.
 
         Args:
             user_id: Filter by user
@@ -555,14 +552,15 @@ class SecurityAlert(BaseModel):
 
         Returns:
             List of SecurityAlert instances
+
         """
         if not session:
             return []
 
         query = session.query(cls).filter(
             cls.status.in_(
-                [AlertStatus.NEW, AlertStatus.ACKNOWLEDGED, AlertStatus.INVESTIGATING]
-            )
+                [AlertStatus.NEW, AlertStatus.ACKNOWLEDGED, AlertStatus.INVESTIGATING],
+            ),
         )
 
         if user_id:
@@ -580,10 +578,9 @@ class SecurityAlert(BaseModel):
 
     @classmethod
     def count_by_type(
-        cls, start_date: datetime, end_date: datetime, session: Any = None
+        cls, start_date: datetime, end_date: datetime, session: Any = None,
     ) -> dict[str, Any]:
-        """
-        Count alerts by type in date range.
+        """Count alerts by type in date range.
 
         Args:
             start_date: Start date
@@ -592,6 +589,7 @@ class SecurityAlert(BaseModel):
 
         Returns:
             Dictionary of counts by alert type
+
         """
         if not session:
             return {}
@@ -608,11 +606,11 @@ class SecurityAlert(BaseModel):
         return {alert_type.value: count for alert_type, count in results}
 
     def to_dict(self) -> dict[str, Any]:
-        """
-        Convert to dictionary.
+        """Convert to dictionary.
 
         Returns:
             Dictionary representation
+
         """
         return {
             "id": str(self.id),

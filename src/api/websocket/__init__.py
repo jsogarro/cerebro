@@ -1,5 +1,4 @@
-"""
-WebSocket package for real-time communication.
+"""WebSocket package for real-time communication.
 """
 
 from .connection_manager import ConnectionManager, websocket_manager

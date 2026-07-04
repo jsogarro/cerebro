@@ -1,5 +1,4 @@
-"""
-Content Supervisor Agent
+"""Content Supervisor Agent
 
 Coordinates content creation teams for writing, editing, and optimizing
 various forms of content. Implements proven content workflows with
@@ -31,8 +30,7 @@ logger = get_logger()
 
 
 class ContentSupervisor(BaseSupervisor):
-    """
-    Content team supervisor implementing content creation workflows.
+    """Content team supervisor implementing content creation workflows.
 
     Manages the complete content lifecycle:
     1. Content planning and strategy
@@ -139,7 +137,7 @@ class ContentSupervisor(BaseSupervisor):
                     reliability_score=0.90,
                     quality_score=0.85,
                 ),
-            }
+            },
         )
 
     def _build_workflow_graph(self) -> None:
@@ -154,25 +152,25 @@ class ContentSupervisor(BaseSupervisor):
         self.workflow_graph.add_node(
             "coordinate_drafting",
             self._create_langgraph_node(
-                "coordinate_drafting", self._coordinate_drafting_phase
+                "coordinate_drafting", self._coordinate_drafting_phase,
             ),
         )
         self.workflow_graph.add_node(
             "coordinate_editing",
             self._create_langgraph_node(
-                "coordinate_editing", self._coordinate_editing_phase
+                "coordinate_editing", self._coordinate_editing_phase,
             ),
         )
         self.workflow_graph.add_node(
             "coordinate_optimization",
             self._create_langgraph_node(
-                "coordinate_optimization", self._coordinate_optimization_phase
+                "coordinate_optimization", self._coordinate_optimization_phase,
             ),
         )
         self.workflow_graph.add_node(
             "evaluate_quality",
             self._create_langgraph_node(
-                "evaluate_quality", self._evaluate_quality_phase
+                "evaluate_quality", self._evaluate_quality_phase,
             ),
         )
 
@@ -188,7 +186,7 @@ class ContentSupervisor(BaseSupervisor):
         self.workflow_graph = self.workflow_graph.compile()  # type: Any
 
     async def _coordinate_workers(
-        self, state: SupervisionState, task: AgentTask
+        self, state: SupervisionState, task: AgentTask,
     ) -> SupervisionState:
         """Content-specific worker coordination."""
         allocated_workers = await self.allocate_workers(task)
@@ -197,12 +195,12 @@ class ContentSupervisor(BaseSupervisor):
             {
                 "content_format": self.content_format,
                 "target_audience": self.target_audience,
-            }
+            },
         )
         return state
 
     async def _plan_content_phase(
-        self, langgraph_state: dict[str, Any]
+        self, langgraph_state: dict[str, Any],
     ) -> dict[str, Any]:
         """Plan content creation strategy."""
         state = langgraph_state["supervision_state"]
@@ -222,14 +220,14 @@ class ContentSupervisor(BaseSupervisor):
                     "format": self.content_format,
                     "audience": self.target_audience,
                 },
-            }
+            },
         }
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
     async def _coordinate_drafting_phase(
-        self, langgraph_state: dict[str, Any]
+        self, langgraph_state: dict[str, Any],
     ) -> dict[str, Any]:
         """Coordinate drafting worker."""
         state = langgraph_state["supervision_state"]
@@ -241,14 +239,14 @@ class ContentSupervisor(BaseSupervisor):
             message_content = TalkHierContent(
                 content=f"Create content draft for: {state.original_query}",
                 background=state.worker_results.get("content_planning", {}).get(
-                    "content", ""
+                    "content", "",
                 )
                 if "content_planning" in state.worker_results
                 else "",
                 intermediate_outputs=state.context,
             )
             response = await self.send_talkhier_message(
-                "drafting", MessageType.SUPERVISOR_ASSIGNMENT, message_content
+                "drafting", MessageType.SUPERVISOR_ASSIGNMENT, message_content,
             )
             if response:
                 state.worker_results["drafting"] = response.talkhier_content
@@ -257,7 +255,7 @@ class ContentSupervisor(BaseSupervisor):
         return langgraph_state
 
     async def _coordinate_editing_phase(
-        self, langgraph_state: dict[str, Any]
+        self, langgraph_state: dict[str, Any],
     ) -> dict[str, Any]:
         """Coordinate editing worker."""
         state = langgraph_state["supervision_state"]
@@ -275,7 +273,7 @@ class ContentSupervisor(BaseSupervisor):
                 intermediate_outputs={"editing_round": 1},
             )
             response = await self.send_talkhier_message(
-                "editing", MessageType.SUPERVISOR_ASSIGNMENT, message_content
+                "editing", MessageType.SUPERVISOR_ASSIGNMENT, message_content,
             )
             if response:
                 state.worker_results["editing"] = response.talkhier_content
@@ -284,7 +282,7 @@ class ContentSupervisor(BaseSupervisor):
         return langgraph_state
 
     async def _coordinate_optimization_phase(
-        self, langgraph_state: dict[str, Any]
+        self, langgraph_state: dict[str, Any],
     ) -> dict[str, Any]:
         """Coordinate optimization worker."""
         state = langgraph_state["supervision_state"]
@@ -300,11 +298,11 @@ class ContentSupervisor(BaseSupervisor):
                 if hasattr(edited_content, "content")
                 else "",
                 intermediate_outputs={
-                    "target_keywords": state.context.get("keywords", [])
+                    "target_keywords": state.context.get("keywords", []),
                 },
             )
             response = await self.send_talkhier_message(
-                "optimization", MessageType.SUPERVISOR_ASSIGNMENT, message_content
+                "optimization", MessageType.SUPERVISOR_ASSIGNMENT, message_content,
             )
             if response:
                 state.worker_results["optimization"] = response.talkhier_content
@@ -313,7 +311,7 @@ class ContentSupervisor(BaseSupervisor):
         return langgraph_state
 
     async def _evaluate_quality_phase(
-        self, langgraph_state: dict[str, Any]
+        self, langgraph_state: dict[str, Any],
     ) -> dict[str, Any]:
         """Evaluate final content quality."""
         state = langgraph_state["supervision_state"]

@@ -48,7 +48,7 @@ class StatsResult(BaseModel):
 
 
 def dcf_gordon_growth(
-    fcf_next: float, growth_rate: float, discount_rate: float
+    fcf_next: float, growth_rate: float, discount_rate: float,
 ) -> DCFResult:
     """Present value of a perpetually growing cash flow (Gordon growth model).
 
@@ -73,7 +73,7 @@ def npv(discount_rate: float, cashflows: list[float]) -> NPVResult:
         raise ValueError("discount_rate must be greater than -1")
     total = sum(cf / (1 + discount_rate) ** t for t, cf in enumerate(cashflows))
     return NPVResult(
-        npv=round(total, 4), discount_rate=discount_rate, cashflows=list(cashflows)
+        npv=round(total, 4), discount_rate=discount_rate, cashflows=list(cashflows),
     )
 
 
@@ -138,7 +138,7 @@ def compound_interest(
 
 
 def loan_amortization(
-    principal: float, annual_rate: float, months: int
+    principal: float, annual_rate: float, months: int,
 ) -> AmortizationResult:
     """Fixed-rate loan monthly payment and total interest."""
     if months <= 0:
@@ -175,7 +175,7 @@ def descriptive_stats(values: list[float]) -> StatsResult:
 
 _OPERATIONS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "dcf": lambda p: dcf_gordon_growth(
-        p["fcf_next"], p["growth_rate"], p["discount_rate"]
+        p["fcf_next"], p["growth_rate"], p["discount_rate"],
     ),
     "npv": lambda p: npv(p["discount_rate"], p["cashflows"]),
     "ratios": lambda p: financial_ratios(p["values"]),
@@ -185,10 +185,10 @@ _OPERATIONS: dict[str, Callable[[dict[str, Any]], Any]] = {
             p["annual_rate"],
             p["years"],
             int(p.get("compounds_per_year", 1)),
-        )
+        ),
     },
     "amortization": lambda p: loan_amortization(
-        p["principal"], p["annual_rate"], int(p["months"])
+        p["principal"], p["annual_rate"], int(p["months"]),
     ),
     "stats": lambda p: descriptive_stats(p["values"]),
 }
@@ -199,13 +199,13 @@ def calculate(operation: str, params: dict[str, Any]) -> Any:
     op = _OPERATIONS.get(operation)
     if op is None:
         raise ValueError(
-            f"Unknown operation '{operation}'. Available: {sorted(_OPERATIONS.keys())}"
+            f"Unknown operation '{operation}'. Available: {sorted(_OPERATIONS.keys())}",
         )
     try:
         return op(params)
     except KeyError as exc:
         raise ValueError(
-            f"Missing required parameter for '{operation}': {exc}"
+            f"Missing required parameter for '{operation}': {exc}",
         ) from exc
 
 

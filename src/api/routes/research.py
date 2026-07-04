@@ -1,5 +1,4 @@
-"""
-Research API endpoints for Research Platform.
+"""Research API endpoints for Research Platform.
 """
 
 from typing import Any
@@ -288,7 +287,7 @@ async def get_research_progress(
             # Calculate progress from execution status
             total_tasks = 4  # Typical research workflow phases
             completed_tasks = int(
-                execution_status.progress_percentage / 25
+                execution_status.progress_percentage / 25,
             )  # 25% per phase
             in_progress = 1 if execution_status.status == "running" else 0
             pending_tasks = max(0, total_tasks - completed_tasks - in_progress)
@@ -331,7 +330,7 @@ async def get_research_progress(
 
 
 @router.post(
-    "/projects/{project_id}/cancel", status_code=http_status.HTTP_204_NO_CONTENT
+    "/projects/{project_id}/cancel", status_code=http_status.HTTP_204_NO_CONTENT,
 )
 async def cancel_research_project(
     project_id: UUID,
@@ -358,7 +357,7 @@ async def cancel_research_project(
         for execution in execution_service.active_executions.values():
             if execution.project_id == str(project_id):
                 execution_cancelled = await execution_service.cancel_execution(
-                    execution.execution_id
+                    execution.execution_id,
                 )
                 break
     except Exception as e:

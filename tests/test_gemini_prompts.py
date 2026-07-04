@@ -1,5 +1,4 @@
-"""
-Test suite for Gemini prompt templates and generation.
+"""Test suite for Gemini prompt templates and generation.
 
 These tests verify prompt engineering functionality.
 """
@@ -108,7 +107,7 @@ class TestAgentPrompts:
         ]
 
         prompt = generate_comparative_agent_prompt(
-            items, criteria=["efficiency", "cost"]
+            items, criteria=["efficiency", "cost"],
         )
 
         assert "compare" in prompt.lower()

@@ -1,5 +1,4 @@
-"""
-OAuth account database model.
+"""OAuth account database model.
 
 Manages OAuth provider connections for social authentication
 (Google, GitHub, etc.).
@@ -42,8 +41,7 @@ class OAuthProvider(StrEnum):
 
 
 class OAuthAccount(BaseModel):
-    """
-    OAuth account model.
+    """OAuth account model.
 
     Links user accounts to external OAuth providers for
     social authentication and authorization.
@@ -66,23 +64,23 @@ class OAuthAccount(BaseModel):
     )
 
     provider_user_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, comment="User ID from OAuth provider"
+        String(255), nullable=False, comment="User ID from OAuth provider",
     )
 
     provider_username: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Username from OAuth provider"
+        String(255), nullable=True, comment="Username from OAuth provider",
     )
 
     provider_email: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Email from OAuth provider"
+        String(255), nullable=True, comment="Email from OAuth provider",
     )
 
     access_token: Mapped[str] = mapped_column(
-        String(2048), nullable=False, comment="OAuth access token (encrypted)"
+        String(2048), nullable=False, comment="OAuth access token (encrypted)",
     )
 
     refresh_token: Mapped[str | None] = mapped_column(
-        String(2048), nullable=True, comment="OAuth refresh token (encrypted)"
+        String(2048), nullable=True, comment="OAuth refresh token (encrypted)",
     )
 
     id_token: Mapped[str | None] = mapped_column(
@@ -99,31 +97,31 @@ class OAuthAccount(BaseModel):
     )
 
     access_token_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Access token expiration time"
+        DateTime(timezone=True), nullable=True, comment="Access token expiration time",
     )
 
     refresh_token_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Refresh token expiration time"
+        DateTime(timezone=True), nullable=True, comment="Refresh token expiration time",
     )
 
     provider_data: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="Full profile data from provider"
+        JSON, nullable=True, comment="Full profile data from provider",
     )
 
     profile_picture_url: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, comment="Profile picture URL from provider"
+        String(500), nullable=True, comment="Profile picture URL from provider",
     )
 
     display_name: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Display name from provider"
+        String(255), nullable=True, comment="Display name from provider",
     )
 
     scopes: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="List of granted OAuth scopes"
+        JSON, nullable=True, comment="List of granted OAuth scopes",
     )
 
     is_primary: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, comment="Primary OAuth account for user"
+        Boolean, nullable=False, default=False, comment="Primary OAuth account for user",
     )
 
     is_active: Mapped[bool] = mapped_column(
@@ -155,23 +153,23 @@ class OAuthAccount(BaseModel):
     )
 
     last_refreshed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Last token refresh time"
+        DateTime(timezone=True), nullable=True, comment="Last token refresh time",
     )
 
     connection_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, comment="Number of times connected"
+        Integer, nullable=False, default=1, comment="Number of times connected",
     )
 
     last_error: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, comment="Last error message"
+        String(500), nullable=True, comment="Last error message",
     )
 
     last_error_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Last error timestamp"
+        DateTime(timezone=True), nullable=True, comment="Last error timestamp",
     )
 
     error_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, comment="Total error count"
+        Integer, nullable=False, default=0, comment="Total error count",
     )
 
     # Relationships
@@ -198,8 +196,7 @@ class OAuthAccount(BaseModel):
         provider_data: dict[str, Any] | None = None,
         scopes: list[str] | None = None,
     ) -> "OAuthAccount":
-        """
-        Create a new OAuth connection.
+        """Create a new OAuth connection.
 
         Args:
             user_id: User ID
@@ -214,6 +211,7 @@ class OAuthAccount(BaseModel):
 
         Returns:
             OAuthAccount instance
+
         """
         # Calculate token expiration
         access_token_expires_at = None
@@ -268,13 +266,13 @@ class OAuthAccount(BaseModel):
         refresh_token: str | None = None,
         expires_in: int | None = None,
     ) -> None:
-        """
-        Update OAuth tokens.
+        """Update OAuth tokens.
 
         Args:
             access_token: New access token
             refresh_token: New refresh token
             expires_in: Token expiration in seconds
+
         """
         self.access_token = access_token  # Should be encrypted
 
@@ -283,7 +281,7 @@ class OAuthAccount(BaseModel):
 
         if expires_in:
             self.access_token_expires_at = datetime.now(UTC) + timedelta(
-                seconds=expires_in
+                seconds=expires_in,
             )
 
         self.last_refreshed_at = datetime.now(UTC)
@@ -294,11 +292,11 @@ class OAuthAccount(BaseModel):
         self.connection_count += 1
 
     def record_error(self, error_message: str) -> None:
-        """
-        Record an error with this OAuth connection.
+        """Record an error with this OAuth connection.
 
         Args:
             error_message: Error message
+
         """
         self.last_error = error_message[:500]  # Truncate to field length
         self.last_error_at = datetime.now(UTC)
@@ -316,16 +314,16 @@ class OAuthAccount(BaseModel):
         self.id_token = None
 
     def set_as_primary(self, session: Any = None) -> None:
-        """
-        Set this as the primary OAuth account for the user.
+        """Set this as the primary OAuth account for the user.
 
         Args:
             session: Database session
+
         """
         if session:
             # Remove primary flag from other accounts
             session.query(OAuthAccount).filter(
-                OAuthAccount.user_id == self.user_id, OAuthAccount.id != self.id
+                OAuthAccount.user_id == self.user_id, OAuthAccount.id != self.id,
             ).update({"is_primary": False})
 
         self.is_primary = True
@@ -362,8 +360,7 @@ class OAuthAccount(BaseModel):
         active_only: bool = True,
         session: Any = None,
     ) -> "OAuthAccount | None":
-        """
-        Get OAuth account by provider.
+        """Get OAuth account by provider.
 
         Args:
             user_id: User ID
@@ -373,12 +370,13 @@ class OAuthAccount(BaseModel):
 
         Returns:
             OAuthAccount instance or None
+
         """
         if not session:
             return None
 
         query = session.query(cls).filter(
-            cls.user_id == user_id, cls.provider == provider
+            cls.user_id == user_id, cls.provider == provider,
         )
 
         if active_only:
@@ -389,10 +387,9 @@ class OAuthAccount(BaseModel):
 
     @classmethod
     def find_by_provider_id(
-        cls, provider: OAuthProvider, provider_user_id: str, session: Any = None
+        cls, provider: OAuthProvider, provider_user_id: str, session: Any = None,
     ) -> "OAuthAccount | None":
-        """
-        Find OAuth account by provider and provider user ID.
+        """Find OAuth account by provider and provider user ID.
 
         Args:
             provider: OAuth provider
@@ -401,6 +398,7 @@ class OAuthAccount(BaseModel):
 
         Returns:
             OAuthAccount instance or None
+
         """
         if not session:
             return None
@@ -413,14 +411,14 @@ class OAuthAccount(BaseModel):
         return result
 
     def to_dict(self, include_tokens: bool = False) -> dict[str, Any]:
-        """
-        Convert to dictionary.
+        """Convert to dictionary.
 
         Args:
             include_tokens: Include token information
 
         Returns:
             Dictionary representation
+
         """
         data = {
             "id": str(self.id),

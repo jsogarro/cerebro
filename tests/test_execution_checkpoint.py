@@ -1,5 +1,4 @@
-"""
-Tests for execution checkpoint and resume functionality.
+"""Tests for execution checkpoint and resume functionality.
 
 Tests the checkpoint storage and resume capability in DirectExecutionService
 with mocked repository to avoid requiring a live database.
@@ -65,7 +64,7 @@ def execution_service_with_checkpoint(mock_session_factory):
 
 @pytest.mark.asyncio
 async def test_checkpoint_with_repository_calls_create_checkpoint(
-    execution_service_with_checkpoint, mock_session_factory
+    execution_service_with_checkpoint, mock_session_factory,
 ):
     """Test that _checkpoint calls create_checkpoint when repository is available."""
     execution_status = ExecutionStatus(
@@ -77,13 +76,13 @@ async def test_checkpoint_with_repository_calls_create_checkpoint(
     )
 
     with patch(
-        "src.api.services.direct_execution_service.CheckpointRepository"
+        "src.api.services.direct_execution_service.CheckpointRepository",
     ) as mock_repo_cls:
         mock_repo_instance = AsyncMock(spec=CheckpointRepository)
         mock_repo_cls.return_value = mock_repo_instance
 
         await execution_service_with_checkpoint._checkpoint(
-            execution_status, "supervisor_execution"
+            execution_status, "supervisor_execution",
         )
 
         # Verify create_checkpoint was called
@@ -114,7 +113,7 @@ async def test_checkpoint_without_repository_is_noop(execution_service_with_chec
 
     # Should not raise, just return silently
     await execution_service_with_checkpoint._checkpoint(
-        execution_status, "supervisor_execution"
+        execution_status, "supervisor_execution",
     )
 
 
@@ -132,23 +131,23 @@ async def test_checkpoint_on_repository_error_degrades_gracefully(
     )
 
     with patch(
-        "src.api.services.direct_execution_service.CheckpointRepository"
+        "src.api.services.direct_execution_service.CheckpointRepository",
     ) as mock_repo_cls:
         mock_repo_instance = AsyncMock(spec=CheckpointRepository)
         mock_repo_instance.create_checkpoint.side_effect = Exception(
-            "DB connection failed"
+            "DB connection failed",
         )
         mock_repo_cls.return_value = mock_repo_instance
 
         # Should not raise, just log warning
         await execution_service_with_checkpoint._checkpoint(
-            execution_status, "supervisor_execution"
+            execution_status, "supervisor_execution",
         )
 
 
 @pytest.mark.asyncio
 async def test_resume_execution_restores_from_checkpoint(
-    execution_service_with_checkpoint, mock_session_factory
+    execution_service_with_checkpoint, mock_session_factory,
 ):
     """Test that resume_execution restores ExecutionStatus from checkpoint."""
     project_id = uuid.uuid4()
@@ -184,7 +183,7 @@ async def test_resume_execution_restores_from_checkpoint(
     mock_checkpoint.id = uuid.uuid4()
 
     with patch(
-        "src.api.services.direct_execution_service.CheckpointRepository"
+        "src.api.services.direct_execution_service.CheckpointRepository",
     ) as mock_repo_cls:
         mock_repo_instance = AsyncMock(spec=CheckpointRepository)
         mock_repo_instance.get_recovery_point.return_value = mock_checkpoint
@@ -192,7 +191,7 @@ async def test_resume_execution_restores_from_checkpoint(
         mock_repo_cls.return_value = mock_repo_instance
 
         result_execution_id = await execution_service_with_checkpoint.resume_execution(
-            project_id
+            project_id,
         )
 
         # Verify execution was resumed
@@ -221,7 +220,7 @@ async def test_resume_execution_returns_none_when_no_checkpoint(
     project_id = uuid.uuid4()
 
     with patch(
-        "src.api.services.direct_execution_service.CheckpointRepository"
+        "src.api.services.direct_execution_service.CheckpointRepository",
     ) as mock_repo_cls:
         mock_repo_instance = AsyncMock(spec=CheckpointRepository)
         mock_repo_instance.get_recovery_point.return_value = None
@@ -257,7 +256,7 @@ async def test_resume_execution_handles_restore_failure(
     mock_checkpoint.id = uuid.uuid4()
 
     with patch(
-        "src.api.services.direct_execution_service.CheckpointRepository"
+        "src.api.services.direct_execution_service.CheckpointRepository",
     ) as mock_repo_cls:
         mock_repo_instance = AsyncMock(spec=CheckpointRepository)
         mock_repo_instance.get_recovery_point.return_value = mock_checkpoint
@@ -292,13 +291,13 @@ async def test_checkpoint_captures_all_execution_state(
     )
 
     with patch(
-        "src.api.services.direct_execution_service.CheckpointRepository"
+        "src.api.services.direct_execution_service.CheckpointRepository",
     ) as mock_repo_cls:
         mock_repo_instance = AsyncMock(spec=CheckpointRepository)
         mock_repo_cls.return_value = mock_repo_instance
 
         await execution_service_with_checkpoint._checkpoint(
-            execution_status, "hierarchical_coordination"
+            execution_status, "hierarchical_coordination",
         )
 
         call_kwargs = mock_repo_instance.create_checkpoint.call_args.kwargs

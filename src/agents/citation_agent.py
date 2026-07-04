@@ -1,5 +1,4 @@
-"""
-Citation & Verification Agent implementation.
+"""Citation & Verification Agent implementation.
 
 This agent specializes in formatting citations and verifying sources.
 """
@@ -18,8 +17,7 @@ logger = get_logger()
 
 
 class CitationAgent(LLMWorkerAgentBase):
-    """
-    Agent specialized in citation formatting and source verification.
+    """Agent specialized in citation formatting and source verification.
 
     This agent formats citations according to academic standards,
     verifies source information, and ensures proper attribution.
@@ -30,21 +28,21 @@ class CitationAgent(LLMWorkerAgentBase):
         return "citation"
 
     async def execute(self, task: AgentTask) -> AgentResult:
-        """
-        Execute a citation formatting task.
+        """Execute a citation formatting task.
 
         Args:
             task: The citation task to execute
 
         Returns:
             AgentResult containing formatted citations
+
         """
         try:
             # Validate input
             sources = task.input_data.get("sources", [])
             if not sources:
                 return self.handle_error(
-                    task, ValueError("Sources required for citation formatting")
+                    task, ValueError("Sources required for citation formatting"),
                 )
 
             style = task.input_data.get("style", "APA")
@@ -64,18 +62,18 @@ class CitationAgent(LLMWorkerAgentBase):
 
             # Step 3: Generate bibliography entries
             bibliography_result = await self._generate_bibliography_with_mcp(
-                sources, style
+                sources, style,
             )
 
             # Step 4: Export to multiple formats if requested
             export_formats = task.input_data.get("export_formats", ["text"])
             export_result = await self._export_citations(
-                citation_result, export_formats
+                citation_result, export_formats,
             )
 
             # Calculate confidence score with MCP data quality
             confidence = self._calculate_confidence(
-                citation_result, sources, mcp_available=bool(self.mcp_integration)
+                citation_result, sources, mcp_available=bool(self.mcp_integration),
             )
 
             # Build enhanced output with MCP data
@@ -85,10 +83,10 @@ class CitationAgent(LLMWorkerAgentBase):
                 "citation_style": style,
                 "total_references": len(sources),
                 "verified_sources": verification_result.get(
-                    "verified_count", len(sources)
+                    "verified_count", len(sources),
                 ),
                 "verification_status": verification_result.get(
-                    "verification_details", []
+                    "verification_details", [],
                 ),
                 "export_formats": export_result,
                 "doi_resolution": verification_result.get("doi_results", {}),
@@ -106,7 +104,7 @@ class CitationAgent(LLMWorkerAgentBase):
                 confidence=confidence,
                 execution_time=0.0,
                 metadata=self.build_execution_metadata(
-                    citation_count=len(output["formatted_citations"])
+                    citation_count=len(output["formatted_citations"]),
                 ),
             )
 
@@ -120,14 +118,14 @@ class CitationAgent(LLMWorkerAgentBase):
             return self.handle_error(task, e)
 
     async def validate_result(self, result: AgentResult) -> bool:
-        """
-        Validate the citation result.
+        """Validate the citation result.
 
         Args:
             result: The result to validate
 
         Returns:
             True if valid, False otherwise
+
         """
         if result.status != "success":
             return result.status == "failed"
@@ -249,7 +247,7 @@ class CitationAgent(LLMWorkerAgentBase):
                     "verified": doi is not None,
                     "doi": doi,
                     "issues": [] if doi else ["DOI not available"],
-                }
+                },
             )
 
         bibliography = sorted(formatted_citations)
@@ -264,10 +262,9 @@ class CitationAgent(LLMWorkerAgentBase):
         }
 
     async def _format_citations_with_mcp(
-        self, sources: list[dict[str, Any]], style: str
+        self, sources: list[dict[str, Any]], style: str,
     ) -> dict[str, Any]:
-        """
-        Format citations using MCP Citation Tool or Gemini structured output.
+        """Format citations using MCP Citation Tool or Gemini structured output.
 
         Args:
             sources: List of source dictionaries
@@ -275,6 +272,7 @@ class CitationAgent(LLMWorkerAgentBase):
 
         Returns:
             Citation formatting results
+
         """
         if not self.mcp_integration:
             self.log_warning("MCP integration not available, using Gemini fallback")
@@ -282,28 +280,26 @@ class CitationAgent(LLMWorkerAgentBase):
 
         try:
             result = await self.mcp_integration.format_citations(
-                sources=sources, style=style
+                sources=sources, style=style,
             )
 
             if result.get("success"):
                 self.log_info(
-                    f"MCP citation formatting successful: {len(sources)} sources in {style} style"
+                    f"MCP citation formatting successful: {len(sources)} sources in {style} style",
                 )
                 return dict(result)
-            else:
-                raise Exception(
-                    f"MCP citation formatting failed: {result.get('error', 'Unknown error')}"
-                )
+            raise Exception(
+                f"MCP citation formatting failed: {result.get('error', 'Unknown error')}",
+            )
 
         except Exception as e:
             self.log_error(f"MCP citation formatting failed: {e}")
             return await self._format_citations_with_gemini(sources, style)
 
     async def _format_citations_with_gemini(
-        self, sources: list[dict[str, Any]], style: str
+        self, sources: list[dict[str, Any]], style: str,
     ) -> dict[str, Any]:
-        """
-        Format citations using Gemini structured output when MCP unavailable.
+        """Format citations using Gemini structured output when MCP unavailable.
 
         Args:
             sources: List of source dictionaries
@@ -311,6 +307,7 @@ class CitationAgent(LLMWorkerAgentBase):
 
         Returns:
             Citation formatting results
+
         """
         from src.agents.schemas import CitationSchema
 
@@ -326,7 +323,7 @@ Return formatted citations as structured JSON."""
 
         try:
             result = await self._generate_structured_with_routing(
-                prompt, CitationSchema, task=None, tier="simple"
+                prompt, CitationSchema, task=None, tier="simple",
             )
 
             # Convert Pydantic model to expected dict format
@@ -351,16 +348,16 @@ Return formatted citations as structured JSON."""
             return self._generate_mock_citations(sources, style)
 
     async def _verify_sources_with_mcp(
-        self, sources: list[dict[str, Any]]
+        self, sources: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """
-        Verify source credibility and resolve DOIs using MCP tools.
+        """Verify source credibility and resolve DOIs using MCP tools.
 
         Args:
             sources: List of source dictionaries
 
         Returns:
             Source verification results
+
         """
         verification_details = []
         doi_results = {}
@@ -390,10 +387,9 @@ Return formatted citations as structured JSON."""
         }
 
     async def _verify_single_source(
-        self, source: dict[str, Any], source_id: str
+        self, source: dict[str, Any], source_id: str,
     ) -> dict[str, Any]:
-        """
-        Verify a single source using various criteria.
+        """Verify a single source using various criteria.
 
         Args:
             source: Source dictionary
@@ -401,6 +397,7 @@ Return formatted citations as structured JSON."""
 
         Returns:
             Verification result for the source
+
         """
         verification_result: dict[str, Any] = {
             "source_id": source_id,
@@ -469,14 +466,14 @@ Return formatted citations as structured JSON."""
         return verification_result
 
     async def _resolve_doi(self, doi: str) -> dict[str, Any]:
-        """
-        Resolve DOI information.
+        """Resolve DOI information.
 
         Args:
             doi: DOI string
 
         Returns:
             DOI resolution result
+
         """
         # Simple DOI validation
         if not doi or not doi.startswith("10."):
@@ -496,10 +493,9 @@ Return formatted citations as structured JSON."""
         }
 
     async def _generate_bibliography_with_mcp(
-        self, sources: list[dict[str, Any]], style: str
+        self, sources: list[dict[str, Any]], style: str,
     ) -> dict[str, Any]:
-        """
-        Generate bibliography using MCP Citation Tool.
+        """Generate bibliography using MCP Citation Tool.
 
         Args:
             sources: List of source dictionaries
@@ -507,6 +503,7 @@ Return formatted citations as structured JSON."""
 
         Returns:
             Bibliography generation results
+
         """
         if not self.mcp_integration:
             # Fallback bibliography generation
@@ -525,7 +522,7 @@ Return formatted citations as structured JSON."""
         try:
             # Use MCP citation tool for bibliography
             result = await self.mcp_integration.format_citations(
-                sources=sources, style=style
+                sources=sources, style=style,
             )
 
             if result.get("success"):
@@ -538,8 +535,7 @@ Return formatted citations as structured JSON."""
                     "format": style,
                     "total_entries": len(bibliography),
                 }
-            else:
-                raise Exception("MCP bibliography generation failed")
+            raise Exception("MCP bibliography generation failed")
 
         except Exception as e:
             self.log_error(f"MCP bibliography generation failed: {e}")
@@ -555,10 +551,9 @@ Return formatted citations as structured JSON."""
             }
 
     async def _export_citations(
-        self, citation_result: dict[str, Any], export_formats: list[str]
+        self, citation_result: dict[str, Any], export_formats: list[str],
     ) -> dict[str, Any]:
-        """
-        Export citations to multiple formats.
+        """Export citations to multiple formats.
 
         Args:
             citation_result: Citation formatting results
@@ -566,6 +561,7 @@ Return formatted citations as structured JSON."""
 
         Returns:
             Export results for each format
+
         """
         exports = {}
         citations = citation_result.get("formatted_citations", [])
@@ -633,8 +629,7 @@ Return formatted citations as structured JSON."""
         return "\\n".join(csv_lines)
 
     def _format_single_citation(self, source: dict[str, Any], style: str) -> str:
-        """
-        Format a single citation in the specified style.
+        """Format a single citation in the specified style.
 
         Args:
             source: Source dictionary
@@ -642,6 +637,7 @@ Return formatted citations as structured JSON."""
 
         Returns:
             Formatted citation string
+
         """
         author = (
             source.get("authors", ["Unknown"])[0]

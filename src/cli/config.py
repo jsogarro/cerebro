@@ -1,5 +1,4 @@
-"""
-Configuration management for Research Platform CLI.
+"""Configuration management for Research Platform CLI.
 """
 
 import os

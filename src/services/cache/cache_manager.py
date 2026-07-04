@@ -1,5 +1,4 @@
-"""
-Cache manager for advanced caching operations.
+"""Cache manager for advanced caching operations.
 
 This module provides a sophisticated cache manager with support for
 various caching strategies, compression, and batch operations.
@@ -20,8 +19,7 @@ logger = get_logger()
 
 
 class CacheManager:
-    """
-    Advanced cache manager with support for multiple strategies.
+    """Advanced cache manager with support for multiple strategies.
 
     Features:
     - Multiple caching strategies
@@ -38,14 +36,14 @@ class CacheManager:
         compression_threshold: int = 1024,
         namespace: str = "gemini",
     ):
-        """
-        Initialize cache manager.
+        """Initialize cache manager.
 
         Args:
             redis_client: Redis client instance
             strategy: Caching strategy to use
             compression_threshold: Size threshold for compression (bytes)
             namespace: Cache key namespace
+
         """
         self.redis = redis_client
         self.strategy = strategy or TTLStrategy(ttl=3600)
@@ -66,14 +64,14 @@ class CacheManager:
         return f"{self.namespace}:{key}"
 
     def _compress_value(self, value: str) -> tuple[bytes, bool]:
-        """
-        Compress value if it exceeds threshold.
+        """Compress value if it exceeds threshold.
 
         Args:
             value: Value to potentially compress
 
         Returns:
             Tuple of (compressed/original bytes, was_compressed)
+
         """
         value_bytes = value.encode("utf-8")
 
@@ -86,8 +84,7 @@ class CacheManager:
         return value_bytes, False
 
     def _decompress_value(self, value: bytes, compressed: bool) -> str:
-        """
-        Decompress value if it was compressed.
+        """Decompress value if it was compressed.
 
         Args:
             value: Potentially compressed value
@@ -95,20 +92,21 @@ class CacheManager:
 
         Returns:
             Decompressed string value
+
         """
         if compressed:
             return gzip.decompress(value).decode("utf-8")
         return value.decode("utf-8")
 
     async def get(self, key: str) -> dict[str, Any] | None:
-        """
-        Get value from cache.
+        """Get value from cache.
 
         Args:
             key: Cache key
 
         Returns:
             Cached value or None if not found
+
         """
         full_key = self._make_key(key)
 
@@ -155,8 +153,7 @@ class CacheManager:
         ttl: int | None = None,
         dependencies: list[str] | None = None,
     ) -> bool:
-        """
-        Set value in cache with optional dependencies.
+        """Set value in cache with optional dependencies.
 
         Args:
             key: Cache key
@@ -166,6 +163,7 @@ class CacheManager:
 
         Returns:
             True if successful
+
         """
         full_key = self._make_key(key)
 
@@ -201,14 +199,14 @@ class CacheManager:
             return False
 
     async def delete(self, key: str) -> bool:
-        """
-        Delete value from cache.
+        """Delete value from cache.
 
         Args:
             key: Cache key
 
         Returns:
             True if key existed and was deleted
+
         """
         full_key = self._make_key(key)
 
@@ -236,14 +234,14 @@ class CacheManager:
             return False
 
     async def batch_get(self, keys: list[str]) -> dict[str, dict[str, Any] | None]:
-        """
-        Get multiple values from cache.
+        """Get multiple values from cache.
 
         Args:
             keys: List of cache keys
 
         Returns:
             Dictionary mapping keys to values (None if not found)
+
         """
         if not keys:
             return {}
@@ -295,8 +293,7 @@ class CacheManager:
         items: dict[str, dict[str, Any]],
         ttl: int | None = None,
     ) -> bool:
-        """
-        Set multiple values in cache.
+        """Set multiple values in cache.
 
         Args:
             items: Dictionary mapping keys to values
@@ -304,6 +301,7 @@ class CacheManager:
 
         Returns:
             True if all successful
+
         """
         if not items:
             return True
@@ -345,11 +343,11 @@ class CacheManager:
             return False
 
     async def clear_namespace(self) -> int:
-        """
-        Clear all keys in the namespace.
+        """Clear all keys in the namespace.
 
         Returns:
             Number of keys deleted
+
         """
         try:
             # Find all keys in namespace
@@ -378,8 +376,7 @@ class CacheManager:
         data_generator: Any,
         batch_size: int = 10,
     ) -> int:
-        """
-        Warm cache with pre-generated data.
+        """Warm cache with pre-generated data.
 
         Args:
             data_generator: Async generator yielding (key, value) pairs
@@ -387,6 +384,7 @@ class CacheManager:
 
         Returns:
             Number of items cached
+
         """
         count = 0
         batch = {}
@@ -412,11 +410,11 @@ class CacheManager:
             return count
 
     def get_metrics(self) -> dict[str, Any]:
-        """
-        Get cache metrics.
+        """Get cache metrics.
 
         Returns:
             Dictionary of metrics
+
         """
         total = self.metrics["hits"] + self.metrics["misses"]
         hit_rate = (self.metrics["hits"] / total * 100) if total > 0 else 0
@@ -428,14 +426,14 @@ class CacheManager:
         }
 
     async def invalidate_dependencies(self, key: str) -> int:
-        """
-        Invalidate all keys dependent on the given key.
+        """Invalidate all keys dependent on the given key.
 
         Args:
             key: Key whose dependents should be invalidated
 
         Returns:
             Number of keys invalidated
+
         """
         full_key = self._make_key(key)
         return await self.strategy.invalidate_dependencies(full_key, self.redis)

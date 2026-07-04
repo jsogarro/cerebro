@@ -1,5 +1,4 @@
-"""
-Base parser utilities for response processing.
+"""Base parser utilities for response processing.
 
 This module provides fundamental parsing and validation functions
 used across different parser types.
@@ -9,18 +8,18 @@ import re
 
 
 def sanitize_html(text: str) -> str:
-    """
-    Remove HTML tags and clean text.
+    """Remove HTML tags and clean text.
 
     Args:
         text: Text potentially containing HTML
 
     Returns:
         Clean text with HTML removed
+
     """
     # Remove script and style tags with content
     text = re.sub(
-        r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE
+        r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE,
     )
     text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
 
@@ -52,18 +51,18 @@ def sanitize_html(text: str) -> str:
 
 
 def remove_personal_info(text: str) -> str:
-    """
-    Remove potential personal information from text.
+    """Remove potential personal information from text.
 
     Args:
         text: Text potentially containing personal info
 
     Returns:
         Text with personal info redacted
+
     """
     # Email addresses
     text = re.sub(
-        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[EMAIL REDACTED]", text
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[EMAIL REDACTED]", text,
     )
 
     # Phone numbers (various formats)
@@ -80,7 +79,7 @@ def remove_personal_info(text: str) -> str:
 
     # Credit card patterns (basic)
     text = re.sub(
-        r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", "[CARD REDACTED]", text
+        r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", "[CARD REDACTED]", text,
     )
 
     # IP addresses
@@ -90,10 +89,9 @@ def remove_personal_info(text: str) -> str:
 
 
 def validate_length(
-    text: str, min_length: int | None = None, max_length: int | None = None
+    text: str, min_length: int | None = None, max_length: int | None = None,
 ) -> bool:
-    """
-    Validate text length is within bounds.
+    """Validate text length is within bounds.
 
     Args:
         text: Text to validate
@@ -102,6 +100,7 @@ def validate_length(
 
     Returns:
         True if text length is valid
+
     """
     text_length = len(text)
 
@@ -112,14 +111,14 @@ def validate_length(
 
 
 def detect_language(text: str) -> str:
-    """
-    Detect the language of text (simplified heuristic).
+    """Detect the language of text (simplified heuristic).
 
     Args:
         text: Text to analyze
 
     Returns:
         Language code (e.g., 'en', 'fr', 'mixed')
+
     """
     # Count language indicators
     languages_detected = []
@@ -197,7 +196,7 @@ def detect_language(text: str) -> str:
     # If multiple languages detected, return "mixed"
     if len(languages_detected) > 1:
         return "mixed"
-    elif len(languages_detected) == 1:
+    if len(languages_detected) == 1:
         return languages_detected[0]
 
     # Default to English
@@ -205,14 +204,14 @@ def detect_language(text: str) -> str:
 
 
 def clean_whitespace(text: str) -> str:
-    """
-    Clean and normalize whitespace in text.
+    """Clean and normalize whitespace in text.
 
     Args:
         text: Text to clean
 
     Returns:
         Text with normalized whitespace
+
     """
     # Replace multiple spaces with single space
     text = re.sub(r" +", " ", text)
@@ -229,8 +228,7 @@ def clean_whitespace(text: str) -> str:
 
 
 def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
-    """
-    Truncate text to maximum length with suffix.
+    """Truncate text to maximum length with suffix.
 
     Args:
         text: Text to truncate
@@ -239,6 +237,7 @@ def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
 
     Returns:
         Truncated text
+
     """
     if len(text) <= max_length:
         return text
@@ -257,14 +256,14 @@ def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
 
 
 def is_valid_json_key(key: str) -> bool:
-    """
-    Check if a string is a valid JSON object key.
+    """Check if a string is a valid JSON object key.
 
     Args:
         key: String to validate
 
     Returns:
         True if valid JSON key
+
     """
     # JSON keys should be strings without control characters
     if not key or not isinstance(key, str):
@@ -275,14 +274,14 @@ def is_valid_json_key(key: str) -> bool:
 
 
 def normalize_quotes(text: str) -> str:
-    """
-    Normalize various quote styles to standard quotes.
+    """Normalize various quote styles to standard quotes.
 
     Args:
         text: Text with various quote styles
 
     Returns:
         Text with normalized quotes
+
     """
     # Smart quotes to regular quotes
     text = text.replace('"', '"').replace('"', '"')

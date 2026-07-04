@@ -1,5 +1,4 @@
-"""
-Configuration settings for Cerebro AI Brain Platform.
+"""Configuration settings for Cerebro AI Brain Platform.
 
 This configuration supports both the legacy Research Platform functionality
 and the new AI Brain capabilities including MASR routing, multi-tier memory,
@@ -303,13 +302,13 @@ class Settings(BaseSettings):
         if env == "production" and v == "MUST_SET_IN_ENV":
             raise ValueError(
                 "SECRET_KEY must be set via environment variable in production. "
-                "Generate a secure key with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+                "Generate a secure key with: python -c 'import secrets; print(secrets.token_urlsafe(32))'",
             )
 
         if len(v) < 32:
             raise ValueError(
                 "SECRET_KEY must be at least 32 characters for security. "
-                f"Current length: {len(v)}"
+                f"Current length: {len(v)}",
             )
 
         return v
@@ -331,7 +330,7 @@ class Settings(BaseSettings):
                 if pattern in v:
                     raise ValueError(
                         f"DATABASE_URL contains default credentials ('{pattern}') in production. "
-                        "Set secure credentials via environment variable."
+                        "Set secure credentials via environment variable.",
                     )
 
         return v

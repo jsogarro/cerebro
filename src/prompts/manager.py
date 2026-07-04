@@ -1,5 +1,4 @@
-"""
-Advanced Prompt Manager
+"""Advanced Prompt Manager
 
 Dynamic prompt loading, management, and optimization system that replaces
 hard-coded prompt functions with flexible YAML-based templates.
@@ -134,10 +133,9 @@ class PromptCache:
                 ):
                     value = self._cache[key]
                     return str(value)
-                else:
-                    # Expired
-                    del self._cache[key]
-                    del self._timestamps[key]
+                # Expired
+                del self._cache[key]
+                del self._timestamps[key]
         return None
 
     def set(self, key: str, value: str) -> None:
@@ -160,8 +158,7 @@ class PromptCache:
 
 
 class PromptManager:
-    """
-    Advanced prompt manager with YAML templates and hot-reload.
+    """Advanced prompt manager with YAML templates and hot-reload.
 
     Provides dynamic prompt loading, template inheritance, variable substitution,
     and performance tracking for all Cerebro agents.
@@ -223,8 +220,7 @@ class PromptManager:
         role: PromptRole | None = None,
         domain: str | None = None,
     ) -> str:
-        """
-        Get a compiled prompt from template.
+        """Get a compiled prompt from template.
 
         Args:
             template_name: Name of the template to use
@@ -234,8 +230,8 @@ class PromptManager:
 
         Returns:
             Compiled prompt string
-        """
 
+        """
         variables = variables or {}
 
         # Create cache key
@@ -280,8 +276,7 @@ class PromptManager:
         task_data: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> str:
-        """
-        Get prompt specifically for an agent type.
+        """Get prompt specifically for an agent type.
 
         Args:
             agent_type: Type of agent requesting prompt
@@ -290,8 +285,8 @@ class PromptManager:
 
         Returns:
             Compiled prompt optimized for the agent
-        """
 
+        """
         # Determine template name based on agent type
         template_name = f"agents/{agent_type}"
 
@@ -312,7 +307,6 @@ class PromptManager:
         worker_results: list[dict[str, Any]] | None = None,
     ) -> str:
         """Get prompt for supervisor agents."""
-
         template_name = f"supervisors/{supervisor_type}"
 
         variables = {
@@ -332,7 +326,6 @@ class PromptManager:
         target_threshold: float = 0.95,
     ) -> str:
         """Get prompt for TalkHier refinement rounds."""
-
         template_name = f"refinement/round_{refinement_round}"
 
         variables = {
@@ -347,7 +340,6 @@ class PromptManager:
 
     async def register_template(self, template: PromptTemplate) -> bool:
         """Register a new template programmatically."""
-
         try:
             template_name = template.metadata.name
 
@@ -365,7 +357,7 @@ class PromptManager:
 
                 # Notify listeners
                 await self._notify_change_listeners(
-                    "created", "", template_name, None, template
+                    "created", "", template_name, None, template,
                 )
 
             logger.info(f"Registered template: {template_name}")
@@ -383,7 +375,6 @@ class PromptManager:
         execution_time_ms: int,
     ) -> bool:
         """Update template performance metrics."""
-
         try:
             template = self._templates.get(template_name)
             if not template:
@@ -413,7 +404,6 @@ class PromptManager:
 
     async def get_template_stats(self) -> dict[str, Any]:
         """Get comprehensive prompt manager statistics."""
-
         return {
             "manager": {
                 "total_templates": len(self._templates),
@@ -441,13 +431,12 @@ class PromptManager:
 
     async def _load_all_templates(self) -> None:
         """Load all template files from directory."""
-
         if not self.templates_dir.exists():
             logger.warning(f"Templates directory not found: {self.templates_dir}")
             return
 
         template_files = list(self.templates_dir.rglob("*.yaml")) + list(
-            self.templates_dir.rglob("*.yml")
+            self.templates_dir.rglob("*.yml"),
         )
 
         for template_file in template_files:
@@ -461,10 +450,9 @@ class PromptManager:
 
     async def _load_template_file(self, template_path: Path) -> None:
         """Load a single template file."""
-
         # Read YAML file
         content = await asyncio.get_event_loop().run_in_executor(
-            None, template_path.read_text, "utf-8"
+            None, template_path.read_text, "utf-8",
         )
 
         # Environment variable substitution
@@ -508,7 +496,6 @@ class PromptManager:
         domain: str | None = None,
     ) -> PromptTemplate | None:
         """Find best matching template."""
-
         # Try exact name match first
         if template_name in self._templates:
             return self._templates[template_name]
@@ -528,10 +515,9 @@ class PromptManager:
         return None
 
     async def _compile_template(
-        self, template: PromptTemplate, variables: dict[str, Any]
+        self, template: PromptTemplate, variables: dict[str, Any],
     ) -> str:
         """Compile template with variable substitution."""
-
         # Resolve inheritance first
         resolved_template = await self._resolve_inheritance(template)
 
@@ -543,7 +529,7 @@ class PromptManager:
 
         if resolved_template.system_prompt:
             system = self._substitute_variables(
-                resolved_template.system_prompt, variables
+                resolved_template.system_prompt, variables,
             )
             parts.append(f"SYSTEM: {system}")
 
@@ -553,21 +539,21 @@ class PromptManager:
 
         if resolved_template.assistant_prompt:
             assistant = self._substitute_variables(
-                resolved_template.assistant_prompt, variables
+                resolved_template.assistant_prompt, variables,
             )
             parts.append(f"ASSISTANT: {assistant}")
 
         # Add examples if present
         if resolved_template.examples:
             examples_text = await self._compile_examples(
-                resolved_template.examples, variables
+                resolved_template.examples, variables,
             )
             parts.append(f"EXAMPLES:\n{examples_text}")
 
         # Add output format specification
         if resolved_template.expected_output_schema:
             schema_text = self._format_output_schema(
-                resolved_template.expected_output_schema
+                resolved_template.expected_output_schema,
             )
             parts.append(f"OUTPUT FORMAT:\n{schema_text}")
 
@@ -575,7 +561,6 @@ class PromptManager:
 
     async def _resolve_inheritance(self, template: PromptTemplate) -> PromptTemplate:
         """Resolve template inheritance chain."""
-
         if not template.inherits_from:
             return template
 
@@ -610,10 +595,9 @@ class PromptManager:
         return merged_template
 
     def _substitute_variables(
-        self, template_text: str, variables: dict[str, Any]
+        self, template_text: str, variables: dict[str, Any],
     ) -> str:
         """Substitute variables in template text."""
-
         result = template_text
 
         # Handle simple {variable} substitution
@@ -637,7 +621,6 @@ class PromptManager:
 
     def _sanitize_template_variable(self, value: str) -> str:
         """Sanitize untrusted variable values before template substitution."""
-
         sanitized = _CONTROL_CHARACTER_PATTERN.sub("", value)
         for pattern in _PROMPT_INJECTION_PATTERNS:
             sanitized = pattern.sub("", sanitized)
@@ -645,14 +628,13 @@ class PromptManager:
 
     def _format_complex_variable(self, value: Any) -> str:
         """Format complex variables (dict, list) for templates."""
-
         if isinstance(value, dict):
             lines = []
             for key, val in value.items():
                 lines.append(f"- {key}: {val}")
             return "\n".join(lines)
 
-        elif isinstance(value, list):
+        if isinstance(value, list):
             lines = []
             for i, item in enumerate(value, 1):
                 if isinstance(item, dict):
@@ -661,12 +643,10 @@ class PromptManager:
                     lines.append(f"{i}. {item}")
             return "\n".join(lines)
 
-        else:
-            return str(value)
+        return str(value)
 
     def _process_conditional_blocks(self, text: str, variables: dict[str, Any]) -> str:
         """Process {{#if variable}}...{{/if}} conditional blocks."""
-
         # Simple conditional processing
         pattern = r"\{\{#if\s+(\w+)\}\}(.*?)\{\{/if\}\}"
 
@@ -676,15 +656,13 @@ class PromptManager:
 
             if variables.get(var_name):
                 return str(block_content)
-            else:
-                return ""
+            return ""
 
         result = re.sub(pattern, replace_conditional, text, flags=re.DOTALL)
         return str(result)
 
     def _process_loop_blocks(self, text: str, variables: dict[str, Any]) -> str:
         """Process {{#each items}}...{{/each}} loop blocks."""
-
         # Simple loop processing
         pattern = r"\{\{#each\s+(\w+)\}\}(.*?)\{\{/each\}\}"
 
@@ -699,16 +677,14 @@ class PromptManager:
                     item_text = block_template.replace("{{item}}", str(item))
                     results.append(item_text)
                 return "\n".join(results)
-            else:
-                return ""
+            return ""
 
         return re.sub(pattern, replace_loop, text, flags=re.DOTALL)
 
     async def _validate_variables(
-        self, template: PromptTemplate, variables: dict[str, Any]
+        self, template: PromptTemplate, variables: dict[str, Any],
     ) -> None:
         """Validate that required variables are provided."""
-
         for var_def in template.variables:
             if var_def.required and var_def.name not in variables:
                 if var_def.default is not None:
@@ -717,10 +693,9 @@ class PromptManager:
                     raise ValueError(f"Required variable missing: {var_def.name}")
 
     async def _compile_examples(
-        self, examples: list[Any], variables: dict[str, Any]
+        self, examples: list[Any], variables: dict[str, Any],
     ) -> str:
         """Compile few-shot examples."""
-
         example_parts = []
 
         for i, example in enumerate(examples, 1):
@@ -745,7 +720,6 @@ class PromptManager:
 
     def _format_output_schema(self, schema: dict[str, Any]) -> str:
         """Format output schema for prompt."""
-
         import json
 
         return f"Please respond with valid JSON matching this schema:\n{json.dumps(schema, indent=2)}"
@@ -758,7 +732,6 @@ class PromptManager:
         domain: str | None,
     ) -> str:
         """Create cache key for prompt compilation."""
-
         import hashlib
 
         key_data = {
@@ -773,7 +746,6 @@ class PromptManager:
 
     async def _update_usage_stats(self, template_name: str, success: bool) -> None:
         """Update usage statistics for template."""
-
         if template_name not in self.usage_stats:
             self.usage_stats[template_name] = {
                 "total_uses": 0,
@@ -789,13 +761,12 @@ class PromptManager:
 
     async def _start_file_watcher(self) -> None:
         """Start file watcher for hot-reload."""
-
         try:
             self._observer = Observer()
             self._watcher = PromptFileWatcher(self)
 
             self._observer.schedule(
-                self._watcher, str(self.templates_dir), recursive=True
+                self._watcher, str(self.templates_dir), recursive=True,
             )
 
             self._observer.start()
@@ -806,7 +777,6 @@ class PromptManager:
 
     async def _reload_templates(self) -> None:
         """Reload templates from files."""
-
         try:
             # Clear current templates
             with self._lock:
@@ -835,9 +805,8 @@ class PromptManager:
         new_template: PromptTemplate | None,
     ) -> None:
         """Notify change listeners."""
-
         event = PromptChangeEvent(
-            change_type, template_path, template_name, old_template, new_template
+            change_type, template_path, template_name, old_template, new_template,
         )
 
         for listener in self._change_listeners:
@@ -850,14 +819,13 @@ class PromptManager:
                 logger.error(f"Prompt change listener failed: {e}")
 
     def add_change_listener(
-        self, listener: Callable[[PromptChangeEvent], None]
+        self, listener: Callable[[PromptChangeEvent], None],
     ) -> None:
         """Add listener for prompt changes."""
         self._change_listeners.append(listener)
 
     async def close(self) -> None:
         """Close prompt manager and cleanup resources."""
-
         if self._observer:
             self._observer.stop()
             self._observer.join()
@@ -871,7 +839,6 @@ _prompt_manager: PromptManager | None = None
 
 async def get_prompt_manager(config: dict[str, Any] | None = None) -> PromptManager:
     """Get or create global prompt manager."""
-
     global _prompt_manager
 
     if not _prompt_manager:
@@ -891,7 +858,6 @@ async def get_prompt(
     domain: str | None = None,
 ) -> str:
     """Get compiled prompt using global manager."""
-
     manager = await get_prompt_manager()
     return await manager.get_prompt(template_name, variables, role, domain)
 

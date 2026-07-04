@@ -1,5 +1,4 @@
-"""
-Report exporters package.
+"""Report exporters package.
 
 This package contains exporters for different report formats,
 following functional programming principles.

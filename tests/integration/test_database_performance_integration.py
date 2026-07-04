@@ -1,5 +1,4 @@
-"""
-Database performance and migration integration tests.
+"""Database performance and migration integration tests.
 """
 
 import json
@@ -52,13 +51,13 @@ class TestDatabasePerformance:
 
         start = time.time()
         await db_session.execute(
-            select(ResearchProject).where(ResearchProject.user_id == str(users[0].id))
+            select(ResearchProject).where(ResearchProject.user_id == str(users[0].id)),
         )
         indexed_time = time.time() - start
 
         start = time.time()
         await db_session.execute(
-            select(ResearchProject).where(ResearchProject.title.like("%test%"))
+            select(ResearchProject).where(ResearchProject.title.like("%test%")),
         )
         non_indexed_time = time.time() - start
 

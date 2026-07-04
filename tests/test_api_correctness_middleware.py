@@ -130,7 +130,7 @@ def test_http_errors_use_standard_error_envelope() -> None:
             "code": "NOT_FOUND",
             "message": "Missing query",
             "details": {},
-        }
+        },
     }
 
 

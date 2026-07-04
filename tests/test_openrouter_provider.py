@@ -39,7 +39,7 @@ def mock_openrouter_response():
                     "role": "assistant",
                 },
                 "finish_reason": "stop",
-            }
+            },
         ],
         "usage": {
             "prompt_tokens": 10,
@@ -141,7 +141,7 @@ class TestRequestPayloadBuilding:
         )
 
         payload = openrouter_provider._build_request_payload(
-            request, "anthropic/claude-sonnet-4.6"
+            request, "anthropic/claude-sonnet-4.6",
         )
 
         assert payload["model"] == "anthropic/claude-sonnet-4.6"
@@ -161,7 +161,7 @@ class TestRequestPayloadBuilding:
         )
 
         payload = openrouter_provider._build_request_payload(
-            request, "anthropic/claude-sonnet-4.6"
+            request, "anthropic/claude-sonnet-4.6",
         )
 
         assert len(payload["messages"]) == 2
@@ -181,7 +181,7 @@ class TestRequestPayloadBuilding:
         )
 
         payload = openrouter_provider._build_request_payload(
-            request, "anthropic/claude-sonnet-4.6"
+            request, "anthropic/claude-sonnet-4.6",
         )
 
         assert len(payload["messages"]) == 3
@@ -193,7 +193,7 @@ class TestRequestPayloadBuilding:
         request = ModelRequest(prompt="Test", top_k=40)
 
         payload = openrouter_provider._build_request_payload(
-            request, "anthropic/claude-sonnet-4.6"
+            request, "anthropic/claude-sonnet-4.6",
         )
 
         assert payload["top_k"] == 40
@@ -204,7 +204,7 @@ class TestGeneration:
     """Test content generation via OpenRouter API."""
 
     async def test_generate_success(
-        self, openrouter_provider, mock_openrouter_response
+        self, openrouter_provider, mock_openrouter_response,
     ):
         """Successful generation should return ModelResponse with content."""
         request = ModelRequest(prompt="What is 2+2?", max_tokens=100)
@@ -227,7 +227,7 @@ class TestGeneration:
             assert response.total_tokens == 18
 
     async def test_generate_with_explicit_model(
-        self, openrouter_provider, mock_openrouter_response
+        self, openrouter_provider, mock_openrouter_response,
     ):
         """Should use explicitly specified model."""
         request = ModelRequest(prompt="Test", max_tokens=100)
@@ -240,7 +240,7 @@ class TestGeneration:
             mock_client.post = AsyncMock(return_value=mock_response)
 
             _response = await openrouter_provider.generate(
-                request, model_name="deepseek/deepseek-chat"
+                request, model_name="deepseek/deepseek-chat",
             )
 
             # Verify the request payload used the explicit model
@@ -249,7 +249,7 @@ class TestGeneration:
             assert payload["model"] == "deepseek/deepseek-chat"
 
     async def test_generate_with_tier_in_metadata(
-        self, openrouter_provider, mock_openrouter_response
+        self, openrouter_provider, mock_openrouter_response,
     ):
         """Should select model based on tier in request metadata."""
         request = ModelRequest(
@@ -317,7 +317,7 @@ class TestHealthCheck:
     """Test provider health check functionality."""
 
     async def test_health_check_success(
-        self, openrouter_provider, mock_openrouter_response
+        self, openrouter_provider, mock_openrouter_response,
     ):
         """Successful health check should mark provider as healthy."""
         # Mock response with "4" in content (correct answer to 2+2 test)
@@ -337,7 +337,7 @@ class TestHealthCheck:
             assert health_status.api_status == "operational"
 
     async def test_health_check_degraded(
-        self, openrouter_provider, mock_openrouter_response
+        self, openrouter_provider, mock_openrouter_response,
     ):
         """Incorrect response should mark as degraded."""
         # Mock response without "4" in content
@@ -373,7 +373,7 @@ class TestStreaming:
     """Test streaming functionality (fallback implementation)."""
 
     async def test_stream_falls_back_to_generate(
-        self, openrouter_provider, mock_openrouter_response
+        self, openrouter_provider, mock_openrouter_response,
     ):
         """Stream should fall back to generate and yield full content."""
         request = ModelRequest(prompt="Test", max_tokens=100)
@@ -443,7 +443,7 @@ class TestModelSlugValidation:
                 {"id": "deepseek/deepseek-chat", "name": "DeepSeek Chat"},
                 {"id": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4.6"},
                 {"id": "google/gemini-pro-1.5", "name": "Gemini Pro 1.5"},
-            ]
+            ],
         }
 
     @pytest.fixture
@@ -455,11 +455,11 @@ class TestModelSlugValidation:
                 # Missing: anthropic/claude-sonnet-4.6 (stale slug)
                 {"id": "anthropic/claude-sonnet-4.7", "name": "Claude Sonnet 4.7"},
                 {"id": "google/gemini-pro-1.5", "name": "Gemini Pro 1.5"},
-            ]
+            ],
         }
 
     async def test_validate_model_slugs_all_valid(
-        self, openrouter_provider, mock_catalog_response_valid
+        self, openrouter_provider, mock_catalog_response_valid,
     ):
         """All tier_mapping slugs present in catalog should pass validation."""
         mock_response = MagicMock()
@@ -485,7 +485,7 @@ class TestModelSlugValidation:
         assert result.validation_error is None
 
     async def test_validate_model_slugs_stale_detected(
-        self, openrouter_provider, mock_catalog_response_stale
+        self, openrouter_provider, mock_catalog_response_stale,
     ):
         """Stale slugs should be detected and reported in invalid_slugs."""
         mock_response = MagicMock()
@@ -516,7 +516,7 @@ class TestModelSlugValidation:
 
         openrouter_provider.client = AsyncMock()
         openrouter_provider.client.get = AsyncMock(
-            side_effect=httpx.HTTPError("Connection failed")
+            side_effect=httpx.HTTPError("Connection failed"),
         )
 
         result = await openrouter_provider.validate_model_slugs()
@@ -533,7 +533,7 @@ class TestModelSlugValidation:
         """Unexpected errors should be caught and logged."""
         openrouter_provider.client = AsyncMock()
         openrouter_provider.client.get = AsyncMock(
-            side_effect=Exception("Unexpected error")
+            side_effect=Exception("Unexpected error"),
         )
 
         result = await openrouter_provider.validate_model_slugs()
@@ -547,7 +547,7 @@ class TestModelSlugValidation:
         assert len(result.invalid_slugs) == 0
 
     async def test_load_configuration_calls_validation_when_enabled(
-        self, openrouter_config, mock_catalog_response_valid
+        self, openrouter_config, mock_catalog_response_valid,
     ):
         """load_configuration should call validate_model_slugs when enabled."""
         # Enable validation explicitly
@@ -577,7 +577,7 @@ class TestModelSlugValidation:
         assert len(provider.stale_slugs) == 0
 
     async def test_load_configuration_skips_validation_when_disabled(
-        self, openrouter_config
+        self, openrouter_config,
     ):
         """load_configuration should skip validation when disabled."""
         # Disable validation explicitly
@@ -596,7 +596,7 @@ class TestModelSlugValidation:
         mock_client.get.assert_not_called()
 
     async def test_load_configuration_logs_error_on_stale_slugs(
-        self, openrouter_config, mock_catalog_response_stale
+        self, openrouter_config, mock_catalog_response_stale,
     ):
         """load_configuration should log ERROR when stale slugs detected."""
         provider = OpenRouterProvider(config=openrouter_config)
@@ -621,7 +621,7 @@ class TestModelSlugValidation:
         assert provider.stale_slugs["complex"] == "anthropic/claude-sonnet-4.6"
 
     async def test_load_configuration_skips_validation_when_no_api_key(
-        self, openrouter_config
+        self, openrouter_config,
     ):
         """Validation should be skipped if no API key configured."""
         openrouter_config["api_key"] = None
@@ -640,7 +640,7 @@ class TestModelSlugValidation:
         mock_client.get.assert_not_called()
 
     async def test_health_check_surfaces_stale_slugs(
-        self, openrouter_provider, mock_openrouter_response
+        self, openrouter_provider, mock_openrouter_response,
     ):
         """health_check should surface stale_slugs in metadata."""
         # Simulate stale slugs detected during load_configuration

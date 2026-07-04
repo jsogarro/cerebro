@@ -1,5 +1,4 @@
-"""
-Hierarchical Supervisor API Routes
+"""Hierarchical Supervisor API Routes
 
 This module implements the REST API endpoints for supervisor coordination,
 following the "Talk Structurally, Act Hierarchically" research patterns.
@@ -70,10 +69,9 @@ connection_manager = SupervisorProgressTracker()
 
 @router.post("/{supervisor_type}/execute", response_model=SupervisorExecuteResponse)
 async def execute_supervisor_task(
-    supervisor_type: SupervisorType, request: SupervisorExecuteRequest
+    supervisor_type: SupervisorType, request: SupervisorExecuteRequest,
 ) -> SupervisorExecuteResponse:
-    """
-    Execute a task through a specific supervisor with worker coordination.
+    """Execute a task through a specific supervisor with worker coordination.
 
     This endpoint implements the hierarchical supervision pattern where a
     supervisor coordinates multiple specialist workers to complete complex tasks.
@@ -82,12 +80,12 @@ async def execute_supervisor_task(
         # Validate supervisor type
         if supervisor_type not in SupervisorType:
             raise HTTPException(
-                status_code=404, detail=f"Supervisor type '{supervisor_type}' not found"
+                status_code=404, detail=f"Supervisor type '{supervisor_type}' not found",
             )
 
         # Execute through service
         response = await supervisor_service.execute_supervisor_task(
-            supervisor_type.value, request
+            supervisor_type.value, request,
         )
 
         # Send WebSocket event for task completion
@@ -114,14 +112,13 @@ async def execute_supervisor_task(
             error=str(e),
         )
         raise HTTPException(
-            status_code=500, detail="Internal error during supervisor execution"
+            status_code=500, detail="Internal error during supervisor execution",
         ) from e
 
 
 @router.get("", response_model=SupervisorListResponse)
 async def list_supervisors() -> SupervisorListResponse:
-    """
-    List all available supervisors with their current status and capabilities.
+    """List all available supervisors with their current status and capabilities.
     """
     try:
         supervisors = await supervisor_service.get_all_supervisors()
@@ -141,14 +138,13 @@ async def list_supervisors() -> SupervisorListResponse:
     except Exception as e:
         logger.error("supervisor_list_failed", error=str(e))
         raise HTTPException(
-            status_code=500, detail="Error retrieving supervisor list"
+            status_code=500, detail="Error retrieving supervisor list",
         ) from e
 
 
 @router.get("/{supervisor_type}", response_model=SupervisorInfo)
 async def get_supervisor_info(supervisor_type: SupervisorType) -> SupervisorInfo:
-    """
-    Get detailed information about a specific supervisor.
+    """Get detailed information about a specific supervisor.
     """
     try:
         return await supervisor_service.get_supervisor_info(supervisor_type.value)
@@ -161,14 +157,13 @@ async def get_supervisor_info(supervisor_type: SupervisorType) -> SupervisorInfo
             error=str(e),
         )
         raise HTTPException(
-            status_code=500, detail="Error retrieving supervisor information"
+            status_code=500, detail="Error retrieving supervisor information",
         ) from e
 
 
 @router.get("/{supervisor_type}/workers", response_model=WorkerListResponse)
 async def get_supervisor_workers(supervisor_type: SupervisorType) -> WorkerListResponse:
-    """
-    Get all workers managed by a specific supervisor.
+    """Get all workers managed by a specific supervisor.
     """
     try:
         workers = await supervisor_service.get_supervisor_workers(supervisor_type.value)
@@ -193,23 +188,22 @@ async def get_supervisor_workers(supervisor_type: SupervisorType) -> WorkerListR
             error=str(e),
         )
         raise HTTPException(
-            status_code=500, detail="Error retrieving worker information"
+            status_code=500, detail="Error retrieving worker information",
         ) from e
 
 
 @router.post("/{supervisor_type}/coordinate", response_model=WorkerCoordinationResponse)
 async def coordinate_workers(
-    supervisor_type: SupervisorType, request: WorkerCoordinationRequest
+    supervisor_type: SupervisorType, request: WorkerCoordinationRequest,
 ) -> WorkerCoordinationResponse:
-    """
-    Coordinate specific workers under a supervisor for a task.
+    """Coordinate specific workers under a supervisor for a task.
 
     This endpoint allows fine-grained control over worker coordination,
     including specification of coordination modes and conflict resolution strategies.
     """
     try:
         response = await supervisor_service.coordinate_workers(
-            supervisor_type.value, request
+            supervisor_type.value, request,
         )
 
         # Send WebSocket event for coordination start
@@ -234,7 +228,7 @@ async def coordinate_workers(
             error=str(e),
         )
         raise HTTPException(
-            status_code=500, detail="Error during worker coordination"
+            status_code=500, detail="Error during worker coordination",
         ) from e
 
 
@@ -242,8 +236,7 @@ async def coordinate_workers(
 async def orchestrate_multi_supervisor(
     request: MultiSupervisorOrchestrationRequest,
 ) -> MultiSupervisorOrchestrationResponse:
-    """
-    Orchestrate multiple supervisors for complex cross-domain tasks.
+    """Orchestrate multiple supervisors for complex cross-domain tasks.
 
     This endpoint enables sophisticated multi-supervisor coordination for
     queries that span multiple domains, with optional result synthesis.
@@ -266,7 +259,7 @@ async def orchestrate_multi_supervisor(
     except Exception as e:
         logger.error("multi_supervisor_orchestration_failed", error=str(e))
         raise HTTPException(
-            status_code=500, detail="Error during multi-supervisor orchestration"
+            status_code=500, detail="Error during multi-supervisor orchestration",
         ) from e
 
 
@@ -274,8 +267,7 @@ async def orchestrate_multi_supervisor(
 async def get_supervisor_stats(
     supervisor_type: SupervisorType,
 ) -> SupervisorStatsResponse:
-    """
-    Get performance statistics for a specific supervisor.
+    """Get performance statistics for a specific supervisor.
 
     Returns comprehensive metrics including success rate, average quality,
     execution times, and worker utilization.
@@ -291,7 +283,7 @@ async def get_supervisor_stats(
             error=str(e),
         )
         raise HTTPException(
-            status_code=500, detail="Error retrieving supervisor statistics"
+            status_code=500, detail="Error retrieving supervisor statistics",
         ) from e
 
 
@@ -299,8 +291,7 @@ async def get_supervisor_stats(
 async def get_supervisor_health(
     supervisor_type: SupervisorType,
 ) -> SupervisorHealthResponse:
-    """
-    Get health status of a specific supervisor.
+    """Get health status of a specific supervisor.
 
     Provides health metrics and recommendations for supervisor optimization.
     """
@@ -315,7 +306,7 @@ async def get_supervisor_health(
             error=str(e),
         )
         raise HTTPException(
-            status_code=500, detail="Error retrieving supervisor health status"
+            status_code=500, detail="Error retrieving supervisor health status",
         ) from e
 
 
@@ -323,13 +314,12 @@ async def get_supervisor_health(
 
 
 @router.post(
-    "/optimize-allocation", response_model=WorkerAllocationOptimizationResponse
+    "/optimize-allocation", response_model=WorkerAllocationOptimizationResponse,
 )
 async def optimize_worker_allocation(
     request: WorkerAllocationOptimizationRequest,
 ) -> WorkerAllocationOptimizationResponse:
-    """
-    Optimize worker allocation based on task requirements and goals.
+    """Optimize worker allocation based on task requirements and goals.
 
     Uses intelligent optimization to determine the best worker allocation
     for quality, speed, cost, or balanced objectives.
@@ -339,7 +329,7 @@ async def optimize_worker_allocation(
     except Exception as e:
         logger.error("supervisor_worker_allocation_optimization_failed", error=str(e))
         raise HTTPException(
-            status_code=500, detail="Error during allocation optimization"
+            status_code=500, detail="Error during allocation optimization",
         ) from e
 
 
@@ -347,8 +337,7 @@ async def optimize_worker_allocation(
 async def resolve_conflicts(
     request: ConflictResolutionRequest,
 ) -> ConflictResolutionResponse:
-    """
-    Resolve conflicts between worker outputs using specified strategy.
+    """Resolve conflicts between worker outputs using specified strategy.
 
     Implements multiple conflict resolution strategies including supervisor override,
     majority vote, quality-based selection, and structured debate.
@@ -379,18 +368,17 @@ async def resolve_conflicts(
             error=str(e),
         )
         raise HTTPException(
-            status_code=500, detail="Error during conflict resolution"
+            status_code=500, detail="Error during conflict resolution",
         ) from e
 
 
 @router.get("/performance/compare", response_model=SupervisorComparisonResponse)
 async def compare_supervisor_performance(
     supervisors: list[SupervisorType] = Query(
-        ..., description="List of supervisor types to compare"
+        ..., description="List of supervisor types to compare",
     ),
 ) -> SupervisorComparisonResponse:
-    """
-    Compare performance metrics across multiple supervisors.
+    """Compare performance metrics across multiple supervisors.
 
     Provides rankings and recommendations for supervisor selection based on
     various performance criteria.
@@ -405,14 +393,13 @@ async def compare_supervisor_performance(
             error=str(e),
         )
         raise HTTPException(
-            status_code=500, detail="Error during performance comparison"
+            status_code=500, detail="Error during performance comparison",
         ) from e
 
 
 @router.post("/experiment", response_model=ExperimentResponse)
 async def run_coordination_experiment(request: ExperimentRequest) -> ExperimentResponse:
-    """
-    Run experiments to test different coordination strategies.
+    """Run experiments to test different coordination strategies.
 
     Enables systematic testing of various supervision strategies to determine
     optimal approaches for specific query types.
@@ -434,7 +421,7 @@ async def run_coordination_experiment(request: ExperimentRequest) -> ExperimentR
     except Exception as e:
         logger.error("supervisor_coordination_experiment_failed", error=str(e))
         raise HTTPException(
-            status_code=500, detail="Error during coordination experiment"
+            status_code=500, detail="Error during coordination experiment",
         ) from e
 
 
@@ -443,10 +430,9 @@ async def run_coordination_experiment(request: ExperimentRequest) -> ExperimentR
 
 @router.websocket("/coordination/ws")
 async def coordination_progress_websocket(
-    websocket: WebSocket, coordination_id: str | None = Query(None)
+    websocket: WebSocket, coordination_id: str | None = Query(None),
 ) -> None:
-    """
-    WebSocket endpoint for real-time worker coordination progress updates.
+    """WebSocket endpoint for real-time worker coordination progress updates.
 
     Streams live updates about worker assignments, task progress,
     conflict detection, and resolution events.
@@ -458,14 +444,14 @@ async def coordination_progress_websocket(
 
         # Send initial connection confirmation
         await websocket.send_json(
-            {"event_type": "connection_established", "coordination_id": coordination_id}
+            {"event_type": "connection_established", "coordination_id": coordination_id},
         )
 
         # Simulate progress updates if coordination_id provided
         if coordination_id:
             # In production, this would fetch real coordination status
             async for event in connection_manager.iter_coordination_progress_events(
-                coordination_id
+                coordination_id,
             ):
                 await websocket.send_json(event.model_dump())
 
@@ -475,7 +461,7 @@ async def coordination_progress_websocket(
                             "event_type": "completed",
                             "coordination_id": coordination_id,
                             "message": "Coordination completed successfully",
-                        }
+                        },
                     )
 
         # Keep connection alive
@@ -504,8 +490,7 @@ async def supervisor_websocket(
     supervisor_type: SupervisorType,
     client_id: str | None = Query(None),
 ) -> None:
-    """
-    WebSocket endpoint for real-time supervisor updates.
+    """WebSocket endpoint for real-time supervisor updates.
 
     Provides live updates on supervisor status, task assignments,
     worker coordination progress, and performance alerts.
@@ -520,13 +505,13 @@ async def supervisor_websocket(
 
         # Send initial status
         supervisor_info = await supervisor_service.get_supervisor_info(
-            supervisor_type.value
+            supervisor_type.value,
         )
         await websocket.send_json(
             {
                 "event_type": "connection_established",
                 "supervisor_info": supervisor_info.model_dump(),
-            }
+            },
         )
 
         # Keep connection alive and handle messages
@@ -542,10 +527,10 @@ async def supervisor_websocket(
                     pass
                 elif data.get("type") == "get_status":
                     health = await supervisor_service.get_supervisor_health(
-                        supervisor_type.value
+                        supervisor_type.value,
                     )
                     await websocket.send_json(
-                        {"event_type": "status_update", "health": health.model_dump()}
+                        {"event_type": "status_update", "health": health.model_dump()},
                     )
 
             except WebSocketDisconnect:

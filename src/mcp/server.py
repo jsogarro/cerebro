@@ -1,5 +1,4 @@
-"""
-MCP Server implementation using FastMCP.
+"""MCP Server implementation using FastMCP.
 
 Provides the main MCP server that manages and exposes tools.
 """
@@ -29,19 +28,18 @@ class MCPServerConfig(BaseModel):
 
 
 class MCPServer:
-    """
-    Main MCP server that manages and exposes tools.
+    """Main MCP server that manages and exposes tools.
 
     This server uses FastMCP to provide a standard MCP interface
     for AI agents to interact with research tools.
     """
 
     def __init__(self, config: MCPServerConfig | None = None):
-        """
-        Initialize MCP server.
+        """Initialize MCP server.
 
         Args:
             config: Server configuration
+
         """
         self.config = config or MCPServerConfig()
         self.mcp = FastMCP(self.config.name)
@@ -54,11 +52,11 @@ class MCPServer:
         logger.info(f"MCP Server initialized: {self.config.name}")
 
     def register_tool(self, tool: BaseMCPTool) -> None:
-        """
-        Register a tool with the server.
+        """Register a tool with the server.
 
         Args:
             tool: Tool instance to register
+
         """
         # Register with internal registry
         self.registry.register(tool)
@@ -80,45 +78,44 @@ class MCPServer:
             return await tool.execute(**kwargs)
 
         _decorated_tool = self.mcp.tool(
-            name=metadata.name, description=metadata.description
+            name=metadata.name, description=metadata.description,
         )(tool_wrapper)
 
         logger.info(f"Registered tool: {metadata.name}")
 
     def register_tools(self, tools: list[BaseMCPTool]) -> None:
-        """
-        Register multiple tools.
+        """Register multiple tools.
 
         Args:
             tools: List of tool instances
+
         """
         for tool in tools:
             self.register_tool(tool)
 
     def get_registered_tools(self) -> list[str]:
-        """
-        Get list of registered tool names.
+        """Get list of registered tool names.
 
         Returns:
             List of tool names
+
         """
         return self.registry.list_tools()
 
     def get_tool(self, name: str) -> BaseMCPTool | None:
-        """
-        Get a specific tool by name.
+        """Get a specific tool by name.
 
         Args:
             name: Tool name
 
         Returns:
             Tool instance or None
+
         """
         return self.registry.get_tool(name)
 
     async def execute_tool(self, name: str, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute a tool by name.
+        """Execute a tool by name.
 
         Args:
             name: Tool name
@@ -126,6 +123,7 @@ class MCPServer:
 
         Returns:
             Tool execution result
+
         """
         tool = self.get_tool(name)
         if not tool:
@@ -134,11 +132,11 @@ class MCPServer:
         return await tool.execute(**kwargs)
 
     def get_server_info(self) -> dict[str, Any]:
-        """
-        Get server information.
+        """Get server information.
 
         Returns:
             Server info dictionary
+
         """
         return {
             "name": self.config.name,
@@ -149,11 +147,11 @@ class MCPServer:
         }
 
     async def health_check(self) -> dict[str, Any]:
-        """
-        Perform health check.
+        """Perform health check.
 
         Returns:
             Health check result
+
         """
         try:
             # Check if tools are accessible

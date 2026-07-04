@@ -1,5 +1,4 @@
-"""
-Agent Execution Service
+"""Agent Execution Service
 
 Service layer for direct agent execution following research-validated patterns:
 - Chain-of-Agents (sequential execution)
@@ -41,8 +40,7 @@ logger = get_logger()
 
 
 class AgentExecutionService:
-    """
-    Service for executing agents using research-validated patterns.
+    """Service for executing agents using research-validated patterns.
 
     Implements Chain-of-Agents, Mixture-of-Agents, and direct execution
     with built-in performance tracking and quality assurance.
@@ -50,7 +48,6 @@ class AgentExecutionService:
 
     def __init__(self, agent_factory: AgentFactory | None = None):
         """Initialize agent execution service."""
-
         # Agent management
         self.agent_factory = agent_factory or AgentFactory()
 
@@ -97,10 +94,9 @@ class AgentExecutionService:
         }
 
     async def execute_single_agent(
-        self, agent_type: AgentType, request: AgentExecutionRequest
+        self, agent_type: AgentType, request: AgentExecutionRequest,
     ) -> AgentExecutionResponse:
-        """
-        Execute single agent following direct interaction pattern.
+        """Execute single agent following direct interaction pattern.
 
         Args:
             agent_type: Type of agent to execute
@@ -108,15 +104,15 @@ class AgentExecutionService:
 
         Returns:
             Agent execution response with results and metrics
-        """
 
+        """
         execution_id = str(uuid.uuid4())
         start_time = datetime.now()
 
         # Check capacity
         if len(self.active_executions) >= self.max_concurrent_executions:
             raise RuntimeError(
-                f"Maximum concurrent executions ({self.max_concurrent_executions}) reached"
+                f"Maximum concurrent executions ({self.max_concurrent_executions}) reached",
             )
 
         # Track execution
@@ -151,7 +147,7 @@ class AgentExecutionService:
 
             # Execute with timeout
             agent_result = await asyncio.wait_for(
-                agent.execute(task), timeout=request.timeout_seconds
+                agent.execute(task), timeout=request.timeout_seconds,
             )
 
             # Build response
@@ -180,14 +176,14 @@ class AgentExecutionService:
             self.execution_history[execution_id] = response
 
             logger.info(
-                f"Single agent execution completed: {agent_type.value} in {execution_time:.2f}s"
+                f"Single agent execution completed: {agent_type.value} in {execution_time:.2f}s",
             )
 
             return response
 
         except TimeoutError:
             logger.error(
-                f"Agent execution timed out: {agent_type.value} after {request.timeout_seconds}s"
+                f"Agent execution timed out: {agent_type.value} after {request.timeout_seconds}s",
             )
 
             response = AgentExecutionResponse(
@@ -233,10 +229,9 @@ class AgentExecutionService:
                 del self.active_executions[execution_id]
 
     async def execute_chain_of_agents(
-        self, request: ChainOfAgentsRequest
+        self, request: ChainOfAgentsRequest,
     ) -> ChainOfAgentsResponse:
-        """
-        Execute Chain-of-Agents following sequential pattern.
+        """Execute Chain-of-Agents following sequential pattern.
 
         Based on "LLMs Working in Harmony" research - agents execute
         sequentially with each agent building on the previous results.
@@ -246,13 +241,13 @@ class AgentExecutionService:
 
         Returns:
             Chain execution response with intermediate and final results
-        """
 
+        """
         execution_id = str(uuid.uuid4())
         start_time = datetime.now()
 
         logger.info(
-            f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}"
+            f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}",
         )
 
         # Initialize chain response
@@ -291,7 +286,7 @@ class AgentExecutionService:
 
                 # Execute agent
                 agent_response = await self.execute_single_agent(
-                    agent_type, agent_request
+                    agent_type, agent_request,
                 )
                 step_time = (datetime.now() - step_start).total_seconds()
 
@@ -309,7 +304,7 @@ class AgentExecutionService:
                     response.early_stopped = True
                     response.stopped_at_agent = agent_type
                     logger.info(
-                        f"Chain early stopped at {agent_type.value} due to low quality"
+                        f"Chain early stopped at {agent_type.value} due to low quality",
                     )
                     break
 
@@ -344,7 +339,7 @@ class AgentExecutionService:
             ).total_seconds()
 
             logger.info(
-                f"Chain-of-Agents completed: {len(request.agent_chain)} agents in {response.total_execution_time_seconds:.2f}s"
+                f"Chain-of-Agents completed: {len(request.agent_chain)} agents in {response.total_execution_time_seconds:.2f}s",
             )
 
             return response
@@ -362,10 +357,9 @@ class AgentExecutionService:
             return response
 
     async def execute_mixture_of_agents(
-        self, request: MixtureOfAgentsRequest
+        self, request: MixtureOfAgentsRequest,
     ) -> MixtureOfAgentsResponse:
-        """
-        Execute Mixture-of-Agents following parallel pattern.
+        """Execute Mixture-of-Agents following parallel pattern.
 
         Based on "LLMs Working in Harmony" research - agents execute
         in parallel and results are intelligently aggregated.
@@ -375,13 +369,13 @@ class AgentExecutionService:
 
         Returns:
             Mixture execution response with aggregated results
-        """
 
+        """
         execution_id = str(uuid.uuid4())
         start_time = datetime.now()
 
         logger.info(
-            f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}"
+            f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}",
         )
 
         # Initialize response
@@ -467,7 +461,7 @@ class AgentExecutionService:
             # Calculate performance metrics
             if execution_times:
                 response.total_execution_time_seconds = max(
-                    execution_times.values()
+                    execution_times.values(),
                 )  # Parallel execution
                 theoretical_sequential_time = sum(execution_times.values())
                 response.parallel_efficiency = (
@@ -488,7 +482,7 @@ class AgentExecutionService:
             response.completed_at = datetime.now()
 
             logger.info(
-                f"Mixture-of-Agents completed: {len(request.agent_types)} agents, consensus: {response.consensus_score:.3f}"
+                f"Mixture-of-Agents completed: {len(request.agent_types)} agents, consensus: {response.consensus_score:.3f}",
             )
 
             return response
@@ -513,7 +507,6 @@ class AgentExecutionService:
         consensus_threshold: float,
     ) -> dict[str, Any]:
         """Aggregate results from mixture of agents."""
-
         if not agent_results:
             return {
                 "result": {},
@@ -547,7 +540,7 @@ class AgentExecutionService:
             aggregated = await self._consensus_aggregation(agent_results, weights)
         elif strategy == "weighted_average":
             aggregated = await self._weighted_average_aggregation(
-                agent_results, weights
+                agent_results, weights,
             )
         elif strategy == "best_quality":
             aggregated = await self._best_quality_aggregation(agent_results)
@@ -577,7 +570,6 @@ class AgentExecutionService:
         weights: dict[str, float],
     ) -> dict[str, Any]:
         """Aggregate results using consensus method."""
-
         # Simplified consensus: combine all outputs weighted by confidence
         aggregated: dict[str, Any] = {
             "consensus_method": "weighted_combination",
@@ -599,7 +591,7 @@ class AgentExecutionService:
             # Extract key findings for synthesis
             if isinstance(result.output, dict):
                 findings = result.output.get(
-                    "findings", result.output.get("analysis", [])
+                    "findings", result.output.get("analysis", []),
                 )
                 if isinstance(findings, list):
                     aggregated["synthesized_findings"].extend(findings)
@@ -612,7 +604,6 @@ class AgentExecutionService:
         weights: dict[str, float],
     ) -> dict[str, Any]:
         """Aggregate results using weighted average method."""
-
         aggregated: dict[str, Any] = {
             "aggregation_method": "weighted_average",
             "weighted_results": {},
@@ -638,10 +629,9 @@ class AgentExecutionService:
         return aggregated
 
     async def _best_quality_aggregation(
-        self, agent_results: dict[str, AgentExecutionResponse]
+        self, agent_results: dict[str, AgentExecutionResponse],
     ) -> dict[str, Any]:
         """Aggregate by selecting best quality result."""
-
         # Find agent with highest quality score
         best_agent = max(agent_results.items(), key=lambda x: x[1].quality_score)
 
@@ -663,7 +653,6 @@ class AgentExecutionService:
 
     async def get_agent_list(self) -> list[AgentInfo]:
         """Get list of available agents with capabilities."""
-
         agents = []
 
         # Define agent information (would be populated from agent registry)
@@ -805,29 +794,28 @@ class AgentExecutionService:
             agents.append(
                 AgentInfo(
                     agent_type=agent_type,
-                    name=cast(str, info["name"]),
-                    description=cast(str, info["description"]),
-                    capabilities=cast(list[AgentCapability], info["capabilities"]),
+                    name=cast("str", info["name"]),
+                    description=cast("str", info["description"]),
+                    capabilities=cast("list[AgentCapability]", info["capabilities"]),
                     average_execution_time_ms=cast(
-                        int, info["average_execution_time_ms"]
+                        "int", info["average_execution_time_ms"],
                     ),
-                    reliability_score=cast(float, info["reliability_score"]),
-                    quality_score=cast(float, info["quality_score"]),
-                    complexity_handling=cast(list[str], info["complexity_handling"]),
-                    optimal_domains=cast(list[str], info["optimal_domains"]),
+                    reliability_score=cast("float", info["reliability_score"]),
+                    quality_score=cast("float", info["quality_score"]),
+                    complexity_handling=cast("list[str]", info["complexity_handling"]),
+                    optimal_domains=cast("list[str]", info["optimal_domains"]),
                     endpoints=[
                         f"/api/v1/agents/{agent_type.value}/execute",
                         f"/api/v1/agents/{agent_type.value}",
                         f"/api/v1/agents/{agent_type.value}/metrics",
                     ],
-                )
+                ),
             )
 
         return agents
 
     async def get_agent_metrics(self, agent_type: AgentType) -> AgentMetricsResponse:
         """Get performance metrics for specific agent type."""
-
         metrics_data = self.agent_metrics.get(agent_type, {})
 
         # Calculate derived metrics
@@ -854,7 +842,7 @@ class AgentExecutionService:
                 quality_history[:5] if len(quality_history) >= 10 else quality_history
             )
             quality_trend = statistics.mean(recent_quality) - statistics.mean(
-                early_quality
+                early_quality,
             )
 
         return AgentMetricsResponse(
@@ -881,7 +869,6 @@ class AgentExecutionService:
 
     async def get_agent_health(self, agent_type: AgentType) -> AgentHealthStatus:
         """Get health status for specific agent type."""
-
         metrics = await self.get_agent_metrics(agent_type)
 
         # Determine health status
@@ -913,17 +900,16 @@ class AgentExecutionService:
                     ex
                     for ex in self.active_executions.values()
                     if ex["status"] == "pending"
-                ]
+                ],
             ),
             current_issues=[],  # Would be populated from actual health checks
             last_health_check=datetime.now(),
         )
 
     async def _update_agent_metrics(
-        self, agent_type: AgentType, response: AgentExecutionResponse, success: bool
+        self, agent_type: AgentType, response: AgentExecutionResponse, success: bool,
     ) -> None:
         """Update performance metrics for agent type."""
-
         if not self.enable_performance_tracking:
             return
 
@@ -954,7 +940,6 @@ class AgentExecutionService:
 
     async def _get_agent_instance(self, agent_type: AgentType) -> BaseAgent:
         """Get agent instance from factory."""
-
         agent_class_name = self.agent_type_mapping.get(agent_type)
         if not agent_class_name:
             raise ValueError(f"Unknown agent type: {agent_type.value}")
@@ -968,7 +953,6 @@ class AgentExecutionService:
 
     async def get_service_stats(self) -> dict[str, Any]:
         """Get comprehensive service statistics."""
-
         return {
             "service": {
                 "active_executions": len(self.active_executions),
@@ -990,7 +974,6 @@ class AgentExecutionService:
 
     async def _get_system_health(self) -> str:
         """Calculate overall system health."""
-
         health_statuses = []
 
         for agent_type in AgentType:
@@ -999,10 +982,9 @@ class AgentExecutionService:
 
         if all(status == "healthy" for status in health_statuses):
             return "healthy"
-        elif any(status == "unavailable" for status in health_statuses):
+        if any(status == "unavailable" for status in health_statuses):
             return "unhealthy"
-        else:
-            return "degraded"
+        return "degraded"
 
 
 # Global service instance

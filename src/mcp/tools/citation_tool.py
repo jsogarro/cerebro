@@ -1,5 +1,4 @@
-"""
-Citation Tool for MCP.
+"""Citation Tool for MCP.
 
 Provides citation formatting and DOI resolution capabilities.
 """
@@ -15,8 +14,7 @@ logger = get_logger()
 
 
 class CitationTool(BaseMCPTool):
-    """
-    MCP tool for citation formatting and management.
+    """MCP tool for citation formatting and management.
 
     Supports APA, MLA, Chicago citation styles and DOI resolution.
     """
@@ -65,20 +63,20 @@ class CitationTool(BaseMCPTool):
         )
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute citation operation.
+        """Execute citation operation.
 
         Args:
             **kwargs: Citation parameters
 
         Returns:
             Formatted citations or resolved DOI
+
         """
         try:
             # Handle DOI resolution
             if "doi" in kwargs:
                 return await self._resolve_doi(
-                    kwargs["doi"], kwargs.get("style", "APA")
+                    kwargs["doi"], kwargs.get("style", "APA"),
                 )
 
             # Handle citation formatting
@@ -91,15 +89,14 @@ class CitationTool(BaseMCPTool):
 
             if output_format == "bibtex":
                 return self._format_bibtex(sources)
-            else:
-                return self._format_citations(sources, style)
+            return self._format_citations(sources, style)
 
         except Exception as e:
             logger.error(f"Citation operation failed: {e!s}")
             return {"success": False, "error": str(e)}
 
     def _format_citations(
-        self, sources: list[dict[str, Any]], style: str
+        self, sources: list[dict[str, Any]], style: str,
     ) -> dict[str, Any]:
         """Format citations in specified style."""
         citations = []

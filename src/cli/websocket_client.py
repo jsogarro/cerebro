@@ -1,5 +1,4 @@
-"""
-WebSocket client for CLI real-time streaming.
+"""WebSocket client for CLI real-time streaming.
 
 This module provides WebSocket connectivity for the CLI to receive
 real-time updates instead of polling the API.
@@ -70,14 +69,14 @@ class CLIWebSocketClient:
             self.console.print(f"[dim]WS: {message}[/dim]")
 
     async def connect(self, endpoint: str) -> bool:
-        """
-        Connect to WebSocket endpoint.
+        """Connect to WebSocket endpoint.
 
         Args:
             endpoint: WebSocket endpoint path (e.g., "/ws/projects/123")
 
         Returns:
             True if connection successful, False otherwise
+
         """
         try:
             # Build WebSocket URL
@@ -108,13 +107,13 @@ class CLIWebSocketClient:
 
         except InvalidStatus as e:
             status_code = getattr(
-                e, "status_code", getattr(e.response, "status_code", 0)
+                e, "status_code", getattr(e.response, "status_code", 0),
             )
             if status_code == 401:
                 print_error("Authentication failed. Please check your token.")
             elif status_code == 403:
                 print_error(
-                    "Access denied. You don't have permission to access this project."
+                    "Access denied. You don't have permission to access this project.",
                 )
             else:
                 print_error(f"Connection failed with status {status_code}")
@@ -159,13 +158,13 @@ class CLIWebSocketClient:
         formatter: OutputFormatter,
         message_handler: Callable[[WSMessage], None] | None = None,
     ) -> bool:
-        """
-        Stream real-time progress updates for a project.
+        """Stream real-time progress updates for a project.
 
         Args:
             project_id: Project ID to monitor
             formatter: Output formatter for displaying updates
             message_handler: Optional custom message handler
+
         """
         # Connect to project-specific endpoint
         endpoint = f"/ws/cli/{project_id}"
@@ -209,10 +208,10 @@ class CLIWebSocketClient:
                         if ws_message.type == WSMessageType.PROGRESS:
                             progress_data = ws_message.data
                             progress_percentage = progress_data.get(
-                                "progress_percentage", 0.0
+                                "progress_percentage", 0.0,
                             )
                             current_agent = progress_data.get(
-                                "current_agent", "Unknown"
+                                "current_agent", "Unknown",
                             )
                             current_status = f"Progress: {progress_percentage:.1f}% - {current_agent}"
 
@@ -223,14 +222,14 @@ class CLIWebSocketClient:
                                     f"Completed: {progress_data.get('completed_tasks', 0)}/{progress_data.get('total_tasks', 0)} tasks",
                                     title=f"Project {project_id}",
                                     border_style="green",
-                                )
+                                ),
                             )
 
                         elif ws_message.type == WSMessageType.AGENT_STARTED:
                             agent_data = ws_message.data
                             agent_type = agent_data.get("agent_type", "Unknown")
                             task_desc = agent_data.get(
-                                "task_description", "Processing..."
+                                "task_description", "Processing...",
                             )
                             current_status = f"🚀 Started: {agent_type} - {task_desc}"
 
@@ -240,7 +239,7 @@ class CLIWebSocketClient:
                                     f"Progress: {progress_percentage:.1f}%",
                                     title=f"Project {project_id}",
                                     border_style="yellow",
-                                )
+                                ),
                             )
 
                         elif ws_message.type == WSMessageType.AGENT_COMPLETED:
@@ -257,7 +256,7 @@ class CLIWebSocketClient:
                                     f"Progress: {progress_percentage:.1f}%",
                                     title=f"Project {project_id}",
                                     border_style="green",
-                                )
+                                ),
                             )
 
                         elif ws_message.type == WSMessageType.AGENT_FAILED:
@@ -272,7 +271,7 @@ class CLIWebSocketClient:
                                     f"Progress: {progress_percentage:.1f}%",
                                     title=f"Project {project_id}",
                                     border_style="red",
-                                )
+                                ),
                             )
 
                         elif ws_message.type == WSMessageType.PROJECT_COMPLETED:
@@ -281,7 +280,7 @@ class CLIWebSocketClient:
 
                         elif ws_message.type == WSMessageType.PROJECT_FAILED:
                             error_msg = ws_message.data.get(
-                                "error_message", "Unknown error"
+                                "error_message", "Unknown error",
                             )
                             print_error(f"❌ Project failed: {error_msg}")
                             break
@@ -333,12 +332,12 @@ class CLIWebSocketClient:
         project_id: UUID,
         log_level: str = "INFO",
     ) -> bool:
-        """
-        Stream real-time logs for a project.
+        """Stream real-time logs for a project.
 
         Args:
             project_id: Project ID to monitor
             log_level: Minimum log level to display
+
         """
         # Connect to project-specific endpoint
         endpoint = f"/ws/cli/{project_id}?format=logs"
@@ -374,7 +373,7 @@ class CLIWebSocketClient:
                         # Fallback to basic message display
                         timestamp = ws_message.timestamp.strftime("%H:%M:%S")
                         self.console.print(
-                            f"[dim]{timestamp}[/dim] {ws_message.type}: {ws_message.data}"
+                            f"[dim]{timestamp}[/dim] {ws_message.type}: {ws_message.data}",
                         )
 
                 except json.JSONDecodeError:
@@ -434,8 +433,7 @@ async def stream_project_progress(
     token: str | None = None,
     verbose: bool = False,
 ) -> bool:
-    """
-    Convenience function to stream project progress.
+    """Convenience function to stream project progress.
 
     Args:
         project_id: Project ID to monitor
@@ -445,6 +443,7 @@ async def stream_project_progress(
 
     Returns:
         True if streaming was successful
+
     """
     async with CLIWebSocketClient(token=token, verbose=verbose) as client:
         result: bool = await client.stream_progress(project_id, formatter)
@@ -455,8 +454,7 @@ async def test_websocket_connection(
     token: str | None = None,
     verbose: bool = False,
 ) -> bool:
-    """
-    Test WebSocket connection to server.
+    """Test WebSocket connection to server.
 
     Args:
         token: Authentication token
@@ -464,6 +462,7 @@ async def test_websocket_connection(
 
     Returns:
         True if connection successful
+
     """
     client = CLIWebSocketClient(token=token, verbose=verbose)
     return await client.test_connection()

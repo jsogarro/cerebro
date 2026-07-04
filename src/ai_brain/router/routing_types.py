@@ -1,5 +1,4 @@
-"""
-Routing Types for MASR
+"""Routing Types for MASR
 
 Shared dataclasses and enums used across the routing system.
 """
@@ -21,7 +20,8 @@ class CollaborationMode(StrEnum):
 
 class RoutingStrategy(StrEnum):
     """High-level routing strategies. Canonical definition; re-exported from
-    src.ai_brain.config.model_schemas for backward compatibility."""
+    src.ai_brain.config.model_schemas for backward compatibility.
+    """
 
     SPEED_FIRST = "speed_first"  # Minimize latency
     COST_EFFICIENT = "cost_efficient"  # Minimize cost

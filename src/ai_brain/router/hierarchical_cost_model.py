@@ -1,5 +1,4 @@
-"""
-Hierarchical Cost Model
+"""Hierarchical Cost Model
 
 Extended cost model for hierarchical supervisor/worker systems that accounts for:
 - Supervisor instantiation and coordination overhead
@@ -126,10 +125,9 @@ class HierarchicalCostEstimate:
 
     def calculate_totals(self) -> None:
         """Calculate total costs from components."""
-
         # Sum component costs
         self.total_instantiation_cost = sum(self.supervisor_costs.values()) + sum(
-            self.worker_costs.values()
+            self.worker_costs.values(),
         )
 
         self.total_coordination_cost = sum(self.coordination_costs.values())
@@ -176,7 +174,6 @@ class SupervisorCostCalculator:
 
     def _initialize_supervisor_profiles(self) -> None:
         """Initialize built-in supervisor cost profiles."""
-
         # Research Supervisor Profile
         self.supervisor_profiles["research"] = SupervisorCostProfile(
             supervisor_type="research",
@@ -209,10 +206,9 @@ class SupervisorCostCalculator:
         )
 
     def calculate_supervisor_instantiation_cost(
-        self, supervisor_type: str, worker_count: int, complexity_level: ComplexityLevel
+        self, supervisor_type: str, worker_count: int, complexity_level: ComplexityLevel,
     ) -> float:
         """Calculate cost of supervisor instantiation."""
-
         profile = self.supervisor_profiles.get(supervisor_type)
         if not profile:
             # Use default profile
@@ -247,7 +243,6 @@ class SupervisorCostCalculator:
         refinement_rounds: int = 1,
     ) -> float:
         """Calculate ongoing runtime cost for supervisor."""
-
         profile = self.supervisor_profiles.get(supervisor_type)
         if not profile:
             profile = SupervisorCostProfile(
@@ -290,7 +285,6 @@ class WorkerCoordinationCostCalculator:
         complexity_level: ComplexityLevel,
     ) -> float:
         """Calculate total cost of instantiating workers."""
-
         base_cost_per_worker = self.cost_factors.worker_instantiation_cost
 
         # Complexity scaling
@@ -322,7 +316,6 @@ class WorkerCoordinationCostCalculator:
         estimated_runtime_seconds: float,
     ) -> float:
         """Calculate coordination overhead costs."""
-
         # Base coordination events per worker per minute
         events_per_worker_per_minute = {
             SupervisionMode.SEQUENTIAL: 2,  # Less coordination needed
@@ -364,7 +357,6 @@ class TalkHierCommunicationCostCalculator:
         enable_consensus_building: bool = True,
     ) -> dict[str, float]:
         """Calculate TalkHier communication costs."""
-
         costs = {}
 
         # Message costs scale with rounds and workers
@@ -404,10 +396,9 @@ class TalkHierCommunicationCostCalculator:
         return costs
 
     def calculate_cross_supervisor_communication_cost(
-        self, supervisor_count: int, estimated_tokens_per_supervisor: int
+        self, supervisor_count: int, estimated_tokens_per_supervisor: int,
     ) -> float:
         """Calculate cost of communication between supervisors."""
-
         if supervisor_count <= 1:
             return 0.0
 
@@ -440,7 +431,6 @@ class EfficiencySavingsCalculator:
         worker_count: int = 1,
     ) -> dict[str, float]:
         """Calculate efficiency savings from various optimizations."""
-
         savings = {}
 
         # Resource pooling savings (reuse of supervisor instances)
@@ -475,15 +465,14 @@ class EfficiencySavingsCalculator:
 
 
 class HierarchicalCostOptimizer:
-    """
-    Main hierarchical cost optimizer that extends the base CostOptimizer.
+    """Main hierarchical cost optimizer that extends the base CostOptimizer.
 
     Provides comprehensive cost modeling for supervisor/worker hierarchical systems
     including all coordination, communication, and efficiency factors.
     """
 
     def __init__(
-        self, base_cost_optimizer: CostOptimizer, config: dict[str, Any] | None = None
+        self, base_cost_optimizer: CostOptimizer, config: dict[str, Any] | None = None,
     ):
         """Initialize hierarchical cost optimizer."""
         self.base_optimizer = base_cost_optimizer
@@ -492,11 +481,11 @@ class HierarchicalCostOptimizer:
         # Initialize hierarchical cost components
         self.cost_factors = HierarchicalCostFactors()
         self.supervisor_calculator = SupervisorCostCalculator(
-            self.config.get("supervisor_calculator", {})
+            self.config.get("supervisor_calculator", {}),
         )
         self.worker_calculator = WorkerCoordinationCostCalculator(self.cost_factors)
         self.communication_calculator = TalkHierCommunicationCostCalculator(
-            self.cost_factors
+            self.cost_factors,
         )
         self.efficiency_calculator = EfficiencySavingsCalculator(self.cost_factors)
 
@@ -519,8 +508,7 @@ class HierarchicalCostOptimizer:
         routing_strategy: RoutingStrategy = RoutingStrategy.BALANCED,
         enable_optimizations: bool = True,
     ) -> HierarchicalCostEstimate:
-        """
-        Calculate comprehensive hierarchical execution costs.
+        """Calculate comprehensive hierarchical execution costs.
 
         Args:
             complexity_analysis: Query complexity analysis
@@ -534,13 +522,13 @@ class HierarchicalCostOptimizer:
 
         Returns:
             Comprehensive hierarchical cost estimate
-        """
 
+        """
         # Get base model cost estimate from existing optimizer
         from .cost_optimizer import OptimizationStrategy
 
         base_result = await self.base_optimizer.optimize(
-            complexity_analysis, OptimizationStrategy.BALANCED
+            complexity_analysis, OptimizationStrategy.BALANCED,
         )
 
         if base_result.estimated_cost:
@@ -552,24 +540,24 @@ class HierarchicalCostOptimizer:
 
         # Initialize hierarchical cost estimate
         estimate = HierarchicalCostEstimate(
-            base_model_cost=base_cost, estimated_tokens=estimated_tokens
+            base_model_cost=base_cost, estimated_tokens=estimated_tokens,
         )
 
         # Calculate supervisor costs
         supervisor_instantiation = (
             self.supervisor_calculator.calculate_supervisor_instantiation_cost(
-                supervisor_type, worker_count, complexity_analysis.level
+                supervisor_type, worker_count, complexity_analysis.level,
             )
         )
 
         # Estimate runtime based on complexity
         estimated_runtime = self._estimate_runtime_seconds(
-            complexity_analysis, worker_count, refinement_rounds
+            complexity_analysis, worker_count, refinement_rounds,
         )
 
         supervisor_runtime = (
             self.supervisor_calculator.calculate_supervisor_runtime_cost(
-                supervisor_type, estimated_runtime, refinement_rounds
+                supervisor_type, estimated_runtime, refinement_rounds,
             )
         )
 
@@ -581,7 +569,7 @@ class HierarchicalCostOptimizer:
         # Calculate worker costs
         worker_instantiation = (
             self.worker_calculator.calculate_worker_instantiation_costs(
-                worker_count, worker_types, complexity_analysis.level
+                worker_count, worker_types, complexity_analysis.level,
             )
         )
 
@@ -592,7 +580,7 @@ class HierarchicalCostOptimizer:
         )
 
         coordination_overhead = self.worker_calculator.calculate_coordination_overhead(
-            worker_count, supervision_mode, estimated_runtime
+            worker_count, supervision_mode, estimated_runtime,
         )
 
         estimate.worker_costs = {
@@ -635,13 +623,13 @@ class HierarchicalCostOptimizer:
         # Set performance predictions
         estimate.predicted_execution_time_seconds = estimated_runtime
         estimate.predicted_quality_score = self._predict_quality_score(
-            complexity_analysis, routing_strategy, refinement_rounds
+            complexity_analysis, routing_strategy, refinement_rounds,
         )
         estimate.confidence = self._calculate_cost_confidence(
-            complexity_analysis, worker_count
+            complexity_analysis, worker_count,
         )
         estimate.cost_variance = self._calculate_cost_variance(
-            estimate.net_cost, complexity_analysis
+            estimate.net_cost, complexity_analysis,
         )
 
         # Track prediction for accuracy metrics
@@ -656,7 +644,6 @@ class HierarchicalCostOptimizer:
         refinement_rounds: int,
     ) -> float:
         """Estimate total runtime for hierarchical execution."""
-
         # Base runtime by complexity
         base_runtime = {
             ComplexityLevel.SIMPLE: 60.0,
@@ -684,7 +671,6 @@ class HierarchicalCostOptimizer:
         refinement_rounds: int,
     ) -> float:
         """Predict quality score for hierarchical execution."""
-
         # Base quality by strategy
         base_quality = {
             RoutingStrategy.SPEED_FIRST: 0.75,
@@ -709,10 +695,9 @@ class HierarchicalCostOptimizer:
         return max(0.6, min(0.98, predicted_quality))
 
     def _calculate_cost_confidence(
-        self, complexity_analysis: ComplexityAnalysis, worker_count: int
+        self, complexity_analysis: ComplexityAnalysis, worker_count: int,
     ) -> float:
         """Calculate confidence in cost prediction."""
-
         # Base confidence
         base_confidence = 0.85
 
@@ -730,10 +715,9 @@ class HierarchicalCostOptimizer:
         return max(0.5, min(0.95, confidence))
 
     def _calculate_cost_variance(
-        self, net_cost: float, complexity_analysis: ComplexityAnalysis
+        self, net_cost: float, complexity_analysis: ComplexityAnalysis,
     ) -> float:
         """Calculate expected variance in cost prediction."""
-
         # Variance as percentage of net cost
         base_variance_pct = 0.15  # 15% base variance
 
@@ -750,10 +734,9 @@ class HierarchicalCostOptimizer:
         return variance
 
     def record_actual_cost(
-        self, prediction_id: str, actual_cost: float, actual_quality: float
+        self, prediction_id: str, actual_cost: float, actual_quality: float,
     ) -> None:
         """Record actual execution cost for accuracy tracking."""
-
         # Update accuracy metrics (simplified implementation)
         self.accuracy_metrics["total_predictions"] += 1
 
@@ -763,7 +746,6 @@ class HierarchicalCostOptimizer:
 
     async def get_cost_model_stats(self) -> dict[str, Any]:
         """Get cost model performance statistics."""
-
         return {
             "predictions": {
                 "total_predictions": len(self.cost_predictions),

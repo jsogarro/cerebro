@@ -1,5 +1,4 @@
-"""
-Supervisor Factory
+"""Supervisor Factory
 
 Dynamic supervisor creation and management system that integrates with MASR
 routing decisions to instantiate and configure appropriate supervisors.
@@ -86,10 +85,10 @@ class SupervisorSpecification:
 
     # Optimization preferences
     optimal_for_complexity: list[str] = field(
-        default_factory=list
+        default_factory=list,
     )  # simple, moderate, complex
     optimal_for_strategies: list[str] = field(
-        default_factory=list
+        default_factory=list,
     )  # speed, cost, quality, balanced
 
     # Health and monitoring
@@ -113,7 +112,7 @@ class SupervisorHealthMonitor:
 
         # Health check configuration
         self.health_check_interval = self.config.get(
-            "health_check_interval_seconds", 300
+            "health_check_interval_seconds", 300,
         )  # 5 minutes
         self.failure_threshold = self.config.get("failure_threshold", 3)
         self.recovery_time = self.config.get("recovery_time_seconds", 600)  # 10 minutes
@@ -137,7 +136,7 @@ class SupervisorHealthMonitor:
         )
 
     def record_execution(
-        self, supervisor_type: str, success: bool, execution_time_ms: int
+        self, supervisor_type: str, success: bool, execution_time_ms: int,
     ) -> None:
         """Record execution result for health tracking."""
         if supervisor_type not in self.supervisor_health:
@@ -161,7 +160,7 @@ class SupervisorHealthMonitor:
         # Update average execution time
         current_avg = spec.average_execution_time_ms
         spec.average_execution_time_ms = int(
-            current_avg * 0.9 + execution_time_ms * 0.1
+            current_avg * 0.9 + execution_time_ms * 0.1,
         )
 
         # Record health event
@@ -266,8 +265,7 @@ class CapabilityMatcher:
         available_supervisors: list[SupervisorSpecification],
         health_monitor: SupervisorHealthMonitor,
     ) -> SupervisorSpecification | None:
-        """
-        Match supervisor to requirements.
+        """Match supervisor to requirements.
 
         Args:
             requirements: Task requirements from MASR routing
@@ -276,8 +274,8 @@ class CapabilityMatcher:
 
         Returns:
             Best matching supervisor specification or None
-        """
 
+        """
         # Filter healthy supervisors
         healthy_supervisors = [
             spec
@@ -311,10 +309,9 @@ class CapabilityMatcher:
         return None
 
     def _calculate_match_score(
-        self, spec: SupervisorSpecification, requirements: dict[str, Any]
+        self, spec: SupervisorSpecification, requirements: dict[str, Any],
     ) -> float:
         """Calculate match score for supervisor against requirements."""
-
         score = 0.0
         total_weight = 0.0
 
@@ -376,8 +373,7 @@ class CapabilityMatcher:
 
 
 class SupervisorFactory:
-    """
-    Factory for creating and managing supervisor instances.
+    """Factory for creating and managing supervisor instances.
 
     Integrates with MASR routing decisions to provide intelligent supervisor
     selection and instantiation based on task requirements.
@@ -389,10 +385,10 @@ class SupervisorFactory:
 
         # Core components
         self.health_monitor = SupervisorHealthMonitor(
-            self.config.get("health_monitor", {})
+            self.config.get("health_monitor", {}),
         )
         self.capability_matcher = CapabilityMatcher(
-            self.config.get("capability_matcher", {})
+            self.config.get("capability_matcher", {}),
         )
 
         # Supervisor registry
@@ -411,7 +407,6 @@ class SupervisorFactory:
 
     def _register_builtin_supervisors(self) -> None:
         """Register built-in supervisor types."""
-
         # Research Supervisor
         research_spec = SupervisorSpecification(
             supervisor_type="research",
@@ -527,13 +522,12 @@ class SupervisorFactory:
         self.register_supervisor(finance_spec)
 
     def register_supervisor(self, spec: SupervisorSpecification) -> None:
-        """
-        Register a supervisor type with the factory.
+        """Register a supervisor type with the factory.
 
         Args:
             spec: Supervisor specification to register
-        """
 
+        """
         self.supervisor_registry[spec.supervisor_type] = spec
         self.health_monitor.register_supervisor(spec)
         self.factory_stats["registry_size"] = len(self.supervisor_registry)
@@ -548,24 +542,23 @@ class SupervisorFactory:
         return list(self.supervisor_registry.values())
 
     def get_supervisor_spec(
-        self, supervisor_type: str
+        self, supervisor_type: str,
     ) -> SupervisorSpecification | None:
         """Get specification for specific supervisor type."""
         return self.supervisor_registry.get(supervisor_type)
 
     async def create_supervisor_from_config(
-        self, config: SupervisorConfiguration
+        self, config: SupervisorConfiguration,
     ) -> BaseSupervisor | None:
-        """
-        Create supervisor instance from configuration.
+        """Create supervisor instance from configuration.
 
         Args:
             config: Supervisor configuration from MASR bridge
 
         Returns:
             Configured supervisor instance or None if creation fails
-        """
 
+        """
         try:
             # Get supervisor specification
             spec = self.supervisor_registry.get(config.supervisor_type)
@@ -631,10 +624,9 @@ class SupervisorFactory:
             return None
 
     async def select_optimal_supervisor(
-        self, config: SupervisorConfiguration, task: AgentTask
+        self, config: SupervisorConfiguration, task: AgentTask,
     ) -> SupervisorSpecification | None:
-        """
-        Select optimal supervisor for configuration and task.
+        """Select optimal supervisor for configuration and task.
 
         Args:
             config: Supervisor configuration from MASR
@@ -642,8 +634,8 @@ class SupervisorFactory:
 
         Returns:
             Best supervisor specification or None
-        """
 
+        """
         # Extract requirements from config and task
         requirements = {
             "domain": config.domain,
@@ -655,13 +647,13 @@ class SupervisorFactory:
 
         # Use capability matcher to find best supervisor
         selected = self.capability_matcher.match_supervisor(
-            requirements, self.get_available_supervisors(), self.health_monitor
+            requirements, self.get_available_supervisors(), self.health_monitor,
         )
 
         return selected
 
     def _infer_complexity(
-        self, config: SupervisorConfiguration, task: AgentTask
+        self, config: SupervisorConfiguration, task: AgentTask,
     ) -> str:
         """Infer complexity level from configuration and task."""
         # Extract from MASR context if available
@@ -675,7 +667,7 @@ class SupervisorFactory:
         return "moderate"
 
     def _extract_required_capabilities(
-        self, config: SupervisorConfiguration, task: AgentTask
+        self, config: SupervisorConfiguration, task: AgentTask,
     ) -> list[SupervisorCapability]:
         """Extract required capabilities from configuration and task."""
         capabilities = []
@@ -704,7 +696,7 @@ class SupervisorFactory:
             [
                 SupervisorCapability.TALKHIER_PROTOCOL,
                 SupervisorCapability.LANGGRAPH_WORKFLOWS,
-            ]
+            ],
         )
 
         # Add refinement capability if multiple rounds expected
@@ -714,11 +706,11 @@ class SupervisorFactory:
         return capabilities
 
     def record_execution_result(
-        self, supervisor_type: str, success: bool, execution_time_ms: int
+        self, supervisor_type: str, success: bool, execution_time_ms: int,
     ) -> None:
         """Record execution result for health monitoring."""
         self.health_monitor.record_execution(
-            supervisor_type, success, execution_time_ms
+            supervisor_type, success, execution_time_ms,
         )
 
     async def get_factory_stats(self) -> FactoryStatsDict:

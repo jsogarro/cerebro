@@ -1,5 +1,4 @@
-"""
-Base agent class providing common functionality for all agents.
+"""Base agent class providing common functionality for all agents.
 
 This module defines the abstract base class that all specialized agents
 must inherit from, following functional programming principles.
@@ -31,8 +30,7 @@ logger = get_logger()
 
 
 class BaseAgent(ABC):
-    """
-    Abstract base class for all research agents.
+    """Abstract base class for all research agents.
 
     This class provides common functionality while enforcing the agent
     interface. All agents should be designed as pure functions that
@@ -45,13 +43,13 @@ class BaseAgent(ABC):
         cache_client: Any | None = None,
         config: dict[str, Any] | None = None,
     ):
-        """
-        Initialize the base agent.
+        """Initialize the base agent.
 
         Args:
             gemini_service: Optional Gemini service for AI capabilities
             cache_client: Optional Redis client for caching
             config: Optional configuration dictionary
+
         """
         self.gemini_service = gemini_service
         self.cache_client = cache_client
@@ -74,8 +72,7 @@ class BaseAgent(ABC):
 
     @abstractmethod
     async def execute(self, task: AgentTask) -> AgentResult:
-        """
-        Execute the agent's main task.
+        """Execute the agent's main task.
 
         This should be implemented as a pure function that transforms
         the task input into a result output.
@@ -85,13 +82,12 @@ class BaseAgent(ABC):
 
         Returns:
             The execution result
+
         """
-        pass
 
     @abstractmethod
     async def validate_result(self, result: AgentResult) -> bool:
-        """
-        Validate the result of an execution.
+        """Validate the result of an execution.
 
         This ensures the result meets quality standards before being
         returned.
@@ -101,18 +97,18 @@ class BaseAgent(ABC):
 
         Returns:
             True if valid, False otherwise
+
         """
-        pass
 
     def get_agent_type(self) -> str:
-        """
-        Get the type of this agent.
+        """Get the type of this agent.
 
         By default, returns the class name in lowercase.
         Can be overridden by subclasses.
 
         Returns:
             The agent type identifier
+
         """
         return self.__class__.__name__.lower().replace("agent", "")
 
@@ -135,18 +131,17 @@ class BaseAgent(ABC):
         self._logger.warning("agent_warning", **fields)
 
     def record_metric(self, name: str, value: float) -> None:
-        """
-        Record a metric for monitoring.
+        """Record a metric for monitoring.
 
         Args:
             name: Metric name
             value: Metric value
+
         """
         self.log_info(f"Metric: {name}={value}")
 
     def build_execution_metadata(self, **metadata: Any) -> dict[str, Any]:
         """Build agent execution metadata with prompt version tracking."""
-
         agent_type = self.get_agent_type()
         return {
             "agent_type": agent_type,
@@ -156,8 +151,7 @@ class BaseAgent(ABC):
         }
 
     def handle_error(self, task: AgentTask, error: Exception) -> AgentResult:
-        """
-        Handle an error during execution.
+        """Handle an error during execution.
 
         Creates a failed result with error information.
 
@@ -167,6 +161,7 @@ class BaseAgent(ABC):
 
         Returns:
             A failed AgentResult
+
         """
         self.log_error(f"Task {task.id} failed: {error!s}")
 
@@ -182,40 +177,40 @@ class BaseAgent(ABC):
         )
 
     async def communicate(
-        self, other_agent: "BaseAgent", message: AgentMessage
+        self, other_agent: "BaseAgent", message: AgentMessage,
     ) -> None:
-        """
-        Send a message to another agent.
+        """Send a message to another agent.
 
         Args:
             other_agent: The agent to send to
             message: The message to send
+
         """
         await other_agent.receive_message(message)
         self.log_info(
-            f"Sent message to {other_agent.get_agent_type()}: {message.message_type}"
+            f"Sent message to {other_agent.get_agent_type()}: {message.message_type}",
         )
 
     async def receive_message(self, message: AgentMessage) -> None:
-        """
-        Receive a message from another agent.
+        """Receive a message from another agent.
 
         Args:
             message: The received message
+
         """
         self._message_queue.append(message)
         self.log_info(
-            f"Received message from {message.from_agent}: {message.message_type}"
+            f"Received message from {message.from_agent}: {message.message_type}",
         )
 
     def get_messages(self) -> list[AgentMessage]:
-        """
-        Get all received messages.
+        """Get all received messages.
 
         Returns a copy to maintain immutability.
 
         Returns:
             List of received messages
+
         """
         return self._message_queue.copy()
 
@@ -229,8 +224,7 @@ class BaseAgent(ABC):
         wait=wait_exponential(multiplier=1, min=1, max=10),
     )
     async def execute_with_retry(self, task: AgentTask) -> AgentResult:
-        """
-        Execute a task with retry logic.
+        """Execute a task with retry logic.
 
         Retries on connection errors and timeouts.
 
@@ -239,6 +233,7 @@ class BaseAgent(ABC):
 
         Returns:
             The execution result
+
         """
         start_time = time.time()
 
@@ -289,26 +284,25 @@ class BaseAgent(ABC):
             self._state = self._state.with_new_status("idle")
 
     def get_metrics(self) -> AgentMetrics:
-        """
-        Get current agent metrics.
+        """Get current agent metrics.
 
         Returns:
             Current metrics
+
         """
         return self._metrics
 
     def get_state(self) -> AgentState:
-        """
-        Get current agent state.
+        """Get current agent state.
 
         Returns:
             Current state
+
         """
         return self._state
 
     async def generate_prompt(self, task: AgentTask) -> str:
-        """
-        Generate a prompt for the Gemini service.
+        """Generate a prompt for the Gemini service.
 
         Can be overridden by subclasses for specialized prompts.
 
@@ -317,12 +311,12 @@ class BaseAgent(ABC):
 
         Returns:
             The generated prompt
+
         """
         return f"Process this task: {task.input_data}"
 
     async def parse_response(self, response: str, task: AgentTask) -> dict[str, Any]:
-        """
-        Parse a response from the Gemini service.
+        """Parse a response from the Gemini service.
 
         Can be overridden by subclasses for specialized parsing.
 
@@ -332,19 +326,20 @@ class BaseAgent(ABC):
 
         Returns:
             Parsed response data
+
         """
         return {"raw_response": response}
 
     async def cache_result(
-        self, key: str, result: AgentResult, ttl: int = 3600
+        self, key: str, result: AgentResult, ttl: int = 3600,
     ) -> None:
-        """
-        Cache a result if cache client is available.
+        """Cache a result if cache client is available.
 
         Args:
             key: Cache key
             result: Result to cache
             ttl: Time to live in seconds
+
         """
         if self.cache_client:
             try:
@@ -361,7 +356,7 @@ class BaseAgent(ABC):
                             "confidence": result.confidence,
                             "execution_time": result.execution_time,
                             "metadata": result.metadata,
-                        }
+                        },
                     ),
                 )
                 self.log_info(f"Cached result for key: {key}")
@@ -369,14 +364,14 @@ class BaseAgent(ABC):
                 self.log_warning(f"Failed to cache result: {e}")
 
     async def get_cached_result(self, key: str) -> AgentResult | None:
-        """
-        Get a cached result if available.
+        """Get a cached result if available.
 
         Args:
             key: Cache key
 
         Returns:
             Cached result or None
+
         """
         if self.cache_client:
             try:

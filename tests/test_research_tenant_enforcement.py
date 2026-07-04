@@ -46,7 +46,7 @@ class _Repo:
                 "project_id": project_id,
                 "status": project_status,
                 "organization_id": organization_id,
-            }
+            },
         )
         return self.project
 
@@ -63,7 +63,7 @@ class _Repo:
                 "user_id": user_id,
                 "organization_id": organization_id,
                 "load_relationships": load_relationships,
-            }
+            },
         )
         return self.project
 
@@ -82,7 +82,7 @@ class _Repo:
                 "limit": limit,
                 "offset": offset,
                 "organization_id": organization_id,
-            }
+            },
         )
         return [self.project]
 
@@ -162,7 +162,7 @@ async def test_get_research_project_filters_by_user_and_org() -> None:
             "user_id": "user-123",
             "organization_id": "org-123",
             "load_relationships": None,
-        }
+        },
     ]
 
 
@@ -205,7 +205,7 @@ async def test_list_research_projects_uses_authenticated_user_and_org() -> None:
             "limit": 25,
             "offset": 5,
             "organization_id": "org-123",
-        }
+        },
     ]
 
 

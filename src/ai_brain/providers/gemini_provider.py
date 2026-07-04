@@ -1,5 +1,4 @@
-"""
-Gemini Provider Implementation
+"""Gemini Provider Implementation
 
 Integrates with Google's Gemini models for multimodal capabilities and
 reliable general-purpose text generation. Builds on the existing Gemini
@@ -38,8 +37,7 @@ logger = get_logger(__name__)
 
 
 class GeminiProvider(BaseProvider):
-    """
-    Google Gemini model provider for multimodal and general-purpose tasks.
+    """Google Gemini model provider for multimodal and general-purpose tasks.
 
     Builds on the existing research platform's Gemini integration while
     extending it to support the AI Brain's routing and optimization features.
@@ -124,20 +122,19 @@ class GeminiProvider(BaseProvider):
         return 0.001
 
     async def generate(
-        self, request: ModelRequest, model_name: str | None = None
+        self, request: ModelRequest, model_name: str | None = None,
     ) -> ModelResponse:
         """Generate response using Gemini models."""
-
         if not await self.validate_request(request):
             return self._create_error_response(
-                request, ValueError("Invalid request"), "validation_error"
+                request, ValueError("Invalid request"), "validation_error",
             )
 
         model_name = model_name or self.default_model
 
         if not self.supports_model(model_name):
             return self._create_error_response(
-                request, ValueError(f"Unsupported model: {model_name}"), "model_error"
+                request, ValueError(f"Unsupported model: {model_name}"), "model_error",
             )
 
         start_time = datetime.now()
@@ -146,11 +143,11 @@ class GeminiProvider(BaseProvider):
             # Use existing Gemini service if available
             if self.gemini_service:
                 response = await self._generate_via_service(
-                    request, model_name, start_time
+                    request, model_name, start_time,
                 )
             else:
                 response = await self._generate_via_direct_api(
-                    request, model_name, start_time
+                    request, model_name, start_time,
                 )
 
             return await self._postprocess_response(response, request)
@@ -160,10 +157,9 @@ class GeminiProvider(BaseProvider):
             return self._create_error_response(request, e, "generation_error")
 
     async def _generate_via_service(
-        self, request: ModelRequest, model_name: str, start_time: datetime
+        self, request: ModelRequest, model_name: str, start_time: datetime,
     ) -> ModelResponse:
         """Generate using existing GeminiService."""
-
         # Convert ModelRequest to format expected by GeminiService
         if request.messages:
             # Use chat format
@@ -182,7 +178,7 @@ class GeminiProvider(BaseProvider):
         try:
             # This would use the existing GeminiService method
             service_response = await self.gemini_service.generate_research_plan(
-                query=prompt
+                query=prompt,
             )
             service_text = str(service_response)
 
@@ -221,10 +217,9 @@ class GeminiProvider(BaseProvider):
             raise
 
     async def _generate_via_direct_api(
-        self, request: ModelRequest, model_name: str, start_time: datetime
+        self, request: ModelRequest, model_name: str, start_time: datetime,
     ) -> ModelResponse:
         """Generate using direct API calls (fallback)."""
-
         # This would implement direct Google AI API calls
         # For now, return a placeholder response
         end_time = datetime.now()
@@ -260,7 +255,6 @@ class GeminiProvider(BaseProvider):
 
     def _calculate_confidence_score(self, content: str, request: ModelRequest) -> float:
         """Calculate confidence score for Gemini response."""
-
         base_confidence = 0.85  # Base confidence for Gemini (reliable)
 
         # Adjust based on response quality indicators
@@ -274,7 +268,7 @@ class GeminiProvider(BaseProvider):
             base_confidence -= 0.05  # Slight decrease for very complex tasks
 
         # Multimodal requests (if supported)
-        domain_str = request.domain if request.domain else ""
+        domain_str = request.domain or ""
         if "vision" in domain_str or "image" in (request.prompt or "").lower():
             model_name_meta = (
                 request.metadata.get("model_name", "")
@@ -287,10 +281,9 @@ class GeminiProvider(BaseProvider):
         return min(max(base_confidence, 0.0), 1.0)
 
     async def stream(
-        self, request: ModelRequest, model_name: str | None = None
+        self, request: ModelRequest, model_name: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream response using Gemini models."""
-
         # Gemini typically doesn't support streaming in the same way
         # Fall back to generating full response and yielding it
         model_name = model_name or self.default_model
@@ -320,11 +313,10 @@ class GeminiProvider(BaseProvider):
 
     async def health_check(self) -> ProviderHealthStatus:
         """Perform Gemini-specific health check."""
-
         try:
             # Test with a simple request
             test_request = ModelRequest(
-                prompt="What is 1 + 1?", max_tokens=10, timeout_seconds=15
+                prompt="What is 1 + 1?", max_tokens=10, timeout_seconds=15,
             )
 
             start_time = datetime.now()
@@ -357,7 +349,6 @@ class GeminiProvider(BaseProvider):
 
     async def validate_request(self, request: ModelRequest) -> bool:
         """Validate Gemini-specific request requirements."""
-
         if not await super().validate_request(request):
             return False
 
@@ -371,7 +362,6 @@ class GeminiProvider(BaseProvider):
 
     def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get Gemini model information."""
-
         if not self.supports_model(model_name):
             return None
 

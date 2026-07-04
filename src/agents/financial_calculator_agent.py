@@ -30,7 +30,7 @@ class FinancialCalculatorAgent(BaseAgent):
                 task,
                 ValueError(
                     "parameters.operation is required. Available: "
-                    f"{finance_math.AVAILABLE_OPERATIONS}"
+                    f"{finance_math.AVAILABLE_OPERATIONS}",
                 ),
             )
 

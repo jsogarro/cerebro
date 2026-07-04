@@ -39,7 +39,7 @@ async def get_optimization_suggestions(organization_id: str) -> dict[str, list[A
 
 @router.post("/estimate")
 async def estimate_cost(
-    query: str, depth: str = "comprehensive"
+    query: str, depth: str = "comprehensive",
 ) -> dict[str, float | str]:
     """Estimate query cost."""
     return {"estimated_cost": 0.5, "model": "kimi-k2.5"}

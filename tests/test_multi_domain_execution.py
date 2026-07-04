@@ -1,5 +1,4 @@
-"""
-Tests for Multi-Domain Sub-Query Execution
+"""Tests for Multi-Domain Sub-Query Execution
 
 Tests the new multi-domain decomposition feature where queries spanning multiple
 domains are dispatched to domain supervisors concurrently and results are merged.
@@ -48,7 +47,7 @@ class _FakeRoutingDecision:
     estimated_quality: float = 0.88
     confidence_score: float = 0.86
     complexity_analysis: _FakeComplexityAnalysis = field(
-        default_factory=_FakeComplexityAnalysis
+        default_factory=_FakeComplexityAnalysis,
     )
     context: dict[str, Any] = field(default_factory=dict)
 
@@ -80,16 +79,15 @@ def multi_domain_service():
             # Per-domain routing
             domain = context["domain"]
             domain_complexity = _FakeComplexityAnalysis(
-                domains=[domain], decomposition=None
+                domains=[domain], decomposition=None,
             )
             domain_decision = _FakeRoutingDecision(
                 complexity_analysis=domain_complexity,
                 agent_allocation=_FakeAgentAllocation(supervisor_type=domain),
             )
             return domain_decision
-        else:
-            # Main route
-            return main_decision
+        # Main route
+        return main_decision
 
     masr_router.route.side_effect = route_side_effect
 
@@ -153,7 +151,7 @@ def single_domain_service():
 
     # No decomposition - single domain
     complexity_analysis = _FakeComplexityAnalysis(
-        domains=["research"], decomposition=None
+        domains=["research"], decomposition=None,
     )
     decision = _FakeRoutingDecision(complexity_analysis=complexity_analysis)
     masr_router.route.return_value = decision
@@ -204,11 +202,11 @@ class TestMultiDomainExecution:
 
     @pytest.mark.asyncio
     async def test_multi_domain_detection_and_execution(
-        self, multi_domain_service, multi_domain_project
+        self, multi_domain_service, multi_domain_project,
     ):
         """Test that multi-domain queries trigger concurrent domain execution."""
         execution_id = await multi_domain_service.start_research_execution(
-            multi_domain_project
+            multi_domain_project,
         )
 
         # Wait for async execution
@@ -246,7 +244,7 @@ class TestMultiDomainExecution:
 
     @pytest.mark.asyncio
     async def test_multi_domain_partial_failure(
-        self, multi_domain_service, multi_domain_project
+        self, multi_domain_service, multi_domain_project,
     ):
         """Test partial failure handling - one domain succeeds, one fails."""
 
@@ -286,7 +284,7 @@ class TestMultiDomainExecution:
         )
 
         execution_id = await multi_domain_service.start_research_execution(
-            multi_domain_project
+            multi_domain_project,
         )
         await asyncio.sleep(0.15)
 
@@ -309,7 +307,7 @@ class TestMultiDomainExecution:
 
     @pytest.mark.asyncio
     async def test_multi_domain_all_fail(
-        self, multi_domain_service, multi_domain_project
+        self, multi_domain_service, multi_domain_project,
     ):
         """Test complete failure when all domains fail."""
 
@@ -329,7 +327,7 @@ class TestMultiDomainExecution:
         )
 
         execution_id = await multi_domain_service.start_research_execution(
-            multi_domain_project
+            multi_domain_project,
         )
         await asyncio.sleep(0.15)
 
@@ -342,11 +340,11 @@ class TestMultiDomainExecution:
 
     @pytest.mark.asyncio
     async def test_single_domain_no_regression(
-        self, single_domain_service, single_domain_project
+        self, single_domain_service, single_domain_project,
     ):
         """Test single-domain queries are completely unaffected (no regression)."""
         execution_id = await single_domain_service.start_research_execution(
-            single_domain_project
+            single_domain_project,
         )
         await asyncio.sleep(0.15)
 
@@ -372,7 +370,7 @@ class TestMultiDomainExecution:
 
     @pytest.mark.asyncio
     async def test_domain_supervisor_mapping(
-        self, multi_domain_service, multi_domain_project
+        self, multi_domain_service, multi_domain_project,
     ):
         """Test sub-queries are routed to correct domain supervisors."""
         await multi_domain_service.start_research_execution(multi_domain_project)
@@ -394,7 +392,7 @@ class TestMultiDomainExecution:
 
     @pytest.mark.asyncio
     async def test_multi_domain_bounded_parallelism(
-        self, multi_domain_service, multi_domain_project
+        self, multi_domain_service, multi_domain_project,
     ):
         """Test concurrency is bounded by semaphore."""
         # Verify max_domain_parallelism is set
@@ -403,7 +401,7 @@ class TestMultiDomainExecution:
         # For this test with 2 domains, both should run concurrently
         # (Actual concurrency control is verified by integration test timing)
         execution_id = await multi_domain_service.start_research_execution(
-            multi_domain_project
+            multi_domain_project,
         )
         await asyncio.sleep(0.15)
 

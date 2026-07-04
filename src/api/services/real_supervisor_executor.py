@@ -1,5 +1,4 @@
-"""
-Real supervisor execution module.
+"""Real supervisor execution module.
 
 Provides actual execution logic for supervisor coordination via MASR bridge.
 """
@@ -62,7 +61,7 @@ class RealSupervisorExecutor:
                 ),
                 timeout_seconds=timeout_seconds,
                 execution_mode=self._coordination_mode_to_execution_mode(
-                    coordination_mode
+                    coordination_mode,
                 ),
                 max_workers=len(workers),
                 max_parallel_workers=(
@@ -87,14 +86,14 @@ class RealSupervisorExecutor:
             supervisor_class = self.supervisor_registry.get(supervisor_type)
             if not supervisor_class:
                 logger.warning(
-                    f"Supervisor type '{supervisor_type}' not found, falling back to research"
+                    f"Supervisor type '{supervisor_type}' not found, falling back to research",
                 )
                 supervisor_class = self.supervisor_registry.get("research")
                 if not supervisor_class:
                     raise ValueError("No supervisors available")
 
             execution_result = await self.masr_bridge.executor.execute(
-                supervisor_class, supervisor_config, agent_task
+                supervisor_class, supervisor_config, agent_task,
             )
 
             for worker in workers:
@@ -185,7 +184,7 @@ async def resolve_conflict_with_supervisor(
                 [
                     f"Output {i + 1} (confidence: {o.get('confidence', 'N/A')}):\n{o['output']}"
                     for i, o in enumerate(conflict_outputs)
-                ]
+                ],
             )
 
             prompt = f"""You are a supervisor resolving conflicts between worker outputs.
@@ -227,6 +226,6 @@ REASONING: <explanation>
             logger.error("LLM-based conflict resolution failed", error=str(e))
 
     resolved = "Weighted consensus: " + " | ".join(
-        [str(o["output"]) for o in conflict_outputs]
+        [str(o["output"]) for o in conflict_outputs],
     )
     return resolved, 0.85, "Combined outputs using weighted consensus"

@@ -1,5 +1,4 @@
-"""
-Template rendering service for report generation.
+"""Template rendering service for report generation.
 
 This service handles Jinja2 template rendering with custom filters and functions,
 following functional programming principles.
@@ -56,7 +55,6 @@ ALLOWED_REPORT_HTML_TAGS = {
 class TemplateRenderingError(Exception):
     """Exception raised during template rendering."""
 
-    pass
 
 
 class TemplateRenderer:
@@ -127,8 +125,7 @@ class TemplateRenderer:
         }
 
     def render_report(self, report: Report, template_name: str | None = None) -> str:
-        """
-        Render a report using the appropriate template.
+        """Render a report using the appropriate template.
 
         Args:
             report: Report object to render
@@ -136,6 +133,7 @@ class TemplateRenderer:
 
         Returns:
             Rendered HTML content
+
         """
         try:
             # Determine template to use
@@ -143,7 +141,7 @@ class TemplateRenderer:
                 template_file = template_name
             else:
                 template_file = self._get_template_for_report_type(
-                    report.configuration.type
+                    report.configuration.type,
                 )
 
             # Get or load template
@@ -174,7 +172,7 @@ class TemplateRenderer:
         }
 
         template_file = template_mapping.get(
-            report_type, "comprehensive_report.html.j2"
+            report_type, "comprehensive_report.html.j2",
         )
 
         # Check if template exists, fall back to base template
@@ -210,7 +208,7 @@ class TemplateRenderer:
                 return template
             except jinja2.TemplateNotFound:
                 raise TemplateRenderingError(
-                    "No templates found (including base.html.j2)"
+                    "No templates found (including base.html.j2)",
                 ) from None
 
     def _build_template_context(self, report: Report) -> dict[str, Any]:
@@ -241,7 +239,7 @@ class TemplateRenderer:
                 return self._basic_markdown_filter(text)
 
             # Configure markdown extensions
-            markdown_api = cast(Any, markdown_module)
+            markdown_api = cast("Any", markdown_module)
             md = markdown_api.Markdown(
                 extensions=[
                     "markdown.extensions.tables",
@@ -253,7 +251,7 @@ class TemplateRenderer:
                     "codehilite": {
                         "css_class": "highlight",
                         "use_pygments": False,
-                    }
+                    },
                 },
             )
             result = md.convert(text)
@@ -272,7 +270,6 @@ class TemplateRenderer:
 
     def _sanitize_rendered_html(self, html: str) -> str:
         """Remove unsafe HTML before templates mark rendered markdown as safe."""
-
         sanitized = re.sub(
             r"<(script|style)[^>]*>.*?</\1>",
             "",
@@ -297,7 +294,7 @@ class TemplateRenderer:
         )
 
     def _truncate_words_filter(
-        self, text: str, length: int = 50, suffix: str = "..."
+        self, text: str, length: int = 50, suffix: str = "...",
     ) -> str:
         """Truncate text to specified number of words."""
         if not text:
@@ -353,10 +350,9 @@ class TemplateRenderer:
         """Format citation count with appropriate pluralization."""
         if count == 0:
             return "no citations"
-        elif count == 1:
+        if count == 1:
             return "1 citation"
-        else:
-            return f"{count:,} citations"
+        return f"{count:,} citations"
 
     def _capitalize_words_filter(self, text: str) -> str:
         """Capitalize each word in text."""
@@ -381,12 +377,11 @@ class TemplateRenderer:
         """Format duration in seconds to human-readable format."""
         if seconds < 60:
             return f"{seconds:.1f} seconds"
-        elif seconds < 3600:
+        if seconds < 3600:
             minutes = seconds / 60
             return f"{minutes:.1f} minutes"
-        else:
-            hours = seconds / 3600
-            return f"{hours:.1f} hours"
+        hours = seconds / 3600
+        return f"{hours:.1f} hours"
 
     # Custom Jinja2 global functions
     def _get_section_number(self, sections: list[Any], current_index: int) -> str:
@@ -412,16 +407,15 @@ class TemplateRenderer:
         """Get confidence level description from score."""
         if score >= 0.9:
             return "Very High"
-        elif score >= 0.8:
+        if score >= 0.8:
             return "High"
-        elif score >= 0.7:
+        if score >= 0.7:
             return "Good"
-        elif score >= 0.6:
+        if score >= 0.6:
             return "Moderate"
-        elif score >= 0.5:
+        if score >= 0.5:
             return "Fair"
-        else:
-            return "Low"
+        return "Low"
 
     def _format_date(self, date: Any, format_string: str = "%B %d, %Y") -> str:
         """Format datetime object."""

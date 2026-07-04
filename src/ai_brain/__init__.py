@@ -1,5 +1,4 @@
-"""
-Cerebro AI Brain - Multi-Modal LLM Intelligence System
+"""Cerebro AI Brain - Multi-Modal LLM Intelligence System
 
 This module contains the core intelligence components of Cerebro, transforming it from
 a specialized research platform into a comprehensive AI brain capable of handling

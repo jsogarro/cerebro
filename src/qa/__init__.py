@@ -76,13 +76,13 @@ class PeerReviewSystem:
     """Manage peer review workflow."""
 
     async def initiate_review(
-        self, project_id: str, num_reviewers: int = 2
+        self, project_id: str, num_reviewers: int = 2,
     ) -> dict[str, Any]:
         """Initiate peer review."""
         return {"project_id": project_id, "status": "initiated"}
 
     async def submit_review(
-        self, assignment_id: str, review_data: dict[str, Any]
+        self, assignment_id: str, review_data: dict[str, Any],
     ) -> dict[str, Any]:
         """Submit a review."""
         return {"assignment_id": assignment_id, "status": "submitted"}

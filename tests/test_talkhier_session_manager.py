@@ -22,7 +22,7 @@ class TestTalkHierSessionManager:
 
     @pytest.mark.asyncio
     async def test_register_session(
-        self, session_manager: TalkHierSessionManager
+        self, session_manager: TalkHierSessionManager,
     ) -> None:
         """Test session registration."""
         session_id = "test-session-001"
@@ -43,7 +43,7 @@ class TestTalkHierSessionManager:
 
     @pytest.mark.asyncio
     async def test_update_round_metrics(
-        self, session_manager: TalkHierSessionManager
+        self, session_manager: TalkHierSessionManager,
     ) -> None:
         """Test round metrics update."""
         session_id = "test-session-002"
@@ -77,7 +77,7 @@ class TestTalkHierSessionManager:
                 {
                     "protocol_type": (
                         ProtocolType.STANDARD if i % 2 == 0 else ProtocolType.FAST_TRACK
-                    )
+                    ),
                 },
             )
 
@@ -106,7 +106,7 @@ class TestTalkHierSessionManager:
 
     @pytest.mark.asyncio
     async def test_coordinate_sessions(
-        self, session_manager: TalkHierSessionManager
+        self, session_manager: TalkHierSessionManager,
     ) -> None:
         """Test session coordination."""
         session_ids = ["session-1", "session-2", "session-3"]

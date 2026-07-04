@@ -1,5 +1,4 @@
-"""
-Consensus Builder for TalkHier Protocol
+"""Consensus Builder for TalkHier Protocol
 
 Implements consensus building and validation mechanisms from TalkHier research,
 enabling multi-agent systems to achieve high-quality agreements through
@@ -87,8 +86,7 @@ class ValidationResult:
 
 
 class ConsensusBuilder:
-    """
-    Builds consensus from multiple agent responses using TalkHier protocol.
+    """Builds consensus from multiple agent responses using TalkHier protocol.
 
     Implements sophisticated consensus mechanisms including confidence aggregation,
     conflict resolution, and multi-round refinement coordination.
@@ -102,7 +100,7 @@ class ConsensusBuilder:
         self.default_threshold = self.config.get("default_consensus_threshold", 0.95)
         self.max_refinement_rounds = self.config.get("max_refinement_rounds", 3)
         self.consensus_method = ConsensusMethod(
-            self.config.get("consensus_method", "evidence_based")
+            self.config.get("consensus_method", "evidence_based"),
         )
 
         # Validation configuration
@@ -120,10 +118,9 @@ class ConsensusBuilder:
         self.average_rounds_needed = 0.0
 
     async def evaluate_consensus(
-        self, messages: list[TalkHierMessage], threshold: float | None = None
+        self, messages: list[TalkHierMessage], threshold: float | None = None,
     ) -> ConsensusScore:
-        """
-        Evaluate consensus across multiple agent messages.
+        """Evaluate consensus across multiple agent messages.
 
         Args:
             messages: List of agent messages to evaluate
@@ -131,8 +128,8 @@ class ConsensusBuilder:
 
         Returns:
             ConsensusScore with detailed consensus analysis
-        """
 
+        """
         threshold = threshold or self.default_threshold
         self.consensus_attempts += 1
 
@@ -158,13 +155,13 @@ class ConsensusBuilder:
 
             # Identify agreement and disagreement areas
             agreement_areas, disagreement_areas = await self._identify_agreement_areas(
-                responses
+                responses,
             )
 
             # Calculate detailed consensus scores
             content_consensus = await self._calculate_content_consensus(responses)
             methodology_consensus = await self._calculate_methodology_consensus(
-                responses
+                responses,
             )
             evidence_consensus = await self._calculate_evidence_consensus(responses)
 
@@ -173,7 +170,7 @@ class ConsensusBuilder:
 
             # Generate resolution suggestions
             resolution_suggestions = await self._generate_resolution_suggestions(
-                conflicts
+                conflicts,
             )
 
             # Assess quality metrics
@@ -213,10 +210,9 @@ class ConsensusBuilder:
             return ConsensusScore()
 
     async def validate_response(
-        self, message: TalkHierMessage, validation_criteria: list[str] | None = None
+        self, message: TalkHierMessage, validation_criteria: list[str] | None = None,
     ) -> ValidationResult:
-        """
-        Validate individual agent response quality.
+        """Validate individual agent response quality.
 
         Args:
             message: Agent message to validate
@@ -224,8 +220,8 @@ class ConsensusBuilder:
 
         Returns:
             ValidationResult with quality assessment
-        """
 
+        """
         validation_criteria = validation_criteria or [
             "factual_accuracy",
             "logical_consistency",
@@ -268,7 +264,7 @@ class ConsensusBuilder:
             improvement_suggestions = []
             if factual_accuracy < 0.8:
                 improvement_suggestions.append(
-                    "Improve factual accuracy with better sources"
+                    "Improve factual accuracy with better sources",
                 )
             if logical_consistency < 0.8:
                 improvement_suggestions.append("Enhance logical flow and reasoning")
@@ -297,10 +293,9 @@ class ConsensusBuilder:
             )
 
     async def _calculate_overall_consensus(
-        self, responses: list[TalkHierContent]
+        self, responses: list[TalkHierContent],
     ) -> float:
         """Calculate overall consensus score."""
-
         if not responses:
             return 0.0
 
@@ -310,14 +305,14 @@ class ConsensusBuilder:
         if self.consensus_method == ConsensusMethod.SIMPLE_AVERAGE:
             return statistics.mean([r.confidence_score for r in responses])
 
-        elif self.consensus_method == ConsensusMethod.WEIGHTED_AVERAGE:
+        if self.consensus_method == ConsensusMethod.WEIGHTED_AVERAGE:
             # Would implement agent-specific weighting
             return statistics.mean([r.confidence_score for r in responses])
 
-        elif self.consensus_method == ConsensusMethod.MEDIAN:
+        if self.consensus_method == ConsensusMethod.MEDIAN:
             return statistics.median([r.confidence_score for r in responses])
 
-        elif self.consensus_method == ConsensusMethod.EVIDENCE_BASED:
+        if self.consensus_method == ConsensusMethod.EVIDENCE_BASED:
             # Weight by evidence quality
             total_weighted_score = 0.0
             total_weight = 0.0
@@ -338,18 +333,17 @@ class ConsensusBuilder:
 
             return total_weighted_score / total_weight
 
-        else:  # VOTING
-            # Simple majority voting based on high confidence
-            high_confidence_count = sum(
-                1 for r in responses if r.confidence_score > 0.7
-            )
-            return high_confidence_count / len(responses)
+        # VOTING
+        # Simple majority voting based on high confidence
+        high_confidence_count = sum(
+            1 for r in responses if r.confidence_score > 0.7
+        )
+        return high_confidence_count / len(responses)
 
     async def _identify_agreement_areas(
-        self, responses: list[TalkHierContent]
+        self, responses: list[TalkHierContent],
     ) -> tuple[list[str], list[str]]:
         """Identify areas of agreement and disagreement."""
-
         if len(responses) < 2:
             return [], []
 
@@ -394,7 +388,7 @@ class ConsensusBuilder:
         return agreement_areas, disagreement_areas
 
     async def _calculate_content_consensus(
-        self, responses: list[TalkHierContent]
+        self, responses: list[TalkHierContent],
     ) -> float:
         """Calculate consensus on main content."""
         # Simplified content similarity calculation
@@ -418,7 +412,7 @@ class ConsensusBuilder:
         return statistics.mean(similarities) if similarities else 0.0
 
     async def _calculate_methodology_consensus(
-        self, responses: list[TalkHierContent]
+        self, responses: list[TalkHierContent],
     ) -> float:
         """Calculate consensus on methodology and approach."""
         # Look for methodological agreement in background/intermediate outputs
@@ -450,7 +444,7 @@ class ConsensusBuilder:
         return statistics.mean(method_scores) if method_scores else 0.5
 
     async def _calculate_evidence_consensus(
-        self, responses: list[TalkHierContent]
+        self, responses: list[TalkHierContent],
     ) -> float:
         """Calculate consensus on evidence and citations."""
         evidence_scores = []
@@ -459,7 +453,7 @@ class ConsensusBuilder:
             # Count evidence items
             evidence_count = len(response.evidence)
             evidence_quality = min(
-                evidence_count / 5.0, 1.0
+                evidence_count / 5.0, 1.0,
             )  # Normalize to 5 pieces of evidence
             evidence_scores.append(evidence_quality)
 
@@ -478,10 +472,9 @@ class ConsensusBuilder:
         return consensus
 
     async def _detect_conflicts(
-        self, responses: list[TalkHierContent]
+        self, responses: list[TalkHierContent],
     ) -> list[dict[str, Any]]:
         """Detect conflicts between agent responses."""
-
         conflicts: list[dict[str, Any]] = []
 
         if len(responses) < 2:
@@ -496,7 +489,7 @@ class ConsensusBuilder:
                     "description": f"Large confidence variance: {max(confidence_scores):.2f} vs {min(confidence_scores):.2f}",
                     "severity": "medium",
                     "agents_involved": [f"response_{i}" for i in range(len(responses))],
-                }
+                },
             )
 
         # Content length conflicts (may indicate different scope)
@@ -508,7 +501,7 @@ class ConsensusBuilder:
                     "description": "Significant difference in response scope/depth",
                     "severity": "medium",
                     "agents_involved": [f"response_{i}" for i in range(len(responses))],
-                }
+                },
             )
 
         # Evidence conflicts
@@ -520,16 +513,15 @@ class ConsensusBuilder:
                     "description": "Inconsistent evidence support across responses",
                     "severity": "high",
                     "agents_involved": [f"response_{i}" for i in range(len(responses))],
-                }
+                },
             )
 
         return conflicts
 
     async def _generate_resolution_suggestions(
-        self, conflicts: list[dict[str, Any]]
+        self, conflicts: list[dict[str, Any]],
     ) -> list[str]:
         """Generate suggestions for resolving identified conflicts."""
-
         suggestions = []
 
         for conflict in conflicts:
@@ -538,7 +530,7 @@ class ConsensusBuilder:
 
             if conflict_type == ConflictType.CONFIDENCE.value:
                 suggestions.append(
-                    "Request additional validation from agents with low confidence"
+                    "Request additional validation from agents with low confidence",
                 )
                 suggestions.append("Provide more specific evidence to support claims")
 
@@ -558,7 +550,6 @@ class ConsensusBuilder:
 
     async def _assess_evidence_quality(self, responses: list[TalkHierContent]) -> float:
         """Assess overall evidence quality."""
-
         if not responses:
             return 0.0
 
@@ -586,10 +577,9 @@ class ConsensusBuilder:
         return statistics.mean(evidence_scores)
 
     async def _assess_response_completeness(
-        self, responses: list[TalkHierContent]
+        self, responses: list[TalkHierContent],
     ) -> float:
         """Assess response completeness."""
-
         completeness_scores = []
 
         for response in responses:
@@ -610,10 +600,9 @@ class ConsensusBuilder:
         return statistics.mean(completeness_scores) if completeness_scores else 0.0
 
     async def _assess_reasoning_soundness(
-        self, responses: list[TalkHierContent]
+        self, responses: list[TalkHierContent],
     ) -> float:
         """Assess logical reasoning quality."""
-
         # Simple heuristic based on response structure and coherence
         reasoning_scores = []
 
@@ -652,8 +641,7 @@ class ConsensusBuilder:
         # Check for evidence support
         if response.evidence:
             return 0.8 + (len(response.evidence) / 10.0) * 0.2
-        else:
-            return 0.5  # Medium confidence without evidence
+        return 0.5  # Medium confidence without evidence
 
     async def _assess_logical_consistency(self, response: TalkHierContent) -> float:
         """Assess logical consistency."""
@@ -670,29 +658,25 @@ class ConsensusBuilder:
         # Some contradiction is normal, too much suggests inconsistency
         if contradiction_count == 0:
             return 0.8  # May be too simplistic
-        elif contradiction_count <= 2:
+        if contradiction_count <= 2:
             return 0.9  # Good balance
-        else:
-            return 0.6  # May be inconsistent
+        return 0.6  # May be inconsistent
 
     async def _assess_evidence_support(self, response: TalkHierContent) -> float:
         """Assess evidence support quality."""
-
         evidence_count = len(response.evidence)
 
         # Quality based on evidence quantity and presence
         if evidence_count == 0:
             return 0.2
-        elif evidence_count <= 2:
+        if evidence_count <= 2:
             return 0.6
-        elif evidence_count <= 5:
+        if evidence_count <= 5:
             return 0.9
-        else:
-            return 1.0
+        return 1.0
 
     async def _assess_completeness(self, response: TalkHierContent) -> float:
         """Assess response completeness."""
-
         score = 0.0
 
         # Content completeness
@@ -713,7 +697,6 @@ class ConsensusBuilder:
 
     async def get_consensus_stats(self) -> dict[str, Any]:
         """Get consensus builder performance statistics."""
-
         success_rate = self.successful_consensus / max(self.consensus_attempts, 1)
 
         return {

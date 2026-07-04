@@ -20,7 +20,6 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 async def get_memory_system(request: Request) -> MultiTierMemorySystem | None:
     """Return the app-level memory system when one is attached."""
-
     memory_system = getattr(request.app.state, "memory_system", None)
     if isinstance(memory_system, MultiTierMemorySystem):
         return memory_system
@@ -34,23 +33,22 @@ async def delete_user_gdpr(
     memory_system: MultiTierMemorySystem | None = Depends(get_memory_system),
 ) -> dict[str, Any]:
     """Delete user data from database records and memory tiers."""
-
     user_id_text = str(user_id)
     project_ids_result = await db.execute(
-        select(ResearchProject.id).where(ResearchProject.user_id == user_id_text)
+        select(ResearchProject.id).where(ResearchProject.user_id == user_id_text),
     )
     project_ids = list(project_ids_result.scalars().all())
 
     deleted_tasks = 0
     if project_ids:
         task_result = await db.execute(
-            delete(AgentTask).where(AgentTask.project_id.in_(project_ids))
+            delete(AgentTask).where(AgentTask.project_id.in_(project_ids)),
         )
         # SQLAlchemy 2.x: Result.rowcount is valid for DELETE/UPDATE; mypy stub gap.
         deleted_tasks = task_result.rowcount or 0  # type: ignore[attr-defined]
 
     project_result = await db.execute(
-        delete(ResearchProject).where(ResearchProject.user_id == user_id_text)
+        delete(ResearchProject).where(ResearchProject.user_id == user_id_text),
     )
     user_result = await db.execute(delete(User).where(User.id == user_id))
 

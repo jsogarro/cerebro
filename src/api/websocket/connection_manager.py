@@ -1,5 +1,4 @@
-"""
-WebSocket connection manager for real-time updates.
+"""WebSocket connection manager for real-time updates.
 
 This module manages WebSocket connections, handles subscriptions,
 and provides message broadcasting capabilities.
@@ -114,8 +113,7 @@ class ConnectionManager:
         *,
         accept: bool = True,
     ) -> str:
-        """
-        Accept a new WebSocket connection.
+        """Accept a new WebSocket connection.
 
         Args:
             websocket: WebSocket connection
@@ -126,6 +124,7 @@ class ConnectionManager:
 
         Returns:
             Client ID for this connection
+
         """
         if accept:
             await websocket.accept()
@@ -239,7 +238,7 @@ class ConnectionManager:
         return True
 
     async def handle_subscription_request(
-        self, client_id: str, request: SubscriptionRequest
+        self, client_id: str, request: SubscriptionRequest,
     ) -> SubscriptionResponse:
         """Handle subscription/unsubscription requests."""
         if client_id not in self.connections:
@@ -262,7 +261,7 @@ class ConnectionManager:
                 active_subscriptions=list(connection.project_subscriptions),
             )
 
-        elif request.action == "unsubscribe" and request.project_id:
+        if request.action == "unsubscribe" and request.project_id:
             success = self.unsubscribe_from_project(client_id, request.project_id)
             return SubscriptionResponse(
                 success=success,
@@ -274,11 +273,10 @@ class ConnectionManager:
                 active_subscriptions=list(connection.project_subscriptions),
             )
 
-        else:
-            return SubscriptionResponse(
-                success=False,
-                message="Invalid subscription request",
-            )
+        return SubscriptionResponse(
+            success=False,
+            message="Invalid subscription request",
+        )
 
     async def broadcast_to_project(self, project_id: UUID, message: WSMessage) -> None:
         """Broadcast a message to all clients subscribed to a project."""
@@ -380,12 +378,12 @@ class ConnectionManager:
                             c
                             for c in self.connections.values()
                             if c.client_type == client_type
-                        ]
+                        ],
                     )
                     for client_type in {
                         c.client_type for c in self.connections.values()
                     }
-                }
+                },
             ),
             "total_project_subscriptions": len(self.project_subscriptions),
             "total_user_subscriptions": len(self.user_subscriptions),

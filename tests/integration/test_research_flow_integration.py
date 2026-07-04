@@ -1,5 +1,4 @@
-"""
-Research flow integration tests (Group A from issue #12).
+"""Research flow integration tests (Group A from issue #12).
 
 Ported from tests/test_e2e_research_flow.py TestResearchFlow (skipped tests).
 These require JWT auth + Postgres testcontainer + dependency injection.
@@ -16,7 +15,7 @@ class TestResearchFlowIntegration:
 
     @pytest.mark.asyncio
     async def test_create_research_project(
-        self, authenticated_client: AsyncClient
+        self, authenticated_client: AsyncClient,
     ) -> None:
         """Bug: Multiple issues prevented project creation:
         - DB not initialized (lifespan missing init_db call)
@@ -43,7 +42,7 @@ class TestResearchFlowIntegration:
 
     @pytest.mark.asyncio
     async def test_get_research_project(
-        self, authenticated_client: AsyncClient
+        self, authenticated_client: AsyncClient,
     ) -> None:
         """Test retrieving a created project by ID."""
         # Create first
@@ -53,7 +52,7 @@ class TestResearchFlowIntegration:
             "user_id": IntegrationTestConfig.TEST_USER_ID,
         }
         create_r = await authenticated_client.post(
-            "/api/v1/research/projects", json=payload
+            "/api/v1/research/projects", json=payload,
         )
         assert create_r.status_code == 201
         pid = create_r.json()["id"]
@@ -67,7 +66,7 @@ class TestResearchFlowIntegration:
 
     @pytest.mark.asyncio
     async def test_list_research_projects(
-        self, authenticated_client: AsyncClient
+        self, authenticated_client: AsyncClient,
     ) -> None:
         """Test listing projects returns created ones."""
         # Create a project
@@ -88,7 +87,7 @@ class TestResearchFlowIntegration:
 
     @pytest.mark.asyncio
     async def test_get_research_progress(
-        self, authenticated_client: AsyncClient
+        self, authenticated_client: AsyncClient,
     ) -> None:
         """Test progress endpoint returns valid structure."""
         # Create
@@ -98,7 +97,7 @@ class TestResearchFlowIntegration:
             "user_id": IntegrationTestConfig.TEST_USER_ID,
         }
         create_r = await authenticated_client.post(
-            "/api/v1/research/projects", json=payload
+            "/api/v1/research/projects", json=payload,
         )
         pid = create_r.json()["id"]
 
@@ -112,7 +111,7 @@ class TestResearchFlowIntegration:
 
     @pytest.mark.asyncio
     async def test_get_results_returns_data_or_404(
-        self, authenticated_client: AsyncClient
+        self, authenticated_client: AsyncClient,
     ) -> None:
         """Bug: results endpoint crashed with selectinload on dynamic relationships.
         Fix: Changed lazy='dynamic' to lazy='selectin'.
@@ -124,7 +123,7 @@ class TestResearchFlowIntegration:
             "user_id": IntegrationTestConfig.TEST_USER_ID,
         }
         create_r = await authenticated_client.post(
-            "/api/v1/research/projects", json=payload
+            "/api/v1/research/projects", json=payload,
         )
         pid = create_r.json()["id"]
 
@@ -134,7 +133,7 @@ class TestResearchFlowIntegration:
 
     @pytest.mark.asyncio
     async def test_nonexistent_project_returns_404(
-        self, authenticated_client: AsyncClient
+        self, authenticated_client: AsyncClient,
     ) -> None:
         """Test that requesting a non-existent project returns 404."""
         fake_id = "00000000-0000-0000-0000-000000000000"

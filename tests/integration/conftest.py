@@ -1,5 +1,4 @@
-"""
-Enhanced test configuration for integration tests.
+"""Enhanced test configuration for integration tests.
 
 This module provides comprehensive fixtures and utilities for integration testing
 with real PostgreSQL, Redis, and Temporal instances using Docker containers.
@@ -116,7 +115,7 @@ async def test_engine(postgres_container) -> AsyncEngine:
     connection_url = postgres_container.get_connection_url()
     # Convert to async URL (testcontainers returns postgresql+psycopg2://)
     async_url = connection_url.replace(
-        "postgresql+psycopg2://", "postgresql+asyncpg://"
+        "postgresql+psycopg2://", "postgresql+asyncpg://",
     )
 
     engine = create_async_engine(
@@ -144,7 +143,7 @@ async def test_engine(postgres_container) -> AsyncEngine:
 async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     """Create a test database session."""
     async_session = sessionmaker(
-        test_engine, class_=AsyncSession, expire_on_commit=False
+        test_engine, class_=AsyncSession, expire_on_commit=False,
     )
 
     async with async_session() as session:
@@ -194,7 +193,7 @@ async def authenticated_client(
 
     # Create session for user creation
     async_session = sessionmaker(
-        test_engine, class_=AsyncSession, expire_on_commit=False
+        test_engine, class_=AsyncSession, expire_on_commit=False,
     )
 
     # Create test user with predictable UUID for tests to reference
@@ -306,7 +305,7 @@ async def admin_client(
 
     # Create session for user creation
     async_session = sessionmaker(
-        test_engine, class_=AsyncSession, expire_on_commit=False
+        test_engine, class_=AsyncSession, expire_on_commit=False,
     )
 
     # Create admin user with predictable UUID for tests to reference
@@ -436,7 +435,7 @@ def sample_project_data() -> dict[str, Any]:
                 unique=True,
             ),
             "depth_level": fake.random_element(
-                ["basic", "intermediate", "comprehensive"]
+                ["basic", "intermediate", "comprehensive"],
             ),
         },
         "user_id": str(uuid.uuid4()),
@@ -455,7 +454,7 @@ def sample_agent_response() -> dict[str, Any]:
                 "methodology",
                 "synthesis",
                 "citation",
-            ]
+            ],
         ),
         "status": "completed",
         "result": {
@@ -525,7 +524,7 @@ def mock_gemini_service(mocker):
     """Mock Gemini service for integration tests."""
     mock = mocker.Mock()
     mock.generate_content.return_value = mocker.Mock(
-        text=fake.paragraph(nb_sentences=10)
+        text=fake.paragraph(nb_sentences=10),
     )
     mock.is_available.return_value = True
     return mock

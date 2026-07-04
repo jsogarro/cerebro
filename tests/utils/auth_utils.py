@@ -1,5 +1,4 @@
-"""
-Authentication utilities for integration testing.
+"""Authentication utilities for integration testing.
 """
 
 import uuid
@@ -56,7 +55,7 @@ class TestAuthManager:
         return jwt.encode(data, self.secret_key, algorithm=self.algorithm)
 
     def create_refresh_token(
-        self, user_id: str, expires_delta: timedelta | None = None
+        self, user_id: str, expires_delta: timedelta | None = None,
     ) -> str:
         """Create a refresh token for testing."""
         data: dict[str, Any] = {"sub": user_id, "type": "refresh"}
@@ -73,15 +72,15 @@ class TestAuthManager:
         return jwt.encode(data, self.secret_key, algorithm=self.algorithm)
 
     def create_expired_token(
-        self, user_id: str, email: str, role: str = "researcher"
+        self, user_id: str, email: str, role: str = "researcher",
     ) -> str:
         """Create an expired token for testing."""
         return self.create_access_token(
-            user_id=user_id, email=email, role=role, expires_delta=timedelta(seconds=-1)
+            user_id=user_id, email=email, role=role, expires_delta=timedelta(seconds=-1),
         )
 
     def create_invalid_signature_token(
-        self, user_id: str, email: str, role: str = "researcher"
+        self, user_id: str, email: str, role: str = "researcher",
     ) -> str:
         """Create a token with invalid signature for testing."""
         data = {
@@ -143,25 +142,25 @@ class TestAuthScenarios:
         """Create various tokens for a user."""
         return {
             "valid_access": self.auth_manager.create_access_token(
-                user.id, user.email, user.role
+                user.id, user.email, user.role,
             ),
             "valid_refresh": self.auth_manager.create_refresh_token(user.id),
             "expired_access": self.auth_manager.create_expired_token(
-                user.id, user.email, user.role
+                user.id, user.email, user.role,
             ),
             "invalid_signature": self.auth_manager.create_invalid_signature_token(
-                user.id, user.email, user.role
+                user.id, user.email, user.role,
             ),
             "admin_access": self.auth_manager.create_access_token(
-                user.id, user.email, "admin"
+                user.id, user.email, "admin",
             ),
             "readonly_access": self.auth_manager.create_access_token(
-                user.id, user.email, user.role, scopes=["read"]
+                user.id, user.email, user.role, scopes=["read"],
             ),
         }
 
     def create_authorization_headers(
-        self, tokens: dict[str, str]
+        self, tokens: dict[str, str],
     ) -> dict[str, dict[str, str]]:
         """Create authorization headers for various scenarios."""
         return {
@@ -277,7 +276,7 @@ class MockOAuthProvider:
         self.users: dict[str, dict[str, Any]] = {}
 
     def register_user(
-        self, oauth_id: str, email: str, name: str, picture: str | None = None
+        self, oauth_id: str, email: str, name: str, picture: str | None = None,
     ) -> None:
         """Register a user with the mock OAuth provider."""
         self.users[oauth_id] = {
@@ -312,10 +311,9 @@ class TestPermissionChecker:
 
     @staticmethod
     def has_permission(
-        user_role: str, required_role: str, operation: str = "read"
+        user_role: str, required_role: str, operation: str = "read",
     ) -> bool:
         """Check if a user role has permission for an operation."""
-
         operation_requirements = {
             "read": ["viewer", "researcher", "admin"],
             "write": ["researcher", "admin"],
@@ -328,7 +326,7 @@ class TestPermissionChecker:
 
     @staticmethod
     def check_resource_ownership(
-        user_id: str, resource_owner_id: str, user_role: str = "researcher"
+        user_id: str, resource_owner_id: str, user_role: str = "researcher",
     ) -> bool:
         """Check if a user owns a resource or is admin."""
         return user_id == resource_owner_id or user_role == "admin"

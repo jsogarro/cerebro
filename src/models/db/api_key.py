@@ -1,5 +1,4 @@
-"""
-API Key database model.
+"""API Key database model.
 
 Manages API keys for service accounts and programmatic access.
 """
@@ -25,11 +24,11 @@ from src.models.db.base import BaseModel
 
 
 def generate_api_key() -> tuple[str, str]:
-    """
-    Generate a new API key.
+    """Generate a new API key.
 
     Returns:
         Tuple of (raw_key, hashed_key)
+
     """
     # Generate a secure random key
     raw_key = f"gar_{secrets.token_urlsafe(32)}"
@@ -41,8 +40,7 @@ def generate_api_key() -> tuple[str, str]:
 
 
 class APIKey(BaseModel):
-    """
-    API Key model.
+    """API Key model.
 
     Stores API keys for programmatic access to the platform.
     Keys are hashed for security and include permission scoping.
@@ -59,19 +57,19 @@ class APIKey(BaseModel):
     )
 
     user_id: Mapped[Any] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True,
     )
 
     name: Mapped[str] = mapped_column(
-        String(255), nullable=False, comment="Descriptive name for the key"
+        String(255), nullable=False, comment="Descriptive name for the key",
     )
 
     description: Mapped[str | None] = mapped_column(
-        String(1000), nullable=True, comment="Detailed description of key purpose"
+        String(1000), nullable=True, comment="Detailed description of key purpose",
     )
 
     permissions: Mapped[list[Any]] = mapped_column(
-        JSON, nullable=False, default=list, comment="List of permission strings"
+        JSON, nullable=False, default=list, comment="List of permission strings",
     )
 
     rate_limit: Mapped[int | None] = mapped_column(
@@ -81,11 +79,11 @@ class APIKey(BaseModel):
     )
 
     allowed_ips: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="List of allowed IP addresses/ranges"
+        JSON, nullable=True, comment="List of allowed IP addresses/ranges",
     )
 
     last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True
+        DateTime(timezone=True), nullable=True, index=True,
     )
 
     last_used_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
@@ -100,15 +98,15 @@ class APIKey(BaseModel):
     )
 
     is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, index=True
+        Boolean, nullable=False, default=True, index=True,
     )
 
     revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="When the key was revoked"
+        DateTime(timezone=True), nullable=True, comment="When the key was revoked",
     )
 
     revoked_reason: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, comment="Reason for revocation"
+        String(500), nullable=True, comment="Reason for revocation",
     )
 
     # Relationships
@@ -130,8 +128,7 @@ class APIKey(BaseModel):
         expires_in_days: int | None = None,
         **kwargs: Any,
     ) -> tuple["APIKey", str]:
-        """
-        Create a new API key.
+        """Create a new API key.
 
         Args:
             user_id: User ID
@@ -142,6 +139,7 @@ class APIKey(BaseModel):
 
         Returns:
             Tuple of (APIKey instance, raw key)
+
         """
         raw_key, hashed_key = generate_api_key()
 
@@ -162,23 +160,23 @@ class APIKey(BaseModel):
 
     @classmethod
     def hash_key(cls, raw_key: str) -> str:
-        """
-        Hash an API key.
+        """Hash an API key.
 
         Args:
             raw_key: Raw API key
 
         Returns:
             Hashed key
+
         """
         return hashlib.sha256(raw_key.encode()).hexdigest()
 
     def record_use(self, ip_address: str | None = None) -> None:
-        """
-        Record API key usage.
+        """Record API key usage.
 
         Args:
             ip_address: IP address of the request
+
         """
         self.last_used_at = datetime.now(UTC)
         self.use_count += 1
@@ -187,11 +185,11 @@ class APIKey(BaseModel):
             self.last_used_ip = ip_address
 
     def revoke(self, reason: str | None = None) -> None:
-        """
-        Revoke the API key.
+        """Revoke the API key.
 
         Args:
             reason: Reason for revocation
+
         """
         self.is_active = False
         self.revoked_at = datetime.now(UTC)
@@ -206,11 +204,11 @@ class APIKey(BaseModel):
         self.revoked_reason = None
 
     def extend_expiration(self, days: int) -> None:
-        """
-        Extend key expiration.
+        """Extend key expiration.
 
         Args:
             days: Number of days to extend
+
         """
         if self.expires_at:
             self.expires_at += timedelta(days=days)
@@ -218,14 +216,14 @@ class APIKey(BaseModel):
             self.expires_at = datetime.now(UTC) + timedelta(days=days)
 
     def has_permission(self, permission: str) -> bool:
-        """
-        Check if key has a specific permission.
+        """Check if key has a specific permission.
 
         Args:
             permission: Permission to check
 
         Returns:
             True if permission is granted
+
         """
         if not self.permissions:
             return False
@@ -238,14 +236,14 @@ class APIKey(BaseModel):
         return permission in self.permissions
 
     def is_valid_ip(self, ip_address: str) -> bool:
-        """
-        Check if IP address is allowed.
+        """Check if IP address is allowed.
 
         Args:
             ip_address: IP address to check
 
         Returns:
             True if IP is allowed
+
         """
         if not self.allowed_ips:
             return True  # No IP restrictions
@@ -275,14 +273,14 @@ class APIKey(BaseModel):
         return max(0, delta.days)
 
     def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:
-        """
-        Convert to dictionary.
+        """Convert to dictionary.
 
         Args:
             include_sensitive: Include sensitive information
 
         Returns:
             Dictionary representation
+
         """
         data = {
             "id": str(self.id),

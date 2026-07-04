@@ -1,5 +1,4 @@
-"""
-Supervisor API Models - Request and Response schemas for Hierarchical Supervisor API
+"""Supervisor API Models - Request and Response schemas for Hierarchical Supervisor API
 
 This module implements comprehensive data models for the Supervisor API endpoints,
 following the "Talk Structurally, Act Hierarchically" research patterns for
@@ -81,8 +80,8 @@ class SupervisorExecuteRequest(BaseModel):
                 "max_workers": 5,
                 "quality_threshold": 0.85,
                 "timeout_seconds": 120,
-            }
-        }
+            },
+        },
     )
 
     query: str = Field(..., description="The task or query to execute")
@@ -91,22 +90,22 @@ class SupervisorExecuteRequest(BaseModel):
         description="Strategy for supervisor-worker interaction",
     )
     coordination_mode: CoordinationMode | None = Field(
-        CoordinationMode.HIERARCHICAL, description="Mode of worker coordination"
+        CoordinationMode.HIERARCHICAL, description="Mode of worker coordination",
     )
     max_workers: int | None = Field(
-        5, ge=1, le=20, description="Maximum number of workers to allocate"
+        5, ge=1, le=20, description="Maximum number of workers to allocate",
     )
     quality_threshold: float | None = Field(
-        0.8, ge=0.0, le=1.0, description="Minimum quality threshold"
+        0.8, ge=0.0, le=1.0, description="Minimum quality threshold",
     )
     timeout_seconds: int | None = Field(
-        120, ge=10, le=600, description="Execution timeout in seconds"
+        120, ge=10, le=600, description="Execution timeout in seconds",
     )
     parameters: dict[str, Any] | None = Field(
-        default_factory=dict, description="Additional parameters"
+        default_factory=dict, description="Additional parameters",
     )
     context: dict[str, Any] | None = Field(
-        default_factory=dict, description="Execution context"
+        default_factory=dict, description="Execution context",
     )
 
 
@@ -120,17 +119,17 @@ class WorkerCoordinationRequest(BaseModel):
                 "worker_types": ["literature-review", "data-analysis", "synthesis"],
                 "coordination_mode": "parallel",
                 "refinement_rounds": 2,
-            }
-        }
+            },
+        },
     )
 
     task: str = Field(..., description="Task to coordinate")
     worker_types: list[str] = Field(..., description="Types of workers to coordinate")
     coordination_mode: CoordinationMode = Field(
-        ..., description="How to coordinate workers"
+        ..., description="How to coordinate workers",
     )
     refinement_rounds: int | None = Field(
-        1, ge=1, le=5, description="Number of refinement rounds"
+        1, ge=1, le=5, description="Number of refinement rounds",
     )
     conflict_resolution: ConflictResolutionStrategy | None = Field(
         ConflictResolutionStrategy.SUPERVISOR_OVERRIDE,
@@ -149,19 +148,19 @@ class MultiSupervisorOrchestrationRequest(BaseModel):
                 "supervisor_types": ["research", "content", "analytics"],
                 "orchestration_strategy": "collaborative",
                 "synthesis_required": True,
-            }
-        }
+            },
+        },
     )
 
     query: str = Field(..., description="Complex query requiring multiple supervisors")
     supervisor_types: list[SupervisorType] = Field(
-        ..., description="Supervisors to involve"
+        ..., description="Supervisors to involve",
     )
     orchestration_strategy: str | None = Field(
-        "collaborative", description="How supervisors should work together"
+        "collaborative", description="How supervisors should work together",
     )
     synthesis_required: bool | None = Field(
-        True, description="Whether to synthesize results across supervisors"
+        True, description="Whether to synthesize results across supervisors",
     )
     priority_weights: dict[str, float] | None = Field(
         default_factory=dict,
@@ -183,21 +182,21 @@ class WorkerAllocationOptimizationRequest(BaseModel):
                 },
                 "available_workers": 10,
                 "optimization_goal": "quality",
-            }
-        }
+            },
+        },
     )
 
     task_requirements: dict[str, Any] = Field(
-        ..., description="Task requirements and constraints"
+        ..., description="Task requirements and constraints",
     )
     available_workers: int = Field(
-        ..., ge=1, le=50, description="Number of available workers"
+        ..., ge=1, le=50, description="Number of available workers",
     )
     optimization_goal: Literal["quality", "speed", "cost", "balanced"] = Field(
-        "balanced", description="What to optimize for"
+        "balanced", description="What to optimize for",
     )
     constraints: dict[str, Any] | None = Field(
-        default_factory=dict, description="Additional constraints"
+        default_factory=dict, description="Additional constraints",
     )
 
 
@@ -213,19 +212,19 @@ class ConflictResolutionRequest(BaseModel):
                     {"worker_id": "w2", "output": "Result B", "confidence": 0.90},
                 ],
                 "resolution_strategy": "quality_based",
-            }
-        }
+            },
+        },
     )
 
     conflict_id: str = Field(..., description="Unique conflict identifier")
     worker_outputs: list[dict[str, Any]] = Field(
-        ..., description="Conflicting worker outputs"
+        ..., description="Conflicting worker outputs",
     )
     resolution_strategy: ConflictResolutionStrategy = Field(
-        ..., description="How to resolve the conflict"
+        ..., description="How to resolve the conflict",
     )
     supervisor_guidance: str | None = Field(
-        None, description="Optional supervisor guidance"
+        None, description="Optional supervisor guidance",
     )
 
 
@@ -238,17 +237,17 @@ class ExperimentRequest(BaseModel):
                 "query": "Test query for experimentation",
                 "strategies_to_test": ["direct", "collaborative", "iterative"],
                 "metrics_to_track": ["quality", "speed", "cost"],
-            }
-        }
+            },
+        },
     )
 
     query: str = Field(..., description="Query to test with")
     strategies_to_test: list[SupervisionStrategy] = Field(
-        ..., description="Strategies to compare"
+        ..., description="Strategies to compare",
     )
     metrics_to_track: list[str] = Field(..., description="Metrics to measure")
     repetitions: int | None = Field(
-        1, ge=1, le=10, description="Number of test repetitions"
+        1, ge=1, le=10, description="Number of test repetitions",
     )
 
 
@@ -262,10 +261,10 @@ class WorkerInfo(BaseModel):
     worker_type: str = Field(..., description="Type of worker agent")
     status: WorkerStatus = Field(..., description="Current worker status")
     capabilities: list[str] = Field(
-        default_factory=list, description="Worker capabilities"
+        default_factory=list, description="Worker capabilities",
     )
     performance_score: float | None = Field(
-        None, ge=0.0, le=1.0, description="Performance rating"
+        None, ge=0.0, le=1.0, description="Performance rating",
     )
     current_task: str | None = Field(None, description="Currently assigned task")
 
@@ -290,15 +289,15 @@ class SupervisorExecuteResponse(BaseModel):
     status: str = Field(..., description="Execution status")
     result: Any | None = Field(None, description="Execution result")
     workers_used: list[str] = Field(
-        default_factory=list, description="Workers that participated"
+        default_factory=list, description="Workers that participated",
     )
     coordination_mode: CoordinationMode
     quality_score: float | None = Field(None, ge=0.0, le=1.0)
     execution_time_ms: int | None = Field(
-        None, description="Execution time in milliseconds"
+        None, description="Execution time in milliseconds",
     )
     refinement_rounds: int = Field(
-        1, description="Number of refinement rounds performed"
+        1, description="Number of refinement rounds performed",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -309,10 +308,10 @@ class WorkerCoordinationResponse(BaseModel):
     coordination_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     workers_assigned: list[WorkerInfo]
     coordination_plan: dict[str, Any] = Field(
-        ..., description="Coordination execution plan"
+        ..., description="Coordination execution plan",
     )
     estimated_completion_time: int | None = Field(
-        None, description="Estimated time in seconds"
+        None, description="Estimated time in seconds",
     )
     status: str = Field("initiated", description="Coordination status")
 
@@ -323,14 +322,14 @@ class MultiSupervisorOrchestrationResponse(BaseModel):
     orchestration_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     supervisors_involved: list[SupervisorInfo]
     individual_results: dict[str, Any] = Field(
-        ..., description="Results from each supervisor"
+        ..., description="Results from each supervisor",
     )
     synthesized_result: Any | None = Field(
-        None, description="Synthesized cross-domain result"
+        None, description="Synthesized cross-domain result",
     )
     orchestration_time_ms: int
     consensus_achieved: bool = Field(
-        False, description="Whether supervisors reached consensus"
+        False, description="Whether supervisors reached consensus",
     )
     quality_metrics: dict[str, float] = Field(default_factory=dict)
 
@@ -343,13 +342,13 @@ class SupervisorStatsResponse(BaseModel):
     success_rate: float = Field(0.0, ge=0.0, le=1.0, description="Success rate")
     average_execution_time_ms: float = Field(0.0, description="Average execution time")
     average_quality_score: float = Field(
-        0.0, ge=0.0, le=1.0, description="Average quality"
+        0.0, ge=0.0, le=1.0, description="Average quality",
     )
     worker_utilization: float = Field(
-        0.0, ge=0.0, le=1.0, description="Worker utilization rate"
+        0.0, ge=0.0, le=1.0, description="Worker utilization rate",
     )
     top_worker_types: list[str] = Field(
-        default_factory=list, description="Most used worker types"
+        default_factory=list, description="Most used worker types",
     )
     recent_performance_trend: str = Field("stable", description="Performance trend")
     cost_metrics: dict[str, float] = Field(default_factory=dict)
@@ -364,11 +363,11 @@ class SupervisorHealthResponse(BaseModel):
     active_workers: int = Field(0, description="Number of active workers")
     queue_depth: int = Field(0, description="Number of queued tasks")
     last_execution: datetime | None = Field(
-        None, description="Last execution timestamp"
+        None, description="Last execution timestamp",
     )
     issues: list[str] = Field(default_factory=list, description="Current issues if any")
     recommendations: list[str] = Field(
-        default_factory=list, description="Health recommendations"
+        default_factory=list, description="Health recommendations",
     )
 
 
@@ -377,13 +376,13 @@ class WorkerAllocationOptimizationResponse(BaseModel):
 
     optimization_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     recommended_allocation: dict[str, int] = Field(
-        ..., description="Recommended worker allocation"
+        ..., description="Recommended worker allocation",
     )
     expected_performance: dict[str, float] = Field(
-        ..., description="Expected performance metrics"
+        ..., description="Expected performance metrics",
     )
     optimization_score: float = Field(
-        ..., ge=0.0, le=1.0, description="Optimization quality"
+        ..., ge=0.0, le=1.0, description="Optimization quality",
     )
     reasoning: str = Field(..., description="Explanation of allocation decision")
     alternative_allocations: list[dict[str, Any]] | None = Field(None)
@@ -395,14 +394,14 @@ class ConflictResolutionResponse(BaseModel):
     conflict_id: str
     resolution_strategy: ConflictResolutionStrategy
     resolved_output: Any = Field(
-        ..., description="Resolved output after conflict resolution"
+        ..., description="Resolved output after conflict resolution",
     )
     confidence_score: float = Field(
-        ..., ge=0.0, le=1.0, description="Confidence in resolution"
+        ..., ge=0.0, le=1.0, description="Confidence in resolution",
     )
     resolution_reasoning: str = Field(..., description="Explanation of resolution")
     worker_consensus: dict[str, float] | None = Field(
-        None, description="Worker agreement levels"
+        None, description="Worker agreement levels",
     )
 
 
@@ -412,14 +411,14 @@ class SupervisorComparisonResponse(BaseModel):
     comparison_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     supervisors_compared: list[SupervisorType]
     performance_metrics: dict[str, dict[str, float]] = Field(
-        ..., description="Performance metrics for each supervisor"
+        ..., description="Performance metrics for each supervisor",
     )
     rankings: dict[str, list[str]] = Field(
-        ..., description="Rankings by different criteria"
+        ..., description="Rankings by different criteria",
     )
     recommendations: dict[str, str] = Field(..., description="Usage recommendations")
     visualization_data: dict[str, Any] | None = Field(
-        None, description="Data for visualization"
+        None, description="Data for visualization",
     )
 
 
@@ -429,19 +428,19 @@ class ExperimentResponse(BaseModel):
     experiment_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     strategies_tested: list[SupervisionStrategy]
     results: dict[str, dict[str, float]] = Field(
-        ..., description="Results for each strategy"
+        ..., description="Results for each strategy",
     )
     best_strategy: SupervisionStrategy = Field(
-        ..., description="Best performing strategy"
+        ..., description="Best performing strategy",
     )
     statistical_significance: float | None = Field(
-        None, description="Statistical significance of results"
+        None, description="Statistical significance of results",
     )
     recommendations: list[str] = Field(
-        default_factory=list, description="Strategy recommendations"
+        default_factory=list, description="Strategy recommendations",
     )
     detailed_analysis: dict[str, Any] | None = Field(
-        None, description="Detailed analysis data"
+        None, description="Detailed analysis data",
     )
 
 
@@ -491,7 +490,7 @@ class WorkerCoordinationProgressEvent(BaseModel):
 
     coordination_id: str
     event_type: Literal[
-        "started", "worker_assigned", "progress", "conflict_detected", "completed"
+        "started", "worker_assigned", "progress", "conflict_detected", "completed",
     ]
     progress_percentage: float = Field(0.0, ge=0.0, le=100.0)
     current_phase: str
@@ -512,5 +511,5 @@ class SupervisorErrorResponse(BaseModel):
     supervisor_type: SupervisorType | None = None
     request_id: str | None = None
     suggestions: list[str] = Field(
-        default_factory=list, description="Suggestions to resolve the error"
+        default_factory=list, description="Suggestions to resolve the error",
     )

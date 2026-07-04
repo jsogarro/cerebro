@@ -1,5 +1,4 @@
-"""
-Pydantic schemas for structured LLM outputs.
+"""Pydantic schemas for structured LLM outputs.
 
 These schemas ensure type safety and validation for all LLM-generated responses.
 """

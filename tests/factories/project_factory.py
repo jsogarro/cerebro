@@ -1,5 +1,4 @@
-"""
-Project factory for generating test research project data.
+"""Project factory for generating test research project data.
 
 Factories produce SQLAlchemy ORM instances aligned with the current
 ``src.models.db.research_project`` and ``src.models.db.research_result``
@@ -46,7 +45,7 @@ def _build_query_payload() -> str:
             "text": fake.paragraph(nb_sentences=3),
             "domains": ["AI", "ML"],
             "depth_level": "comprehensive",
-        }
+        },
     )
 
 
@@ -69,8 +68,8 @@ class ResearchProjectFactory(Factory):
                 elements=["AI", "ML", "Ethics", "Biology", "Physics"],
                 length=3,
                 unique=True,
-            )
-        )
+            ),
+        ),
     )
     # ``status`` is a SQLEnum column — pass enum members.
     status = FuzzyChoice(list(ProjectStatus))
@@ -97,7 +96,7 @@ class ResearchResultFactory(Factory):
         lambda: {
             "summary": fake.paragraph(nb_sentences=5),
             "findings": [fake.sentence() for _ in range(3)],
-        }
+        },
     )
     confidence_score = FuzzyFloat(0.7, 1.0)
     agent_type = FuzzyChoice(
@@ -107,7 +106,7 @@ class ResearchResultFactory(Factory):
             "methodology",
             "synthesis",
             "citation",
-        ]
+        ],
     )
     result_metadata = LazyFunction(dict)
     source_id = None

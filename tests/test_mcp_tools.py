@@ -1,5 +1,4 @@
-"""
-Tests for MCP tools.
+"""Tests for MCP tools.
 
 Following TDD principles - tests written before implementation.
 """
@@ -25,7 +24,7 @@ class TestAcademicSearchTool:
             search_response = MagicMock()
             search_response.status_code = 200
             search_response.json.return_value = {
-                "esearchresult": {"idlist": ["12345", "67890"], "count": "2"}
+                "esearchresult": {"idlist": ["12345", "67890"], "count": "2"},
             }
 
             # Second call - fetch summaries
@@ -45,14 +44,14 @@ class TestAcademicSearchTool:
                         "authors": [{"name": "Author B"}],
                         "pubdate": "2024",
                     },
-                }
+                },
             }
 
             # Return different responses for each call
             mock_get.side_effect = [search_response, summary_response]
 
             result = await tool.execute(
-                query="COVID-19 vaccines", databases=["pubmed"], max_results=10
+                query="COVID-19 vaccines", databases=["pubmed"], max_results=10,
             )
 
             assert result["success"]
@@ -83,7 +82,7 @@ class TestAcademicSearchTool:
             mock_get.return_value = mock_response
 
             result = await tool.execute(
-                query="machine learning", databases=["arxiv"], max_results=5
+                query="machine learning", databases=["arxiv"], max_results=5,
             )
 
             assert result["success"]
@@ -137,7 +136,7 @@ class TestAcademicSearchTool:
         tool = AcademicSearchTool()
 
         result = await tool.execute(
-            query="test", databases=["invalid_db"], max_results=5
+            query="test", databases=["invalid_db"], max_results=5,
         )
 
         assert not result["success"]
@@ -176,7 +175,7 @@ class TestCitationTool:
                     "journal": "Test Journal",
                     "volume": 10,
                     "pages": "1-10",
-                }
+                },
             ],
             style="APA",
         )
@@ -202,7 +201,7 @@ class TestCitationTool:
                     "year": 2023,
                     "publisher": "Test Publisher",
                     "city": "New York",
-                }
+                },
             ],
             style="MLA",
         )
@@ -247,7 +246,7 @@ class TestCitationTool:
                     "authors": ["Smith, J."],
                     "year": 2024,
                     "journal": "Test Journal",
-                }
+                },
             ],
             format="bibtex",
         )
@@ -273,7 +272,7 @@ class TestStatisticsTool:
         tool = StatisticsTool()
 
         result = await tool.execute(
-            operation="descriptive", data=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            operation="descriptive", data=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         )
 
         assert result["success"]
@@ -290,7 +289,7 @@ class TestStatisticsTool:
         tool = StatisticsTool()
 
         result = await tool.execute(
-            operation="t_test", group1=[1, 2, 3, 4, 5], group2=[6, 7, 8, 9, 10]
+            operation="t_test", group1=[1, 2, 3, 4, 5], group2=[6, 7, 8, 9, 10],
         )
 
         assert result["success"]
@@ -306,7 +305,7 @@ class TestStatisticsTool:
         tool = StatisticsTool()
 
         result = await tool.execute(
-            operation="correlation", x=[1, 2, 3, 4, 5], y=[2, 4, 6, 8, 10]
+            operation="correlation", x=[1, 2, 3, 4, 5], y=[2, 4, 6, 8, 10],
         )
 
         assert result["success"]
@@ -321,7 +320,7 @@ class TestStatisticsTool:
         tool = StatisticsTool()
 
         result = await tool.execute(
-            operation="plot", plot_type="histogram", data=[1, 2, 2, 3, 3, 3, 4, 4, 5]
+            operation="plot", plot_type="histogram", data=[1, 2, 2, 3, 3, 3, 4, 4, 5],
         )
 
         assert result["success"]

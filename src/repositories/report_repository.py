@@ -1,5 +1,4 @@
-"""
-Repository for managing generated reports.
+"""Repository for managing generated reports.
 
 This module provides data access operations for generated reports,
 following the repository pattern with functional programming principles.
@@ -36,8 +35,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         project_id: UUID | None = None,
         **kwargs: Any,
     ) -> GeneratedReport:
-        """
-        Create a new generated report record.
+        """Create a new generated report record.
 
         Args:
             title: Report title
@@ -49,6 +47,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
 
         Returns:
             Created GeneratedReport instance
+
         """
         report_data = {
             "title": title,
@@ -68,7 +67,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return results[0] if results else None
 
     async def get_by_project_id(
-        self, project_id: UUID, limit: int | None = None
+        self, project_id: UUID, limit: int | None = None,
     ) -> list[GeneratedReport]:
         """Get all reports for a project."""
         query = self.build_query().filter(GeneratedReport.project_id == project_id)
@@ -81,7 +80,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return list(result.scalars().all())
 
     async def get_by_user_id(
-        self, user_id: UUID, limit: int | None = None, status_filter: str | None = None
+        self, user_id: UUID, limit: int | None = None, status_filter: str | None = None,
     ) -> list[GeneratedReport]:
         """Get all reports for a user."""
         query = self.build_query().filter(GeneratedReport.user_id == user_id)
@@ -98,14 +97,14 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return list(result.scalars().all())
 
     async def get_public_reports(
-        self, limit: int = 50, offset: int = 0
+        self, limit: int = 50, offset: int = 0,
     ) -> list[GeneratedReport]:
         """Get public reports."""
         query = self.build_query().filter(
             and_(
                 GeneratedReport.is_public.is_(True),
                 GeneratedReport.generation_status == "completed",
-            )
+            ),
         )
         query = query.order_by(desc(GeneratedReport.created_at))
         query = query.offset(offset).limit(limit)
@@ -122,8 +121,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[GeneratedReport], int]:
-        """
-        Search reports by various criteria.
+        """Search reports by various criteria.
 
         Args:
             search_term: Search term to match against title, query, or content
@@ -135,6 +133,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
 
         Returns:
             Tuple of (reports, total_count)
+
         """
         # Build search filter
         search_filter = or_(
@@ -174,7 +173,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return reports, total_count
 
     async def get_reports_by_status(
-        self, status: str, limit: int | None = None
+        self, status: str, limit: int | None = None,
     ) -> list[GeneratedReport]:
         """Get reports by generation status."""
         query = self.build_query().filter(GeneratedReport.generation_status == status)
@@ -191,7 +190,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return await self.get_reports_by_status("pending", limit)
 
     async def get_failed_reports(
-        self, since: datetime | None = None, limit: int = 50
+        self, since: datetime | None = None, limit: int = 50,
     ) -> list[GeneratedReport]:
         """Get failed reports, optionally filtered by date."""
         query = self.build_query().filter(GeneratedReport.generation_status == "failed")
@@ -206,10 +205,9 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return list(result.scalars().all())
 
     async def get_report_statistics(
-        self, user_id: UUID | None = None, days: int = 30
+        self, user_id: UUID | None = None, days: int = 30,
     ) -> dict[str, Any]:
-        """
-        Get report generation statistics.
+        """Get report generation statistics.
 
         Args:
             user_id: Optional user ID to filter by
@@ -217,6 +215,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
 
         Returns:
             Dictionary with statistics
+
         """
         since_date = datetime.now(UTC) - timedelta(days=days)
 
@@ -287,7 +286,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         }
 
     async def update_report_status(
-        self, report_id: UUID, status: str, error_message: str | None = None
+        self, report_id: UUID, status: str, error_message: str | None = None,
     ) -> GeneratedReport | None:
         """Update report generation status."""
         report = await self.get(report_id)
@@ -349,10 +348,9 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return report
 
     async def cleanup_old_reports(
-        self, days_old: int = 90, keep_public: bool = True, dry_run: bool = True
+        self, days_old: int = 90, keep_public: bool = True, dry_run: bool = True,
     ) -> tuple[int, list[str]]:
-        """
-        Clean up old reports and their files.
+        """Clean up old reports and their files.
 
         Args:
             days_old: Delete reports older than this many days
@@ -361,6 +359,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
 
         Returns:
             Tuple of (deleted_count, deleted_ids)
+
         """
         cutoff_date = datetime.now(UTC) - timedelta(days=days_old)
 
@@ -386,7 +385,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
                         logger.info(f"Deleted files for report {report.id}")
                     except Exception as e:
                         logger.error(
-                            f"Failed to delete files for report {report.id}: {e}"
+                            f"Failed to delete files for report {report.id}: {e}",
                         )
 
                 # Delete database record
@@ -402,7 +401,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
 
     async def get_report_with_formats(self, report_id: UUID) -> GeneratedReport | None:
         """Get report with all format files loaded."""
-        formats_attr = cast(Any, GeneratedReport.formats)
+        formats_attr = cast("Any", GeneratedReport.formats)
         query = (
             self.build_query()
             .options(selectinload(formats_attr))
@@ -449,14 +448,14 @@ class ReportFormatRepository(BaseRepository[ReportFormat]):
         return report_format
 
     async def get_by_report_and_format(
-        self, report_id: UUID, format_type: str
+        self, report_id: UUID, format_type: str,
     ) -> ReportFormat | None:
         """Get specific format for a report."""
         query = self.build_query().filter(
             and_(
                 ReportFormat.report_id == report_id,
                 ReportFormat.format_type == format_type,
-            )
+            ),
         )
 
         result = await self.session.execute(query)
@@ -479,7 +478,7 @@ class ReportFormatRepository(BaseRepository[ReportFormat]):
         return format_obj.verify_integrity()
 
     async def cleanup_orphaned_formats(
-        self, dry_run: bool = True
+        self, dry_run: bool = True,
     ) -> tuple[int, list[str]]:
         """Clean up format records without associated reports."""
         from sqlalchemy import select
@@ -505,7 +504,7 @@ class ReportFormatRepository(BaseRepository[ReportFormat]):
                         os.unlink(format_obj.file_path)
                     except Exception as e:
                         logger.error(
-                            f"Failed to delete format file {format_obj.file_path}: {e}"
+                            f"Failed to delete format file {format_obj.file_path}: {e}",
                         )
 
                 await self.delete(format_obj.id)

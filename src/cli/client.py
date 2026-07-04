@@ -1,5 +1,4 @@
-"""
-API client wrapper for Research Platform CLI.
+"""API client wrapper for Research Platform CLI.
 """
 
 import json
@@ -244,7 +243,7 @@ class ResearchAPIClient:
     # Generic HTTP methods for agent framework
 
     async def get(
-        self, path: str, params: dict[str, Any] | None = None
+        self, path: str, params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Generic GET request."""
         response = await self._request("GET", path, params=params)

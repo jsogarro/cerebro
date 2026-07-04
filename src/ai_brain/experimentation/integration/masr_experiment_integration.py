@@ -1,5 +1,4 @@
-"""
-MASR Router Experiment Integration
+"""MASR Router Experiment Integration
 
 This module integrates experimentation capabilities directly into the MASR
 (Multi-Agent System Router) to enable A/B testing of routing strategies,
@@ -64,7 +63,7 @@ class MASRExperimentConfig:
             "response_quality",
             "success_rate",
             "fallback_triggered",
-        ]
+        ],
     )
     allocation_strategy: str = "epsilon_greedy"
     epsilon: float = 0.1
@@ -87,8 +86,7 @@ class MASRExperimentResult:
 
 
 class MASRExperimentalRouter(MASRouter):
-    """
-    Extended MASR Router with integrated experimentation capabilities.
+    """Extended MASR Router with integrated experimentation capabilities.
 
     This class wraps the existing MASRouter to add A/B testing functionality
     for routing decisions, collaboration modes, and optimization strategies.
@@ -140,10 +138,9 @@ class MASRExperimentalRouter(MASRouter):
         logger.info("MASR experiments initialized")
 
     async def register_experiment(
-        self, experiment_id: str, config: MASRExperimentConfig
+        self, experiment_id: str, config: MASRExperimentConfig,
     ) -> bool:
-        """
-        Register a new MASR experiment.
+        """Register a new MASR experiment.
 
         Args:
             experiment_id: Unique experiment identifier
@@ -151,6 +148,7 @@ class MASRExperimentalRouter(MASRouter):
 
         Returns:
             Success status
+
         """
         try:
             # Register with experiment manager
@@ -246,10 +244,9 @@ class MASRExperimentalRouter(MASRouter):
             return False
 
     async def route_with_experiment(
-        self, query: str, context: dict[str, Any] | None = None
+        self, query: str, context: dict[str, Any] | None = None,
     ) -> RoutingDecision:
-        """
-        Route query with experimental variant selection.
+        """Route query with experimental variant selection.
 
         This method wraps the original route() method to add experimentation.
 
@@ -259,6 +256,7 @@ class MASRExperimentalRouter(MASRouter):
 
         Returns:
             RoutingDecision with experimental modifications
+
         """
         start_time = datetime.now()
         context = context or {}
@@ -289,7 +287,7 @@ class MASRExperimentalRouter(MASRouter):
                 # Apply experimental routing strategy
                 strategy = config.variants[variant_used]["strategy"]
                 routing_decision = await self._route_with_strategy(
-                    query, context, complexity_analysis, strategy
+                    query, context, complexity_analysis, strategy,
                 )
                 experiment_metadata["routing_strategy"] = strategy.value
 
@@ -344,8 +342,7 @@ class MASRExperimentalRouter(MASRouter):
         complexity_analysis: Any,
         strategy: RoutingStrategy,
     ) -> RoutingDecision:
-        """
-        Route with specific experimental strategy.
+        """Route with specific experimental strategy.
 
         Args:
             query: Query to route
@@ -355,6 +352,7 @@ class MASRExperimentalRouter(MASRouter):
 
         Returns:
             RoutingDecision based on strategy
+
         """
         # Set the routing strategy
         original_strategy = getattr(self, "_default_strategy", RoutingStrategy.BALANCED)
@@ -366,28 +364,27 @@ class MASRExperimentalRouter(MASRouter):
             # Perform routing with experimental strategy
             if strategy == RoutingStrategy.COST_EFFICIENT:
                 return await self._cost_efficient_routing(
-                    query, context, complexity_analysis
+                    query, context, complexity_analysis,
                 )
-            elif strategy == RoutingStrategy.QUALITY_FOCUSED:
+            if strategy == RoutingStrategy.QUALITY_FOCUSED:
                 return await self._quality_focused_routing(
-                    query, context, complexity_analysis
+                    query, context, complexity_analysis,
                 )
-            elif strategy == RoutingStrategy.SPEED_FIRST:
+            if strategy == RoutingStrategy.SPEED_FIRST:
                 return await self._speed_first_routing(
-                    query, context, complexity_analysis
+                    query, context, complexity_analysis,
                 )
-            elif strategy == RoutingStrategy.ADAPTIVE:
+            if strategy == RoutingStrategy.ADAPTIVE:
                 return await self._adaptive_routing(query, context, complexity_analysis)
-            else:
-                # Default balanced routing
-                return await self.route(query, context)
+            # Default balanced routing
+            return await self.route(query, context)
 
         finally:
             # Restore original strategy
             self._default_strategy = original_strategy
 
     async def _cost_efficient_routing(
-        self, query: str, context: dict[str, Any], complexity_analysis: Any
+        self, query: str, context: dict[str, Any], complexity_analysis: Any,
     ) -> RoutingDecision:
         """Cost-optimized routing strategy."""
         # Prefer cheaper models and minimal agent allocation
@@ -405,7 +402,7 @@ class MASRExperimentalRouter(MASRouter):
             timestamp=datetime.now(),
             complexity_analysis=complexity_analysis,
             optimization_result=await self.cost_optimizer.optimize(
-                complexity_analysis, OptimizationStrategy.COST_MINIMIZED
+                complexity_analysis, OptimizationStrategy.COST_MINIMIZED,
             ),
             collaboration_mode=CollaborationMode.DIRECT,
             agent_allocation=allocation,
@@ -417,7 +414,7 @@ class MASRExperimentalRouter(MASRouter):
         )
 
     async def _quality_focused_routing(
-        self, query: str, context: dict[str, Any], complexity_analysis: Any
+        self, query: str, context: dict[str, Any], complexity_analysis: Any,
     ) -> RoutingDecision:
         """Quality-optimized routing strategy."""
         # Use best models and comprehensive agent teams
@@ -435,7 +432,7 @@ class MASRExperimentalRouter(MASRouter):
             timestamp=datetime.now(),
             complexity_analysis=complexity_analysis,
             optimization_result=await self.cost_optimizer.optimize(
-                complexity_analysis, OptimizationStrategy.PERFORMANCE_OPTIMIZED
+                complexity_analysis, OptimizationStrategy.PERFORMANCE_OPTIMIZED,
             ),
             collaboration_mode=CollaborationMode.ENSEMBLE,
             agent_allocation=allocation,
@@ -447,7 +444,7 @@ class MASRExperimentalRouter(MASRouter):
         )
 
     async def _speed_first_routing(
-        self, query: str, context: dict[str, Any], complexity_analysis: Any
+        self, query: str, context: dict[str, Any], complexity_analysis: Any,
     ) -> RoutingDecision:
         """Speed-optimized routing strategy."""
         # Minimize latency with fast models and parallel processing
@@ -465,7 +462,7 @@ class MASRExperimentalRouter(MASRouter):
             timestamp=datetime.now(),
             complexity_analysis=complexity_analysis,
             optimization_result=await self.cost_optimizer.optimize(
-                complexity_analysis, OptimizationStrategy.LATENCY_OPTIMIZED
+                complexity_analysis, OptimizationStrategy.LATENCY_OPTIMIZED,
             ),
             collaboration_mode=CollaborationMode.PARALLEL,
             agent_allocation=allocation,
@@ -477,7 +474,7 @@ class MASRExperimentalRouter(MASRouter):
         )
 
     async def _adaptive_routing(
-        self, query: str, context: dict[str, Any], complexity_analysis: Any
+        self, query: str, context: dict[str, Any], complexity_analysis: Any,
     ) -> RoutingDecision:
         """Adaptive routing based on historical performance."""
         # Analyze recent performance metrics
@@ -487,19 +484,18 @@ class MASRExperimentalRouter(MASRouter):
         if recent_metrics.get("error_rate", 0) > 0.1:
             # High error rate - focus on quality
             return await self._quality_focused_routing(
-                query, context, complexity_analysis
+                query, context, complexity_analysis,
             )
-        elif recent_metrics.get("avg_latency_ms", 0) > 3000:
+        if recent_metrics.get("avg_latency_ms", 0) > 3000:
             # High latency - focus on speed
             return await self._speed_first_routing(query, context, complexity_analysis)
-        elif recent_metrics.get("avg_cost", 0) > 0.02:
+        if recent_metrics.get("avg_cost", 0) > 0.02:
             # High cost - focus on efficiency
             return await self._cost_efficient_routing(
-                query, context, complexity_analysis
+                query, context, complexity_analysis,
             )
-        else:
-            # Balanced approach
-            return await self.route(query, context)
+        # Balanced approach
+        return await self.route(query, context)
 
     async def _report_metrics(self, result: MASRExperimentResult) -> None:
         """Report experiment metrics to the experiment manager."""
@@ -544,14 +540,14 @@ class MASRExperimentalRouter(MASRouter):
         return metrics
 
     async def get_experiment_results(self, experiment_id: str) -> dict[str, Any]:
-        """
-        Get results for a specific experiment.
+        """Get results for a specific experiment.
 
         Args:
             experiment_id: Experiment to get results for
 
         Returns:
             Dictionary with experiment results and statistics
+
         """
         if experiment_id not in self.active_experiments:
             return {"error": f"Experiment {experiment_id} not found"}
@@ -559,7 +555,7 @@ class MASRExperimentalRouter(MASRouter):
         # Get experiment from manager
         experiment = await self.experiment_manager.get_experiment(experiment_id)
         results: dict[str, Any] = {
-            "experiment": experiment.__dict__ if experiment else {}
+            "experiment": experiment.__dict__ if experiment else {},
         }
 
         # Add MASR-specific analysis
@@ -591,14 +587,14 @@ class MASRExperimentalRouter(MASRouter):
         return results
 
     async def stop_experiment(self, experiment_id: str) -> bool:
-        """
-        Stop an active experiment.
+        """Stop an active experiment.
 
         Args:
             experiment_id: Experiment to stop
 
         Returns:
             Success status
+
         """
         if experiment_id not in self.active_experiments:
             return False
@@ -606,7 +602,7 @@ class MASRExperimentalRouter(MASRouter):
         try:
             # Stop in experiment manager
             await self.experiment_manager.stop_experiment(
-                experiment_id, reason="manual_stop"
+                experiment_id, reason="manual_stop",
             )
 
             # Stop in registry
@@ -623,10 +619,9 @@ class MASRExperimentalRouter(MASRouter):
             return False
 
     async def optimize_routing_parameters(
-        self, optimization_goals: dict[str, float]
+        self, optimization_goals: dict[str, float],
     ) -> dict[str, Any]:
-        """
-        Optimize routing parameters based on experiment results.
+        """Optimize routing parameters based on experiment results.
 
         Args:
             optimization_goals: Weights for different metrics
@@ -634,6 +629,7 @@ class MASRExperimentalRouter(MASRouter):
 
         Returns:
             Optimized parameter configuration
+
         """
         # Analyze all experiment results
         all_results = {}

@@ -49,9 +49,9 @@ def test_quality_validator_accepts_high_scoring_paper() -> None:
         worker_results={
             "draft_paper": TalkHierContent(intermediate_outputs={"revision_count": 0}),
             "graduate_review": TalkHierContent(
-                intermediate_outputs={"overall_score": 9.1}
+                intermediate_outputs={"overall_score": 9.1},
             ),
-        }
+        },
     )
 
     assert validator.should_revise_paper({"supervision_state": state}) == "accept"
@@ -63,9 +63,9 @@ def test_quality_validator_revises_low_scoring_paper_under_revision_limit() -> N
         worker_results={
             "draft_paper": TalkHierContent(intermediate_outputs={"revision_count": 2}),
             "graduate_review": TalkHierContent(
-                intermediate_outputs={"overall_score": 8.9}
+                intermediate_outputs={"overall_score": 8.9},
             ),
-        }
+        },
     )
 
     assert validator.should_revise_paper({"supervision_state": state}) == "revise"
@@ -79,9 +79,9 @@ def test_quality_validator_accepts_when_revision_cap_reached() -> None:
         worker_results={
             "draft_paper": TalkHierContent(intermediate_outputs={"revision_count": 2}),
             "graduate_review": TalkHierContent(
-                intermediate_outputs={"overall_score": 6.0}
+                intermediate_outputs={"overall_score": 6.0},
             ),
-        }
+        },
     )
 
     assert validator.should_revise_paper({"supervision_state": state}) == "accept"
@@ -95,7 +95,7 @@ async def test_quality_validator_evaluates_consensus_from_worker_results() -> No
         task_id="task-1",
         worker_results={
             "draft_paper": TalkHierContent(
-                intermediate_outputs={"title": "Paper", "revision_count": 0}
+                intermediate_outputs={"title": "Paper", "revision_count": 0},
             ),
             "synthesis": TalkHierContent(
                 content="Synthesis",

@@ -1,5 +1,4 @@
-"""
-Adaptive Allocation Engine for Multi-Armed Bandit Integration
+"""Adaptive Allocation Engine for Multi-Armed Bandit Integration
 
 This engine provides sophisticated allocation strategies for experiments using
 multi-armed bandit algorithms. It integrates with the existing statistical
@@ -91,8 +90,7 @@ class AllocationDecision:
 
 
 class AdaptiveAllocationEngine:
-    """
-    Engine for adaptive experiment allocation using multi-armed bandits.
+    """Engine for adaptive experiment allocation using multi-armed bandits.
 
     Provides intelligent allocation strategies that adapt based on performance
     while maintaining safety constraints and statistical rigor.
@@ -130,15 +128,14 @@ class AdaptiveAllocationEngine:
         variants: list[str],
         allocation_config: AllocationConfig,
     ) -> None:
-        """
-        Register experiment for adaptive allocation.
+        """Register experiment for adaptive allocation.
 
         Args:
             experiment_id: Unique experiment identifier
             variants: List of variant names
             allocation_config: Configuration for allocation strategy
-        """
 
+        """
         # Validate configuration
         if sum(allocation_config.initial_allocation.values()) != 1.0:
             raise ValueError("Initial allocation must sum to 1.0")
@@ -161,15 +158,15 @@ class AdaptiveAllocationEngine:
                 {
                     "exploration_rate": allocation_config.exploration_rate,
                     "posterior_temp_enabled": self.config.get(
-                        "posterior_temp_enabled", False
+                        "posterior_temp_enabled", False,
                     ),
                     "posterior_temp_threshold": self.config.get(
-                        "posterior_temp_threshold", 150
+                        "posterior_temp_threshold", 150,
                     ),
                     "posterior_temp_factor": self.config.get(
-                        "posterior_temp_factor", 3.0
+                        "posterior_temp_factor", 3.0,
                     ),
-                }
+                },
             )
             await bandit.initialize_bandit(
                 num_arms=len(variants),
@@ -179,14 +176,13 @@ class AdaptiveAllocationEngine:
             self.bandit_optimizers[experiment_id] = bandit
 
         logger.info(
-            f"Registered experiment {experiment_id} with {len(variants)} variants"
+            f"Registered experiment {experiment_id} with {len(variants)} variants",
         )
 
     async def allocate_variant(
-        self, experiment_id: str, user_context: dict[str, Any] | None = None
+        self, experiment_id: str, user_context: dict[str, Any] | None = None,
     ) -> AllocationDecision:
-        """
-        Allocate user to experiment variant.
+        """Allocate user to experiment variant.
 
         Args:
             experiment_id: Experiment to allocate for
@@ -194,8 +190,8 @@ class AdaptiveAllocationEngine:
 
         Returns:
             Allocation decision with variant and reasoning
-        """
 
+        """
         if experiment_id not in self.active_experiments:
             raise ValueError(f"Experiment {experiment_id} not registered")
 
@@ -205,24 +201,24 @@ class AdaptiveAllocationEngine:
         # Choose allocation method based on strategy
         if config.strategy == AllocationStrategy.FIXED_RANDOM:
             decision = await self._fixed_random_allocation(
-                experiment_id, config, context
+                experiment_id, config, context,
             )
         elif config.strategy == AllocationStrategy.ADAPTIVE_BANDIT:
             decision = await self._adaptive_bandit_allocation(
-                experiment_id, config, context
+                experiment_id, config, context,
             )
         elif config.strategy == AllocationStrategy.CONTEXTUAL_BANDIT:
             decision = await self._contextual_bandit_allocation(
-                experiment_id, config, context
+                experiment_id, config, context,
             )
         elif config.strategy == AllocationStrategy.SAFETY_CONSTRAINED:
             decision = await self._safety_constrained_allocation(
-                experiment_id, config, context
+                experiment_id, config, context,
             )
         else:
             # Default to fixed random
             decision = await self._fixed_random_allocation(
-                experiment_id, config, context
+                experiment_id, config, context,
             )
 
         # Apply safety checks
@@ -242,10 +238,9 @@ class AdaptiveAllocationEngine:
         return decision
 
     async def _fixed_random_allocation(
-        self, experiment_id: str, config: AllocationConfig, context: dict[str, Any]
+        self, experiment_id: str, config: AllocationConfig, context: dict[str, Any],
     ) -> AllocationDecision:
         """Fixed random allocation based on initial configuration."""
-
         # Select variant based on fixed probabilities
         variants = list(config.initial_allocation.keys())
         probabilities = list(config.initial_allocation.values())
@@ -264,10 +259,9 @@ class AdaptiveAllocationEngine:
         )
 
     async def _adaptive_bandit_allocation(
-        self, experiment_id: str, config: AllocationConfig, context: dict[str, Any]
+        self, experiment_id: str, config: AllocationConfig, context: dict[str, Any],
     ) -> AllocationDecision:
         """Adaptive allocation using multi-armed bandit."""
-
         bandit = self.bandit_optimizers.get(experiment_id)
         if not bandit:
             # Fallback to fixed allocation
@@ -295,10 +289,9 @@ class AdaptiveAllocationEngine:
         )
 
     async def _contextual_bandit_allocation(
-        self, experiment_id: str, config: AllocationConfig, context: dict[str, Any]
+        self, experiment_id: str, config: AllocationConfig, context: dict[str, Any],
     ) -> AllocationDecision:
         """Contextual bandit allocation using user/query context."""
-
         # Extract context features
         context_vector = []
         for feature in config.context_features:
@@ -333,10 +326,9 @@ class AdaptiveAllocationEngine:
         return await self._adaptive_bandit_allocation(experiment_id, config, context)
 
     async def _safety_constrained_allocation(
-        self, experiment_id: str, config: AllocationConfig, context: dict[str, Any]
+        self, experiment_id: str, config: AllocationConfig, context: dict[str, Any],
     ) -> AllocationDecision:
         """Safety-constrained allocation with gradual rollout."""
-
         # Check if we have enough safety samples
         total_samples = sum(
             len(rewards)
@@ -353,20 +345,20 @@ class AdaptiveAllocationEngine:
 
         # Use bandit allocation with safety constraints
         decision = await self._adaptive_bandit_allocation(
-            experiment_id, config, context
+            experiment_id, config, context,
         )
 
         # Apply safety constraints
         if decision.allocation_probability < config.min_allocation:
             decision.allocation_probability = config.min_allocation
             decision.safety_warnings.append(
-                "Increased allocation to meet minimum safety threshold"
+                "Increased allocation to meet minimum safety threshold",
             )
 
         if decision.allocation_probability > config.max_allocation:
             decision.allocation_probability = config.max_allocation
             decision.safety_warnings.append(
-                "Reduced allocation to meet maximum safety threshold"
+                "Reduced allocation to meet maximum safety threshold",
             )
 
         decision.allocation_reason += " (with safety constraints)"
@@ -374,10 +366,9 @@ class AdaptiveAllocationEngine:
         return decision
 
     async def _apply_safety_checks(
-        self, decision: AllocationDecision, config: AllocationConfig
+        self, decision: AllocationDecision, config: AllocationConfig,
     ) -> AllocationDecision:
         """Apply safety checks to allocation decision."""
-
         if not config.enable_guardrails:
             return decision
 
@@ -408,12 +399,12 @@ class AdaptiveAllocationEngine:
 
                 # Check performance threshold
                 relative_performance = variant_performance / max(
-                    control_performance, 0.01
+                    control_performance, 0.01,
                 )
 
                 if relative_performance < config.performance_threshold:
                     decision.safety_warnings.append(
-                        f"Variant performance ({relative_performance:.3f}) below threshold ({config.performance_threshold})"
+                        f"Variant performance ({relative_performance:.3f}) below threshold ({config.performance_threshold})",
                     )
                     decision.safety_check_passed = False
             except (ValueError, IndexError):
@@ -429,22 +420,21 @@ class AdaptiveAllocationEngine:
         reward: float,
         context: dict[str, Any] | None = None,
     ) -> None:
-        """
-        Record experiment outcome for bandit learning.
+        """Record experiment outcome for bandit learning.
 
         Args:
             experiment_id: Experiment identifier
             variant_id: Variant that was selected
             reward: Observed reward (0.0 - 1.0)
             context: Context features for contextual bandits
-        """
 
+        """
         config = self.active_experiments.get(experiment_id)
         bandit = self.bandit_optimizers.get(experiment_id)
 
         if not config or not bandit:
             logger.warning(
-                f"Cannot record outcome for unknown experiment {experiment_id}"
+                f"Cannot record outcome for unknown experiment {experiment_id}",
             )
             return
 
@@ -454,7 +444,7 @@ class AdaptiveAllocationEngine:
             arm_index = variants.index(variant_id)
         except ValueError:
             logger.error(
-                f"Variant {variant_id} not found for experiment {experiment_id}"
+                f"Variant {variant_id} not found for experiment {experiment_id}",
             )
             return
 
@@ -471,7 +461,6 @@ class AdaptiveAllocationEngine:
 
     async def update_allocations(self) -> list[str]:
         """Update all active experiment allocations based on performance."""
-
         updated_experiments = []
 
         for experiment_id, config in self.active_experiments.items():
@@ -489,7 +478,7 @@ class AdaptiveAllocationEngine:
             try:
                 # Calculate new optimal allocation
                 new_allocation = await self._calculate_optimal_allocation(
-                    experiment_id, config, bandit
+                    experiment_id, config, bandit,
                 )
 
                 # Apply safety constraints
@@ -507,7 +496,7 @@ class AdaptiveAllocationEngine:
 
                 if max_change > 0.1:  # 10% change threshold
                     logger.info(
-                        f"Updated allocations for {experiment_id}: {safe_allocation}"
+                        f"Updated allocations for {experiment_id}: {safe_allocation}",
                     )
                     updated_experiments.append(experiment_id)
 
@@ -517,10 +506,9 @@ class AdaptiveAllocationEngine:
         return updated_experiments
 
     async def _calculate_optimal_allocation(
-        self, experiment_id: str, config: AllocationConfig, bandit: MultiBanditOptimizer
+        self, experiment_id: str, config: AllocationConfig, bandit: MultiBanditOptimizer,
     ) -> dict[str, float]:
         """Calculate optimal allocation based on bandit performance."""
-
         if not hasattr(bandit, "arm_values") or not bandit.arm_values:
             return config.initial_allocation.copy()
 
@@ -561,21 +549,18 @@ class AdaptiveAllocationEngine:
         return allocation
 
     def _apply_allocation_safety(
-        self, allocation: dict[str, float], config: AllocationConfig
+        self, allocation: dict[str, float], config: AllocationConfig,
     ) -> dict[str, float]:
         """Apply safety constraints to allocation."""
-
         safe_allocation = allocation.copy()
 
         # Apply minimum allocation constraints
         for variant in safe_allocation:
-            if safe_allocation[variant] < config.min_allocation:
-                safe_allocation[variant] = config.min_allocation
+            safe_allocation[variant] = max(safe_allocation[variant], config.min_allocation)
 
         # Apply maximum allocation constraints
         for variant in safe_allocation:
-            if safe_allocation[variant] > config.max_allocation:
-                safe_allocation[variant] = config.max_allocation
+            safe_allocation[variant] = min(safe_allocation[variant], config.max_allocation)
 
         # Renormalize
         total = sum(safe_allocation.values())
@@ -586,7 +571,6 @@ class AdaptiveAllocationEngine:
 
     def _get_bandit_algorithm(self, strategy: AllocationStrategy) -> BanditAlgorithm:
         """Map allocation strategy to bandit algorithm."""
-
         mapping = {
             AllocationStrategy.ADAPTIVE_BANDIT: BanditAlgorithm.THOMPSON_SAMPLING,
             AllocationStrategy.CONTEXTUAL_BANDIT: BanditAlgorithm.CONTEXTUAL_BANDIT,
@@ -598,7 +582,6 @@ class AdaptiveAllocationEngine:
 
     async def start_adaptive_updates(self) -> None:
         """Start background task for adaptive allocation updates."""
-
         if self.update_task and not self.update_task.done():
             logger.warning("Adaptive updates already running")
             return
@@ -608,7 +591,6 @@ class AdaptiveAllocationEngine:
 
     async def stop_adaptive_updates(self) -> None:
         """Stop background adaptive updates."""
-
         if self.update_task and not self.update_task.done():
             self.update_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -618,7 +600,6 @@ class AdaptiveAllocationEngine:
 
     async def _adaptive_update_loop(self) -> None:
         """Background loop for updating allocations."""
-
         while True:
             try:
                 await asyncio.sleep(self.update_interval)
@@ -637,7 +618,6 @@ class AdaptiveAllocationEngine:
 
     async def get_experiment_performance(self, experiment_id: str) -> dict[str, Any]:
         """Get performance metrics for experiment."""
-
         config = self.active_experiments.get(experiment_id)
         bandit = self.bandit_optimizers.get(experiment_id)
 
@@ -665,7 +645,7 @@ class AdaptiveAllocationEngine:
                         if i < len(bandit.arm_counts)
                         else 0,
                         "allocation_probability": config.initial_allocation.get(
-                            variant, 0.0
+                            variant, 0.0,
                         ),
                     }
 
@@ -673,7 +653,6 @@ class AdaptiveAllocationEngine:
 
     async def get_allocation_stats(self) -> dict[str, Any]:
         """Get comprehensive allocation engine statistics."""
-
         return {
             "allocation_stats": self.allocation_stats.copy(),
             "active_experiments": len(self.active_experiments),

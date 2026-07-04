@@ -1,5 +1,4 @@
-"""
-Database session management.
+"""Database session management.
 
 Provides utilities for managing database connections and sessions.
 """
@@ -27,11 +26,11 @@ _async_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_database_url() -> str:
-    """
-    Get database URL from settings.
+    """Get database URL from settings.
 
     Returns:
         Database URL
+
     """
     return str(settings.DATABASE_URL)
 
@@ -45,8 +44,7 @@ def create_engine(
     echo_pool: bool = False,
     use_null_pool: bool = False,
 ) -> AsyncEngine:
-    """
-    Create async database engine.
+    """Create async database engine.
 
     Args:
         database_url: Database URL (uses settings if not provided)
@@ -59,6 +57,7 @@ def create_engine(
 
     Returns:
         Async engine
+
     """
     if not database_url:
         database_url = get_database_url()
@@ -102,12 +101,12 @@ def create_engine(
 
 
 async def init_db(database_url: str | None = None, **engine_kwargs: Any) -> None:
-    """
-    Initialize database connection.
+    """Initialize database connection.
 
     Args:
         database_url: Database URL
         **engine_kwargs: Additional engine arguments
+
     """
     global _engine, _async_session_factory
 
@@ -157,14 +156,14 @@ async def close_db() -> None:
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """
-    Get async session factory.
+    """Get async session factory.
 
     Returns:
         Session factory
 
     Raises:
         RuntimeError: If database not initialized
+
     """
     if _async_session_factory is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")
@@ -172,11 +171,11 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Get database session.
+    """Get database session.
 
     Yields:
         Database session
+
     """
     session_factory = get_session_factory()
 
@@ -193,11 +192,11 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 @asynccontextmanager
 async def get_transaction() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Get database session with transaction.
+    """Get database session with transaction.
 
     Yields:
         Database session with active transaction
+
     """
     session_factory = get_session_factory()
 
@@ -210,8 +209,7 @@ async def get_transaction() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def execute_in_transaction(func: Any, *args: Any, **kwargs: Any) -> Any:
-    """
-    Execute function in transaction.
+    """Execute function in transaction.
 
     Args:
         func: Async function to execute
@@ -220,24 +218,24 @@ async def execute_in_transaction(func: Any, *args: Any, **kwargs: Any) -> Any:
 
     Returns:
         Function result
+
     """
     async with get_transaction() as session:
         return await func(session, *args, **kwargs)
 
 
 class DatabaseManager:
-    """
-    Database manager for advanced operations.
+    """Database manager for advanced operations.
 
     Provides utilities for health checks, statistics, and maintenance.
     """
 
     def __init__(self, engine: AsyncEngine | None = None):
-        """
-        Initialize database manager.
+        """Initialize database manager.
 
         Args:
             engine: Database engine (uses global if not provided)
+
         """
         resolved_engine = engine or _engine
 
@@ -247,11 +245,11 @@ class DatabaseManager:
         self.engine: AsyncEngine = resolved_engine
 
     async def check_connection(self) -> bool:
-        """
-        Check database connection.
+        """Check database connection.
 
         Returns:
             True if connected
+
         """
         try:
             async with self.engine.begin() as conn:
@@ -262,11 +260,11 @@ class DatabaseManager:
             return False
 
     async def get_pool_status(self) -> dict[str, Any]:
-        """
-        Get connection pool status.
+        """Get connection pool status.
 
         Returns:
             Pool status information
+
         """
         pool = self.engine.pool
 
@@ -279,11 +277,11 @@ class DatabaseManager:
         }
 
     async def get_table_sizes(self) -> dict[str, Any]:
-        """
-        Get table sizes.
+        """Get table sizes.
 
         Returns:
             Dictionary of table sizes
+
         """
         query = """
         SELECT 
@@ -306,16 +304,16 @@ class DatabaseManager:
         }
 
     async def get_slow_queries(
-        self, min_duration_ms: int = 1000
+        self, min_duration_ms: int = 1000,
     ) -> list[dict[str, Any]]:
-        """
-        Get slow queries.
+        """Get slow queries.
 
         Args:
             min_duration_ms: Minimum duration in milliseconds
 
         Returns:
             List of slow queries
+
         """
         query = f"""
         SELECT 
@@ -352,11 +350,11 @@ class DatabaseManager:
             return []
 
     async def analyze_indexes(self) -> dict[str, Any]:
-        """
-        Analyze index usage.
+        """Analyze index usage.
 
         Returns:
             Index analysis results
+
         """
         # Get unused indexes
         unused_query = """
@@ -396,11 +394,11 @@ class DatabaseManager:
         return {"unused_indexes": unused, "index_hit_rate": hit_rate}
 
     async def vacuum_analyze(self, table_name: str | None = None) -> None:
-        """
-        Run VACUUM ANALYZE.
+        """Run VACUUM ANALYZE.
 
         Args:
             table_name: Specific table or None for all
+
         """
         query = f"VACUUM ANALYZE {table_name}" if table_name else "VACUUM ANALYZE"
 

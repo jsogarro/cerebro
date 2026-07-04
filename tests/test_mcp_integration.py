@@ -1,5 +1,4 @@
-"""
-Integration tests for MCP server and tools.
+"""Integration tests for MCP server and tools.
 """
 
 import pytest
@@ -100,7 +99,7 @@ class TestMCPClient:
         client = MCPClient()
 
         result = await client.search_academic(
-            query="test query", databases=["arxiv"], max_results=5
+            query="test query", databases=["arxiv"], max_results=5,
         )
 
         assert "success" in result
@@ -117,7 +116,7 @@ class TestMCPClient:
                     "authors": ["Smith, J."],
                     "year": 2024,
                     "journal": "Test Journal",
-                }
+                },
             ],
             style="APA",
         )
@@ -131,7 +130,7 @@ class TestMCPClient:
         client = MCPClient()
 
         result = await client.analyze_statistics(
-            operation="descriptive", data=[1, 2, 3, 4, 5]
+            operation="descriptive", data=[1, 2, 3, 4, 5],
         )
 
         assert result["success"]
@@ -149,7 +148,7 @@ class TestMCPClient:
         relationships = [{"source": "1", "target": "2", "type": "related"}]
 
         result = await client.build_knowledge_graph(
-            entities=entities, relationships=relationships
+            entities=entities, relationships=relationships,
         )
 
         assert result["success"]

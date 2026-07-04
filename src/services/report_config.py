@@ -1,5 +1,4 @@
-"""
-Report generation configuration and settings.
+"""Report generation configuration and settings.
 
 This module provides configuration management for report generation,
 following functional programming principles with immutable configurations.
@@ -254,7 +253,7 @@ class ReportTemplateConfig:
     def get_template_config(self, report_type: ReportType) -> dict[str, Any]:
         """Get template configuration for a specific report type."""
         return self._template_configs.get(
-            report_type, self._template_configs[ReportType.COMPREHENSIVE]
+            report_type, self._template_configs[ReportType.COMPREHENSIVE],
         )
 
     def get_template_path(self, report_type: ReportType) -> str:

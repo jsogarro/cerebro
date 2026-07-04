@@ -1,5 +1,4 @@
-"""
-Tests for Research Platform models following TDD principles.
+"""Tests for Research Platform models following TDD principles.
 First test: Research Project model
 """
 
@@ -171,7 +170,7 @@ class TestResearchProjectModel:
         """Test research project validation rules."""
         # Test empty query text
         with pytest.raises(
-            ValidationError, match="String should have at least 1 character"
+            ValidationError, match="String should have at least 1 character",
         ):
             ResearchQuery(text="", domains=["test"])
 

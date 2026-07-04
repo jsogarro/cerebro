@@ -248,13 +248,13 @@ def _coerce_trusted_source(source: TrustedSourceInput) -> TrustedSource:
         source_type=_required_str(source.get("source_type"), "source source_type"),
         snippet=_required_str(source.get("snippet"), "source snippet"),
         supported_claims=tuple(
-            _required_str_list(source.get("supported_claims"), "supported_claims")
+            _required_str_list(source.get("supported_claims"), "supported_claims"),
         ),
         contradicted_claims=tuple(
             _required_str_list(
                 source.get("contradicted_claims", []),
                 "contradicted_claims",
-            )
+            ),
         ),
     )
 

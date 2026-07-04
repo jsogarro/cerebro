@@ -1,5 +1,4 @@
-"""
-Main FastAPI application for Research Platform.
+"""Main FastAPI application for Research Platform.
 """
 
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -176,16 +175,16 @@ app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
 # Agent Framework APIs (Research-Informed)
 app.include_router(
-    query_api.router, tags=["intelligent-query"]
+    query_api.router, tags=["intelligent-query"],
 )  # Primary API - MASR routed
 app.include_router(
-    agent_api.router, tags=["direct-agents"]
+    agent_api.router, tags=["direct-agents"],
 )  # Bypass API - Direct access
 # MASR Dynamic Routing API
 app.include_router(masr_api.router, tags=["masr-routing"])  # MASR routing intelligence
 # Hierarchical Supervisor API (Week 3 - Talk Structurally, Act Hierarchically)
 app.include_router(
-    supervisor_api.router, tags=["supervisors"]
+    supervisor_api.router, tags=["supervisors"],
 )  # Supervisor coordination
 app.include_router(talkhier_api.router, tags=["talkhier"])
 app.include_router(websocket.router, tags=["websocket"])
@@ -211,21 +210,21 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 app.add_exception_handler(
     HTTPException,
     cast(
-        Callable[[Request, Exception], Response | Awaitable[Response]],
+        "Callable[[Request, Exception], Response | Awaitable[Response]]",
         http_exception_handler,
     ),
 )
 app.add_exception_handler(
     RequestValidationError,
     cast(
-        Callable[[Request, Exception], Response | Awaitable[Response]],
+        "Callable[[Request, Exception], Response | Awaitable[Response]]",
         validation_exception_handler,
     ),
 )
 app.add_exception_handler(
     Exception,
     cast(
-        Callable[[Request, Exception], Response | Awaitable[Response]],
+        "Callable[[Request, Exception], Response | Awaitable[Response]]",
         global_exception_handler,
     ),
 )

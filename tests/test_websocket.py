@@ -1,5 +1,4 @@
-"""
-Tests for WebSocket functionality.
+"""Tests for WebSocket functionality.
 
 This module contains comprehensive tests for WebSocket connections,
 message handling, authentication, and CLI streaming capabilities.
@@ -128,7 +127,7 @@ class TestConnectionManager:
 
     @pytest.mark.asyncio
     async def test_connection_lifecycle(
-        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock,
     ) -> None:
         """Test WebSocket connection lifecycle."""
         # Connect
@@ -154,7 +153,7 @@ class TestConnectionManager:
 
     @pytest.mark.asyncio
     async def test_project_subscriptions(
-        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock,
     ) -> None:
         """Test project subscription functionality."""
         project_id = uuid4()
@@ -179,7 +178,7 @@ class TestConnectionManager:
 
     @pytest.mark.asyncio
     async def test_subscription_request_handling(
-        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock,
     ) -> None:
         """Test handling of subscription requests."""
         project_id = uuid4()
@@ -195,7 +194,7 @@ class TestConnectionManager:
         )
 
         response = await connection_manager.handle_subscription_request(
-            client_id, subscribe_request
+            client_id, subscribe_request,
         )
 
         assert response.success
@@ -208,7 +207,7 @@ class TestConnectionManager:
         )
 
         response = await connection_manager.handle_subscription_request(
-            client_id, unsubscribe_request
+            client_id, unsubscribe_request,
         )
 
         assert response.success
@@ -216,7 +215,7 @@ class TestConnectionManager:
 
     @pytest.mark.asyncio
     async def test_message_broadcasting(
-        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock,
     ) -> None:
         """Test message broadcasting to subscribed clients."""
         project_id = uuid4()
@@ -248,7 +247,7 @@ class TestConnectionManager:
 
     @pytest.mark.asyncio
     async def test_failed_message_cleanup(
-        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
+        self, connection_manager: ConnectionManager, mock_websocket: AsyncMock,
     ) -> None:
         """Test cleanup of failed connections during broadcasting."""
         project_id = uuid4()
@@ -285,7 +284,7 @@ class TestEventPublisher:
 
     @pytest.mark.asyncio
     async def test_progress_update_publishing(
-        self, event_publisher: EventPublisher
+        self, event_publisher: EventPublisher,
     ) -> None:
         """Test publishing progress updates."""
         project_id = uuid4()
@@ -308,7 +307,7 @@ class TestEventPublisher:
 
     @pytest.mark.asyncio
     async def test_agent_lifecycle_events(
-        self, event_publisher: EventPublisher
+        self, event_publisher: EventPublisher,
     ) -> None:
         """Test publishing agent lifecycle events."""
         project_id = uuid4()
@@ -339,7 +338,7 @@ class TestEventPublisher:
 
     @pytest.mark.asyncio
     async def test_project_lifecycle_events(
-        self, event_publisher: EventPublisher
+        self, event_publisher: EventPublisher,
     ) -> None:
         """Test publishing project lifecycle events."""
         project_id = uuid4()
@@ -350,12 +349,12 @@ class TestEventPublisher:
 
             # Test project completed
             await event_publisher.publish_project_completed(
-                project_id, "Research completed with 15 key findings"
+                project_id, "Research completed with 15 key findings",
             )
 
             # Test project failed
             await event_publisher.publish_project_failed(
-                project_id, "Insufficient access to required databases"
+                project_id, "Insufficient access to required databases",
             )
 
             # Test project cancelled

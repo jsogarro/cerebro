@@ -1,5 +1,4 @@
-"""
-Citation parsing and formatting utilities.
+"""Citation parsing and formatting utilities.
 
 This module provides functions for parsing, extracting, and formatting
 academic citations in various styles (APA, MLA, Chicago).
@@ -9,8 +8,7 @@ import re
 
 
 def parse_citation(citation: str, style: str = "APA") -> dict[str, str]:
-    """
-    Parse a citation string into components.
+    """Parse a citation string into components.
 
     Args:
         citation: Citation string
@@ -18,6 +16,7 @@ def parse_citation(citation: str, style: str = "APA") -> dict[str, str]:
 
     Returns:
         Dictionary with citation components
+
     """
     result = {}
 
@@ -35,8 +34,7 @@ def parse_citation(citation: str, style: str = "APA") -> dict[str, str]:
 
 
 def parse_apa_citation(citation: str) -> dict[str, str]:
-    """
-    Parse APA format citation.
+    """Parse APA format citation.
 
     Format: Author, A. A. (Year). Title. Journal, Volume(Issue), pages.
 
@@ -45,6 +43,7 @@ def parse_apa_citation(citation: str) -> dict[str, str]:
 
     Returns:
         Dictionary with parsed components
+
     """
     result = {}
 
@@ -101,8 +100,7 @@ def parse_apa_citation(citation: str) -> dict[str, str]:
 
 
 def parse_mla_citation(citation: str) -> dict[str, str]:
-    """
-    Parse MLA format citation.
+    """Parse MLA format citation.
 
     Format: Author. "Title." Journal, vol. #, no. #, Year, pp. pages.
 
@@ -111,6 +109,7 @@ def parse_mla_citation(citation: str) -> dict[str, str]:
 
     Returns:
         Dictionary with parsed components
+
     """
     result = {}
 
@@ -126,8 +125,7 @@ def parse_mla_citation(citation: str) -> dict[str, str]:
     if title_match:
         title = title_match.group(1)
         # Remove trailing period if present
-        if title.endswith("."):
-            title = title[:-1]
+        title = title.removesuffix(".")
         result["title"] = title
 
     # Extract journal (after title, before vol.)
@@ -166,8 +164,7 @@ def parse_mla_citation(citation: str) -> dict[str, str]:
 
 
 def parse_chicago_citation(citation: str) -> dict[str, str]:
-    """
-    Parse Chicago style citation.
+    """Parse Chicago style citation.
 
     Format: Author. "Title." Journal Volume, no. Issue (Year): pages.
 
@@ -176,6 +173,7 @@ def parse_chicago_citation(citation: str) -> dict[str, str]:
 
     Returns:
         Dictionary with parsed components
+
     """
     result = {}
 
@@ -223,14 +221,14 @@ def parse_chicago_citation(citation: str) -> dict[str, str]:
 
 
 def auto_parse_citation(citation: str) -> dict[str, str]:
-    """
-    Attempt to parse citation without knowing the style.
+    """Attempt to parse citation without knowing the style.
 
     Args:
         citation: Citation string
 
     Returns:
         Dictionary with best-effort parsed components
+
     """
     result = {}
 
@@ -283,7 +281,7 @@ def auto_parse_citation(citation: str) -> dict[str, str]:
     # Author (usually at beginning)
     # Simple heuristic: text before first period or year
     if "year" in result:
-        before_year = citation.split(result["year"])[0]
+        before_year = citation.split(result["year"], maxsplit=1)[0]
         author_pattern = r"^([^.,\(]+)"
         author_match = re.match(author_pattern, before_year.strip())
         if author_match:
@@ -293,14 +291,14 @@ def auto_parse_citation(citation: str) -> dict[str, str]:
 
 
 def extract_doi(text: str) -> str | None:
-    """
-    Extract DOI from text.
+    """Extract DOI from text.
 
     Args:
         text: Text potentially containing a DOI
 
     Returns:
         DOI string or None
+
     """
     # DOI patterns
     doi_patterns = [
@@ -321,10 +319,9 @@ def extract_doi(text: str) -> str | None:
 
 
 def format_citation(
-    components: dict[str, str], style: str = "APA", include_doi: bool = True
+    components: dict[str, str], style: str = "APA", include_doi: bool = True,
 ) -> str:
-    """
-    Format citation components into a citation string.
+    """Format citation components into a citation string.
 
     Args:
         components: Dictionary with citation components
@@ -333,15 +330,15 @@ def format_citation(
 
     Returns:
         Formatted citation string
+
     """
     if style.upper() == "APA":
         return format_apa(components, include_doi)
-    elif style.upper() == "MLA":
+    if style.upper() == "MLA":
         return format_mla(components, include_doi)
-    elif style.upper() == "CHICAGO":
+    if style.upper() == "CHICAGO":
         return format_chicago(components, include_doi)
-    else:
-        return format_apa(components, include_doi)  # Default to APA
+    return format_apa(components, include_doi)  # Default to APA
 
 
 def format_apa(components: dict[str, str], include_doi: bool = True) -> str:
@@ -434,14 +431,14 @@ def format_chicago(components: dict[str, str], include_doi: bool = True) -> str:
 
 
 def extract_bibtex_fields(bibtex: str) -> dict[str, str]:
-    """
-    Extract fields from BibTeX entry.
+    """Extract fields from BibTeX entry.
 
     Args:
         bibtex: BibTeX entry string
 
     Returns:
         Dictionary of BibTeX fields
+
     """
     fields = {}
 
@@ -468,14 +465,14 @@ def extract_bibtex_fields(bibtex: str) -> dict[str, str]:
 
 
 def validate_citation(citation_data: dict[str, str]) -> bool:
-    """
-    Validate that citation has required fields.
+    """Validate that citation has required fields.
 
     Args:
         citation_data: Citation components dictionary
 
     Returns:
         True if citation has minimum required fields
+
     """
     # Minimum required fields
     required_fields = ["author", "title", "year"]
@@ -494,8 +491,7 @@ def validate_citation(citation_data: dict[str, str]) -> bool:
 
 
 def bibtex_to_citation(bibtex: str, style: str = "APA") -> str:
-    """
-    Convert BibTeX entry to formatted citation.
+    """Convert BibTeX entry to formatted citation.
 
     Args:
         bibtex: BibTeX entry
@@ -503,6 +499,7 @@ def bibtex_to_citation(bibtex: str, style: str = "APA") -> str:
 
     Returns:
         Formatted citation
+
     """
     fields = extract_bibtex_fields(bibtex)
 

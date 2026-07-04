@@ -1,5 +1,4 @@
-"""
-Synthesis Agent implementation.
+"""Synthesis Agent implementation.
 
 This agent specializes in integrating outputs from multiple agents into coherent insights.
 """
@@ -17,8 +16,7 @@ logger = get_logger()
 
 
 class SynthesisAgent(LLMWorkerAgentBase):
-    """
-    Agent specialized in synthesizing outputs from multiple research agents.
+    """Agent specialized in synthesizing outputs from multiple research agents.
 
     This agent integrates findings, resolves conflicts, and creates
     comprehensive narratives from diverse inputs.
@@ -29,21 +27,21 @@ class SynthesisAgent(LLMWorkerAgentBase):
         return "synthesis"
 
     async def execute(self, task: AgentTask) -> AgentResult:
-        """
-        Execute a synthesis task.
+        """Execute a synthesis task.
 
         Args:
             task: The synthesis task to execute
 
         Returns:
             AgentResult containing integrated findings
+
         """
         try:
             # Validate input
             agent_outputs = task.input_data.get("agent_outputs", {})
             if not agent_outputs:
                 return self.handle_error(
-                    task, ValueError("Agent outputs required for synthesis")
+                    task, ValueError("Agent outputs required for synthesis"),
                 )
 
             # Check cache first
@@ -59,14 +57,14 @@ class SynthesisAgent(LLMWorkerAgentBase):
             try:
                 prompt = self._build_prompt(agent_outputs)
                 schema_result = await self._generate_structured_with_routing(
-                    prompt, SynthesisSchema, task=task
+                    prompt, SynthesisSchema, task=task,
                 )
                 # Convert Pydantic model to dict for compatibility
                 synthesis = schema_result.model_dump()
             except Exception as e:
                 # Fallback for testing without configured LLM
                 self.log_warning(
-                    f"Structured generation failed: {e}, using mock fallback"
+                    f"Structured generation failed: {e}, using mock fallback",
                 )
                 synthesis = self._generate_mock_synthesis(agent_outputs)
 
@@ -104,14 +102,14 @@ class SynthesisAgent(LLMWorkerAgentBase):
             return self.handle_error(task, e)
 
     async def validate_result(self, result: AgentResult) -> bool:
-        """
-        Validate the synthesis result.
+        """Validate the synthesis result.
 
         Args:
             result: The result to validate
 
         Returns:
             True if valid, False otherwise
+
         """
         if result.status != "success":
             return result.status == "failed"
@@ -132,7 +130,7 @@ class SynthesisAgent(LLMWorkerAgentBase):
         return True
 
     def _calculate_confidence(
-        self, synthesis: dict[str, Any], agent_outputs: dict[str, Any]
+        self, synthesis: dict[str, Any], agent_outputs: dict[str, Any],
     ) -> float:
         """Calculate confidence score based on synthesis quality."""
         confidence = 0.5

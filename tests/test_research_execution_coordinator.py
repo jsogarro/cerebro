@@ -102,7 +102,7 @@ async def test_execution_coordinator_preserves_worker_assignment_payloads() -> N
     assert isinstance(literature_content, TalkHierContent)
     assert literature_content.content == "Conduct systematic literature review"
     assert literature_content.intermediate_outputs == {
-        "query": "How does AI affect learning?"
+        "query": "How does AI affect learning?",
     }
 
     assert isinstance(methodology_content, TalkHierContent)
@@ -135,8 +135,8 @@ def test_execution_coordinator_extracts_sources_for_citation() -> None:
 
     worker_results = {
         "literature_review": TalkHierContent(
-            intermediate_outputs={"sources_found": sources}
-        )
+            intermediate_outputs={"sources_found": sources},
+        ),
     }
 
     assert coordinator._extract_sources(worker_results) == sources

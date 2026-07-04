@@ -1,5 +1,4 @@
-"""
-E2E tests for WebSocket connection lifecycle and real-time progress events.
+"""E2E tests for WebSocket connection lifecycle and real-time progress events.
 
 Covers WebSocket authentication, connection establishment, message flow,
 project progress subscription, reconnection, and error handling against
@@ -28,8 +27,7 @@ VALID_PASSWORD = "Xy9!zAbCdEfG"
 
 
 async def create_authenticated_user() -> tuple[str, str]:
-    """
-    Helper to create and authenticate a user, returning (email, access_token).
+    """Helper to create and authenticate a user, returning (email, access_token).
     """
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
         email = f"wsuser_{uuid.uuid4().hex[:8]}@example.com"
@@ -56,8 +54,7 @@ class TestWebSocketE2E:
     """End-to-end WebSocket connection and message flow tests."""
 
     async def test_websocket_connect_with_valid_token(self):
-        """
-        Happy path: connect to /ws with valid JWT token via query param.
+        """Happy path: connect to /ws with valid JWT token via query param.
 
         Server accepts WS, authenticates token, sends welcome message.
         """
@@ -87,8 +84,7 @@ class TestWebSocketE2E:
             await ws.close()
 
     async def test_websocket_connect_without_token_in_dev_mode(self):
-        """
-        Unauthenticated connection in development mode.
+        """Unauthenticated connection in development mode.
 
         In development (ENVIRONMENT=development), anonymous connections
         should be allowed per src/api/websocket/auth.py:46-50.
@@ -118,8 +114,7 @@ class TestWebSocketE2E:
                 )
 
     async def test_websocket_reconnect_with_same_token(self):
-        """
-        Reconnect flow: connect, disconnect cleanly, then reconnect with same JWT.
+        """Reconnect flow: connect, disconnect cleanly, then reconnect with same JWT.
 
         Both connections should succeed.
         """
@@ -152,11 +147,10 @@ class TestWebSocketE2E:
             await ws.close()
 
     @pytest.mark.skip(
-        reason="Skip: needs tenant-claim fix from parallel PR - project creation will fail with 500"
+        reason="Skip: needs tenant-claim fix from parallel PR - project creation will fail with 500",
     )
     async def test_websocket_project_progress_subscription(self):
-        """
-        Subscribe to project-specific progress updates via /ws/projects/{project_id}.
+        """Subscribe to project-specific progress updates via /ws/projects/{project_id}.
 
         1. Create a research project via API
         2. Connect to project WebSocket endpoint
@@ -205,8 +199,7 @@ class TestWebSocketE2E:
             await ws.close()
 
     async def test_websocket_clean_disconnect(self):
-        """
-        Clean disconnect: client initiates close, server handles gracefully.
+        """Clean disconnect: client initiates close, server handles gracefully.
 
         No exceptions should be raised during normal close flow.
         """
@@ -228,8 +221,7 @@ class TestWebSocketE2E:
         # No exceptions = success
 
     async def test_websocket_malformed_token_fails(self):
-        """
-        Connect with a malformed JWT token.
+        """Connect with a malformed JWT token.
 
         Server accepts, then closes with code 1008 after auth failure.
         """
@@ -247,8 +239,7 @@ class TestWebSocketE2E:
                         await asyncio.wait_for(ws.receive_json(), timeout=2.0)
 
     async def test_websocket_subscribe_to_events(self):
-        """
-        Subscribe to events via the general /ws endpoint.
+        """Subscribe to events via the general /ws endpoint.
 
         Send a subscription request and verify the server acknowledges it.
         """
@@ -266,7 +257,7 @@ class TestWebSocketE2E:
                 {
                     "type": "subscribe",
                     "channel": "user_events",
-                }
+                },
             )
 
             # Wait for acknowledgment or any response

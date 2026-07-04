@@ -1,5 +1,4 @@
-"""
-Agent Framework API Routes
+"""Agent Framework API Routes
 
 REST API endpoints for direct agent interaction following research-validated
 patterns from "LLMs Working in Harmony" and other foundational papers.
@@ -45,8 +44,7 @@ router = APIRouter(prefix="/api/v1/agents")
 async def list_agents(
     include_metrics: bool = Query(False, description="Include performance metrics"),
 ) -> AgentListResponse:
-    """
-    List all available agents with capabilities.
+    """List all available agents with capabilities.
 
     Following research pattern: Agent capability discovery for optimal selection.
     """
@@ -62,10 +60,10 @@ async def list_agents(
             agents=agents,
             total_agents=len(agents),
             total_capabilities=len(
-                {cap for agent in agents for cap in agent.capabilities}
+                {cap for agent in agents for cap in agent.capabilities},
             ),
             supported_domains=list(
-                {domain for agent in agents for domain in agent.optimal_domains}
+                {domain for agent in agents for domain in agent.optimal_domains},
             ),
             supported_execution_modes=list(ExecutionMode),
             system_health=system_health,
@@ -88,8 +86,7 @@ async def list_agents(
 
 @router.get("/{agent_type}", response_model=AgentInfo)
 async def get_agent_info(agent_type: AgentType) -> AgentInfo:
-    """
-    Get detailed information about a specific agent.
+    """Get detailed information about a specific agent.
 
     Provides agent capabilities, performance characteristics, and API endpoints.
     """
@@ -98,7 +95,7 @@ async def get_agent_info(agent_type: AgentType) -> AgentInfo:
         agents = await service.get_agent_list()
 
         agent_info = next(
-            (agent for agent in agents if agent.agent_type == agent_type), None
+            (agent for agent in agents if agent.agent_type == agent_type), None,
         )
 
         if not agent_info:
@@ -125,8 +122,7 @@ async def execute_agent(
     request: AgentExecutionRequest,
     background_tasks: BackgroundTasks,
 ) -> AgentExecutionResponse:
-    """
-    Execute single agent directly.
+    """Execute single agent directly.
 
     Following research pattern: Direct agent interaction with performance tracking.
     Supports TalkHier refinement for quality assurance.
@@ -166,8 +162,7 @@ async def execute_agent(
 async def execute_chain_of_agents(
     request: ChainOfAgentsRequest,
 ) -> ChainOfAgentsResponse:
-    """
-    Execute Chain-of-Agents (sequential execution pattern).
+    """Execute Chain-of-Agents (sequential execution pattern).
 
     Based on "LLMs Working in Harmony" research: Sequential agent execution
     where each agent builds on the results of the previous agent.
@@ -176,7 +171,7 @@ async def execute_chain_of_agents(
     """
     try:
         logger.info(
-            f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}"
+            f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}",
         )
 
         service = get_agent_execution_service()
@@ -208,8 +203,7 @@ async def execute_chain_of_agents(
 async def execute_mixture_of_agents(
     request: MixtureOfAgentsRequest,
 ) -> MixtureOfAgentsResponse:
-    """
-    Execute Mixture-of-Agents (parallel execution with aggregation).
+    """Execute Mixture-of-Agents (parallel execution with aggregation).
 
     Based on "LLMs Working in Harmony" research: Parallel agent execution
     with intelligent result aggregation and consensus building.
@@ -218,7 +212,7 @@ async def execute_mixture_of_agents(
     """
     try:
         logger.info(
-            f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}"
+            f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}",
         )
 
         service = get_agent_execution_service()
@@ -248,10 +242,9 @@ async def execute_mixture_of_agents(
 
 @router.post("/{agent_type}/validate", response_model=AgentValidationResponse)
 async def validate_agent_input(
-    agent_type: AgentType, request: AgentValidationRequest
+    agent_type: AgentType, request: AgentValidationRequest,
 ) -> AgentValidationResponse:
-    """
-    Validate input for specific agent type.
+    """Validate input for specific agent type.
 
     Checks query suitability, parameter validation, and provides
     optimization suggestions before execution.
@@ -262,14 +255,14 @@ async def validate_agent_input(
         # Basic validation logic (would be enhanced with actual agent validation)
         query_length = len(request.query)
         query_suitability = min(
-            1.0, max(0.3, (query_length - 10) / 100)
+            1.0, max(0.3, (query_length - 10) / 100),
         )  # Simple heuristic
 
         # Parameter validation (simplified)
         parameter_validation = {}
         for key, value in request.parameters.items():
             parameter_validation[key] = isinstance(
-                value, (str, int, float, bool, list, dict)
+                value, (str, int, float, bool, list, dict),
             )
 
         validation_score = (
@@ -281,11 +274,11 @@ async def validate_agent_input(
         recommendations = []
         if query_length < 20:
             recommendations.append(
-                "Consider providing more detailed query for better results"
+                "Consider providing more detailed query for better results",
             )
         if query_length > 1000:
             recommendations.append(
-                "Consider breaking down complex query into smaller parts"
+                "Consider breaking down complex query into smaller parts",
             )
 
         response = AgentValidationResponse(
@@ -315,8 +308,7 @@ async def validate_agent_input(
 
 @router.get("/{agent_type}/metrics", response_model=AgentMetricsResponse)
 async def get_agent_metrics(agent_type: AgentType) -> AgentMetricsResponse:
-    """
-    Get performance metrics for specific agent.
+    """Get performance metrics for specific agent.
 
     Provides comprehensive performance analytics following Anthropic
     engineering approach for agent evaluation and optimization.
@@ -339,8 +331,7 @@ async def get_agent_metrics(agent_type: AgentType) -> AgentMetricsResponse:
 
 @router.get("/{agent_type}/health", response_model=AgentHealthStatus)
 async def get_agent_health(agent_type: AgentType) -> AgentHealthStatus:
-    """
-    Get health status for specific agent.
+    """Get health status for specific agent.
 
     Provides real-time health monitoring with performance indicators
     and recovery information.
@@ -363,8 +354,7 @@ async def get_agent_health(agent_type: AgentType) -> AgentHealthStatus:
 
 @router.get("/system/stats")
 async def get_system_stats() -> dict[str, Any]:
-    """
-    Get comprehensive system statistics.
+    """Get comprehensive system statistics.
 
     Provides system-wide performance metrics and health information
     for monitoring and optimization.
@@ -385,8 +375,7 @@ async def get_system_stats() -> dict[str, Any]:
 
 @router.get("/executions/active")
 async def get_active_executions() -> dict[str, Any]:
-    """
-    Get information about currently active agent executions.
+    """Get information about currently active agent executions.
 
     Useful for monitoring system load and debugging performance issues.
     """
@@ -406,7 +395,7 @@ async def get_active_executions() -> dict[str, Any]:
                     ).total_seconds()
                     if execution_data.get("started_at")
                     else 0,
-                }
+                },
             )
 
         return {
@@ -434,8 +423,7 @@ async def literature_search(
     max_sources: int = Query(25, ge=5, le=100),
     domains: list[str] = Query(default=[]),
 ) -> AgentExecutionResponse:
-    """
-    Optimized literature search endpoint.
+    """Optimized literature search endpoint.
 
     Specialized endpoint for literature review agent with common parameters
     exposed as query parameters for convenience.
@@ -458,8 +446,7 @@ async def format_citations(
     sources: list[str] = Body(..., min_length=1),
     style: str = Body("APA", pattern="^(APA|MLA|Chicago)$"),
 ) -> AgentExecutionResponse:
-    """
-    Optimized citation formatting endpoint.
+    """Optimized citation formatting endpoint.
 
     Specialized endpoint for citation agent with style selection.
     """
@@ -480,11 +467,10 @@ async def format_citations(
 async def synthesize_findings(
     findings: list[dict[str, Any]] = Body(..., min_length=2),
     synthesis_focus: str = Body(
-        "comprehensive", pattern="^(comprehensive|comparative|thematic)$"
+        "comprehensive", pattern="^(comprehensive|comparative|thematic)$",
     ),
 ) -> AgentExecutionResponse:
-    """
-    Optimized synthesis endpoint.
+    """Optimized synthesis endpoint.
 
     Specialized endpoint for synthesis agent with focus selection.
     """
@@ -510,8 +496,7 @@ async def literature_analysis_workflow(
     domains: list[str] = Query(default=[]),
     max_sources: int = Query(25, ge=10, le=100),
 ) -> ChainOfAgentsResponse:
-    """
-    Convenience endpoint for literature analysis workflow.
+    """Convenience endpoint for literature analysis workflow.
 
     Implements Chain-of-Agents pattern: Literature Review → Citation → Synthesis
     """
@@ -535,17 +520,16 @@ async def literature_analysis_workflow(
 
 
 @router.post(
-    "/workflows/comprehensive-research", response_model=MixtureOfAgentsResponse
+    "/workflows/comprehensive-research", response_model=MixtureOfAgentsResponse,
 )
 async def comprehensive_research_workflow(
     query: str = Query(..., min_length=10),
     domains: list[str] = Query(default=[]),
     analysis_depth: str = Query(
-        "comprehensive", pattern="^(basic|comprehensive|exhaustive)$"
+        "comprehensive", pattern="^(basic|comprehensive|exhaustive)$",
     ),
 ) -> MixtureOfAgentsResponse:
-    """
-    Convenience endpoint for comprehensive research workflow.
+    """Convenience endpoint for comprehensive research workflow.
 
     Implements Mixture-of-Agents pattern: All agents analyze query in parallel,
     results aggregated for comprehensive coverage.
@@ -581,7 +565,6 @@ async def comprehensive_research_workflow(
 @router.get("/health/summary")
 async def get_agents_health_summary() -> dict[str, Any]:
     """Get health summary for all agents."""
-
     try:
         service = get_agent_execution_service()
 
@@ -650,8 +633,7 @@ async def compare_agent_performance(
     ),
     time_period_hours: int = Query(24, ge=1, le=168),  # 1 hour to 1 week
 ) -> dict[str, Any]:
-    """
-    Compare performance across all agent types.
+    """Compare performance across all agent types.
 
     Enables optimization and A/B testing by providing comparative
     performance analysis across the agent ecosystem.

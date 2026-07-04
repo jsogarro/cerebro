@@ -1,5 +1,4 @@
-"""
-Tests for Comparative Analysis Agent.
+"""Tests for Comparative Analysis Agent.
 
 Following TDD principles - tests written before implementation.
 """
@@ -75,9 +74,9 @@ class TestComparativeAnalysisAgent:
                             "Accuracy vs Speed trade-off between Method A and B",
                             "Cost vs Performance trade-off with Method C",
                         ],
-                    }
-                }
-            )
+                    },
+                },
+            ),
         )
 
         agent = ComparativeAnalysisAgent(gemini_service=mock_gemini)
@@ -128,9 +127,9 @@ class TestComparativeAnalysisAgent:
                         },
                         "recommendations": ["Choose based on priority"],
                         "trade_offs": ["Effectiveness vs Efficiency"],
-                    }
-                }
-            )
+                    },
+                },
+            ),
         )
 
         agent = ComparativeAnalysisAgent(gemini_service=mock_gemini)
@@ -194,9 +193,9 @@ class TestComparativeAnalysisAgent:
                         },
                         "recommendations": ["Option B for balanced performance"],
                         "trade_offs": ["Quality vs Cost/Time"],
-                    }
-                }
-            )
+                    },
+                },
+            ),
         )
 
         agent = ComparativeAnalysisAgent(gemini_service=mock_gemini)
@@ -250,9 +249,9 @@ class TestComparativeAnalysisAgent:
                             "Maintenance cost: Solution Y is 60% cheaper to maintain",
                         ],
                         "recommendations": ["Consider project constraints"],
-                    }
-                }
-            )
+                    },
+                },
+            ),
         )
 
         agent = ComparativeAnalysisAgent(gemini_service=mock_gemini)

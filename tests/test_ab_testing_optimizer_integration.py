@@ -1,5 +1,4 @@
-"""
-Feedback optimizer and end-to-end integration tests for the A/B testing system.
+"""Feedback optimizer and end-to-end integration tests for the A/B testing system.
 """
 
 from types import SimpleNamespace
@@ -36,33 +35,33 @@ class TestFeedbackLoopOptimizer:
         )
         with (
             patch(
-                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.AgentFrameworkExperimentor"
+                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.AgentFrameworkExperimentor",
             ),
             patch(
-                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.SupervisionFeedbackLearner"
+                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.SupervisionFeedbackLearner",
             ),
             patch(
-                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.FeedbackLoopOptimizer._start_optimization_loop"
+                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.FeedbackLoopOptimizer._start_optimization_loop",
             ),
         ):
             return FeedbackLoopOptimizer(config)
 
     @pytest.mark.asyncio
     async def test_generate_routing_optimization(
-        self, optimizer: FeedbackLoopOptimizer
+        self, optimizer: FeedbackLoopOptimizer,
     ) -> None:
         """Test generating routing strategy optimization decisions."""
         optimizer._get_current_routing_weights = AsyncMock(
             return_value={
                 "cost_weight": 0.5,
                 "quality_weight": 0.5,
-            }
+            },
         )
         optimizer.feedback_system.get_optimal_routing_weights = AsyncMock(
             return_value={
                 "cost_weight": 0.3,
                 "quality_weight": 0.7,
-            }
+            },
         )
         optimizer._estimate_performance = AsyncMock(side_effect=[0.8, 0.85])
 
@@ -75,7 +74,7 @@ class TestFeedbackLoopOptimizer:
 
     @pytest.mark.asyncio
     async def test_apply_high_confidence_optimization(
-        self, optimizer: FeedbackLoopOptimizer
+        self, optimizer: FeedbackLoopOptimizer,
     ) -> None:
         """Test auto-applying high confidence optimizations."""
         decision = OptimizationDecision(
@@ -96,7 +95,7 @@ class TestFeedbackLoopOptimizer:
 
     @pytest.mark.asyncio
     async def test_recommend_medium_confidence_optimization(
-        self, optimizer: FeedbackLoopOptimizer
+        self, optimizer: FeedbackLoopOptimizer,
     ) -> None:
         """Test recommending medium confidence optimizations."""
         decision = OptimizationDecision(
@@ -140,7 +139,7 @@ class TestFeedbackLoopOptimizer:
 
     @pytest.mark.asyncio
     async def test_rollback_on_degradation(
-        self, optimizer: FeedbackLoopOptimizer
+        self, optimizer: FeedbackLoopOptimizer,
     ) -> None:
         """Test rolling back optimizations on performance degradation."""
         decision = OptimizationDecision(
@@ -165,7 +164,7 @@ class TestFeedbackLoopOptimizer:
 
     @pytest.mark.asyncio
     async def test_process_experiment_results(
-        self, optimizer: FeedbackLoopOptimizer
+        self, optimizer: FeedbackLoopOptimizer,
     ) -> None:
         """Test processing experiment results for learning."""
         results = {
@@ -182,7 +181,7 @@ class TestFeedbackLoopOptimizer:
             return_value={
                 "routing_strategy": "quality_focused",
                 "parameters": {"quality_weight": 0.7},
-            }
+            },
         )
         optimizer._process_routing_learnings = AsyncMock()
 
@@ -203,29 +202,29 @@ class TestEndToEndIntegration:
         """Test complete experiment lifecycle from creation to optimization."""
         with (
             patch(
-                "src.ai_brain.experimentation.integration.agent_framework_integration.AgentExecutionService"
+                "src.ai_brain.experimentation.integration.agent_framework_integration.AgentExecutionService",
             ),
             patch(
-                "src.ai_brain.experimentation.integration.agent_framework_integration.MASRRoutingService"
+                "src.ai_brain.experimentation.integration.agent_framework_integration.MASRRoutingService",
             ),
             patch(
-                "src.ai_brain.experimentation.integration.agent_framework_integration.AgentFrameworkExperimentor._start_background_tasks"
+                "src.ai_brain.experimentation.integration.agent_framework_integration.AgentFrameworkExperimentor._start_background_tasks",
             ),
         ):
             experimentor = AgentFrameworkExperimentor()
             experimentor.experiment_manager.create_experiment = AsyncMock()
 
         with patch(
-            "src.ai_brain.experimentation.monitoring.real_time_dashboard.RealTimeDashboard._start_background_tasks"
+            "src.ai_brain.experimentation.monitoring.real_time_dashboard.RealTimeDashboard._start_background_tasks",
         ):
             dashboard = RealTimeDashboard()
 
         with (
             patch(
-                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.FeedbackLoopOptimizer._start_optimization_loop"
+                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.FeedbackLoopOptimizer._start_optimization_loop",
             ),
             patch(
-                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.AgentFrameworkExperimentor"
+                "src.ai_brain.experimentation.optimization.feedback_loop_optimizer.AgentFrameworkExperimentor",
             ),
         ):
             optimizer = FeedbackLoopOptimizer()
@@ -235,13 +234,13 @@ class TestEndToEndIntegration:
                 supervisor_allocations=[SimpleNamespace(supervisor_type="research")],
                 estimated_cost=0.01,
                 model_dump=lambda: {"supervisor_type": "research"},
-            )
+            ),
         )
         experimentor.supervisor_service.execute_supervisor_task = AsyncMock(
             return_value=SimpleNamespace(
                 quality_score=0.9,
                 result="Success",
-            )
+            ),
         )
 
         exp_id = await experimentor.create_routing_experiment(
@@ -249,7 +248,7 @@ class TestEndToEndIntegration:
             strategies=["balanced", "quality_focused"],
         )
         experimentor.allocation_engine.allocate_variant = AsyncMock(
-            return_value=SimpleNamespace(variant_id="balanced")
+            return_value=SimpleNamespace(variant_id="balanced"),
         )
         with patch.object(dashboard, "_broadcast_to_dashboard", AsyncMock()):
             await dashboard.register_experiment(exp_id, {"type": "routing"})

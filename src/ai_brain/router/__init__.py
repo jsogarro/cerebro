@@ -1,5 +1,4 @@
-"""
-MASR (Multi-Agent System Router) Package
+"""MASR (Multi-Agent System Router) Package
 
 Intelligent routing system that analyzes query complexity and optimizes
 model/agent allocation for cost-effective and performant execution.

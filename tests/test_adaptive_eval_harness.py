@@ -44,7 +44,7 @@ class TestCorpusGeneration:
         for delta in (-2, -1, 0, 1, 2):
             qualities = [
                 ev.simulate_outcome(
-                    q, max(1, q.analytic_worker_count + delta)
+                    q, max(1, q.analytic_worker_count + delta),
                 ).quality_score
                 for q in hier
             ]
@@ -59,7 +59,7 @@ class TestCorpusGeneration:
         for delta in (-2, -1, 0, 1, 2):
             qualities = [
                 ev.simulate_outcome(
-                    q, max(1, q.analytic_worker_count + delta)
+                    q, max(1, q.analytic_worker_count + delta),
                 ).quality_score
                 for q in hier
             ]
@@ -78,10 +78,10 @@ class TestPosteriorTemperatureLever:
                 "posterior_temp_enabled": True,
                 "posterior_temp_threshold": 10,
                 "posterior_temp_factor": 3.0,
-            }
+            },
         )
         await bandit.initialize_bandit(
-            num_arms=2, algorithm=BanditAlgorithm.THOMPSON_SAMPLING
+            num_arms=2, algorithm=BanditAlgorithm.THOMPSON_SAMPLING,
         )
         # Feed a clearly better arm 0
         for _ in range(20):
@@ -97,7 +97,8 @@ class TestPosteriorTemperatureLever:
     @pytest.mark.asyncio
     async def test_sharpening_exploits_at_least_as_much(self) -> None:
         """Comparative: with identical evidence and RNG, the sharpened bandit
-        picks the best arm at least as often as the unsharpened one."""
+        picks the best arm at least as often as the unsharpened one.
+        """
 
         async def run(enabled: bool) -> int:
             np.random.seed(0)
@@ -106,10 +107,10 @@ class TestPosteriorTemperatureLever:
                     "posterior_temp_enabled": enabled,
                     "posterior_temp_threshold": 10,
                     "posterior_temp_factor": 3.0,
-                }
+                },
             )
             await bandit.initialize_bandit(
-                num_arms=2, algorithm=BanditAlgorithm.THOMPSON_SAMPLING
+                num_arms=2, algorithm=BanditAlgorithm.THOMPSON_SAMPLING,
             )
             for _ in range(20):
                 await bandit.update_bandit(0, reward=0.9)
@@ -122,10 +123,11 @@ class TestPosteriorTemperatureLever:
     @pytest.mark.asyncio
     async def test_continuous_update_separates_posterior_means(self) -> None:
         """Regression for the binary reward>0.5 threshold: rewards in a narrow
-        high band must still separate arm posteriors."""
+        high band must still separate arm posteriors.
+        """
         bandit = MultiBanditOptimizer({})
         await bandit.initialize_bandit(
-            num_arms=2, algorithm=BanditAlgorithm.THOMPSON_SAMPLING
+            num_arms=2, algorithm=BanditAlgorithm.THOMPSON_SAMPLING,
         )
         for _ in range(50):
             await bandit.update_bandit(0, reward=0.80)

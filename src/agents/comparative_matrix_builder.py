@@ -21,10 +21,10 @@ class ComparisonMatrixBuilder:
                     criteria_ranges[criterion] = {"min": score, "max": score}
                 else:
                     criteria_ranges[criterion]["min"] = min(
-                        criteria_ranges[criterion]["min"], score
+                        criteria_ranges[criterion]["min"], score,
                     )
                     criteria_ranges[criterion]["max"] = max(
-                        criteria_ranges[criterion]["max"], score
+                        criteria_ranges[criterion]["max"], score,
                     )
 
         normalized: dict[str, dict[str, float]] = {}
@@ -70,7 +70,7 @@ class ComparisonMatrixBuilder:
             )
 
         overall_ranking = sorted(
-            overall_scores.items(), key=lambda x: x[1], reverse=True
+            overall_scores.items(), key=lambda x: x[1], reverse=True,
         )
         rankings["overall"] = [item for item, _ in overall_ranking]
 
@@ -135,7 +135,7 @@ class ComparisonMatrixBuilder:
                     if std_dev > 0:
                         z_score = (original_score - mean_val) / std_dev
                         enhanced_matrix[item][criterion] = max(
-                            0, min(1, 0.5 + z_score * 0.2)
+                            0, min(1, 0.5 + z_score * 0.2),
                         )
 
         return enhanced_matrix
@@ -155,12 +155,12 @@ class ComparisonMatrixBuilder:
             item_scores[item] = {
                 "score": mean_score,
                 "confidence": self.calculate_ranking_confidence(
-                    scores, statistical_data
+                    scores, statistical_data,
                 ),
             }
 
         sorted_items = sorted(
-            item_scores.items(), key=lambda x: x[1]["score"], reverse=True
+            item_scores.items(), key=lambda x: x[1]["score"], reverse=True,
         )
 
         rankings_list: list[dict[str, str | float | int]] = [

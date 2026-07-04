@@ -1,5 +1,4 @@
-"""
-Knowledge Graph Tool for MCP.
+"""Knowledge Graph Tool for MCP.
 
 Provides entity extraction, graph building, and analysis capabilities.
 """
@@ -16,8 +15,7 @@ logger = get_logger()
 
 
 class KnowledgeGraphTool(BaseMCPTool):
-    """
-    MCP tool for knowledge graph operations.
+    """MCP tool for knowledge graph operations.
 
     Supports entity extraction, graph building, analysis, and visualization.
     """
@@ -63,38 +61,36 @@ class KnowledgeGraphTool(BaseMCPTool):
         )
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute knowledge graph operation.
+        """Execute knowledge graph operation.
 
         Args:
             **kwargs: Operation parameters
 
         Returns:
             Operation results
+
         """
         try:
             operation = kwargs.get("operation", "")
 
             if operation == "extract_entities":
                 return self._extract_entities(kwargs.get("text", ""))
-            elif operation == "build_graph":
+            if operation == "build_graph":
                 return self._build_graph(
-                    kwargs.get("entities", []), kwargs.get("relationships", [])
+                    kwargs.get("entities", []), kwargs.get("relationships", []),
                 )
-            elif operation == "analyze_graph":
+            if operation == "analyze_graph":
                 return self._analyze_graph()
-            elif operation == "visualize":
+            if operation == "visualize":
                 return self._visualize_graph()
-            else:
-                return {"success": False, "error": f"Unknown operation: {operation}"}
+            return {"success": False, "error": f"Unknown operation: {operation}"}
 
         except Exception as e:
             logger.error(f"Knowledge graph operation failed: {e!s}")
             return {"success": False, "error": str(e)}
 
     def _extract_entities(self, text: str) -> dict[str, Any]:
-        """
-        Extract entities from text.
+        """Extract entities from text.
 
         Simple implementation - in production would use NER models.
         """
@@ -139,7 +135,7 @@ class KnowledgeGraphTool(BaseMCPTool):
                 entity_type = self._classify_entity(entity_text)
 
                 entities.append(
-                    {"text": entity_text, "type": entity_type, "position": i}
+                    {"text": entity_text, "type": entity_type, "position": i},
                 )
 
         # Remove duplicates
@@ -161,20 +157,19 @@ class KnowledgeGraphTool(BaseMCPTool):
         # Simple classification rules
         if any(suffix in text.lower() for suffix in ["inc", "corp", "llc", "ltd"]):
             return "organization"
-        elif any(
+        if any(
             word in text.lower() for word in ["university", "college", "institute"]
         ):
             return "institution"
-        elif text.count(" ") >= 1 and text[0].isupper():
+        if text.count(" ") >= 1 and text[0].isupper():
             # Multi-word capitalized - likely a person name
             return "person"
-        elif text[0].isupper():
+        if text[0].isupper():
             return "concept"
-        else:
-            return "unknown"
+        return "unknown"
 
     def _build_graph(
-        self, entities: list[dict[str, Any]], relationships: list[dict[str, Any]]
+        self, entities: list[dict[str, Any]], relationships: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Build knowledge graph from entities and relationships."""
         if not entities:
@@ -194,7 +189,7 @@ class KnowledgeGraphTool(BaseMCPTool):
         # Add edges (relationships)
         for rel in relationships:
             self.graph.add_edge(
-                rel["source"], rel["target"], type=rel.get("type", "related")
+                rel["source"], rel["target"], type=rel.get("type", "related"),
             )
 
         return {
@@ -220,13 +215,13 @@ class KnowledgeGraphTool(BaseMCPTool):
         if self.graph.number_of_nodes() > 0:
             degree_centrality = nx.degree_centrality(self.graph)
             top_nodes = sorted(
-                degree_centrality.items(), key=lambda x: x[1], reverse=True
+                degree_centrality.items(), key=lambda x: x[1], reverse=True,
             )[:5]
 
             metrics["centrality"] = {
                 "top_nodes": [
                     {"node": node, "score": score} for node, score in top_nodes
-                ]
+                ],
             }
 
         # Community detection (for connected graphs)

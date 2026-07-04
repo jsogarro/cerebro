@@ -1,5 +1,4 @@
-"""
-Visualization generation service using Plotly and NetworkX.
+"""Visualization generation service using Plotly and NetworkX.
 
 This service generates interactive and static visualizations for research reports,
 following functional programming principles with pure data transformation functions.
@@ -58,7 +57,6 @@ logger = get_logger()
 class VisualizationGenerationError(Exception):
     """Exception raised during visualization generation."""
 
-    pass
 
 
 class VisualizationGenerator:
@@ -96,14 +94,13 @@ class VisualizationGenerator:
 
         if missing_deps:
             logger.warning(
-                f"Some visualization dependencies are missing: {missing_deps}"
+                f"Some visualization dependencies are missing: {missing_deps}",
             )
 
     def generate_visualization(
-        self, viz_spec: Visualization, format: str = "html", theme: str = "plotly_white"
+        self, viz_spec: Visualization, format: str = "html", theme: str = "plotly_white",
     ) -> dict[str, Any]:
-        """
-        Generate a visualization from specification.
+        """Generate a visualization from specification.
 
         Args:
             viz_spec: Visualization specification
@@ -112,6 +109,7 @@ class VisualizationGenerator:
 
         Returns:
             Dictionary with visualization data and metadata
+
         """
         try:
             logger.info(f"Generating visualization: {viz_spec.id} ({viz_spec.type})")
@@ -119,37 +117,36 @@ class VisualizationGenerator:
             # Generate visualization based on type
             if viz_spec.type == VisualizationType.BAR_CHART:
                 return self._generate_bar_chart(viz_spec, format, theme)
-            elif viz_spec.type == VisualizationType.LINE_CHART:
+            if viz_spec.type == VisualizationType.LINE_CHART:
                 return self._generate_line_chart(viz_spec, format, theme)
-            elif viz_spec.type == VisualizationType.PIE_CHART:
+            if viz_spec.type == VisualizationType.PIE_CHART:
                 return self._generate_pie_chart(viz_spec, format, theme)
-            elif viz_spec.type == VisualizationType.SCATTER_PLOT:
+            if viz_spec.type == VisualizationType.SCATTER_PLOT:
                 return self._generate_scatter_plot(viz_spec, format, theme)
-            elif viz_spec.type == VisualizationType.RADAR_CHART:
+            if viz_spec.type == VisualizationType.RADAR_CHART:
                 return self._generate_radar_chart(viz_spec, format, theme)
-            elif viz_spec.type == VisualizationType.HEATMAP:
+            if viz_spec.type == VisualizationType.HEATMAP:
                 return self._generate_heatmap(viz_spec, format, theme)
-            elif viz_spec.type == VisualizationType.NETWORK_GRAPH:
+            if viz_spec.type == VisualizationType.NETWORK_GRAPH:
                 return self._generate_network_graph(viz_spec, format, theme)
-            elif viz_spec.type == VisualizationType.WORD_CLOUD:
+            if viz_spec.type == VisualizationType.WORD_CLOUD:
                 return self._generate_word_cloud(viz_spec, format)
-            elif viz_spec.type == VisualizationType.HISTOGRAM:
+            if viz_spec.type == VisualizationType.HISTOGRAM:
                 return self._generate_histogram(viz_spec, format, theme)
-            elif viz_spec.type == VisualizationType.BOX_PLOT:
+            if viz_spec.type == VisualizationType.BOX_PLOT:
                 return self._generate_box_plot(viz_spec, format, theme)
-            else:
-                raise VisualizationGenerationError(
-                    f"Unsupported visualization type: {viz_spec.type}"
-                )
+            raise VisualizationGenerationError(
+                f"Unsupported visualization type: {viz_spec.type}",
+            )
 
         except Exception as e:
             logger.error(f"Visualization generation failed: {e}")
             raise VisualizationGenerationError(
-                f"Failed to generate {viz_spec.type}: {e}"
+                f"Failed to generate {viz_spec.type}: {e}",
             ) from e
 
     def _generate_bar_chart(
-        self, viz_spec: Visualization, format: str, theme: str
+        self, viz_spec: Visualization, format: str, theme: str,
     ) -> dict[str, Any]:
         """Generate bar chart visualization."""
         if not PLOTLY_AVAILABLE:
@@ -180,8 +177,8 @@ class VisualizationGenerator:
                     y=y_values,
                     marker_color=self.color_schemes["professional"][0],
                     name=viz_spec.title,
-                )
-            ]
+                ),
+            ],
         )
 
         # Update layout
@@ -197,7 +194,7 @@ class VisualizationGenerator:
         return self._finalize_plotly_figure(fig, format, viz_spec)
 
     def _generate_line_chart(
-        self, viz_spec: Visualization, format: str, theme: str
+        self, viz_spec: Visualization, format: str, theme: str,
     ) -> dict[str, Any]:
         """Generate line chart visualization."""
         if not PLOTLY_AVAILABLE:
@@ -220,7 +217,7 @@ class VisualizationGenerator:
                         mode="lines+markers",
                         name=series.get("name", f"Series {i + 1}"),
                         line={"color": colors[i % len(colors)]},
-                    )
+                    ),
                 )
         else:
             # Single series
@@ -231,7 +228,7 @@ class VisualizationGenerator:
                     mode="lines+markers",
                     name=viz_spec.title,
                     line={"color": self.color_schemes["professional"][0]},
-                )
+                ),
             )
 
         # Update layout
@@ -247,7 +244,7 @@ class VisualizationGenerator:
         return self._finalize_plotly_figure(fig, format, viz_spec)
 
     def _generate_pie_chart(
-        self, viz_spec: Visualization, format: str, theme: str
+        self, viz_spec: Visualization, format: str, theme: str,
     ) -> dict[str, Any]:
         """Generate pie chart visualization."""
         if not PLOTLY_AVAILABLE:
@@ -267,8 +264,8 @@ class VisualizationGenerator:
                     values=values,
                     hole=0.3 if viz_spec.config.get("donut", False) else 0,
                     marker_colors=self.color_schemes["professional"][: len(labels)],
-                )
-            ]
+                ),
+            ],
         )
 
         # Update layout
@@ -282,7 +279,7 @@ class VisualizationGenerator:
         return self._finalize_plotly_figure(fig, format, viz_spec)
 
     def _generate_scatter_plot(
-        self, viz_spec: Visualization, format: str, theme: str
+        self, viz_spec: Visualization, format: str, theme: str,
     ) -> dict[str, Any]:
         """Generate scatter plot visualization."""
         if not PLOTLY_AVAILABLE:
@@ -307,7 +304,7 @@ class VisualizationGenerator:
                 hovertemplate="<b>%{text}</b><br>X: %{x}<br>Y: %{y}<extra></extra>"
                 if "text" in data
                 else None,
-            )
+            ),
         )
 
         # Update layout
@@ -323,7 +320,7 @@ class VisualizationGenerator:
         return self._finalize_plotly_figure(fig, format, viz_spec)
 
     def _generate_radar_chart(
-        self, viz_spec: Visualization, format: str, theme: str
+        self, viz_spec: Visualization, format: str, theme: str,
     ) -> dict[str, Any]:
         """Generate radar chart visualization."""
         if not PLOTLY_AVAILABLE:
@@ -352,7 +349,7 @@ class VisualizationGenerator:
                         fill="toself",
                         name=series.get("name", f"Series {i + 1}"),
                         line={"color": colors[i % len(colors)]},
-                    )
+                    ),
                 )
         else:
             # Single series
@@ -367,7 +364,7 @@ class VisualizationGenerator:
                     fill="toself",
                     name=viz_spec.title,
                     line={"color": self.color_schemes["professional"][0]},
-                )
+                ),
             )
 
         # Update layout
@@ -378,7 +375,7 @@ class VisualizationGenerator:
                     "range": [0, max(data.get("values", [1])) * 1.1]
                     if "values" in data
                     else [0, 1],
-                }
+                },
             },
             title=viz_spec.title,
             template=theme,
@@ -389,7 +386,7 @@ class VisualizationGenerator:
         return self._finalize_plotly_figure(fig, format, viz_spec)
 
     def _generate_heatmap(
-        self, viz_spec: Visualization, format: str, theme: str
+        self, viz_spec: Visualization, format: str, theme: str,
     ) -> dict[str, Any]:
         """Generate heatmap visualization."""
         if not PLOTLY_AVAILABLE:
@@ -412,7 +409,7 @@ class VisualizationGenerator:
                 colorscale=config.get("colorscale", "RdYlBu"),
                 showscale=True,
                 hoverongaps=False,
-            )
+            ),
         )
 
         # Update layout
@@ -428,12 +425,12 @@ class VisualizationGenerator:
         return self._finalize_plotly_figure(fig, format, viz_spec)
 
     def _generate_network_graph(
-        self, viz_spec: Visualization, format: str, theme: str
+        self, viz_spec: Visualization, format: str, theme: str,
     ) -> dict[str, Any]:
         """Generate network graph visualization."""
         if not NETWORKX_AVAILABLE:
             raise VisualizationGenerationError(
-                "NetworkX not available for network graph"
+                "NetworkX not available for network graph",
             )
 
         data = viz_spec.data
@@ -472,8 +469,7 @@ class VisualizationGenerator:
         # If Plotly is available, create interactive network
         if PLOTLY_AVAILABLE:
             return self._create_plotly_network(G, pos, viz_spec, format, theme)
-        else:
-            return self._create_matplotlib_network(G, pos, viz_spec, format)
+        return self._create_matplotlib_network(G, pos, viz_spec, format)
 
     def _create_plotly_network(
         self,
@@ -564,7 +560,7 @@ class VisualizationGenerator:
                         "xanchor": "left",
                         "yanchor": "bottom",
                         "font": {"size": 12},
-                    }
+                    },
                 ],
                 xaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
                 yaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
@@ -619,7 +615,7 @@ class VisualizationGenerator:
         }
 
     def _generate_word_cloud(
-        self, viz_spec: Visualization, format: str
+        self, viz_spec: Visualization, format: str,
     ) -> dict[str, Any]:
         """Generate word cloud visualization."""
         if not WORDCLOUD_AVAILABLE:
@@ -653,7 +649,7 @@ class VisualizationGenerator:
             ).generate_from_frequencies(frequencies)
         else:
             raise VisualizationGenerationError(
-                "Word cloud requires 'text' or 'frequencies' in data"
+                "Word cloud requires 'text' or 'frequencies' in data",
             )
 
         # Convert to image
@@ -679,7 +675,7 @@ class VisualizationGenerator:
         }
 
     def _generate_histogram(
-        self, viz_spec: Visualization, format: str, theme: str
+        self, viz_spec: Visualization, format: str, theme: str,
     ) -> dict[str, Any]:
         """Generate histogram visualization."""
         if not PLOTLY_AVAILABLE:
@@ -697,8 +693,8 @@ class VisualizationGenerator:
                     name=viz_spec.title,
                     marker_color=self.color_schemes["professional"][0],
                     opacity=0.7,
-                )
-            ]
+                ),
+            ],
         )
 
         # Update layout
@@ -714,7 +710,7 @@ class VisualizationGenerator:
         return self._finalize_plotly_figure(fig, format, viz_spec)
 
     def _generate_box_plot(
-        self, viz_spec: Visualization, format: str, theme: str
+        self, viz_spec: Visualization, format: str, theme: str,
     ) -> dict[str, Any]:
         """Generate box plot visualization."""
         if not PLOTLY_AVAILABLE:
@@ -734,7 +730,7 @@ class VisualizationGenerator:
                         y=group_values,
                         name=group_name,
                         marker_color=colors[i % len(colors)],
-                    )
+                    ),
                 )
         else:
             # Single group
@@ -743,7 +739,7 @@ class VisualizationGenerator:
                     y=data.get("values", []),
                     name=viz_spec.title,
                     marker_color=self.color_schemes["professional"][0],
-                )
+                ),
             )
 
         # Update layout
@@ -758,7 +754,7 @@ class VisualizationGenerator:
         return self._finalize_plotly_figure(fig, format, viz_spec)
 
     def _finalize_plotly_figure(
-        self, fig: Any, format: str, viz_spec: Visualization
+        self, fig: Any, format: str, viz_spec: Visualization,
     ) -> dict[str, Any]:
         """Finalize Plotly figure and convert to requested format."""
         if format == "html":
@@ -772,7 +768,7 @@ class VisualizationGenerator:
                 "title": viz_spec.title,
                 "interactive": True,
             }
-        elif format in ["png", "svg", "pdf"]:
+        if format in ["png", "svg", "pdf"]:
             # Convert to static image
             img_bytes = pio.to_image(
                 fig,
@@ -792,14 +788,12 @@ class VisualizationGenerator:
                 "title": viz_spec.title,
                 "interactive": False,
             }
-        else:
-            raise VisualizationGenerationError(f"Unsupported format: {format}")
+        raise VisualizationGenerationError(f"Unsupported format: {format}")
 
     def generate_report_visualizations(
-        self, report: Report, format: str = "html"
+        self, report: Report, format: str = "html",
     ) -> dict[str, dict[str, Any]]:
-        """
-        Generate all visualizations for a report.
+        """Generate all visualizations for a report.
 
         Args:
             report: Report object with visualization specifications
@@ -807,6 +801,7 @@ class VisualizationGenerator:
 
         Returns:
             Dictionary mapping visualization IDs to generated content
+
         """
         if not self.settings.enable_visualizations:
             logger.info("Visualization generation is disabled")
@@ -839,7 +834,7 @@ def create_visualization_generator(
 
 # Utility functions for creating common visualization specifications
 def create_source_distribution_viz(
-    sources: list[dict[str, Any]], viz_id: str = "source_dist"
+    sources: list[dict[str, Any]], viz_id: str = "source_dist",
 ) -> Visualization:
     year_counts: dict[str, int] = {}
     for source in sources:
@@ -859,7 +854,7 @@ def create_source_distribution_viz(
 
 
 def create_domain_coverage_viz(
-    domains: list[str], viz_id: str = "domain_coverage"
+    domains: list[str], viz_id: str = "domain_coverage",
 ) -> Visualization:
     """Create visualization specification for domain coverage."""
     return Visualization(

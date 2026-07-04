@@ -1,5 +1,4 @@
-"""
-Audit log database model.
+"""Audit log database model.
 
 Provides comprehensive security audit trail for all authentication
 and authorization events in the system.
@@ -95,8 +94,7 @@ class AuditSeverity(StrEnum):
 
 
 class AuditLog(BaseModel):
-    """
-    Audit log model.
+    """Audit log model.
 
     Comprehensive audit trail for security events, authentication,
     and data access tracking.
@@ -120,7 +118,7 @@ class AuditLog(BaseModel):
     )
 
     event_category: Mapped[str | None] = mapped_column(
-        String(50), nullable=True, index=True, comment="Event category for grouping"
+        String(50), nullable=True, index=True, comment="Event category for grouping",
     )
 
     user_id: Mapped[Any | None] = mapped_column(
@@ -131,11 +129,11 @@ class AuditLog(BaseModel):
     )
 
     username: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="Username at time of event (denormalized)"
+        String(100), nullable=True, comment="Username at time of event (denormalized)",
     )
 
     email: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Email at time of event (denormalized)"
+        String(255), nullable=True, comment="Email at time of event (denormalized)",
     )
 
     actor_id: Mapped[Any | None] = mapped_column(
@@ -145,27 +143,27 @@ class AuditLog(BaseModel):
     )
 
     actor_username: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="Username of actor"
+        String(100), nullable=True, comment="Username of actor",
     )
 
     resource_type: Mapped[str | None] = mapped_column(
-        String(50), nullable=True, index=True, comment="Type of resource affected"
+        String(50), nullable=True, index=True, comment="Type of resource affected",
     )
 
     resource_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, index=True, comment="ID of resource affected"
+        String(255), nullable=True, index=True, comment="ID of resource affected",
     )
 
     resource_name: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Name/description of resource"
+        String(255), nullable=True, comment="Name/description of resource",
     )
 
     action: Mapped[str] = mapped_column(
-        String(100), nullable=False, comment="Action performed"
+        String(100), nullable=False, comment="Action performed",
     )
 
     description: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Detailed event description"
+        Text, nullable=True, comment="Detailed event description",
     )
 
     result: Mapped[str | None] = mapped_column(
@@ -175,35 +173,35 @@ class AuditLog(BaseModel):
     )
 
     error_message: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Error message if action failed"
+        Text, nullable=True, comment="Error message if action failed",
     )
 
     ip_address: Mapped[str | None] = mapped_column(
-        String(45), nullable=True, index=True, comment="Client IP address"
+        String(45), nullable=True, index=True, comment="Client IP address",
     )
 
     user_agent: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, comment="User agent string"
+        String(500), nullable=True, comment="User agent string",
     )
 
     request_id: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, index=True, comment="Request correlation ID"
+        String(100), nullable=True, index=True, comment="Request correlation ID",
     )
 
     session_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Session ID if applicable"
+        String(255), nullable=True, comment="Session ID if applicable",
     )
 
     country: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="Country from IP geolocation"
+        String(100), nullable=True, comment="Country from IP geolocation",
     )
 
     city: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="City from IP geolocation"
+        String(100), nullable=True, comment="City from IP geolocation",
     )
 
     event_metadata: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="Additional event metadata"
+        JSON, nullable=True, comment="Additional event metadata",
     )
 
     is_suspicious: Mapped[bool] = mapped_column(
@@ -223,11 +221,11 @@ class AuditLog(BaseModel):
     )
 
     reviewed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="When event was reviewed"
+        DateTime(timezone=True), nullable=True, comment="When event was reviewed",
     )
 
     reviewed_by: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="Who reviewed the event"
+        String(255), nullable=True, comment="Who reviewed the event",
     )
 
     # Relationships
@@ -256,8 +254,7 @@ class AuditLog(BaseModel):
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> "AuditLog":
-        """
-        Create an audit log entry.
+        """Create an audit log entry.
 
         Args:
             event_type: Type of event
@@ -273,6 +270,7 @@ class AuditLog(BaseModel):
 
         Returns:
             AuditLog instance
+
         """
         # Determine event category from event type
         event_category = cls._get_event_category(event_type)
@@ -302,31 +300,30 @@ class AuditLog(BaseModel):
         """Get event category from event type."""
         if "login" in event_type.value.lower() or "logout" in event_type.value.lower():
             return "authentication"
-        elif "password" in event_type.value.lower():
+        if "password" in event_type.value.lower():
             return "password"
-        elif "account" in event_type.value.lower():
+        if "account" in event_type.value.lower():
             return "account"
-        elif "mfa" in event_type.value.lower():
+        if "mfa" in event_type.value.lower():
             return "mfa"
-        elif "oauth" in event_type.value.lower():
+        if "oauth" in event_type.value.lower():
             return "oauth"
-        elif "session" in event_type.value.lower():
+        if "session" in event_type.value.lower():
             return "session"
-        elif "api_key" in event_type.value.lower():
+        if "api_key" in event_type.value.lower():
             return "api_key"
-        elif (
+        if (
             "permission" in event_type.value.lower()
             or "role" in event_type.value.lower()
         ):
             return "authorization"
-        elif "data" in event_type.value.lower():
+        if "data" in event_type.value.lower():
             return "data_access"
-        else:
-            return "security"
+        return "security"
 
     @staticmethod
     def _is_suspicious_event(
-        event_type: AuditEventType, result: str, metadata: dict[str, Any] | None
+        event_type: AuditEventType, result: str, metadata: dict[str, Any] | None,
     ) -> bool:
         """Determine if event is suspicious."""
         # Failed login attempts
@@ -362,8 +359,7 @@ class AuditLog(BaseModel):
         limit: int = 100,
         session: Any = None,
     ) -> list["AuditLog"]:
-        """
-        Get audit events for a user.
+        """Get audit events for a user.
 
         Args:
             user_id: User ID
@@ -373,6 +369,7 @@ class AuditLog(BaseModel):
 
         Returns:
             List of AuditLog instances
+
         """
         if not session:
             return []
@@ -389,10 +386,9 @@ class AuditLog(BaseModel):
 
     @classmethod
     def get_suspicious_events(
-        cls, unreviewed_only: bool = True, limit: int = 100, session: Any = None
+        cls, unreviewed_only: bool = True, limit: int = 100, session: Any = None,
     ) -> list["AuditLog"]:
-        """
-        Get suspicious events requiring review.
+        """Get suspicious events requiring review.
 
         Args:
             unreviewed_only: Only get unreviewed events
@@ -401,6 +397,7 @@ class AuditLog(BaseModel):
 
         Returns:
             List of AuditLog instances
+
         """
         if not session:
             return []
@@ -416,22 +413,22 @@ class AuditLog(BaseModel):
         return results
 
     def mark_reviewed(self, reviewer: str) -> None:
-        """
-        Mark event as reviewed.
+        """Mark event as reviewed.
 
         Args:
             reviewer: Username of reviewer
+
         """
         self.reviewed_at = datetime.now(UTC)
         self.reviewed_by = reviewer
         self.requires_review = False
 
     def to_dict(self) -> dict[str, Any]:
-        """
-        Convert to dictionary.
+        """Convert to dictionary.
 
         Returns:
             Dictionary representation
+
         """
         return {
             "id": str(self.id),

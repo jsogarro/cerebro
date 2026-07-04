@@ -1,5 +1,4 @@
-"""
-Authentication-related database models.
+"""Authentication-related database models.
 
 Additional tables for authentication, sessions, and security features.
 """
@@ -25,8 +24,7 @@ from src.models.db.base import BaseModel
 
 
 class PasswordHistory(BaseModel):
-    """
-    Password history tracking.
+    """Password history tracking.
 
     Stores hashed passwords to prevent reuse.
     """
@@ -41,7 +39,7 @@ class PasswordHistory(BaseModel):
     )
 
     password_hash = Column(
-        String(255), nullable=False, comment="Bcrypt hashed password"
+        String(255), nullable=False, comment="Bcrypt hashed password",
     )
 
     # Relationships
@@ -54,8 +52,7 @@ class PasswordHistory(BaseModel):
 
 
 class UserSession(BaseModel):
-    """
-    User session tracking.
+    """User session tracking.
 
     Stores active user sessions for management and security.
     """
@@ -86,7 +83,7 @@ class UserSession(BaseModel):
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
     last_activity: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="Last activity timestamp"
+        DateTime(timezone=True), nullable=True, comment="Last activity timestamp",
     )
 
     # Relationships
@@ -110,8 +107,7 @@ class UserSession(BaseModel):
 
 
 class AuditLog(BaseModel):
-    """
-    Audit log for security events.
+    """Audit log for security events.
 
     Immutable log of all security-relevant actions.
     """
@@ -134,11 +130,11 @@ class AuditLog(BaseModel):
     )
 
     resource_type = Column(
-        String(50), nullable=True, index=True, comment="Type of resource affected"
+        String(50), nullable=True, index=True, comment="Type of resource affected",
     )
 
     resource_id = Column(
-        UUID(as_uuid=True), nullable=True, index=True, comment="ID of resource affected"
+        UUID(as_uuid=True), nullable=True, index=True, comment="ID of resource affected",
     )
 
     details = Column(JSON, nullable=True, comment="Additional event details")
@@ -148,7 +144,7 @@ class AuditLog(BaseModel):
     user_agent = Column(Text, nullable=True, comment="User agent string")
 
     status = Column(
-        String(20), nullable=True, comment="Result status (success, failure, etc.)"
+        String(20), nullable=True, comment="Result status (success, failure, etc.)",
     )
 
     # Relationships
@@ -163,8 +159,7 @@ class AuditLog(BaseModel):
 
 
 class OAuthAccount(BaseModel):
-    """
-    OAuth provider accounts.
+    """OAuth provider accounts.
 
     Links users to external OAuth providers.
     """
@@ -179,11 +174,11 @@ class OAuthAccount(BaseModel):
     )
 
     provider = Column(
-        String(50), nullable=False, comment="OAuth provider name (google, github, etc.)"
+        String(50), nullable=False, comment="OAuth provider name (google, github, etc.)",
     )
 
     provider_user_id = Column(
-        String(255), nullable=False, comment="User ID from provider"
+        String(255), nullable=False, comment="User ID from provider",
     )
 
     access_token = Column(Text, nullable=True, comment="Encrypted access token")
@@ -191,11 +186,11 @@ class OAuthAccount(BaseModel):
     refresh_token = Column(Text, nullable=True, comment="Encrypted refresh token")
 
     expires_at = Column(
-        DateTime(timezone=True), nullable=True, comment="Token expiration time"
+        DateTime(timezone=True), nullable=True, comment="Token expiration time",
     )
 
     profile_data = Column(
-        JSON, nullable=True, comment="Cached profile data from provider"
+        JSON, nullable=True, comment="Cached profile data from provider",
     )
 
     # Relationships
@@ -209,8 +204,7 @@ class OAuthAccount(BaseModel):
 
 
 class MFASettings(BaseModel):
-    """
-    Multi-factor authentication settings.
+    """Multi-factor authentication settings.
 
     Stores MFA configuration for users.
     """
@@ -228,19 +222,19 @@ class MFASettings(BaseModel):
     totp_secret = Column(String(255), nullable=True, comment="Encrypted TOTP secret")
 
     backup_codes: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String), nullable=True, comment="Encrypted backup codes"
+        ARRAY(String), nullable=True, comment="Encrypted backup codes",
     )
 
     sms_number = Column(
-        String(20), nullable=True, comment="Phone number for SMS verification"
+        String(20), nullable=True, comment="Phone number for SMS verification",
     )
 
     is_enabled = Column(
-        Boolean, nullable=False, default=False, comment="Whether MFA is enabled"
+        Boolean, nullable=False, default=False, comment="Whether MFA is enabled",
     )
 
     preferred_method = Column(
-        String(20), nullable=True, comment="Preferred MFA method (totp, sms, etc.)"
+        String(20), nullable=True, comment="Preferred MFA method (totp, sms, etc.)",
     )
 
     # Relationships
@@ -248,8 +242,7 @@ class MFASettings(BaseModel):
 
 
 class LoginAttempt(BaseModel):
-    """
-    Login attempt tracking.
+    """Login attempt tracking.
 
     Tracks failed login attempts for security monitoring.
     """
@@ -257,7 +250,7 @@ class LoginAttempt(BaseModel):
     __tablename__ = "login_attempts"
 
     email = Column(
-        String(255), nullable=False, index=True, comment="Email used in attempt"
+        String(255), nullable=False, index=True, comment="Email used in attempt",
     )
 
     ip_address = Column(INET, nullable=True, comment="IP address of attempt")
@@ -276,8 +269,7 @@ class LoginAttempt(BaseModel):
 
 
 class SecurityAlert(BaseModel):
-    """
-    Security alerts and notifications.
+    """Security alerts and notifications.
 
     Stores security-related alerts for users.
     """
@@ -308,11 +300,11 @@ class SecurityAlert(BaseModel):
     details = Column(JSON, nullable=True, comment="Additional alert details")
 
     is_read = Column(
-        Boolean, nullable=False, default=False, comment="Whether alert has been read"
+        Boolean, nullable=False, default=False, comment="Whether alert has been read",
     )
 
     resolved_at = Column(
-        DateTime(timezone=True), nullable=True, comment="When alert was resolved"
+        DateTime(timezone=True), nullable=True, comment="When alert was resolved",
     )
 
     # Relationships

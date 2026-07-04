@@ -1,5 +1,4 @@
-"""
-MASR Dynamic Routing API Models
+"""MASR Dynamic Routing API Models
 
 Request and response models for MASR routing intelligence endpoints.
 Based on "MasRouter: Learning to Route LLMs" research patterns.
@@ -25,14 +24,14 @@ class RoutingRequest(BaseModel):
 
     query: str = Field(description="The user query to route")
     context: dict[str, Any] | None = Field(
-        default=None, description="Additional context for routing"
+        default=None, description="Additional context for routing",
     )
     strategy: RoutingStrategy | None = Field(
-        default=None, description="Override routing strategy"
+        default=None, description="Override routing strategy",
     )
     max_cost: float | None = Field(default=None, description="Maximum cost constraint")
     min_quality: float | None = Field(
-        default=None, description="Minimum quality requirement"
+        default=None, description="Minimum quality requirement",
     )
     timeout_ms: int | None = Field(default=None, description="Timeout in milliseconds")
 
@@ -44,13 +43,13 @@ class CostEstimationRequest(BaseModel):
 
     query: str = Field(description="Query to estimate cost for")
     strategy: RoutingStrategy | None = Field(
-        default=None, description="Routing strategy to use"
+        default=None, description="Routing strategy to use",
     )
     include_breakdown: bool = Field(
-        default=True, description="Include detailed breakdown"
+        default=True, description="Include detailed breakdown",
     )
     include_confidence: bool = Field(
-        default=True, description="Include confidence intervals"
+        default=True, description="Include confidence intervals",
     )
 
 
@@ -61,10 +60,10 @@ class StrategyEvaluationRequest(BaseModel):
 
     query: str = Field(description="Query to evaluate strategies for")
     strategies: list[RoutingStrategy] | None = Field(
-        default=None, description="Strategies to evaluate (all if not specified)"
+        default=None, description="Strategies to evaluate (all if not specified)",
     )
     weights: dict[str, float] | None = Field(
-        default=None, description="Custom weights for cost, quality, latency"
+        default=None, description="Custom weights for cost, quality, latency",
     )
 
 
@@ -73,10 +72,10 @@ class ComplexityAnalysisRequest(BaseModel):
 
     query: str = Field(description="Query to analyze")
     include_features: bool = Field(
-        default=True, description="Include feature breakdown"
+        default=True, description="Include feature breakdown",
     )
     include_recommendations: bool = Field(
-        default=True, description="Include routing recommendations"
+        default=True, description="Include routing recommendations",
     )
 
 
@@ -88,11 +87,11 @@ class RoutingFeedback(BaseModel):
     actual_latency_ms: int = Field(description="Actual latency in milliseconds")
     quality_score: float = Field(ge=0, le=1, description="Quality score (0-1)")
     user_satisfaction: float | None = Field(
-        default=None, ge=0, le=1, description="User satisfaction score (0-1)"
+        default=None, ge=0, le=1, description="User satisfaction score (0-1)",
     )
     error_occurred: bool = Field(default=False, description="Whether an error occurred")
     error_message: str | None = Field(
-        default=None, description="Error message if applicable"
+        default=None, description="Error message if applicable",
     )
 
 
@@ -131,7 +130,7 @@ class CostBreakdown(BaseModel):
     memory_operations: float = Field(description="Cost for memory operations")
     total_cost: float = Field(description="Total estimated cost")
     confidence_interval: tuple[float, float] | None = Field(
-        default=None, description="95% confidence interval for cost"
+        default=None, description="95% confidence interval for cost",
     )
 
 
@@ -147,10 +146,10 @@ class RoutingDecisionResponse(BaseModel):
     collaboration_mode: CollaborationMode = Field(description="Collaboration mode")
 
     supervisor_allocations: list[SupervisorAllocation] = Field(
-        description="Allocated supervisors and workers"
+        description="Allocated supervisors and workers",
     )
     selected_models: list[ModelInfo] = Field(
-        description="Selected models for execution"
+        description="Selected models for execution",
     )
 
     estimated_cost: float = Field(description="Estimated total cost in USD")
@@ -159,7 +158,7 @@ class RoutingDecisionResponse(BaseModel):
 
     reasoning: str = Field(description="Explanation of routing decision")
     alternatives: list[dict[str, Any]] | None = Field(
-        default=None, description="Alternative routing options considered"
+        default=None, description="Alternative routing options considered",
     )
 
 
@@ -169,7 +168,7 @@ class CostEstimationResponse(BaseModel):
     estimated_cost: float = Field(description="Total estimated cost in USD")
     breakdown: CostBreakdown | None = Field(default=None, description="Cost breakdown")
     confidence_score: float = Field(
-        ge=0, le=1, description="Estimation confidence (0-1)"
+        ge=0, le=1, description="Estimation confidence (0-1)",
     )
     cost_factors: dict[str, float] = Field(description="Individual cost factors")
     recommendations: list[str] = Field(description="Cost optimization recommendations")
@@ -187,7 +186,7 @@ class StrategyComparison(BaseModel):
     pros: list[str] = Field(description="Advantages of this strategy")
     cons: list[str] = Field(description="Disadvantages of this strategy")
     recommendation_score: float = Field(
-        ge=0, le=1, description="Recommendation score (0-1)"
+        ge=0, le=1, description="Recommendation score (0-1)",
     )
 
 
@@ -219,7 +218,7 @@ class ComplexityAnalysisResponse(BaseModel):
     complexity: QueryComplexity = Field(description="Overall complexity level")
     complexity_score: float = Field(ge=0, le=1, description="Complexity score (0-1)")
     features: ComplexityFeatures | None = Field(
-        default=None, description="Detailed feature breakdown"
+        default=None, description="Detailed feature breakdown",
     )
     recommended_approach: str = Field(description="Recommended execution approach")
     routing_recommendations: list[str] = Field(description="Routing recommendations")
@@ -249,16 +248,16 @@ class RouterStatus(BaseModel):
     active_supervisors: int = Field(description="Currently active supervisors")
 
     performance_metrics: dict[str, dict[str, float]] = Field(
-        description="Performance metrics by strategy"
+        description="Performance metrics by strategy",
     )
     model_availability: dict[str, bool] = Field(
-        description="Model provider availability"
+        description="Model provider availability",
     )
     learning_metrics: dict[str, Any] = Field(description="Learning system metrics")
 
     last_error: str | None = Field(default=None, description="Last error message")
     last_error_time: datetime | None = Field(
-        default=None, description="Last error timestamp"
+        default=None, description="Last error timestamp",
     )
 
 
@@ -291,11 +290,11 @@ class MASRErrorResponse(BaseModel):
     error: str = Field(description="Error message")
     error_code: str = Field(description="Error code")
     details: dict[str, Any] | None = Field(
-        default=None, description="Additional error details"
+        default=None, description="Additional error details",
     )
     suggestions: list[str] | None = Field(
-        default=None, description="Suggestions to resolve"
+        default=None, description="Suggestions to resolve",
     )
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), description="Error timestamp"
+        default_factory=lambda: datetime.now(UTC), description="Error timestamp",
     )

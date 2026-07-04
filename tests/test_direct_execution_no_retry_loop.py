@@ -52,7 +52,7 @@ class _DecisionStub:
 def _make_service() -> DirectExecutionService:
     router = MagicMock()
     router.route = AsyncMock(
-        return_value=_DecisionStub(_AllocStub(), _ComplexityAnalysisStub())
+        return_value=_DecisionStub(_AllocStub(), _ComplexityAnalysisStub()),
     )
 
     bridge = MagicMock()
@@ -64,12 +64,12 @@ def _make_service() -> DirectExecutionService:
             consensus_score=0.7,
             workers_used=3,
             errors=[],
-        )
+        ),
     )
 
     # event_publisher=None makes _publish_progress_update a no-op.
     return DirectExecutionService(
-        masr_router=router, supervisor_bridge=bridge, event_publisher=None
+        masr_router=router, supervisor_bridge=bridge, event_publisher=None,
     )
 
 

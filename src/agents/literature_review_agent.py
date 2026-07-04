@@ -1,5 +1,4 @@
-"""
-Literature Review Agent implementation.
+"""Literature Review Agent implementation.
 
 This agent specializes in conducting comprehensive literature reviews,
 searching academic sources, and identifying research gaps.
@@ -21,8 +20,7 @@ logger = get_logger()
 
 
 class LiteratureReviewAgent(LLMWorkerAgentBase):
-    """
-    Agent specialized in conducting systematic literature reviews.
+    """Agent specialized in conducting systematic literature reviews.
 
     This agent searches for academic sources, extracts key findings,
     identifies research gaps, and generates comprehensive literature summaries.
@@ -33,14 +31,14 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return "literature_review"
 
     async def execute(self, task: AgentTask) -> AgentResult:
-        """
-        Execute a literature review task.
+        """Execute a literature review task.
 
         Args:
             task: The literature review task to execute
 
         Returns:
             AgentResult containing sources, findings, and gaps
+
         """
         try:
             # Validate input
@@ -58,7 +56,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             # Search and analyze using structured output (consolidates source search + analysis)
             if self.gemini_service:
                 literature_analysis = await self._search_and_analyze_structured(
-                    task.input_data
+                    task.input_data,
                 )
                 # Extract sources from structured response
                 academic_sources: dict[str, Any] = {
@@ -71,10 +69,10 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             else:
                 # Fallback: Use original two-step process for testing
                 academic_sources = await self._search_academic_sources(
-                    task.input_data, task
+                    task.input_data, task,
                 )
                 literature_analysis_dict = await self._analyze_literature_with_gemini(
-                    task.input_data, academic_sources, task
+                    task.input_data, academic_sources, task,
                 )
                 # Convert to structured format
                 from src.agents.schemas import LiteratureAnalysisSchema
@@ -84,16 +82,16 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                     key_findings=literature_analysis_dict.get("key_findings", []),
                     research_gaps=literature_analysis_dict.get("research_gaps", []),
                     methodologies_used=literature_analysis_dict.get(
-                        "methodologies_used", []
+                        "methodologies_used", [],
                     ),
                     quality_assessment=literature_analysis_dict.get(
-                        "quality_assessment", ""
+                        "quality_assessment", "",
                     ),
                 )
 
             # Step 3: Build knowledge graph of relationships
             knowledge_graph = await self._build_literature_knowledge_graph(
-                academic_sources, literature_analysis
+                academic_sources, literature_analysis,
             )
 
             # Step 4: Format citations properly
@@ -106,7 +104,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             # Analyze research gaps with enhanced analysis
             gaps = literature_analysis.research_gaps
             gap_analysis = self._analyze_research_gaps(
-                gaps, ranked_sources, knowledge_graph
+                gaps, ranked_sources, knowledge_graph,
             )
 
             # Calculate confidence score with MCP-enhanced data
@@ -126,7 +124,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 "methodologies_used": literature_analysis.methodologies_used,
                 "quality_assessment": literature_analysis.quality_assessment,
                 "search_strategy": academic_sources.get(
-                    "search_strategy", "Multi-database academic search"
+                    "search_strategy", "Multi-database academic search",
                 ),
                 "total_sources": len(ranked_sources),
                 "databases_searched": academic_sources.get("databases_searched", []),
@@ -140,11 +138,11 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
             # Handle depth level
             depth_level = task.input_data.get(
-                "depth_level", ResearchDepth.COMPREHENSIVE.value
+                "depth_level", ResearchDepth.COMPREHENSIVE.value,
             )
             if depth_level == ResearchDepth.EXHAUSTIVE.value:
                 output["search_strategy"] = "Exhaustive " + output.get(
-                    "search_strategy", "search"
+                    "search_strategy", "search",
                 )
 
             result = AgentResult(
@@ -161,7 +159,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
             # Cache the result
             await self.cache_result(
-                cache_key, result, ttl=LONG_TERM_CACHE_TTL
+                cache_key, result, ttl=LONG_TERM_CACHE_TTL,
             )  # 24 hours
 
             return result
@@ -171,14 +169,14 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             return self.handle_error(task, e)
 
     async def validate_result(self, result: AgentResult) -> bool:
-        """
-        Validate the literature review result.
+        """Validate the literature review result.
 
         Args:
             result: The result to validate
 
         Returns:
             True if valid, False otherwise
+
         """
         if result.status != "success":
             return result.status == "failed"  # Failed results are valid
@@ -207,19 +205,19 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return not (not isinstance(gaps, list) or len(gaps) == 0)
 
     def _rank_sources_by_relevance(
-        self, sources: list[dict[str, Any]]
+        self, sources: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """
-        Rank sources by relevance score in descending order.
+        """Rank sources by relevance score in descending order.
 
         Args:
             sources: List of source dictionaries
 
         Returns:
             Sorted list of sources
+
         """
         return sorted(
-            sources, key=lambda x: x.get("relevance_score", 0.0), reverse=True
+            sources, key=lambda x: x.get("relevance_score", 0.0), reverse=True,
         )
 
     def _analyze_research_gaps(
@@ -228,8 +226,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         sources: list[dict[str, Any]],
         knowledge_graph: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Analyze research gaps in context of found sources and knowledge graph.
+        """Analyze research gaps in context of found sources and knowledge graph.
 
         Args:
             gaps: List of identified gaps
@@ -238,6 +235,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         Returns:
             Gap analysis dictionary
+
         """
         analysis = {
             "total_gaps": len(gaps),
@@ -258,14 +256,14 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return analysis
 
     def _categorize_gaps(self, gaps: list[str]) -> dict[str, list[str]]:
-        """
-        Categorize research gaps by type.
+        """Categorize research gaps by type.
 
         Args:
             gaps: List of gap descriptions
 
         Returns:
             Categorized gaps
+
         """
         categories: dict[str, list[str]] = {
             "methodological": [],
@@ -304,24 +302,23 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return {k: v for k, v in categories.items() if v}
 
     def _assess_coverage(self, sources: list[dict[str, Any]]) -> str:
-        """
-        Assess literature coverage based on sources.
+        """Assess literature coverage based on sources.
 
         Args:
             sources: List of sources
 
         Returns:
             Coverage assessment
+
         """
         count = len(sources)
         if count >= 50:
             return "Comprehensive coverage"
-        elif count >= 20:
+        if count >= 20:
             return "Good coverage"
-        elif count >= 10:
+        if count >= 10:
             return "Moderate coverage"
-        else:
-            return "Limited coverage"
+        return "Limited coverage"
 
     def _calculate_confidence(
         self,
@@ -330,8 +327,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         findings: list[str],
         mcp_data_quality: bool = False,
     ) -> float:
-        """
-        Calculate confidence score based on multiple factors.
+        """Calculate confidence score based on multiple factors.
 
         Args:
             sources: List of sources found
@@ -340,6 +336,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         Returns:
             Confidence score between 0.0 and 1.0
+
         """
         confidence = 0.5  # Base confidence
 
@@ -379,7 +376,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         # Factor 4: Average relevance score (max +0.1)
         if sources:
             avg_relevance = sum(s.get("relevance_score", 0.0) for s in sources) / len(
-                sources
+                sources,
             )
             confidence += avg_relevance * 0.1
 
@@ -391,14 +388,14 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return min(max(confidence, 0.0), 1.0)
 
     def _generate_cache_key(self, task: AgentTask) -> str:
-        """
-        Generate a cache key for the task.
+        """Generate a cache key for the task.
 
         Args:
             task: The task to generate key for
 
         Returns:
             Cache key string
+
         """
         key_parts = [
             self.get_agent_type(),
@@ -410,14 +407,14 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return hashlib.md5(key_string.encode()).hexdigest()
 
     def _generate_mock_analysis(self, task: AgentTask) -> dict[str, Any]:
-        """
-        Generate mock analysis for testing without Gemini.
+        """Generate mock analysis for testing without Gemini.
 
         Args:
             task: The task to analyze
 
         Returns:
             Mock literature analysis
+
         """
         return {
             "search_strategy": "Mock systematic search",
@@ -443,10 +440,9 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         }
 
     async def _search_academic_sources(
-        self, input_data: dict[str, Any], task: AgentTask | None = None
+        self, input_data: dict[str, Any], task: AgentTask | None = None,
     ) -> dict[str, Any]:
-        """
-        Search academic sources using MCP tools.
+        """Search academic sources using MCP tools.
 
         Args:
             input_data: Task input data
@@ -454,10 +450,11 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         Returns:
             Academic search results
+
         """
         if not self.mcp_integration:
             self.log_warning(
-                "MCP integration not available, using Gemini source search"
+                "MCP integration not available, using Gemini source search",
             )
             return await self._fallback_academic_search(input_data, task)
 
@@ -484,7 +481,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             )
 
             self.log_info(
-                f"Academic search completed: {result.get('total_found', 0)} sources found"
+                f"Academic search completed: {result.get('total_found', 0)} sources found",
             )
             return dict(result)
 
@@ -498,8 +495,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         academic_sources: dict[str, Any],
         task: AgentTask,
     ) -> dict[str, Any]:
-        """
-        Analyze literature using Gemini with real academic sources.
+        """Analyze literature using Gemini with real academic sources.
 
         Args:
             input_data: Original task input
@@ -508,10 +504,11 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         Returns:
             Literature analysis from Gemini
+
         """
         # Prepare sources for Gemini analysis
         sources_text = self._prepare_sources_for_analysis(
-            academic_sources.get("sources", [])
+            academic_sources.get("sources", []),
         )
 
         # Create enhanced prompt with real sources
@@ -535,10 +532,9 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             return self._generate_mock_analysis_from_sources(academic_sources)
 
     async def _build_literature_knowledge_graph(
-        self, academic_sources: dict[str, Any], literature_analysis: dict[str, Any]
+        self, academic_sources: dict[str, Any], literature_analysis: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Build knowledge graph from literature using MCP tools.
+        """Build knowledge graph from literature using MCP tools.
 
         Args:
             academic_sources: Academic search results
@@ -546,6 +542,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         Returns:
             Knowledge graph data
+
         """
         if not self.mcp_integration:
             return {"success": False, "error": "MCP integration not available"}
@@ -565,10 +562,10 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         try:
             result = await self.mcp_integration.build_knowledge_graph(
-                text=text_for_analysis
+                text=text_for_analysis,
             )
             self.log_info(
-                f"Knowledge graph built with {len(result.get('entities', []))} entities"
+                f"Knowledge graph built with {len(result.get('entities', []))} entities",
             )
             return dict(result)
         except Exception as e:
@@ -576,16 +573,16 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             return {"success": False, "error": str(e)}
 
     async def _format_source_citations(
-        self, academic_sources: dict[str, Any]
+        self, academic_sources: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Format citations using MCP citation tool.
+        """Format citations using MCP citation tool.
 
         Args:
             academic_sources: Academic search results
 
         Returns:
             Formatted citations
+
         """
         if not self.mcp_integration:
             return {"success": False, "citations": []}
@@ -608,7 +605,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         try:
             result = await self.mcp_integration.format_citations(
-                sources=citation_sources, style="APA"
+                sources=citation_sources, style="APA",
             )
             self.log_info(f"Formatted {len(citation_sources)} citations")
             return dict(result)
@@ -617,14 +614,14 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             return {"success": False, "error": str(e)}
 
     def _determine_databases(self, domains: list[str]) -> list[str]:
-        """
-        Determine which databases to search based on domains.
+        """Determine which databases to search based on domains.
 
         Args:
             domains: Research domains
 
         Returns:
             List of database names
+
         """
         databases = ["arxiv"]  # Default
 
@@ -649,14 +646,14 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return list(set(databases))
 
     def _prepare_sources_for_analysis(self, sources: list[dict[str, Any]]) -> str:
-        """
-        Prepare sources text for Gemini analysis.
+        """Prepare sources text for Gemini analysis.
 
         Args:
             sources: List of source dictionaries
 
         Returns:
             Formatted sources text
+
         """
         if not sources:
             return "No sources found."
@@ -682,7 +679,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return "\\n\\n".join(sources_text)
 
     async def _search_sources_structured(
-        self, input_data: dict[str, Any]
+        self, input_data: dict[str, Any],
     ) -> list[dict[str, Any]]:
         """Find academic sources using structured output."""
         from pydantic import BaseModel, Field
@@ -691,7 +688,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         class SourceListSchema(BaseModel):
             sources: list[AcademicSource] = Field(
-                description="List of academic sources"
+                description="List of academic sources",
             )
 
         query = input_data.get("query", "")
@@ -715,7 +712,7 @@ Requirements:
 
         try:
             result = await self._generate_structured_with_routing(
-                prompt, SourceListSchema, task=None
+                prompt, SourceListSchema, task=None,
             )
             self.log_info(f"Found {len(result.sources)} sources")
             return [s.model_dump() for s in result.sources]
@@ -724,7 +721,7 @@ Requirements:
             return []
 
     async def _analyze_sources_structured(
-        self, query: str, sources: list[dict[str, Any]]
+        self, query: str, sources: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Analyze found sources using structured output."""
         from src.agents.schemas import LiteratureAnalysisSchema
@@ -748,7 +745,7 @@ Analyze the literature and provide:
 
         try:
             result = await self._generate_structured_with_routing(
-                prompt, LiteratureAnalysisSchema, task=None
+                prompt, LiteratureAnalysisSchema, task=None,
             )
             return {
                 "key_findings": result.key_findings,
@@ -766,10 +763,9 @@ Analyze the literature and provide:
             }
 
     async def _search_and_analyze_structured(
-        self, input_data: dict[str, Any]
+        self, input_data: dict[str, Any],
     ) -> Any:  # Returns LiteratureAnalysisSchema
-        """
-        Search for sources and analyze using structured output (two sequential calls).
+        """Search for sources and analyze using structured output (two sequential calls).
 
         Splits into two calls to prevent token exhaustion:
         1. Source discovery (capped at 10 sources)
@@ -780,6 +776,7 @@ Analyze the literature and provide:
 
         Returns:
             LiteratureAnalysisSchema instance with sources and analysis
+
         """
         from src.agents.schemas import LiteratureAnalysisSchema
         from src.agents.schemas.literature_review import AcademicSource
@@ -802,10 +799,9 @@ Analyze the literature and provide:
         )
 
     async def _fallback_academic_search(
-        self, input_data: dict[str, Any], task: AgentTask | None = None
+        self, input_data: dict[str, Any], task: AgentTask | None = None,
     ) -> dict[str, Any]:
-        """
-        Fallback academic search using Gemini when MCP tools are unavailable.
+        """Fallback academic search using Gemini when MCP tools are unavailable.
 
         Uses the LLM's training knowledge to identify real, published academic
         papers relevant to the query.
@@ -816,6 +812,7 @@ Analyze the literature and provide:
 
         Returns:
             Search results with real academic sources identified by Gemini
+
         """
         query = input_data.get("query", "")
         domains = input_data.get("domains", [])
@@ -894,7 +891,7 @@ Requirements:
                     "fallback": False,
                 }
             self.log_warning(
-                f"Gemini returned no sources. Parsed keys: {list(parsed.keys())}"
+                f"Gemini returned no sources. Parsed keys: {list(parsed.keys())}",
             )
         except Exception as e:
             self.log_error(f"Gemini source search failed: {e}")
@@ -902,7 +899,7 @@ Requirements:
         return self._static_fallback_sources(query, domains)
 
     def _static_fallback_sources(
-        self, query: str, domains: list[str]
+        self, query: str, domains: list[str],
     ) -> dict[str, Any]:
         """Last-resort static fallback when both MCP and Gemini are unavailable."""
         return {
@@ -915,16 +912,16 @@ Requirements:
         }
 
     def _generate_mock_analysis_from_sources(
-        self, academic_sources: dict[str, Any]
+        self, academic_sources: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Generate mock Gemini analysis based on real sources.
+        """Generate mock Gemini analysis based on real sources.
 
         Args:
             academic_sources: Real or mock academic sources
 
         Returns:
             Mock literature analysis
+
         """
         sources = academic_sources.get("sources", [])
         source_count = len(sources)
@@ -960,10 +957,9 @@ Requirements:
         }
 
     def _assess_kg_coverage(
-        self, entities: list[dict[str, Any]], gaps: list[str]
+        self, entities: list[dict[str, Any]], gaps: list[str],
     ) -> str:
-        """
-        Assess how well the knowledge graph covers research gaps.
+        """Assess how well the knowledge graph covers research gaps.
 
         Args:
             entities: List of extracted entities
@@ -971,6 +967,7 @@ Requirements:
 
         Returns:
             Coverage assessment string
+
         """
         if not entities or not gaps:
             return "insufficient_data"
@@ -980,14 +977,13 @@ Requirements:
         gap_count = len(gaps)
 
         coverage_ratio = entity_count / max(
-            gap_count * 5, 1
+            gap_count * 5, 1,
         )  # 5 entities per gap is good
 
         if coverage_ratio >= 1.0:
             return "comprehensive"
-        elif coverage_ratio >= 0.5:
+        if coverage_ratio >= 0.5:
             return "good"
-        elif coverage_ratio >= 0.2:
+        if coverage_ratio >= 0.2:
             return "moderate"
-        else:
-            return "limited"
+        return "limited"

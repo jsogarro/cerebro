@@ -1,5 +1,4 @@
-"""
-Tests for Literature Review Agent.
+"""Tests for Literature Review Agent.
 
 Following TDD principles - tests written before implementation.
 """
@@ -42,7 +41,7 @@ def _mock_gemini_two_call(
                 methodologies_used=methodologies_used or [],
                 quality_assessment=quality_assessment,
             ),
-        ]
+        ],
     )
     return mock
 
@@ -110,13 +109,13 @@ class TestLiteratureReviewAgent:
         mock_gemini = _mock_gemini_two_call(
             sources=[
                 AcademicSource(
-                    title="Paper C", authors=["C"], year=2020, relevance_score=0.5
+                    title="Paper C", authors=["C"], year=2020, relevance_score=0.5,
                 ),
                 AcademicSource(
-                    title="Paper A", authors=["A"], year=2024, relevance_score=0.95
+                    title="Paper A", authors=["A"], year=2024, relevance_score=0.95,
                 ),
                 AcademicSource(
-                    title="Paper B", authors=["B"], year=2023, relevance_score=0.75
+                    title="Paper B", authors=["B"], year=2023, relevance_score=0.75,
                 ),
             ],
             key_findings=["Finding 1"],
@@ -149,7 +148,7 @@ class TestLiteratureReviewAgent:
         mock_gemini = _mock_gemini_two_call(
             sources=[
                 AcademicSource(
-                    title="Study 1", authors=["Author1"], year=2024, relevance_score=0.9
+                    title="Study 1", authors=["Author1"], year=2024, relevance_score=0.9,
                 ),
             ],
             key_findings=["Current state of research"],
@@ -210,7 +209,7 @@ class TestLiteratureReviewAgent:
         mock_gemini = _mock_gemini_two_call(
             sources=[
                 AcademicSource(
-                    title="Cached", authors=["A"], year=2024, relevance_score=0.9
+                    title="Cached", authors=["A"], year=2024, relevance_score=0.9,
                 ),
             ],
             key_findings=["Finding"],
@@ -220,7 +219,7 @@ class TestLiteratureReviewAgent:
         )
 
         agent = LiteratureReviewAgent(
-            gemini_service=mock_gemini, cache_client=mock_cache
+            gemini_service=mock_gemini, cache_client=mock_cache,
         )
 
         task = AgentTask(
@@ -245,7 +244,7 @@ class TestLiteratureReviewAgent:
         mock_gemini_high = _mock_gemini_two_call(
             sources=[
                 AcademicSource(
-                    title=f"Paper {i}", authors=["A"], year=2024, relevance_score=0.9
+                    title=f"Paper {i}", authors=["A"], year=2024, relevance_score=0.9,
                 )
                 for i in range(20)
             ],
@@ -274,7 +273,7 @@ class TestLiteratureReviewAgent:
         mock_gemini_low = _mock_gemini_two_call(
             sources=[
                 AcademicSource(
-                    title="Paper 1", authors=["A"], year=2020, relevance_score=0.5
+                    title="Paper 1", authors=["A"], year=2020, relevance_score=0.5,
                 ),
             ],
             key_findings=["Finding 1"],
@@ -335,7 +334,7 @@ class TestLiteratureReviewAgent:
 
         mock_gemini = AsyncMock()
         mock_gemini.generate_structured_content = AsyncMock(
-            side_effect=Exception("Gemini API error")
+            side_effect=Exception("Gemini API error"),
         )
 
         agent = LiteratureReviewAgent(gemini_service=mock_gemini)
@@ -363,7 +362,7 @@ class TestLiteratureReviewAgent:
         mock_gemini = _mock_gemini_two_call(
             sources=[
                 AcademicSource(
-                    title=f"Paper {i}", authors=["A"], year=2024, relevance_score=0.8
+                    title=f"Paper {i}", authors=["A"], year=2024, relevance_score=0.8,
                 )
                 for i in range(100)
             ],

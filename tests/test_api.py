@@ -1,5 +1,4 @@
-"""
-Tests for FastAPI endpoints following TDD principles.
+"""Tests for FastAPI endpoints following TDD principles.
 """
 
 import pytest
@@ -49,14 +48,14 @@ class TestHealthEndpoints:
         "the test DB is SQLite. These tests need to be ported to the integration "
         "conftest pattern (authenticated_client + Postgres testcontainer) before "
         "they can run again."
-    )
+    ),
 )
 class TestResearchEndpoints:
     """Test research API endpoints."""
 
     @pytest.mark.asyncio
     async def test_create_research_project(
-        self, async_client: AsyncClient, sample_research_query
+        self, async_client: AsyncClient, sample_research_query,
     ):
         """Test creating a new research project."""
         payload = {
@@ -98,7 +97,7 @@ class TestResearchEndpoints:
         """Test getting research project progress."""
         project_id = "550e8400-e29b-41d4-a716-446655440000"
         response = await async_client.get(
-            f"/api/v1/research/projects/{project_id}/progress"
+            f"/api/v1/research/projects/{project_id}/progress",
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -113,7 +112,7 @@ class TestResearchEndpoints:
         """Test cancelling a research project."""
         project_id = "550e8400-e29b-41d4-a716-446655440000"
         response = await async_client.post(
-            f"/api/v1/research/projects/{project_id}/cancel"
+            f"/api/v1/research/projects/{project_id}/cancel",
         )
 
         assert response.status_code == status.HTTP_204_NO_CONTENT

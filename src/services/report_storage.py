@@ -1,5 +1,4 @@
-"""
-Report storage service for managing generated report files.
+"""Report storage service for managing generated report files.
 
 This service handles the storage and retrieval of generated reports,
 following functional programming principles with pure data operations.
@@ -26,7 +25,6 @@ logger = get_logger()
 class ReportStorageError(Exception):
     """Exception raised during report storage operations."""
 
-    pass
 
 
 class ReportStorageService:
@@ -61,8 +59,7 @@ class ReportStorageService:
         user_id: UUID | None = None,
         project_id: UUID | None = None,
     ) -> GeneratedReport:
-        """
-        Store a generated report with all its format outputs.
+        """Store a generated report with all its format outputs.
 
         Args:
             report: Generated report object
@@ -72,6 +69,7 @@ class ReportStorageService:
 
         Returns:
             Stored GeneratedReport database record
+
         """
         try:
             logger.info(f"Storing report: {report.id}")
@@ -81,7 +79,7 @@ class ReportStorageService:
 
             # Create database record
             db_report = await self._create_report_record(
-                report, user_id, project_id, report_dir
+                report, user_id, project_id, report_dir,
             )
 
             # Store format files
@@ -91,7 +89,7 @@ class ReportStorageService:
             for format_enum, output in outputs.items():
                 try:
                     await self._store_format_file(
-                        db_report.id, format_enum, output, report_dir
+                        db_report.id, format_enum, output, report_dir,
                     )
                     file_sizes[format_enum.value] = (
                         len(output.content)
@@ -105,11 +103,11 @@ class ReportStorageService:
 
             # Update report with completion details
             await self.report_repo.mark_report_completed(
-                db_report.id, formats_generated, file_sizes, storage_path=report_dir
+                db_report.id, formats_generated, file_sizes, storage_path=report_dir,
             )
 
             logger.info(
-                f"Report {report.id} stored successfully with {len(formats_generated)} formats"
+                f"Report {report.id} stored successfully with {len(formats_generated)} formats",
             )
             return db_report
 
@@ -181,7 +179,7 @@ class ReportStorageService:
 
         # Write file
         content_bytes = self._prepare_content_for_storage(
-            output.content, output.encoding
+            output.content, output.encoding,
         )
 
         with open(file_path, "wb") as f:
@@ -208,11 +206,10 @@ class ReportStorageService:
         """Prepare content for file storage."""
         if isinstance(content, bytes):
             return content
-        elif isinstance(content, str):
+        if isinstance(content, str):
             return content.encode(encoding if encoding != "binary" else "utf-8")
-        else:
-            # Convert other types to string first
-            return str(content).encode(encoding if encoding != "binary" else "utf-8")
+        # Convert other types to string first
+        return str(content).encode(encoding if encoding != "binary" else "utf-8")
 
     def _extract_content_preview(self, report: Report, max_length: int = 500) -> str:
         """Extract content preview from report sections."""
@@ -252,7 +249,7 @@ class ReportStorageService:
                 for line in lines:
                     stripped = line.strip()
                     if stripped.startswith(
-                        ("•", "-", "*", "1.", "2.", "3.", "4.", "5.")
+                        ("•", "-", "*", "1.", "2.", "3.", "4.", "5."),
                     ):
                         # Clean up the finding text
                         finding = stripped.lstrip("•-*123456789. ")
@@ -272,10 +269,9 @@ class ReportStorageService:
         return await self.report_repo.get_report_with_formats(report_id)
 
     async def retrieve_report_content(
-        self, report_id: UUID, format_type: str
+        self, report_id: UUID, format_type: str,
     ) -> tuple[bytes, str] | None:
-        """
-        Retrieve content for a specific report format.
+        """Retrieve content for a specific report format.
 
         Args:
             report_id: Report ID
@@ -283,9 +279,10 @@ class ReportStorageService:
 
         Returns:
             Tuple of (content_bytes, mime_type) or None if not found
+
         """
         report_format = await self.format_repo.get_by_report_and_format(
-            report_id, format_type
+            report_id, format_type,
         )
 
         if not report_format:
@@ -296,18 +293,18 @@ class ReportStorageService:
             return content, report_format.mime_type
         except Exception as e:
             logger.error(
-                f"Failed to retrieve content for {report_id}/{format_type}: {e}"
+                f"Failed to retrieve content for {report_id}/{format_type}: {e}",
             )
             return None
 
     async def list_user_reports(
-        self, user_id: UUID, limit: int = 50, status_filter: str | None = None
+        self, user_id: UUID, limit: int = 50, status_filter: str | None = None,
     ) -> list[GeneratedReport]:
         """List reports for a user."""
         return await self.report_repo.get_by_user_id(user_id, limit, status_filter)
 
     async def list_project_reports(
-        self, project_id: UUID, limit: int | None = None
+        self, project_id: UUID, limit: int | None = None,
     ) -> list[GeneratedReport]:
         """List reports for a project."""
         return await self.report_repo.get_by_project_id(project_id, limit)
@@ -333,8 +330,7 @@ class ReportStorageService:
         )
 
     async def delete_report(self, report_id: UUID, delete_files: bool = True) -> bool:
-        """
-        Delete a report and optionally its files.
+        """Delete a report and optionally its files.
 
         Args:
             report_id: Report ID to delete
@@ -342,6 +338,7 @@ class ReportStorageService:
 
         Returns:
             True if deletion successful
+
         """
         try:
             report = await self.report_repo.get(report_id)
@@ -386,7 +383,7 @@ class ReportStorageService:
                     "total_storage_bytes": 0,
                     "total_storage_mb": 0,
                     "storage_error": str(e),
-                }
+                },
             )
 
         return stats
@@ -416,10 +413,9 @@ class ReportStorageService:
         }
 
     async def cleanup_old_reports(
-        self, days_old: int = 90, keep_public: bool = True, dry_run: bool = True
+        self, days_old: int = 90, keep_public: bool = True, dry_run: bool = True,
     ) -> dict[str, Any]:
-        """
-        Clean up old reports and return statistics.
+        """Clean up old reports and return statistics.
 
         Args:
             days_old: Delete reports older than this many days
@@ -428,9 +424,10 @@ class ReportStorageService:
 
         Returns:
             Cleanup statistics
+
         """
         deleted_count, deleted_ids = await self.report_repo.cleanup_old_reports(
-            days_old, keep_public, dry_run
+            days_old, keep_public, dry_run,
         )
 
         # Also cleanup orphaned format files
@@ -477,13 +474,13 @@ class ReportStorageService:
                 # Verify hash if available
                 if format_obj.file_hash:
                     is_valid = await self.format_repo.verify_format_integrity(
-                        format_obj.id
+                        format_obj.id,
                     )
                     if is_valid:
                         integrity_results["formats_valid"] += 1
                     else:
                         integrity_results["formats_invalid"].append(
-                            format_obj.format_type
+                            format_obj.format_type,
                         )
                 else:
                     # No hash to verify, assume valid if file exists

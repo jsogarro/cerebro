@@ -1,5 +1,4 @@
-"""
-Foundation Model Providers Package
+"""Foundation Model Providers Package
 
 Provides a unified interface for interacting with different foundation models
 including local models (Llama, DeepSeek) and cloud APIs (Gemini, OpenAI, Claude).

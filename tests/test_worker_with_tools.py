@@ -13,7 +13,7 @@ def mock_gemini_service():
     """Mock Gemini service."""
     service = MagicMock()
     service.generate_content = AsyncMock(
-        return_value="Analysis: The data shows a clear upward trend."
+        return_value="Analysis: The data shows a clear upward trend.",
     )
     return service
 

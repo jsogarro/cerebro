@@ -1,5 +1,4 @@
-"""
-Comprehensive API integration tests for the Research Platform.
+"""Comprehensive API integration tests for the Research Platform.
 
 Every test in this module was written against an earlier version of the
 auth / RBAC / research-project API. The current API diverges enough that
@@ -70,7 +69,7 @@ class TestAuthenticationFlow:
     @pytest.mark.skip(reason=_SKIP_REGISTER_SIDE_EFFECT)
     @pytest.mark.asyncio
     async def test_user_registration_flow(
-        self, async_client: AsyncClient, db_session: AsyncSession
+        self, async_client: AsyncClient, db_session: AsyncSession,
     ) -> None:
         """Test complete user registration flow."""
         # Register new user
@@ -82,7 +81,7 @@ class TestAuthenticationFlow:
         }
 
         response = await async_client.post(
-            "/api/v1/auth/register", json=registration_data
+            "/api/v1/auth/register", json=registration_data,
         )
 
         assert response.status_code == 201
@@ -123,11 +122,11 @@ class TestAuthenticationFlow:
             "user is seeded by the integration conftest, and registering one "
             "hits the same /secrets side effect. Rewrite to mint tokens via "
             "the real JWTService and call /refresh against them."
-        )
+        ),
     )
     @pytest.mark.asyncio
     async def test_token_refresh_flow(
-        self, authenticated_client: AsyncClient, async_client: AsyncClient
+        self, authenticated_client: AsyncClient, async_client: AsyncClient,
     ) -> None:
         """Test token refresh flow."""
         # Get initial tokens
@@ -141,7 +140,7 @@ class TestAuthenticationFlow:
 
         # Use refresh token to get new access token
         refresh_response = await async_client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+            "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]},
         )
 
         assert refresh_response.status_code == 200
@@ -162,11 +161,11 @@ class TestAuthenticationFlow:
             "token that can't pass real validation. The downstream login "
             "assertions are already commented out. Rewrite end-to-end to "
             "exercise a real reset token loop."
-        )
+        ),
     )
     @pytest.mark.asyncio
     async def test_password_reset_flow(
-        self, async_client: AsyncClient, db_session: AsyncSession
+        self, async_client: AsyncClient, db_session: AsyncSession,
     ) -> None:
         """Test password reset flow."""
         # Create user
@@ -176,7 +175,7 @@ class TestAuthenticationFlow:
 
         # Request password reset
         reset_request = await async_client.post(
-            "/api/v1/auth/forgot-password", json={"email": user.email}
+            "/api/v1/auth/forgot-password", json={"email": user.email},
         )
 
         assert reset_request.status_code == 200
@@ -208,7 +207,7 @@ class TestAuthenticationFlow:
 
     @pytest.mark.asyncio
     async def test_oauth_authentication_flow(
-        self, async_client: AsyncClient, db_session: AsyncSession
+        self, async_client: AsyncClient, db_session: AsyncSession,
     ) -> None:
         """Test OAuth authentication flow."""
         # Initiate OAuth flow
@@ -237,11 +236,11 @@ class TestAuthorizationAndRBAC:
             "/api/v1/admin/users does not exist on any router and the helper "
             "TestAuthManager mints HS256 tokens that the current RS256 "
             "JWTService rejects. " + _SKIP_TEST_AUTH_MANAGER
-        )
+        ),
     )
     @pytest.mark.asyncio
     async def test_role_based_access(
-        self, async_client: AsyncClient, db_session: AsyncSession
+        self, async_client: AsyncClient, db_session: AsyncSession,
     ) -> None:
         """Test role-based access control."""
         auth_manager = TestAuthManager()
@@ -256,18 +255,18 @@ class TestAuthorizationAndRBAC:
 
         # Create tokens for each user
         admin_token = auth_manager.create_access_token(
-            admin_user.id, admin_user.email, "admin"
+            admin_user.id, admin_user.email, "admin",
         )
         researcher_token = auth_manager.create_access_token(
-            researcher_user.id, researcher_user.email, "researcher"
+            researcher_user.id, researcher_user.email, "researcher",
         )
         viewer_token = auth_manager.create_access_token(
-            viewer_user.id, viewer_user.email, "viewer"
+            viewer_user.id, viewer_user.email, "viewer",
         )
 
         # Test admin-only endpoint
         await async_client.get(
-            "/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_token}"}
+            "/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_token}"},
         )
         # assert admin_response.status_code == 200
 
@@ -278,7 +277,7 @@ class TestAuthorizationAndRBAC:
         # assert researcher_response.status_code == 403
 
         await async_client.get(
-            "/api/v1/admin/users", headers={"Authorization": f"Bearer {viewer_token}"}
+            "/api/v1/admin/users", headers={"Authorization": f"Bearer {viewer_token}"},
         )
         # assert viewer_response.status_code == 403
 
@@ -288,7 +287,7 @@ class TestAuthorizationAndRBAC:
             "TestAuthManager HS256 tokens. Tenant-scoped resource ownership "
             "is exercised by tests/test_research_tenant_enforcement.py. "
             + _SKIP_TEST_AUTH_MANAGER
-        )
+        ),
     )
     @pytest.mark.asyncio
     async def test_resource_ownership(
@@ -312,7 +311,7 @@ class TestAuthorizationAndRBAC:
 
         # User1 can access their project
         user1_token = auth_manager.create_access_token(
-            user1.id, user1.email, "researcher"
+            user1.id, user1.email, "researcher",
         )
 
         user1_response = await async_client.get(
@@ -323,7 +322,7 @@ class TestAuthorizationAndRBAC:
 
         # User2 cannot access user1's project
         user2_token = auth_manager.create_access_token(
-            user2.id, user2.email, "researcher"
+            user2.id, user2.email, "researcher",
         )
 
         await async_client.get(
@@ -338,7 +337,7 @@ class TestAuthorizationAndRBAC:
         await db_session.commit()
 
         admin_token = auth_manager.create_access_token(
-            admin_user.id, admin_user.email, "admin"
+            admin_user.id, admin_user.email, "admin",
         )
 
         await async_client.get(
@@ -371,7 +370,7 @@ class TestCompleteAPIWorkflow:
         }
 
         create_response = await authenticated_client.post(
-            "/api/v1/projects", json=project_data
+            "/api/v1/projects", json=project_data,
         )
 
         assert create_response.status_code == 201
@@ -380,7 +379,7 @@ class TestCompleteAPIWorkflow:
 
         # Step 2: Start research workflow
         start_response = await authenticated_client.post(
-            f"/api/v1/projects/{project_id}/start"
+            f"/api/v1/projects/{project_id}/start",
         )
 
         assert start_response.status_code == 200
@@ -389,7 +388,7 @@ class TestCompleteAPIWorkflow:
 
         # Step 3: Monitor progress
         progress_response = await authenticated_client.get(
-            f"/api/v1/projects/{project_id}/progress"
+            f"/api/v1/projects/{project_id}/progress",
         )
 
         assert progress_response.status_code == 200
@@ -399,7 +398,7 @@ class TestCompleteAPIWorkflow:
 
         # Step 4: Get partial results
         results_response = await authenticated_client.get(
-            f"/api/v1/projects/{project_id}/results"
+            f"/api/v1/projects/{project_id}/results",
         )
 
         assert results_response.status_code == 200
@@ -408,7 +407,7 @@ class TestCompleteAPIWorkflow:
 
         # Step 5: Get final report
         report_response = await authenticated_client.get(
-            f"/api/v1/projects/{project_id}/report"
+            f"/api/v1/projects/{project_id}/report",
         )
 
         # Report might not be ready yet
@@ -424,7 +423,7 @@ class TestCompleteAPIWorkflow:
     @pytest.mark.skip(reason=_SKIP_LEGACY_PROJECT_URL)
     @pytest.mark.asyncio
     async def test_concurrent_project_execution(
-        self, authenticated_client: AsyncClient, db_session: AsyncSession
+        self, authenticated_client: AsyncClient, db_session: AsyncSession,
     ) -> None:
         """Test concurrent execution of multiple projects."""
         # Create multiple projects
@@ -441,7 +440,7 @@ class TestCompleteAPIWorkflow:
             }
 
             response = await authenticated_client.post(
-                "/api/v1/projects", json=project_data
+                "/api/v1/projects", json=project_data,
             )
 
             assert response.status_code == 201
@@ -452,7 +451,7 @@ class TestCompleteAPIWorkflow:
 
         async def start_project(project_id: str):
             return await authenticated_client.post(
-                f"/api/v1/projects/{project_id}/start"
+                f"/api/v1/projects/{project_id}/start",
             )
 
         start_tasks = [start_project(p["id"]) for p in projects]
@@ -467,7 +466,7 @@ class TestCompleteAPIWorkflow:
         # Check all projects are running
         for project in projects:
             status_response = await authenticated_client.get(
-                f"/api/v1/projects/{project['id']}/status"
+                f"/api/v1/projects/{project['id']}/status",
             )
 
             assert status_response.status_code == 200
@@ -477,7 +476,7 @@ class TestCompleteAPIWorkflow:
     @pytest.mark.skip(reason=_SKIP_LEGACY_PROJECT_URL)
     @pytest.mark.asyncio
     async def test_project_cancellation(
-        self, authenticated_client: AsyncClient, db_session: AsyncSession
+        self, authenticated_client: AsyncClient, db_session: AsyncSession,
     ) -> None:
         """Test project cancellation workflow."""
         # Create and start project
@@ -492,7 +491,7 @@ class TestCompleteAPIWorkflow:
         }
 
         create_response = await authenticated_client.post(
-            "/api/v1/projects", json=project_data
+            "/api/v1/projects", json=project_data,
         )
 
         assert create_response.status_code == 201
@@ -500,14 +499,14 @@ class TestCompleteAPIWorkflow:
 
         # Start project
         start_response = await authenticated_client.post(
-            f"/api/v1/projects/{project_id}/start"
+            f"/api/v1/projects/{project_id}/start",
         )
 
         assert start_response.status_code == 200
 
         # Cancel project
         cancel_response = await authenticated_client.post(
-            f"/api/v1/projects/{project_id}/cancel"
+            f"/api/v1/projects/{project_id}/cancel",
         )
 
         assert cancel_response.status_code == 200
@@ -516,7 +515,7 @@ class TestCompleteAPIWorkflow:
 
         # Verify project is cancelled
         status_response = await authenticated_client.get(
-            f"/api/v1/projects/{project_id}/status"
+            f"/api/v1/projects/{project_id}/status",
         )
 
         assert status_response.status_code == 200

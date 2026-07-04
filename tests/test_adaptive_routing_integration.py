@@ -1,5 +1,4 @@
-"""
-Integration tests for adaptive routing feature.
+"""Integration tests for adaptive routing feature.
 
 Tests cover:
 1. Flag OFF regression (byte-for-byte current behavior, zero engine calls)
@@ -67,7 +66,7 @@ class TestAdaptiveRoutingFlagOff:
     """Test suite for ADAPTIVE_ROUTING_ENABLED=False (regression guards)."""
 
     async def test_flag_off_returns_none(
-        self, router_config_flag_off, mock_complexity_analysis
+        self, router_config_flag_off, mock_complexity_analysis,
     ):
         """Flag OFF → _get_adaptive_allocation_adjustment returns None."""
         router = MASRouter(config=router_config_flag_off)
@@ -88,11 +87,11 @@ class TestAdaptiveRoutingFlagOff:
         assert router._adaptive_engine is None
 
     async def test_flag_off_zero_overhead(
-        self, router_config_flag_off, mock_complexity_analysis
+        self, router_config_flag_off, mock_complexity_analysis,
     ):
         """Flag OFF → no engine calls, zero overhead."""
         with patch(
-            "src.ai_brain.experimentation.core.adaptive_allocation_engine.AdaptiveAllocationEngine"
+            "src.ai_brain.experimentation.core.adaptive_allocation_engine.AdaptiveAllocationEngine",
         ) as mock_engine_class:
             router = MASRouter(config=router_config_flag_off)
 
@@ -111,7 +110,7 @@ class TestAdaptiveRoutingColdStart:
     """Test suite for cold-start behavior (history < threshold)."""
 
     async def test_cold_history_returns_none(
-        self, router_config_flag_on, mock_complexity_analysis
+        self, router_config_flag_on, mock_complexity_analysis,
     ):
         """History < min_history → returns None (grace period)."""
         router = MASRouter(config=router_config_flag_on)
@@ -128,7 +127,7 @@ class TestAdaptiveRoutingColdStart:
         assert result is None
 
     async def test_warm_history_allows_adaptation(
-        self, router_config_flag_on, mock_complexity_analysis
+        self, router_config_flag_on, mock_complexity_analysis,
     ):
         """History >= min_history → adaptation returns a recommendation."""
         router = MASRouter(config=router_config_flag_on)
@@ -159,33 +158,33 @@ class TestAdaptiveAdjustmentBounds:
 
         # Baseline 5, recommendation 7 → delta +2 (within cap)
         result = router._apply_adaptive_adjustment(
-            memory_adjusted_count=5, adaptive_recommendation=7
+            memory_adjusted_count=5, adaptive_recommendation=7,
         )
 
         assert result == 7
 
     async def test_apply_adaptive_adjustment_hits_positive_cap(
-        self, router_config_flag_on
+        self, router_config_flag_on,
     ):
         """Adaptive delta > +2 → capped to +2."""
         router = MASRouter(config=router_config_flag_on)
 
         # Baseline 5, recommendation 10 → delta +5, capped to +2 → result 7
         result = router._apply_adaptive_adjustment(
-            memory_adjusted_count=5, adaptive_recommendation=10
+            memory_adjusted_count=5, adaptive_recommendation=10,
         )
 
         assert result == 7
 
     async def test_apply_adaptive_adjustment_hits_negative_cap(
-        self, router_config_flag_on
+        self, router_config_flag_on,
     ):
         """Adaptive delta < -2 → capped to -2."""
         router = MASRouter(config=router_config_flag_on)
 
         # Baseline 5, recommendation 1 → delta -4, capped to -2 → result 3
         result = router._apply_adaptive_adjustment(
-            memory_adjusted_count=5, adaptive_recommendation=1
+            memory_adjusted_count=5, adaptive_recommendation=1,
         )
 
         assert result == 3
@@ -196,7 +195,7 @@ class TestAdaptiveAdjustmentBounds:
 
         # Baseline 2, recommendation 0 → delta -2 → result would be 0, floored to 1
         result = router._apply_adaptive_adjustment(
-            memory_adjusted_count=2, adaptive_recommendation=0
+            memory_adjusted_count=2, adaptive_recommendation=0,
         )
 
         assert result == 1
@@ -218,12 +217,12 @@ class TestCompositionWithMemoryPrior:
         # Final: 7
 
         memory_adjusted = router._apply_memory_adjustment(
-            analytic_count=3, episodic_prior=5
+            analytic_count=3, episodic_prior=5,
         )
         assert memory_adjusted == 5
 
         final = router._apply_adaptive_adjustment(
-            memory_adjusted_count=memory_adjusted, adaptive_recommendation=7
+            memory_adjusted_count=memory_adjusted, adaptive_recommendation=7,
         )
         assert final == 7
 
@@ -239,12 +238,12 @@ class TestCompositionWithMemoryPrior:
         # Final: 7
 
         memory_adjusted = router._apply_memory_adjustment(
-            analytic_count=3, episodic_prior=10
+            analytic_count=3, episodic_prior=10,
         )
         assert memory_adjusted == 5  # Capped at 3+2
 
         final = router._apply_adaptive_adjustment(
-            memory_adjusted_count=memory_adjusted, adaptive_recommendation=12
+            memory_adjusted_count=memory_adjusted, adaptive_recommendation=12,
         )
         assert final == 7  # Capped at 5+2
 
@@ -254,7 +253,7 @@ class TestEngineErrorResilience:
     """Test graceful fallback when adaptive engine raises errors."""
 
     async def test_engine_error_returns_none(
-        self, router_config_flag_on, mock_complexity_analysis
+        self, router_config_flag_on, mock_complexity_analysis,
     ):
         """Engine raises → returns None (routing proceeds with memory prior only)."""
         router = MASRouter(config=router_config_flag_on)
@@ -263,7 +262,7 @@ class TestEngineErrorResilience:
         # Mock engine to raise an error
         router._adaptive_engine = MagicMock()
         router._adaptive_engine.allocate_variant = AsyncMock(
-            side_effect=RuntimeError("Bandit explosion")
+            side_effect=RuntimeError("Bandit explosion"),
         )
 
         result = await router._get_adaptive_allocation_adjustment(
@@ -281,7 +280,7 @@ class TestHardCapPreservation:
     """Test that final worker_count respects system limits."""
 
     async def test_parallel_mode_respects_max_parallel_workers(
-        self, router_config_flag_on, mock_complexity_analysis
+        self, router_config_flag_on, mock_complexity_analysis,
     ):
         """PARALLEL mode: final count <= max_parallel_workers."""
         router = MASRouter(config=router_config_flag_on)
@@ -299,7 +298,7 @@ class TestHardCapPreservation:
         assert allocation.worker_count <= router.max_parallel_workers
 
     async def test_hierarchical_mode_respects_max_agents_per_query(
-        self, router_config_flag_on, mock_complexity_analysis
+        self, router_config_flag_on, mock_complexity_analysis,
     ):
         """HIERARCHICAL mode: final count <= max_agents_per_query."""
         router = MASRouter(config=router_config_flag_on)
@@ -327,7 +326,7 @@ class TestStructuredLogging:
 
         # The method logs with structlog; verify it doesn't raise
         result = router._apply_adaptive_adjustment(
-            memory_adjusted_count=5, adaptive_recommendation=7
+            memory_adjusted_count=5, adaptive_recommendation=7,
         )
 
         # Verify the result is correct
@@ -339,7 +338,7 @@ class TestStructuredLogging:
 
         # The method should not log when delta is 0
         result = router._apply_adaptive_adjustment(
-            memory_adjusted_count=5, adaptive_recommendation=5
+            memory_adjusted_count=5, adaptive_recommendation=5,
         )
 
         # Verify no change

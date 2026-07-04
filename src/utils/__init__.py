@@ -1,5 +1,4 @@
-"""
-Utility modules for the Cerebro research platform.
+"""Utility modules for the Cerebro research platform.
 
 This package contains shared utility functions and helpers used across the application.
 """

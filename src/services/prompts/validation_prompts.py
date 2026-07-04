@@ -1,5 +1,4 @@
-"""
-Validation and quality check prompt templates.
+"""Validation and quality check prompt templates.
 
 This module contains prompts for validating research outputs.
 """
@@ -46,8 +45,8 @@ For each claim, provide verification status, supporting evidence, and confidence
                 "evidence": [str],
                 "confidence_level": float,
                 "sources": [str],
-            }
-        ]
+            },
+        ],
     }
 
     prompt = compose_prompt([system_prompt, task_description])
@@ -94,7 +93,7 @@ Provide a comprehensive credibility assessment with scoring and recommendations.
             "potential_biases": [str],
             "recommendation": str,
             "confidence": float,
-        }
+        },
     }
 
     prompt = compose_prompt([system_prompt, task_description])
@@ -133,12 +132,12 @@ Identify any inconsistencies and suggest reconciliation strategies.
         "consistency_analysis": {
             "consistency_score": float,  # 0-1 scale
             "contradictions": [
-                {"finding_ids": [int], "description": str, "severity": str}
+                {"finding_ids": [int], "description": str, "severity": str},
             ],
             "consistent_findings": [int],
             "reconciliation_strategies": [str],
             "confidence_assessment": str,
-        }
+        },
     }
 
     prompt = compose_prompt([system_prompt, task_description])
@@ -181,7 +180,7 @@ Provide a comprehensive validation analysis with confidence assessment.
             "data_sufficiency": str,
             "alternative_explanations": [str],
             "recommendations": [str],
-        }
+        },
     }
 
     prompt = compose_prompt([system_prompt, task_description])

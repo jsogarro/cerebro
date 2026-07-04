@@ -1,5 +1,4 @@
-"""
-Pydantic Schemas for Model Configuration
+"""Pydantic Schemas for Model Configuration
 
 Defines validation schemas for model specifications, provider configurations,
 and routing rules. Ensures type safety and validation for all configuration
@@ -57,10 +56,10 @@ class ModelSpecification(BaseModel):
 
     # Cost and performance metrics
     cost_per_1k_tokens: float = Field(
-        ..., ge=0.0, description="Cost per 1K tokens in USD"
+        ..., ge=0.0, description="Cost per 1K tokens in USD",
     )
     avg_latency_ms: int = Field(
-        ..., ge=0, description="Average latency in milliseconds"
+        ..., ge=0, description="Average latency in milliseconds",
     )
     context_window: int = Field(..., ge=1000, description="Maximum context window size")
     max_output_tokens: int = Field(..., ge=1, description="Maximum output tokens")
@@ -68,28 +67,28 @@ class ModelSpecification(BaseModel):
     # Quality and reliability metrics
     quality_score: float = Field(..., ge=0.0, le=1.0, description="Quality score (0-1)")
     availability: float = Field(
-        default=0.99, ge=0.0, le=1.0, description="SLA availability"
+        default=0.99, ge=0.0, le=1.0, description="SLA availability",
     )
     rate_limit: int = Field(default=1000, ge=1, description="Requests per minute limit")
     supports_streaming: bool = Field(
-        default=False, description="Supports streaming responses"
+        default=False, description="Supports streaming responses",
     )
 
     # Capabilities and characteristics
     capabilities: list[ModelCapability] = Field(
-        default_factory=list, description="Model capabilities"
+        default_factory=list, description="Model capabilities",
     )
     strengths: list[str] = Field(default_factory=list, description="Model strengths")
     weaknesses: list[str] = Field(default_factory=list, description="Model weaknesses")
 
     # Optimization criteria
     optimal_for: dict[str, Any] | None = Field(
-        default=None, description="Conditions when this model is optimal"
+        default=None, description="Conditions when this model is optimal",
     )
 
     # Documentation and metadata
     metadata: dict[str, Any] | None = Field(
-        default_factory=dict, description="Additional model metadata"
+        default_factory=dict, description="Additional model metadata",
     )
 
     @field_validator("cost_per_1k_tokens")
@@ -119,24 +118,24 @@ class ProviderConfiguration(BaseModel):
     # API configuration
     api_endpoint: str = Field(..., description="API endpoint URL")
     api_key_env: str | None = Field(
-        default=None, description="Environment variable name for API key"
+        default=None, description="Environment variable name for API key",
     )
     health_check_endpoint: str | None = Field(
-        default=None, description="Health check endpoint path"
+        default=None, description="Health check endpoint path",
     )
 
     # Connection configuration
     timeout_ms: int = Field(default=30000, ge=1000, description="Request timeout")
     max_retries: int = Field(
-        default=3, ge=0, le=10, description="Maximum retry attempts"
+        default=3, ge=0, le=10, description="Maximum retry attempts",
     )
     connection_pool_size: int = Field(
-        default=10, ge=1, description="Connection pool size"
+        default=10, ge=1, description="Connection pool size",
     )
 
     # Provider-specific settings
     provider_settings: dict[str, Any] = Field(
-        default_factory=dict, description="Provider-specific configuration"
+        default_factory=dict, description="Provider-specific configuration",
     )
 
     @field_validator("api_endpoint")
@@ -194,10 +193,10 @@ class RoutingConfiguration(BaseModel):
 
     default_strategy: RoutingStrategy = RoutingStrategy.BALANCED
     cost_optimization: CostOptimizationConfig = Field(
-        default_factory=CostOptimizationConfig
+        default_factory=CostOptimizationConfig,
     )
     performance_optimization: PerformanceOptimizationConfig = Field(
-        default_factory=PerformanceOptimizationConfig
+        default_factory=PerformanceOptimizationConfig,
     )
 
     # Selection rules by complexity
@@ -274,7 +273,7 @@ class ModelConfiguration(BaseModel):
     @field_validator("models")
     @classmethod
     def validate_models_have_providers(
-        cls, v: dict[str, ModelSpecification], info: ValidationInfo
+        cls, v: dict[str, ModelSpecification], info: ValidationInfo,
     ) -> dict[str, ModelSpecification]:
         """Ensure all models reference valid providers."""
         # Skip validation if providers haven't been processed yet
@@ -285,7 +284,7 @@ class ModelConfiguration(BaseModel):
         for model_name, model_spec in v.items():
             if model_spec.provider not in providers:
                 raise ValueError(
-                    f"Model '{model_name}' references unknown provider '{model_spec.provider}'"
+                    f"Model '{model_name}' references unknown provider '{model_spec.provider}'",
                 )
 
         return v
@@ -301,7 +300,7 @@ class ModelConfiguration(BaseModel):
         }
 
     def get_models_for_provider(
-        self, provider_name: str
+        self, provider_name: str,
     ) -> dict[str, ModelSpecification]:
         """Get all models for a specific provider."""
         return {
@@ -311,7 +310,7 @@ class ModelConfiguration(BaseModel):
         }
 
     def get_models_by_capability(
-        self, capability: ModelCapability
+        self, capability: ModelCapability,
     ) -> dict[str, ModelSpecification]:
         """Get all models that support a specific capability."""
         return {

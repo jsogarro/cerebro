@@ -1,5 +1,4 @@
-"""
-MCP (Model Context Protocol) Server Implementation.
+"""MCP (Model Context Protocol) Server Implementation.
 
 This module provides MCP tool servers for the research platform,
 enabling AI agents to interact with various data sources and tools.

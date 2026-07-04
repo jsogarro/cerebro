@@ -1,5 +1,4 @@
-"""
-Main report generation service.
+"""Main report generation service.
 
 This service orchestrates the generation of research reports in multiple formats,
 following functional programming principles with pure transformation functions.
@@ -42,7 +41,6 @@ logger = get_logger()
 class ReportGenerationError(Exception):
     """Exception raised during report generation."""
 
-    pass
 
 
 class ReportGenerator:
@@ -65,10 +63,10 @@ class ReportGenerator:
         self._ensure_storage_directory()
 
         self.output_generator = ReportOutputGenerator(
-            self.settings, self.format_config, self.template_config
+            self.settings, self.format_config, self.template_config,
         )
         self.structure_builder = ReportStructureBuilder(
-            self.template_config, self.quality_config
+            self.template_config, self.quality_config,
         )
 
     def _ensure_storage_directory(self) -> None:
@@ -80,10 +78,9 @@ class ReportGenerator:
             raise ReportGenerationError(f"Storage setup failed: {e}") from e
 
     async def generate_report(
-        self, request: ReportGenerationRequest
+        self, request: ReportGenerationRequest,
     ) -> ReportGenerationResponse:
-        """
-        Generate a research report from the request.
+        """Generate a research report from the request.
 
         This is the main entry point for report generation, following a functional
         pipeline: data extraction -> structure building -> format generation.
@@ -93,6 +90,7 @@ class ReportGenerator:
 
         Returns:
             Response with generated report information
+
         """
         start_time = time.time()
         report_id = self._generate_report_id()
@@ -105,7 +103,7 @@ class ReportGenerator:
 
             # Build report structure
             report = await self._build_report_structure(
-                input_data, request.configuration, report_id
+                input_data, request.configuration, report_id,
             )
 
             # Generate outputs in requested formats
@@ -133,7 +131,7 @@ class ReportGenerator:
             )
 
             logger.info(
-                f"Report generation {report_id} completed in {generation_time:.2f}s"
+                f"Report generation {report_id} completed in {generation_time:.2f}s",
             )
 
             return response
@@ -154,10 +152,9 @@ class ReportGenerator:
             )
 
     async def _extract_input_data(
-        self, request: ReportGenerationRequest
+        self, request: ReportGenerationRequest,
     ) -> dict[str, Any]:
-        """
-        Extract and validate input data from the request.
+        """Extract and validate input data from the request.
 
         This function normalizes data from different sources (project ID or direct data)
         into a consistent format for report generation.
@@ -165,13 +162,12 @@ class ReportGenerator:
         if request.project_id:
             # Load data from project ID (would integrate with database)
             return await self._load_project_data(str(request.project_id))
-        elif request.workflow_data:
+        if request.workflow_data:
             # Use direct workflow data
             return self._validate_workflow_data(request.workflow_data)
-        else:
-            raise ReportGenerationError(
-                "No data source provided (project_id or workflow_data)"
-            )
+        raise ReportGenerationError(
+            "No data source provided (project_id or workflow_data)",
+        )
 
     async def _load_project_data(self, project_id: str) -> dict[str, Any]:
         """Load project data from database (mock implementation)."""
@@ -218,10 +214,9 @@ class ReportGenerator:
         return data
 
     async def _build_report_structure(
-        self, input_data: dict[str, Any], config: ReportConfiguration, report_id: str
+        self, input_data: dict[str, Any], config: ReportConfiguration, report_id: str,
     ) -> Report:
-        """
-        Build the complete report structure from input data.
+        """Build the complete report structure from input data.
 
         This function transforms raw research data into a structured Report object
         with sections, citations, and metadata.
@@ -269,93 +264,93 @@ class ReportGenerator:
         await self.structure_builder.build_sections(report, input_data)
 
     async def _build_introduction_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build introduction section."""
         return await self.structure_builder.build_introduction_section(report, results)
 
     async def _build_methodology_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build methodology section."""
         return await self.structure_builder.build_methodology_section(report, results)
 
     async def _build_literature_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build literature review section."""
         return await self.structure_builder.build_literature_section(report, results)
 
     async def _build_findings_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build findings section."""
         return await self.structure_builder.build_findings_section(report, results)
 
     async def _build_analysis_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build analysis section."""
         return await self.structure_builder.build_analysis_section(report, results)
 
     async def _build_discussion_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build discussion section."""
         return await self.structure_builder.build_discussion_section(report, results)
 
     async def _build_conclusions_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build conclusions section."""
         return await self.structure_builder.build_conclusions_section(report, results)
 
     async def _build_recommendations_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build recommendations section."""
         return await self.structure_builder.build_recommendations_section(
-            report, results
+            report, results,
         )
 
     async def _build_limitations_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build limitations section."""
         return await self.structure_builder.build_limitations_section(report, results)
 
     async def _build_abstract_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build abstract section for academic papers."""
         return await self.structure_builder.build_abstract_section(report, results)
 
     async def _build_results_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build results section for academic papers."""
         return await self.structure_builder.build_results_section(report, results)
 
     async def _build_key_findings_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build key findings section for executive summary."""
         return await self.structure_builder.build_key_findings_section(report, results)
 
     async def _build_insights_section(
-        self, report: Report, results: dict[str, Any]
+        self, report: Report, results: dict[str, Any],
     ) -> ReportSection | None:
         """Build insights section."""
         return await self.structure_builder.build_insights_section(report, results)
 
     async def _process_citations(
-        self, report: Report, input_data: dict[str, Any]
+        self, report: Report, input_data: dict[str, Any],
     ) -> None:
         """Process and format citations from input data."""
         await self.structure_builder.process_citations(report, input_data)
 
     async def _generate_visualizations(
-        self, report: Report, input_data: dict[str, Any]
+        self, report: Report, input_data: dict[str, Any],
     ) -> None:
         """Generate visualization specifications (actual chart generation will be handled by exporters)."""
         await self.structure_builder.generate_visualizations(report, input_data)
@@ -365,7 +360,7 @@ class ReportGenerator:
         await self.structure_builder.build_metadata(report, input_data)
 
     async def _generate_executive_summary(
-        self, report: Report, input_data: dict[str, Any]
+        self, report: Report, input_data: dict[str, Any],
     ) -> None:
         """Generate executive summary for the report."""
         await self.structure_builder.generate_executive_summary(report, input_data)
@@ -375,13 +370,13 @@ class ReportGenerator:
         await self.structure_builder.validate_report_quality(report)
 
     async def _generate_formats(
-        self, report: Report, formats: list[ReportFormat]
+        self, report: Report, formats: list[ReportFormat],
     ) -> dict[ReportFormat, ReportOutput]:
         """Generate report outputs in the requested formats."""
         return await self.output_generator.generate_formats(report, formats)
 
     async def _generate_single_format(
-        self, report: Report, format: ReportFormat
+        self, report: Report, format: ReportFormat,
     ) -> ReportOutput:
         """Generate report output in a single format."""
         return await self.output_generator.generate_single_format(report, format)
@@ -415,7 +410,7 @@ class ReportGenerator:
         return self.output_generator.generate_basic_html(report)
 
     async def _save_outputs(
-        self, report: Report, outputs: dict[ReportFormat, ReportOutput]
+        self, report: Report, outputs: dict[ReportFormat, ReportOutput],
     ) -> None:
         """Save generated outputs to storage."""
         report_dir = os.path.join(self.settings.report_storage_path, report.id)
@@ -453,7 +448,7 @@ class ReportGenerator:
                 logger.error(f"Failed to save {format} report: {e}")
 
     def _build_download_urls(
-        self, report_id: str, outputs: dict[ReportFormat, ReportOutput]
+        self, report_id: str, outputs: dict[ReportFormat, ReportOutput],
     ) -> dict[ReportFormat, str]:
         """Build download URLs for generated outputs."""
         urls = {}
@@ -472,14 +467,13 @@ class ReportGenerator:
         """Get confidence level description from score."""
         if score >= 0.9:
             return "very high"
-        elif score >= 0.7:
+        if score >= 0.7:
             return "high"
-        elif score >= 0.5:
+        if score >= 0.5:
             return "moderate"
-        elif score >= 0.3:
+        if score >= 0.3:
             return "low"
-        else:
-            return "very low"
+        return "very low"
 
 
 __all__ = [

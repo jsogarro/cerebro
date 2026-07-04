@@ -48,12 +48,12 @@ class TestReportGenerator:
                         "authors": ["Smith, J."],
                         "year": 2024,
                         "summary": "This paper explores...",
-                    }
+                    },
                 ],
                 "findings": {
                     "key_insights": [
-                        {"text": "AI improves learning outcomes", "confidence": 0.8}
-                    ]
+                        {"text": "AI improves learning outcomes", "confidence": 0.8},
+                    ],
                 },
                 "citations": [
                     {
@@ -61,7 +61,7 @@ class TestReportGenerator:
                         "authors": ["Smith, J."],
                         "title": "AI in Education Research",
                         "year": 2024,
-                    }
+                    },
                 ],
                 "recommendations": [
                     "Implement AI tutoring systems",
@@ -83,7 +83,7 @@ class TestReportGenerator:
 
     @pytest.mark.asyncio
     async def test_report_structure_building(
-        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any]
+        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any],
     ) -> None:
         """Test building report structure from input data."""
         generator = ReportGenerator(temp_settings)
@@ -91,7 +91,7 @@ class TestReportGenerator:
         config = ReportConfiguration(type=ReportType.COMPREHENSIVE)
 
         report = await generator._build_report_structure(
-            mock_input_data, config, "test-report-1"
+            mock_input_data, config, "test-report-1",
         )
 
         assert report.id == "test-report-1"
@@ -105,7 +105,7 @@ class TestReportGenerator:
 
     @pytest.mark.asyncio
     async def test_section_building(
-        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any]
+        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any],
     ) -> None:
         """Test building specific sections."""
         generator = ReportGenerator(temp_settings)
@@ -119,7 +119,7 @@ class TestReportGenerator:
         )
 
         intro_section = await generator._build_introduction_section(
-            report, mock_input_data["aggregated_results"]
+            report, mock_input_data["aggregated_results"],
         )
 
         assert intro_section is not None
@@ -127,7 +127,7 @@ class TestReportGenerator:
         assert report.query in intro_section.content
 
         findings_section = await generator._build_findings_section(
-            report, mock_input_data["aggregated_results"]
+            report, mock_input_data["aggregated_results"],
         )
 
         assert findings_section is not None
@@ -136,7 +136,7 @@ class TestReportGenerator:
 
     @pytest.mark.asyncio
     async def test_citation_processing(
-        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any]
+        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any],
     ) -> None:
         """Test citation processing."""
         generator = ReportGenerator(temp_settings)
@@ -158,7 +158,7 @@ class TestReportGenerator:
 
     @pytest.mark.asyncio
     async def test_markdown_generation(
-        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any]
+        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any],
     ) -> None:
         """Test markdown report generation."""
         generator = ReportGenerator(temp_settings)
@@ -181,7 +181,7 @@ class TestReportGenerator:
 
     @pytest.mark.asyncio
     async def test_html_generation(
-        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any]
+        self, temp_settings: ReportSettings, mock_input_data: dict[str, Any],
     ) -> None:
         """Test HTML report generation."""
         generator = ReportGenerator(temp_settings)

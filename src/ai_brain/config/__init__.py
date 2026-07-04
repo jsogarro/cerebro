@@ -1,5 +1,4 @@
-"""
-Model Configuration Management Package
+"""Model Configuration Management Package
 
 Provides dynamic configuration management for Cerebro's foundation models,
 replacing hard-coded model specifications with flexible YAML-based configuration.

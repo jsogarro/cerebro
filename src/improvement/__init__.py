@@ -29,7 +29,7 @@ class FeedbackCollectionService:
     """Collect and process feedback."""
 
     async def collect_explicit_feedback(
-        self, project_id: str, agent_id: str, rating: int, comments: str | None = None
+        self, project_id: str, agent_id: str, rating: int, comments: str | None = None,
     ) -> FeedbackRecord:
         """Collect explicit rating."""
         import uuid
@@ -57,7 +57,7 @@ class RLTrainer:
     """Reinforcement learning from human feedback."""
 
     async def train_step(
-        self, training_examples: list[dict[str, Any]]
+        self, training_examples: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Single RL training step."""
         return {"average_reward": 0.5}
@@ -67,7 +67,7 @@ class PromptOptimizer:
     """Automatically optimize prompts."""
 
     async def optimize_prompt(
-        self, current_prompt: str, agent_id: str, feedback_data: list[FeedbackRecord]
+        self, current_prompt: str, agent_id: str, feedback_data: list[FeedbackRecord],
     ) -> dict[str, Any]:
         """Generate optimized prompt."""
         return {
@@ -95,7 +95,7 @@ class MetaLearner:
     """Learn across agents and domains."""
 
     async def extract_cross_domain_patterns(
-        self, agents: list[str]
+        self, agents: list[str],
     ) -> list[dict[str, Any]]:
         """Identify transferable patterns."""
         return []
@@ -106,4 +106,3 @@ class ContinuousImprovementPipeline:
 
     async def run_daily_cycle(self) -> None:
         """Run improvement cycle."""
-        pass

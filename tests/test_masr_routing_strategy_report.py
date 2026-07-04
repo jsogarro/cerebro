@@ -35,7 +35,7 @@ def service() -> MASRRoutingService:
     ],
 )
 async def test_response_echoes_requested_strategy(
-    service: MASRRoutingService, requested: RoutingStrategy
+    service: MASRRoutingService, requested: RoutingStrategy,
 ) -> None:
     """The routing response must report the strategy that was requested."""
     request = RoutingRequest(

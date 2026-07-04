@@ -1,5 +1,4 @@
-"""
-MASR-Supervisor Bridge
+"""MASR-Supervisor Bridge
 
 Core integration layer that translates MASR routing decisions into supervisor
 execution plans and coordinates the hierarchical execution of multi-agent workflows.
@@ -149,16 +148,15 @@ class RoutingDecisionTranslator:
         }
 
     def translate(self, routing_decision: RoutingDecision) -> SupervisorConfiguration:
-        """
-        Translate MASR routing decision to supervisor configuration.
+        """Translate MASR routing decision to supervisor configuration.
 
         Args:
             routing_decision: MASR routing decision to translate
 
         Returns:
             SupervisorConfiguration for execution
-        """
 
+        """
         # Determine supervisor type from agent allocation
         supervisor_type = routing_decision.agent_allocation.supervisor_type
 
@@ -179,12 +177,12 @@ class RoutingDecisionTranslator:
         # Determine max refinement rounds based on complexity
         complexity_level = routing_decision.complexity_analysis.level
         max_refinement_rounds = self._calculate_max_refinement_rounds(
-            complexity_level, routing_strategy
+            complexity_level, routing_strategy,
         )
 
         # Get execution mode from collaboration mode
         execution_mode = self.collaboration_to_execution.get(
-            routing_decision.collaboration_mode, "parallel"
+            routing_decision.collaboration_mode, "parallel",
         )
 
         return SupervisorConfiguration(
@@ -234,7 +232,7 @@ class RoutingDecisionTranslator:
         return domain_names[0] if domain_names else "research"
 
     def _infer_routing_strategy(
-        self, routing_decision: RoutingDecision
+        self, routing_decision: RoutingDecision,
     ) -> RoutingStrategy:
         """Infer routing strategy from routing decision context."""
         # This would normally be part of the routing decision
@@ -242,10 +240,9 @@ class RoutingDecisionTranslator:
         return RoutingStrategy.BALANCED
 
     def _calculate_max_refinement_rounds(
-        self, complexity_level: ComplexityLevel, routing_strategy: RoutingStrategy
+        self, complexity_level: ComplexityLevel, routing_strategy: RoutingStrategy,
     ) -> int:
         """Calculate max refinement rounds based on complexity and strategy."""
-
         base_rounds = {
             ComplexityLevel.SIMPLE: 1,
             ComplexityLevel.MODERATE: 2,
@@ -267,7 +264,7 @@ class ResourcePool:
     """Resource pool for managing supervisor instances."""
 
     def __init__(
-        self, config: dict[str, Any] | None = None, gemini_service: Any | None = None
+        self, config: dict[str, Any] | None = None, gemini_service: Any | None = None,
     ):
         """Initialize resource pool."""
         self.config = config or {}
@@ -293,10 +290,9 @@ class ResourcePool:
         self._cleanup_task: asyncio.Task[None] | None = None
 
     async def get_supervisor(
-        self, supervisor_class: type[BaseSupervisor], config: SupervisorConfiguration
+        self, supervisor_class: type[BaseSupervisor], config: SupervisorConfiguration,
     ) -> BaseSupervisor:
-        """
-        Get supervisor instance from pool or create new one.
+        """Get supervisor instance from pool or create new one.
 
         Args:
             supervisor_class: Supervisor class to instantiate
@@ -304,8 +300,8 @@ class ResourcePool:
 
         Returns:
             Supervisor instance ready for execution
-        """
 
+        """
         supervisor_type = config.supervisor_type
 
         # Try to get from pool first
@@ -335,7 +331,6 @@ class ResourcePool:
 
     async def return_supervisor(self, supervisor: BaseSupervisor) -> None:
         """Return supervisor to pool for reuse."""
-
         supervisor_type = supervisor.supervisor_type
 
         # Initialize pool if needed
@@ -355,7 +350,7 @@ class ResourcePool:
             logger.debug(f"Evicted supervisor {supervisor_type} - pool full")
 
     def _create_supervisor_config(
-        self, config: SupervisorConfiguration
+        self, config: SupervisorConfiguration,
     ) -> dict[str, Any]:
         """Create supervisor-specific configuration."""
         return {
@@ -400,7 +395,7 @@ class SupervisorExecutor:
     """Manages supervisor execution lifecycle."""
 
     def __init__(
-        self, resource_pool: ResourcePool, config: dict[str, Any] | None = None
+        self, resource_pool: ResourcePool, config: dict[str, Any] | None = None,
     ):
         """Initialize supervisor executor."""
         self.resource_pool = resource_pool
@@ -424,8 +419,7 @@ class SupervisorExecutor:
         config: SupervisorConfiguration,
         task: AgentTask,
     ) -> SupervisorExecutionResult:
-        """
-        Execute task using specified supervisor.
+        """Execute task using specified supervisor.
 
         Args:
             supervisor_class: Supervisor class to use
@@ -434,8 +428,8 @@ class SupervisorExecutor:
 
         Returns:
             Execution result with performance metrics
-        """
 
+        """
         execution_id = str(uuid.uuid4())
         start_time = datetime.now()
 
@@ -454,13 +448,13 @@ class SupervisorExecutor:
             # Get supervisor from pool
             result.status = SupervisorExecutionStatus.INITIALIZING
             supervisor = await self.resource_pool.get_supervisor(
-                supervisor_class, config
+                supervisor_class, config,
             )
 
             # Execute task
             result.status = SupervisorExecutionStatus.EXECUTING
             logger.info(
-                f"Executing task {task.id} with {config.supervisor_type} supervisor"
+                f"Executing task {task.id} with {config.supervisor_type} supervisor",
             )
 
             agent_result = await supervisor.execute(task)
@@ -472,19 +466,19 @@ class SupervisorExecutor:
 
             # Extract supervision quality metrics
             if hasattr(agent_result, "output") and isinstance(
-                agent_result.output, dict
+                agent_result.output, dict,
             ):
                 supervision_quality = agent_result.output.get("supervision_quality", {})
                 result.supervision_quality = supervision_quality
                 result.consensus_score = supervision_quality.get(
-                    "final_consensus_score", 0.0
+                    "final_consensus_score", 0.0,
                 )
                 result.refinement_rounds = supervision_quality.get(
-                    "refinement_rounds", 0
+                    "refinement_rounds", 0,
                 )
 
                 coordination_metadata = agent_result.output.get(
-                    "coordination_metadata", {}
+                    "coordination_metadata", {},
                 )
                 result.workers_used = len(coordination_metadata.get("workers_used", []))
 
@@ -524,7 +518,7 @@ class SupervisorExecutor:
         return result
 
     async def get_execution_status(
-        self, execution_id: str
+        self, execution_id: str,
     ) -> SupervisorExecutionResult | None:
         """Get status of active execution."""
         return self.active_executions.get(execution_id)
@@ -547,15 +541,14 @@ class SupervisorExecutor:
 
 
 class MASRSupervisorBridge:
-    """
-    Main bridge class integrating MASR routing with supervisor execution.
+    """Main bridge class integrating MASR routing with supervisor execution.
 
     This is the primary interface for routing queries through the MASR system
     and executing them via hierarchical supervisors with TalkHier protocol.
     """
 
     def __init__(
-        self, config: dict[str, Any] | None = None, gemini_service: Any | None = None
+        self, config: dict[str, Any] | None = None, gemini_service: Any | None = None,
     ):
         """Initialize MASR-Supervisor bridge."""
         self.config = config or {}
@@ -587,8 +580,7 @@ class MASRSupervisorBridge:
         task: AgentTask,
         supervisor_registry: dict[str, type[BaseSupervisor]],
     ) -> SupervisorExecutionResult:
-        """
-        Execute a MASR routing decision using appropriate supervisor.
+        """Execute a MASR routing decision using appropriate supervisor.
 
         Args:
             routing_decision: MASR routing decision
@@ -597,8 +589,8 @@ class MASRSupervisorBridge:
 
         Returns:
             Supervisor execution result with performance metrics
-        """
 
+        """
         start_time = datetime.now()
         self.bridge_stats["total_requests"] += 1
 
@@ -608,12 +600,12 @@ class MASRSupervisorBridge:
 
             # Get supervisor class from registry, defaulting to "research"
             supervisor_class = supervisor_registry.get(
-                supervisor_config.supervisor_type
+                supervisor_config.supervisor_type,
             )
             if not supervisor_class:
                 logger.warning(
                     f"Supervisor '{supervisor_config.supervisor_type}' not found, "
-                    f"falling back to 'research'"
+                    f"falling back to 'research'",
                 )
                 supervisor_class = supervisor_registry.get("research")
                 if not supervisor_class:
@@ -621,7 +613,7 @@ class MASRSupervisorBridge:
 
             # Execute via supervisor
             result = await self.executor.execute(
-                supervisor_class, supervisor_config, task
+                supervisor_class, supervisor_config, task,
             )
 
             # Calculate bridge performance metrics
@@ -652,7 +644,7 @@ class MASRSupervisorBridge:
 
         except Exception as e:
             logger.error(
-                f"Bridge execution failed for query {routing_decision.query_id}: {e}"
+                f"Bridge execution failed for query {routing_decision.query_id}: {e}",
             )
             self.bridge_stats["failed_requests"] += 1
 

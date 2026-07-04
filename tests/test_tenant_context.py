@@ -71,7 +71,7 @@ def test_require_organization_id_fails_closed_when_claim_missing() -> None:
 async def test_set_postgres_tenant_context_sets_transaction_local_var() -> None:
     session = _CapturingSession()
 
-    await set_postgres_tenant_context(cast(AsyncSession, session), "org-456")
+    await set_postgres_tenant_context(cast("AsyncSession", session), "org-456")
 
     assert len(session.executed) == 1
     statement, parameters = session.executed[0]
@@ -85,7 +85,7 @@ async def test_get_tenant_context_returns_context_and_sets_db_var() -> None:
 
     context = await get_tenant_context(
         token_payload=_token_payload("org-789"),
-        session=cast(AsyncSession, session),
+        session=cast("AsyncSession", session),
     )
 
     assert context == TenantContext(user_id="user-123", organization_id="org-789")
@@ -103,6 +103,6 @@ async def test_set_postgres_tenant_context_skips_non_postgres_dialects() -> None
     """
     session = _CapturingSession(dialect_name="sqlite")
 
-    await set_postgres_tenant_context(cast(AsyncSession, session), "org-456")
+    await set_postgres_tenant_context(cast("AsyncSession", session), "org-456")
 
     assert session.executed == []

@@ -1,5 +1,4 @@
-"""
-Authentication API endpoints.
+"""Authentication API endpoints.
 
 Provides user registration, login, token management, and password reset.
 """
@@ -64,7 +63,7 @@ async def get_password_service() -> PasswordService:
 
 
 @router.post(
-    "/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
+    "/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED,
 )
 async def register(
     request: RegisterRequest,
@@ -73,8 +72,7 @@ async def register(
     jwt_service: JWTService = Depends(get_jwt_service),
     password_service: PasswordService = Depends(get_password_service),
 ) -> AuthResponse:
-    """
-    Register a new user account.
+    """Register a new user account.
 
     Creates a new user with the provided credentials and returns authentication tokens.
     """
@@ -85,18 +83,18 @@ async def register(
         existing_user = await user_repo.get_by_email(request.email)
         if existing_user:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
+                status_code=status.HTTP_409_CONFLICT, detail="Email already registered",
             )
 
         existing_user = await user_repo.get_by_username(request.username)
         if existing_user:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Username already taken"
+                status_code=status.HTTP_409_CONFLICT, detail="Username already taken",
             )
 
         # Validate password strength
         validation = password_service.validate_password_strength(
-            request.password, username=request.username, email=request.email
+            request.password, username=request.username, email=request.email,
         )
 
         if not validation["valid"]:
@@ -147,7 +145,7 @@ async def register(
         # background_tasks.add_task(send_verification_email, user.email, user.id)
 
         logger.info(
-            "User registered successfully", user_id=str(user.id), email=user.email
+            "User registered successfully", user_id=str(user.id), email=user.email,
         )
 
         return AuthResponse(user=UserResponse.from_orm(user), tokens=tokens)
@@ -161,8 +159,7 @@ async def login(
     jwt_service: JWTService = Depends(get_jwt_service),
     password_service: PasswordService = Depends(get_password_service),
 ) -> AuthResponse:
-    """
-    Login with email and password.
+    """Login with email and password.
 
     Authenticates user credentials and returns access and refresh tokens.
     """
@@ -179,13 +176,13 @@ async def login(
         )
 
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password",
         )
 
     # Check if account is active
     if not user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled",
         )
 
     # Update login info
@@ -229,15 +226,14 @@ async def refresh_tokens(
     request: RefreshRequest,
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> TokenPair:
-    """
-    Refresh authentication tokens.
+    """Refresh authentication tokens.
 
     Uses a valid refresh token to generate new access and refresh tokens.
     """
     try:
         # Refresh tokens
         new_tokens = await jwt_service.refresh_tokens(
-            refresh_token=request.refresh_token, device_id=request.device_id
+            refresh_token=request.refresh_token, device_id=request.device_id,
         )
 
         logger.info("Tokens refreshed successfully")
@@ -246,7 +242,7 @@ async def refresh_tokens(
     except Exception as e:
         logger.warning("Token refresh failed", error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token",
         ) from e
 
 
@@ -255,8 +251,7 @@ async def logout(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
-    """
-    Logout and revoke tokens.
+    """Logout and revoke tokens.
 
     Adds the current token to blacklist, preventing further use.
     """
@@ -278,8 +273,7 @@ async def forgot_password(
     db: AsyncSession = Depends(get_session),
     password_service: PasswordService = Depends(get_password_service),
 ) -> dict[str, str]:
-    """
-    Request password reset.
+    """Request password reset.
 
     Sends a password reset email with a secure token.
     """
@@ -313,8 +307,7 @@ async def reset_password(
     db: AsyncSession = Depends(get_session),
     password_service: PasswordService = Depends(get_password_service),
 ) -> dict[str, str]:
-    """
-    Reset password with token.
+    """Reset password with token.
 
     Validates the reset token and updates the user's password.
     """
@@ -334,12 +327,12 @@ async def reset_password(
 
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found",
             )
 
         # Validate new password
         validation = password_service.validate_password_strength(
-            request.new_password, username=user.username, email=user.email
+            request.new_password, username=user.username, email=user.email,
         )
 
         if not validation["valid"]:
@@ -385,8 +378,7 @@ async def change_password(
     db: AsyncSession = Depends(get_session),
     password_service: PasswordService = Depends(get_password_service),
 ) -> dict[str, str]:
-    """
-    Change password for authenticated user.
+    """Change password for authenticated user.
 
     Requires current password verification before updating.
     """
@@ -434,7 +426,7 @@ async def change_password(
 
         # Add to password history
         await password_service.add_to_password_history(
-            user_id, current_user.hashed_password
+            user_id, current_user.hashed_password,
         )
 
         await db.commit()
@@ -449,8 +441,7 @@ async def verify_email(
     token: str,
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, str]:
-    """
-    Verify email address with token.
+    """Verify email address with token.
 
     Confirms the user's email address using the verification token.
     """
@@ -465,8 +456,7 @@ async def get_sessions(
     current_user: User = Depends(get_current_user),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> list[SessionInfo]:
-    """
-    Get active sessions for current user.
+    """Get active sessions for current user.
 
     Returns a list of all active sessions with device and location information.
     """
@@ -492,8 +482,7 @@ async def revoke_session(
     current_user: User = Depends(get_current_user),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
-    """
-    Revoke a specific session.
+    """Revoke a specific session.
 
     Terminates the session associated with the given device ID.
     """
@@ -509,12 +498,12 @@ async def revoke_session(
                 _jti = key.replace("refresh:token:", "")
                 # Would need to revoke associated tokens
                 logger.info(
-                    "Session revoked", user_id=str(current_user.id), device_id=device_id
+                    "Session revoked", user_id=str(current_user.id), device_id=device_id,
                 )
                 return
 
     raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        status_code=status.HTTP_404_NOT_FOUND, detail="Session not found",
     )
 
 
@@ -523,8 +512,7 @@ async def revoke_all_sessions(
     current_user: User = Depends(get_current_user),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
-    """
-    Revoke all sessions for current user.
+    """Revoke all sessions for current user.
 
     Logs out the user from all devices and sessions.
     """
@@ -537,8 +525,7 @@ async def revoke_all_sessions(
 async def get_current_user_info(
     current_user: User = Depends(get_current_user),
 ) -> UserResponse:
-    """
-    Get current user information.
+    """Get current user information.
 
     Returns the authenticated user's profile information.
     """

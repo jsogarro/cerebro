@@ -1,5 +1,4 @@
-"""
-Test suite for Gemini response parsing.
+"""Test suite for Gemini response parsing.
 
 These tests verify response parsing and data extraction functionality.
 """
@@ -17,7 +16,7 @@ class TestJSONParser:
         from src.services.parsers.json_parser import parse_json_response
 
         response = json.dumps(
-            {"result": "success", "data": {"key": "value"}, "items": [1, 2, 3]}
+            {"result": "success", "data": {"key": "value"}, "items": [1, 2, 3]},
         )
 
         result = parse_json_response(response)
@@ -264,7 +263,7 @@ class TestCitationParser:
         assert validate_citation(valid_citation) is True
 
         invalid_citation = {
-            "author": "Author"
+            "author": "Author",
             # Missing required fields
         }
 

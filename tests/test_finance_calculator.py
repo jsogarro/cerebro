@@ -37,7 +37,7 @@ def test_financial_ratios() -> None:
             "total_equity": 400,
             "net_income": 80,
             "revenue": 1000,
-        }
+        },
     ).ratios
     assert r["current_ratio"] == 2.0
     assert r["quick_ratio"] == 1.6
@@ -93,9 +93,9 @@ async def test_calculator_agent_computes_dcf() -> None:
                     "fcf_next": 100,
                     "growth_rate": 0.05,
                     "discount_rate": 0.10,
-                }
+                },
             },
-        )
+        ),
     )
     assert result.status == "success"
     assert result.confidence == 1.0
@@ -105,6 +105,6 @@ async def test_calculator_agent_computes_dcf() -> None:
 async def test_calculator_agent_missing_operation_errors() -> None:
     agent = FinancialCalculatorAgent()
     result = await agent.execute(
-        AgentTask(id="t", agent_type="financial_calculator", input_data={})
+        AgentTask(id="t", agent_type="financial_calculator", input_data={}),
     )
     assert result.status != "success" or "result" not in result.output

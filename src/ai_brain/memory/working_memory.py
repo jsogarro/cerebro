@@ -1,5 +1,4 @@
-"""
-Working Memory Manager
+"""Working Memory Manager
 
 Manages short-term memory for active conversations, current context,
 and temporary state. Uses Redis for fast access with TTL-based expiration.
@@ -66,8 +65,7 @@ class ConversationContext:
 
 
 class WorkingMemoryManager:
-    """
-    Manages working memory using Redis for fast, temporary storage.
+    """Manages working memory using Redis for fast, temporary storage.
 
     Working memory is designed for:
     - Fast read/write operations (< 1ms)
@@ -136,8 +134,7 @@ class WorkingMemoryManager:
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """
-        Store an item in working memory.
+        """Store an item in working memory.
 
         Args:
             key: Storage key
@@ -148,8 +145,8 @@ class WorkingMemoryManager:
 
         Returns:
             True if stored successfully
-        """
 
+        """
         try:
             # Create working memory item
             item = WorkingMemoryItem(
@@ -180,16 +177,15 @@ class WorkingMemoryManager:
             return False
 
     async def retrieve(self, key: str) -> Any | None:
-        """
-        Retrieve an item from working memory.
+        """Retrieve an item from working memory.
 
         Args:
             key: Storage key
 
         Returns:
             Stored value or None if not found
-        """
 
+        """
         try:
             if self.redis_client:
                 item = await self._retrieve_redis(key)
@@ -208,9 +204,8 @@ class WorkingMemoryManager:
                     self._bg_tasks.create_task(self._update_access_stats(key, item))
 
                 return item.value
-            else:
-                self.miss_count += 1
-                return None
+            self.miss_count += 1
+            return None
 
         except Exception as e:
             logger.error(f"Failed to retrieve working memory item {key}: {e}")
@@ -219,13 +214,11 @@ class WorkingMemoryManager:
 
     async def delete(self, key: str) -> bool:
         """Delete an item from working memory."""
-
         try:
             if self.redis_client:
                 result = await self.redis_client.delete(self._make_key(key))
                 return result > 0
-            else:
-                return self._memory_fallback.pop(key, None) is not None
+            return self._memory_fallback.pop(key, None) is not None
 
         except Exception as e:
             logger.error(f"Failed to delete working memory item {key}: {e}")
@@ -233,12 +226,10 @@ class WorkingMemoryManager:
 
     async def exists(self, key: str) -> bool:
         """Check if a key exists in working memory."""
-
         try:
             if self.redis_client:
                 return await self.redis_client.exists(self._make_key(key)) > 0
-            else:
-                return key in self._memory_fallback
+            return key in self._memory_fallback
 
         except Exception as e:
             logger.error(f"Failed to check working memory existence {key}: {e}")
@@ -246,7 +237,6 @@ class WorkingMemoryManager:
 
     async def store_conversation_context(self, context: ConversationContext) -> bool:
         """Store conversation context in working memory."""
-
         context.last_updated = datetime.now()
         key = f"conversation:{context.session_id}"
 
@@ -263,10 +253,9 @@ class WorkingMemoryManager:
         )
 
     async def retrieve_conversation_context(
-        self, session_id: str
+        self, session_id: str,
     ) -> ConversationContext | None:
         """Retrieve conversation context from working memory."""
-
         key = f"conversation:{session_id}"
         context_data = await self.retrieve(key)
 
@@ -280,10 +269,9 @@ class WorkingMemoryManager:
         return None
 
     async def update_conversation_context(
-        self, session_id: str, updates: dict[str, Any]
+        self, session_id: str, updates: dict[str, Any],
     ) -> bool:
         """Update specific fields in conversation context."""
-
         context = await self.retrieve_conversation_context(session_id)
         if not context:
             return False
@@ -297,10 +285,9 @@ class WorkingMemoryManager:
         return await self.store_conversation_context(context)
 
     async def add_message_to_context(
-        self, session_id: str, message: dict[str, Any]
+        self, session_id: str, message: dict[str, Any],
     ) -> bool:
         """Add a message to conversation context."""
-
         context = await self.retrieve_conversation_context(session_id)
         if not context:
             # Create new context
@@ -318,10 +305,9 @@ class WorkingMemoryManager:
         return await self.store_conversation_context(context)
 
     async def store_agent_state(
-        self, agent_id: str, state: dict[str, Any], session_id: str | None = None
+        self, agent_id: str, state: dict[str, Any], session_id: str | None = None,
     ) -> bool:
         """Store agent state in working memory."""
-
         key = f"agent_state:{agent_id}"
         if session_id:
             key += f":{session_id}"
@@ -335,10 +321,9 @@ class WorkingMemoryManager:
         )
 
     async def retrieve_agent_state(
-        self, agent_id: str, session_id: str | None = None
+        self, agent_id: str, session_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Retrieve agent state from working memory."""
-
         key = f"agent_state:{agent_id}"
         if session_id:
             key += f":{session_id}"
@@ -347,22 +332,20 @@ class WorkingMemoryManager:
 
     async def get_keys_by_pattern(self, pattern: str) -> list[str]:
         """Get all keys matching a pattern."""
-
         try:
             if self.redis_client:
                 full_pattern = f"{self.key_prefix}{pattern}"
                 keys = await self.redis_client.keys(full_pattern)
                 # Remove prefix from keys
                 return [key.decode().replace(self.key_prefix, "") for key in keys]
-            else:
-                # Simple pattern matching for fallback
-                import fnmatch
+            # Simple pattern matching for fallback
+            import fnmatch
 
-                return [
-                    key
-                    for key in self._memory_fallback
-                    if fnmatch.fnmatch(key, pattern)
-                ]
+            return [
+                key
+                for key in self._memory_fallback
+                if fnmatch.fnmatch(key, pattern)
+            ]
 
         except Exception as e:
             logger.error(f"Failed to get keys by pattern {pattern}: {e}")
@@ -370,7 +353,6 @@ class WorkingMemoryManager:
 
     async def get_keys_by_tags(self, tags: list[str]) -> list[str]:
         """Get all keys that have specific tags."""
-
         matching_keys = []
 
         try:
@@ -408,7 +390,6 @@ class WorkingMemoryManager:
 
     async def delete_by_user_id(self, user_id: str) -> int:
         """Delete working-memory items associated with a user."""
-
         deleted_count = 0
 
         try:
@@ -436,7 +417,6 @@ class WorkingMemoryManager:
 
     async def cleanup_expired(self) -> int:
         """Clean up expired items from working memory."""
-
         cleaned_count = 0
 
         try:
@@ -470,7 +450,6 @@ class WorkingMemoryManager:
 
     async def get_memory_stats(self) -> dict[str, Any]:
         """Get working memory statistics."""
-
         stats = {
             "hit_count": self.hit_count,
             "miss_count": self.miss_count,
@@ -487,14 +466,14 @@ class WorkingMemoryManager:
                         "redis_memory_used": info.get("used_memory", 0),
                         "redis_memory_human": info.get("used_memory_human", "0B"),
                         "redis_connected": True,
-                    }
+                    },
                 )
             else:
                 stats.update(
                     {
                         "fallback_item_count": len(self._memory_fallback),
                         "redis_connected": False,
-                    }
+                    },
                 )
 
         except Exception as e:
@@ -525,7 +504,7 @@ class WorkingMemoryManager:
                 redis_key,
                 ttl,
                 serialize_for_cache(self._encryption.encrypt_data(item_data)).decode(
-                    "utf-8"
+                    "utf-8",
                 ),
             )
 
@@ -566,7 +545,6 @@ class WorkingMemoryManager:
 
     def _deserialize_stored_item(self, data: bytes | str) -> dict[str, Any]:
         """Deserialize and decrypt a stored working-memory payload."""
-
         item_data = deserialize_from_cache(data)
         decrypted = self._encryption.decrypt_data(item_data)
         if not isinstance(decrypted, dict):
@@ -601,7 +579,6 @@ class WorkingMemoryManager:
     @staticmethod
     def _item_belongs_to_user(item: WorkingMemoryItem, user_id: str) -> bool:
         """Check common working-memory user ownership locations."""
-
         return item.metadata.get("user_id") == user_id or (
             isinstance(item.value, dict) and item.value.get("user_id") == user_id
         )

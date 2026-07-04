@@ -1,5 +1,4 @@
-"""
-Configuration for Gemini service.
+"""Configuration for Gemini service.
 
 This module contains configuration settings for the Gemini API integration.
 """
@@ -16,8 +15,7 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class GeminiConfig:
-    """
-    Immutable configuration for Gemini service.
+    """Immutable configuration for Gemini service.
 
     Following functional programming principles with immutable data structures.
     """
@@ -55,8 +53,7 @@ class GeminiConfig:
 
     @classmethod
     def from_env(cls) -> "GeminiConfig":
-        """
-        Create configuration from environment variables.
+        """Create configuration from environment variables.
 
         This is a pure function that reads environment and returns config.
         """
@@ -80,8 +77,7 @@ class GeminiConfig:
 
 
 def get_generation_config(config: GeminiConfig) -> dict[str, Any]:
-    """
-    Get generation configuration for Gemini model.
+    """Get generation configuration for Gemini model.
 
     Pure function that transforms config to generation settings.
     """

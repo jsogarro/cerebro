@@ -1,5 +1,4 @@
-"""
-E2E tests for tenant isolation (multi-tenancy).
+"""E2E tests for tenant isolation (multi-tenancy).
 
 Verifies that users cannot access each other's projects.
 
@@ -43,8 +42,7 @@ class TestTenantIsolationE2E:
     """End-to-end tenant isolation tests."""
 
     async def test_cross_tenant_project_access_denied(self):
-        """
-        Alice creates project P_A. Bob tries to access P_A -> denied.
+        """Alice creates project P_A. Bob tries to access P_A -> denied.
 
         Currently skips due to tenant org claim issue preventing project creation.
         """
@@ -71,7 +69,7 @@ class TestTenantIsolationE2E:
             assert alice_create_response.status_code == 201
             alice_project = alice_create_response.json()
             alice_project_id = alice_project.get("id") or alice_project.get(
-                "project", {}
+                "project", {},
             ).get("id")
 
             # Bob tries to access Alice's project
@@ -84,8 +82,7 @@ class TestTenantIsolationE2E:
             assert bob_access_response.status_code in [403, 404]
 
     async def test_users_see_only_own_projects(self):
-        """
-        Alice lists projects -> sees only hers. Bob lists -> sees only his.
+        """Alice lists projects -> sees only hers. Bob lists -> sees only his.
 
         Currently skips/adapts due to tenant claim issue.
         """
@@ -152,7 +149,7 @@ class TestTenantIsolationE2E:
             assert alice_create_response.status_code == 201
             alice_project = alice_create_response.json()
             alice_project_id = alice_project.get("id") or alice_project.get(
-                "project", {}
+                "project", {},
             ).get("id")
 
             # Bob tries to cancel Alice's project

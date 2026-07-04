@@ -1,5 +1,4 @@
-"""
-Advanced Agent Communication System
+"""Advanced Agent Communication System
 
 Implements TalkHier-inspired communication protocol enhanced with LangGraph
 integration for sophisticated hierarchical agent coordination.

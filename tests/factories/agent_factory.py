@@ -1,5 +1,4 @@
-"""
-Agent factory for generating mock agent responses and test data.
+"""Agent factory for generating mock agent responses and test data.
 """
 
 import json
@@ -17,7 +16,7 @@ class MockAgentResponseFactory:
 
     @staticmethod
     def create_literature_review_response(
-        num_papers: int = 20, include_error: bool = False
+        num_papers: int = 20, include_error: bool = False,
     ) -> dict[str, Any]:
         """Create a mock literature review agent response."""
         if include_error:
@@ -64,7 +63,7 @@ class MockAgentResponseFactory:
 
     @staticmethod
     def create_comparative_analysis_response(
-        num_theories: int = 5, include_error: bool = False
+        num_theories: int = 5, include_error: bool = False,
     ) -> dict[str, Any]:
         """Create a mock comparative analysis agent response."""
         if include_error:
@@ -241,7 +240,7 @@ class MockAgentResponseFactory:
 
     @staticmethod
     def create_citation_response(
-        num_citations: int = 30, include_error: bool = False
+        num_citations: int = 30, include_error: bool = False,
     ) -> dict[str, Any]:
         """Create a mock citation agent response."""
         if include_error:
@@ -258,7 +257,7 @@ class MockAgentResponseFactory:
             citation = {
                 "id": str(uuid.uuid4()),
                 "type": random.choice(
-                    ["journal", "book", "conference", "web", "thesis"]
+                    ["journal", "book", "conference", "web", "thesis"],
                 ),
                 "title": fake.catch_phrase(),
                 "authors": [fake.name() for _ in range(random.randint(1, 3))],
@@ -275,14 +274,14 @@ class MockAgentResponseFactory:
                 ),
                 "url": fake.url() if random.choice([True, False]) else None,
                 "accessed_date": fake.date_between(
-                    start_date="-30d", end_date="today"
+                    start_date="-30d", end_date="today",
                 ).isoformat(),
                 "formatted_citations": {
                     style: f"Formatted citation in {style} style"
                     for style in citation_styles
                 },
                 "verification_status": random.choice(
-                    ["verified", "unverified", "partial"]
+                    ["verified", "unverified", "partial"],
                 ),
             }
             citations.append(citation)
@@ -316,7 +315,7 @@ class MockAgentResponseFactory:
 
     @staticmethod
     def create_batch_responses(
-        agents: list[str], include_errors: bool = False
+        agents: list[str], include_errors: bool = False,
     ) -> dict[str, dict[str, Any]]:
         """Create responses for multiple agents."""
         factory = MockAgentResponseFactory()
@@ -350,7 +349,7 @@ class MockGeminiResponseFactory:
 
     @staticmethod
     def create_response(
-        prompt_type: str = "general", include_error: bool = False
+        prompt_type: str = "general", include_error: bool = False,
     ) -> str:
         """Create a mock Gemini response based on prompt type."""
         if include_error:
@@ -363,7 +362,7 @@ class MockGeminiResponseFactory:
                     "analysis": fake.paragraph(nb_sentences=8),
                     "key_points": [fake.sentence() for _ in range(3)],
                     "confidence": round(random.uniform(0.7, 1.0), 2),
-                }
+                },
             ),
             "summary": fake.paragraph(nb_sentences=3),
             "question": fake.sentence() + "?",
@@ -399,7 +398,7 @@ class MockMCPToolFactory:
 
     @staticmethod
     def create_academic_search_response(
-        query: str, max_results: int = 10
+        query: str, max_results: int = 10,
     ) -> dict[str, Any]:
         """Create mock academic search tool response."""
         results = []
@@ -424,7 +423,7 @@ class MockMCPToolFactory:
 
     @staticmethod
     def create_citation_tool_response(
-        citation_data: dict[str, Any], style: str = "APA"
+        citation_data: dict[str, Any], style: str = "APA",
     ) -> dict[str, Any]:
         """Create mock citation formatting tool response."""
         return {
@@ -436,7 +435,7 @@ class MockMCPToolFactory:
 
     @staticmethod
     def create_statistics_tool_response(
-        data: list[float], analysis_type: str = "descriptive"
+        data: list[float], analysis_type: str = "descriptive",
     ) -> dict[str, Any]:
         """Create mock statistics tool response."""
         import statistics

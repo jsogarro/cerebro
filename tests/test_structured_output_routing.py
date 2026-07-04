@@ -65,7 +65,7 @@ class TestStructuredRoutingFlagOff:
 
     @patch("src.core.config.settings")
     async def test_flag_off_delegates_to_gemini(
-        self, mock_settings, test_agent, test_task
+        self, mock_settings, test_agent, test_task,
     ):
         """When flag is OFF, delegates to GeminiService."""
         mock_settings.MULTI_PROVIDER_ROUTING_ENABLED = False
@@ -79,18 +79,18 @@ class TestStructuredRoutingFlagOff:
 
         # Execute
         result = await test_agent._generate_structured_with_routing(
-            "test prompt", SimpleSchema, test_task
+            "test prompt", SimpleSchema, test_task,
         )
 
         # Verify
         assert result == expected_result
         mock_gemini.generate_structured_content.assert_called_once_with(
-            "test prompt", SimpleSchema
+            "test prompt", SimpleSchema,
         )
 
     @patch("src.core.config.settings")
     async def test_flag_on_but_no_api_key_uses_gemini(
-        self, mock_settings, test_agent, test_task
+        self, mock_settings, test_agent, test_task,
     ):
         """When flag is ON but no API key, falls back to Gemini."""
         mock_settings.MULTI_PROVIDER_ROUTING_ENABLED = True
@@ -104,7 +104,7 @@ class TestStructuredRoutingFlagOff:
 
         # Execute
         result = await test_agent._generate_structured_with_routing(
-            "test prompt", SimpleSchema, test_task
+            "test prompt", SimpleSchema, test_task,
         )
 
         # Verify
@@ -118,14 +118,14 @@ class TestStructuredRoutingFlagOn:
     @patch("src.core.config.settings")
     @patch("src.ai_brain.providers.ModelRouter")
     async def test_flag_on_routes_via_openrouter(
-        self, mock_router_class, mock_settings, test_agent, test_task
+        self, mock_router_class, mock_settings, test_agent, test_task,
     ):
         """When flag is ON, routes through OpenRouter with JSON mode."""
         mock_settings.MULTI_PROVIDER_ROUTING_ENABLED = True
         mock_settings.OPENROUTER_API_KEY = "test-key"
         mock_settings.OPENROUTER_ENDPOINT = "https://test.endpoint"
         mock_settings.OPENROUTER_TIER_MAPPING = {
-            "balanced": "anthropic/claude-sonnet-4.6"
+            "balanced": "anthropic/claude-sonnet-4.6",
         }
 
         # Mock successful OpenRouter response
@@ -138,7 +138,7 @@ class TestStructuredRoutingFlagOn:
 
         # Execute
         result = await test_agent._generate_structured_with_routing(
-            "test prompt", SimpleSchema, test_task
+            "test prompt", SimpleSchema, test_task,
         )
 
         # Verify
@@ -155,7 +155,7 @@ class TestStructuredRoutingFlagOn:
     @patch("src.core.config.settings")
     @patch("src.ai_brain.providers.ModelRouter")
     async def test_json_parse_error_falls_back_to_gemini(
-        self, mock_router_class, mock_settings, test_agent, test_task
+        self, mock_router_class, mock_settings, test_agent, test_task,
     ):
         """When JSON parse fails, falls back to Gemini."""
         mock_settings.MULTI_PROVIDER_ROUTING_ENABLED = True
@@ -179,7 +179,7 @@ class TestStructuredRoutingFlagOn:
 
         # Execute
         result = await test_agent._generate_structured_with_routing(
-            "test prompt", SimpleSchema, test_task
+            "test prompt", SimpleSchema, test_task,
         )
 
         # Verify fallback was used
@@ -189,7 +189,7 @@ class TestStructuredRoutingFlagOn:
     @patch("src.core.config.settings")
     @patch("src.ai_brain.providers.ModelRouter")
     async def test_schema_validation_error_falls_back_to_gemini(
-        self, mock_router_class, mock_settings, test_agent, test_task
+        self, mock_router_class, mock_settings, test_agent, test_task,
     ):
         """When schema validation fails, falls back to Gemini."""
         mock_settings.MULTI_PROVIDER_ROUTING_ENABLED = True
@@ -213,7 +213,7 @@ class TestStructuredRoutingFlagOn:
 
         # Execute
         result = await test_agent._generate_structured_with_routing(
-            "test prompt", SimpleSchema, test_task
+            "test prompt", SimpleSchema, test_task,
         )
 
         # Verify fallback was used
@@ -223,7 +223,7 @@ class TestStructuredRoutingFlagOn:
     @patch("src.core.config.settings")
     @patch("src.ai_brain.providers.ModelRouter")
     async def test_http_error_falls_back_to_gemini(
-        self, mock_router_class, mock_settings, test_agent, test_task
+        self, mock_router_class, mock_settings, test_agent, test_task,
     ):
         """When HTTP error occurs, falls back to Gemini."""
         mock_settings.MULTI_PROVIDER_ROUTING_ENABLED = True
@@ -247,7 +247,7 @@ class TestStructuredRoutingFlagOn:
 
         # Execute
         result = await test_agent._generate_structured_with_routing(
-            "test prompt", SimpleSchema, test_task
+            "test prompt", SimpleSchema, test_task,
         )
 
         # Verify fallback was used
@@ -257,7 +257,7 @@ class TestStructuredRoutingFlagOn:
     @patch("src.core.config.settings")
     @patch("src.ai_brain.providers.ModelRouter")
     async def test_router_exception_falls_back_to_gemini(
-        self, mock_router_class, mock_settings, test_agent, test_task
+        self, mock_router_class, mock_settings, test_agent, test_task,
     ):
         """When router raises exception, falls back to Gemini."""
         mock_settings.MULTI_PROVIDER_ROUTING_ENABLED = True
@@ -278,7 +278,7 @@ class TestStructuredRoutingFlagOn:
 
         # Execute
         result = await test_agent._generate_structured_with_routing(
-            "test prompt", SimpleSchema, test_task
+            "test prompt", SimpleSchema, test_task,
         )
 
         # Verify fallback was used
@@ -309,7 +309,7 @@ class TestSwappedAgentCallSites:
         assert source.count("_generate_structured_with_routing(") >= 1
 
     @patch(
-        "src.agents.methodology_agent.MethodologyAgent._generate_structured_with_routing"
+        "src.agents.methodology_agent.MethodologyAgent._generate_structured_with_routing",
     )
     async def test_methodology_agent_uses_routing(self, mock_routing):
         """MethodologyAgent uses _generate_structured_with_routing."""
@@ -349,7 +349,7 @@ class TestSwappedAgentCallSites:
         assert call_args[1]["task"] == task
 
     @patch(
-        "src.agents.synthesis_agent.SynthesisAgent._generate_structured_with_routing"
+        "src.agents.synthesis_agent.SynthesisAgent._generate_structured_with_routing",
     )
     async def test_synthesis_agent_uses_routing(self, mock_routing):
         """SynthesisAgent uses _generate_structured_with_routing."""
@@ -427,7 +427,8 @@ class TestSchemaInstructionsGeneration:
 class TestFenceTolerantParsing:
     """Models frequently wrap json_object output in markdown fences; the
     routed structured parser must tolerate them (bare json.loads regressed
-    to a silent per-call Gemini fallback in live runs)."""
+    to a silent per-call Gemini fallback in live runs).
+    """
 
     @pytest.mark.asyncio
     @patch("src.core.config.settings")
@@ -449,7 +450,7 @@ class TestFenceTolerantParsing:
             return_value=MagicMock(generate_structured_content=gemini_fallback),
         ):
             result = await worker._generate_structured_with_routing(
-                "Describe Ada.", SimpleSchema, None
+                "Describe Ada.", SimpleSchema, None,
             )
 
         assert isinstance(result, SimpleSchema)
@@ -460,7 +461,8 @@ class TestFenceTolerantParsing:
 class TestStaleGuardsRemoved:
     """Lazy-init means self.gemini_service is None until ensured; pre-routing
     guards on it made mock/static fallbacks unconditional and routing
-    unreachable (found by live end-to-end verification)."""
+    unreachable (found by live end-to-end verification).
+    """
 
     @pytest.mark.asyncio
     async def test_citation_formatting_reaches_routing_without_service(self):
@@ -471,12 +473,12 @@ class TestStaleGuardsRemoved:
         assert agent.gemini_service is None  # lazy init precondition
 
         with patch.object(
-            agent, "_generate_structured_with_routing", new=AsyncMock()
+            agent, "_generate_structured_with_routing", new=AsyncMock(),
         ) as routed:
             from src.agents.schemas import CitationSchema
 
             routed.return_value = CitationSchema(citations=[])
             await agent._format_citations_with_gemini(
-                [{"title": "T", "authors": ["A"], "year": 2020}], "APA"
+                [{"title": "T", "authors": ["A"], "year": 2020}], "APA",
             )
         routed.assert_awaited_once()

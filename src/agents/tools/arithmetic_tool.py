@@ -17,7 +17,7 @@ class ArithmeticParams(BaseModel):
     """Parameters for safe arithmetic evaluation."""
 
     expression: str = Field(
-        ..., description="Arithmetic expression (e.g., '(2 + 3) * 4 / 2')"
+        ..., description="Arithmetic expression (e.g., '(2 + 3) * 4 / 2')",
     )
 
 
@@ -66,11 +66,11 @@ class ArithmeticTool(AgentTool[ArithmeticParams]):
             if not isinstance(n_val, (int, float)):
                 raise ValueError(f"Unsupported number type: {type(n_val)}")
             return float(n_val)
-        elif isinstance(node, ast.Constant):  # Constant (Python 3.8+)
+        if isinstance(node, ast.Constant):  # Constant (Python 3.8+)
             if isinstance(node.value, (int, float)):
                 return float(node.value)
             raise ValueError(f"Unsupported constant: {type(node.value)}")
-        elif isinstance(node, ast.BinOp):  # Binary operation (x + y)
+        if isinstance(node, ast.BinOp):  # Binary operation (x + y)
             left = self._eval_node(node.left)
             right = self._eval_node(node.right)
             op = self._OPERATORS.get(type(node.op))
@@ -84,25 +84,24 @@ class ArithmeticTool(AgentTool[ArithmeticParams]):
             # Guard against huge exponents
             if isinstance(node.op, ast.Pow) and abs(right) > self._MAX_EXPONENT:
                 raise ValueError(
-                    f"Exponent too large: {right} (max ±{self._MAX_EXPONENT})"
+                    f"Exponent too large: {right} (max ±{self._MAX_EXPONENT})",
                 )
 
             bin_result: float = float(op(left, right))
             return bin_result
-        elif isinstance(node, ast.UnaryOp):  # Unary operation (+x, -x)
+        if isinstance(node, ast.UnaryOp):  # Unary operation (+x, -x)
             operand = self._eval_node(node.operand)
             op = self._OPERATORS.get(type(node.op))
             if op is None:
                 raise ValueError(
-                    f"Unsupported unary operator: {type(node.op).__name__}"
+                    f"Unsupported unary operator: {type(node.op).__name__}",
                 )
             unary_result: float = float(op(operand))
             return unary_result
-        else:
-            raise ValueError(
-                f"Disallowed node type: {type(node).__name__}. "
-                "Only arithmetic expressions are allowed."
-            )
+        raise ValueError(
+            f"Disallowed node type: {type(node).__name__}. "
+            "Only arithmetic expressions are allowed.",
+        )
 
     async def _execute_impl(self, params: ArithmeticParams) -> Any:
         """Parse and evaluate the arithmetic expression safely."""

@@ -125,7 +125,7 @@ class TalkHierConsensusEvaluator:
         minority_reports = []
 
         avg_confidence = sum(r.get("confidence", 0) for r in results) / max(
-            1, len(results)
+            1, len(results),
         )
 
         for result in results:
@@ -137,7 +137,7 @@ class TalkHierConsensusEvaluator:
                         "position": result.get("content"),
                         "confidence": confidence,
                         "deviation": confidence - avg_confidence,
-                    }
+                    },
                 )
 
         return minority_reports
@@ -173,12 +173,12 @@ class TalkHierConsensusEvaluator:
         if has_consensus:
             reasoning_parts.append(
                 f"Consensus achieved with score {consensus_score:.2f} "
-                f"(threshold: {session.consensus_threshold:.2f})"
+                f"(threshold: {session.consensus_threshold:.2f})",
             )
         else:
             reasoning_parts.append(
                 f"Consensus not reached - score {consensus_score:.2f} "
-                f"below threshold {session.consensus_threshold:.2f}"
+                f"below threshold {session.consensus_threshold:.2f}",
             )
 
         high_agreement_pairs = []
@@ -195,13 +195,13 @@ class TalkHierConsensusEvaluator:
         if high_agreement_pairs:
             reasoning_parts.append(
                 "Strong agreement between: "
-                + ", ".join([f"{a1}-{a2}" for a1, a2 in high_agreement_pairs[:3]])
+                + ", ".join([f"{a1}-{a2}" for a1, a2 in high_agreement_pairs[:3]]),
             )
 
         if low_agreement_pairs:
             reasoning_parts.append(
                 "Disagreement between: "
-                + ", ".join([f"{a1}-{a2}" for a1, a2 in low_agreement_pairs[:3]])
+                + ", ".join([f"{a1}-{a2}" for a1, a2 in low_agreement_pairs[:3]]),
             )
 
         return " | ".join(reasoning_parts)

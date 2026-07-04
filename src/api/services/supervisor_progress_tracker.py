@@ -43,7 +43,7 @@ class SupervisorProgressTracker:
         self.supervisor_subscriptions[supervisor_type].append(websocket)
 
     def unsubscribe_supervisor(
-        self, supervisor_type: str, websocket: WebSocket
+        self, supervisor_type: str, websocket: WebSocket,
     ) -> None:
         """Remove a WebSocket from supervisor-specific events."""
         if (
@@ -53,7 +53,7 @@ class SupervisorProgressTracker:
             self.supervisor_subscriptions[supervisor_type].remove(websocket)
 
     async def send_supervisor_event(
-        self, supervisor_type: str, event: SupervisorWebSocketEvent
+        self, supervisor_type: str, event: SupervisorWebSocketEvent,
     ) -> None:
         """Send an event to all clients subscribed to a supervisor."""
         if supervisor_type in self.supervisor_subscriptions:
@@ -73,7 +73,7 @@ class SupervisorProgressTracker:
                     logger.error("supervisor_event_broadcast_failed", error=str(exc))
 
     async def iter_coordination_progress_events(
-        self, coordination_id: str, delay_seconds: float = 1.0
+        self, coordination_id: str, delay_seconds: float = 1.0,
     ) -> AsyncIterator[WorkerCoordinationProgressEvent]:
         """Yield simulated coordination progress events using the legacy schema."""
         for progress in [10, 30, 50, 70, 90, 100]:

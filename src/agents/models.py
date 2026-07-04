@@ -1,5 +1,4 @@
-"""
-Data models for the agent system.
+"""Data models for the agent system.
 
 These models use immutable dataclasses to ensure functional programming principles.
 """
@@ -10,8 +9,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class AgentTask:
-    """
-    Represents a task to be executed by an agent.
+    """Represents a task to be executed by an agent.
 
     This is an immutable data structure that encapsulates all information
     needed for an agent to perform its work.
@@ -25,8 +23,7 @@ class AgentTask:
     priority: int = 0  # Higher values = higher priority
 
     def with_updated_context(self, **kwargs: Any) -> "AgentTask":
-        """
-        Create a new AgentTask with updated context.
+        """Create a new AgentTask with updated context.
 
         This maintains immutability by returning a new instance.
         """
@@ -43,8 +40,7 @@ class AgentTask:
 
 @dataclass(frozen=True)
 class AgentResult:
-    """
-    Represents the result of an agent's execution.
+    """Represents the result of an agent's execution.
 
     This immutable structure contains the output and metadata from
     an agent's processing of a task.
@@ -68,8 +64,7 @@ class AgentResult:
 
 @dataclass(frozen=True)
 class AgentMessage:
-    """
-    Represents a message between agents.
+    """Represents a message between agents.
 
     This enables inter-agent communication for coordination
     and information sharing.
@@ -88,8 +83,7 @@ class AgentMessage:
 
 @dataclass(frozen=True)
 class AgentCapability:
-    """
-    Describes what an agent is capable of doing.
+    """Describes what an agent is capable of doing.
 
     Used for agent discovery and task routing.
     """
@@ -108,8 +102,7 @@ class AgentCapability:
 
 @dataclass(frozen=True)
 class AgentMetrics:
-    """
-    Metrics collected from agent execution.
+    """Metrics collected from agent execution.
 
     Used for monitoring and optimization.
     """
@@ -129,8 +122,7 @@ class AgentMetrics:
         return self.successful_tasks / self.total_tasks
 
     def with_new_task(self, result: AgentResult) -> "AgentMetrics":
-        """
-        Create updated metrics with a new task result.
+        """Create updated metrics with a new task result.
 
         Maintains immutability by returning a new instance.
         """
@@ -160,8 +152,7 @@ class AgentMetrics:
 
 @dataclass(frozen=True)
 class AgentState:
-    """
-    Represents the current state of an agent.
+    """Represents the current state of an agent.
 
     Used for monitoring and coordination.
     """
@@ -171,7 +162,7 @@ class AgentState:
     current_task: str | None = None
     last_activity: float | None = None
     metrics: AgentMetrics = field(
-        default_factory=lambda: AgentMetrics(agent_type="unknown")
+        default_factory=lambda: AgentMetrics(agent_type="unknown"),
     )
 
     def is_available(self) -> bool:
@@ -179,8 +170,7 @@ class AgentState:
         return self.status == "idle"
 
     def with_new_status(self, status: str, task_id: str | None = None) -> "AgentState":
-        """
-        Create a new state with updated status.
+        """Create a new state with updated status.
 
         Maintains immutability.
         """

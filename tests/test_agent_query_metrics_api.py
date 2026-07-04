@@ -1,5 +1,4 @@
-"""
-Tests for agent query, pattern, and metrics API surfaces.
+"""Tests for agent query, pattern, and metrics API surfaces.
 """
 
 from datetime import datetime
@@ -28,12 +27,12 @@ class TestIntelligentQueryAPI:
 
     @patch("src.api.services.direct_execution_service.get_direct_execution_service")
     def test_intelligent_research_query(
-        self, mock_get_service: Mock, client: TestClient
+        self, mock_get_service: Mock, client: TestClient,
     ) -> None:
         """Test primary intelligent research endpoint."""
         mock_service = Mock()
         mock_service.start_research_execution = AsyncMock(
-            return_value="test-execution-123"
+            return_value="test-execution-123",
         )
         mock_service.get_execution_status = AsyncMock(
             return_value=Mock(
@@ -44,7 +43,7 @@ class TestIntelligentQueryAPI:
                 quality_scores={},
                 execution_time_seconds=0.0,
                 started_at=datetime.now(),
-            )
+            ),
         )
         mock_get_service.return_value = mock_service
 

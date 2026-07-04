@@ -1,5 +1,4 @@
-"""
-Tests for Parallel Worker Execution in Supervisors
+"""Tests for Parallel Worker Execution in Supervisors
 
 Tests that SupervisionMode.PARALLEL actually executes workers concurrently
 with proper failure isolation, partial results, and semaphore bounds.
@@ -55,7 +54,7 @@ class TestParallelWorkerExecution:
 
         start = time.perf_counter()
         results = await mock_supervisor.execute_workers_parallel(
-            worker_specs, SupervisionMode.PARALLEL
+            worker_specs, SupervisionMode.PARALLEL,
         )
         elapsed = time.perf_counter() - start
 
@@ -75,7 +74,7 @@ class TestParallelWorkerExecution:
                 to_agent="supervisor",
                 message_type=MessageType.SUPERVISOR_ASSIGNMENT,
                 content=TalkHierContent(content=f"response from {worker_type}"),
-            )
+            ),
         )
 
         worker_specs = [
@@ -85,7 +84,7 @@ class TestParallelWorkerExecution:
         ]
 
         results = await mock_supervisor.execute_workers_parallel(
-            worker_specs, SupervisionMode.PARALLEL
+            worker_specs, SupervisionMode.PARALLEL,
         )
 
         assert len(results) == 3
@@ -118,7 +117,7 @@ class TestParallelWorkerExecution:
         ]
 
         results = await mock_supervisor.execute_workers_parallel(
-            worker_specs, SupervisionMode.PARALLEL
+            worker_specs, SupervisionMode.PARALLEL,
         )
 
         # Should have 3 successful results, worker2 excluded
@@ -132,7 +131,7 @@ class TestParallelWorkerExecution:
     async def test_all_workers_fail(self, mock_supervisor):
         """Test all workers fail: graceful degradation returns empty dict."""
         mock_supervisor.send_talkhier_message = AsyncMock(
-            side_effect=RuntimeError("All workers fail")
+            side_effect=RuntimeError("All workers fail"),
         )
 
         worker_specs = [
@@ -141,7 +140,7 @@ class TestParallelWorkerExecution:
         ]
 
         results = await mock_supervisor.execute_workers_parallel(
-            worker_specs, SupervisionMode.PARALLEL
+            worker_specs, SupervisionMode.PARALLEL,
         )
 
         # Graceful degradation: empty dict
@@ -182,7 +181,7 @@ class TestParallelWorkerExecution:
 
         # max_parallel_workers=2, so max concurrent should be <= 2
         await mock_supervisor.execute_workers_parallel(
-            worker_specs, SupervisionMode.PARALLEL
+            worker_specs, SupervisionMode.PARALLEL,
         )
 
         assert max_concurrent <= 2
@@ -211,7 +210,7 @@ class TestParallelWorkerExecution:
         ]
 
         results = await mock_supervisor.execute_workers_parallel(
-            worker_specs, SupervisionMode.SEQUENTIAL
+            worker_specs, SupervisionMode.SEQUENTIAL,
         )
 
         # Sequential execution preserves order
@@ -241,7 +240,7 @@ class TestParallelWorkerExecution:
         ]
 
         results = await mock_supervisor.execute_workers_parallel(
-            worker_specs, SupervisionMode.SEQUENTIAL
+            worker_specs, SupervisionMode.SEQUENTIAL,
         )
 
         # Sequential mode includes all workers, failed one has None
@@ -286,12 +285,12 @@ class TestParallelWorkerExecution:
 
         # First round (initial execution)
         results_r1 = await mock_supervisor.execute_workers_parallel(
-            worker_specs, SupervisionMode.PARALLEL
+            worker_specs, SupervisionMode.PARALLEL,
         )
 
         # Second round (after REVISE verdict)
         results_r2 = await mock_supervisor.execute_workers_parallel(
-            worker_specs, SupervisionMode.PARALLEL
+            worker_specs, SupervisionMode.PARALLEL,
         )
 
         # Both rounds should execute all workers in parallel

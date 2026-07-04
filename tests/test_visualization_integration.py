@@ -22,7 +22,7 @@ class TestVisualizationIntegration:
     def test_report_visualization_generation(self) -> None:
         """Test generating multiple visualizations for a report."""
         settings = ReportSettings(
-            enable_visualizations=True, max_visualizations_per_report=5
+            enable_visualizations=True, max_visualizations_per_report=5,
         )
         generator = VisualizationGenerator(settings)
 
@@ -131,7 +131,7 @@ class TestVisualizationIntegration:
         report.add_visualization(viz2)
 
         def mock_generate_side_effect(
-            viz_spec: Visualization, _format: str = "html"
+            viz_spec: Visualization, _format: str = "html",
         ) -> dict[str, Any]:
             if viz_spec.id == "viz-good":
                 return {"type": "plotly", "data": "good_chart"}

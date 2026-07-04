@@ -1,5 +1,4 @@
-"""
-Research Result database model.
+"""Research Result database model.
 
 Stores research findings, sources, and citations.
 """
@@ -29,8 +28,7 @@ class ResultType(StrEnum):
 
 
 class ResearchResult(BaseModel):
-    """
-    Research result model.
+    """Research result model.
 
     Stores various types of research outputs including findings,
     sources, citations, and analysis results.
@@ -53,11 +51,11 @@ class ResearchResult(BaseModel):
     )
 
     content: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, comment="Result content (structure varies by type)"
+        JSON, nullable=False, comment="Result content (structure varies by type)",
     )
 
     confidence_score: Mapped[float | None] = mapped_column(
-        Float, nullable=True, comment="Confidence score for the result (0.0 to 1.0)"
+        Float, nullable=True, comment="Confidence score for the result (0.0 to 1.0)",
     )
 
     agent_type: Mapped[str | None] = mapped_column(
@@ -94,31 +92,30 @@ class ResearchResult(BaseModel):
     )
 
     def set_confidence(self, score: float) -> None:
-        """
-        Set confidence score.
+        """Set confidence score.
 
         Args:
             score: Confidence score (0.0 to 1.0)
+
         """
         if not 0.0 <= score <= 1.0:
             raise ValueError("Confidence score must be between 0.0 and 1.0")
         self.confidence_score = score
 
     def add_metadata(self, key: str, value: Any) -> None:
-        """
-        Add or update metadata.
+        """Add or update metadata.
 
         Args:
             key: Metadata key
             value: Metadata value
+
         """
         if self.result_metadata is None:
             self.result_metadata = {}
         self.result_metadata[key] = value
 
     def get_metadata(self, key: str, default: Any = None) -> Any:
-        """
-        Get metadata value.
+        """Get metadata value.
 
         Args:
             key: Metadata key
@@ -126,6 +123,7 @@ class ResearchResult(BaseModel):
 
         Returns:
             Metadata value
+
         """
         if self.result_metadata is None:
             return default
@@ -152,8 +150,7 @@ class ResearchResult(BaseModel):
         return bool(self.result_type == ResultType.CITATION.value)
 
     def get_content_field(self, field: str, default: Any = None) -> Any:
-        """
-        Get a field from the content JSON.
+        """Get a field from the content JSON.
 
         Args:
             field: Field name
@@ -161,29 +158,30 @@ class ResearchResult(BaseModel):
 
         Returns:
             Field value
+
         """
         if not self.content:
             return default
         return self.content.get(field, default)
 
     def set_content_field(self, field: str, value: Any) -> None:
-        """
-        Set a field in the content JSON.
+        """Set a field in the content JSON.
 
         Args:
             field: Field name
             value: Field value
+
         """
         if self.content is None:
             self.content = {}
         self.content[field] = value
 
     def merge_content(self, additional_content: dict[str, Any]) -> None:
-        """
-        Merge additional content into existing content.
+        """Merge additional content into existing content.
 
         Args:
             additional_content: Content to merge
+
         """
         if self.content is None:
             self.content = {}

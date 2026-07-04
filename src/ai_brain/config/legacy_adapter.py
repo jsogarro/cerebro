@@ -1,5 +1,4 @@
-"""
-Legacy Configuration Adapter
+"""Legacy Configuration Adapter
 
 Provides backward compatibility for components that expect hard-coded
 model specifications. This adapter translates between the old hard-coded
@@ -39,14 +38,12 @@ logger = get_logger()
 
 
 class LegacyConfigurationAdapter:
-    """
-    Adapter for translating between legacy hard-coded configurations
+    """Adapter for translating between legacy hard-coded configurations
     and new dynamic configuration system.
     """
 
     def __init__(self) -> None:
         """Initialize legacy adapter."""
-
         # Capability mapping between legacy and new enums
         self.capability_mapping = {
             LegacyModelCapability.TEXT_GENERATION: ConfigModelCapability.TEXT_GENERATION,
@@ -71,8 +68,7 @@ class LegacyConfigurationAdapter:
         legacy_capabilities: list[LegacyModelCapability],
         provider_config: dict[str, Any],
     ) -> dict[str, ModelSpecification]:
-        """
-        Migrate legacy provider specifications to new configuration format.
+        """Migrate legacy provider specifications to new configuration format.
 
         Args:
             provider_name: Name of the provider
@@ -82,8 +78,8 @@ class LegacyConfigurationAdapter:
 
         Returns:
             Dictionary of ModelSpecification objects
-        """
 
+        """
         migrated_models = {}
 
         for model_name, legacy_spec in legacy_model_specs.items():
@@ -117,20 +113,19 @@ class LegacyConfigurationAdapter:
             migrated_models[model_name] = model_spec
 
         logger.info(
-            f"Migrated {len(migrated_models)} models for provider {provider_name}"
+            f"Migrated {len(migrated_models)} models for provider {provider_name}",
         )
         return migrated_models
 
     def create_provider_configuration(
-        self, provider_name: str, provider_config: dict[str, Any]
+        self, provider_name: str, provider_config: dict[str, Any],
     ) -> ProviderConfiguration:
         """Create provider configuration from legacy config."""
-
         return ProviderConfiguration(
             name=provider_config.get("name", provider_name.title()),
             enabled=provider_config.get("enabled", True),
             api_endpoint=provider_config.get(
-                "endpoint", provider_config.get("api_endpoint", "")
+                "endpoint", provider_config.get("api_endpoint", ""),
             ),
             api_key_env=provider_config.get("api_key_env"),
             health_check_endpoint=provider_config.get("health_check_endpoint"),
@@ -141,10 +136,9 @@ class LegacyConfigurationAdapter:
         )
 
     def generate_configuration_from_legacy(
-        self, legacy_providers: dict[str, dict[str, Any]], environment: str = "migrated"
+        self, legacy_providers: dict[str, dict[str, Any]], environment: str = "migrated",
     ) -> ModelConfiguration:
-        """
-        Generate complete ModelConfiguration from legacy provider data.
+        """Generate complete ModelConfiguration from legacy provider data.
 
         Args:
             legacy_providers: Dictionary of legacy provider configurations
@@ -152,8 +146,8 @@ class LegacyConfigurationAdapter:
 
         Returns:
             Complete ModelConfiguration object
-        """
 
+        """
         models = {}
         providers = {}
 
@@ -165,13 +159,13 @@ class LegacyConfigurationAdapter:
 
             # Migrate models
             migrated_models = self.migrate_provider_specs_to_config(
-                provider_name, legacy_model_specs, legacy_capabilities, legacy_config
+                provider_name, legacy_model_specs, legacy_capabilities, legacy_config,
             )
             models.update(migrated_models)
 
             # Create provider configuration
             provider_config = self.create_provider_configuration(
-                provider_name, legacy_config
+                provider_name, legacy_config,
             )
             providers[provider_name] = provider_config
 
@@ -194,25 +188,22 @@ class LegacyConfigurationAdapter:
 
     def _infer_model_tier(self, legacy_spec: dict[str, Any]) -> ModelTier:
         """Infer model tier from legacy specification."""
-
         cost = legacy_spec.get("cost_per_1k_tokens", 0.001)
         quality = legacy_spec.get("quality_score", 0.75)
 
         # Simple heuristic-based classification
         if cost < 0.0005 and quality < 0.7:
             return ModelTier.BASIC
-        elif cost < 0.001 and quality < 0.85:
+        if cost < 0.001 and quality < 0.85:
             return ModelTier.STANDARD
-        elif cost > 0.0015 or quality > 0.9:
+        if cost > 0.0015 or quality > 0.9:
             return ModelTier.PREMIUM
-        else:
-            return ModelTier.STANDARD
+        return ModelTier.STANDARD
 
     def _convert_legacy_capabilities(
-        self, legacy_capabilities: list[LegacyModelCapability]
+        self, legacy_capabilities: list[LegacyModelCapability],
     ) -> list[ConfigModelCapability]:
         """Convert legacy capabilities to new format."""
-
         converted = []
 
         for legacy_cap in legacy_capabilities:
@@ -222,10 +213,9 @@ class LegacyConfigurationAdapter:
         return converted
 
     def convert_config_capabilities_to_legacy(
-        self, config_capabilities: list[ConfigModelCapability]
+        self, config_capabilities: list[ConfigModelCapability],
     ) -> list[LegacyModelCapability]:
         """Convert configuration capabilities to legacy format."""
-
         converted = []
 
         for config_cap in config_capabilities:
@@ -236,15 +226,14 @@ class LegacyConfigurationAdapter:
 
 
 class LegacyProviderWrapper:
-    """
-    Wrapper that makes configuration-based providers look like legacy providers.
+    """Wrapper that makes configuration-based providers look like legacy providers.
 
     This allows existing code that expects hard-coded model_specs to continue
     working while the system gradually migrates to configuration-based approach.
     """
 
     def __init__(
-        self, provider: "BaseProvider", model_config_manager: "ModelConfigManager"
+        self, provider: "BaseProvider", model_config_manager: "ModelConfigManager",
     ):
         """Initialize legacy wrapper."""
         self.provider = provider
@@ -253,10 +242,9 @@ class LegacyProviderWrapper:
 
     async def get_legacy_model_specs(self) -> dict[str, dict[str, Any]]:
         """Get model specifications in legacy format."""
-
         # Get current model specifications from configuration
         model_specs = await self.model_config_manager.get_models_for_provider(
-            self.provider.provider_name
+            self.provider.provider_name,
         )
 
         # Convert to legacy format
@@ -282,10 +270,9 @@ class LegacyProviderWrapper:
 
     async def get_legacy_capabilities(self) -> list[LegacyModelCapability]:
         """Get capabilities in legacy format."""
-
         # Get all capabilities from configured models
         model_specs = await self.model_config_manager.get_models_for_provider(
-            self.provider.provider_name
+            self.provider.provider_name,
         )
 
         all_capabilities = set()
@@ -294,7 +281,7 @@ class LegacyProviderWrapper:
 
         # Convert to legacy format
         return self.adapter.convert_config_capabilities_to_legacy(
-            list(all_capabilities)
+            list(all_capabilities),
         )
 
 

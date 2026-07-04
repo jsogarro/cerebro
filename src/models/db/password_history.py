@@ -1,5 +1,4 @@
-"""
-Password history database model.
+"""Password history database model.
 
 Tracks password changes to prevent password reuse and enforce
 password history policies.
@@ -25,8 +24,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class PasswordHistory(BaseModel):
-    """
-    Password history model.
+    """Password history model.
 
     Tracks historical passwords for each user to prevent reuse
     and enforce password policies.
@@ -42,7 +40,7 @@ class PasswordHistory(BaseModel):
     )
 
     hashed_password: Mapped[str] = mapped_column(
-        String(255), nullable=False, comment="Bcrypt hashed password"
+        String(255), nullable=False, comment="Bcrypt hashed password",
     )
 
     changed_by: Mapped[str | None] = mapped_column(
@@ -58,7 +56,7 @@ class PasswordHistory(BaseModel):
     )
 
     ip_address: Mapped[str | None] = mapped_column(
-        String(45), nullable=True, comment="IP address from which password was changed"
+        String(45), nullable=True, comment="IP address from which password was changed",
     )
 
     user_agent: Mapped[str | None] = mapped_column(
@@ -68,7 +66,7 @@ class PasswordHistory(BaseModel):
     )
 
     password_strength: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, comment="Password strength score (0-100)"
+        Integer, nullable=True, comment="Password strength score (0-100)",
     )
 
     expires_at: Mapped[datetime | None] = mapped_column(
@@ -98,8 +96,7 @@ class PasswordHistory(BaseModel):
         password_strength: int | None = None,
         expires_in_days: int | None = None,
     ) -> PasswordHistory:
-        """
-        Create a new password history entry.
+        """Create a new password history entry.
 
         Args:
             user_id: User ID
@@ -113,6 +110,7 @@ class PasswordHistory(BaseModel):
 
         Returns:
             PasswordHistory instance
+
         """
         hashed_password = pwd_context.hash(password)
 
@@ -132,14 +130,14 @@ class PasswordHistory(BaseModel):
         )
 
     def verify_password(self, password: str) -> bool:
-        """
-        Check if a password matches this historical password.
+        """Check if a password matches this historical password.
 
         Args:
             password: Plain text password to check
 
         Returns:
             True if password matches
+
         """
         return bool(pwd_context.verify(password, self.hashed_password))
 
@@ -164,8 +162,7 @@ class PasswordHistory(BaseModel):
         history_count: int = 5,
         session: Session | None = None,
     ) -> bool:
-        """
-        Check if password has been used recently.
+        """Check if password has been used recently.
 
         Args:
             user_id: User ID
@@ -175,6 +172,7 @@ class PasswordHistory(BaseModel):
 
         Returns:
             True if password was used recently
+
         """
         if not session:
             return False
@@ -193,10 +191,9 @@ class PasswordHistory(BaseModel):
 
     @classmethod
     def get_last_change(
-        cls, user_id: str, session: Session | None = None
+        cls, user_id: str, session: Session | None = None,
     ) -> PasswordHistory | None:
-        """
-        Get the most recent password change for a user.
+        """Get the most recent password change for a user.
 
         Args:
             user_id: User ID
@@ -204,6 +201,7 @@ class PasswordHistory(BaseModel):
 
         Returns:
             Most recent PasswordHistory entry or None
+
         """
         if not session:
             return None
@@ -217,11 +215,11 @@ class PasswordHistory(BaseModel):
         return result
 
     def to_dict(self) -> dict[str, Any]:
-        """
-        Convert to dictionary.
+        """Convert to dictionary.
 
         Returns:
             Dictionary representation (excludes sensitive data)
+
         """
         return {
             "id": str(self.id),

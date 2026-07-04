@@ -1,5 +1,4 @@
-"""
-Agent Task database model.
+"""Agent Task database model.
 
 Represents agent tasks within research projects.
 """
@@ -39,8 +38,7 @@ class TaskStatus(StrEnum):
 
 
 class AgentTask(BaseModel):
-    """
-    Agent task model.
+    """Agent task model.
 
     Stores information about individual agent tasks
     executed as part of research projects.
@@ -70,35 +68,35 @@ class AgentTask(BaseModel):
     )
 
     status: Mapped[TaskStatus] = mapped_column(
-        SQLEnum(TaskStatus), nullable=False, default=TaskStatus.PENDING, index=True
+        SQLEnum(TaskStatus), nullable=False, default=TaskStatus.PENDING, index=True,
     )
 
     input_data: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict, comment="Input data for the agent"
+        JSON, nullable=False, default=dict, comment="Input data for the agent",
     )
 
     output_data: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="Output data from the agent"
+        JSON, nullable=True, comment="Output data from the agent",
     )
 
     error_message: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Error message if task failed"
+        Text, nullable=True, comment="Error message if task failed",
     )
 
     retry_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, comment="Number of retry attempts"
+        Integer, nullable=False, default=0, comment="Number of retry attempts",
     )
 
     started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True
+        DateTime(timezone=True), nullable=True, index=True,
     )
 
     completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True), nullable=True,
     )
 
     execution_time_ms: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, comment="Execution time in milliseconds"
+        Integer, nullable=True, comment="Execution time in milliseconds",
     )
 
     priority: Mapped[int] = mapped_column(
@@ -109,7 +107,7 @@ class AgentTask(BaseModel):
     )
 
     depends_on: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="List of task IDs this task depends on"
+        JSON, nullable=True, comment="List of task IDs this task depends on",
     )
 
     # Relationships
@@ -127,18 +125,16 @@ class AgentTask(BaseModel):
 
     def start(self) -> None:
         """Mark task as started."""
-
         self.status = TaskStatus.IN_PROGRESS
         self.started_at = datetime.now(UTC)
 
     def complete(self, output_data: dict[str, Any]) -> None:
-        """
-        Mark task as completed.
+        """Mark task as completed.
 
         Args:
             output_data: Output data from the agent
-        """
 
+        """
         self.status = TaskStatus.COMPLETED
         self.output_data = output_data
         self.completed_at = datetime.now(UTC)
@@ -148,13 +144,12 @@ class AgentTask(BaseModel):
             self.execution_time_ms = int(delta.total_seconds() * 1000)
 
     def fail(self, error_message: str) -> None:
-        """
-        Mark task as failed.
+        """Mark task as failed.
 
         Args:
             error_message: Error message
-        """
 
+        """
         self.status = TaskStatus.FAILED
         self.error_message = error_message
         self.completed_at = datetime.now(UTC)
@@ -175,7 +170,6 @@ class AgentTask(BaseModel):
 
     def cancel(self) -> None:
         """Cancel the task."""
-
         self.status = TaskStatus.CANCELLED
         if not self.completed_at:
             self.completed_at = datetime.now(UTC)
@@ -205,14 +199,14 @@ class AgentTask(BaseModel):
         return self.status == TaskStatus.COMPLETED
 
     def can_start(self, completed_task_ids: set[Any]) -> bool:
-        """
-        Check if task can start based on dependencies.
+        """Check if task can start based on dependencies.
 
         Args:
             completed_task_ids: Set of completed task IDs
 
         Returns:
             True if all dependencies are met
+
         """
         if not self.depends_on:
             return True

@@ -54,10 +54,10 @@ async def test_same_query_different_strategy_not_served_from_cache() -> None:
     query = "Analyze the tradeoffs in distributed consensus algorithms"
 
     first = await service.get_routing_decision(
-        RoutingRequest(query=query, strategy=RoutingStrategy.QUALITY_FOCUSED)
+        RoutingRequest(query=query, strategy=RoutingStrategy.QUALITY_FOCUSED),
     )
     second = await service.get_routing_decision(
-        RoutingRequest(query=query, strategy=RoutingStrategy.COST_EFFICIENT)
+        RoutingRequest(query=query, strategy=RoutingStrategy.COST_EFFICIENT),
     )
 
     assert first.strategy == RoutingStrategy.QUALITY_FOCUSED

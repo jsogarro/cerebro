@@ -1,5 +1,4 @@
-"""
-TalkHier Session Service
+"""TalkHier Session Service
 
 This service manages TalkHier protocol sessions, implementing structured dialogue
 and multi-round refinement patterns from "Talk Structurally, Act Hierarchically" research.
@@ -98,8 +97,7 @@ class TalkHierSession:
 
 
 class TalkHierSessionService:
-    """
-    Service managing TalkHier protocol sessions
+    """Service managing TalkHier protocol sessions
 
     This service coordinates structured dialogue sessions following the
     TalkHier protocol, enabling multi-round refinement with consensus building.
@@ -134,16 +132,16 @@ class TalkHierSessionService:
         return self.session_coordinator.initialize_protocol_configs()
 
     async def create_session(
-        self, request: TalkHierSessionRequest
+        self, request: TalkHierSessionRequest,
     ) -> TalkHierSessionResponse:
-        """
-        Create a new TalkHier refinement session
+        """Create a new TalkHier refinement session
 
         Args:
             request: Session creation request
 
         Returns:
             Session creation response with session ID and configuration
+
         """
         session_id = str(uuid.uuid4())
 
@@ -152,17 +150,17 @@ class TalkHierSessionService:
 
         # Route query through MASR for intelligent supervisor selection
         routing_decision = await self._get_routing_decision(
-            request.query, request.domains
+            request.query, request.domains,
         )
 
         # Create supervisor based on routing decision
         supervisor = await self._create_supervisor(
-            routing_decision, request.supervisor_type
+            routing_decision, request.supervisor_type,
         )
 
         # Determine participants
         participants = await self._determine_participants(
-            request.participants, routing_decision, supervisor
+            request.participants, routing_decision, supervisor,
         )
 
         # Create session
@@ -200,14 +198,14 @@ class TalkHierSessionService:
 
         # Calculate estimated duration
         estimated_duration = self._estimate_duration(
-            request.max_rounds, len(participants), protocol_config
+            request.max_rounds, len(participants), protocol_config,
         )
 
         # Generate WebSocket URL
         websocket_url = f"/api/v1/talkhier/sessions/{session_id}/live"
 
         logger.info(
-            f"Created TalkHier session {session_id} with {len(participants)} participants"
+            f"Created TalkHier session {session_id} with {len(participants)} participants",
         )
 
         return TalkHierSessionResponse(
@@ -225,14 +223,14 @@ class TalkHierSessionService:
         )
 
     async def get_session_status(self, session_id: str) -> SessionStatusResponse:
-        """
-        Get current status of a TalkHier session
+        """Get current status of a TalkHier session
 
         Args:
             session_id: Session identifier
 
         Returns:
             Current session status and history
+
         """
         session = self._get_session(session_id)
 
@@ -242,7 +240,7 @@ class TalkHierSessionService:
 
         if session.started_at:
             elapsed_seconds = int(
-                (datetime.now(UTC) - session.started_at).total_seconds()
+                (datetime.now(UTC) - session.started_at).total_seconds(),
             )
             remaining_seconds = max(0, session.timeout_seconds - elapsed_seconds)
 
@@ -260,10 +258,9 @@ class TalkHierSessionService:
         )
 
     async def execute_refinement_round(
-        self, session_id: str, request: RefinementRoundRequest
+        self, session_id: str, request: RefinementRoundRequest,
     ) -> RefinementRoundResponse:
-        """
-        Execute a refinement round in an active session
+        """Execute a refinement round in an active session
 
         Args:
             session_id: Session identifier
@@ -271,6 +268,7 @@ class TalkHierSessionService:
 
         Returns:
             Round execution results
+
         """
         session = self._get_session(session_id)
 
@@ -282,21 +280,20 @@ class TalkHierSessionService:
         )
 
         logger.info(
-            f"Completed refinement round {request.round_number} for session {session_id}"
+            f"Completed refinement round {request.round_number} for session {session_id}",
         )
         logger.info(
             f"Quality: {response.quality_score:.2f}, "
             f"Consensus: {response.consensus_score:.2f}, "
-            f"Delta: {response.improvement_delta:+.2f}"
+            f"Delta: {response.improvement_delta:+.2f}",
         )
 
         return response
 
     async def check_consensus(
-        self, session_id: str, request: ConsensusCheckRequest
+        self, session_id: str, request: ConsensusCheckRequest,
     ) -> ConsensusResult:
-        """
-        Check consensus status in a session
+        """Check consensus status in a session
 
         Args:
             session_id: Session identifier
@@ -304,6 +301,7 @@ class TalkHierSessionService:
 
         Returns:
             Consensus analysis result
+
         """
         session = self._get_session(session_id)
 
@@ -315,16 +313,15 @@ class TalkHierSessionService:
 
         logger.info(
             f"Consensus check for session {session_id}: "
-            f"{result.has_consensus} (score: {result.consensus_score:.2f})"
+            f"{result.has_consensus} (score: {result.consensus_score:.2f})",
         )
 
         return result
 
     async def close_session(
-        self, session_id: str, request: SessionCloseRequest
+        self, session_id: str, request: SessionCloseRequest,
     ) -> SessionCloseResponse:
-        """
-        Close a TalkHier session
+        """Close a TalkHier session
 
         Args:
             session_id: Session identifier
@@ -332,6 +329,7 @@ class TalkHierSessionService:
 
         Returns:
             Session closure summary
+
         """
         session = self._get_session(session_id)
 
@@ -352,7 +350,7 @@ class TalkHierSessionService:
         total_duration = 0
         if session.started_at and session.completed_at:
             total_duration = int(
-                (session.completed_at - session.started_at).total_seconds()
+                (session.completed_at - session.started_at).total_seconds(),
             )
 
         # Generate transcript URL if requested
@@ -399,16 +397,16 @@ class TalkHierSessionService:
         )
 
     async def validate_protocol(
-        self, request: ProtocolValidationRequest
+        self, request: ProtocolValidationRequest,
     ) -> ValidationResponse:
-        """
-        Validate TalkHier communication structure
+        """Validate TalkHier communication structure
 
         Args:
             request: Validation request
 
         Returns:
             Validation results and recommendations
+
         """
         structural_errors = []
         timing_errors = []
@@ -420,7 +418,7 @@ class TalkHierSessionService:
         # Validate structure
         if request.check_structure:
             structural_errors = await self._validate_message_structure(
-                request.messages, protocol_detected
+                request.messages, protocol_detected,
             )
 
         # Validate timing
@@ -429,7 +427,7 @@ class TalkHierSessionService:
 
         # Validate roles
         role_errors = await self._validate_message_roles(
-            request.messages, protocol_detected
+            request.messages, protocol_detected,
         )
 
         # Calculate quality assessment
@@ -437,7 +435,7 @@ class TalkHierSessionService:
 
         # Generate recommendations
         recommendations = await self._generate_protocol_recommendations(
-            structural_errors, timing_errors, role_errors, quality_assessment
+            structural_errors, timing_errors, role_errors, quality_assessment,
         )
 
         # Determine overall validity
@@ -465,13 +463,13 @@ class TalkHierSessionService:
         return session
 
     async def _get_routing_decision(
-        self, query: str, domains: list[str]
+        self, query: str, domains: list[str],
     ) -> RoutingDecision:
         """Get routing decision from MASR"""
         return await self.session_coordinator.get_routing_decision(query, domains)
 
     async def _create_supervisor(
-        self, routing_decision: RoutingDecision, requested_type: str | None
+        self, routing_decision: RoutingDecision, requested_type: str | None,
     ) -> BaseSupervisor | None:
         """Create supervisor based on routing decision"""
         return await self.session_coordinator.create_supervisor(
@@ -504,7 +502,7 @@ class TalkHierSessionService:
         )
 
     def _estimate_duration(
-        self, max_rounds: int, participant_count: int, protocol_config: dict[str, Any]
+        self, max_rounds: int, participant_count: int, protocol_config: dict[str, Any],
     ) -> int:
         """Estimate session duration in seconds"""
         return self.session_coordinator.estimate_duration(
@@ -540,21 +538,21 @@ class TalkHierSessionService:
         )
 
     async def _aggregate_refinement_results(
-        self, responses: dict[str, dict[str, Any]], strategy: RefinementStrategy
+        self, responses: dict[str, dict[str, Any]], strategy: RefinementStrategy,
     ) -> dict[str, Any]:
         """Aggregate participant responses based on strategy"""
         return await self.round_executor.aggregate_refinement_results(
-            responses, strategy
+            responses, strategy,
         )
 
     async def _calculate_quality_score(
-        self, result: dict[str, Any], threshold: float
+        self, result: dict[str, Any], threshold: float,
     ) -> float:
         """Calculate quality score for result"""
         return await self.round_executor.calculate_quality_score(result, threshold)
 
     async def _calculate_consensus_score(
-        self, responses: dict[str, dict[str, Any]], consensus_type: ConsensusType
+        self, responses: dict[str, dict[str, Any]], consensus_type: ConsensusType,
     ) -> float:
         """Calculate consensus score among responses"""
         return await self.round_executor.calculate_consensus_score(
@@ -580,13 +578,13 @@ class TalkHierSessionService:
         )
 
     async def _calculate_agreement_matrix(
-        self, results: list[dict[str, Any]]
+        self, results: list[dict[str, Any]],
     ) -> dict[str, dict[str, float]]:
         """Calculate pairwise agreement between participants"""
         return await self.consensus_evaluator.calculate_agreement_matrix(results)
 
     async def _generate_minority_reports(
-        self, results: list[dict[str, Any]], consensus_score: float
+        self, results: list[dict[str, Any]], consensus_score: float,
     ) -> list[dict[str, Any]]:
         """Generate minority opinion reports"""
         return await self.consensus_evaluator.generate_minority_reports(
@@ -595,7 +593,7 @@ class TalkHierSessionService:
         )
 
     def _generate_consensus_recommendation(
-        self, has_consensus: bool, consensus_score: float, session: TalkHierSession
+        self, has_consensus: bool, consensus_score: float, session: TalkHierSession,
     ) -> str:
         """Generate recommendation based on consensus status"""
         return self.consensus_evaluator.generate_consensus_recommendation(
@@ -626,7 +624,7 @@ class TalkHierSessionService:
         return f"/api/v1/talkhier/transcripts/{transcript_id}"
 
     async def _generate_session_summary(
-        self, session: TalkHierSession
+        self, session: TalkHierSession,
     ) -> dict[str, Any]:
         """Generate comprehensive session summary"""
         return {
@@ -639,7 +637,7 @@ class TalkHierSessionService:
             "consensus_progression": [r.consensus_score for r in session.rounds],
             "key_insights": await self._extract_key_insights(session),
             "participant_performance": await self._analyze_participant_performance(
-                session
+                session,
             ),
         }
 
@@ -652,13 +650,13 @@ class TalkHierSessionService:
             insights.append(f"Quality target achieved ({session.current_quality:.2f})")
         else:
             insights.append(
-                f"Quality below target ({session.current_quality:.2f} < {session.quality_threshold:.2f})"
+                f"Quality below target ({session.current_quality:.2f} < {session.quality_threshold:.2f})",
             )
 
         # Consensus achievement
         if session.current_consensus >= session.consensus_threshold:
             insights.append(
-                f"Strong consensus reached ({session.current_consensus:.2f})"
+                f"Strong consensus reached ({session.current_consensus:.2f})",
             )
         else:
             insights.append(f"Limited consensus ({session.current_consensus:.2f})")
@@ -672,7 +670,7 @@ class TalkHierSessionService:
         return insights
 
     async def _analyze_participant_performance(
-        self, session: TalkHierSession
+        self, session: TalkHierSession,
     ) -> dict[str, dict[str, Any]]:
         """Analyze individual participant performance"""
         performance = {}
@@ -714,7 +712,7 @@ class TalkHierSessionService:
         return min(1.0, efficiency)
 
     async def _detect_protocol_type(
-        self, messages: list[dict[str, Any]]
+        self, messages: list[dict[str, Any]],
     ) -> ProtocolType:
         """Detect protocol type from message patterns"""
         # Analyze message patterns to detect protocol
@@ -722,7 +720,7 @@ class TalkHierSessionService:
 
         if len(messages) <= 2:
             return ProtocolType.FAST_TRACK
-        elif len(messages) >= 10:
+        if len(messages) >= 10:
             return ProtocolType.DEEP_ANALYSIS
 
         # Check for supervisor messages
@@ -736,7 +734,7 @@ class TalkHierSessionService:
         return ProtocolType.STANDARD
 
     async def _validate_message_structure(
-        self, messages: list[dict[str, Any]], protocol: ProtocolType
+        self, messages: list[dict[str, Any]], protocol: ProtocolType,
     ) -> list[str]:
         """Validate message structure for protocol"""
         errors = []
@@ -759,7 +757,7 @@ class TalkHierSessionService:
         return errors
 
     async def _validate_message_timing(
-        self, messages: list[dict[str, Any]]
+        self, messages: list[dict[str, Any]],
     ) -> list[str]:
         """Validate message timing sequence"""
         errors = []
@@ -769,7 +767,7 @@ class TalkHierSessionService:
             if "timestamp" in msg:
                 try:
                     timestamp = datetime.fromisoformat(
-                        msg["timestamp"].replace("Z", "+00:00")
+                        msg["timestamp"].replace("Z", "+00:00"),
                     )
                     if last_timestamp and timestamp < last_timestamp:
                         errors.append(f"Message {i}: timestamp out of order")
@@ -782,13 +780,13 @@ class TalkHierSessionService:
                         str(e),
                     )
                     errors.append(
-                        f"Message {i}: invalid timestamp format: {type(e).__name__}"
+                        f"Message {i}: invalid timestamp format: {type(e).__name__}",
                     )
 
         return errors
 
     async def _validate_message_roles(
-        self, messages: list[dict[str, Any]], protocol: ProtocolType
+        self, messages: list[dict[str, Any]], protocol: ProtocolType,
     ) -> list[str]:
         """Validate message roles for protocol"""
         errors = []
@@ -803,7 +801,7 @@ class TalkHierSessionService:
         return errors
 
     async def _assess_communication_quality(
-        self, messages: list[dict[str, Any]]
+        self, messages: list[dict[str, Any]],
     ) -> float:
         """Assess overall communication quality"""
         if not messages:
@@ -844,7 +842,7 @@ class TalkHierSessionService:
 
         if structural_errors:
             recommendations.append(
-                "Fix message structure issues for protocol compliance"
+                "Fix message structure issues for protocol compliance",
             )
 
         if timing_errors:
@@ -852,12 +850,12 @@ class TalkHierSessionService:
 
         if role_errors:
             recommendations.append(
-                "Use valid message roles (supervisor, worker, coordinator)"
+                "Use valid message roles (supervisor, worker, coordinator)",
             )
 
         if quality_score < 0.7:
             recommendations.append(
-                "Improve message quality with more detailed content and evidence"
+                "Improve message quality with more detailed content and evidence",
             )
 
         if not recommendations:

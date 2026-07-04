@@ -1,5 +1,4 @@
-"""
-Test suite for security components.
+"""Test suite for security components.
 
 Tests rate limiting, security headers, validators, and authentication features.
 """
@@ -44,7 +43,7 @@ def mock_request() -> Request:
         "X-Request-ID": "test-request-123",
     }
     request.state = Mock()
-    return cast(Request, request)
+    return cast("Request", request)
 
 
 class TestRateLimiter:
@@ -52,7 +51,7 @@ class TestRateLimiter:
 
     @pytest.mark.asyncio
     async def test_sliding_window_rate_limit(
-        self, redis_client: Any, mock_request: Request
+        self, redis_client: Any, mock_request: Request,
     ) -> None:
         """Test sliding window rate limiting."""
         # Setup
@@ -69,7 +68,7 @@ class TestRateLimiter:
 
         # Test rate limit check
         allowed, metadata = await rate_limiter.check_rate_limit(
-            mock_request, identifier="user123"
+            mock_request, identifier="user123",
         )
 
         assert allowed is True
@@ -79,7 +78,7 @@ class TestRateLimiter:
 
     @pytest.mark.asyncio
     async def test_rate_limit_exceeded(
-        self, redis_client: Any, mock_request: Request
+        self, redis_client: Any, mock_request: Request,
     ) -> None:
         """Test rate limit exceeded scenario."""
         rate_limiter = RateLimiter(redis_client, default_limit=5, default_window=60)
@@ -89,7 +88,7 @@ class TestRateLimiter:
         redis_client.zrange.return_value = [(b"timestamp", 1234567890.0)]
 
         allowed, metadata = await rate_limiter.check_rate_limit(
-            mock_request, identifier="user123"
+            mock_request, identifier="user123",
         )
 
         assert allowed is False
@@ -97,7 +96,7 @@ class TestRateLimiter:
 
     @pytest.mark.asyncio
     async def test_token_bucket_rate_limit(
-        self, redis_client: Any, mock_request: Request
+        self, redis_client: Any, mock_request: Request,
     ) -> None:
         """Test token bucket rate limiting."""
         rate_limiter = RateLimiter(
@@ -115,7 +114,7 @@ class TestRateLimiter:
         ]
 
         _allowed, metadata = await rate_limiter.check_rate_limit(
-            mock_request, endpoint="/api/v1/research/execute"
+            mock_request, endpoint="/api/v1/research/execute",
         )
 
         assert "tokens" in metadata
@@ -140,7 +139,7 @@ class TestSecurityHeaders:
     async def test_security_headers_applied(self) -> None:
         """Test that security headers are applied to responses."""
         middleware = SecurityHeadersMiddleware(
-            csp_enabled=True, hsts_enabled=True, frame_options="DENY"
+            csp_enabled=True, hsts_enabled=True, frame_options="DENY",
         )
 
         # Create mock request and response
@@ -188,7 +187,7 @@ class TestSecurityHeaders:
     async def test_cors_security(self) -> None:
         """Test CORS security middleware."""
         middleware = CORSSecurityMiddleware(
-            allowed_origins=["https://example.com"], allow_credentials=True
+            allowed_origins=["https://example.com"], allow_credentials=True,
         )
 
         # Test allowed origin
@@ -435,5 +434,5 @@ class TestSecurityValidators:
         # Content validation
         with pytest.raises(ValueError):
             FileUploadValidator.validate_file(
-                "fake.pdf", "document", 1024, content=b"<script>alert('XSS')</script>"
+                "fake.pdf", "document", 1024, content=b"<script>alert('XSS')</script>",
             )

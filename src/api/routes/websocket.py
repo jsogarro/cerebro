@@ -1,5 +1,4 @@
-"""
-WebSocket API routes for real-time communication.
+"""WebSocket API routes for real-time communication.
 
 This module provides WebSocket endpoints for streaming real-time updates
 to various clients including web browsers and CLI tools.
@@ -41,8 +40,7 @@ async def websocket_endpoint(
     token: str | None = Query(None, description="JWT authentication token"),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
-    """
-    General purpose WebSocket endpoint for real-time updates.
+    """General purpose WebSocket endpoint for real-time updates.
 
     Clients can subscribe to various project and user events through this endpoint.
     Authentication is handled via query parameter or first message.
@@ -89,10 +87,10 @@ async def websocket_endpoint(
                 # Handle subscription requests
                 if message_data.get("type") == "subscription":
                     subscription_request = SubscriptionRequest(
-                        **message_data.get("data", {})
+                        **message_data.get("data", {}),
                     )
                     response = await websocket_manager.handle_subscription_request(
-                        client_id, subscription_request
+                        client_id, subscription_request,
                     )
 
                     # Send response back to client
@@ -102,7 +100,7 @@ async def websocket_endpoint(
                         data=response.model_dump(),
                     )
                     await websocket_manager.connections[client_id].send_message(
-                        response_message
+                        response_message,
                     )
 
                 # Handle heartbeat responses
@@ -177,8 +175,7 @@ async def project_websocket_endpoint(
     token: str | None = Query(None, description="JWT authentication token"),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
-    """
-    Project-specific WebSocket endpoint for real-time project updates.
+    """Project-specific WebSocket endpoint for real-time project updates.
 
     Automatically subscribes the client to updates for the specified project.
     Ideal for project-specific dashboards and CLI monitoring.
@@ -239,10 +236,10 @@ async def project_websocket_endpoint(
                 # Handle additional subscription requests
                 elif message_data.get("type") == "subscription":
                     subscription_request = SubscriptionRequest(
-                        **message_data.get("data", {})
+                        **message_data.get("data", {}),
                     )
                     response = await websocket_manager.handle_subscription_request(
-                        client_id, subscription_request
+                        client_id, subscription_request,
                     )
 
                     response_message = WSMessage(
@@ -251,7 +248,7 @@ async def project_websocket_endpoint(
                         data=response.model_dump(),
                     )
                     await websocket_manager.connections[client_id].send_message(
-                        response_message
+                        response_message,
                     )
 
                 consecutive_errors = 0
@@ -314,8 +311,7 @@ async def cli_websocket_endpoint(
     format: str = Query("text", description="Output format for CLI"),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
-    """
-    CLI-optimized WebSocket endpoint for command-line tools.
+    """CLI-optimized WebSocket endpoint for command-line tools.
 
     Provides simplified, text-based messaging optimized for terminal output.
     Includes progress bars, formatted status updates, and minimal JSON overhead.

@@ -1,5 +1,4 @@
-"""
-User factory for generating test user data.
+"""User factory for generating test user data.
 """
 
 import uuid
@@ -30,14 +29,14 @@ class UserFactory(Factory):
     username = Sequence(lambda n: f"user{n}")
     full_name = LazyAttribute(lambda o: fake.name())
     hashed_password = LazyAttribute(
-        lambda o: password_service.hash_password("Password123!@#")
+        lambda o: password_service.hash_password("Password123!@#"),
     )
     role = FuzzyChoice(["admin", "researcher", "viewer"])
     is_active = True
     is_verified = True
     is_superuser = False
     created_at = FuzzyDateTime(
-        start_dt=datetime.now(UTC) - timedelta(days=30), end_dt=datetime.now(UTC)
+        start_dt=datetime.now(UTC) - timedelta(days=30), end_dt=datetime.now(UTC),
     )
     updated_at = LazyAttribute(lambda o: o.created_at + timedelta(hours=1))
     last_login = LazyAttribute(lambda o: o.created_at + timedelta(days=1))
@@ -168,8 +167,8 @@ class APIKeyFactory(Factory):
     key_prefix = LazyAttribute(lambda o: o.key_hash[:8])
     scopes = LazyFunction(
         lambda: fake.random_elements(
-            elements=["read", "write", "delete", "admin"], length=2, unique=True
-        )
+            elements=["read", "write", "delete", "admin"], length=2, unique=True,
+        ),
     )
     expires_at = LazyFunction(lambda: datetime.now(UTC) + timedelta(days=90))
     is_active = True
@@ -211,7 +210,7 @@ class TestUserGenerator:
 
     @staticmethod
     def create_user_with_history(
-        num_sessions: int = 5, num_api_keys: int = 2
+        num_sessions: int = 5, num_api_keys: int = 2,
     ) -> dict[str, Any]:
         """Create a user with session and API key history."""
         user = UserFactory()
@@ -230,7 +229,7 @@ class TestUserGenerator:
         api_keys = []
         for i in range(num_api_keys):
             api_key = APIKeyFactory(
-                user_id=user.id, created_at=user.created_at + timedelta(days=i * 30)
+                user_id=user.id, created_at=user.created_at + timedelta(days=i * 30),
             )
             api_keys.append(api_key)
 
@@ -284,18 +283,18 @@ class TestUserGenerator:
                 is_verified=True,
             ),
             "unverified_user": UserFactory.create_unverified(
-                username="unverified_user", email="unverified@example.com"
+                username="unverified_user", email="unverified@example.com",
             ),
             "inactive_user": UserFactory.create_inactive(
-                username="inactive_user", email="inactive@example.com"
+                username="inactive_user", email="inactive@example.com",
             ),
             "admin_user": UserFactory.create_admin(
-                username="admin_user", email="admin@example.com"
+                username="admin_user", email="admin@example.com",
             ),
             "researcher_user": UserFactory.create_researcher(
-                username="researcher_user", email="researcher@example.com"
+                username="researcher_user", email="researcher@example.com",
             ),
             "viewer_user": UserFactory.create_viewer(
-                username="viewer_user", email="viewer@example.com"
+                username="viewer_user", email="viewer@example.com",
             ),
         }

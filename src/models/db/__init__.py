@@ -1,5 +1,4 @@
-"""
-Database models package.
+"""Database models package.
 
 This package contains all SQLAlchemy ORM models for the
 Multi-Agent Research Platform.
