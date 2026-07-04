@@ -3,6 +3,23 @@
 from dataclasses import dataclass
 from typing import Any
 
+from src.qa.mast import (
+    ContentHashTracker,
+    MASTLabel,
+    MASTLabeler,
+    MASTLabelingResult,
+    format_mast_labels_for_metadata,
+)
+
+# Export MAST components for external use
+__all__ = [
+    "ContentHashTracker",
+    "MASTLabel",
+    "MASTLabeler",
+    "MASTLabelingResult",
+    "format_mast_labels_for_metadata",
+]
+
 
 @dataclass
 class FactCheckResult:
