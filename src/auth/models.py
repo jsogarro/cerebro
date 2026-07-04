@@ -1,4 +1,5 @@
-"""Authentication data models.
+"""
+Authentication data models.
 
 Pydantic models for authentication requests and responses.
 """
@@ -62,8 +63,8 @@ class TokenPair(BaseModel):
                 "refresh_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
                 "token_type": "Bearer",
                 "expires_in": 900,
-            },
-        },
+            }
+        }
     )
 
 
@@ -89,7 +90,7 @@ class LoginRequest(BaseModel):
 
         if not (has_upper and has_lower and has_digit and has_special):
             raise ValueError(
-                "Password must contain uppercase, lowercase, digit, and special character",
+                "Password must contain uppercase, lowercase, digit, and special character"
             )
 
         return v
@@ -101,8 +102,8 @@ class LoginRequest(BaseModel):
                 "password": "SecurePassword123!",
                 "device_id": "device-fingerprint-123",
                 "remember_me": False,
-            },
-        },
+            }
+        }
     )
 
 
@@ -112,7 +113,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr = Field(..., description="Email address")
     username: str = Field(..., min_length=3, max_length=50, description="Username")
     password: str = Field(
-        ..., min_length=12, description="Password (min 12 characters)",
+        ..., min_length=12, description="Password (min 12 characters)"
     )
     confirm_password: str = Field(..., description="Password confirmation")
     full_name: str | None = Field(None, max_length=255, description="Full name")
@@ -125,7 +126,7 @@ class RegisterRequest(BaseModel):
         """Validate username format."""
         if not re.match(r"^[a-zA-Z0-9_-]+$", v):
             raise ValueError(
-                "Username must contain only letters, numbers, underscores, and hyphens",
+                "Username must contain only letters, numbers, underscores, and hyphens"
             )
         return v.lower()
 
@@ -144,7 +145,7 @@ class RegisterRequest(BaseModel):
 
         if not (has_upper and has_lower and has_digit and has_special):
             raise ValueError(
-                "Password must contain uppercase, lowercase, digit, and special character",
+                "Password must contain uppercase, lowercase, digit, and special character"
             )
 
         return v
@@ -176,8 +177,8 @@ class RegisterRequest(BaseModel):
                 "full_name": "John Doe",
                 "organization": "Research Institute",
                 "accept_terms": True,
-            },
-        },
+            }
+        }
     )
 
 
@@ -192,8 +193,8 @@ class RefreshRequest(BaseModel):
             "example": {
                 "refresh_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
                 "device_id": "device-fingerprint-123",
-            },
-        },
+            }
+        }
     )
 
 
@@ -203,7 +204,7 @@ class PasswordResetRequest(BaseModel):
     email: EmailStr = Field(..., description="Email address for password reset")
 
     model_config = ConfigDict(
-        json_schema_extra={"example": {"email": "user@example.com"}},
+        json_schema_extra={"example": {"email": "user@example.com"}}
     )
 
 
@@ -228,7 +229,7 @@ class PasswordResetConfirm(BaseModel):
 
         if not (has_upper and has_lower and has_digit and has_special):
             raise ValueError(
-                "Password must contain uppercase, lowercase, digit, and special character",
+                "Password must contain uppercase, lowercase, digit, and special character"
             )
 
         return v
@@ -248,8 +249,8 @@ class PasswordResetConfirm(BaseModel):
                 "token": "reset-token-abc123",
                 "new_password": "NewSecurePass123!@#",
                 "confirm_password": "NewSecurePass123!@#",
-            },
-        },
+            }
+        }
     )
 
 
@@ -274,7 +275,7 @@ class ChangePasswordRequest(BaseModel):
 
         if not (has_upper and has_lower and has_digit and has_special):
             raise ValueError(
-                "Password must contain uppercase, lowercase, digit, and special character",
+                "Password must contain uppercase, lowercase, digit, and special character"
             )
 
         return v
@@ -304,7 +305,7 @@ class EmailVerificationRequest(BaseModel):
     token: str = Field(..., description="Email verification token")
 
     model_config = ConfigDict(
-        json_schema_extra={"example": {"token": "verification-token-xyz789"}},
+        json_schema_extra={"example": {"token": "verification-token-xyz789"}}
     )
 
 
@@ -359,8 +360,8 @@ class AuthResponse(BaseModel):
                     "token_type": "Bearer",
                     "expires_in": 900,
                 },
-            },
-        },
+            }
+        }
     )
 
 
@@ -381,6 +382,6 @@ class SessionInfo(BaseModel):
                 "last_activity": "2024-01-15T11:30:00Z",
                 "ip_address": "192.168.1.1",
                 "user_agent": "Mozilla/5.0...",
-            },
-        },
+            }
+        }
     )

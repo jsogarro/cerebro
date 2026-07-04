@@ -1,4 +1,5 @@
-"""Services module for the research platform.
+"""
+Services module for the research platform.
 
 This module contains integrations with external services like Gemini.
 """

@@ -1,4 +1,5 @@
-"""Cost Optimization Engine for MASR
+"""
+Cost Optimization Engine for MASR
 
 Optimizes model selection based on cost-performance trade-offs, analyzing:
 - Model costs per 1K tokens for different providers
@@ -97,7 +98,8 @@ class OptimizationResult:
 
 
 class CostOptimizer:
-    """Optimizes model selection for cost-effectiveness while meeting
+    """
+    Optimizes model selection for cost-effectiveness while meeting
     performance and quality requirements.
 
     Integrates with the complexity analyzer to make informed routing
@@ -129,14 +131,15 @@ class CostOptimizer:
 
         # Strategy preferences
         self.default_strategy = OptimizationStrategy(
-            self.config.get("default_strategy", "balanced"),
+            self.config.get("default_strategy", "balanced")
         )
 
     async def load_models(self) -> bool:
         """Load model specifications from configuration manager."""
+
         if not self.model_config_manager:
             logger.warning(
-                "No model configuration manager available, using legacy models",
+                "No model configuration manager available, using legacy models"
             )
             self.models = self._initialize_models_legacy()
             self._models_loaded = True
@@ -281,7 +284,8 @@ class CostOptimizer:
         strategy: OptimizationStrategy | None = None,
         constraints: dict[str, Any] | None = None,
     ) -> OptimizationResult:
-        """Optimize model selection based on complexity analysis and constraints.
+        """
+        Optimize model selection based on complexity analysis and constraints.
 
         Args:
             complexity_analysis: Result from QueryComplexityAnalyzer
@@ -290,7 +294,6 @@ class CostOptimizer:
 
         Returns:
             OptimizationResult with recommended model configuration
-
         """
         strategy = strategy or self.default_strategy
         constraints = constraints or {}
@@ -302,7 +305,7 @@ class CostOptimizer:
 
         # Filter models based on basic requirements
         candidate_models = await self._filter_candidates(
-            complexity_analysis, constraints,
+            complexity_analysis, constraints
         )
 
         if not candidate_models:
@@ -310,17 +313,17 @@ class CostOptimizer:
 
         # Calculate costs for each candidate
         cost_estimates = await self._calculate_costs(
-            candidate_models, complexity_analysis,
+            candidate_models, complexity_analysis
         )
 
         # Select optimal model based on strategy
         primary_model, primary_estimate = await self._select_optimal_model(
-            cost_estimates, strategy, constraints,
+            cost_estimates, strategy, constraints
         )
 
         # Select fallback models
         fallback_models = await self._select_fallback_models(
-            candidate_models, primary_model, cost_estimates,
+            candidate_models, primary_model, cost_estimates
         )
 
         # Generate alternatives for comparison
@@ -332,12 +335,12 @@ class CostOptimizer:
 
         # Assess risk factors
         risk_factors = self._assess_risk_factors(
-            primary_model, complexity_analysis, constraints,
+            primary_model, complexity_analysis, constraints
         )
 
         # Generate reasoning
         reasoning = self._generate_reasoning(
-            primary_model, primary_estimate, strategy, alternatives,
+            primary_model, primary_estimate, strategy, alternatives
         )
 
         result = OptimizationResult(
@@ -352,13 +355,13 @@ class CostOptimizer:
 
         logger.info(
             f"Selected {primary_model.name} with estimated cost "
-            f"${primary_estimate.cost_per_request:.4f}/request",
+            f"${primary_estimate.cost_per_request:.4f}/request"
         )
 
         return result
 
     async def _filter_candidates(
-        self, complexity_analysis: Any, constraints: dict[str, Any],
+        self, complexity_analysis: Any, constraints: dict[str, Any]
     ) -> list[ModelSpec]:
         """Filter models based on basic requirements."""
         candidates = []
@@ -367,7 +370,7 @@ class CostOptimizer:
         max_latency = constraints.get("max_latency_ms", self.latency_threshold_ms)
         min_quality = constraints.get("min_quality_score", self.quality_threshold)
         required_context = constraints.get(
-            "min_context_window", complexity_analysis.estimated_tokens * 2,
+            "min_context_window", complexity_analysis.estimated_tokens * 2
         )
 
         for model in self.models.values():
@@ -405,18 +408,19 @@ class CostOptimizer:
         for domain in domains:
             domain_name = domain.value if hasattr(domain, "value") else str(domain)
             required_strengths = domain_compatibility.get(
-                domain_name, ["general_purpose"],
+                domain_name, ["general_purpose"]
             )
 
             # Check if model has any required strengths for this domain
             if any(strength in model.strengths for strength in required_strengths):
                 continue
-            return False
+            else:
+                return False
 
         return True
 
     async def _calculate_costs(
-        self, candidates: list[ModelSpec], complexity_analysis: Any,
+        self, candidates: list[ModelSpec], complexity_analysis: Any
     ) -> dict[ModelSpec, CostEstimate]:
         """Calculate cost estimates for candidate models."""
         estimates = {}
@@ -458,7 +462,7 @@ class CostOptimizer:
         return estimates
 
     def _is_perfect_domain_fit(
-        self, model: ModelSpec, complexity_analysis: Any,
+        self, model: ModelSpec, complexity_analysis: Any
     ) -> bool:
         """Check if model is a perfect fit for the query domain."""
         # Check if model's strengths perfectly align with query requirements
@@ -482,45 +486,46 @@ class CostOptimizer:
         constraints: dict[str, Any],
     ) -> tuple[ModelSpec, CostEstimate]:
         """Select the optimal model based on strategy."""
+
         if strategy == OptimizationStrategy.COST_MINIMIZED:
             # Select cheapest model that meets quality threshold
             return min(cost_estimates.items(), key=lambda x: x[1].cost_per_request)
 
-        if strategy == OptimizationStrategy.PERFORMANCE_OPTIMIZED:
+        elif strategy == OptimizationStrategy.PERFORMANCE_OPTIMIZED:
             # Select highest quality model regardless of cost
             return max(cost_estimates.items(), key=lambda x: x[1].quality_score)
 
-        if strategy == OptimizationStrategy.LATENCY_OPTIMIZED:
+        elif strategy == OptimizationStrategy.LATENCY_OPTIMIZED:
             # Select fastest model
             return min(cost_estimates.items(), key=lambda x: x[1].latency_estimate_ms)
 
-        # BALANCED
-        # Select model with best cost-quality-latency balance
-        def score_model(item: tuple[ModelSpec, CostEstimate]) -> float:
-            _model, estimate = item
-            # Normalize factors (0-1 scale)
-            cost_score = 1 - min(
-                estimate.cost_per_request / self.max_cost_per_request, 1.0,
-            )
-            quality_score = estimate.quality_score
-            latency_score = 1 - min(
-                estimate.latency_estimate_ms / self.latency_threshold_ms, 1.0,
-            )
+        else:  # BALANCED
+            # Select model with best cost-quality-latency balance
+            def score_model(item: tuple[ModelSpec, CostEstimate]) -> float:
+                _model, estimate = item
+                # Normalize factors (0-1 scale)
+                cost_score = 1 - min(
+                    estimate.cost_per_request / self.max_cost_per_request, 1.0
+                )
+                quality_score = estimate.quality_score
+                latency_score = 1 - min(
+                    estimate.latency_estimate_ms / self.latency_threshold_ms, 1.0
+                )
 
-            # Weighted combination
-            weights = constraints.get(
-                "balance_weights", {"cost": 0.4, "quality": 0.4, "latency": 0.2},
-            )
+                # Weighted combination
+                weights = constraints.get(
+                    "balance_weights", {"cost": 0.4, "quality": 0.4, "latency": 0.2}
+                )
 
-            total_score = float(
-                cost_score * float(weights["cost"])
-                + quality_score * float(weights["quality"])
-                + latency_score * float(weights["latency"]),
-            )
+                total_score = float(
+                    cost_score * float(weights["cost"])
+                    + quality_score * float(weights["quality"])
+                    + latency_score * float(weights["latency"])
+                )
 
-            return total_score
+                return total_score
 
-        return max(cost_estimates.items(), key=score_model)
+            return max(cost_estimates.items(), key=score_model)
 
     async def _select_fallback_models(
         self,
@@ -539,7 +544,7 @@ class CostOptimizer:
             key=lambda m: (
                 -m.availability,  # Higher availability first
                 cost_estimates[m].cost_per_request,  # Then lower cost
-            ),
+            )
         )
 
         # Select up to 2 fallback models
@@ -548,7 +553,7 @@ class CostOptimizer:
         return fallbacks
 
     def _assess_risk_factors(
-        self, model: ModelSpec, complexity_analysis: Any, constraints: dict[str, Any],
+        self, model: ModelSpec, complexity_analysis: Any, constraints: dict[str, Any]
     ) -> list[str]:
         """Assess risk factors for the selected model."""
         risks = []
@@ -591,7 +596,7 @@ class CostOptimizer:
         # Cost justification
         reasoning_parts.append(
             f"Estimated cost: ${estimate.cost_per_request:.4f} per request "
-            f"(${estimate.total_monthly_cost:.2f} monthly)",
+            f"(${estimate.total_monthly_cost:.2f} monthly)"
         )
 
         # Quality justification
@@ -606,12 +611,12 @@ class CostOptimizer:
             cost_diff = alt_estimate.cost_per_request - estimate.cost_per_request
             if cost_diff > 0:
                 reasoning_parts.append(
-                    f"Saves ${cost_diff:.4f} per request vs {alt_model.name}",
+                    f"Saves ${cost_diff:.4f} per request vs {alt_model.name}"
                 )
             else:
                 reasoning_parts.append(
                     f"Costs ${-cost_diff:.4f} more than {alt_model.name} "
-                    f"for better quality/performance",
+                    f"for better quality/performance"
                 )
 
         return ". ".join(reasoning_parts)

@@ -1,4 +1,5 @@
-"""Supervisor Configuration Module
+"""
+Supervisor Configuration Module
 
 Configuration translation and management for supervisor-based execution.
 Translates MASR complexity analysis and routing strategies into supervisor
@@ -119,7 +120,8 @@ class ComplexityToWorkerMapper:
         subtask_count: int,
         uncertainty: float,
     ) -> dict[str, Any]:
-        """Calculate optimal worker allocation.
+        """
+        Calculate optimal worker allocation.
 
         Args:
             complexity_level: Query complexity level
@@ -129,16 +131,16 @@ class ComplexityToWorkerMapper:
 
         Returns:
             Worker allocation configuration
-
         """
+
         # Get base allocation for complexity level
         base_allocation = self.complexity_worker_map.get(
-            complexity_level, self.complexity_worker_map[ComplexityLevel.MODERATE],
+            complexity_level, self.complexity_worker_map[ComplexityLevel.MODERATE]
         )
 
         # Apply domain adjustments
         domain_adj = self.domain_adjustments.get(
-            domain, {"worker_multiplier": 1.0, "quality_bonus": 0.0},
+            domain, {"worker_multiplier": 1.0, "quality_bonus": 0.0}
         )
         worker_multiplier = float(domain_adj.get("worker_multiplier", 1.0))
 
@@ -231,7 +233,8 @@ class QualityThresholdCalculator:
         uncertainty: float,
         priority_level: str = "normal",
     ) -> dict[str, Any]:
-        """Calculate quality thresholds for supervisor configuration.
+        """
+        Calculate quality thresholds for supervisor configuration.
 
         Args:
             routing_strategy: MASR routing strategy
@@ -241,28 +244,28 @@ class QualityThresholdCalculator:
 
         Returns:
             Quality threshold configuration
-
         """
+
         # Get base thresholds for strategy
         base_config = self.strategy_quality_map.get(
-            routing_strategy, self.strategy_quality_map[RoutingStrategy.BALANCED],
+            routing_strategy, self.strategy_quality_map[RoutingStrategy.BALANCED]
         )
 
         quality_threshold_val = base_config.get("quality_threshold", 0.8)
         consensus_threshold_val = base_config.get("consensus_threshold", 0.85)
         quality_threshold = coerce_float(
-            quality_threshold_val, 0.8, min_val=0.0, max_val=1.0,
+            quality_threshold_val, 0.8, min_val=0.0, max_val=1.0
         )
         consensus_threshold = coerce_float(
-            consensus_threshold_val, 0.85, min_val=0.0, max_val=1.0,
+            consensus_threshold_val, 0.85, min_val=0.0, max_val=1.0
         )
         quality_focus = base_config.get(
-            "quality_focus", QualityFocusLevel.STANDARD.value,
+            "quality_focus", QualityFocusLevel.STANDARD.value
         )
 
         # Apply complexity adjustments
         complexity_adj = self.complexity_adjustments.get(
-            complexity_level, {"threshold_adjustment": 0.0},
+            complexity_level, {"threshold_adjustment": 0.0}
         )
         threshold_adj = float(complexity_adj.get("threshold_adjustment", 0.0))
         quality_threshold = quality_threshold + threshold_adj
@@ -323,7 +326,8 @@ class RefinementRoundCalculator:
         complexity_level: ComplexityLevel,
         enable_early_stopping: bool = True,
     ) -> dict[str, Any]:
-        """Calculate optimal refinement rounds configuration.
+        """
+        Calculate optimal refinement rounds configuration.
 
         Args:
             quality_focus: Quality focus level
@@ -333,11 +337,11 @@ class RefinementRoundCalculator:
 
         Returns:
             Refinement rounds configuration
-
         """
+
         # Get base rounds for quality focus
         focus_config = self.quality_focus_rounds.get(
-            quality_focus, self.quality_focus_rounds[QualityFocusLevel.STANDARD],
+            quality_focus, self.quality_focus_rounds[QualityFocusLevel.STANDARD]
         )
 
         base_rounds = focus_config["base_rounds"]
@@ -360,7 +364,7 @@ class RefinementRoundCalculator:
         }
 
         rounds_adj = complexity_adjustments.get(
-            complexity_level, {"rounds_adjustment": 0},
+            complexity_level, {"rounds_adjustment": 0}
         )["rounds_adjustment"]
 
         base_rounds += rounds_adj
@@ -429,23 +433,24 @@ class CollaborationModeTranslator:
         }
 
     def translate_collaboration_mode(
-        self, collaboration_mode: CollaborationMode,
+        self, collaboration_mode: CollaborationMode
     ) -> dict[str, Any]:
-        """Translate collaboration mode to supervision configuration.
+        """
+        Translate collaboration mode to supervision configuration.
 
         Args:
             collaboration_mode: MASR collaboration mode
 
         Returns:
             Supervision mode configuration
-
         """
+
         supervision_mode = self.collaboration_to_supervision.get(
-            collaboration_mode, SupervisionMode.PARALLEL,
+            collaboration_mode, SupervisionMode.PARALLEL
         )
 
         additional_config = self.collaboration_configs.get(
-            collaboration_mode, self.collaboration_configs[CollaborationMode.PARALLEL],
+            collaboration_mode, self.collaboration_configs[CollaborationMode.PARALLEL]
         )
 
         return {
@@ -456,7 +461,8 @@ class CollaborationModeTranslator:
 
 
 class SupervisorConfigurationManager:
-    """Main configuration manager that integrates all configuration components.
+    """
+    Main configuration manager that integrates all configuration components.
 
     Provides a unified interface for translating MASR routing decisions and
     complexity analysis into comprehensive supervisor configurations.
@@ -468,16 +474,16 @@ class SupervisorConfigurationManager:
 
         # Initialize component calculators
         self.worker_mapper = ComplexityToWorkerMapper(
-            self.config.get("worker_mapper", {}),
+            self.config.get("worker_mapper", {})
         )
         self.quality_calculator = QualityThresholdCalculator(
-            self.config.get("quality_calculator", {}),
+            self.config.get("quality_calculator", {})
         )
         self.refinement_calculator = RefinementRoundCalculator(
-            self.config.get("refinement_calculator", {}),
+            self.config.get("refinement_calculator", {})
         )
         self.collaboration_translator = CollaborationModeTranslator(
-            self.config.get("collaboration_translator", {}),
+            self.config.get("collaboration_translator", {})
         )
 
     def create_supervisor_configuration(
@@ -491,7 +497,8 @@ class SupervisorConfigurationManager:
         priority_level: str = "normal",
         additional_context: dict[str, Any] | None = None,
     ) -> SupervisorConfigurationProfile:
-        """Create comprehensive supervisor configuration.
+        """
+        Create comprehensive supervisor configuration.
 
         Args:
             complexity_level: Query complexity level
@@ -505,18 +512,18 @@ class SupervisorConfigurationManager:
 
         Returns:
             Complete supervisor configuration profile
-
         """
+
         primary_domain = domains[0] if domains else "research"
 
         # Calculate worker allocation
         worker_config = self.worker_mapper.calculate_worker_allocation(
-            complexity_level, primary_domain, subtask_count, uncertainty,
+            complexity_level, primary_domain, subtask_count, uncertainty
         )
 
         # Calculate quality thresholds
         quality_config = self.quality_calculator.calculate_quality_thresholds(
-            routing_strategy, complexity_level, uncertainty, priority_level,
+            routing_strategy, complexity_level, uncertainty, priority_level
         )
 
         # Calculate refinement rounds
@@ -529,7 +536,7 @@ class SupervisorConfigurationManager:
 
         # Translate collaboration mode
         supervision_config = self.collaboration_translator.translate_collaboration_mode(
-            collaboration_mode,
+            collaboration_mode
         )
 
         # Calculate timeout based on complexity and worker count

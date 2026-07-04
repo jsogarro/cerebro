@@ -1,4 +1,5 @@
-"""Test suite for Gemini service following TDD principles.
+"""
+Test suite for Gemini service following TDD principles.
 
 These tests verify the Gemini integration service functionality.
 """
@@ -39,7 +40,7 @@ class TestGeminiService:
                 "phases": ["literature_review", "analysis", "synthesis"],
                 "estimated_time": 3600,
                 "methodology": "systematic_review",
-            },
+            }
         )
         mock_model.ainvoke = AsyncMock(return_value=mock_response)
         return mock_model
@@ -92,7 +93,7 @@ class TestGeminiService:
         # Configure mock to fail twice then succeed
         success_response = MagicMock()
         success_response.content = json.dumps(
-            {"phases": ["literature_review"], "methodology": "test"},
+            {"phases": ["literature_review"], "methodology": "test"}
         )
         mock_gemini_model.ainvoke.side_effect = [
             Exception("API Error"),
@@ -102,7 +103,7 @@ class TestGeminiService:
         service.model = mock_gemini_model
 
         query = ResearchQuery(
-            text="Test query", domains=["Test"], depth_level=ResearchDepth.SURVEY,
+            text="Test query", domains=["Test"], depth_level=ResearchDepth.SURVEY
         )
 
         result = await service.generate_research_plan(query)
@@ -153,7 +154,7 @@ class TestGeminiService:
         service.model = mock_gemini_model
 
         query = ResearchQuery(
-            text="Test query", domains=["Test"], depth_level=ResearchDepth.SURVEY,
+            text="Test query", domains=["Test"], depth_level=ResearchDepth.SURVEY
         )
 
         result = await service.generate_research_plan(query)
@@ -174,7 +175,7 @@ class TestGeminiService:
                 "key_findings": ["Finding 1", "Finding 2"],
                 "gaps": ["Gap 1"],
                 "summary": "Analysis summary",
-            },
+            }
         )
         mock_gemini_model.ainvoke = AsyncMock(return_value=mock_response)
 
@@ -198,7 +199,7 @@ class TestGeminiService:
                 "synthesis": "Comprehensive synthesis",
                 "conclusions": ["Conclusion 1", "Conclusion 2"],
                 "recommendations": ["Recommendation 1"],
-            },
+            }
         )
         mock_gemini_model.ainvoke = AsyncMock(return_value=mock_response)
 
@@ -228,9 +229,9 @@ class TestGeminiService:
                         "apa": "Author, A. (2024). Title. Journal.",
                         "mla": 'Author, A. "Title." Journal (2024).',
                         "chicago": 'Author, A. "Title." Journal (2024).',
-                    },
-                ],
-            },
+                    }
+                ]
+            }
         )
         mock_gemini_model.ainvoke = AsyncMock(return_value=mock_response)
 
@@ -255,7 +256,7 @@ class TestGeminiService:
                 "confidence": 0.85,
                 "evidence": ["Evidence 1", "Evidence 2"],
                 "counter_evidence": ["Counter 1"],
-            },
+            }
         )
         mock_gemini_model.ainvoke = AsyncMock(return_value=mock_response)
 
@@ -283,7 +284,7 @@ class TestGeminiService:
         service.model = mock_gemini_model
 
         query = ResearchQuery(
-            text="Test query", domains=["Test"], depth_level=ResearchDepth.SURVEY,
+            text="Test query", domains=["Test"], depth_level=ResearchDepth.SURVEY
         )
 
         with pytest.raises(ValueError) as exc_info:
@@ -300,14 +301,14 @@ class TestGeminiService:
 
         queries = [
             ResearchQuery(
-                text=f"Query {i}", domains=["Test"], depth_level=ResearchDepth.SURVEY,
+                text=f"Query {i}", domains=["Test"], depth_level=ResearchDepth.SURVEY
             )
             for i in range(10)
         ]
 
         # All requests should complete without error
         results = await asyncio.gather(
-            *[service.generate_research_plan(q) for q in queries],
+            *[service.generate_research_plan(q) for q in queries]
         )
 
         assert len(results) == 10

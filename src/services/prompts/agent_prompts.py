@@ -1,4 +1,5 @@
-"""Agent-specific prompt templates.
+"""
+Agent-specific prompt templates.
 
 This module contains prompts for different research agents.
 """
@@ -37,6 +38,7 @@ AGENT_PROMPT_TEMPLATE_METADATA: dict[str, dict[str, str]] = {
 
 def get_agent_prompt_version(agent_type: str) -> str:
     """Return the tracked prompt version for an agent type."""
+
     metadata = AGENT_PROMPT_TEMPLATE_METADATA.get(agent_type)
     if metadata is None:
         return "unversioned"
@@ -73,13 +75,13 @@ Please provide a comprehensive literature analysis following systematic review p
         "literature_analysis": {
             "search_strategy": str,
             "sources_found": [
-                {"title": str, "authors": [str], "year": int, "relevance_score": float},
+                {"title": str, "authors": [str], "year": int, "relevance_score": float}
             ],
             "key_findings": [str],
             "methodologies_used": [str],
             "research_gaps": [str],
             "quality_assessment": str,
-        },
+        }
     }
 
     prompt = compose_prompt([system_prompt, task_description])
@@ -136,7 +138,7 @@ Provide a comprehensive comparative analysis with comparison matrix, strengths/w
             "strengths_weaknesses": {},
             "recommendations": [str],
             "trade_offs": [str],
-        },
+        }
     }
 
     if context:
@@ -148,7 +150,7 @@ Provide a comprehensive comparative analysis with comparison matrix, strengths/w
 
 
 def generate_methodology_agent_prompt(
-    research_question: str, context: dict[str, Any],
+    research_question: str, context: dict[str, Any]
 ) -> str:
     """Generate prompt for Methodology Agent."""
     system_prompt = create_system_prompt(
@@ -184,7 +186,7 @@ Provide detailed methodological recommendations including design, data collectio
             "ethical_considerations": [str],
             "limitations": [str],
             "timeline": str,
-        },
+        }
     }
 
     prompt = compose_prompt([system_prompt, task_description])
@@ -230,7 +232,7 @@ Create a comprehensive synthesis that integrates all findings into a coherent re
             "meta_insights": [str],
             "comprehensive_narrative": str,
             "confidence_assessment": str,
-        },
+        }
     }
 
     prompt = compose_prompt([system_prompt, task_description])
@@ -238,7 +240,7 @@ Create a comprehensive synthesis that integrates all findings into a coherent re
 
 
 def generate_citation_agent_prompt(
-    sources: list[dict[str, Any]], style: str = "APA",
+    sources: list[dict[str, Any]], style: str = "APA"
 ) -> str:
     """Generate prompt for Citation Agent."""
     system_prompt = create_system_prompt(
@@ -273,10 +275,10 @@ Provide properly formatted citations and verify source information.
             "formatted_citations": [{"source_id": int, "citation": str, "style": str}],
             "bibliography": [str],
             "verification_status": [
-                {"source_id": int, "verified": bool, "issues": [str]},
+                {"source_id": int, "verified": bool, "issues": [str]}
             ],
             "completeness_check": str,
-        },
+        }
     }
 
     prompt = compose_prompt([system_prompt, task_description])

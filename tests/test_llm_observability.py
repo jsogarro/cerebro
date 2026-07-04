@@ -161,14 +161,14 @@ def test_record_llm_call_updates_prometheus_metrics() -> None:
             latency_ms=250,
             cost_usd=0.012,
             request_id="request-1",
-        ),
+        )
     )
 
     assert sample_value("llm_tokens_total", prompt_labels) == before_prompt + 7
     assert sample_value("llm_tokens_total", completion_labels) == before_completion + 11
     assert sample_value("llm_call_duration_seconds_count", labels) == before_count + 1
     assert sample_value("llm_cost_usd_total", labels) == pytest.approx(
-        before_cost + 0.012,
+        before_cost + 0.012
     )
 
 
@@ -212,7 +212,7 @@ def test_base_provider_records_llm_metrics_after_postprocess(
             cost_usd=0.004,
             request_id="request-2",
             success=True,
-        ),
+        )
     ]
 
 
@@ -344,7 +344,7 @@ def test_cost_drift_middleware_records_threshold_event() -> None:
                 latency_ms=100,
                 cost_usd=0.013,
                 request_id="drift-request",
-            ),
+            )
         )
         return {"ok": True}
 

@@ -1,4 +1,5 @@
-"""API endpoints for A/B Testing experiment management.
+"""
+API endpoints for A/B Testing experiment management.
 
 This module provides REST API endpoints for creating, managing, and
 analyzing experiments across the Cerebro AI Brain platform.
@@ -36,10 +37,10 @@ class VariantCreate(BaseModel):
     description: str | None = Field(None, description="Variant description")
     is_control: bool = Field(False, description="Is this the control variant?")
     allocation_percentage: float = Field(
-        ..., description="Percentage of traffic for this variant",
+        ..., description="Percentage of traffic for this variant"
     )
     parameters: dict[str, Any] = Field(
-        default_factory=dict, description="Variant parameters",
+        default_factory=dict, description="Variant parameters"
     )
 
 
@@ -50,15 +51,15 @@ class ExperimentCreate(BaseModel):
     description: str | None = Field(None, description="Experiment description")
     experiment_type: ExperimentType = Field(..., description="Type of experiment")
     allocation_strategy: AllocationStrategy = Field(
-        AllocationStrategy.RANDOM, description="Traffic allocation strategy",
+        AllocationStrategy.RANDOM, description="Traffic allocation strategy"
     )
     traffic_percentage: float = Field(
-        100.0, description="Percentage of total traffic to include",
+        100.0, description="Percentage of total traffic to include"
     )
     variants: list[VariantCreate] = Field(..., description="Experiment variants")
     metrics: list[str] = Field(default_factory=list, description="Metrics to track")
     success_criteria: dict[str, Any] = Field(
-        default_factory=dict, description="Success criteria for the experiment",
+        default_factory=dict, description="Success criteria for the experiment"
     )
     min_sample_size: int = Field(1000, description="Minimum sample size per variant")
     confidence_level: float = Field(0.95, description="Statistical confidence level")
@@ -119,12 +120,12 @@ class MetricRecord(BaseModel):
     """Model for recording experiment metrics."""
 
     assignment_id: UUID = Field(
-        ..., description="Assignment ID from variant assignment",
+        ..., description="Assignment ID from variant assignment"
     )
     metric_name: str = Field(..., description="Name of the metric")
     metric_value: float = Field(..., description="Metric value")
     metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata",
+        default_factory=dict, description="Additional metadata"
     )
 
 
@@ -149,7 +150,8 @@ async def create_experiment(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ExperimentResponse:
-    """Create a new A/B testing experiment.
+    """
+    Create a new A/B testing experiment.
 
     This endpoint creates an experiment with variants and configuration
     for running A/B tests across the Cerebro platform.
@@ -228,7 +230,8 @@ async def list_experiments(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[ExperimentResponse]:
-    """List all experiments with optional filtering.
+    """
+    List all experiments with optional filtering.
 
     Returns a list of experiments, optionally filtered by status or type.
     """
@@ -280,7 +283,8 @@ async def get_experiment(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ExperimentResponse:
-    """Get a specific experiment by ID.
+    """
+    Get a specific experiment by ID.
 
     Returns detailed information about a single experiment.
     """
@@ -326,7 +330,8 @@ async def update_experiment(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ExperimentResponse:
-    """Update an experiment's configuration.
+    """
+    Update an experiment's configuration.
 
     Allows updating experiment status, traffic percentage, and other settings.
     """
@@ -383,9 +388,10 @@ async def update_experiment(
 
 @router.post("/{experiment_id}/assign", response_model=AssignmentResponse)
 async def assign_variant(
-    experiment_id: UUID, request: AssignmentRequest, db: AsyncSession = Depends(get_db),
+    experiment_id: UUID, request: AssignmentRequest, db: AsyncSession = Depends(get_db)
 ) -> AssignmentResponse:
-    """Get variant assignment for a user/session.
+    """
+    Get variant assignment for a user/session.
 
     This endpoint determines which variant a user should be assigned to
     based on the experiment's allocation strategy.
@@ -416,7 +422,7 @@ async def assign_variant(
         select(ExperimentAssignment).where(
             ExperimentAssignment.experiment_id == experiment_id,
             ExperimentAssignment.assignment_key == assignment_key,
-        ),
+        )
     )
     existing_assignment = existing.scalar_one_or_none()
 
@@ -428,8 +434,8 @@ async def assign_variant(
         return AssignmentResponse(
             experiment_id=experiment_id,
             variant_id=variant.id,
-            variant_name=cast("str", variant.name),
-            parameters=cast("dict[str, Any]", variant.parameters),
+            variant_name=cast(str, variant.name),
+            parameters=cast(dict[str, Any], variant.parameters),
             assignment_key=assignment_key,
         )
 
@@ -439,7 +445,7 @@ async def assign_variant(
         if (user_hash % 100) >= experiment.traffic_percentage:
             # User not in experiment traffic
             control_variant = next(
-                (v for v in experiment.variants if v.is_control), experiment.variants[0],
+                (v for v in experiment.variants if v.is_control), experiment.variants[0]
             )
             return AssignmentResponse(
                 experiment_id=experiment_id,
@@ -507,9 +513,10 @@ async def assign_variant(
 
 @router.post("/{experiment_id}/metrics")
 async def record_metric(
-    experiment_id: UUID, metric: MetricRecord, db: AsyncSession = Depends(get_db),
+    experiment_id: UUID, metric: MetricRecord, db: AsyncSession = Depends(get_db)
 ) -> JSONResponse:
-    """Record a metric for an experiment.
+    """
+    Record a metric for an experiment.
 
     This endpoint records performance metrics for experiment analysis.
     """
@@ -520,7 +527,7 @@ async def record_metric(
         select(ExperimentAssignment).where(
             ExperimentAssignment.id == metric.assignment_id,
             ExperimentAssignment.experiment_id == experiment_id,
-        ),
+        )
     )
     assignment = result.scalar_one_or_none()
 
@@ -541,7 +548,7 @@ async def record_metric(
     await db.commit()
 
     return JSONResponse(
-        status_code=200, content={"message": "Metric recorded successfully"},
+        status_code=200, content={"message": "Metric recorded successfully"}
     )
 
 
@@ -551,7 +558,8 @@ async def get_experiment_analysis(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ExperimentAnalysisResponse:
-    """Get analysis results for an experiment.
+    """
+    Get analysis results for an experiment.
 
     Returns statistical analysis comparing variants in the experiment.
     """
@@ -567,7 +575,7 @@ async def get_experiment_analysis(
         select(ExperimentAnalysis)
         .where(ExperimentAnalysis.experiment_id == experiment_id)
         .order_by(ExperimentAnalysis.analyzed_at.desc())
-        .limit(1),
+        .limit(1)
     )
     analysis = result.scalar_one_or_none()
 
@@ -606,8 +614,8 @@ async def get_experiment_analysis(
             for variant in experiment.variants:
                 if variant.id in variant_stats:
                     stats = variant_stats[variant.id]
-                    sample_sizes[cast("str", variant.name)] = cast("int", stats.count)
-                    variant_means[cast("str", variant.name)] = float(stats.mean or 0)
+                    sample_sizes[cast(str, variant.name)] = cast(int, stats.count)
+                    variant_means[cast(str, variant.name)] = float(stats.mean or 0)
 
             analysis_results: dict[str, Any] = {
                 "control_mean": float(control_stats.mean or 0),
@@ -634,10 +642,10 @@ async def get_experiment_analysis(
         raise HTTPException(status_code=404, detail="No analysis data available")
 
     return ExperimentAnalysisResponse(
-        experiment_id=cast("UUID", analysis.experiment_id),
-        analysis_type=cast("str", analysis.analysis_type),
-        results=cast("dict[str, Any]", analysis.results),
-        recommendation=cast("str | None", analysis.recommendation),
-        confidence_score=cast("float | None", analysis.confidence_score),
-        analyzed_at=cast("datetime", analysis.analyzed_at),
+        experiment_id=cast(UUID, analysis.experiment_id),
+        analysis_type=cast(str, analysis.analysis_type),
+        results=cast(dict[str, Any], analysis.results),
+        recommendation=cast(str | None, analysis.recommendation),
+        confidence_score=cast(float | None, analysis.confidence_score),
+        analyzed_at=cast(datetime, analysis.analyzed_at),
     )

@@ -1,4 +1,5 @@
-"""DeepSeek Provider Implementation
+"""
+DeepSeek Provider Implementation
 
 Provides integration with DeepSeek-V3 models for high-quality reasoning,
 mathematical computation, and analytical tasks. DeepSeek-V3 is particularly
@@ -29,7 +30,8 @@ logger = get_logger(__name__)
 
 
 class DeepSeekProvider(BaseProvider):
-    """DeepSeek-V3 model provider for complex reasoning and analysis tasks.
+    """
+    DeepSeek-V3 model provider for complex reasoning and analysis tasks.
 
     DeepSeek-V3 excels at:
     - Mathematical reasoning and computation
@@ -97,6 +99,7 @@ class DeepSeekProvider(BaseProvider):
 
     async def load_configuration(self) -> None:
         """Load DeepSeek-specific configuration."""
+
         # Load base configuration
         await super().load_configuration()
 
@@ -117,13 +120,13 @@ class DeepSeekProvider(BaseProvider):
             self.client = httpx.AsyncClient(
                 timeout=httpx.Timeout(timeout_ms / 1000.0),
                 limits=httpx.Limits(
-                    max_keepalive_connections=pool_size, max_connections=pool_size * 2,
+                    max_keepalive_connections=pool_size, max_connections=pool_size * 2
                 ),
             )
 
         if not self.api_key:
             logger.warning(
-                "DeepSeek API key not configured - provider will not function",
+                "DeepSeek API key not configured - provider will not function"
             )
 
         if not self.client:
@@ -146,22 +149,23 @@ class DeepSeekProvider(BaseProvider):
         return float(cost)
 
     async def generate(
-        self, request: ModelRequest, model_name: str | None = None,
+        self, request: ModelRequest, model_name: str | None = None
     ) -> ModelResponse:
         """Generate response using DeepSeek models."""
+
         # Ensure configuration is loaded
         await self.ensure_configuration_loaded()
 
         if not await self.validate_request(request):
             return self._create_error_response(
-                request, ValueError("Invalid request"), "validation_error",
+                request, ValueError("Invalid request"), "validation_error"
             )
 
         model_name = model_name or self.default_model
 
         if not self.supports_model(model_name):
             return self._create_error_response(
-                request, ValueError(f"Unsupported model: {model_name}"), "model_error",
+                request, ValueError(f"Unsupported model: {model_name}"), "model_error"
             )
 
         start_time = datetime.now()
@@ -175,7 +179,7 @@ class DeepSeekProvider(BaseProvider):
 
             # Process response
             model_response = await self._process_api_response(
-                response, request, model_name, start_time,
+                response, request, model_name, start_time
             )
 
             return await self._postprocess_response(model_response, request)
@@ -185,9 +189,10 @@ class DeepSeekProvider(BaseProvider):
             return self._create_error_response(request, e, "generation_error")
 
     async def stream(
-        self, request: ModelRequest, model_name: str | None = None,
+        self, request: ModelRequest, model_name: str | None = None
     ) -> AsyncGenerator[str, None]:
         """Stream response using DeepSeek models."""
+
         model_name = model_name or self.default_model
 
         if not self.supports_model(model_name):
@@ -235,9 +240,10 @@ class DeepSeekProvider(BaseProvider):
             yield f"Error: {e!s}"
 
     def _build_request_payload(
-        self, request: ModelRequest, model_name: str,
+        self, request: ModelRequest, model_name: str
     ) -> dict[str, Any]:
         """Build API request payload."""
+
         # Convert messages or prompt to chat format
         if request.messages:
             messages = request.messages.copy()
@@ -256,7 +262,7 @@ class DeepSeekProvider(BaseProvider):
         else:
             # Fallback to legacy specs
             legacy_max_obj = self._legacy_model_specs.get(model_name, {}).get(
-                "max_output_tokens", 8000,
+                "max_output_tokens", 8000
             )
             legacy_max = legacy_max_obj if isinstance(legacy_max_obj, int) else 8000
             max_tokens = min(request.max_tokens, legacy_max)
@@ -287,6 +293,7 @@ class DeepSeekProvider(BaseProvider):
 
     async def _make_api_request(self, payload: dict[str, Any]) -> httpx.Response:
         """Make API request to DeepSeek."""
+
         if not self.client:
             raise ValueError("HTTP client not initialized")
 
@@ -300,7 +307,7 @@ class DeepSeekProvider(BaseProvider):
             error_bytes = await response.aread()
             error_detail = error_bytes.decode("utf-8")
             raise Exception(
-                f"DeepSeek API error: {response.status_code} - {error_detail}",
+                f"DeepSeek API error: {response.status_code} - {error_detail}"
             )
 
         return response
@@ -313,6 +320,7 @@ class DeepSeekProvider(BaseProvider):
         start_time: datetime,
     ) -> ModelResponse:
         """Process API response into ModelResponse."""
+
         response_data = response.json()
 
         # Extract response content
@@ -336,7 +344,7 @@ class DeepSeekProvider(BaseProvider):
 
         # Calculate confidence score (heuristic based on response characteristics)
         confidence_score = self._calculate_confidence_score(
-            content, finish_reason, request, response_data,
+            content, finish_reason, request, response_data
         )
 
         # Parse structured content if JSON response
@@ -377,6 +385,7 @@ class DeepSeekProvider(BaseProvider):
         response_data: dict[str, Any],
     ) -> float:
         """Calculate confidence score for the response."""
+
         base_confidence = 0.8  # Base confidence for DeepSeek
 
         # Adjust based on finish reason
@@ -405,6 +414,7 @@ class DeepSeekProvider(BaseProvider):
 
     async def health_check(self) -> "ProviderHealthStatus":
         """Perform DeepSeek-specific health check."""
+
         try:
             # Test with a simple mathematical reasoning task
             test_request = ModelRequest(
@@ -440,6 +450,7 @@ class DeepSeekProvider(BaseProvider):
 
     async def validate_request(self, request: ModelRequest) -> bool:
         """Validate DeepSeek-specific request requirements."""
+
         if not await super().validate_request(request):
             return False
 
@@ -453,6 +464,7 @@ class DeepSeekProvider(BaseProvider):
 
     def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get DeepSeek model information."""
+
         if not self.supports_model(model_name):
             return None
 

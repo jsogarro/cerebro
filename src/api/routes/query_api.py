@@ -1,4 +1,5 @@
-"""Query API Routes - Primary Interface for Cerebro AI Brain
+"""
+Query API Routes - Primary Interface for Cerebro AI Brain
 
 Primary API following research-validated routing patterns:
 - Always routes through MASR for optimal agent selection
@@ -36,29 +37,29 @@ class IntelligentQueryRequest(BaseModel):
 
     query: str = Field(..., min_length=1, max_length=2000, description="Research query")
     domains: list[str] = Field(
-        default_factory=list, description="Domain hints (optional)",
+        default_factory=list, description="Domain hints (optional)"
     )
     context: dict[str, Any] = Field(
-        default_factory=dict, description="Additional context",
+        default_factory=dict, description="Additional context"
     )
 
     # Routing preferences (optional - MASR will optimize if not specified)
     routing_strategy: RoutingStrategy | None = Field(
-        None, description="Routing strategy preference",
+        None, description="Routing strategy preference"
     )
     quality_preference: float | None = Field(
-        None, ge=0.0, le=1.0, description="Quality vs speed preference",
+        None, ge=0.0, le=1.0, description="Quality vs speed preference"
     )
     cost_preference: float | None = Field(
-        None, ge=0.0, le=1.0, description="Cost sensitivity",
+        None, ge=0.0, le=1.0, description="Cost sensitivity"
     )
 
     # Execution options
     enable_real_time_updates: bool = Field(
-        default=True, description="Enable WebSocket progress updates",
+        default=True, description="Enable WebSocket progress updates"
     )
     timeout_seconds: int = Field(
-        default=300, ge=60, le=1800, description="Maximum execution time",
+        default=300, ge=60, le=1800, description="Maximum execution time"
     )
 
     # User context
@@ -88,14 +89,14 @@ class AnalysisRequest(BaseModel):
 class SynthesisRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     synthesis_focus: str = Field(
-        default="comprehensive", pattern="^(comprehensive|thematic|comparative)$",
+        default="comprehensive", pattern="^(comprehensive|thematic|comparative)$"
     )
     source_materials: list[dict[str, Any]] = Field(
-        default_factory=list, description="Pre-existing materials to synthesize",
+        default_factory=list, description="Pre-existing materials to synthesize"
     )
 
     narrative_style: str = Field(
-        default="academic", pattern="^(academic|executive|technical)$",
+        default="academic", pattern="^(academic|executive|technical)$"
     )
     include_visualizations: bool = Field(default=True)
     citation_style: str = Field(default="APA", pattern="^(APA|MLA|Chicago)$")
@@ -149,7 +150,8 @@ async def intelligent_research_query(
     request: IntelligentQueryRequest,
     background_tasks: BackgroundTasks,
 ) -> IntelligentQueryResponse:
-    """Primary research endpoint using MASR intelligent routing.
+    """
+    Primary research endpoint using MASR intelligent routing.
 
     This endpoint implements the full Cerebro intelligence stack:
     1. MASR analyzes query and selects optimal routing strategy
@@ -250,7 +252,8 @@ async def intelligent_analysis_query(
     request: AnalysisRequest,
     background_tasks: BackgroundTasks,
 ) -> IntelligentQueryResponse:
-    """Analysis-focused endpoint using MASR intelligent routing.
+    """
+    Analysis-focused endpoint using MASR intelligent routing.
 
     Optimized for analytical queries with configurable depth and methodology.
     Always routes through MASR for optimal agent selection and cost efficiency.
@@ -297,7 +300,8 @@ async def intelligent_synthesis_query(
     request: SynthesisRequest,
     background_tasks: BackgroundTasks,
 ) -> IntelligentQueryResponse:
-    """Synthesis-focused endpoint using MASR intelligent routing.
+    """
+    Synthesis-focused endpoint using MASR intelligent routing.
 
     Optimized for synthesis queries with existing materials or fresh analysis.
     MASR determines whether to use direct synthesis or full research pipeline.
@@ -338,7 +342,8 @@ async def intelligent_synthesis_query(
 
 @router.get("/execution/{execution_id}/status")
 async def get_execution_status(execution_id: str) -> dict[str, Any]:
-    """Get real-time status of intelligent query execution.
+    """
+    Get real-time status of intelligent query execution.
 
     Provides progress updates from MASR routing through supervisor coordination
     to final agent execution and result synthesis.
@@ -379,6 +384,7 @@ async def get_execution_status(execution_id: str) -> dict[str, Any]:
 @router.get("/execution/{execution_id}/results")
 async def get_execution_results(execution_id: str) -> dict[str, Any]:
     """Get results from completed intelligent query execution."""
+
     try:
         execution_service = get_direct_execution_service()
         results = await execution_service.get_execution_results(execution_id)
@@ -403,7 +409,8 @@ async def get_execution_results(execution_id: str) -> dict[str, Any]:
 
 @router.post("/execution/{project_id}/resume")
 async def resume_execution(project_id: str) -> dict[str, Any]:
-    """Resume execution from the latest checkpoint for a project.
+    """
+    Resume execution from the latest checkpoint for a project.
 
     This endpoint loads the most recent recoverable checkpoint for the project
     and resumes execution from that point. Returns the execution ID if successful.
@@ -455,7 +462,8 @@ async def intelligent_literature_query(
     max_sources: int = Query(50, ge=10, le=200),
     depth: ResearchDepth = ResearchDepth.COMPREHENSIVE,
 ) -> IntelligentQueryResponse:
-    """Literature-focused query with MASR intelligent routing.
+    """
+    Literature-focused query with MASR intelligent routing.
 
     MASR determines optimal literature review strategy based on query complexity.
     """
@@ -483,7 +491,8 @@ async def intelligent_methodology_query(
     research_type: str = Query("mixed", pattern="^(quantitative|qualitative|mixed)$"),
     domains: list[str] = Query(default=[]),
 ) -> IntelligentQueryResponse:
-    """Methodology-focused query with MASR intelligent routing.
+    """
+    Methodology-focused query with MASR intelligent routing.
 
     MASR selects optimal methodology approach based on research type and complexity.
     """
@@ -508,11 +517,12 @@ async def intelligent_methodology_query(
 async def intelligent_comparison_query(
     query: str = Query(..., min_length=10),
     comparison_focus: str = Query(
-        "approaches", pattern="^(approaches|theories|methods|findings)$",
+        "approaches", pattern="^(approaches|theories|methods|findings)$"
     ),
     domains: list[str] = Query(default=[]),
 ) -> IntelligentQueryResponse:
-    """Comparison-focused query with MASR intelligent routing.
+    """
+    Comparison-focused query with MASR intelligent routing.
 
     MASR determines optimal comparison strategy and agent coordination.
     """
@@ -538,7 +548,8 @@ async def intelligent_comparison_query(
 
 @router.get("/routing/strategies")
 async def get_available_routing_strategies() -> dict[str, Any]:
-    """Get available routing strategies and their characteristics.
+    """
+    Get available routing strategies and their characteristics.
 
     Exposes MASR routing intelligence for user understanding and optimization.
     """
@@ -592,7 +603,8 @@ async def get_routing_recommendation(
     query: str = Query(..., min_length=1),
     context: str = Query("", description="Optional JSON context string"),
 ) -> dict[str, Any]:
-    """Get MASR routing recommendation without executing query.
+    """
+    Get MASR routing recommendation without executing query.
 
     Useful for cost estimation and strategy planning.
     """

@@ -1,4 +1,5 @@
-"""Research API endpoints integration tests (Group B from issue #12).
+"""
+Research API endpoints integration tests (Group B from issue #12).
 
 Ported from tests/test_api.py TestResearchEndpoints (skipped tests).
 These require JWT auth + Postgres testcontainer + dependency injection.
@@ -16,7 +17,7 @@ class TestResearchEndpointsIntegration:
 
     @pytest.mark.asyncio
     async def test_create_research_project(
-        self, authenticated_client: AsyncClient,
+        self, authenticated_client: AsyncClient
     ) -> None:
         """Test creating a new research project."""
         payload = {
@@ -30,7 +31,7 @@ class TestResearchEndpointsIntegration:
         }
 
         response = await authenticated_client.post(
-            "/api/v1/research/projects", json=payload,
+            "/api/v1/research/projects", json=payload
         )
 
         assert response.status_code == status.HTTP_201_CREATED
@@ -44,12 +45,12 @@ class TestResearchEndpointsIntegration:
 
     @pytest.mark.asyncio
     async def test_get_research_project_not_found(
-        self, authenticated_client: AsyncClient,
+        self, authenticated_client: AsyncClient
     ) -> None:
         """Test getting a non-existent research project."""
         project_id = "550e8400-e29b-41d4-a716-446655440000"
         response = await authenticated_client.get(
-            f"/api/v1/research/projects/{project_id}",
+            f"/api/v1/research/projects/{project_id}"
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -59,7 +60,7 @@ class TestResearchEndpointsIntegration:
 
     @pytest.mark.asyncio
     async def test_list_research_projects(
-        self, authenticated_client: AsyncClient,
+        self, authenticated_client: AsyncClient
     ) -> None:
         """Test listing research projects."""
         response = await authenticated_client.get("/api/v1/research/projects")
@@ -70,7 +71,7 @@ class TestResearchEndpointsIntegration:
 
     @pytest.mark.asyncio
     async def test_get_research_progress(
-        self, authenticated_client: AsyncClient,
+        self, authenticated_client: AsyncClient
     ) -> None:
         """Test getting research project progress for an existing project."""
         # Create a project first — the progress endpoint requires the project to exist
@@ -80,13 +81,13 @@ class TestResearchEndpointsIntegration:
             "user_id": IntegrationTestConfig.TEST_USER_ID,
         }
         create_response = await authenticated_client.post(
-            "/api/v1/research/projects", json=create_payload,
+            "/api/v1/research/projects", json=create_payload
         )
         assert create_response.status_code == status.HTTP_201_CREATED
         project_id = create_response.json()["id"]
 
         response = await authenticated_client.get(
-            f"/api/v1/research/projects/{project_id}/progress",
+            f"/api/v1/research/projects/{project_id}/progress"
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -98,7 +99,7 @@ class TestResearchEndpointsIntegration:
 
     @pytest.mark.asyncio
     async def test_cancel_research_project(
-        self, authenticated_client: AsyncClient,
+        self, authenticated_client: AsyncClient
     ) -> None:
         """Test cancelling a research project."""
         # Create a project first — cancel requires the project to exist
@@ -108,13 +109,13 @@ class TestResearchEndpointsIntegration:
             "user_id": IntegrationTestConfig.TEST_USER_ID,
         }
         create_response = await authenticated_client.post(
-            "/api/v1/research/projects", json=create_payload,
+            "/api/v1/research/projects", json=create_payload
         )
         assert create_response.status_code == status.HTTP_201_CREATED
         project_id = create_response.json()["id"]
 
         response = await authenticated_client.post(
-            f"/api/v1/research/projects/{project_id}/cancel",
+            f"/api/v1/research/projects/{project_id}/cancel"
         )
 
         assert response.status_code == status.HTTP_204_NO_CONTENT

@@ -1,4 +1,5 @@
-"""TalkHier Protocol API Routes
+"""
+TalkHier Protocol API Routes
 
 This module implements REST and WebSocket endpoints for the TalkHier Protocol API,
 following patterns from "Talk Structurally, Act Hierarchically" research.
@@ -50,7 +51,7 @@ logger = get_logger()
 
 # Create router with prefix and tags
 router = APIRouter(
-    prefix="/api/v1/talkhier", tags=["TalkHier Protocol", "Agent Framework APIs"],
+    prefix="/api/v1/talkhier", tags=["TalkHier Protocol", "Agent Framework APIs"]
 )
 
 # Initialize services
@@ -69,7 +70,8 @@ connection_manager = ConnectionManager()
 async def create_refinement_session(
     request: TalkHierSessionRequest,
 ) -> TalkHierSessionResponse:
-    """Start a new TalkHier refinement session
+    """
+    Start a new TalkHier refinement session
 
     Creates a structured dialogue session for multi-round refinement
     with consensus building and quality assurance.
@@ -97,7 +99,6 @@ async def create_refinement_session(
         })
         session_id = response.json()["session_id"]
         ```
-
     """
     try:
         logger.info(
@@ -141,7 +142,8 @@ async def create_refinement_session(
 async def get_session_status(
     session_id: str = Path(..., description="Session identifier"),
 ) -> SessionStatusResponse:
-    """Get current status of a TalkHier session
+    """
+    Get current status of a TalkHier session
 
     Returns detailed session information including round history,
     quality scores, consensus levels, and timing information.
@@ -157,7 +159,6 @@ async def get_session_status(
         status = await client.get(f"/api/v1/talkhier/sessions/{session_id}")
         print(f"Round {status['current_round']}, Quality: {status['current_quality']}")
         ```
-
     """
     try:
         status_response = await session_service.get_session_status(session_id)
@@ -184,9 +185,10 @@ async def get_session_status(
 
 @router.post("/sessions/{session_id}/round", response_model=RefinementRoundResponse)
 async def execute_refinement_round(
-    session_id: str, request: RefinementRoundRequest,
+    session_id: str, request: RefinementRoundRequest
 ) -> RefinementRoundResponse:
-    """Execute a refinement round in an active session
+    """
+    Execute a refinement round in an active session
 
     Coordinates multi-agent refinement with quality assessment
     and consensus tracking. Each round improves upon previous results.
@@ -211,7 +213,6 @@ async def execute_refinement_round(
             }
         )
         ```
-
     """
     try:
         logger.info(
@@ -222,7 +223,7 @@ async def execute_refinement_round(
 
         # Execute round
         round_response = await session_service.execute_refinement_round(
-            session_id, request,
+            session_id, request
         )
 
         # Broadcast round completion via WebSocket
@@ -267,9 +268,10 @@ async def execute_refinement_round(
 
 @router.post("/sessions/{session_id}/consensus", response_model=ConsensusResult)
 async def check_consensus_status(
-    session_id: str, request: ConsensusCheckRequest,
+    session_id: str, request: ConsensusCheckRequest
 ) -> ConsensusResult:
-    """Check consensus status among session participants
+    """
+    Check consensus status among session participants
 
     Analyzes agreement levels between agents and provides
     detailed consensus metrics with minority reports if requested.
@@ -294,7 +296,6 @@ async def check_consensus_status(
             }
         )
         ```
-
     """
     try:
         consensus_result = await session_service.check_consensus(session_id, request)
@@ -330,10 +331,11 @@ async def check_consensus_status(
 async def close_session(
     session_id: str,
     request: SessionCloseRequest = SessionCloseRequest(
-        reason=None, save_transcript=True, generate_summary=True,
+        reason=None, save_transcript=True, generate_summary=True
     ),
 ) -> SessionCloseResponse:
-    """Close a TalkHier session
+    """
+    Close a TalkHier session
 
     Finalizes the session, generates summary, and optionally
     saves transcript for future reference.
@@ -355,7 +357,6 @@ async def close_session(
             }
         )
         ```
-
     """
     try:
         close_response = await session_service.close_session(session_id, request)
@@ -370,7 +371,7 @@ async def close_session(
         if session_id in websocket_handler.session_connections:
             disconnect_errors: list[str] = []
             for connection_id in list(
-                websocket_handler.session_connections[session_id],
+                websocket_handler.session_connections[session_id]
             ):
                 try:
                     await connection_manager.disconnect(connection_id)
@@ -416,7 +417,8 @@ async def close_session(
 
 @router.get("/protocols", response_model=ProtocolListResponse)
 async def list_available_protocols() -> ProtocolListResponse:
-    """List available TalkHier protocol configurations
+    """
+    List available TalkHier protocol configurations
 
     Returns all available protocol types with their characteristics
     and recommended use cases.
@@ -430,7 +432,6 @@ async def list_available_protocols() -> ProtocolListResponse:
         for protocol in protocols["protocols"]:
             print(f"{protocol['type']}: {protocol['description']}")
         ```
-
     """
     protocols = [
         {
@@ -489,7 +490,8 @@ async def list_available_protocols() -> ProtocolListResponse:
 async def validate_communication_structure(
     request: ProtocolValidationRequest,
 ) -> ValidationResponse:
-    """Validate TalkHier communication structure
+    """
+    Validate TalkHier communication structure
 
     Checks if a sequence of messages follows TalkHier protocol
     guidelines and provides improvement recommendations.
@@ -508,7 +510,6 @@ async def validate_communication_structure(
             "check_timing": True
         })
         ```
-
     """
     try:
         validation_response = await session_service.validate_protocol(request)
@@ -536,13 +537,14 @@ async def validate_communication_structure(
 async def get_protocol_analytics(
     time_range: str | None = Query("24h", description="Time range (1h, 24h, 7d, 30d)"),
     protocol_type: ProtocolType | None = Query(
-        None, description="Filter by protocol type",
+        None, description="Filter by protocol type"
     ),
     min_quality: float | None = Query(
-        None, ge=0.0, le=1.0, description="Minimum quality filter",
+        None, ge=0.0, le=1.0, description="Minimum quality filter"
     ),
 ) -> AnalyticsResponse:
-    """Get TalkHier protocol performance analytics
+    """
+    Get TalkHier protocol performance analytics
 
     Returns aggregated analytics about session performance,
     protocol usage, and quality trends.
@@ -560,7 +562,6 @@ async def get_protocol_analytics(
         analytics = await client.get("/api/v1/talkhier/analytics?time_range=7d")
         print(f"Success rate: {analytics['success_rate']:.1%}")
         ```
-
     """
     try:
         # Get analytics from session manager
@@ -573,7 +574,7 @@ async def get_protocol_analytics(
         # Add protocol-specific insights
         if protocol_type:
             analytics["protocol_insights"] = await _get_protocol_insights(
-                protocol_type, analytics,
+                protocol_type, analytics
             )
 
         return AnalyticsResponse(**analytics)
@@ -596,7 +597,8 @@ async def get_protocol_analytics(
 
 @router.websocket("/sessions/{session_id}/live")
 async def websocket_session_updates(websocket: WebSocket, session_id: str) -> None:
-    """WebSocket endpoint for real-time session updates
+    """
+    WebSocket endpoint for real-time session updates
 
     Provides live updates during TalkHier refinement sessions including:
     - Round start/completion events
@@ -613,14 +615,13 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
             console.log(`Event: ${update.event_type}`, update.data);
         };
         ```
-
     """
     connection_id = await connection_manager.connect(websocket)
 
     try:
         # Register connection for session
         await websocket_handler.register_session_connection(
-            session_id, connection_id, websocket,
+            session_id, connection_id, websocket
         )
 
         # Send initial session status
@@ -636,7 +637,7 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
                     "current_quality": status.current_quality,
                     "current_consensus": status.current_consensus,
                 },
-            },
+            }
         )
 
         # Keep connection alive and handle messages
@@ -649,7 +650,7 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
             elif data.get("type") == "get_status":
                 status = await session_service.get_session_status(session_id)
                 await websocket.send_json(
-                    {"type": "status_update", "data": status.dict()},
+                    {"type": "status_update", "data": status.dict()}
                 )
 
     except WebSocketDisconnect:
@@ -666,7 +667,8 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
 
 @router.websocket("/interactive")
 async def websocket_interactive_session(websocket: WebSocket) -> None:
-    """WebSocket endpoint for interactive TalkHier dialogue
+    """
+    WebSocket endpoint for interactive TalkHier dialogue
 
     Enables real-time interactive refinement sessions where
     users can participate in the structured dialogue process.
@@ -689,7 +691,6 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
             command: 'force_consensus'
         }));
         ```
-
     """
     connection_id = await connection_manager.connect(websocket)
     session_id: str | None = None
@@ -704,7 +705,7 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                 session_id = init_data["session_id"]
                 # Join existing session
                 await websocket_handler.join_interactive_session(
-                    session_id, connection_id, websocket,
+                    session_id, connection_id, websocket
                 )
             else:
                 # Create new interactive session
@@ -713,12 +714,12 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                 session_id = session_response.session_id
 
                 await websocket_handler.register_interactive_session(
-                    session_id, connection_id, websocket,
+                    session_id, connection_id, websocket
                 )
 
             # Send confirmation
             await websocket.send_json(
-                {"type": "session_initialized", "session_id": session_id},
+                {"type": "session_initialized", "session_id": session_id}
             )
 
         # Handle interactive messages and commands
@@ -730,7 +731,7 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                 message = InteractiveMessage(**data)
                 if session_id is not None:
                     await websocket_handler.handle_interactive_message(
-                        session_id, connection_id, message,
+                        session_id, connection_id, message
                     )
 
             elif data.get("type") == "command":
@@ -738,7 +739,7 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                 command = InteractiveCommand(**data)
                 if session_id is not None:
                     await websocket_handler.handle_interactive_command(
-                        session_id, connection_id, command,
+                        session_id, connection_id, command
                     )
 
     except WebSocketDisconnect:
@@ -756,7 +757,8 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
 
 @router.websocket("/coordination")
 async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
-    """WebSocket endpoint for multi-session coordination monitoring
+    """
+    WebSocket endpoint for multi-session coordination monitoring
 
     Provides real-time updates for coordinated TalkHier sessions
     running in parallel or hierarchical patterns.
@@ -775,7 +777,6 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             console.log(`Coordination progress: ${update.overall_progress}`);
         };
         ```
-
     """
     connection_id = await connection_manager.connect(websocket)
     coordination_id: str | None = None
@@ -789,14 +790,14 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
 
             # Register for coordination updates
             await websocket_handler.register_coordination_monitor(
-                coordination_id, connection_id, websocket,
+                coordination_id, connection_id, websocket
             )
 
             # Send initial status
             if coordination_id is not None:
                 status = await session_manager.get_coordination_status(coordination_id)
             await websocket.send_json(
-                {"type": "coordination_status", "data": status.dict()},
+                {"type": "coordination_status", "data": status.dict()}
             )
 
         # Keep connection alive and send updates
@@ -808,13 +809,13 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             elif data.get("type") == "get_status" and coordination_id is not None:
                 status = await session_manager.get_coordination_status(coordination_id)
                 await websocket.send_json(
-                    {"type": "status_update", "data": status.dict()},
+                    {"type": "status_update", "data": status.dict()}
                 )
 
     except WebSocketDisconnect:
         if coordination_id:
             await websocket_handler.unregister_coordination_monitor(
-                coordination_id, connection_id,
+                coordination_id, connection_id
             )
         await connection_manager.disconnect(connection_id)
     except Exception as e:
@@ -835,7 +836,8 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
 async def coordinate_multiple_sessions(
     request: CoordinationRequest,
 ) -> CoordinationStatus:
-    """Coordinate multiple TalkHier sessions
+    """
+    Coordinate multiple TalkHier sessions
 
     Enables running multiple refinement sessions in coordinated
     patterns (sequential, parallel, or hierarchical).
@@ -857,7 +859,6 @@ async def coordinate_multiple_sessions(
             "aggregate_results": True
         })
         ```
-
     """
     try:
         # Create coordination through session manager
@@ -889,7 +890,7 @@ async def coordinate_multiple_sessions(
 
 
 async def _log_session_analytics(
-    event_type: str, session_id: str, metrics: dict[str, Any],
+    event_type: str, session_id: str, metrics: dict[str, Any]
 ) -> None:
     """Log session analytics for monitoring"""
     try:
@@ -909,7 +910,7 @@ async def _log_session_analytics(
 
 
 async def _get_protocol_insights(
-    protocol_type: ProtocolType, analytics: dict[str, Any],
+    protocol_type: ProtocolType, analytics: dict[str, Any]
 ) -> list[str]:
     """Generate protocol-specific insights from analytics"""
     insights = []
@@ -918,14 +919,14 @@ async def _get_protocol_insights(
         avg_rounds = analytics.get("average_rounds", 0)
         if avg_rounds > 2:
             insights.append(
-                "Fast track sessions exceeding expected rounds - consider standard protocol",
+                "Fast track sessions exceeding expected rounds - consider standard protocol"
             )
 
     elif protocol_type == ProtocolType.DEEP_ANALYSIS:
         avg_quality = analytics.get("average_quality", 0)
         if avg_quality < 0.85:
             insights.append(
-                "Deep analysis sessions not achieving expected quality levels",
+                "Deep analysis sessions not achieving expected quality levels"
             )
 
     elif protocol_type == ProtocolType.SUPERVISED:
@@ -943,11 +944,11 @@ async def _get_protocol_insights(
 
 @router.get("/health")
 async def talkhier_health_check() -> dict[str, Any]:
-    """Health check for TalkHier Protocol API
+    """
+    Health check for TalkHier Protocol API
 
     Returns:
         Service health status
-
     """
     try:
         active_sessions = len(session_service.sessions)

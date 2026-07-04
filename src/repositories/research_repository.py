@@ -1,4 +1,5 @@
-"""Research project repository.
+"""
+Research project repository.
 
 Specialized repository for research project operations.
 """
@@ -16,7 +17,8 @@ from src.repositories.base import BaseRepository
 
 
 class ResearchRepository(BaseRepository[ResearchProject]):
-    """Repository for research project operations.
+    """
+    Repository for research project operations.
 
     Provides specialized queries for research projects.
     """
@@ -33,7 +35,8 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         offset: int | None = None,
         organization_id: str | UUID | None = None,
     ) -> list[ResearchProject]:
-        """Get projects by user.
+        """
+        Get projects by user.
 
         Args:
             user_id: User ID
@@ -44,7 +47,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
 
         Returns:
             List of projects
-
         """
         filters: dict[str, Any] = {"user_id": str(user_id)}
         if status:
@@ -67,7 +69,8 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         organization_id: str | UUID,
         load_relationships: list[str] | None = None,
     ) -> ResearchProject | None:
-        """Get a project by ID within both user and organization boundaries.
+        """
+        Get a project by ID within both user and organization boundaries.
 
         Args:
             project_id: Project ID
@@ -77,7 +80,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
 
         Returns:
             Project or None if outside the tenant/user boundary
-
         """
         query = self.build_query().where(
             ResearchProject.id == project_id,
@@ -97,7 +99,8 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         user_id: UUID | None = None,
         organization_id: str | UUID | None = None,
     ) -> list[ResearchProject]:
-        """Get all in-progress projects.
+        """
+        Get all in-progress projects.
 
         Args:
             user_id: Filter by user (optional)
@@ -105,10 +108,9 @@ class ResearchRepository(BaseRepository[ResearchProject]):
 
         Returns:
             List of in-progress projects
-
         """
         query = self.build_query().where(
-            ResearchProject.status == ProjectStatus.IN_PROGRESS,
+            ResearchProject.status == ProjectStatus.IN_PROGRESS
         )
         query = self.apply_organization_scope(query, organization_id)
 
@@ -130,7 +132,8 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         updated_by: str | None = None,
         organization_id: str | UUID | None = None,
     ) -> ResearchProject | None:
-        """Update project status.
+        """
+        Update project status.
 
         Args:
             project_id: Project ID
@@ -140,7 +143,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
 
         Returns:
             Updated project
-
         """
         return await self.update(
             project_id,
@@ -155,7 +157,8 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         score: float,
         organization_id: str | UUID | None = None,
     ) -> ResearchProject | None:
-        """Update project quality score.
+        """
+        Update project quality score.
 
         Args:
             project_id: Project ID
@@ -164,13 +167,12 @@ class ResearchRepository(BaseRepository[ResearchProject]):
 
         Returns:
             Updated project
-
         """
         if not 0.0 <= score <= 1.0:
             raise ValueError("Quality score must be between 0.0 and 1.0")
 
         return await self.update(
-            project_id, {"quality_score": score}, organization_id=organization_id,
+            project_id, {"quality_score": score}, organization_id=organization_id
         )
 
     async def get_with_results(
@@ -178,7 +180,8 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         project_id: UUID,
         organization_id: str | UUID | None = None,
     ) -> ResearchProject | None:
-        """Get project with all results loaded.
+        """
+        Get project with all results loaded.
 
         Args:
             project_id: Project ID
@@ -186,7 +189,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
 
         Returns:
             Project with results
-
         """
         return await self.get(
             project_id,
@@ -205,7 +207,8 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         offset: int = 0,
         organization_id: str | UUID | None = None,
     ) -> list[ResearchProject]:
-        """Search research projects.
+        """
+        Search research projects.
 
         Args:
             query: Search query
@@ -219,7 +222,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
 
         Returns:
             List of matching projects
-
         """
         stmt = self.build_query()
         stmt = self.apply_organization_scope(stmt, organization_id)
@@ -230,7 +232,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
                 or_(
                     func.lower(ResearchProject.title).contains(query.lower()),
                     func.lower(ResearchProject.query).contains(query.lower()),
-                ),
+                )
             )
 
         # Filter by domains (JSON contains)
@@ -269,7 +271,8 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         days: int = 30,
         organization_id: str | UUID | None = None,
     ) -> dict[str, Any]:
-        """Get project statistics.
+        """
+        Get project statistics.
 
         Args:
             user_id: Filter by user
@@ -278,7 +281,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
 
         Returns:
             Statistics dictionary
-
         """
         since = datetime.now(UTC) - timedelta(days=days)
 
@@ -287,7 +289,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             and_(
                 ResearchProject.deleted_at.is_(None),
                 ResearchProject.created_at >= since,
-            ),
+            )
         )
         base_query = self.apply_organization_scope(base_query, organization_id)
 
@@ -302,7 +304,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
                     ResearchProject.deleted_at.is_(None),
                     ResearchProject.status == status,
                     ResearchProject.created_at >= since,
-                ),
+                )
             )
             count_query = self.apply_organization_scope(count_query, organization_id)
             if user_id:
@@ -317,7 +319,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
                 ResearchProject.deleted_at.is_(None),
                 ResearchProject.quality_score.isnot(None),
                 ResearchProject.created_at >= since,
-            ),
+            )
         )
         avg_query = self.apply_organization_scope(avg_query, organization_id)
         if user_id:
@@ -331,7 +333,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             and_(
                 ResearchProject.deleted_at.is_(None),
                 ResearchProject.created_at >= since,
-            ),
+            )
         )
         total_query = self.apply_organization_scope(total_query, organization_id)
         if user_id:
@@ -349,14 +351,14 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         }
 
     async def cleanup_stale_projects(self, days_old: int = 30) -> int:
-        """Clean up stale in-progress projects.
+        """
+        Clean up stale in-progress projects.
 
         Args:
             days_old: Days since last update
 
         Returns:
             Number of projects marked as failed
-
         """
         cutoff = datetime.now(UTC) - timedelta(days=days_old)
 
@@ -365,7 +367,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
                 ResearchProject.deleted_at.is_(None),
                 ResearchProject.status == ProjectStatus.IN_PROGRESS,
                 ResearchProject.updated_at < cutoff,
-            ),
+            )
         )
 
         result = await self.session.execute(query)

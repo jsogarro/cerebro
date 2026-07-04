@@ -65,7 +65,7 @@ def test_similarity_analyzer_calculates_matrix_similarity() -> None:
             "A": {"quality": 1.0, "cost": 0.0},
             "B": {"quality": 0.5, "cost": 0.5},
             "C": {"quality": 0.0, "cost": 1.0},
-        },
+        }
     )
 
     assert similarity["method"] == "score_vector_overlap"

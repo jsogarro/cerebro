@@ -1,4 +1,5 @@
-"""Tests for remaining agents: Methodology, Synthesis, and Citation.
+"""
+Tests for remaining agents: Methodology, Synthesis, and Citation.
 
 Following TDD principles - tests written before implementation.
 """
@@ -44,7 +45,7 @@ class TestMethodologyAgent:
                     "Validity",
                     "Generalizability",
                 ],
-            ),
+            )
         )
 
         agent = MethodologyAgent(gemini_service=mock_gemini)
@@ -116,7 +117,7 @@ class TestSynthesisAgent:
                 meta_insights=["Higher-order insight from synthesis"],
                 comprehensive_narrative="Complete synthesis narrative...",
                 confidence_assessment="High confidence in synthesis",
-            ),
+            )
         )
 
         agent = SynthesisAgent(gemini_service=mock_gemini)
@@ -132,7 +133,7 @@ class TestSynthesisAgent:
                         "ranking": ["A", "B"],
                     },
                     "methodology": {"design": "Mixed", "methods": ["Survey"]},
-                },
+                }
             },
             context={"project_id": "proj-001"},
         )
@@ -193,7 +194,7 @@ class TestCitationAgent:
                 ],
                 style="APA",
                 total_sources=2,
-            ),
+            )
         )
 
         agent = CitationAgent(gemini_service=mock_gemini)

@@ -1,4 +1,5 @@
-"""Real-time dashboard integration tests for the A/B testing system.
+"""
+Real-time dashboard integration tests for the A/B testing system.
 """
 
 from datetime import UTC, datetime
@@ -26,13 +27,13 @@ class TestRealTimeDashboard:
         )
         with (
             patch(
-                "src.ai_brain.experimentation.monitoring.real_time_dashboard.ConnectionManager",
+                "src.ai_brain.experimentation.monitoring.real_time_dashboard.ConnectionManager"
             ),
             patch(
-                "src.ai_brain.experimentation.monitoring.real_time_dashboard.EventPublisher",
+                "src.ai_brain.experimentation.monitoring.real_time_dashboard.EventPublisher"
             ),
             patch(
-                "src.ai_brain.experimentation.monitoring.real_time_dashboard.RealTimeDashboard._start_background_tasks",
+                "src.ai_brain.experimentation.monitoring.real_time_dashboard.RealTimeDashboard._start_background_tasks"
             ),
         ):
             return RealTimeDashboard(config)
@@ -41,7 +42,7 @@ class TestRealTimeDashboard:
     async def test_register_experiment(self, dashboard: RealTimeDashboard) -> None:
         """Test registering an experiment with the dashboard."""
         with patch.object(
-            dashboard, "_broadcast_to_dashboard", AsyncMock(),
+            dashboard, "_broadcast_to_dashboard", AsyncMock()
         ) as broadcast:
             await dashboard.register_experiment(
                 experiment_id="test_exp_001",
@@ -58,7 +59,7 @@ class TestRealTimeDashboard:
 
     @pytest.mark.asyncio
     async def test_update_experiment_metrics(
-        self, dashboard: RealTimeDashboard,
+        self, dashboard: RealTimeDashboard
     ) -> None:
         """Test updating experiment metrics."""
         await dashboard.register_experiment("test_exp", {})
@@ -100,7 +101,7 @@ class TestRealTimeDashboard:
 
     @pytest.mark.asyncio
     async def test_generate_dashboard_update(
-        self, dashboard: RealTimeDashboard,
+        self, dashboard: RealTimeDashboard
     ) -> None:
         """Test generating dashboard updates with visualizations."""
         snapshot = ExperimentSnapshot(
@@ -117,7 +118,7 @@ class TestRealTimeDashboard:
         )
 
         update: dict[str, Any] = await dashboard._generate_dashboard_update(
-            "test_exp", snapshot,
+            "test_exp", snapshot
         )
 
         assert update["event"] == "experiment_update"

@@ -32,7 +32,7 @@ class TestContentSupervisorVerification:
 
     @pytest.mark.asyncio
     async def test_quality_phase_with_verification_pass(
-        self, mock_gemini_service, mock_cache_client,
+        self, mock_gemini_service, mock_cache_client
     ):
         """Test that PASS verdict does not reduce quality score."""
         supervisor = ContentSupervisor(
@@ -79,7 +79,7 @@ class TestContentSupervisorVerification:
                     output={"content": "VERDICT: PASS\nISSUES: None"},
                     confidence=0.9,
                     execution_time=1.0,
-                ),
+                )
             )
             mock_create_agent.return_value = mock_verif_agent
 
@@ -98,7 +98,7 @@ class TestContentSupervisorVerification:
 
     @pytest.mark.asyncio
     async def test_quality_phase_with_verification_revise(
-        self, mock_gemini_service, mock_cache_client,
+        self, mock_gemini_service, mock_cache_client
     ):
         """Test that REVISE verdict reduces quality score."""
         supervisor = ContentSupervisor(
@@ -142,11 +142,11 @@ class TestContentSupervisorVerification:
                     task_id="verif-1",
                     status="completed",
                     output={
-                        "content": "VERDICT: REVISE\nISSUES:\n1. Factual error in paragraph 2",
+                        "content": "VERDICT: REVISE\nISSUES:\n1. Factual error in paragraph 2"
                     },
                     confidence=0.9,
                     execution_time=1.0,
-                ),
+                )
             )
             mock_create_agent.return_value = mock_verif_agent
 
@@ -164,7 +164,7 @@ class TestContentSupervisorVerification:
 
     @pytest.mark.asyncio
     async def test_quality_phase_empty_content_graceful_degradation(
-        self, mock_gemini_service, mock_cache_client,
+        self, mock_gemini_service, mock_cache_client
     ):
         """Test graceful degradation when content is empty."""
         supervisor = ContentSupervisor(
@@ -203,7 +203,7 @@ class TestAnalyticsSupervisorVerification:
 
     @pytest.mark.asyncio
     async def test_confidence_phase_with_verification_pass(
-        self, mock_gemini_service, mock_cache_client,
+        self, mock_gemini_service, mock_cache_client
     ):
         """Test that PASS verdict does not reduce quality score in analytics."""
         supervisor = AnalyticsSupervisor(
@@ -248,7 +248,7 @@ class TestAnalyticsSupervisorVerification:
                     output={"content": "VERDICT: PASS\nISSUES: None"},
                     confidence=0.9,
                     execution_time=1.0,
-                ),
+                )
             )
             mock_create_agent.return_value = mock_verif_agent
 
@@ -267,7 +267,7 @@ class TestFinanceSupervisorVerification:
 
     @pytest.mark.asyncio
     async def test_quality_phase_with_verification_revise(
-        self, mock_gemini_service, mock_cache_client,
+        self, mock_gemini_service, mock_cache_client
     ):
         """Test that REVISE verdict reduces quality score in finance."""
         supervisor = FinanceSupervisor(
@@ -310,11 +310,11 @@ class TestFinanceSupervisorVerification:
                     task_id="verif-3",
                     status="completed",
                     output={
-                        "content": "VERDICT: REVISE\nISSUES:\n1. Arithmetic mistake in ROE calculation",
+                        "content": "VERDICT: REVISE\nISSUES:\n1. Arithmetic mistake in ROE calculation"
                     },
                     confidence=0.9,
                     execution_time=1.0,
-                ),
+                )
             )
             mock_create_agent.return_value = mock_verif_agent
 
@@ -333,7 +333,7 @@ class TestVerificationAgentError:
 
     @pytest.mark.asyncio
     async def test_verification_agent_error_graceful_degradation(
-        self, mock_gemini_service, mock_cache_client,
+        self, mock_gemini_service, mock_cache_client
     ):
         """Test that verification errors don't break the workflow."""
         supervisor = ContentSupervisor(
@@ -368,7 +368,7 @@ class TestVerificationAgentError:
         with patch("src.agents.factory.AgentFactory.create_agent") as mock_create_agent:
             mock_verif_agent = MagicMock()
             mock_verif_agent.execute = AsyncMock(
-                side_effect=Exception("Verification service unavailable"),
+                side_effect=Exception("Verification service unavailable")
             )
             mock_create_agent.return_value = mock_verif_agent
 

@@ -1,4 +1,5 @@
-"""E2E tests for authentication flow against live docker-compose stack.
+"""
+E2E tests for authentication flow against live docker-compose stack.
 
 Covers complete user authentication lifecycle including registration, login,
 token refresh, protected endpoint access, and logout with both happy paths
@@ -25,7 +26,8 @@ class TestAuthE2E:
     """End-to-end authentication flow tests against live stack."""
 
     async def test_complete_auth_happy_path(self):
-        """Complete happy path: register -> login -> access protected endpoint.
+        """
+        Complete happy path: register -> login -> access protected endpoint.
         """
         async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
             # Register a new user

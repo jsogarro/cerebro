@@ -1,4 +1,5 @@
-"""Text and markdown response parsing utilities.
+"""
+Text and markdown response parsing utilities.
 
 This module provides functions for parsing text-based responses,
 extracting structured information from unstructured text.
@@ -8,7 +9,8 @@ import re
 
 
 def parse_markdown_sections(text: str) -> dict[str, str]:
-    """Parse markdown text into sections based on headers.
+    """
+    Parse markdown text into sections based on headers.
 
     Pure function that extracts sections from markdown.
 
@@ -17,7 +19,6 @@ def parse_markdown_sections(text: str) -> dict[str, str]:
 
     Returns:
         Dictionary mapping section headers to content
-
     """
     sections = {}
     current_section = "Introduction"
@@ -52,7 +53,8 @@ def parse_markdown_sections(text: str) -> dict[str, str]:
 
 
 def extract_bullet_points(text: str) -> list[str]:
-    """Extract bullet points from text.
+    """
+    Extract bullet points from text.
 
     Handles various bullet formats: -, *, •, +
 
@@ -61,7 +63,6 @@ def extract_bullet_points(text: str) -> list[str]:
 
     Returns:
         List of bullet point contents
-
     """
     bullet_patterns = [
         r"^\s*[-*•+]\s+(.+)$",  # Standard bullets
@@ -83,7 +84,8 @@ def extract_bullet_points(text: str) -> list[str]:
 
 
 def extract_numbered_list(text: str) -> list[str]:
-    """Extract numbered list items from text.
+    """
+    Extract numbered list items from text.
 
     Handles formats: 1. item, 1) item, (1) item
 
@@ -92,7 +94,6 @@ def extract_numbered_list(text: str) -> list[str]:
 
     Returns:
         List of numbered items (without numbers)
-
     """
     patterns = [
         r"^\s*\d+\.\s+(.+)$",  # 1. item
@@ -116,7 +117,8 @@ def extract_numbered_list(text: str) -> list[str]:
 
 
 def extract_key_value_pairs(text: str) -> dict[str, str]:
-    """Extract key-value pairs from text.
+    """
+    Extract key-value pairs from text.
 
     Handles formats: "Key: Value", "Key = Value", "Key - Value"
 
@@ -125,7 +127,6 @@ def extract_key_value_pairs(text: str) -> dict[str, str]:
 
     Returns:
         Dictionary of extracted pairs
-
     """
     patterns = [
         r"^([^:=\-]+):\s*(.+)$",  # Key: Value
@@ -153,7 +154,8 @@ def extract_key_value_pairs(text: str) -> dict[str, str]:
 
 
 def extract_entities(text: str) -> dict[str, list[str]]:
-    """Extract named entities from text.
+    """
+    Extract named entities from text.
 
     Basic entity extraction for:
     - People (names with titles)
@@ -170,7 +172,6 @@ def extract_entities(text: str) -> dict[str, list[str]]:
 
     Returns:
         Dictionary categorizing found entities
-
     """
     entities: dict[str, list[str]] = {
         "people": [],
@@ -259,14 +260,14 @@ def extract_entities(text: str) -> dict[str, list[str]]:
 
 
 def extract_quotes(text: str) -> list[tuple[str, str | None]]:
-    """Extract quoted text with optional attribution.
+    """
+    Extract quoted text with optional attribution.
 
     Args:
         text: Text containing quotes
 
     Returns:
         List of tuples (quote, attribution)
-
     """
     quotes = []
 
@@ -287,14 +288,14 @@ def extract_quotes(text: str) -> list[tuple[str, str | None]]:
 
 
 def extract_code_blocks(text: str) -> dict[str, list[str]]:
-    """Extract code blocks from markdown text.
+    """
+    Extract code blocks from markdown text.
 
     Args:
         text: Text containing code blocks
 
     Returns:
         Dictionary mapping language to list of code blocks
-
     """
     code_blocks: dict[str, list[str]] = {}
 
@@ -312,14 +313,14 @@ def extract_code_blocks(text: str) -> dict[str, list[str]]:
 
 
 def clean_text(text: str) -> str:
-    """Clean text by removing extra whitespace and normalizing.
+    """
+    Clean text by removing extra whitespace and normalizing.
 
     Args:
         text: Text to clean
 
     Returns:
         Cleaned text
-
     """
     # Remove extra whitespace
     text = re.sub(r"\s+", " ", text)
@@ -338,7 +339,8 @@ def clean_text(text: str) -> str:
 
 
 def extract_summary(text: str, max_length: int = 500) -> str:
-    """Extract or generate a summary from text.
+    """
+    Extract or generate a summary from text.
 
     Looks for explicit summary sections or takes first paragraph.
 
@@ -348,7 +350,6 @@ def extract_summary(text: str, max_length: int = 500) -> str:
 
     Returns:
         Summary text
-
     """
     # Look for explicit summary section
     sections = parse_markdown_sections(text)

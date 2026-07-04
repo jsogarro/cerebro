@@ -1,4 +1,5 @@
-"""OpenRouter Provider Implementation
+"""
+OpenRouter Provider Implementation
 
 Provides unified multi-provider routing through OpenRouter's OpenAI-compatible API.
 Enables access to Claude, Llama, DeepSeek, Gemini, and other models through a single
@@ -37,7 +38,8 @@ class SlugValidationResult:
 
 
 class OpenRouterProvider(BaseProvider):
-    """OpenRouter multi-provider integration using OpenAI-compatible API.
+    """
+    OpenRouter multi-provider integration using OpenAI-compatible API.
 
     Provides single-key access to Claude, Llama, DeepSeek, Gemini, and other models
     through OpenRouter's unified endpoint. Supports configurable tier mapping for
@@ -60,7 +62,7 @@ class OpenRouterProvider(BaseProvider):
 
         # API configuration
         self.api_endpoint = config.get(
-            "endpoint", "https://openrouter.ai/api/v1/chat/completions",
+            "endpoint", "https://openrouter.ai/api/v1/chat/completions"
         )
         self.api_key = config.get("api_key")
 
@@ -134,7 +136,6 @@ class OpenRouterProvider(BaseProvider):
 
         Returns:
             SlugValidationResult with valid/invalid slug breakdown
-
         """
         valid_slugs: dict[str, str] = {}
         invalid_slugs: dict[str, str] = {}
@@ -209,13 +210,13 @@ class OpenRouterProvider(BaseProvider):
             self.client = httpx.AsyncClient(
                 timeout=httpx.Timeout(timeout_ms / 1000.0),
                 limits=httpx.Limits(
-                    max_keepalive_connections=pool_size, max_connections=pool_size * 2,
+                    max_keepalive_connections=pool_size, max_connections=pool_size * 2
                 ),
             )
 
         if not self.api_key:
             logger.warning(
-                "OpenRouter API key not configured - provider will not function",
+                "OpenRouter API key not configured - provider will not function"
             )
 
         if not self.client:
@@ -273,18 +274,17 @@ class OpenRouterProvider(BaseProvider):
 
         Returns:
             OpenRouter model ID string
-
         """
         if tier and tier in self.tier_mapping:
             return str(self.tier_mapping[tier])
         # Default to balanced tier
         default_model: str = str(
-            self.tier_mapping.get("balanced", "anthropic/claude-sonnet-4.6"),
+            self.tier_mapping.get("balanced", "anthropic/claude-sonnet-4.6")
         )
         return default_model
 
     async def generate(
-        self, request: ModelRequest, model_name: str | None = None,
+        self, request: ModelRequest, model_name: str | None = None
     ) -> ModelResponse:
         """Generate response using OpenRouter API.
 
@@ -294,14 +294,13 @@ class OpenRouterProvider(BaseProvider):
 
         Returns:
             ModelResponse with generated content and metadata
-
         """
         # Ensure configuration is loaded
         await self.ensure_configuration_loaded()
 
         if not await self.validate_request(request):
             return self._create_error_response(
-                request, ValueError("Invalid request"), "validation_error",
+                request, ValueError("Invalid request"), "validation_error"
             )
 
         # Determine model to use
@@ -326,7 +325,7 @@ class OpenRouterProvider(BaseProvider):
 
             # Process response
             model_response = self._process_api_response(
-                response_data, request, selected_model, start_time,
+                response_data, request, selected_model, start_time
             )
 
             return await self._postprocess_response(model_response, request)
@@ -336,7 +335,7 @@ class OpenRouterProvider(BaseProvider):
             return self._create_error_response(request, e, "generation_error")
 
     def _build_request_payload(
-        self, request: ModelRequest, model_name: str,
+        self, request: ModelRequest, model_name: str
     ) -> dict[str, Any]:
         """Build OpenAI-compatible request payload for OpenRouter API."""
         # Convert to chat messages format
@@ -382,7 +381,6 @@ class OpenRouterProvider(BaseProvider):
 
         Raises:
             Exception: On API errors or network failures
-
         """
         if not self.client:
             raise RuntimeError("HTTP client not initialized")
@@ -398,7 +396,7 @@ class OpenRouterProvider(BaseProvider):
         }
 
         response = await self.client.post(
-            self.api_endpoint, headers=headers, json=payload,
+            self.api_endpoint, headers=headers, json=payload
         )
 
         response.raise_for_status()
@@ -422,7 +420,6 @@ class OpenRouterProvider(BaseProvider):
 
         Returns:
             ModelResponse with parsed content and metadata
-
         """
         end_time = datetime.now()
         latency_ms = int((end_time - start_time).total_seconds() * 1000)
@@ -431,7 +428,7 @@ class OpenRouterProvider(BaseProvider):
         choices = response_data.get("choices", [])
         if not choices:
             return self._create_error_response(
-                request, ValueError("No choices in response"), "empty_response",
+                request, ValueError("No choices in response"), "empty_response"
             )
 
         message = choices[0].get("message", {})
@@ -480,7 +477,6 @@ class OpenRouterProvider(BaseProvider):
 
         Returns:
             Confidence score between 0.0 and 1.0
-
         """
         base_confidence = 0.85
 
@@ -497,7 +493,7 @@ class OpenRouterProvider(BaseProvider):
         return min(max(base_confidence, 0.0), 1.0)
 
     async def stream(
-        self, request: ModelRequest, model_name: str | None = None,
+        self, request: ModelRequest, model_name: str | None = None
     ) -> AsyncGenerator[str, None]:
         """Stream response - not implemented for OpenRouter.
 
@@ -509,7 +505,6 @@ class OpenRouterProvider(BaseProvider):
 
         Yields:
             Response content as a single chunk
-
         """
         response = await self.generate(request, model_name)
 
@@ -526,7 +521,6 @@ class OpenRouterProvider(BaseProvider):
 
         Returns:
             ProviderHealthStatus with current health information
-
         """
         try:
             # Test with a simple request
@@ -582,7 +576,6 @@ class OpenRouterProvider(BaseProvider):
 
         Returns:
             True if request is valid, False otherwise
-
         """
         if not await super().validate_request(request):
             return False

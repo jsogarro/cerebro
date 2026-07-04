@@ -1,4 +1,5 @@
-"""Routing Cache Manager for MASR
+"""
+Routing Cache Manager for MASR
 
 Manages caching of routing decisions to improve response time and reduce
 redundant complexity analysis and optimization for similar queries.
@@ -14,7 +15,8 @@ if TYPE_CHECKING:
 
 
 class RoutingCacheManager:
-    """Manages routing decision caching with configurable size limits.
+    """
+    Manages routing decision caching with configurable size limits.
 
     Implements LRU-style eviction when cache size exceeds maximum.
     """
@@ -25,13 +27,13 @@ class RoutingCacheManager:
         max_size: int = 1000,
         eviction_batch_size: int = 100,
     ):
-        """Initialize routing cache manager.
+        """
+        Initialize routing cache manager.
 
         Args:
             enabled: Whether caching is enabled
             max_size: Maximum number of cached decisions
             eviction_batch_size: Number of entries to evict when max_size reached
-
         """
         self.enabled = enabled
         self.max_size = max_size
@@ -45,7 +47,8 @@ class RoutingCacheManager:
         strategy: Any = None,
         constraints: dict[str, Any] | None = None,
     ) -> RoutingDecision | None:
-        """Check if we have a cached routing decision.
+        """
+        Check if we have a cached routing decision.
 
         Args:
             query: The query string
@@ -55,7 +58,6 @@ class RoutingCacheManager:
 
         Returns:
             Cached RoutingDecision if found, None otherwise
-
         """
         if not self.enabled:
             return None
@@ -71,7 +73,8 @@ class RoutingCacheManager:
         strategy: Any = None,
         constraints: dict[str, Any] | None = None,
     ) -> None:
-        """Cache a routing decision.
+        """
+        Cache a routing decision.
 
         Args:
             query: The query string
@@ -79,7 +82,6 @@ class RoutingCacheManager:
             decision: The routing decision to cache
             strategy: Requested routing strategy (part of the cache identity)
             constraints: Custom routing constraints (part of the cache identity)
-
         """
         if not self.enabled:
             return
@@ -98,7 +100,8 @@ class RoutingCacheManager:
         strategy: Any = None,
         constraints: dict[str, Any] | None = None,
     ) -> str:
-        """Generate a cache key for query, context, strategy and constraints.
+        """
+        Generate a cache key for query, context, strategy and constraints.
 
         The strategy and constraints are part of the key because the same
         query can route very differently under different strategies (e.g.
@@ -114,7 +117,6 @@ class RoutingCacheManager:
 
         Returns:
             MD5 hash string as cache key
-
         """
         # Create hash from query and relevant context
         cache_data = {

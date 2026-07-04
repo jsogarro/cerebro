@@ -135,7 +135,7 @@ async def test_financial_analysis_agent_with_values_returns_exact_computed_ratio
             "inventory": 100,
             "total_debt": 300,
             "total_equity": 600,
-        },
+        }
     }
     result = await agent.execute(_task("financial_analysis", "Analyze health", params))
 
@@ -158,7 +158,7 @@ async def test_financial_analysis_agent_includes_exact_ratios_in_prompt():
         "values": {
             "current_assets": 500,
             "current_liabilities": 250,
-        },
+        }
     }
     await agent.execute(_task("financial_analysis", "Analyze", params))
 

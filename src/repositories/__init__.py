@@ -1,4 +1,5 @@
-"""Repository pattern implementation for data access.
+"""
+Repository pattern implementation for data access.
 
 This package provides clean data access through repository pattern.
 """

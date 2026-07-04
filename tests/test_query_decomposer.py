@@ -1,4 +1,5 @@
-"""Tests for QueryDecomposer
+"""
+Tests for QueryDecomposer
 
 Covers domain detection, sub-query generation, and multi-domain
 decomposition logic.

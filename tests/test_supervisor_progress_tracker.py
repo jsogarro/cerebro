@@ -62,7 +62,7 @@ async def test_progress_tracker_iterates_legacy_coordination_schema() -> None:
     events = [
         event
         async for event in tracker.iter_coordination_progress_events(
-            "coord-1", delay_seconds=0,
+            "coord-1", delay_seconds=0
         )
     ]
 

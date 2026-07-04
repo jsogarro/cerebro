@@ -60,7 +60,7 @@ class TestRootDockerfileContract:
         assert len(froms) == 4, f"Expected 4 FROM stages, got {len(froms)}: {froms}"
 
     def test_stages_named_base_development_builder_production(
-        self, content: str,
+        self, content: str
     ) -> None:
         names = re.findall(r"AS\s+(\w+)", content, re.IGNORECASE)
         assert names == ["base", "development", "builder", "production"], names
@@ -121,7 +121,7 @@ class TestRootDockerfileContract:
 
     def test_apt_runtime_deps_present_on_production(self, content: str) -> None:
         # production stage installs curl
-        prod_section = content.rsplit("FROM python:3.11-slim as production", maxsplit=1)[-1]
+        prod_section = content.split("FROM python:3.11-slim as production")[-1]
         assert "curl" in prod_section
 
 

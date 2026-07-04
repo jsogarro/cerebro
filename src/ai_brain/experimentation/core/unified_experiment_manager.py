@@ -1,4 +1,5 @@
-"""Unified Experiment Manager for System-Wide A/B Testing
+"""
+Unified Experiment Manager for System-Wide A/B Testing
 
 This module extends the existing PromptVersionManager to support system-wide
 experimentation across all Cerebro intelligence components including MASR routing,
@@ -121,22 +122,24 @@ class ExperimentAllocationStrategy(ABC):
 
     @abstractmethod
     async def get_variant(
-        self, experiment: SystemExperiment, context: dict[str, Any],
+        self, experiment: SystemExperiment, context: dict[str, Any]
     ) -> ExperimentVariant:
         """Determine which variant to assign based on context."""
+        pass
 
     @abstractmethod
     async def update_allocation(
-        self, experiment: SystemExperiment, performance_data: dict[str, Any],
+        self, experiment: SystemExperiment, performance_data: dict[str, Any]
     ) -> None:
         """Update allocation based on performance (for adaptive strategies)."""
+        pass
 
 
 class RandomAllocationStrategy(ExperimentAllocationStrategy):
     """Simple random allocation based on variant percentages."""
 
     async def get_variant(
-        self, experiment: SystemExperiment, context: dict[str, Any],
+        self, experiment: SystemExperiment, context: dict[str, Any]
     ) -> ExperimentVariant:
         """Randomly assign variant based on allocation percentages."""
         import random
@@ -154,9 +157,10 @@ class RandomAllocationStrategy(ExperimentAllocationStrategy):
         return experiment.variants[-1]
 
     async def update_allocation(
-        self, experiment: SystemExperiment, performance_data: dict[str, Any],
+        self, experiment: SystemExperiment, performance_data: dict[str, Any]
     ) -> None:
         """No updates for random allocation."""
+        pass
 
 
 class DeterministicAllocationStrategy(ExperimentAllocationStrategy):
@@ -172,7 +176,7 @@ class DeterministicAllocationStrategy(ExperimentAllocationStrategy):
         return float(int(hash_value, 16) / (16 ** len(hash_value)))
 
     async def get_variant(
-        self, experiment: SystemExperiment, context: dict[str, Any],
+        self, experiment: SystemExperiment, context: dict[str, Any]
     ) -> ExperimentVariant:
         """Deterministically assign variant based on context hash."""
         hash_value = self._hash_context(context, experiment.id)
@@ -186,13 +190,15 @@ class DeterministicAllocationStrategy(ExperimentAllocationStrategy):
         return experiment.variants[-1]
 
     async def update_allocation(
-        self, experiment: SystemExperiment, performance_data: dict[str, Any],
+        self, experiment: SystemExperiment, performance_data: dict[str, Any]
     ) -> None:
         """No updates for deterministic allocation."""
+        pass
 
 
 class UnifiedExperimentManager:
-    """Manages system-wide experiments across all Cerebro components.
+    """
+    Manages system-wide experiments across all Cerebro components.
     Extends PromptVersionManager functionality to entire system.
     """
 
@@ -201,12 +207,12 @@ class UnifiedExperimentManager:
         prompt_manager: PromptVersionManager | None = None,
         allocation_strategy: ExperimentAllocationStrategy | None = None,
     ):
-        """Initialize the unified experiment manager.
+        """
+        Initialize the unified experiment manager.
 
         Args:
             prompt_manager: Existing prompt version manager for backward compatibility
             allocation_strategy: Strategy for allocating users to variants
-
         """
         self.prompt_manager = prompt_manager
         self.allocation_strategy = (
@@ -217,16 +223,16 @@ class UnifiedExperimentManager:
         self.assignment_cache: dict[str, dict[str, ExperimentVariant]] = {}
 
     async def create_experiment(
-        self, experiment_config: dict[str, Any],
+        self, experiment_config: dict[str, Any]
     ) -> SystemExperiment:
-        """Create a new system-wide experiment.
+        """
+        Create a new system-wide experiment.
 
         Args:
             experiment_config: Configuration dictionary for the experiment
 
         Returns:
             Created SystemExperiment instance
-
         """
         # Parse configuration
         experiment = SystemExperiment(
@@ -238,7 +244,7 @@ class UnifiedExperimentManager:
             variants=[self._parse_variant(v) for v in experiment_config["variants"]],
             metrics=self._parse_metrics(experiment_config["metrics"]),
             statistical_config=self._parse_statistical_config(
-                experiment_config.get("statistical_config", {}),
+                experiment_config.get("statistical_config", {})
             ),
             success_criteria=[
                 self._parse_success_criteria(c)
@@ -270,9 +276,10 @@ class UnifiedExperimentManager:
         await self._initialize_component_tracking(experiment)
 
     async def get_variant_for_context(
-        self, experiment_id: str, context: dict[str, Any],
+        self, experiment_id: str, context: dict[str, Any]
     ) -> ExperimentVariant | None:
-        """Get the appropriate variant for a given context.
+        """
+        Get the appropriate variant for a given context.
 
         Args:
             experiment_id: ID of the experiment
@@ -280,7 +287,6 @@ class UnifiedExperimentManager:
 
         Returns:
             Assigned ExperimentVariant or None if experiment not active
-
         """
         if experiment_id not in self.active_experiments:
             return None
@@ -306,7 +312,7 @@ class UnifiedExperimentManager:
         return variant
 
     async def track_assignment(
-        self, experiment_id: str, context: dict[str, Any], variant: ExperimentVariant,
+        self, experiment_id: str, context: dict[str, Any], variant: ExperimentVariant
     ) -> None:
         """Track that a user/session was assigned to a variant."""
         # This would integrate with the metrics collection system
@@ -339,7 +345,8 @@ class UnifiedExperimentManager:
         # TODO: Send to metrics pipeline
 
     async def check_experiment_status(self, experiment_id: str) -> ExperimentStatus:
-        """Check current status of an experiment and update if needed.
+        """
+        Check current status of an experiment and update if needed.
 
         This includes checking for:
         - Statistical significance reached
@@ -357,7 +364,7 @@ class UnifiedExperimentManager:
         return experiment.status
 
     async def stop_experiment(
-        self, experiment_id: str, reason: str = "manual_stop",
+        self, experiment_id: str, reason: str = "manual_stop"
     ) -> None:
         """Stop a running experiment."""
         if experiment_id not in self.active_experiments:
@@ -443,7 +450,7 @@ class UnifiedExperimentManager:
         )
 
     def _parse_success_criteria(
-        self, criteria_config: dict[str, Any],
+        self, criteria_config: dict[str, Any]
     ) -> SuccessCriteria:
         """Parse success criteria configuration."""
         return SuccessCriteria(
@@ -459,7 +466,7 @@ class UnifiedExperimentManager:
         total_allocation = sum(v.allocation for v in experiment.variants)
         if abs(total_allocation - 1.0) > 0.001:
             raise ValueError(
-                f"Variant allocations must sum to 1.0, got {total_allocation}",
+                f"Variant allocations must sum to 1.0, got {total_allocation}"
             )
 
         # Ensure at least one control variant
@@ -478,7 +485,7 @@ class UnifiedExperimentManager:
         return f"{experiment_id}:{identifier}"
 
     async def _initialize_component_tracking(
-        self, experiment: SystemExperiment,
+        self, experiment: SystemExperiment
     ) -> None:
         """Initialize tracking for experiment components."""
         # This would set up hooks in each component system
@@ -496,7 +503,7 @@ class UnifiedExperimentManager:
             # ... etc
 
     async def _apply_variant_configuration(
-        self, experiment: SystemExperiment, variant: ExperimentVariant,
+        self, experiment: SystemExperiment, variant: ExperimentVariant
     ) -> None:
         """Apply winning variant configuration to production."""
         for component in experiment.components:

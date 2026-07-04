@@ -1,4 +1,5 @@
-"""Finance Supervisor Agent
+"""
+Finance Supervisor Agent
 
 Coordinates a finance analysis team over figures/assumptions/theses supplied in
 the query (no market-data feeds or datasets). Implements a LangGraph workflow
@@ -28,7 +29,8 @@ logger = get_logger()
 
 
 class FinanceSupervisor(BaseSupervisor):
-    """Finance team supervisor implementing an analysis → valuation → risk workflow.
+    """
+    Finance team supervisor implementing an analysis → valuation → risk workflow.
 
     Uses LangGraph for state management and TalkHier for worker coordination.
     """
@@ -112,7 +114,7 @@ class FinanceSupervisor(BaseSupervisor):
                     reliability_score=0.93,
                     quality_score=0.89,
                 ),
-            },
+            }
         )
 
     def _build_workflow_graph(self) -> None:
@@ -122,13 +124,13 @@ class FinanceSupervisor(BaseSupervisor):
         self.workflow_graph.add_node(
             "analyze_financials",
             self._create_langgraph_node(
-                "analyze_financials", self._analyze_financials_phase,
+                "analyze_financials", self._analyze_financials_phase
             ),
         )
         self.workflow_graph.add_node(
             "coordinate_valuation",
             self._create_langgraph_node(
-                "coordinate_valuation", self._coordinate_valuation_phase,
+                "coordinate_valuation", self._coordinate_valuation_phase
             ),
         )
         self.workflow_graph.add_node(
@@ -138,7 +140,7 @@ class FinanceSupervisor(BaseSupervisor):
         self.workflow_graph.add_node(
             "evaluate_quality",
             self._create_langgraph_node(
-                "evaluate_quality", self._evaluate_quality_phase,
+                "evaluate_quality", self._evaluate_quality_phase
             ),
         )
 
@@ -151,7 +153,7 @@ class FinanceSupervisor(BaseSupervisor):
         self.workflow_graph = self.workflow_graph.compile()  # type: Any
 
     async def _coordinate_workers(
-        self, state: SupervisionState, task: AgentTask,
+        self, state: SupervisionState, task: AgentTask
     ) -> SupervisionState:
         """Finance-specific worker coordination."""
         allocated_workers = await self.allocate_workers(task)
@@ -160,12 +162,12 @@ class FinanceSupervisor(BaseSupervisor):
             {
                 "analysis_depth": self.analysis_depth,
                 "include_valuation": self.include_valuation,
-            },
+            }
         )
         return state
 
     async def _analyze_financials_phase(
-        self, langgraph_state: dict[str, Any],
+        self, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Run financial statement/ratio analysis."""
         state = langgraph_state["supervision_state"]
@@ -182,7 +184,7 @@ class FinanceSupervisor(BaseSupervisor):
                 intermediate_outputs=state.context,
             )
             response = await self.send_talkhier_message(
-                "financial_analysis", MessageType.SUPERVISOR_ASSIGNMENT, message_content,
+                "financial_analysis", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
                 state.worker_results["financial_analysis"] = response.talkhier_content
@@ -191,7 +193,7 @@ class FinanceSupervisor(BaseSupervisor):
         return langgraph_state
 
     async def _coordinate_valuation_phase(
-        self, langgraph_state: dict[str, Any],
+        self, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Run valuation informed by the prior analysis."""
         state = langgraph_state["supervision_state"]
@@ -206,7 +208,7 @@ class FinanceSupervisor(BaseSupervisor):
                 intermediate_outputs=state.context,
             )
             response = await self.send_talkhier_message(
-                "valuation", MessageType.SUPERVISOR_ASSIGNMENT, message_content,
+                "valuation", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
                 state.worker_results["valuation"] = response.talkhier_content
@@ -215,7 +217,7 @@ class FinanceSupervisor(BaseSupervisor):
         return langgraph_state
 
     async def _coordinate_risk_phase(
-        self, langgraph_state: dict[str, Any],
+        self, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Run risk assessment informed by the analysis and valuation."""
         state = langgraph_state["supervision_state"]
@@ -230,7 +232,7 @@ class FinanceSupervisor(BaseSupervisor):
                 intermediate_outputs=state.context,
             )
             response = await self.send_talkhier_message(
-                "risk_assessment", MessageType.SUPERVISOR_ASSIGNMENT, message_content,
+                "risk_assessment", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
                 state.worker_results["risk_assessment"] = response.talkhier_content
@@ -239,7 +241,7 @@ class FinanceSupervisor(BaseSupervisor):
         return langgraph_state
 
     async def _evaluate_quality_phase(
-        self, langgraph_state: dict[str, Any],
+        self, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Evaluate finance analysis completeness."""
         state = langgraph_state["supervision_state"]

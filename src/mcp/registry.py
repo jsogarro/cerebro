@@ -1,4 +1,5 @@
-"""Tool registry for MCP server.
+"""
+Tool registry for MCP server.
 
 Manages tool registration, discovery, and versioning.
 """
@@ -11,7 +12,8 @@ logger = get_logger()
 
 
 class ToolRegistry:
-    """Registry for MCP tools.
+    """
+    Registry for MCP tools.
 
     Manages tool registration, discovery, and versioning.
     """
@@ -23,11 +25,11 @@ class ToolRegistry:
         self._versions: dict[str, list[str]] = {}
 
     def register(self, tool: BaseMCPTool) -> None:
-        """Register a tool.
+        """
+        Register a tool.
 
         Args:
             tool: Tool instance to register
-
         """
         metadata = tool.get_metadata()
         name = metadata.name
@@ -50,14 +52,14 @@ class ToolRegistry:
         logger.info(f"Registered tool: {name} v{version}")
 
     def unregister(self, name: str) -> bool:
-        """Unregister a tool.
+        """
+        Unregister a tool.
 
         Args:
             name: Tool name
 
         Returns:
             True if unregistered, False if not found
-
         """
         if name in self._tools:
             del self._tools[name]
@@ -67,56 +69,56 @@ class ToolRegistry:
         return False
 
     def get_tool(self, name: str) -> BaseMCPTool | None:
-        """Get a tool by name.
+        """
+        Get a tool by name.
 
         Args:
             name: Tool name
 
         Returns:
             Tool instance or None
-
         """
         return self._tools.get(name)
 
     def get_metadata(self, name: str) -> ToolMetadata | None:
-        """Get tool metadata.
+        """
+        Get tool metadata.
 
         Args:
             name: Tool name
 
         Returns:
             Tool metadata or None
-
         """
         return self._metadata.get(name)
 
     def list_tools(self) -> list[str]:
-        """List all registered tool names.
+        """
+        List all registered tool names.
 
         Returns:
             List of tool names
-
         """
         return list(self._tools.keys())
 
     def list_tools_with_metadata(self) -> dict[str, ToolMetadata]:
-        """List all tools with their metadata.
+        """
+        List all tools with their metadata.
 
         Returns:
             Dictionary of tool names to metadata
-
         """
         return self._metadata.copy()
 
     def search_tools(self, query: str) -> list[str]:
-        """Search for tools by name or description.
+        """
+        Search for tools by name or description.
 
         Args:
             query: Search query
 
         Returns:
             List of matching tool names
-
         """
         query_lower = query.lower()
         matches = []
@@ -132,14 +134,14 @@ class ToolRegistry:
         return matches
 
     def get_tools_by_tag(self, tag: str) -> list[str]:
-        """Get tools by tag.
+        """
+        Get tools by tag.
 
         Args:
             tag: Tag to search for
 
         Returns:
             List of tool names with the tag
-
         """
         tag_lower = tag.lower()
         matches = []
@@ -151,23 +153,23 @@ class ToolRegistry:
         return matches
 
     def get_tool_versions(self, name: str) -> list[str]:
-        """Get available versions for a tool.
+        """
+        Get available versions for a tool.
 
         Args:
             name: Tool name
 
         Returns:
             List of versions
-
         """
         return self._versions.get(name, [])
 
     def get_registry_info(self) -> dict[str, object]:
-        """Get registry information.
+        """
+        Get registry information.
 
         Returns:
             Registry info dictionary
-
         """
         return {
             "total_tools": len(self._tools),
@@ -179,11 +181,11 @@ class ToolRegistry:
         }
 
     def _get_all_tags(self) -> list[str]:
-        """Get all unique tags from registered tools.
+        """
+        Get all unique tags from registered tools.
 
         Returns:
             List of unique tags
-
         """
         tags = set()
         for metadata in self._metadata.values():

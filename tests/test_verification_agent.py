@@ -31,7 +31,7 @@ async def test_verification_reviews_provided_content() -> None:
             id="t",
             agent_type="verification",
             input_data={"query": "review this", "content": "The sum 2+2 equals 5."},
-        ),
+        )
     )
     assert result.status == "success"
     assert "VERDICT" in result.output["content"]

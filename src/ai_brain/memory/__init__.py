@@ -1,4 +1,5 @@
-"""Multi-Tier Memory Management System
+"""
+Multi-Tier Memory Management System
 
 Implements sophisticated memory management for Cerebro AI Brain with
 four distinct tiers of memory storage and retrieval:

@@ -1,4 +1,5 @@
-"""AI Brain Integration Module
+"""
+AI Brain Integration Module
 
 Integration components that connect different AI Brain subsystems:
 - MASR Router to Supervisor coordination

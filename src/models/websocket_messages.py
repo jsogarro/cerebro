@@ -1,4 +1,5 @@
-"""WebSocket message models for real-time communication.
+"""
+WebSocket message models for real-time communication.
 
 These models define the structure for WebSocket messages sent between
 the server and various clients (web, CLI, etc.).
@@ -57,7 +58,7 @@ class WSMessage(BaseModel):
         json_encoders={
             datetime: lambda v: v.isoformat(),
             UUID: lambda v: str(v),
-        },
+        }
     )
 
 
@@ -117,7 +118,7 @@ class CLIWSMessage(WSMessage):
     """CLI-specific WebSocket message with formatted output."""
 
     formatted_text: str | None = Field(
-        None, description="Pre-formatted text for terminal",
+        None, description="Pre-formatted text for terminal"
     )
     progress_bar: CLIProgressBar | None = Field(None, description="Progress bar data")
     clear_screen: bool = Field(False, description="Whether to clear terminal screen")
@@ -132,28 +133,29 @@ class CLIWSMessage(WSMessage):
             progress_data = ProgressUpdate(**self.data)
             return f"Progress: {progress_data.progress_percentage:.1f}% ({progress_data.completed_tasks}/{progress_data.total_tasks} tasks)"
 
-        if self.type == WSMessageType.AGENT_STARTED:
+        elif self.type == WSMessageType.AGENT_STARTED:
             agent_data = AgentUpdate(**self.data)
             return f"🚀 Started: {agent_data.agent_type} - {agent_data.task_description or 'Processing...'}"
 
-        if self.type == WSMessageType.AGENT_COMPLETED:
+        elif self.type == WSMessageType.AGENT_COMPLETED:
             agent_data = AgentUpdate(**self.data)
             return f"✅ Completed: {agent_data.agent_type} - {agent_data.result_summary or 'Done'}"
 
-        if self.type == WSMessageType.AGENT_FAILED:
+        elif self.type == WSMessageType.AGENT_FAILED:
             agent_data = AgentUpdate(**self.data)
             return f"❌ Failed: {agent_data.agent_type} - {agent_data.error_message or 'Unknown error'}"
 
-        if self.type == WSMessageType.ERROR:
+        elif self.type == WSMessageType.ERROR:
             return f"❌ Error: {self.data.get('message', 'Unknown error occurred')}"
 
-        if self.type == WSMessageType.WARNING:
+        elif self.type == WSMessageType.WARNING:
             return f"⚠️  Warning: {self.data.get('message', 'Warning')}"
 
-        if self.type == WSMessageType.INFO:
+        elif self.type == WSMessageType.INFO:
             return f"ℹ️  Info: {self.data.get('message', 'Information')}"  # noqa: RUF001
 
-        return f"{self.type}: {self.data}"
+        else:
+            return f"{self.type}: {self.data}"
 
 
 class ConnectionInfo(BaseModel):
@@ -173,10 +175,10 @@ class SubscriptionRequest(BaseModel):
     action: str = Field(..., description="Action: subscribe or unsubscribe")
     project_id: UUID | None = Field(None, description="Project to subscribe to")
     message_types: list[WSMessageType] | None = Field(
-        None, description="Specific message types to subscribe to",
+        None, description="Specific message types to subscribe to"
     )
     client_type: str = Field(
-        default="web", description="Client type for message formatting",
+        default="web", description="Client type for message formatting"
     )
 
 
@@ -186,7 +188,7 @@ class SubscriptionResponse(BaseModel):
     success: bool = Field(..., description="Whether subscription was successful")
     message: str = Field(..., description="Response message")
     active_subscriptions: list[UUID] = Field(
-        default_factory=list, description="Currently active project subscriptions",
+        default_factory=list, description="Currently active project subscriptions"
     )
 
 
@@ -199,5 +201,5 @@ class HeartbeatMessage(BaseModel):
     model_config = ConfigDict(
         json_encoders={
             datetime: lambda v: v.isoformat(),
-        },
+        }
     )

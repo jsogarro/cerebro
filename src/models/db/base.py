@@ -1,4 +1,5 @@
-"""Base model configuration for all database models.
+"""
+Base model configuration for all database models.
 
 Provides common fields and functionality for all SQLAlchemy models.
 """
@@ -49,7 +50,8 @@ class Base(DeclarativeBase):
 
 
 class BaseModel(Base):
-    """Abstract base model with common fields.
+    """
+    Abstract base model with common fields.
 
     Provides:
     - UUID primary key
@@ -62,12 +64,12 @@ class BaseModel(Base):
 
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(), primary_key=True, default=uuid.uuid4, nullable=False,
+        UUID(), primary_key=True, default=uuid.uuid4, nullable=False
     )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(),
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     updated_at: Mapped[datetime] = mapped_column(
@@ -79,7 +81,7 @@ class BaseModel(Base):
 
     # Soft delete
     deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True,
+        DateTime(timezone=True), nullable=True, index=True
     )
 
     # Audit fields
@@ -93,33 +95,33 @@ class BaseModel(Base):
         return self.deleted_at is not None
 
     def soft_delete(self, deleted_by: str | None = None) -> None:
-        """Soft delete the record.
+        """
+        Soft delete the record.
 
         Args:
             deleted_by: User who deleted the record
-
         """
         self.deleted_at = datetime.now(UTC)
         if deleted_by:
             self.updated_by = deleted_by
 
     def restore(self, restored_by: str | None = None) -> None:
-        """Restore a soft deleted record.
+        """
+        Restore a soft deleted record.
 
         Args:
             restored_by: User who restored the record
-
         """
         self.deleted_at = None
         if restored_by:
             self.updated_by = restored_by
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert model to dictionary.
+        """
+        Convert model to dictionary.
 
         Returns:
             Dictionary representation of the model
-
         """
         result = {}
         for column in self.__table__.columns:

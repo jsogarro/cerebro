@@ -121,22 +121,23 @@ class UnitConversionTool(AgentTool[UnitConversionParams]):
         # Convert from Celsius to target
         if to_u in ("fahrenheit", "f"):
             return celsius * 9 / 5 + 32
-        if to_u in ("kelvin", "k"):
+        elif to_u in ("kelvin", "k"):
             return celsius + 273.15
-        if to_u in ("celsius", "c"):
+        elif to_u in ("celsius", "c"):
             return celsius
-        raise ValueError(f"Unknown temperature unit: {to_unit}")
+        else:
+            raise ValueError(f"Unknown temperature unit: {to_unit}")
 
     def _find_conversion_table(self, unit: str) -> dict[str, float] | None:
         """Find which conversion table a unit belongs to."""
         unit_lower = unit.lower()
         if unit_lower in self._LENGTH:
             return self._LENGTH
-        if unit_lower in self._MASS:
+        elif unit_lower in self._MASS:
             return self._MASS
-        if unit_lower in self._DATA:
+        elif unit_lower in self._DATA:
             return self._DATA
-        if unit_lower in self._TEMPERATURE_UNITS:
+        elif unit_lower in self._TEMPERATURE_UNITS:
             return None  # Special handling
         return None
 
@@ -150,7 +151,7 @@ class UnitConversionTool(AgentTool[UnitConversionParams]):
             if to_unit not in self._TEMPERATURE_UNITS:
                 raise ValueError(
                     f"Cannot convert temperature ({params.from_unit}) "
-                    f"to non-temperature unit ({params.to_unit})",
+                    f"to non-temperature unit ({params.to_unit})"
                 )
             result = self._convert_temperature(params.value, from_unit, to_unit)
             return {
@@ -169,7 +170,7 @@ class UnitConversionTool(AgentTool[UnitConversionParams]):
         if to_unit not in table:
             raise ValueError(
                 f"Cannot convert {params.from_unit} to {params.to_unit} "
-                "(different unit types)",
+                "(different unit types)"
             )
 
         # Convert: value * from_multiplier / to_multiplier

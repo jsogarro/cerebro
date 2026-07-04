@@ -1,4 +1,5 @@
-"""API error handling and WebSocket integration tests.
+"""
+API error handling and WebSocket integration tests.
 
 All tests in this module require the Docker-backed integration conftest at
 ``tests/integration/conftest.py`` (Postgres + Redis testcontainers, JWT
@@ -39,7 +40,7 @@ class TestAPIErrorHandling:
 
     @pytest.mark.asyncio
     async def test_invalid_input_validation(
-        self, authenticated_client: AsyncClient,
+        self, authenticated_client: AsyncClient
     ) -> None:
         """Test input validation errors."""
         invalid_project = {
@@ -52,7 +53,7 @@ class TestAPIErrorHandling:
         }
 
         response = await authenticated_client.post(
-            "/api/v1/research/projects", json=invalid_project,
+            "/api/v1/research/projects", json=invalid_project
         )
 
         assert response.status_code == 422
@@ -75,11 +76,11 @@ class TestAPIErrorHandling:
             "Research projects have no update (PATCH/PUT) endpoint, so "
             "concurrent-modification semantics can't be exercised. Un-skip "
             "once an update endpoint is added to src/api/routes/research.py."
-        ),
+        )
     )
     @pytest.mark.asyncio
     async def test_concurrent_modifications(
-        self, authenticated_client: AsyncClient, db_session: AsyncSession,
+        self, authenticated_client: AsyncClient, db_session: AsyncSession
     ) -> None:
         """Test handling of concurrent modifications."""
         project_data = {
@@ -93,7 +94,7 @@ class TestAPIErrorHandling:
         }
 
         response = await authenticated_client.post(
-            "/api/v1/research/projects", json=project_data,
+            "/api/v1/research/projects", json=project_data
         )
 
         assert response.status_code == 201
@@ -103,7 +104,7 @@ class TestAPIErrorHandling:
 
         async def update_project(new_title: str) -> Response:
             return await authenticated_client.patch(
-                f"/api/v1/research/projects/{project_id}", json={"title": new_title},
+                f"/api/v1/research/projects/{project_id}", json={"title": new_title}
             )
 
         update_tasks = [update_project(f"Updated Title {i}") for i in range(5)]
@@ -119,7 +120,7 @@ class TestAPIErrorHandling:
 
     @pytest.mark.asyncio
     async def test_database_connection_failure(
-        self, authenticated_client: AsyncClient, mocker: Any,
+        self, authenticated_client: AsyncClient, mocker: Any
     ) -> None:
         """Test handling of database connection failures."""
         mocker.patch(
@@ -145,7 +146,7 @@ class TestWebSocketConnections:
 
     @pytest.mark.asyncio
     async def test_websocket_project_updates(
-        self, test_engine: Any, authenticated_client: AsyncClient,
+        self, test_engine: Any, authenticated_client: AsyncClient
     ) -> None:
         """Test WebSocket updates for project progress."""
         from httpx_ws import aconnect_ws
@@ -169,7 +170,7 @@ class TestWebSocketConnections:
 
     @pytest.mark.asyncio
     async def test_websocket_authentication(
-        self, authenticated_client: AsyncClient,
+        self, authenticated_client: AsyncClient
     ) -> None:
         """Test WebSocket authentication."""
         from httpx_ws import aconnect_ws
@@ -213,7 +214,7 @@ class TestWebSocketConnections:
 
     @pytest.mark.asyncio
     async def test_websocket_reconnection(
-        self, authenticated_client: AsyncClient,
+        self, authenticated_client: AsyncClient
     ) -> None:
         """Test WebSocket reconnection handling."""
         from httpx_ws import aconnect_ws

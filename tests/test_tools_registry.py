@@ -130,7 +130,7 @@ class TestToolRegistry:
 
         # Test unit conversion
         result = await registry.execute(
-            "unit_conversion", {"value": 1000, "from_unit": "m", "to_unit": "km"},
+            "unit_conversion", {"value": 1000, "from_unit": "m", "to_unit": "km"}
         )
         assert result.success is True
         assert result.value["result"] == 1.0

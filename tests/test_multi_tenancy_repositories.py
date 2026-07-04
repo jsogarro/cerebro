@@ -45,14 +45,14 @@ def _sql(statement: Any) -> str:
 
 
 def test_base_repository_applies_organization_scope() -> None:
-    repo = BaseRepository(ResearchProject, cast("AsyncSession", object()))
+    repo = BaseRepository(ResearchProject, cast(AsyncSession, object()))
     statement = repo.apply_organization_scope(repo.build_query(), uuid4())
 
     assert "research_projects.organization_id" in _sql(statement)
 
 
 def test_base_repository_rejects_scope_for_unscoped_models() -> None:
-    repo = BaseRepository(APIKey, cast("AsyncSession", object()))
+    repo = BaseRepository(APIKey, cast(AsyncSession, object()))
 
     with pytest.raises(ValueError, match="does not support organization scoping"):
         repo.apply_organization_scope(repo.build_query(), uuid4())
@@ -61,7 +61,7 @@ def test_base_repository_rejects_scope_for_unscoped_models() -> None:
 @pytest.mark.asyncio
 async def test_research_repository_applies_organization_scope_to_queries() -> None:
     session = _CapturingSession()
-    repo = ResearchRepository(cast("AsyncSession", session))
+    repo = ResearchRepository(cast(AsyncSession, session))
     org_id = uuid4()
 
     await repo.get_in_progress(user_id=uuid4(), organization_id=org_id)
@@ -81,7 +81,7 @@ async def test_research_repository_applies_organization_scope_to_queries() -> No
 @pytest.mark.asyncio
 async def test_task_repository_applies_organization_scope_to_queries() -> None:
     session = _CapturingSession()
-    repo = TaskRepository(cast("AsyncSession", session))
+    repo = TaskRepository(cast(AsyncSession, session))
     org_id = uuid4()
 
     await repo.get_pending_tasks(agent_type="literature", organization_id=org_id)

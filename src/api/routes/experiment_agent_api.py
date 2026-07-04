@@ -1,4 +1,5 @@
-"""Agent Framework A/B Testing API Endpoints
+"""
+Agent Framework A/B Testing API Endpoints
 
 This module provides REST API endpoints specifically for A/B testing
 experiments on the Agent Framework APIs, enabling systematic optimization
@@ -39,7 +40,7 @@ class RoutingExperimentCreate(BaseModel):
         description="Routing strategies to test (e.g., cost_efficient, quality_focused)",
     )
     target_domains: list[str] | None = Field(
-        None, description="Specific domains to target",
+        None, description="Specific domains to target"
     )
     duration_days: int = Field(7, description="Experiment duration in days")
     min_samples: int = Field(100, description="Minimum samples per variant")
@@ -54,7 +55,7 @@ class APIPatternExperimentCreate(BaseModel):
         description="API pattern configurations to test",
     )
     complexity_levels: list[str] = Field(
-        default=["all"], description="Query complexity levels to target",
+        default=["all"], description="Query complexity levels to target"
     )
 
 
@@ -65,7 +66,7 @@ class TalkHierExperimentCreate(BaseModel):
     min_rounds: int = Field(1, description="Minimum refinement rounds")
     max_rounds: int = Field(5, description="Maximum refinement rounds")
     consensus_thresholds: list[float] = Field(
-        default=[0.7, 0.8, 0.9], description="Consensus thresholds to test",
+        default=[0.7, 0.8, 0.9], description="Consensus thresholds to test"
     )
 
 
@@ -78,7 +79,7 @@ class SupervisorExperimentCreate(BaseModel):
         description="Execution modes to test",
     )
     worker_counts: list[int] = Field(
-        default=[2, 3, 5], description="Worker counts to test",
+        default=[2, 3, 5], description="Worker counts to test"
     )
 
 
@@ -88,10 +89,10 @@ class ExperimentExecutionRequest(BaseModel):
     query: str = Field(..., description="User query to execute")
     user_id: str = Field(..., description="User identifier")
     context: dict[str, Any] = Field(
-        default_factory=dict, description="Query context (domain, complexity, etc.)",
+        default_factory=dict, description="Query context (domain, complexity, etc.)"
     )
     experiment_ids: list[str] | None = Field(
-        None, description="Specific experiments to include",
+        None, description="Specific experiments to include"
     )
 
 
@@ -100,17 +101,17 @@ class OptimizationApproval(BaseModel):
 
     optimization_id: str = Field(..., description="Optimization ID to approve")
     apply_immediately: bool = Field(
-        False, description="Apply immediately or use gradual rollout",
+        False, description="Apply immediately or use gradual rollout"
     )
     rollout_percentage: float | None = Field(
-        None, description="Initial rollout percentage if gradual",
+        None, description="Initial rollout percentage if gradual"
     )
 
 
 # ==================== Create Router ====================
 
 router = APIRouter(
-    prefix="/api/v1/experiments/agent-framework", tags=["agent-experiments"],
+    prefix="/api/v1/experiments/agent-framework", tags=["agent-experiments"]
 )
 
 
@@ -119,9 +120,10 @@ router = APIRouter(
 
 @router.post("/routing", response_model=dict[str, str])
 async def create_routing_experiment(
-    experiment: RoutingExperimentCreate, current_user: User = Depends(get_current_user),
+    experiment: RoutingExperimentCreate, current_user: User = Depends(get_current_user)
 ) -> dict[str, str]:
-    """Create a new MASR routing strategy A/B test.
+    """
+    Create a new MASR routing strategy A/B test.
 
     This endpoint creates an experiment to test different routing strategies
     and find the optimal configuration for query routing.
@@ -163,7 +165,8 @@ async def create_api_pattern_experiment(
     experiment: APIPatternExperimentCreate,
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
-    """Create an API pattern optimization experiment.
+    """
+    Create an API pattern optimization experiment.
 
     Tests Primary vs Bypass API usage patterns to find the optimal
     balance between intelligence and direct execution.
@@ -172,7 +175,7 @@ async def create_api_pattern_experiment(
 
     try:
         experiment_id = await experimentor.create_api_pattern_experiment(
-            name=experiment.name,
+            name=experiment.name
         )
 
         # Register with dashboard
@@ -199,9 +202,10 @@ async def create_api_pattern_experiment(
 
 @router.post("/talkhier", response_model=dict[str, str])
 async def create_talkhier_experiment(
-    experiment: TalkHierExperimentCreate, current_user: User = Depends(get_current_user),
+    experiment: TalkHierExperimentCreate, current_user: User = Depends(get_current_user)
 ) -> dict[str, str]:
-    """Create a TalkHier protocol optimization experiment.
+    """
+    Create a TalkHier protocol optimization experiment.
 
     Tests different refinement round counts and consensus thresholds
     to optimize the structured dialogue protocol.
@@ -242,7 +246,8 @@ async def create_supervisor_experiment(
     experiment: SupervisorExperimentCreate,
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
-    """Create a supervisor coordination experiment.
+    """
+    Create a supervisor coordination experiment.
 
     Tests different supervisor execution modes and worker allocations
     to optimize hierarchical coordination.
@@ -283,7 +288,8 @@ async def create_supervisor_experiment(
 async def execute_with_experiments(
     request: ExperimentExecutionRequest,
 ) -> dict[str, Any]:
-    """Execute a query while running A/B experiments.
+    """
+    Execute a query while running A/B experiments.
 
     This endpoint processes queries through the experimental framework,
     applying variant configurations and tracking metrics.
@@ -311,7 +317,8 @@ async def execute_with_experiments(
 async def get_active_experiments(
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """Get list of all active Agent Framework experiments.
+    """
+    Get list of all active Agent Framework experiments.
 
     Returns experiments currently running with their configurations
     and current sample sizes.
@@ -332,7 +339,8 @@ async def get_experiment_results(
     include_statistics: bool = Query(True, description="Include statistical analysis"),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Get current results for an Agent Framework experiment.
+    """
+    Get current results for an Agent Framework experiment.
 
     Returns performance metrics, sample sizes, and statistical analysis
     for all variants in the experiment.
@@ -341,7 +349,7 @@ async def get_experiment_results(
 
     try:
         results = await experimentor.get_experiment_results(
-            experiment_id=experiment_id, include_statistical_analysis=include_statistics,
+            experiment_id=experiment_id, include_statistical_analysis=include_statistics
         )
         return results
 
@@ -355,7 +363,8 @@ async def stop_experiment(
     reason: str = Body("manual_stop", description="Reason for stopping"),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Stop an active experiment and get final results.
+    """
+    Stop an active experiment and get final results.
 
     Stops the experiment, performs final analysis, and returns
     conclusions and recommendations.
@@ -364,7 +373,7 @@ async def stop_experiment(
 
     try:
         final_results = await experimentor.stop_experiment(
-            experiment_id=experiment_id, reason=reason,
+            experiment_id=experiment_id, reason=reason
         )
         return final_results
 
@@ -379,7 +388,8 @@ async def stop_experiment(
 async def get_pending_optimizations(
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """Get pending optimization recommendations from experiments.
+    """
+    Get pending optimization recommendations from experiments.
 
     Returns optimizations that require manual approval based on
     experiment results and confidence levels.
@@ -402,7 +412,7 @@ async def get_pending_optimizations(
                     "risk_level": decision.risk_level,
                     "rationale": decision.rationale,
                     "experiment_evidence": decision.experiment_evidence,
-                },
+                }
             )
 
     return pending
@@ -410,9 +420,10 @@ async def get_pending_optimizations(
 
 @router.post("/optimizations/approve", response_model=dict[str, str])
 async def approve_optimization(
-    approval: OptimizationApproval, current_user: User = Depends(get_current_user),
+    approval: OptimizationApproval, current_user: User = Depends(get_current_user)
 ) -> dict[str, str]:
-    """Approve and apply an optimization recommendation.
+    """
+    Approve and apply an optimization recommendation.
 
     Applies the optimization either immediately or through
     gradual rollout based on the approval settings.
@@ -437,7 +448,8 @@ async def approve_optimization(
 
 @router.websocket("/dashboard")
 async def dashboard_websocket(websocket: WebSocket) -> None:
-    """WebSocket endpoint for real-time experiment dashboard.
+    """
+    WebSocket endpoint for real-time experiment dashboard.
 
     Provides live updates on experiment metrics, statistical analysis,
     and optimization recommendations.
@@ -462,10 +474,10 @@ async def dashboard_websocket(websocket: WebSocket) -> None:
                 experiment_id = data.get("experiment_id")
                 format = data.get("format", "json")
                 export_data = await dashboard.export_experiment_data(
-                    experiment_id, format,
+                    experiment_id, format
                 )
                 await websocket.send_json(
-                    {"type": "export_result", "data": export_data},
+                    {"type": "export_result", "data": export_data}
                 )
 
     except Exception as e:
@@ -480,7 +492,8 @@ async def dashboard_websocket(websocket: WebSocket) -> None:
 
 @router.get("/health", response_model=dict[str, Any])
 async def experiment_system_health() -> dict[str, Any]:
-    """Check health of the A/B testing system.
+    """
+    Check health of the A/B testing system.
 
     Returns status of experimentor, dashboard, and optimizer components.
     """

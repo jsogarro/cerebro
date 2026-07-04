@@ -19,7 +19,7 @@ class TestTalkHierWebSocketHandler:
 
     @pytest.mark.asyncio
     async def test_register_session_connection(
-        self, websocket_handler: TalkHierWebSocketHandler,
+        self, websocket_handler: TalkHierWebSocketHandler
     ) -> None:
         """Test session connection registration."""
         session_id = "test-session"
@@ -39,7 +39,7 @@ class TestTalkHierWebSocketHandler:
 
     @pytest.mark.asyncio
     async def test_broadcast_round_started(
-        self, websocket_handler: TalkHierWebSocketHandler,
+        self, websocket_handler: TalkHierWebSocketHandler
     ) -> None:
         """Test round started event broadcasting."""
         session_id = "test-session"
@@ -66,7 +66,7 @@ class TestTalkHierWebSocketHandler:
 
     @pytest.mark.asyncio
     async def test_interactive_session_management(
-        self, websocket_handler: TalkHierWebSocketHandler,
+        self, websocket_handler: TalkHierWebSocketHandler
     ) -> None:
         """Test interactive session management."""
         session_id = "interactive-session"
@@ -97,7 +97,7 @@ class TestTalkHierWebSocketHandler:
 
     @pytest.mark.asyncio
     async def test_coordination_monitoring(
-        self, websocket_handler: TalkHierWebSocketHandler,
+        self, websocket_handler: TalkHierWebSocketHandler
     ) -> None:
         """Test coordination monitoring."""
         coordination_id = "coord-123"

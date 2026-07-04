@@ -28,7 +28,7 @@ def test_golden_dataset_fixture_has_expected_contract() -> None:
     case_ids: set[str] = set()
     for case_data in cases:
         assert isinstance(case_data, dict)
-        case = cast("Mapping[str, object]", case_data)
+        case = cast(Mapping[str, object], case_data)
         case_id = case.get("id")
 
         assert isinstance(case_id, str)
@@ -79,7 +79,7 @@ def test_regression_runner_fails_when_more_than_ten_percent_regresses() -> None:
     runner = GoldenDatasetRegressionRunner(dataset)
 
     result = runner.run(
-        lambda _case: AgentOutput(text="Unrelated answer.", citations=()),
+        lambda _case: AgentOutput(text="Unrelated answer.", citations=())
     )
 
     assert result.passed is False
@@ -97,7 +97,7 @@ def _complete_output(case: GoldenDatasetCase) -> AgentOutput:
 def _load_raw_dataset() -> Mapping[str, object]:
     loaded = json.loads(DATASET_PATH.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
-    return cast("Mapping[str, object]", loaded)
+    return cast(Mapping[str, object], loaded)
 
 
 def _non_empty_list(value: object) -> bool:

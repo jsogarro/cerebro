@@ -1,4 +1,5 @@
-"""API Pattern Experiments Integration
+"""
+API Pattern Experiments Integration
 
 This module enables experimentation with different API execution patterns,
 including Primary API vs Bypass API usage, execution modes (Chain vs Mixture),
@@ -54,7 +55,7 @@ class APIExperimentConfig:
             "token_usage",
             "api_calls",
             "error_rate",
-        ],
+        ]
     )
     allocation_strategy: str = "thompson_sampling"
     min_samples: int = 50
@@ -79,7 +80,8 @@ class APIExecutionResult:
 
 
 class APIPatternExperimentor:
-    """Manages experiments for API execution patterns and strategies.
+    """
+    Manages experiments for API execution patterns and strategies.
 
     This class integrates with the Agent Framework to test different
     API patterns and execution modes for optimal performance.
@@ -95,10 +97,10 @@ class APIPatternExperimentor:
 
         # Execution handlers
         self.pattern_handlers: dict[
-            APIPattern, Callable[..., Awaitable[dict[str, Any]]],
+            APIPattern, Callable[..., Awaitable[dict[str, Any]]]
         ] = {}
         self.mode_handlers: dict[
-            ExecutionMode, Callable[..., Awaitable[dict[str, Any]]],
+            ExecutionMode, Callable[..., Awaitable[dict[str, Any]]]
         ] = {}
 
         # Results storage
@@ -126,14 +128,14 @@ class APIPatternExperimentor:
         }
 
     async def create_experiment(self, config: APIExperimentConfig) -> bool:
-        """Create a new API pattern experiment.
+        """
+        Create a new API pattern experiment.
 
         Args:
             config: Experiment configuration
 
         Returns:
             Success status
-
         """
         try:
             # Create variants for all pattern-mode combinations
@@ -152,7 +154,7 @@ class APIPatternExperimentor:
                     "variants": variants,
                     "allocation_strategy": config.allocation_strategy,
                     "metrics": config.metrics,
-                },
+                }
             )
 
             # Store configuration
@@ -166,9 +168,10 @@ class APIPatternExperimentor:
             return False
 
     async def execute_with_experiment(
-        self, query: str, query_type: str, context: dict[str, Any] | None = None,
+        self, query: str, query_type: str, context: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Execute query with experimental API pattern selection.
+        """
+        Execute query with experimental API pattern selection.
 
         Args:
             query: Query to execute
@@ -177,7 +180,6 @@ class APIPatternExperimentor:
 
         Returns:
             Execution result with experiment metadata
-
         """
         context = context or {}
         request_id = f"req_{datetime.now().timestamp()}"
@@ -209,12 +211,12 @@ class APIPatternExperimentor:
             pattern = APIPattern(
                 variant_parts[0] + "_" + variant_parts[1]
                 if variant_parts[0] in ["primary", "bypass"]
-                else variant_parts[0],
+                else variant_parts[0]
             )
             mode = ExecutionMode(
                 "_".join(variant_parts[2:])
                 if len(variant_parts) > 2
-                else ExecutionMode.CHAIN,
+                else ExecutionMode.CHAIN
             )
         else:
             pattern = APIPattern.PRIMARY_API
@@ -225,7 +227,7 @@ class APIPatternExperimentor:
 
         try:
             result = await self._execute_with_pattern_and_mode(
-                query, query_type, context, pattern, mode,
+                query, query_type, context, pattern, mode
             )
 
             execution_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -325,7 +327,7 @@ class APIPatternExperimentor:
         result["api_calls"] = result.get("api_calls", 0) + 3  # More API calls
         result["cost"] = result.get("cost", 0) * 1.2  # Slightly higher cost
         result["quality_score"] = min(
-            1.0, result.get("quality_score", 0.8) * 1.1,
+            1.0, result.get("quality_score", 0.8) * 1.1
         )  # Better quality
 
         return dict(result)
@@ -369,27 +371,28 @@ class APIPatternExperimentor:
         if query_length < 100 and complexity == "low":
             # Use Bypass for simple queries
             return await self._execute_bypass_api(query, context, mode_handler)
-        if query_length > 500 or complexity == "high":
+        elif query_length > 500 or complexity == "high":
             # Use Primary for complex queries
             return await self._execute_primary_api(query, context, mode_handler)
-        # Mixed approach
-        primary_result = await self._execute_primary_api(
-            query, {**context, "weight": 0.6}, mode_handler,
-        )
-        bypass_result = await self._execute_bypass_api(
-            query, {**context, "weight": 0.4}, mode_handler,
-        )
+        else:
+            # Mixed approach
+            primary_result = await self._execute_primary_api(
+                query, {**context, "weight": 0.6}, mode_handler
+            )
+            bypass_result = await self._execute_bypass_api(
+                query, {**context, "weight": 0.4}, mode_handler
+            )
 
-        # Combine results
-        return {
-            "response": primary_result.get("response", ""),
-            "cost": primary_result["cost"] * 0.6 + bypass_result["cost"] * 0.4,
-            "quality_score": primary_result["quality_score"] * 0.6
-            + bypass_result["quality_score"] * 0.4,
-            "api_calls": primary_result["api_calls"] + bypass_result["api_calls"],
-            "token_usage": primary_result.get("token_usage", 0)
-            + bypass_result.get("token_usage", 0),
-        }
+            # Combine results
+            return {
+                "response": primary_result.get("response", ""),
+                "cost": primary_result["cost"] * 0.6 + bypass_result["cost"] * 0.4,
+                "quality_score": primary_result["quality_score"] * 0.6
+                + bypass_result["quality_score"] * 0.4,
+                "api_calls": primary_result["api_calls"] + bypass_result["api_calls"],
+                "token_usage": primary_result.get("token_usage", 0)
+                + bypass_result.get("token_usage", 0),
+            }
 
     async def _execute_parallel_apis(
         self,
@@ -400,10 +403,10 @@ class APIPatternExperimentor:
         """Execute both API patterns in parallel."""
         # Run both patterns concurrently
         primary_task = asyncio.create_task(
-            self._execute_primary_api(query, context, mode_handler),
+            self._execute_primary_api(query, context, mode_handler)
         )
         bypass_task = asyncio.create_task(
-            self._execute_bypass_api(query, context, mode_handler),
+            self._execute_bypass_api(query, context, mode_handler)
         )
 
         primary_result, bypass_result = await asyncio.gather(primary_task, bypass_task)
@@ -411,16 +414,17 @@ class APIPatternExperimentor:
         # Select best result based on quality and speed
         if primary_result["quality_score"] > bypass_result["quality_score"] * 1.2:
             return primary_result
-        if (
+        elif (
             bypass_result.get("latency_ms", float("inf"))
             < primary_result.get("latency_ms", float("inf")) * 0.5
         ):
             return bypass_result
-        # Return primary by default
-        return primary_result
+        else:
+            # Return primary by default
+            return primary_result
 
     async def _execute_chain_mode(
-        self, query: str, context: dict[str, Any],
+        self, query: str, context: dict[str, Any]
     ) -> dict[str, Any]:
         """Execute in chain mode (sequential)."""
         # Simulate sequential agent execution
@@ -444,7 +448,7 @@ class APIPatternExperimentor:
         }
 
     async def _execute_mixture_mode(
-        self, query: str, context: dict[str, Any],
+        self, query: str, context: dict[str, Any]
     ) -> dict[str, Any]:
         """Execute in mixture mode (mixed dependencies)."""
         # Simulate mixed execution with interdependencies
@@ -453,7 +457,7 @@ class APIPatternExperimentor:
 
         # Parallel phase
         _parallel_results = await asyncio.gather(
-            *[asyncio.sleep(0.05) for _ in range(parallel_tasks)],
+            *[asyncio.sleep(0.05) for _ in range(parallel_tasks)]
         )
 
         # Sequential phase
@@ -470,7 +474,7 @@ class APIPatternExperimentor:
         }
 
     async def _execute_parallel_mode(
-        self, query: str, context: dict[str, Any],
+        self, query: str, context: dict[str, Any]
     ) -> dict[str, Any]:
         """Execute in parallel mode."""
         # Simulate fully parallel execution
@@ -489,7 +493,7 @@ class APIPatternExperimentor:
         }
 
     async def _execute_hierarchical_mode(
-        self, query: str, context: dict[str, Any],
+        self, query: str, context: dict[str, Any]
     ) -> dict[str, Any]:
         """Execute in hierarchical mode."""
         # Simulate supervisor-worker hierarchy
@@ -516,13 +520,13 @@ class APIPatternExperimentor:
         }
 
     async def _execute_default(
-        self, query: str, query_type: str, context: dict[str, Any],
+        self, query: str, query_type: str, context: dict[str, Any]
     ) -> dict[str, Any]:
         """Default execution without experimentation."""
         return await self._execute_chain_mode(query, context)
 
     async def _report_metrics(
-        self, result: APIExecutionResult, experiment_id: str,
+        self, result: APIExecutionResult, experiment_id: str
     ) -> None:
         """Report execution metrics to experiment manager."""
         _metrics = {
@@ -550,14 +554,14 @@ class APIPatternExperimentor:
         # )
 
     async def analyze_experiment(self, experiment_id: str) -> dict[str, Any]:
-        """Analyze results of an API pattern experiment.
+        """
+        Analyze results of an API pattern experiment.
 
         Args:
             experiment_id: Experiment to analyze
 
         Returns:
             Analysis results with recommendations
-
         """
         if experiment_id not in self.active_experiments:
             return {"error": f"Experiment {experiment_id} not found"}
@@ -595,11 +599,11 @@ class APIPatternExperimentor:
         # Find best combination for different objectives
         recommendations = {
             "best_for_speed": min(
-                analysis.items(), key=lambda x: x[1]["avg_latency_ms"],
+                analysis.items(), key=lambda x: x[1]["avg_latency_ms"]
             )[0],
             "best_for_cost": min(analysis.items(), key=lambda x: x[1]["avg_cost"])[0],
             "best_for_quality": max(
-                analysis.items(), key=lambda x: x[1]["avg_quality"],
+                analysis.items(), key=lambda x: x[1]["avg_quality"]
             )[0],
             "best_balanced": self._find_balanced_best(analysis),
         }

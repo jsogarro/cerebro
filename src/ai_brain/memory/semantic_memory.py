@@ -1,4 +1,5 @@
-"""Semantic Memory Manager
+"""
+Semantic Memory Manager
 
 Manages semantic memory for storing and retrieving knowledge using vector
 similarity search. Integrates with the existing vector database infrastructure
@@ -86,7 +87,8 @@ class SemanticResult:
 
 
 class SemanticMemoryManager:
-    """Manages semantic memory using vector similarity search.
+    """
+    Manages semantic memory using vector similarity search.
 
     Provides intelligent knowledge storage and retrieval with:
     - Vector embeddings for semantic similarity
@@ -120,6 +122,7 @@ class SemanticMemoryManager:
 
     async def initialize(self) -> None:
         """Initialize the semantic memory system."""
+
         # Initialize embedding model
         if SentenceTransformer:
             try:
@@ -147,15 +150,16 @@ class SemanticMemoryManager:
             logger.warning("Using fallback storage for semantic memory")
 
     async def store(self, item: SemanticItem) -> bool:
-        """Store an item in semantic memory.
+        """
+        Store an item in semantic memory.
 
         Args:
             item: Semantic item to store
 
         Returns:
             True if stored successfully
-
         """
+
         try:
             # Generate embedding if not provided
             if not item.embedding and item.content:
@@ -175,15 +179,16 @@ class SemanticMemoryManager:
             return False
 
     async def search(self, query: SemanticQuery) -> list[SemanticResult]:
-        """Search semantic memory for relevant items.
+        """
+        Search semantic memory for relevant items.
 
         Args:
             query: Search query parameters
 
         Returns:
             List of relevant results with similarity scores
-
         """
+
         try:
             # Generate query embedding if not provided
             if not query.query_embedding and query.query_text:
@@ -211,7 +216,8 @@ class SemanticMemoryManager:
         source: str | None = None,
         confidence: float = 1.0,
     ) -> str:
-        """Store knowledge in semantic memory.
+        """
+        Store knowledge in semantic memory.
 
         Args:
             content: Knowledge content to store
@@ -223,8 +229,8 @@ class SemanticMemoryManager:
 
         Returns:
             ID of stored knowledge item
-
         """
+
         item = SemanticItem(
             content=content,
             domain=domain,
@@ -245,7 +251,8 @@ class SemanticMemoryManager:
         limit: int = 5,
         min_similarity: float = 0.7,
     ) -> list[dict[str, Any]]:
-        """Retrieve relevant knowledge for a query.
+        """
+        Retrieve relevant knowledge for a query.
 
         Args:
             query: Query text
@@ -255,8 +262,8 @@ class SemanticMemoryManager:
 
         Returns:
             List of relevant knowledge items
-
         """
+
         search_query = SemanticQuery(
             query_text=query,
             domain=domain,
@@ -279,26 +286,28 @@ class SemanticMemoryManager:
                     "source": result.item.source,
                     "confidence": result.item.confidence_score,
                     "created_at": result.item.created_at.isoformat(),
-                },
+                }
             )
 
         return knowledge_items
 
     async def update_item(self, item_id: str, updates: dict[str, Any]) -> bool:
         """Update an existing semantic memory item."""
+
         try:
             if self.vector_client:
                 # For vector DB, we need to retrieve, update, and re-store
                 # This is a simplified approach
                 return False  # Not implemented in this version
-            # Update in fallback storage
-            for item in self._fallback_storage:
-                if item.id == item_id:
-                    for key, value in updates.items():
-                        if hasattr(item, key):
-                            setattr(item, key, value)
-                    return True
-            return False
+            else:
+                # Update in fallback storage
+                for item in self._fallback_storage:
+                    if item.id == item_id:
+                        for key, value in updates.items():
+                            if hasattr(item, key):
+                                setattr(item, key, value)
+                        return True
+                return False
 
         except Exception as e:
             logger.error(f"Failed to update semantic item {item_id}: {e}")
@@ -306,6 +315,7 @@ class SemanticMemoryManager:
 
     async def delete_item(self, item_id: str) -> bool:
         """Delete an item from semantic memory."""
+
         try:
             if self.vector_client:
                 # Delete from vector database
@@ -314,11 +324,12 @@ class SemanticMemoryManager:
                     points_selector=models.PointIdsList(points=[item_id]),
                 )
                 return True
-            # Delete from fallback storage
-            self._fallback_storage = [
-                item for item in self._fallback_storage if item.id != item_id
-            ]
-            return True
+            else:
+                # Delete from fallback storage
+                self._fallback_storage = [
+                    item for item in self._fallback_storage if item.id != item_id
+                ]
+                return True
 
         except Exception as e:
             logger.error(f"Failed to delete semantic item {item_id}: {e}")
@@ -326,6 +337,7 @@ class SemanticMemoryManager:
 
     async def delete_by_user_id(self, user_id: str) -> int:
         """Delete fallback semantic items associated with a user."""
+
         if self.vector_client:
             logger.warning("User-scoped semantic vector deletion is not implemented")
             return 0
@@ -340,6 +352,7 @@ class SemanticMemoryManager:
 
     async def get_memory_stats(self) -> dict[str, Any]:
         """Get semantic memory statistics."""
+
         stats = {
             "store_count": self.store_count,
             "search_count": self.search_count,
@@ -349,21 +362,21 @@ class SemanticMemoryManager:
         try:
             if self.vector_client:
                 collection_info = await self.vector_client.get_collection(
-                    self.collection_name,
+                    self.collection_name
                 )
                 stats.update(
                     {
                         "total_items": collection_info.points_count,
                         "vector_dimension": collection_info.config.params.vectors.size,
                         "database_connected": True,
-                    },
+                    }
                 )
             else:
                 stats.update(
                     {
                         "total_items": len(self._fallback_storage),
                         "database_connected": False,
-                    },
+                    }
                 )
 
         except Exception as e:
@@ -373,6 +386,7 @@ class SemanticMemoryManager:
 
     async def _generate_embedding(self, text: str) -> list[float] | None:
         """Generate embedding for text."""
+
         if self.embedding_model:
             try:
                 # Generate embedding using sentence transformer
@@ -399,6 +413,7 @@ class SemanticMemoryManager:
 
     async def _ensure_collection_exists(self) -> None:
         """Ensure vector collection exists."""
+
         assert self.vector_client is not None
         assert models is not None
 
@@ -412,7 +427,7 @@ class SemanticMemoryManager:
                 await self.vector_client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=models.VectorParams(
-                        size=self.embedding_dimension, distance=models.Distance.COSINE,
+                        size=self.embedding_dimension, distance=models.Distance.COSINE
                     ),
                 )
                 logger.info(f"Created vector collection: {self.collection_name}")
@@ -423,6 +438,7 @@ class SemanticMemoryManager:
 
     async def _store_vector_db(self, item: SemanticItem) -> None:
         """Store item in vector database."""
+
         assert self.vector_client is not None
         assert models is not None
 
@@ -443,11 +459,12 @@ class SemanticMemoryManager:
         )
 
         await self.vector_client.upsert(
-            collection_name=self.collection_name, points=[point],
+            collection_name=self.collection_name, points=[point]
         )
 
     async def _search_vector_db(self, query: SemanticQuery) -> list[SemanticResult]:
         """Search vector database."""
+
         assert self.vector_client is not None
         assert models is not None
 
@@ -457,22 +474,22 @@ class SemanticMemoryManager:
         if query.domain:
             filter_conditions.append(
                 models.FieldCondition(
-                    key="domain", match=models.MatchValue(value=query.domain),
-                ),
+                    key="domain", match=models.MatchValue(value=query.domain)
+                )
             )
 
         if query.categories:
             filter_conditions.append(
                 models.FieldCondition(
-                    key="category", match=models.MatchAny(any=query.categories),
-                ),
+                    key="category", match=models.MatchAny(any=query.categories)
+                )
             )
 
         if query.min_confidence > 0:
             filter_conditions.append(
                 models.FieldCondition(
-                    key="confidence_score", range=models.Range(gte=query.min_confidence),
-                ),
+                    key="confidence_score", range=models.Range(gte=query.min_confidence)
+                )
             )
 
         # Combine filter conditions
@@ -534,6 +551,7 @@ class SemanticMemoryManager:
 
     def _search_fallback(self, query: SemanticQuery) -> list[SemanticResult]:
         """Search fallback storage using simple text matching."""
+
         results = []
         query_lower = query.query_text.lower()
 

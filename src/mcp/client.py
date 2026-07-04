@@ -1,4 +1,5 @@
-"""MCP Client for agent integration.
+"""
+MCP Client for agent integration.
 
 Provides a client interface for agents to use MCP tools.
 """
@@ -19,18 +20,19 @@ logger = get_logger()
 
 
 class MCPClient:
-    """Client for interacting with MCP tools.
+    """
+    Client for interacting with MCP tools.
 
     This client provides a simplified interface for agents
     to execute MCP tools without direct server interaction.
     """
 
     def __init__(self, server_config: MCPServerConfig | None = None):
-        """Initialize MCP client.
+        """
+        Initialize MCP client.
 
         Args:
             server_config: Server configuration
-
         """
         self.server = MCPServer(server_config)
         self._register_default_tools()
@@ -48,9 +50,10 @@ class MCPClient:
         logger.info(f"Registered {len(tools)} default tools")
 
     async def search_academic(
-        self, query: str, databases: list[str] | None = None, max_results: int = 10,
+        self, query: str, databases: list[str] | None = None, max_results: int = 10
     ) -> dict[str, Any]:
-        """Search academic databases.
+        """
+        Search academic databases.
 
         Args:
             query: Search query
@@ -59,18 +62,18 @@ class MCPClient:
 
         Returns:
             Search results
-
         """
         if databases is None:
             databases = ["arxiv"]
         return await self.server.execute_tool(
-            "search_academic", query=query, databases=databases, max_results=max_results,
+            "search_academic", query=query, databases=databases, max_results=max_results
         )
 
     async def format_citations(
-        self, sources: list[dict[str, Any]], style: str = "APA",
+        self, sources: list[dict[str, Any]], style: str = "APA"
     ) -> dict[str, Any]:
-        """Format citations.
+        """
+        Format citations.
 
         Args:
             sources: List of sources
@@ -78,14 +81,14 @@ class MCPClient:
 
         Returns:
             Formatted citations
-
         """
         return await self.server.execute_tool(
-            "citation_formatter", sources=sources, style=style,
+            "citation_formatter", sources=sources, style=style
         )
 
     async def analyze_statistics(self, operation: str, **kwargs: Any) -> dict[str, Any]:
-        """Perform statistical analysis.
+        """
+        Perform statistical analysis.
 
         Args:
             operation: Statistical operation
@@ -93,10 +96,9 @@ class MCPClient:
 
         Returns:
             Analysis results
-
         """
         return await self.server.execute_tool(
-            "statistics_analyzer", operation=operation, **kwargs,
+            "statistics_analyzer", operation=operation, **kwargs
         )
 
     async def build_knowledge_graph(
@@ -105,7 +107,8 @@ class MCPClient:
         entities: list[Any] | None = None,
         relationships: list[Any] | None = None,
     ) -> dict[str, Any]:
-        """Build knowledge graph.
+        """
+        Build knowledge graph.
 
         Args:
             text: Text for entity extraction
@@ -114,12 +117,11 @@ class MCPClient:
 
         Returns:
             Graph building result
-
         """
         if text:
             # Extract entities first
             result = await self.server.execute_tool(
-                "knowledge_graph", operation="extract_entities", text=text,
+                "knowledge_graph", operation="extract_entities", text=text
             )
 
             if result["success"] and result.get("entities"):
@@ -140,16 +142,17 @@ class MCPClient:
         return {"success": False, "error": "No entities provided or extracted"}
 
     def get_available_tools(self) -> list[str]:
-        """Get list of available tools.
+        """
+        Get list of available tools.
 
         Returns:
             List of tool names
-
         """
         return self.server.get_registered_tools()
 
     async def execute_tool(self, tool_name: str, **kwargs: Any) -> dict[str, Any]:
-        """Execute a tool by name.
+        """
+        Execute a tool by name.
 
         Args:
             tool_name: Tool name
@@ -157,16 +160,15 @@ class MCPClient:
 
         Returns:
             Tool execution result
-
         """
         return await self.server.execute_tool(tool_name, **kwargs)
 
     async def health_check(self) -> dict[str, Any]:
-        """Check client and server health.
+        """
+        Check client and server health.
 
         Returns:
             Health status
-
         """
         server_health = await self.server.health_check()
 

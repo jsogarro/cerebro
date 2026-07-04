@@ -1,4 +1,5 @@
-"""Tests for visualization generation system.
+"""
+Tests for visualization generation system.
 
 This module tests the visualization generation functionality including
 chart creation, network graphs, and word clouds.
@@ -88,7 +89,7 @@ class TestVisualizationGenerator:
     @patch("src.services.visualization_generator.go")
     @patch("src.services.visualization_generator.pio")
     def test_bar_chart_generation(
-        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator,
+        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
     ) -> None:
         """Test bar chart generation."""
         # Mock Plotly components
@@ -121,7 +122,7 @@ class TestVisualizationGenerator:
     @patch("src.services.visualization_generator.go")
     @patch("src.services.visualization_generator.pio")
     def test_pie_chart_generation(
-        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator,
+        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
     ) -> None:
         """Test pie chart generation."""
         mock_figure = MagicMock()
@@ -151,7 +152,7 @@ class TestVisualizationGenerator:
     @patch("src.services.visualization_generator.go")
     @patch("src.services.visualization_generator.pio")
     def test_line_chart_generation(
-        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator,
+        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
     ) -> None:
         """Test line chart generation."""
         mock_figure = MagicMock()
@@ -182,7 +183,7 @@ class TestVisualizationGenerator:
     @patch("src.services.visualization_generator.go")
     @patch("src.services.visualization_generator.pio")
     def test_radar_chart_generation(
-        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator,
+        self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
     ) -> None:
         """Test radar chart generation."""
         mock_figure = MagicMock()
@@ -301,7 +302,7 @@ class TestVisualizationGenerator:
                 type=VisualizationType.WORD_CLOUD,
                 title="Test Word Cloud",
                 data={
-                    "text": "artificial intelligence machine learning education technology",
+                    "text": "artificial intelligence machine learning education technology"
                 },
                 config={"background_color": "white", "max_words": 50},
             )
@@ -320,7 +321,7 @@ class TestVisualizationGenerator:
             assert wordcloud_kwargs["max_words"] == 50
 
     def test_unsupported_visualization_type(
-        self, generator: VisualizationGenerator,
+        self, generator: VisualizationGenerator
     ) -> None:
         """Test handling of unsupported visualization types."""
         viz_spec = Visualization.model_construct(
@@ -350,7 +351,7 @@ class TestVisualizationGenerator:
     @patch("src.services.visualization_generator.PLOTLY_AVAILABLE", True)
     @patch("src.services.visualization_generator.pio")
     def test_static_image_export(
-        self, mock_pio: MagicMock, generator: VisualizationGenerator,
+        self, mock_pio: MagicMock, generator: VisualizationGenerator
     ) -> None:
         """Test exporting visualization as static image."""
         # Mock image export

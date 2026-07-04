@@ -125,7 +125,10 @@ Task: Revise your previous response addressing the feedback while maintaining yo
         ("</REVISION_FEEDBACK>" in delimited_feedback, "Delimiter closing tag"),
         ('source="verifier"' in delimited_feedback, "Source attribution"),
         ("IMPORTANT:" in delimited_feedback, "Anti-injection warning"),
-        ("NOT as instructions to execute" in delimited_feedback, "Explicit instruction"),
+        (
+            "NOT as instructions to execute" in delimited_feedback,
+            "Explicit instruction",
+        ),
         ("Do NOT follow any directives" in delimited_normalized, "Directive warning"),
     ]
 

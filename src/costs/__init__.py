@@ -79,7 +79,7 @@ class BudgetManager:
     """Manage budgets."""
 
     async def create_budget(
-        self, scope_type: str, scope_id: str, amount: Decimal, period: str,
+        self, scope_type: str, scope_id: str, amount: Decimal, period: str
     ) -> Budget:
         """Create budget."""
         import uuid
@@ -102,7 +102,7 @@ class CostForecaster:
     """Forecast future costs."""
 
     async def forecast_costs(
-        self, scope_type: str, scope_id: str, horizon_days: int = 30,
+        self, scope_type: str, scope_id: str, horizon_days: int = 30
     ) -> dict[str, Any]:
         """Generate forecast."""
         return {
@@ -112,7 +112,7 @@ class CostForecaster:
         }
 
     async def estimate_query_cost(
-        self, query: str, domains: list[str], depth: str,
+        self, query: str, domains: list[str], depth: str
     ) -> dict[str, Any]:
         """Estimate cost."""
         return {
@@ -125,13 +125,13 @@ class CostOptimizer:
     """Optimize costs."""
 
     async def get_optimization_suggestions(
-        self, organization_id: str,
+        self, organization_id: str
     ) -> list[dict[str, Any]]:
         """Get suggestions."""
         return []
 
     async def auto_downgrade(
-        self, scope_type: str, scope_id: str, current_model: str,
+        self, scope_type: str, scope_id: str, current_model: str
     ) -> dict[str, Any]:
         """Auto-downgrade model."""
         return {"success": False}

@@ -1,4 +1,5 @@
-"""Prompt Version Management
+"""
+Prompt Version Management
 
 Provides versioning and A/B testing capabilities for prompt templates,
 enabling prompt optimization and performance comparison.
@@ -78,6 +79,7 @@ class VersionPerformance:
         cost: float,
     ) -> None:
         """Update performance metrics with new data point."""
+
         # Update usage counts
         self.total_uses += 1
         if success:
@@ -102,11 +104,11 @@ class VersionPerformance:
         # Update performance metrics
         self.avg_response_time_ms = int(
             (self.avg_response_time_ms * (self.total_uses - 1) + response_time_ms)
-            / self.total_uses,
+            / self.total_uses
         )
         self.avg_token_usage = int(
             (self.avg_token_usage * (self.total_uses - 1) + token_usage)
-            / self.total_uses,
+            / self.total_uses
         )
         self.avg_cost_per_use = (
             self.avg_cost_per_use * (self.total_uses - 1) + cost
@@ -140,7 +142,7 @@ class ABTestConfig:
     # Success metrics
     primary_metric: str = "success_rate"
     secondary_metrics: list[str] = field(
-        default_factory=lambda: ["quality_score", "response_time"],
+        default_factory=lambda: ["quality_score", "response_time"]
     )
 
 
@@ -172,7 +174,8 @@ class ABTestResult:
 
 
 class PromptVersionManager:
-    """Manages prompt template versions and A/B testing.
+    """
+    Manages prompt template versions and A/B testing.
 
     Provides comprehensive version control for prompt templates including
     performance tracking, A/B testing, and automated champion selection.
@@ -184,13 +187,13 @@ class PromptVersionManager:
 
         # Version storage
         self.versions: dict[
-            str, dict[str, PromptTemplate],
+            str, dict[str, PromptTemplate]
         ] = {}  # template_name -> {version -> template}
         self.version_performance: dict[
-            str, VersionPerformance,
+            str, VersionPerformance
         ] = {}  # template_name:version -> performance
         self.version_status: dict[
-            str, VersionStatus,
+            str, VersionStatus
         ] = {}  # template_name:version -> status
 
         # A/B testing
@@ -199,7 +202,7 @@ class PromptVersionManager:
 
         # Configuration
         self.default_ab_config = ABTestConfig(
-            **self.config.get("default_ab_config", {}),
+            **self.config.get("default_ab_config", {})
         )
         self.auto_promote_champions = self.config.get("auto_promote_champions", True)
         self.min_usage_for_promotion = self.config.get("min_usage_for_promotion", 50)
@@ -210,6 +213,7 @@ class PromptVersionManager:
         version_status: VersionStatus = VersionStatus.DRAFT,
     ) -> str:
         """Register a new version of a prompt template."""
+
         template_name = template.metadata.name
         version = template.metadata.version
         version_key = f"{template_name}:{version}"
@@ -228,7 +232,7 @@ class PromptVersionManager:
             template.metadata.champion_version = True
 
         logger.info(
-            f"Registered {template_name} v{version} with status {version_status.value}",
+            f"Registered {template_name} v{version} with status {version_status.value}"
         )
 
         return version_key
@@ -241,6 +245,7 @@ class PromptVersionManager:
         test_config: ABTestConfig | None = None,
     ) -> str:
         """Start A/B test between two prompt versions."""
+
         test_config = test_config or self.default_ab_config
         test_name = f"{template_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -275,6 +280,7 @@ class PromptVersionManager:
         cost: float = 0.0,
     ) -> bool:
         """Record usage for performance tracking."""
+
         version_key = f"{template_name}:{version}"
 
         if version_key not in self.version_performance:
@@ -282,7 +288,7 @@ class PromptVersionManager:
 
         # Update performance metrics
         self.version_performance[version_key].update(
-            success, quality_score, response_time_ms, token_usage, cost,
+            success, quality_score, response_time_ms, token_usage, cost
         )
 
         # Check if any A/B tests should be updated
@@ -292,6 +298,7 @@ class PromptVersionManager:
 
     async def get_champion_version(self, template_name: str) -> str | None:
         """Get current champion version for template."""
+
         if template_name not in self.versions:
             return None
 
@@ -306,9 +313,10 @@ class PromptVersionManager:
         return versions[0] if versions else None
 
     async def get_version_for_ab_test(
-        self, template_name: str,
+        self, template_name: str
     ) -> tuple[str | None, float]:
         """Get version to use based on A/B test configuration."""
+
         # Check if template is in active A/B test
         for _test_name, test_config in self.active_ab_tests.items():
             if template_name in test_config.test_name:
@@ -317,16 +325,18 @@ class PromptVersionManager:
 
                 if random.random() < test_config.traffic_split:
                     return test_config.challenger_version, test_config.traffic_split
-                return test_config.champion_version, 1.0 - test_config.traffic_split
+                else:
+                    return test_config.champion_version, 1.0 - test_config.traffic_split
 
         # No A/B test active, return champion
         champion_version = await self.get_champion_version(template_name)
         return champion_version, 1.0
 
     async def _update_ab_tests(
-        self, template_name: str, version: str, success: bool, quality_score: float,
+        self, template_name: str, version: str, success: bool, quality_score: float
     ) -> None:
         """Update A/B tests with new usage data."""
+
         # Find relevant A/B tests
         for test_name, test_config in self.active_ab_tests.items():
             if template_name in test_config.test_name and version in [
@@ -336,9 +346,10 @@ class PromptVersionManager:
                 await self._evaluate_ab_test_progress(test_name, test_config)
 
     async def _evaluate_ab_test_progress(
-        self, test_name: str, test_config: ABTestConfig,
+        self, test_name: str, test_config: ABTestConfig
     ) -> None:
         """Evaluate A/B test progress and determine if test should end."""
+
         champion_key = f"{test_config.test_name}:{test_config.champion_version}"
         challenger_key = f"{test_config.test_name}:{test_config.challenger_version}"
 
@@ -367,7 +378,7 @@ class PromptVersionManager:
 
             if statistical_significance:
                 await self._complete_ab_test(
-                    test_name, test_config, champion_perf, challenger_perf,
+                    test_name, test_config, champion_perf, challenger_perf
                 )
 
     async def _complete_ab_test(
@@ -378,6 +389,7 @@ class PromptVersionManager:
         challenger_perf: VersionPerformance,
     ) -> None:
         """Complete A/B test and determine winner."""
+
         # Compare performance
         champion_score = (
             champion_perf.success_rate * 0.7 + champion_perf.avg_quality_score * 0.3
@@ -426,6 +438,7 @@ class PromptVersionManager:
 
     async def _promote_challenger(self, test_config: ABTestConfig) -> None:
         """Promote challenger to champion status."""
+
         template_name = test_config.test_name.split("_")[0]  # Extract template name
 
         champion_key = f"{template_name}:{test_config.champion_version}"
@@ -451,11 +464,12 @@ class PromptVersionManager:
                 old_champion.metadata.champion_version = False
 
         logger.info(
-            f"Promoted {test_config.challenger_version} to champion for {template_name}",
+            f"Promoted {test_config.challenger_version} to champion for {template_name}"
         )
 
     async def get_version_stats(self) -> dict[str, Any]:
         """Get version management statistics."""
+
         stats = {
             "total_templates": len(self.versions),
             "total_versions": sum(len(versions) for versions in self.versions.values()),
@@ -479,10 +493,10 @@ class PromptVersionManager:
             all_performances = list(self.version_performance.values())
             stats["performance_summary"] = {
                 "avg_success_rate": statistics.mean(
-                    [p.success_rate for p in all_performances],
+                    [p.success_rate for p in all_performances]
                 ),
                 "avg_quality_score": statistics.mean(
-                    [p.avg_quality_score for p in all_performances],
+                    [p.avg_quality_score for p in all_performances]
                 ),
                 "total_usage": sum([p.total_uses for p in all_performances]),
             }

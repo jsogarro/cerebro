@@ -1,4 +1,5 @@
-"""Tests for Multi-Domain Merge Strategy (concat vs llm)
+"""
+Tests for Multi-Domain Merge Strategy (concat vs llm)
 
 Tests the MULTI_DOMAIN_MERGE_STRATEGY config option that allows choosing
 between labeled concatenation (default) and LLM synthesis for merging
@@ -48,7 +49,7 @@ class _FakeRoutingDecision:
     estimated_quality: float = 0.88
     confidence_score: float = 0.86
     complexity_analysis: _FakeComplexityAnalysis = field(
-        default_factory=_FakeComplexityAnalysis,
+        default_factory=_FakeComplexityAnalysis
     )
     context: dict[str, Any] = field(default_factory=dict)
 
@@ -70,7 +71,7 @@ async def _wait_for_completion(service, execution_id, timeout_s: float = 10.0):
 def service_with_concat_strategy():
     """DirectExecutionService with concat merge strategy (default)."""
     with patch(
-        "src.api.services.direct_execution_service.get_settings",
+        "src.api.services.direct_execution_service.get_settings"
     ) as mock_settings:
         mock_settings.return_value.MULTI_DOMAIN_MERGE_STRATEGY = "concat"
         mock_settings.return_value.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT = 4000
@@ -98,7 +99,7 @@ def service_with_concat_strategy():
             if context and "domain" in context:
                 domain = context["domain"]
                 domain_complexity = _FakeComplexityAnalysis(
-                    domains=[domain], decomposition=None,
+                    domains=[domain], decomposition=None
                 )
                 return _FakeRoutingDecision(
                     complexity_analysis=domain_complexity,
@@ -114,7 +115,7 @@ def service_with_concat_strategy():
             return Mock(
                 status=Mock(value="completed"),
                 agent_result=Mock(
-                    output={"domain_result": f"Results from {domain} domain"},
+                    output={"domain_result": f"Results from {domain} domain"}
                 ),
                 quality_score=0.85,
                 consensus_score=0.90,
@@ -137,7 +138,7 @@ def service_with_concat_strategy():
 def service_with_llm_strategy():
     """DirectExecutionService with llm merge strategy."""
     with patch(
-        "src.api.services.direct_execution_service.get_settings",
+        "src.api.services.direct_execution_service.get_settings"
     ) as mock_settings:
         mock_settings.return_value.MULTI_DOMAIN_MERGE_STRATEGY = "llm"
         mock_settings.return_value.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT = 4000
@@ -165,7 +166,7 @@ def service_with_llm_strategy():
             if context and "domain" in context:
                 domain = context["domain"]
                 domain_complexity = _FakeComplexityAnalysis(
-                    domains=[domain], decomposition=None,
+                    domains=[domain], decomposition=None
                 )
                 return _FakeRoutingDecision(
                     complexity_analysis=domain_complexity,
@@ -180,7 +181,7 @@ def service_with_llm_strategy():
             return Mock(
                 status=Mock(value="completed"),
                 agent_result=Mock(
-                    output={"domain_result": f"Results from {domain} domain"},
+                    output={"domain_result": f"Results from {domain} domain"}
                 ),
                 quality_score=0.85,
                 consensus_score=0.90,
@@ -332,7 +333,7 @@ async def test_partial_domain_failure_with_llm_synthesis(service_with_llm_strate
 
     # Modify bridge to fail analytics domain
     async def execute_side_effect_with_failure(
-        routing_decision, task, supervisor_registry,
+        routing_decision, task, supervisor_registry
     ):
         domain = routing_decision.agent_allocation.supervisor_type
         if domain == "analytics":
@@ -344,7 +345,7 @@ async def test_partial_domain_failure_with_llm_synthesis(service_with_llm_strate
         return Mock(
             status=Mock(value="completed"),
             agent_result=Mock(
-                output={"domain_result": f"Results from {domain} domain"},
+                output={"domain_result": f"Results from {domain} domain"}
             ),
             quality_score=0.85,
             consensus_score=0.90,
@@ -404,7 +405,7 @@ async def test_partial_domain_failure_with_llm_synthesis(service_with_llm_strate
 async def test_single_domain_path_unchanged():
     """Test that single-domain queries bypass multi-domain merge logic entirely."""
     with patch(
-        "src.api.services.direct_execution_service.get_settings",
+        "src.api.services.direct_execution_service.get_settings"
     ) as mock_settings:
         mock_settings.return_value.MULTI_DOMAIN_MERGE_STRATEGY = "llm"
 

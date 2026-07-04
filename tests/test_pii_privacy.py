@@ -88,7 +88,7 @@ def test_working_memory_encrypts_redis_payload_round_trip(
         monkeypatch.setenv("MEMORY_ENCRYPTION_KEY", Fernet.generate_key().decode())
         memory = WorkingMemoryManager({"key_prefix": "test:"})
         fake_redis = FakeRedis()
-        memory.redis_client = cast("Any", fake_redis)
+        memory.redis_client = cast(Any, fake_redis)
 
         assert await memory.store(
             "query",
@@ -99,7 +99,7 @@ def test_working_memory_encrypts_redis_payload_round_trip(
         stored = fake_redis.values["test:query"]
         assert "jane.doe@example.com" not in stored
         assert await memory.retrieve("query") == {
-            "query": "contact jane.doe@example.com",
+            "query": "contact jane.doe@example.com"
         }
 
     asyncio.run(run())
@@ -136,7 +136,7 @@ def test_multi_tier_memory_purge_removes_user_data_from_all_fallback_tiers(
 ) -> None:
     async def run() -> None:
         memory = MultiTierMemorySystem(
-            {"procedural_memory": {"storage_path": str(tmp_path / "procedures.json")}},
+            {"procedural_memory": {"storage_path": str(tmp_path / "procedures.json")}}
         )
         memory.working_memory.redis_client = None
         assert await memory.working_memory.store(
@@ -145,7 +145,7 @@ def test_multi_tier_memory_purge_removes_user_data_from_all_fallback_tiers(
             metadata={"user_id": "user-1"},
         )
         assert await memory.episodic_memory.store_episode(
-            Episode(id="owned-episode", session_id="s1", user_id="user-1"),
+            Episode(id="owned-episode", session_id="s1", user_id="user-1")
         )
         memory.semantic_memory._fallback_storage = [
             SemanticItem(id="owned-semantic", metadata={"user_id": "user-1"}),
@@ -154,7 +154,7 @@ def test_multi_tier_memory_purge_removes_user_data_from_all_fallback_tiers(
             "owned-procedure": Procedure(
                 id="owned-procedure",
                 metadata={"user_id": "user-1"},
-            ),
+            )
         }
 
         deleted = await memory.purge_user_data("user-1")
@@ -198,7 +198,7 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
                 email="gdpr@example.com",
                 username="gdpr-user",
                 hashed_password="hashed",
-            ),
+            )
         )
         project_id = uuid4()
         await db_session.execute(
@@ -209,7 +209,7 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
                 user_id=str(user_id),
                 domains=["privacy"],
                 status="DRAFT",
-            ),
+            )
         )
         await db_session.execute(
             AgentTask.__table__.insert().values(
@@ -218,7 +218,7 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
                 agent_type="privacy",
                 status="PENDING",
                 input_data={"query": "gdpr@example.com"},
-            ),
+            )
         )
         await db_session.commit()
 

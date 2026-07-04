@@ -1,4 +1,5 @@
-"""Production configuration enhancements for the Research Platform.
+"""
+Production configuration enhancements for the Research Platform.
 
 This module provides production-specific configurations and utilities
 that integrate with the main configuration system.
@@ -233,11 +234,11 @@ class ProductionValidation:
 
     @staticmethod
     def is_production_ready() -> tuple[bool, list[str]]:
-        """Check if the system is production ready.
+        """
+        Check if the system is production ready.
 
         Returns:
             Tuple of (is_ready, list_of_issues)
-
         """
         validations = ProductionValidation.validate_environment()
         issues = []
@@ -257,11 +258,11 @@ production_validation = ProductionValidation()
 
 
 def get_production_config() -> dict[str, Any]:
-    """Get complete production configuration.
+    """
+    Get complete production configuration.
 
     Returns:
         Dictionary containing all production settings.
-
     """
     return {
         "environment": app_config.environment,

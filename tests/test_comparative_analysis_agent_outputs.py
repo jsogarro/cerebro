@@ -1,4 +1,5 @@
-"""Tests for Comparative Analysis Agent output variants and validation.
+"""
+Tests for Comparative Analysis Agent output variants and validation.
 """
 
 import json
@@ -47,9 +48,9 @@ class TestComparativeAnalysisAgentOutputs:
                         },
                         "recommendations": ["Tool 2 for Feature B priority"],
                         "trade_offs": ["Feature trade-off exists"],
-                    },
-                },
-            ),
+                    }
+                }
+            )
         )
 
         agent = ComparativeAnalysisAgent(gemini_service=mock_gemini)
@@ -96,9 +97,9 @@ class TestComparativeAnalysisAgentOutputs:
                         },
                         "recommendations": ["R1", "R2", "R3"],
                         "trade_offs": ["T1", "T2", "T3", "T4"],
-                    },
-                },
-            ),
+                    }
+                }
+            )
         )
 
         agent_high = ComparativeAnalysisAgent(gemini_service=mock_gemini_high)
@@ -133,9 +134,9 @@ class TestComparativeAnalysisAgentOutputs:
                         },
                         "recommendations": [],
                         "trade_offs": [],
-                    },
-                },
-            ),
+                    }
+                }
+            )
         )
 
         agent_low = ComparativeAnalysisAgent(gemini_service=mock_gemini_low)
@@ -229,9 +230,9 @@ class TestComparativeAnalysisAgentOutputs:
                         },
                         "recommendations": ["Framework A for this specific context"],
                         "trade_offs": ["Performance vs Community support"],
-                    },
-                },
-            ),
+                    }
+                }
+            )
         )
 
         agent = ComparativeAnalysisAgent(gemini_service=mock_gemini)

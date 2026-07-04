@@ -1,4 +1,5 @@
-"""Tests for reports API endpoints.
+"""
+Tests for reports API endpoints.
 
 This module tests the REST API endpoints for report generation,
 retrieval, and management functionality.
@@ -39,9 +40,9 @@ class TestReportsAPI:
                             "title": "AI in Education",
                             "authors": ["Smith, J."],
                             "year": 2024,
-                        },
-                    ],
-                },
+                        }
+                    ]
+                }
             },
         }
 
@@ -148,7 +149,7 @@ class TestReportsAPI:
             mock_generator = MagicMock()
             mock_storage = MagicMock()
             mock_storage.retrieve_report_content = AsyncMock(
-                return_value=(mock_content, mock_mime_type),
+                return_value=(mock_content, mock_mime_type)
             )
             mock_storage.update_report_access = AsyncMock()
             mock_repo = MagicMock()
@@ -244,7 +245,7 @@ class TestReportsAPI:
             )
 
             response = client.get(
-                f"/api/v1/reports?user_id={user_id}&page=1&page_size=10",
+                f"/api/v1/reports?user_id={user_id}&page=1&page_size=10"
             )
 
             assert response.status_code == 200
@@ -280,7 +281,7 @@ class TestReportsAPI:
                 created_at=MagicMock(),
                 generation_time_seconds=60.0,
                 formats=[],
-            ),
+            )
         ]
 
         mock_reports[0].created_at.isoformat.return_value = "2024-01-01T00:00:00Z"
@@ -414,7 +415,7 @@ class TestReportsAPI:
             mock_generator = MagicMock()
             mock_storage = MagicMock()
             mock_storage.verify_report_integrity = AsyncMock(
-                return_value=mock_integrity,
+                return_value=mock_integrity
             )
             mock_repo = MagicMock()
             mock_format_repo = MagicMock()

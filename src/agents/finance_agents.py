@@ -89,7 +89,7 @@ class ValuationAgent(_FinanceAgentBase):
                 from src.agents.tools.finance_math import dcf_gordon_growth
 
                 result = dcf_gordon_growth(
-                    params["fcf_next"], params["growth_rate"], params["discount_rate"],
+                    params["fcf_next"], params["growth_rate"], params["discount_rate"]
                 )
                 return {"dcf": result.model_dump()}
             except (KeyError, ValueError, TypeError):
@@ -101,7 +101,7 @@ class ValuationAgent(_FinanceAgentBase):
                 from src.agents.tools.finance_math import dcf_gordon_growth
 
                 result = dcf_gordon_growth(
-                    params["fcf_next"], params["growth_rate"], params["discount_rate"],
+                    params["fcf_next"], params["growth_rate"], params["discount_rate"]
                 )
                 return {"dcf": result.model_dump()}
             except (ValueError, TypeError):

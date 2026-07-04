@@ -1,4 +1,5 @@
-"""MASR Dynamic Routing API Routes
+"""
+MASR Dynamic Routing API Routes
 
 REST API endpoints for MASR routing intelligence, following
 "MasRouter: Learning to Route LLMs" research patterns.
@@ -56,7 +57,8 @@ routing_service = MASRRoutingService()
     },
 )
 async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionResponse:
-    """Get intelligent routing decision for a query.
+    """
+    Get intelligent routing decision for a query.
 
     This endpoint analyzes the query complexity, selects the optimal routing strategy,
     allocates supervisors and workers, and provides cost/latency estimates.
@@ -96,7 +98,8 @@ async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionRespon
     ),
 )
 async def estimate_cost(request: CostEstimationRequest) -> CostEstimationResponse:
-    """Estimate execution cost with breakdown.
+    """
+    Estimate execution cost with breakdown.
 
     Provides detailed cost analysis including:
     - Model inference costs
@@ -132,7 +135,8 @@ async def estimate_cost(request: CostEstimationRequest) -> CostEstimationRespons
 async def evaluate_strategies(
     request: StrategyEvaluationRequest,
 ) -> StrategyEvaluationResponse:
-    """Evaluate and compare routing strategies.
+    """
+    Evaluate and compare routing strategies.
 
     Compares strategies based on:
     - Cost efficiency
@@ -167,14 +171,14 @@ async def evaluate_strategies(
 async def analyze_complexity(
     request: ComplexityAnalysisRequest,
 ) -> ComplexityAnalysisResponse:
-    """Analyze query complexity with features.
+    """
+    Analyze query complexity with features.
 
     Returns:
     - Complexity level and score
     - Feature breakdown (reasoning depth, data requirements, etc.)
     - Recommended execution approach
     - Routing recommendations
-
     """
     try:
         response = await routing_service.analyze_complexity(request)
@@ -198,7 +202,8 @@ async def analyze_complexity(
     description="Get list of available routing strategies with their characteristics.",
 )
 async def get_strategies() -> StrategiesListResponse:
-    """Get available routing strategies.
+    """
+    Get available routing strategies.
 
     Returns information about each strategy including:
     - Optimization focus
@@ -228,14 +233,14 @@ async def get_strategies() -> StrategiesListResponse:
     description="Get list of available models and their tier classifications.",
 )
 async def get_models() -> ModelsListResponse:
-    """Get available models and tiers.
+    """
+    Get available models and tiers.
 
     Returns:
     - Model specifications
     - Tier classifications
     - Provider information
     - Capabilities and costs
-
     """
     try:
         response = await routing_service.get_available_models()
@@ -262,7 +267,8 @@ async def get_models() -> ModelsListResponse:
     ),
 )
 async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
-    """Submit feedback for routing learning.
+    """
+    Submit feedback for routing learning.
 
     Feedback is used to:
     - Improve cost predictions
@@ -305,7 +311,8 @@ async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
     ),
 )
 async def get_status() -> RouterStatus:
-    """Get router health and performance.
+    """
+    Get router health and performance.
 
     Returns:
     - Overall health status
@@ -313,7 +320,6 @@ async def get_status() -> RouterStatus:
     - Model availability
     - Learning system metrics
     - Active supervisor count
-
     """
     try:
         response = await routing_service.get_router_status()

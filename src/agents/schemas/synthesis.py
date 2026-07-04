@@ -1,11 +1,13 @@
-"""Synthesis agent schemas for structured output.
+"""
+Synthesis agent schemas for structured output.
 """
 
 from pydantic import BaseModel, Field
 
 
 class SynthesisSchema(BaseModel):
-    """Schema for synthesis analysis output.
+    """
+    Schema for synthesis analysis output.
 
     Field names MUST match the keys used in synthesis_agent.py output dict.
     """

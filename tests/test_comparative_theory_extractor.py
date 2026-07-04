@@ -15,7 +15,7 @@ def test_theory_extractor_preserves_legacy_research_query_shape() -> None:
         {
             "items": ["Method A", "Method B", "Method C", "Method D"],
             "criteria": ["Accuracy", "Speed", "Cost", "Scale"],
-        },
+        }
     )
 
     assert (
@@ -28,7 +28,7 @@ def test_theory_extractor_preserves_fallback_research_shape() -> None:
     extractor = TheoryExtractor()
 
     research = extractor.fallback_comparative_research(
-        {"items": ["A", "B"], "criteria": ["Quality"]},
+        {"items": ["A", "B"], "criteria": ["Quality"]}
     )
 
     assert research["success"] is True
@@ -56,7 +56,7 @@ def test_theory_extractor_extracts_theory_hints_from_sources() -> None:
                 },
                 {"title": "Field notes", "abstract": "Observational data only."},
             ],
-        },
+        }
     )
 
     assert theories == [
@@ -64,7 +64,7 @@ def test_theory_extractor_extracts_theory_hints_from_sources() -> None:
             "name": "A Comparative Framework",
             "source": "academic",
             "year": "2026",
-        },
+        }
     ]
 
 
@@ -73,7 +73,7 @@ async def test_theory_extractor_searches_mcp_sources() -> None:
     extractor = TheoryExtractor()
     mcp_integration = AsyncMock()
     mcp_integration.search_academic_sources = AsyncMock(
-        return_value={"success": True, "total_found": 2, "sources": []},
+        return_value={"success": True, "total_found": 2, "sources": []}
     )
     info_messages: list[str] = []
     warning_messages: list[str] = []
@@ -104,7 +104,7 @@ def test_comparative_agent_initializes_theory_extractor() -> None:
     assert isinstance(agent.theory_extractor, TheoryExtractor)
     assert (
         agent._fallback_comparative_research(
-            {"items": ["A", "B"], "criteria": ["Quality"]},
+            {"items": ["A", "B"], "criteria": ["Quality"]}
         )["fallback"]
         is True
     )

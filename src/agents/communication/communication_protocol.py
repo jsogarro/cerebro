@@ -1,4 +1,5 @@
-"""TalkHier Communication Protocol Implementation
+"""
+TalkHier Communication Protocol Implementation
 
 Implements the TalkHier communication protocol with LangGraph integration,
 providing structured multi-agent communication with consensus building
@@ -103,7 +104,8 @@ class RefinementResult:
 
 
 class CommunicationProtocol:
-    """TalkHier-inspired communication protocol with LangGraph integration.
+    """
+    TalkHier-inspired communication protocol with LangGraph integration.
 
     Manages sophisticated agent communication patterns including:
     - Multi-round refinement workflows
@@ -121,12 +123,12 @@ class CommunicationProtocol:
         self.consensus_threshold = self.config.get("consensus_threshold", 0.95)
         self.quality_threshold = self.config.get("quality_threshold", 0.8)
         self.refinement_timeout_minutes = self.config.get(
-            "refinement_timeout_minutes", 30,
+            "refinement_timeout_minutes", 30
         )
 
         # Consensus builder
         self.consensus_builder = ConsensusBuilder(
-            self.config.get("consensus_builder", {}),
+            self.config.get("consensus_builder", {})
         )
 
         # Message routing and storage
@@ -145,7 +147,8 @@ class CommunicationProtocol:
         context: dict[str, Any] | None = None,
         consensus_threshold: float | None = None,
     ) -> RefinementResult:
-        """Initiate TalkHier refinement workflow.
+        """
+        Initiate TalkHier refinement workflow.
 
         Args:
             initial_query: The query or task to refine
@@ -155,8 +158,8 @@ class CommunicationProtocol:
 
         Returns:
             RefinementResult with final consensus and metadata
-
         """
+
         conversation_id = f"refinement_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         consensus_target = consensus_threshold or self.consensus_threshold
 
@@ -185,7 +188,7 @@ class CommunicationProtocol:
 
             # Round 1: Initial responses
             round_1 = await self._execute_round_1_initial_responses(
-                conversation_id, initial_query, participating_agents, context,
+                conversation_id, initial_query, participating_agents, context
             )
             refinement_rounds.append(round_1)
 
@@ -198,7 +201,7 @@ class CommunicationProtocol:
                         consensus_score=round_1.consensus_score.overall_score,
                     )
                 return await self._finalize_refinement(
-                    conversation_id, refinement_rounds, start_time,
+                    conversation_id, refinement_rounds, start_time
                 )
 
             # Round 2: Cross-validation and conflict resolution
@@ -206,7 +209,7 @@ class CommunicationProtocol:
                 round_1.consensus_score and round_1.consensus_score.overall_score >= 0.7
             ):  # Proceed if reasonable progress
                 round_2 = await self._execute_round_2_cross_validation(
-                    conversation_id, round_1, participating_agents,
+                    conversation_id, round_1, participating_agents
                 )
                 refinement_rounds.append(round_2)
 
@@ -219,19 +222,19 @@ class CommunicationProtocol:
                             consensus_score=round_2.consensus_score.overall_score,
                         )
                     return await self._finalize_refinement(
-                        conversation_id, refinement_rounds, start_time,
+                        conversation_id, refinement_rounds, start_time
                     )
 
             # Round 3: Final synthesis and consensus
             if len(refinement_rounds) >= 2:
                 round_3 = await self._execute_round_3_final_synthesis(
-                    conversation_id, refinement_rounds, participating_agents,
+                    conversation_id, refinement_rounds, participating_agents
                 )
                 refinement_rounds.append(round_3)
 
             # Finalize results
             return await self._finalize_refinement(
-                conversation_id, refinement_rounds, start_time,
+                conversation_id, refinement_rounds, start_time
             )
 
         except Exception as e:
@@ -259,6 +262,7 @@ class CommunicationProtocol:
         context: dict[str, Any] | None,
     ) -> RefinementRound:
         """Execute Round 1: Gather initial responses from all agents."""
+
         round_1 = RefinementRound(round_number=1, phase=WorkflowPhase.INITIAL_EXECUTION)
 
         logger.info(
@@ -314,7 +318,7 @@ class CommunicationProtocol:
 
             # Evaluate consensus
             round_1.consensus_score = await self.consensus_builder.evaluate_consensus(
-                round_1.participant_messages,
+                round_1.participant_messages
             )
 
             # Check if consensus threshold met
@@ -324,7 +328,7 @@ class CommunicationProtocol:
 
             round_1.completed_at = datetime.now()
             round_1.duration_ms = int(
-                (round_1.completed_at - round_1.started_at).total_seconds() * 1000,
+                (round_1.completed_at - round_1.started_at).total_seconds() * 1000
             )
 
             logger.info(
@@ -345,9 +349,10 @@ class CommunicationProtocol:
         return round_1
 
     async def _execute_round_2_cross_validation(
-        self, conversation_id: str, round_1: RefinementRound, agents: list[BaseAgent],
+        self, conversation_id: str, round_1: RefinementRound, agents: list[BaseAgent]
     ) -> RefinementRound:
         """Execute Round 2: Cross-validation and conflict resolution."""
+
         round_2 = RefinementRound(round_number=2, phase=WorkflowPhase.CROSS_VALIDATION)
 
         logger.info(
@@ -424,7 +429,7 @@ class CommunicationProtocol:
 
             # Evaluate Round 2 consensus
             round_2.consensus_score = await self.consensus_builder.evaluate_consensus(
-                round_2.participant_messages,
+                round_2.participant_messages
             )
 
             round_2.consensus_achieved = (
@@ -433,7 +438,7 @@ class CommunicationProtocol:
 
             round_2.completed_at = datetime.now()
             round_2.duration_ms = int(
-                (round_2.completed_at - round_2.started_at).total_seconds() * 1000,
+                (round_2.completed_at - round_2.started_at).total_seconds() * 1000
             )
 
             logger.info(
@@ -460,6 +465,7 @@ class CommunicationProtocol:
         agents: list[BaseAgent],
     ) -> RefinementRound:
         """Execute Round 3: Final synthesis and consensus."""
+
         round_3 = RefinementRound(round_number=3, phase=WorkflowPhase.FINAL_SYNTHESIS)
 
         logger.info(
@@ -528,7 +534,7 @@ class CommunicationProtocol:
 
             # Final consensus evaluation
             round_3.consensus_score = await self.consensus_builder.evaluate_consensus(
-                round_3.participant_messages,
+                round_3.participant_messages
             )
 
             round_3.consensus_achieved = (
@@ -537,7 +543,7 @@ class CommunicationProtocol:
 
             round_3.completed_at = datetime.now()
             round_3.duration_ms = int(
-                (round_3.completed_at - round_3.started_at).total_seconds() * 1000,
+                (round_3.completed_at - round_3.started_at).total_seconds() * 1000
             )
 
             logger.info(
@@ -558,9 +564,10 @@ class CommunicationProtocol:
         return round_3
 
     async def _send_message_to_agent(
-        self, agent: BaseAgent, message: TalkHierMessage,
+        self, agent: BaseAgent, message: TalkHierMessage
     ) -> TalkHierMessage:
         """Send TalkHier message to agent and get response."""
+
         try:
             # Execute the agent with a real task built from the message
             from ..models import AgentTask
@@ -595,7 +602,7 @@ class CommunicationProtocol:
 
             response_content = TalkHierContent(
                 content=agent_result.output.get(
-                    "summary", str(agent_result.output)[:500],
+                    "summary", str(agent_result.output)[:500]
                 )
                 if isinstance(agent_result.output, dict)
                 else str(agent_result.output)[:500],
@@ -627,7 +634,7 @@ class CommunicationProtocol:
             )
             # Return error response
             error_content = TalkHierContent(
-                content=f"Error processing message: {e!s}", confidence_score=0.0,
+                content=f"Error processing message: {e!s}", confidence_score=0.0
             )
 
             return TalkHierMessage(
@@ -639,9 +646,10 @@ class CommunicationProtocol:
             )
 
     async def _finalize_refinement(
-        self, conversation_id: str, rounds: list[RefinementRound], start_time: datetime,
+        self, conversation_id: str, rounds: list[RefinementRound], start_time: datetime
     ) -> RefinementResult:
         """Finalize refinement process and create result."""
+
         if not rounds:
             return RefinementResult()
 
@@ -704,9 +712,10 @@ class CommunicationProtocol:
         return result
 
     async def _synthesize_final_response(
-        self, rounds: list[RefinementRound],
+        self, rounds: list[RefinementRound]
     ) -> TalkHierContent | None:
         """Synthesize final response from all refinement rounds."""
+
         if not rounds:
             return None
 
@@ -718,7 +727,7 @@ class CommunicationProtocol:
 
         # Simple synthesis: combine highest confidence responses
         best_response = max(
-            final_messages, key=lambda msg: msg.talkhier_content.confidence_score,
+            final_messages, key=lambda msg: msg.talkhier_content.confidence_score
         )
 
         # Create synthesized content
@@ -739,7 +748,7 @@ class CommunicationProtocol:
                 "contributing_agents": [msg.from_agent for msg in final_messages],
             },
             confidence_score=statistics.mean(
-                [msg.talkhier_content.confidence_score for msg in final_messages],
+                [msg.talkhier_content.confidence_score for msg in final_messages]
             ),
             evidence=list(set(all_evidence)),  # Deduplicate evidence
         )
@@ -747,9 +756,10 @@ class CommunicationProtocol:
         return synthesized
 
     async def send_hierarchical_message(
-        self, message: TalkHierMessage, target_agents: list[BaseAgent],
+        self, message: TalkHierMessage, target_agents: list[BaseAgent]
     ) -> list[TalkHierMessage]:
         """Send message through hierarchical routing."""
+
         responses = []
 
         try:
@@ -779,6 +789,7 @@ class CommunicationProtocol:
 
     async def get_protocol_stats(self) -> ProtocolStatsDict:
         """Get communication protocol performance statistics."""
+
         success_rate = self.successful_consensus / max(self.total_conversations, 1)
 
         consensus_stats = await self.consensus_builder.get_consensus_stats()

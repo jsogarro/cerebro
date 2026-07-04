@@ -32,7 +32,7 @@ class TestReportResponseModels:
         mock_report.formats = [mock_format1, mock_format2]
 
         response = ReportResponse.from_db_report(
-            mock_report, base_url="http://localhost:8000",
+            mock_report, base_url="http://localhost:8000"
         )
 
         assert response.id == mock_report.id

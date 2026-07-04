@@ -1,4 +1,5 @@
-"""E2E tests for research project lifecycle against live docker-compose stack.
+"""
+E2E tests for research project lifecycle against live docker-compose stack.
 
 Covers project creation, retrieval, progress monitoring, results, and cancellation.
 
@@ -40,7 +41,8 @@ class TestResearchProjectE2E:
     """End-to-end research project lifecycle tests."""
 
     async def test_full_project_lifecycle(self):
-        """Full lifecycle: create -> get -> check progress -> get results (or cancel).
+        """
+        Full lifecycle: create -> get -> check progress -> get results (or cancel).
 
         Note: Actual research execution may fail due to known MCP/supervisor issues.
         This test validates the API contract, not the research engine itself.
@@ -75,7 +77,7 @@ class TestResearchProjectE2E:
             )
             project_data = create_response.json()
             project_id = project_data.get("id") or project_data.get("project", {}).get(
-                "id",
+                "id"
             )
             assert project_id is not None
 

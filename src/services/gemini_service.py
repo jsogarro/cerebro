@@ -1,4 +1,5 @@
-"""Gemini service for AI-powered research capabilities.
+"""
+Gemini service for AI-powered research capabilities.
 
 This service integrates with Google's Gemini API following functional programming principles.
 """
@@ -26,7 +27,8 @@ logger = get_logger()
 
 
 class GeminiService:
-    """Service for interacting with Google's Gemini API.
+    """
+    Service for interacting with Google's Gemini API.
 
     This service follows functional programming principles:
     - All data transformations are pure functions
@@ -42,7 +44,8 @@ class GeminiService:
         cache_client: aioredis.Redis[Any] | None = None,
         **kwargs: Any,
     ):
-        """Initialize Gemini service.
+        """
+        Initialize Gemini service.
 
         Args:
             api_key: Gemini API key (reads from env if not provided)
@@ -50,7 +53,6 @@ class GeminiService:
             config: Complete configuration object
             cache_client: Redis client for caching
             **kwargs: Additional configuration overrides
-
         """
         # Use provided config or create from environment
         if config:
@@ -93,7 +95,8 @@ class GeminiService:
         wait=wait_exponential(multiplier=2, min=5, max=30),
     )
     async def _generate_content(self, prompt: str) -> str:
-        """Generate content from Gemini with retry logic.
+        """
+        Generate content from Gemini with retry logic.
 
         This method handles the side effect of calling the API.
         """
@@ -106,7 +109,8 @@ class GeminiService:
                 raise
 
     async def generate_content(self, prompt: str) -> str:
-        """Public interface to generate content from Gemini.
+        """
+        Public interface to generate content from Gemini.
 
         Used by all agent implementations to call the LLM.
 
@@ -115,14 +119,14 @@ class GeminiService:
 
         Returns:
             Generated text response.
-
         """
         return await self._generate_content(prompt)
 
     async def generate_structured_content(
-        self, prompt: str, schema: type[Any], max_retries: int = 2,
+        self, prompt: str, schema: type[Any], max_retries: int = 2
     ) -> Any:
-        """Generate structured content from Gemini using Pydantic schema validation.
+        """
+        Generate structured content from Gemini using Pydantic schema validation.
 
         Args:
             prompt: The prompt to send to Gemini.
@@ -134,7 +138,6 @@ class GeminiService:
 
         Raises:
             Exception: If parsing fails after all retries.
-
         """
         from langchain_core.output_parsers import PydanticOutputParser
 
@@ -170,17 +173,19 @@ class GeminiService:
                 )
                 if attempt < max_retries:
                     continue
-                logger.error(
-                    "structured_output_parse_exhausted",
-                    error=str(last_error),
-                )
-                raise
+                else:
+                    logger.error(
+                        "structured_output_parse_exhausted",
+                        error=str(last_error),
+                    )
+                    raise
 
         # Should never reach here, but for type safety
-        raise last_error or Exception("Unexpected parse failure")
+        raise last_error if last_error else Exception("Unexpected parse failure")
 
     def _generate_cache_key(self, prefix: str, data: Any) -> str:
-        """Generate cache key for data.
+        """
+        Generate cache key for data.
 
         Pure function that generates deterministic cache keys.
         """
@@ -195,7 +200,8 @@ class GeminiService:
         return f"gemini:{prefix}:{hash_obj.hexdigest()}"
 
     async def _get_cached_response(self, cache_key: str) -> dict[str, Any] | None:
-        """Get cached response if available.
+        """
+        Get cached response if available.
 
         Side effect: Redis read operation.
         """
@@ -216,7 +222,8 @@ class GeminiService:
         return None
 
     async def _set_cached_response(self, cache_key: str, data: dict[str, Any]) -> None:
-        """Set cached response.
+        """
+        Set cached response.
 
         Side effect: Redis write operation.
         """
@@ -235,7 +242,8 @@ class GeminiService:
             logger.warning("gemini_cache_write_failed", error=str(e))
 
     def _parse_json_response(self, response: str) -> dict[str, Any]:
-        """Parse JSON from Gemini response using the parsers module.
+        """
+        Parse JSON from Gemini response using the parsers module.
 
         Pure function that extracts and parses JSON.
         """
@@ -244,7 +252,8 @@ class GeminiService:
         return parse_json_response(response)
 
     async def generate_research_plan(self, query: Any) -> dict[str, Any]:
-        """Generate a research plan from a query.
+        """
+        Generate a research plan from a query.
 
         Transforms query into research plan through Gemini.
         """
@@ -275,7 +284,8 @@ class GeminiService:
         return result
 
     async def analyze_literature(self, sources: list[str]) -> dict[str, Any]:
-        """Analyze literature sources.
+        """
+        Analyze literature sources.
 
         Transforms source list into literature analysis.
         """
@@ -306,9 +316,10 @@ class GeminiService:
         return result
 
     async def synthesize_findings(
-        self, findings: list[dict[str, Any]],
+        self, findings: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        """Synthesize research findings.
+        """
+        Synthesize research findings.
 
         Transforms findings list into synthesis.
         """
@@ -337,7 +348,8 @@ class GeminiService:
         return result
 
     async def generate_citations(self, sources: list[dict[str, Any]]) -> dict[str, Any]:
-        """Generate formatted citations.
+        """
+        Generate formatted citations.
 
         Transforms source data into formatted citations.
         """
@@ -366,9 +378,10 @@ class GeminiService:
         return result
 
     async def validate_hypothesis(
-        self, hypothesis: str, data: dict[str, Any],
+        self, hypothesis: str, data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Validate a research hypothesis.
+        """
+        Validate a research hypothesis.
 
         Transforms hypothesis and data into validation result.
         """

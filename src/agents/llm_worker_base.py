@@ -72,8 +72,8 @@ class LLMWorkerAgentBase(BaseAgent):
             def _register_tools(self, registry: ToolRegistry) -> None:
                 from src.agents.tools import ArithmeticTool
                 registry.register(ArithmeticTool())
-
         """
+        pass
 
     def _get_tool_registry(self) -> ToolRegistry:
         """Get or create the tool registry for this agent.
@@ -121,7 +121,7 @@ class LLMWorkerAgentBase(BaseAgent):
             )
 
             procedures = await self.procedural_memory.retrieve_procedures(
-                procedure_query,
+                procedure_query
             )
 
             if not procedures:
@@ -133,7 +133,7 @@ class LLMWorkerAgentBase(BaseAgent):
                 success_rate = proc.success_count / max(proc.usage_count, 1)
                 lines.append(
                     f"{i}. {proc.name} (confidence: {proc.confidence:.2f}, "
-                    f"success: {success_rate:.1%}, used {proc.usage_count}x)",
+                    f"success: {success_rate:.1%}, used {proc.usage_count}x)"
                 )
                 if proc.parameters:
                     # Truncate if too long
@@ -150,7 +150,7 @@ class LLMWorkerAgentBase(BaseAgent):
             return None
 
     async def _generate_with_routing(
-        self, prompt: str, task: AgentTask,
+        self, prompt: str, task: AgentTask
     ) -> tuple[str | None, float]:
         """Generate content via ModelRouter or GeminiService with graceful fallback.
 
@@ -164,7 +164,6 @@ class LLMWorkerAgentBase(BaseAgent):
 
         Returns:
             Tuple of (content, confidence_score). Content is None on failure.
-
         """
         from src.core.config import settings
 
@@ -198,7 +197,7 @@ class LLMWorkerAgentBase(BaseAgent):
                             "api_key": settings.OPENROUTER_API_KEY,
                             "endpoint": settings.OPENROUTER_ENDPOINT,
                             "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
-                        },
+                        }
                     },
                     "enable_fallback": True,
                     "max_retries": 3,
@@ -220,12 +219,12 @@ class LLMWorkerAgentBase(BaseAgent):
             # OpenRouter failed, log and fall back to Gemini
             self.log_warning(
                 f"OpenRouter generation failed: {response.error_message}, "
-                "falling back to GeminiService",
+                "falling back to GeminiService"
             )
 
         except Exception as exc:
             self.log_warning(
-                f"ModelRouter routing failed: {exc}, falling back to GeminiService",
+                f"ModelRouter routing failed: {exc}, falling back to GeminiService"
             )
 
         # Fallback to GeminiService on any error
@@ -239,7 +238,6 @@ class LLMWorkerAgentBase(BaseAgent):
 
         Returns:
             Tuple of (content, confidence_score). Content is None on failure.
-
         """
         gemini = self._ensure_gemini_service()
         if gemini is None:
@@ -294,7 +292,6 @@ class LLMWorkerAgentBase(BaseAgent):
 
         Raises:
             Exception: If generation and fallback both fail
-
         """
         self.last_structured_truncated = False
         from src.core.config import settings
@@ -330,7 +327,7 @@ class LLMWorkerAgentBase(BaseAgent):
             metadata = {
                 "tier": routing_tier,
                 "response_format": {
-                    "type": "json_object",
+                    "type": "json_object"
                 },  # OpenAI-compatible JSON mode
             }
 
@@ -353,7 +350,7 @@ class LLMWorkerAgentBase(BaseAgent):
                             "api_key": settings.OPENROUTER_API_KEY,
                             "endpoint": settings.OPENROUTER_ENDPOINT,
                             "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
-                        },
+                        }
                     },
                     "enable_fallback": True,
                     "max_retries": 3,
@@ -403,7 +400,7 @@ class LLMWorkerAgentBase(BaseAgent):
                     needs_retry = True
                     retry_reason = "parse_validation_failed"
                     self.log_warning(
-                        f"OpenRouter JSON parse/validation failed: {parse_err}",
+                        f"OpenRouter JSON parse/validation failed: {parse_err}"
                     )
 
                 # Retry ONCE with doubled max_tokens (capped at 8000) if needed
@@ -453,38 +450,38 @@ class LLMWorkerAgentBase(BaseAgent):
                             if truncated_but_valid is not None:
                                 self.log_warning(
                                     "Retry parse failed; returning the schema-valid "
-                                    f"but truncated first attempt: {retry_parse_err}",
+                                    f"but truncated first attempt: {retry_parse_err}"
                                 )
                                 self.last_structured_truncated = True
                                 return truncated_but_valid
                             self.log_warning(
                                 f"Retry parse/validation also failed: {retry_parse_err}, "
-                                "falling back to GeminiService",
+                                "falling back to GeminiService"
                             )
                     else:
                         if truncated_but_valid is not None:
                             self.log_warning(
                                 "Retry generation failed; returning the schema-valid "
-                                f"but truncated first attempt: {retry_response.error_message}",
+                                f"but truncated first attempt: {retry_response.error_message}"
                             )
                             self.last_structured_truncated = True
                             return truncated_but_valid
                         self.log_warning(
                             f"Retry generation failed: {retry_response.error_message}, "
-                            "falling back to GeminiService",
+                            "falling back to GeminiService"
                         )
                 elif needs_retry:
                     if truncated_but_valid is not None:
                         self.log_warning(
                             f"Truncation at max_tokens={max_tokens} >= 8000 cap; "
-                            "returning the schema-valid but truncated result",
+                            "returning the schema-valid but truncated result"
                         )
                         self.last_structured_truncated = True
                         return truncated_but_valid
                     # Already at or above 8000 token cap, skip retry
                     self.log_warning(
                         f"Truncation detected but max_tokens={max_tokens} >= 8000 cap, "
-                        "falling back to GeminiService",
+                        "falling back to GeminiService"
                     )
                 # If we get here, both initial and retry (if attempted) failed
                 # Fall through to Gemini fallback
@@ -493,13 +490,13 @@ class LLMWorkerAgentBase(BaseAgent):
                 # OpenRouter failed, log and fall back to Gemini
                 self.log_warning(
                     f"OpenRouter generation failed: {response.error_message}, "
-                    "falling back to GeminiService",
+                    "falling back to GeminiService"
                 )
 
         except Exception as exc:
             self.log_warning(
                 f"ModelRouter structured routing failed: {exc}, "
-                "falling back to GeminiService",
+                "falling back to GeminiService"
             )
 
         # Fallback to GeminiService on any error
@@ -519,7 +516,6 @@ class LLMWorkerAgentBase(BaseAgent):
 
         Returns:
             Formatted schema instructions string
-
         """
         try:
             schema_dict = schema.model_json_schema()
@@ -547,15 +543,15 @@ class LLMWorkerAgentBase(BaseAgent):
 
         Returns:
             Tier string: "simple", "balanced", or "complex"
-
         """
         complexity_score = task.input_data.get("complexity_score", 0.5)
 
         if complexity_score < 0.3:
             return "simple"
-        if complexity_score < 0.7:
+        elif complexity_score < 0.7:
             return "balanced"
-        return "complex"
+        else:
+            return "complex"
 
     async def execute(self, task: AgentTask) -> AgentResult:
         query = str(task.input_data.get("query", "")).strip()
@@ -587,7 +583,7 @@ class LLMWorkerAgentBase(BaseAgent):
             import json
 
             computed_block = "\n\nPrecomputed exact values:\n" + json.dumps(
-                computed, indent=2,
+                computed, indent=2
             )
             prompt += computed_block
 

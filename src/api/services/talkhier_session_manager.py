@@ -1,4 +1,5 @@
-"""TalkHier Session Manager
+"""
+TalkHier Session Manager
 
 Advanced session coordination and analytics management for TalkHier protocol.
 Handles multi-session coordination, performance tracking, and analytics aggregation.
@@ -52,7 +53,8 @@ class CoordinationGroup:
 
 
 class TalkHierSessionManager:
-    """Manages TalkHier sessions with analytics and coordination capabilities
+    """
+    Manages TalkHier sessions with analytics and coordination capabilities
     """
 
     def __init__(self) -> None:
@@ -66,7 +68,7 @@ class TalkHierSessionManager:
                 "total_rounds": 0,
                 "total_quality": 0.0,
                 "total_consensus": 0.0,
-            },
+            }
         )
 
     async def register_session(self, session_id: str, config: dict[str, Any]) -> None:
@@ -97,7 +99,7 @@ class TalkHierSessionManager:
                 stats["total_consensus"] += metrics.final_consensus
 
     async def update_round_metrics(
-        self, session_id: str, round_data: dict[str, Any],
+        self, session_id: str, round_data: dict[str, Any]
     ) -> None:
         """Update metrics for a completed round"""
         if session_id in self.sessions:
@@ -110,7 +112,7 @@ class TalkHierSessionManager:
             metrics.final_consensus = round_data.get("consensus", 0.0)
 
     async def coordinate_sessions(
-        self, request: CoordinationRequest,
+        self, request: CoordinationRequest
     ) -> CoordinationStatus:
         """Coordinate multiple sessions"""
         coordination_id = f"coord_{datetime.now(UTC).timestamp()}"
@@ -159,7 +161,7 @@ class TalkHierSessionManager:
                 metrics = self.sessions[session_id]
                 session_statuses[session_id] = SessionStatus.ACTIVE
                 total_progress += metrics.rounds_completed / max(
-                    3, metrics.rounds_completed,
+                    3, metrics.rounds_completed
                 )
                 total_quality += metrics.final_quality
             else:
@@ -271,7 +273,7 @@ class TalkHierSessionManager:
                 "session_id": session_id,
                 "metrics": metrics,
                 "timestamp": timestamp,
-            },
+            }
         )
 
         # Keep only recent events (e.g., last 10000)
@@ -298,13 +300,14 @@ class TalkHierSessionManager:
 
         if time_range == "1h":
             return now - timedelta(hours=1)
-        if time_range == "24h":
+        elif time_range == "24h":
             return now - timedelta(days=1)
-        if time_range == "7d":
+        elif time_range == "7d":
             return now - timedelta(days=7)
-        if time_range == "30d":
+        elif time_range == "30d":
             return now - timedelta(days=30)
-        return None
+        else:
+            return None
 
     def _empty_analytics(self) -> dict[str, Any]:
         """Return empty analytics structure"""
@@ -323,7 +326,7 @@ class TalkHierSessionManager:
         }
 
     def _generate_coordination_insights(
-        self, coordination: CoordinationGroup,
+        self, coordination: CoordinationGroup
     ) -> list[str]:
         """Generate insights for coordination group"""
         insights = []
@@ -337,13 +340,13 @@ class TalkHierSessionManager:
 
         if len(coordination.session_ids) > 5:
             insights.append(
-                f"Large coordination group ({len(coordination.session_ids)} sessions)",
+                f"Large coordination group ({len(coordination.session_ids)} sessions)"
             )
 
         return insights
 
     def _calculate_strategy_performance(
-        self, sessions: list[SessionMetrics],
+        self, sessions: list[SessionMetrics]
     ) -> dict[str, dict[str, float]]:
         """Calculate performance by strategy"""
         # Simplified - would need strategy tracking
@@ -354,7 +357,7 @@ class TalkHierSessionManager:
         }
 
     def _calculate_quality_trends(
-        self, sessions: list[SessionMetrics],
+        self, sessions: list[SessionMetrics]
     ) -> list[dict[str, Any]]:
         """Calculate quality trends over time"""
         trends = []
@@ -373,13 +376,13 @@ class TalkHierSessionManager:
                     "timestamp": hour.isoformat(),
                     "average_quality": sum(qualities) / len(qualities),
                     "session_count": len(qualities),
-                },
+                }
             )
 
         return trends
 
     def _calculate_consensus_patterns(
-        self, sessions: list[SessionMetrics],
+        self, sessions: list[SessionMetrics]
     ) -> dict[str, Any]:
         """Analyze consensus achievement patterns"""
         high_consensus = sum(1 for m in sessions if m.final_consensus >= 0.8)

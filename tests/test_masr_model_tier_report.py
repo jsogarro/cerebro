@@ -34,7 +34,7 @@ async def test_selected_models_reflect_optimizer_tier() -> None:
 
     with patch.object(service.router, "route", new=AsyncMock(return_value=decision)):
         response = await service.get_routing_decision(
-            RoutingRequest(query="anything", strategy=RoutingStrategy.QUALITY_FOCUSED),
+            RoutingRequest(query="anything", strategy=RoutingStrategy.QUALITY_FOCUSED)
         )
 
     assert response.selected_models, "no models were surfaced for the decision"

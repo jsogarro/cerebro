@@ -1,4 +1,5 @@
-"""Metrics collection for Gemini service.
+"""
+Metrics collection for Gemini service.
 
 This module provides Prometheus metrics and monitoring capabilities
 for the Gemini API integration.
@@ -13,7 +14,7 @@ from prometheus_client import Counter, Gauge, Histogram, Summary
 
 # Metrics definitions
 gemini_requests_total = Counter(
-    "gemini_requests_total", "Total number of Gemini API requests", ["method", "status"],
+    "gemini_requests_total", "Total number of Gemini API requests", ["method", "status"]
 )
 
 gemini_request_duration = Histogram(
@@ -38,24 +39,25 @@ gemini_cache_operations = Counter(
 gemini_cache_hit_rate = Gauge("gemini_cache_hit_rate", "Cache hit rate percentage")
 
 gemini_rate_limit_remaining = Gauge(
-    "gemini_rate_limit_remaining", "Remaining rate limit quota",
+    "gemini_rate_limit_remaining", "Remaining rate limit quota"
 )
 
 gemini_concurrent_requests = Gauge(
-    "gemini_concurrent_requests", "Number of concurrent Gemini requests",
+    "gemini_concurrent_requests", "Number of concurrent Gemini requests"
 )
 
 gemini_errors_total = Counter(
-    "gemini_errors_total", "Total number of Gemini API errors", ["error_type"],
+    "gemini_errors_total", "Total number of Gemini API errors", ["error_type"]
 )
 
 gemini_response_size = Summary(
-    "gemini_response_size_bytes", "Size of Gemini API responses in bytes",
+    "gemini_response_size_bytes", "Size of Gemini API responses in bytes"
 )
 
 
 class GeminiMetrics:
-    """Metrics collector for Gemini service.
+    """
+    Metrics collector for Gemini service.
 
     Provides methods for tracking API usage, performance, and errors.
     """
@@ -64,12 +66,12 @@ class GeminiMetrics:
         self.start_times: dict[str, float] = {}
 
     def record_request_start(self, request_id: str, method: str) -> None:
-        """Record the start of a request.
+        """
+        Record the start of a request.
 
         Args:
             request_id: Unique request identifier
             method: API method being called
-
         """
         self.start_times[request_id] = time.time()
         gemini_concurrent_requests.inc()
@@ -81,14 +83,14 @@ class GeminiMetrics:
         status: str = "success",
         response_size: int | None = None,
     ) -> None:
-        """Record the end of a request.
+        """
+        Record the end of a request.
 
         Args:
             request_id: Unique request identifier
             method: API method that was called
             status: Request status (success/error)
             response_size: Size of response in bytes
-
         """
         # Record request count
         gemini_requests_total.labels(method=method, status=status).inc()
@@ -107,12 +109,12 @@ class GeminiMetrics:
         gemini_concurrent_requests.dec()
 
     def record_tokens(self, input_tokens: int, output_tokens: int) -> None:
-        """Record token usage.
+        """
+        Record token usage.
 
         Args:
             input_tokens: Number of input tokens
             output_tokens: Number of output tokens
-
         """
         gemini_tokens_used.labels(type="input").inc(input_tokens)
         gemini_tokens_used.labels(type="output").inc(output_tokens)
@@ -122,39 +124,39 @@ class GeminiMetrics:
         operation: str,
         status: str,
     ) -> None:
-        """Record cache operation.
+        """
+        Record cache operation.
 
         Args:
             operation: Type of operation (get/set/delete)
             status: Operation status (hit/miss/error)
-
         """
         gemini_cache_operations.labels(operation=operation, status=status).inc()
 
     def update_cache_hit_rate(self, hit_rate: float) -> None:
-        """Update cache hit rate gauge.
+        """
+        Update cache hit rate gauge.
 
         Args:
             hit_rate: Hit rate percentage (0-100)
-
         """
         gemini_cache_hit_rate.set(hit_rate)
 
     def record_error(self, error_type: str) -> None:
-        """Record an error.
+        """
+        Record an error.
 
         Args:
             error_type: Type of error that occurred
-
         """
         gemini_errors_total.labels(error_type=error_type).inc()
 
     def update_rate_limit(self, remaining: int) -> None:
-        """Update remaining rate limit.
+        """
+        Update remaining rate limit.
 
         Args:
             remaining: Number of remaining requests
-
         """
         gemini_rate_limit_remaining.set(remaining)
 
@@ -220,13 +222,15 @@ def track_gemini_call(method: str) -> Callable[..., Any]:
 
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
-        return sync_wrapper
+        else:
+            return sync_wrapper
 
     return decorator
 
 
 class CircuitBreaker:
-    """Circuit breaker pattern for Gemini API calls.
+    """
+    Circuit breaker pattern for Gemini API calls.
 
     Prevents cascading failures by temporarily blocking calls
     when error rate exceeds threshold.
@@ -238,13 +242,13 @@ class CircuitBreaker:
         recovery_timeout: int = 60,
         expected_exception: type[BaseException] = Exception,
     ):
-        """Initialize circuit breaker.
+        """
+        Initialize circuit breaker.
 
         Args:
             failure_threshold: Number of failures before opening circuit
             recovery_timeout: Seconds to wait before attempting recovery
             expected_exception: Exception type to catch
-
         """
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
@@ -255,7 +259,8 @@ class CircuitBreaker:
         self.state = "closed"  # closed, open, half-open
 
     def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Call function with circuit breaker protection.
+        """
+        Call function with circuit breaker protection.
 
         Args:
             func: Function to call
@@ -267,7 +272,6 @@ class CircuitBreaker:
 
         Raises:
             Exception: If circuit is open or function fails
-
         """
         if self.state == "open":
             if self._should_attempt_reset():
@@ -284,9 +288,10 @@ class CircuitBreaker:
             raise
 
     async def async_call(
-        self, func: Callable[..., Any], *args: Any, **kwargs: Any,
+        self, func: Callable[..., Any], *args: Any, **kwargs: Any
     ) -> Any:
-        """Async version of call.
+        """
+        Async version of call.
 
         Args:
             func: Async function to call
@@ -295,7 +300,6 @@ class CircuitBreaker:
 
         Returns:
             Function result
-
         """
         if self.state == "open":
             if self._should_attempt_reset():

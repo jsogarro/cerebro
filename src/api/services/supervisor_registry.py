@@ -1,4 +1,5 @@
-"""Registry for supervisor metadata, workers, and metrics.
+"""
+Registry for supervisor metadata, workers, and metrics.
 
 This keeps the static supervisor/worker catalog separate from orchestration
 logic while preserving the in-memory data structures used by the API service.
@@ -55,7 +56,7 @@ class SupervisorRegistry:
 
             self.metrics[supervisor_type.value] = SupervisorMetrics()
             self.workers[supervisor_type.value] = self.create_workers_for_supervisor(
-                supervisor_type,
+                supervisor_type
             )
 
     def get_supervisor_capabilities(self, supervisor_type: SupervisorType) -> list[str]:
@@ -121,7 +122,7 @@ class SupervisorRegistry:
         }
 
     def create_workers_for_supervisor(
-        self, supervisor_type: SupervisorType,
+        self, supervisor_type: SupervisorType
     ) -> list[WorkerInfo]:
         """Create worker agents for a supervisor."""
         workers = []
@@ -141,7 +142,7 @@ class SupervisorRegistry:
         return workers
 
     def get_worker_types_for_supervisor(
-        self, supervisor_type: SupervisorType,
+        self, supervisor_type: SupervisorType
     ) -> list[str]:
         """Get worker types for a supervisor."""
         worker_types_map = {

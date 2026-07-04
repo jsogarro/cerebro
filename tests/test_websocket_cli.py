@@ -60,8 +60,8 @@ class TestCLIWebSocketIntegration:
                 [
                     progress_message.model_dump_json(),
                     completion_message.model_dump_json(),
-                ],
-            ),
+                ]
+            )
         )
 
         client = CLIWebSocketClient(verbose=True)

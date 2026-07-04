@@ -1,4 +1,5 @@
-"""Real-Time A/B Testing Dashboard
+"""
+Real-Time A/B Testing Dashboard
 
 This module provides real-time monitoring and visualization of A/B testing
 experiments running on the Agent Framework APIs. It integrates with WebSocket
@@ -70,12 +71,13 @@ class DashboardConfig:
             DashboardMetric.LATENCY,
             DashboardMetric.COST,
             DashboardMetric.SUCCESS_RATE,
-        ],
+        ]
     )
 
 
 class RealTimeDashboard:
-    """Real-time monitoring dashboard for A/B testing experiments.
+    """
+    Real-time monitoring dashboard for A/B testing experiments.
 
     Provides live updates on experiment performance, statistical analysis,
     and recommendations through WebSocket connections.
@@ -122,7 +124,7 @@ class RealTimeDashboard:
     # ==================== Dashboard Updates ====================
 
     async def register_experiment(
-        self, experiment_id: str, experiment_config: dict[str, Any],
+        self, experiment_id: str, experiment_config: dict[str, Any]
     ) -> None:
         """Register a new experiment for monitoring."""
         self.active_experiments.add(experiment_id)
@@ -135,7 +137,7 @@ class RealTimeDashboard:
                 "experiment_id": experiment_id,
                 "config": experiment_config,
                 "timestamp": datetime.now(UTC).isoformat(),
-            },
+            }
         )
 
         logger.info(f"Registered experiment {experiment_id} for monitoring")
@@ -164,11 +166,11 @@ class RealTimeDashboard:
             snapshot.p_value = statistical_analysis.get("p_value")
             snapshot.effect_size = statistical_analysis.get("effect_size")
             snapshot.confidence_level = statistical_analysis.get(
-                "confidence_level", 0.0,
+                "confidence_level", 0.0
             )
             snapshot.winning_variant = statistical_analysis.get("winning_variant")
             snapshot.recommendation = self._generate_recommendation(
-                statistical_analysis,
+                statistical_analysis
             )
 
         # Store in history
@@ -214,7 +216,7 @@ class RealTimeDashboard:
     # ==================== Visualization Generation ====================
 
     async def _generate_dashboard_update(
-        self, experiment_id: str, snapshot: ExperimentSnapshot,
+        self, experiment_id: str, snapshot: ExperimentSnapshot
     ) -> dict[str, Any]:
         """Generate dashboard update with visualizations."""
         update: dict[str, Any] = {
@@ -260,7 +262,7 @@ class RealTimeDashboard:
         return update
 
     def _generate_time_series_chart(
-        self, history: list[ExperimentSnapshot],
+        self, history: list[ExperimentSnapshot]
     ) -> dict[str, Any]:
         """Generate time series chart data."""
         if not history:
@@ -299,7 +301,7 @@ class RealTimeDashboard:
         }
 
     def _generate_distribution_chart(
-        self, snapshot: ExperimentSnapshot,
+        self, snapshot: ExperimentSnapshot
     ) -> dict[str, Any]:
         """Generate distribution comparison chart."""
         variants = list(snapshot.variants.keys())
@@ -327,7 +329,7 @@ class RealTimeDashboard:
         }
 
     def _generate_statistical_chart(
-        self, snapshot: ExperimentSnapshot,
+        self, snapshot: ExperimentSnapshot
     ) -> dict[str, Any]:
         """Generate statistical significance visualization."""
         variants = list(snapshot.variants.keys())
@@ -409,7 +411,7 @@ class RealTimeDashboard:
                         "type": "warning",
                         "message": f"Low sample size for {variant}: {size}",
                         "variant": variant,
-                    },
+                    }
                 )
 
         # Check statistical significance
@@ -422,7 +424,7 @@ class RealTimeDashboard:
                     "type": "info",
                     "message": f"Statistical significance reached (p={snapshot.p_value:.4f})",
                     "variant": snapshot.winning_variant or "unknown",
-                },
+                }
             )
 
         # Check effect size
@@ -434,7 +436,7 @@ class RealTimeDashboard:
                 {
                     "type": "warning",
                     "message": f"Small effect size detected: {snapshot.effect_size:.4f}",
-                },
+                }
             )
 
         return alerts
@@ -466,7 +468,7 @@ class RealTimeDashboard:
     # ==================== WebSocket Communication ====================
 
     async def connect_dashboard_client(
-        self, client_id: str, websocket: WebSocket,
+        self, client_id: str, websocket: WebSocket
     ) -> None:
         """Connect a new dashboard client."""
         self.dashboard_clients.add(client_id)
@@ -479,7 +481,7 @@ class RealTimeDashboard:
             from src.models.websocket_messages import WSMessage, WSMessageType
 
             message = WSMessage(
-                type=WSMessageType.INFO, project_id=None, data=initial_state,
+                type=WSMessageType.INFO, project_id=None, data=initial_state
             )
             await connection.send_message(message)
 
@@ -496,7 +498,7 @@ class RealTimeDashboard:
         """Broadcast message to all dashboard clients."""
         for client_id in self.dashboard_clients:
             await self.event_publisher.publish_event(
-                event_type="dashboard_update", data=message, target_clients=[client_id],
+                event_type="dashboard_update", data=message, target_clients=[client_id]
             )
 
     async def _get_dashboard_state(self) -> dict[str, Any]:
@@ -531,7 +533,7 @@ class RealTimeDashboard:
     async def _clean_old_history(self) -> None:
         """Remove old data from history."""
         cutoff_time = datetime.now(UTC) - timedelta(
-            minutes=self.config.history_window_minutes,
+            minutes=self.config.history_window_minutes
         )
 
         for exp_id in list(self.experiment_history.keys()):
@@ -550,7 +552,7 @@ class RealTimeDashboard:
                 del self.experiment_history[exp_id]
 
     async def export_experiment_data(
-        self, experiment_id: str, format: str = "json",
+        self, experiment_id: str, format: str = "json"
     ) -> Any:
         """Export experiment data for analysis."""
         if experiment_id not in self.experiment_history:
@@ -571,13 +573,13 @@ class RealTimeDashboard:
                 for s in history
             ]
 
-        if format == "dataframe":
+        elif format == "dataframe":
             # Convert to pandas DataFrame only when the optional dependency is installed.
             try:
                 pandas = import_module("pandas")
             except ImportError as exc:
                 raise RuntimeError(
-                    "pandas is required to export experiment data as a dataframe",
+                    "pandas is required to export experiment data as a dataframe"
                 ) from exc
 
             data = []
@@ -593,7 +595,8 @@ class RealTimeDashboard:
 
             return pandas.DataFrame(data)
 
-        raise ValueError(f"Unsupported format: {format}")
+        else:
+            raise ValueError(f"Unsupported format: {format}")
 
 
 # Singleton instance

@@ -1,4 +1,5 @@
-"""MASR (Multi-Agent System Router) - Core Intelligence Engine
+"""
+MASR (Multi-Agent System Router) - Core Intelligence Engine
 
 The Multi-Agent System Router is the central intelligence component that:
 1. Analyzes incoming queries for complexity and requirements
@@ -103,7 +104,8 @@ class RoutingDecision:
 
 
 class MASRouter:
-    """Multi-Agent System Router - The central intelligence of Cerebro.
+    """
+    Multi-Agent System Router - The central intelligence of Cerebro.
 
     Combines complexity analysis with cost optimization to make intelligent
     routing decisions that balance performance, cost, and quality based on
@@ -123,7 +125,7 @@ class MASRouter:
 
         # Initialize components
         self.complexity_analyzer = QueryComplexityAnalyzer(
-            self.config.get("complexity_analyzer", {}),
+            self.config.get("complexity_analyzer", {})
         )
         cost_opt_config = config.get("cost_optimizer", {}) if config else {}
         self.cost_optimizer = CostOptimizer(cost_opt_config, model_config_manager)
@@ -138,13 +140,13 @@ class MASRouter:
 
         # Initialize metrics collector
         self.default_strategy = RoutingStrategy(
-            self.config.get("default_strategy", "balanced"),
+            self.config.get("default_strategy", "balanced")
         )
         self.metrics_collector = RoutingMetricsCollector(
             default_strategy=self.default_strategy,
             adaptation_window_hours=self.config.get("adaptation_window_hours", 24),
             min_history_for_adaptation=self.config.get(
-                "min_history_for_adaptation", 100,
+                "min_history_for_adaptation", 100
             ),
         )
 
@@ -176,16 +178,16 @@ class MASRouter:
 
         # Memory-informed routing (feature-flagged, default OFF)
         self.memory_informed_routing_enabled = self.config.get(
-            "memory_informed_routing_enabled", False,
+            "memory_informed_routing_enabled", False
         )
         self.memory_routing_max_worker_adjust = self.config.get(
-            "memory_routing_max_worker_adjust", 2,
+            "memory_routing_max_worker_adjust", 2
         )
         self.memory_routing_freshness_days = self.config.get(
-            "memory_routing_freshness_days", 30,
+            "memory_routing_freshness_days", 30
         )
         self.memory_prompt_max_procedures = self.config.get(
-            "memory_prompt_max_procedures", 3,
+            "memory_prompt_max_procedures", 3
         )
         # Memory managers injected externally (None = no memory influence)
         self.episodic_memory: EpisodicMemoryManager | None = None
@@ -193,17 +195,17 @@ class MASRouter:
 
         # Adaptive routing (feature-flagged, default OFF)
         self.adaptive_routing_enabled = self.config.get(
-            "adaptive_routing_enabled", False,
+            "adaptive_routing_enabled", False
         )
         # Min history raised to 300 (from 100) based on sample-complexity analysis:
         # For 3 modes x 5 arms = 15 contexts with delta_mu=0.15, sigma=0.02, Hoeffding bound
         # requires ~14 samples per arm for 95% confidence -> 450 total minimum.
         # 300 provides reasonable cold-start horizon while staying below full bound.
         self.adaptive_routing_min_history = self.config.get(
-            "adaptive_routing_min_history", 300,
+            "adaptive_routing_min_history", 300
         )
         self.adaptive_routing_max_worker_adjust = self.config.get(
-            "adaptive_routing_max_worker_adjust", 2,
+            "adaptive_routing_max_worker_adjust", 2
         )
         self._adaptive_engine: AdaptiveAllocationEngine | None = None
         # Per-mode quality baselines for advantage reward computation (EMA)
@@ -215,20 +217,20 @@ class MASRouter:
                     "global_min_allocation": 0.05,
                     "global_max_allocation": 0.70,
                     "update_interval_seconds": self.config.get(
-                        "adaptive_routing_update_interval_seconds", 300,
+                        "adaptive_routing_update_interval_seconds", 300
                     ),
                     # Convergence lever: sharpen Thompson posteriors after
                     # warm-up so exploitation ramps once arms are estimated.
                     "posterior_temp_enabled": self.config.get(
-                        "adaptive_routing_posterior_temp_enabled", True,
+                        "adaptive_routing_posterior_temp_enabled", True
                     ),
                     "posterior_temp_threshold": self.config.get(
-                        "adaptive_routing_posterior_temp_threshold", 150,
+                        "adaptive_routing_posterior_temp_threshold", 150
                     ),
                     "posterior_temp_factor": self.config.get(
-                        "adaptive_routing_posterior_temp_factor", 3.0,
+                        "adaptive_routing_posterior_temp_factor", 3.0
                     ),
-                },
+                }
             )
 
     @property
@@ -243,7 +245,8 @@ class MASRouter:
         strategy: RoutingStrategy | None = None,
         constraints: dict[str, Any] | None = None,
     ) -> RoutingDecision:
-        """Route a query through intelligent analysis and optimization.
+        """
+        Route a query through intelligent analysis and optimization.
 
         Args:
             query: The input query to route
@@ -253,7 +256,6 @@ class MASRouter:
 
         Returns:
             RoutingDecision with complete routing specifications
-
         """
         start_time = datetime.now()
         query_id = str(uuid.uuid4())
@@ -267,7 +269,7 @@ class MASRouter:
             # part of the cache identity — the same query routes differently
             # under a different strategy or cost/quality constraints.
             cached_decision = self.cache_manager.check_cache(
-                query, context, strategy, constraints,
+                query, context, strategy, constraints
             )
             if cached_decision:
                 logger.info(f"Using cached routing for {query_id}")
@@ -286,27 +288,27 @@ class MASRouter:
                 routing_strategy = RoutingStrategy(strategy)
             else:
                 routing_strategy = self._select_routing_strategy(
-                    complexity_analysis, context,
+                    complexity_analysis, context
                 )
             optimization_strategy = self._map_to_optimization_strategy(routing_strategy)
 
             optimization_result = await self.cost_optimizer.optimize(
-                complexity_analysis, optimization_strategy, constraints,
+                complexity_analysis, optimization_strategy, constraints
             )
 
             # Step 3: Determine collaboration mode
             collaboration_mode = self._determine_collaboration_mode(
-                complexity_analysis, optimization_result,
+                complexity_analysis, optimization_result
             )
 
             # Step 3.5: Query episodic memory for routing prior (if enabled)
             episodic_prior = await self._get_episodic_routing_prior(
-                complexity_analysis, query,
+                complexity_analysis, query
             )
 
             # Step 3.6: Query adaptive engine for allocation adjustment (if enabled)
             adaptive_recommendation = await self._get_adaptive_allocation_adjustment(
-                complexity_analysis, collaboration_mode, episodic_prior,
+                complexity_analysis, collaboration_mode, episodic_prior
             )
 
             # Step 4: Allocate agents (with optional memory + adaptive adjustment)
@@ -319,7 +321,7 @@ class MASRouter:
 
             # Step 5: Calculate performance predictions
             predictions = self._predict_performance(
-                complexity_analysis, optimization_result, agent_allocation,
+                complexity_analysis, optimization_result, agent_allocation
             )
 
             # Step 6: Create routing decision
@@ -338,14 +340,14 @@ class MASRouter:
                 fallback_strategy=self._select_fallback_strategy(complexity_analysis),
                 monitoring_level=self._select_monitoring_level(complexity_analysis),
                 context_requirements=self._determine_context_requirements(
-                    complexity_analysis, context,
+                    complexity_analysis, context
                 ),
                 memory_allocation=self._allocate_memory(complexity_analysis),
             )
 
             # Cache decision
             self.cache_manager.cache_decision(
-                query, context, decision, strategy, constraints,
+                query, context, decision, strategy, constraints
             )
 
             # Update metrics
@@ -357,7 +359,7 @@ class MASRouter:
             # Trigger adaptive learning if enabled
             if self.learning_enabled:
                 task = asyncio.create_task(
-                    self.metrics_collector.adapt_from_decision(decision),
+                    self.metrics_collector.adapt_from_decision(decision)
                 )
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
@@ -366,7 +368,7 @@ class MASRouter:
             logger.info(
                 f"Routing complete for {query_id}: {decision.collaboration_mode.value} "
                 f"mode with {decision.agent_allocation.worker_count} agents "
-                f"(processing: {processing_time:.1f}ms)",
+                f"(processing: {processing_time:.1f}ms)"
             )
 
             await self._routing_circuit_breaker._on_success()
@@ -379,9 +381,10 @@ class MASRouter:
             return self._create_fallback_decision(query_id, query, e)
 
     def _select_routing_strategy(
-        self, complexity_analysis: ComplexityAnalysis, context: dict[str, Any] | None,
+        self, complexity_analysis: ComplexityAnalysis, context: dict[str, Any] | None
     ) -> RoutingStrategy:
         """Select the optimal routing strategy based on analysis and context."""
+
         # Check for explicit strategy in context
         if context and context.get("routing_strategy"):
             return RoutingStrategy(context["routing_strategy"])
@@ -397,16 +400,17 @@ class MASRouter:
         if complexity_analysis.priority_level == "critical":
             return RoutingStrategy.SPEED_FIRST
 
-        if complexity_analysis.level == ComplexityLevel.SIMPLE:
+        elif complexity_analysis.level == ComplexityLevel.SIMPLE:
             return RoutingStrategy.COST_EFFICIENT
 
-        if complexity_analysis.level == ComplexityLevel.COMPLEX:
+        elif complexity_analysis.level == ComplexityLevel.COMPLEX:
             return RoutingStrategy.QUALITY_FOCUSED
 
-        return self.default_strategy
+        else:
+            return self.default_strategy
 
     def _map_to_optimization_strategy(
-        self, routing_strategy: RoutingStrategy,
+        self, routing_strategy: RoutingStrategy
     ) -> OptimizationStrategy:
         """Map routing strategy to cost optimization strategy."""
         mapping = {
@@ -425,6 +429,7 @@ class MASRouter:
         optimization_result: OptimizationResult,
     ) -> CollaborationMode:
         """Determine optimal agent collaboration mode."""
+
         # Simple queries can use direct mode
         if complexity_analysis.level == ComplexityLevel.SIMPLE:
             return CollaborationMode.DIRECT
@@ -445,7 +450,7 @@ class MASRouter:
         return CollaborationMode.PARALLEL
 
     async def _get_episodic_routing_prior(
-        self, complexity_analysis: ComplexityAnalysis, query: str,
+        self, complexity_analysis: ComplexityAnalysis, query: str
     ) -> int | None:
         """Query episodic memory for past routing decisions on similar queries.
 
@@ -486,7 +491,7 @@ class MASRouter:
 
                 # Freshness decay: exponential decay over freshness_days
                 freshness_weight = max(
-                    0.0, 1.0 - (age_days / self.memory_routing_freshness_days),
+                    0.0, 1.0 - (age_days / self.memory_routing_freshness_days)
                 )
                 weighted_value = worker_count * quality_score * freshness_weight
                 adjustments.append(weighted_value)
@@ -527,7 +532,6 @@ class MASRouter:
             - Flag is OFF
             - History too small (cold start)
             - Engine raises an error (graceful fallback)
-
         """
         # Guard: flag OFF → no-op (zero overhead)
         if not self.adaptive_routing_enabled or self._adaptive_engine is None:
@@ -537,7 +541,7 @@ class MASRouter:
         history_size = self.metrics_collector.get_history_size()
         if history_size < self.adaptive_routing_min_history:
             logger.debug(
-                f"adaptive_routing: cold start, history {history_size} < {self.adaptive_routing_min_history}",
+                f"adaptive_routing: cold start, history {history_size} < {self.adaptive_routing_min_history}"
             )
             return None
 
@@ -560,7 +564,7 @@ class MASRouter:
                     exploration_rate=0.1,
                     confidence_threshold=0.95,
                     update_frequency_seconds=self.config.get(
-                        "adaptive_routing_update_interval_seconds", 300,
+                        "adaptive_routing_update_interval_seconds", 300
                     ),
                     enable_guardrails=True,
                     performance_threshold=0.95,
@@ -568,11 +572,11 @@ class MASRouter:
                 )
 
                 await self._adaptive_engine.register_experiment(
-                    experiment_id, variants, config,
+                    experiment_id, variants, config
                 )
 
                 logger.info(
-                    f"adaptive_routing: registered experiment {experiment_id} with 5 arms",
+                    f"adaptive_routing: registered experiment {experiment_id} with 5 arms"
                 )
 
             # Allocate variant (selects arm via Thompson Sampling)
@@ -591,13 +595,13 @@ class MASRouter:
             # But we need to return an absolute count, not a delta
             # So we'll infer the baseline from the collaboration_mode
             baseline = self._infer_baseline_worker_count(
-                complexity_analysis, collaboration_mode,
+                complexity_analysis, collaboration_mode
             )
             recommended_count = max(1, baseline + selected_delta)
 
             logger.debug(
                 f"adaptive_routing: experiment {experiment_id} selected arm {decision.variant_id} "
-                f"(delta {selected_delta}, baseline {baseline} → {recommended_count})",
+                f"(delta {selected_delta}, baseline {baseline} → {recommended_count})"
             )
 
             return recommended_count
@@ -605,7 +609,7 @@ class MASRouter:
         except Exception as e:
             # Resilient: log and return None (routing proceeds with memory prior only)
             logger.warning(
-                f"adaptive_allocation_adjustment failed (graceful fallback): {e}",
+                f"adaptive_allocation_adjustment failed (graceful fallback): {e}"
             )
             return None
 
@@ -621,21 +625,21 @@ class MASRouter:
         """
         if collaboration_mode == CollaborationMode.DIRECT:
             return 1
-        if collaboration_mode == CollaborationMode.PARALLEL:
+        elif collaboration_mode == CollaborationMode.PARALLEL:
             return int(
-                min(len(complexity_analysis.domains) + 1, self.max_parallel_workers),
+                min(len(complexity_analysis.domains) + 1, self.max_parallel_workers)
             )
-        if collaboration_mode == CollaborationMode.HIERARCHICAL:
+        elif collaboration_mode == CollaborationMode.HIERARCHICAL:
             return int(
-                min(complexity_analysis.subtask_count, self.max_agents_per_query),
+                min(complexity_analysis.subtask_count, self.max_agents_per_query)
             )
-        if collaboration_mode == CollaborationMode.DEBATE:
+        elif collaboration_mode == CollaborationMode.DEBATE:
             return 3  # Fixed
-        # ENSEMBLE
-        return 5
+        else:  # ENSEMBLE
+            return 5
 
     async def record_routing_outcome(
-        self, decision: RoutingDecision, quality_score: float, actual_cost: float,
+        self, decision: RoutingDecision, quality_score: float, actual_cost: float
     ) -> None:
         """Record routing outcome for adaptive learning.
 
@@ -643,7 +647,6 @@ class MASRouter:
             decision: The routing decision that was executed
             quality_score: Observed quality score (0.0-1.0)
             actual_cost: Actual cost incurred
-
         """
         if not self.adaptive_routing_enabled or self._adaptive_engine is None:
             return
@@ -653,7 +656,7 @@ class MASRouter:
 
             # Map actual worker_count back to arm (delta)
             baseline = self._infer_baseline_worker_count(
-                decision.complexity_analysis, decision.collaboration_mode,
+                decision.complexity_analysis, decision.collaboration_mode
             )
             actual_delta = decision.agent_allocation.worker_count - baseline
 
@@ -676,26 +679,26 @@ class MASRouter:
 
             # Update baseline with exponential moving average (alpha=0.05 for stability)
             self._mode_quality_baselines[mode] = float(
-                0.95 * quality_baseline + 0.05 * quality_score,
+                0.95 * quality_baseline + 0.05 * quality_score
             )
 
             # Shift advantage to [0, 1] range for Thompson Sampling Beta update
             reward = float(np.clip(advantage + 0.5, 0.0, 1.0))
 
             await self._adaptive_engine.record_outcome(
-                experiment_id, variant_id, reward,
+                experiment_id, variant_id, reward
             )
 
             logger.debug(
                 f"adaptive_routing: recorded outcome for {experiment_id} "
-                f"variant {variant_id} reward {reward:.3f}",
+                f"variant {variant_id} reward {reward:.3f}"
             )
 
         except Exception as e:
             logger.warning(f"Failed to record adaptive routing outcome: {e}")
 
     def _apply_memory_adjustment(
-        self, analytic_count: int, episodic_prior: int | None,
+        self, analytic_count: int, episodic_prior: int | None
     ) -> int:
         """Apply bounded memory-informed adjustment to analytic worker_count.
 
@@ -705,7 +708,6 @@ class MASRouter:
 
         Returns:
             Adjusted worker_count, bounded to ± max_worker_adjust from baseline
-
         """
         if episodic_prior is None:
             return analytic_count
@@ -721,7 +723,7 @@ class MASRouter:
         return result
 
     def _apply_adaptive_adjustment(
-        self, memory_adjusted_count: int, adaptive_recommendation: int | None,
+        self, memory_adjusted_count: int, adaptive_recommendation: int | None
     ) -> int:
         """Apply bounded adaptive routing adjustment to memory-adjusted worker_count.
 
@@ -731,7 +733,6 @@ class MASRouter:
 
         Returns:
             Final adjusted worker_count, bounded to ± adaptive_max_worker_adjust from baseline
-
         """
         if adaptive_recommendation is None:
             return memory_adjusted_count
@@ -771,11 +772,11 @@ class MASRouter:
             collaboration_mode: Determined collaboration mode
             episodic_prior: Optional episodic memory prior for worker_count (raw value)
             adaptive_recommendation: Optional adaptive engine recommendation (raw value)
-
         """
+
         # Get supervisor types based on domains
         supervisor_types = self._get_domain_supervisor_types(
-            complexity_analysis.domains,
+            complexity_analysis.domains
         )
         primary_supervisor = supervisor_types[0] if supervisor_types else "research"
 
@@ -790,16 +791,16 @@ class MASRouter:
                 retry_attempts=MIN_RETRY_ATTEMPTS,
             )
 
-        if collaboration_mode == CollaborationMode.PARALLEL:
+        elif collaboration_mode == CollaborationMode.PARALLEL:
             analytic_count = min(
-                len(complexity_analysis.domains) + 1, self.max_parallel_workers,
+                len(complexity_analysis.domains) + 1, self.max_parallel_workers
             )
             # Sequential composition: memory first, then adaptive
             memory_adjusted = self._apply_memory_adjustment(
-                analytic_count, episodic_prior,
+                analytic_count, episodic_prior
             )
             worker_count = self._apply_adaptive_adjustment(
-                memory_adjusted, adaptive_recommendation,
+                memory_adjusted, adaptive_recommendation
             )
             worker_count = min(worker_count, self.max_parallel_workers)  # Hard cap
             return AgentAllocation(
@@ -811,16 +812,16 @@ class MASRouter:
                 retry_attempts=DEFAULT_RETRY_ATTEMPTS,
             )
 
-        if collaboration_mode == CollaborationMode.HIERARCHICAL:
+        elif collaboration_mode == CollaborationMode.HIERARCHICAL:
             analytic_count = min(
-                complexity_analysis.subtask_count, self.max_agents_per_query,
+                complexity_analysis.subtask_count, self.max_agents_per_query
             )
             # Sequential composition: memory first, then adaptive
             memory_adjusted = self._apply_memory_adjustment(
-                analytic_count, episodic_prior,
+                analytic_count, episodic_prior
             )
             worker_count = self._apply_adaptive_adjustment(
-                memory_adjusted, adaptive_recommendation,
+                memory_adjusted, adaptive_recommendation
             )
             worker_count = min(worker_count, self.max_agents_per_query)  # Hard cap
             return AgentAllocation(
@@ -832,7 +833,7 @@ class MASRouter:
                 retry_attempts=MAX_RETRY_ATTEMPTS,
             )
 
-        if collaboration_mode == CollaborationMode.DEBATE:
+        elif collaboration_mode == CollaborationMode.DEBATE:
             # DEBATE is fixed at 3 (no memory adjustment)
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
@@ -843,24 +844,24 @@ class MASRouter:
                 retry_attempts=DEFAULT_RETRY_ATTEMPTS,
             )
 
-        # ENSEMBLE
-        analytic_count = 5
-        # Sequential composition: memory first, then adaptive
-        memory_adjusted = self._apply_memory_adjustment(
-            analytic_count, episodic_prior,
-        )
-        worker_count = self._apply_adaptive_adjustment(
-            memory_adjusted, adaptive_recommendation,
-        )
-        worker_count = max(3, min(worker_count, 7))  # Ensemble: 3-7 range
-        return AgentAllocation(
-            supervisor_type=primary_supervisor,
-            worker_count=worker_count,
-            worker_types=self._get_domain_worker_types(complexity_analysis.domains),
-            max_parallel=HIGH_PARALLELISM,
-            timeout_seconds=MEDIUM_TIMEOUT,
-            retry_attempts=MIN_RETRY_ATTEMPTS,
-        )
+        else:  # ENSEMBLE
+            analytic_count = 5
+            # Sequential composition: memory first, then adaptive
+            memory_adjusted = self._apply_memory_adjustment(
+                analytic_count, episodic_prior
+            )
+            worker_count = self._apply_adaptive_adjustment(
+                memory_adjusted, adaptive_recommendation
+            )
+            worker_count = max(3, min(worker_count, 7))  # Ensemble: 3-7 range
+            return AgentAllocation(
+                supervisor_type=primary_supervisor,
+                worker_count=worker_count,
+                worker_types=self._get_domain_worker_types(complexity_analysis.domains),
+                max_parallel=HIGH_PARALLELISM,
+                timeout_seconds=MEDIUM_TIMEOUT,
+                retry_attempts=MIN_RETRY_ATTEMPTS,
+            )
 
     def _get_domain_supervisor_types(self, domains: Any) -> list[str]:
         """Get supervisor types based on identified domains (enhanced for hierarchical routing)."""
@@ -878,7 +879,7 @@ class MASRouter:
         for domain in domains:
             domain_name = domain.value if hasattr(domain, "value") else str(domain)
             supervisor_type = domain_supervisors.get(
-                domain_name, "research",
+                domain_name, "research"
             )  # Default to research
             if supervisor_type not in supervisor_types:
                 supervisor_types.append(supervisor_type)
@@ -946,6 +947,7 @@ class MASRouter:
         agent_allocation: AgentAllocation,
     ) -> dict[str, float]:
         """Predict performance metrics for the routing decision."""
+
         # Base predictions from optimization
         if optimization_result.estimated_cost is None:
             return {"cost": 0.0, "latency": 0.0, "quality": 0.0, "confidence": 0.0}
@@ -961,7 +963,7 @@ class MASRouter:
         predicted_cost = base_cost * agent_overhead_factor
         predicted_latency = base_latency + coordination_overhead
         predicted_quality = min(
-            base_quality + (agent_allocation.worker_count * 0.05), 1.0,
+            base_quality + (agent_allocation.worker_count * 0.05), 1.0
         )
 
         # Confidence based on analysis uncertainty
@@ -978,9 +980,10 @@ class MASRouter:
         """Select appropriate fallback strategy."""
         if complexity_analysis.priority_level == "critical":
             return "immediate_fallback"
-        if complexity_analysis.level == ComplexityLevel.SIMPLE:
+        elif complexity_analysis.level == ComplexityLevel.SIMPLE:
             return "retry_with_simpler_model"
-        return "graceful_degradation"
+        else:
+            return "graceful_degradation"
 
     def _select_monitoring_level(self, complexity_analysis: Any) -> str:
         """Select monitoring level based on complexity."""
@@ -989,10 +992,11 @@ class MASRouter:
             or complexity_analysis.uncertainty > 0.7
         ):
             return "detailed"
-        return "standard"
+        else:
+            return "standard"
 
     def _determine_context_requirements(
-        self, complexity_analysis: Any, context: dict[str, Any] | None,
+        self, complexity_analysis: Any, context: dict[str, Any] | None
     ) -> dict[str, Any]:
         """Determine context preservation requirements."""
         requirements: dict[str, Any] = {}
@@ -1027,7 +1031,7 @@ class MASRouter:
         return allocation
 
     def _create_fallback_decision(
-        self, query_id: str, query: str, error: Exception,
+        self, query_id: str, query: str, error: Exception
     ) -> RoutingDecision:
         """Create a safe fallback routing decision when routing fails."""
         logger.warning(f"Creating fallback decision for {query_id} due to: {error}")
@@ -1093,7 +1097,7 @@ class MASRouter:
             routing_strategy=self.default_strategy,
             collaboration_mode=CollaborationMode.DIRECT,
             agent_allocation=AgentAllocation(
-                supervisor_type="general", worker_count=1, worker_types=["general"],
+                supervisor_type="general", worker_count=1, worker_types=["general"]
             ),
             estimated_cost=0.0008,
             estimated_latency_ms=100,

@@ -28,7 +28,7 @@ class WorkingMemoryContext:
         self.last_activity = datetime.now()
 
     def get_relevant_context(
-        self, query: str, max_items: int = 5,
+        self, query: str, max_items: int = 5
     ) -> list[dict[str, Any]]:
         """Retrieve relevant context items."""
         all_context: list[dict[str, Any]] = []
@@ -40,7 +40,7 @@ class WorkingMemoryContext:
                     "type": "previous_query",
                     "content": hist_query,
                     "relevance": relevance,
-                },
+                }
             )
 
         all_context.sort(key=lambda x: float(x["relevance"]), reverse=True)
@@ -75,7 +75,7 @@ class WorkingMemoryManager:
         self._memories: dict[str, WorkingMemoryContext] = {}
 
     async def get_or_create(
-        self, session_id: str, user_id: str, project_id: str | None = None,
+        self, session_id: str, user_id: str, project_id: str | None = None
     ) -> WorkingMemoryContext:
         """Get or create working memory."""
         if session_id in self._memories:
@@ -84,7 +84,7 @@ class WorkingMemoryManager:
             return memory
 
         memory = WorkingMemoryContext(
-            session_id=session_id, user_id=user_id, project_id=project_id,
+            session_id=session_id, user_id=user_id, project_id=project_id
         )
         self._memories[session_id] = memory
         return memory
@@ -126,7 +126,7 @@ class EpisodicMemoryService:
         return event
 
     async def get_recent_context(
-        self, user_id: str, limit: int = 20,
+        self, user_id: str, limit: int = 20
     ) -> list[EpisodicEvent]:
         """Get recent events."""
         return []
@@ -155,7 +155,7 @@ class ProceduralMemoryService:
     """Learn and apply procedural knowledge."""
 
     async def get_applicable_skills(
-        self, query: str, domains: list[str], user_id: str,
+        self, query: str, domains: list[str], user_id: str
     ) -> list[dict[str, Any]]:
         """Get skills applicable to query."""
         return []
@@ -165,7 +165,7 @@ class QuerySuggestionService:
     """Generate intelligent query suggestions."""
 
     async def get_suggestions(
-        self, user_id: str, current_query: str,
+        self, user_id: str, current_query: str
     ) -> list[dict[str, Any]]:
         """Get context-aware suggestions."""
         return []

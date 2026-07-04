@@ -1,4 +1,5 @@
-"""Tests for Agent Factory.
+"""
+Tests for Agent Factory.
 
 Following TDD principles - tests written before implementation.
 """

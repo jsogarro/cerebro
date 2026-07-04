@@ -1,4 +1,5 @@
-"""DOCX export functionality using python-docx.
+"""
+DOCX export functionality using python-docx.
 
 This module provides DOCX generation from report data,
 following functional programming principles with pure transformation functions.
@@ -34,6 +35,7 @@ logger = get_logger()
 class DOCXExportError(Exception):
     """Exception raised during DOCX export."""
 
+    pass
 
 
 class DOCXExporter:
@@ -43,20 +45,20 @@ class DOCXExporter:
         """Initialize DOCX exporter."""
         if not PYTHON_DOCX_AVAILABLE:
             raise DOCXExportError(
-                "python-docx is not available. Install with: pip install python-docx",
+                "python-docx is not available. Install with: pip install python-docx"
             )
 
         self.settings = settings or ReportSettings()
 
     def export_to_docx(self, report: Report) -> ReportOutput:
-        """Export report to DOCX format.
+        """
+        Export report to DOCX format.
 
         Args:
             report: Report object to export
 
         Returns:
             ReportOutput with DOCX content
-
         """
         try:
             logger.info(f"Starting DOCX export for report: {report.id}")
@@ -168,7 +170,7 @@ class DOCXExporter:
         doc.add_paragraph()  # Empty line
         if report.configuration.author_name:
             author_paragraph = doc.add_paragraph(
-                f"Author: {report.configuration.author_name}",
+                f"Author: {report.configuration.author_name}"
             )
             author_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
@@ -177,7 +179,7 @@ class DOCXExporter:
             inst_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         date_paragraph = doc.add_paragraph(
-            f"Generated: {report.metadata.generated_at.strftime('%B %d, %Y')}",
+            f"Generated: {report.metadata.generated_at.strftime('%B %d, %Y')}"
         )
         date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
@@ -218,7 +220,7 @@ class DOCXExporter:
 
         if report.metadata.agents_used:
             metadata_items.append(
-                ("AI Agents Used", ", ".join(report.metadata.agents_used)),
+                ("AI Agents Used", ", ".join(report.metadata.agents_used))
             )
 
         for attribute, value in metadata_items:
@@ -244,7 +246,7 @@ class DOCXExporter:
 
         toc_paragraph = doc.add_paragraph(
             "Note: Table of contents can be generated in Microsoft Word using "
-            "References > Table of Contents after opening this document.",
+            "References > Table of Contents after opening this document."
         )
         toc_paragraph.style = "Metadata"
 
@@ -254,7 +256,7 @@ class DOCXExporter:
         """Add a report section to the document."""
         # Section heading
         heading_level = min(
-            section.level + 1, 6,
+            section.level + 1, 6
         )  # Word supports up to 6 heading levels
         doc.add_heading(section.title, level=heading_level)
 
@@ -270,7 +272,7 @@ class DOCXExporter:
         doc.add_paragraph()  # Empty line after section
 
     def _add_subsection(
-        self, doc: DocxDocument, subsection: ReportSection, level: int,
+        self, doc: DocxDocument, subsection: ReportSection, level: int
     ) -> None:
         """Add a subsection to the document."""
         heading_level = min(level + 1, 6)
@@ -287,7 +289,7 @@ class DOCXExporter:
         for i, citation in enumerate(report.citations, 1):
             # Format citation
             citation_text = citation.format_citation(
-                report.configuration.citation_style,
+                report.configuration.citation_style
             )
 
             # Add as numbered paragraph

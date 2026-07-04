@@ -31,7 +31,7 @@ def build_error_payload(
             "code": code,
             "message": message,
             "details": details or {},
-        },
+        }
     }
 
 
@@ -43,7 +43,7 @@ def _detail_to_error(
         code = str(
             detail.get("code")
             or detail.get("error_code")
-            or ERROR_CODES_BY_STATUS.get(status_code, "API_ERROR"),
+            or ERROR_CODES_BY_STATUS.get(status_code, "API_ERROR")
         )
         message = str(detail.get("message") or detail.get("error") or "Request failed")
         details = detail.get("details", {})

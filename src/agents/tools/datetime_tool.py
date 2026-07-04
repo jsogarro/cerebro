@@ -23,7 +23,7 @@ class DatetimeParams(BaseModel):
     date_iso: str | None = Field(None, description="ISO 8601 date (e.g., '2024-01-15')")
     days: int | None = Field(None, description="Number of days to add")
     other_date_iso: str | None = Field(
-        None, description="Second date for diff_days operation",
+        None, description="Second date for diff_days operation"
     )
 
 
@@ -70,7 +70,7 @@ class DatetimeTool(AgentTool[DatetimeParams]):
                 "timestamp": now.timestamp(),
             }
 
-        if operation == "day_of_week":
+        elif operation == "day_of_week":
             if not params.date_iso:
                 raise ValueError("date_iso is required for day_of_week operation")
             dt = self._parse_date(params.date_iso)
@@ -80,10 +80,10 @@ class DatetimeTool(AgentTool[DatetimeParams]):
                 "day_number": dt.isoweekday(),  # 1=Monday, 7=Sunday
             }
 
-        if operation == "add_days":
+        elif operation == "add_days":
             if not params.date_iso or params.days is None:
                 raise ValueError(
-                    "date_iso and days are required for add_days operation",
+                    "date_iso and days are required for add_days operation"
                 )
             dt = self._parse_date(params.date_iso)
             new_dt = dt + timedelta(days=params.days)
@@ -94,10 +94,10 @@ class DatetimeTool(AgentTool[DatetimeParams]):
                 "result_datetime_utc": new_dt.isoformat(),
             }
 
-        if operation == "diff_days":
+        elif operation == "diff_days":
             if not params.date_iso or not params.other_date_iso:
                 raise ValueError(
-                    "date_iso and other_date_iso are required for diff_days operation",
+                    "date_iso and other_date_iso are required for diff_days operation"
                 )
             dt1 = self._parse_date(params.date_iso)
             dt2 = self._parse_date(params.other_date_iso)
@@ -109,10 +109,11 @@ class DatetimeTool(AgentTool[DatetimeParams]):
                 "difference_seconds": diff.total_seconds(),
             }
 
-        raise ValueError(
-            f"Unknown operation '{operation}'. "
-            "Supported: current, day_of_week, add_days, diff_days",
-        )
+        else:
+            raise ValueError(
+                f"Unknown operation '{operation}'. "
+                "Supported: current, day_of_week, add_days, diff_days"
+            )
 
 
 __all__ = ["DatetimeParams", "DatetimeTool"]

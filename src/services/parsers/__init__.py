@@ -1,4 +1,5 @@
-"""Response parsing utilities for Gemini service.
+"""
+Response parsing utilities for Gemini service.
 
 This module provides parsers for different response formats from the Gemini API.
 """

@@ -66,12 +66,12 @@ def test_insight_synthesizer_preserves_research_summary_and_fallbacks() -> None:
                     "title": "A Comparative Framework",
                     "year": 2026,
                     "abstract": "x" * 151,
-                },
+                }
             ],
-        },
+        }
     )
     fallback_research = synthesizer.fallback_comparative_research(
-        {"items": ["A", "B"], "criteria": ["Quality"]},
+        {"items": ["A", "B"], "criteria": ["Quality"]}
     )
     fallback_stats = synthesizer.fallback_statistical_analysis({"items": ["A", "B"]})
 
@@ -90,7 +90,7 @@ async def test_insight_synthesizer_formats_methodology_citations() -> None:
         return_value={
             "success": True,
             "formatted_citations": ["Example, A. (2026). Comparative methods."],
-        },
+        }
     )
     info_messages: list[str] = []
     error_messages: list[str] = []
@@ -131,5 +131,5 @@ def test_comparative_agent_initializes_insight_synthesizer() -> None:
 
     assert isinstance(agent.insight_synthesizer, ComparativeInsightSynthesizer)
     assert agent._categorize_trade_offs(["Cost vs quality"]) == {
-        "cost": ["Cost vs quality"],
+        "cost": ["Cost vs quality"]
     }

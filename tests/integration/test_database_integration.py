@@ -1,4 +1,5 @@
-"""Database integration tests for the Research Platform.
+"""
+Database integration tests for the Research Platform.
 
 Tests in this file exercise schema-level guarantees (unique constraints,
 real foreign keys, real cascade deletes) and aggregation/window queries
@@ -52,7 +53,7 @@ class TestTransactionManagement:
         assert persisted_user.email == user.email
 
         result = await db_session.execute(
-            select(ResearchProject).where(ResearchProject.id == project.id),
+            select(ResearchProject).where(ResearchProject.id == project.id)
         )
         persisted_project = result.scalar_one()
         assert persisted_project.title == project.title
@@ -64,7 +65,7 @@ class TestTransactionManagement:
             "String(255), not a typed FK — the bogus value persists and commit "
             "succeeds. Un-skip when user_id becomes an enforced FK again, or rewrite "
             "to trigger rollback via a constraint that actually exists."
-        ),
+        )
     )
     @pytest.mark.asyncio
     async def test_transaction_rollback(self, db_session: AsyncSession) -> None:
@@ -118,7 +119,7 @@ class TestTransactionManagement:
         await db_session.commit()
 
         result = await db_session.execute(
-            select(User).where(User.email == shared_email),
+            select(User).where(User.email == shared_email)
         )
         survivors = result.scalars().all()
         assert len(survivors) == 1
@@ -135,7 +136,7 @@ class TestRepositoryIntegration:
             "get_by_email, get_by_username, create_with_password, update_password, "
             "etc. Coverage for the current API lives in "
             "tests/test_multi_tenancy_repositories.py."
-        ),
+        )
     )
     @pytest.mark.asyncio
     async def test_user_repository_crud(self, db_session: AsyncSession) -> None:
@@ -147,7 +148,7 @@ class TestRepositoryIntegration:
             "none exist on the current repository. The real query surface is "
             "get_by_user, search_projects, update_status, update_quality_score. "
             "Coverage lives in tests/test_multi_tenancy_repositories.py."
-        ),
+        )
     )
     @pytest.mark.asyncio
     async def test_research_repository_queries(self, db_session: AsyncSession) -> None:
@@ -159,7 +160,7 @@ class TestRepositoryIntegration:
             "(description, query_text, depth_level, agent_name) to create(dict). "
             "Neither the eager-load helper nor those columns exist on the current "
             "models. Coverage lives in tests/test_multi_tenancy_repositories.py."
-        ),
+        )
     )
     @pytest.mark.asyncio
     async def test_repository_relationships(self, db_session: AsyncSession) -> None:
@@ -178,8 +179,8 @@ class TestComplexQueries:
         # Count projects by status
         result = await db_session.execute(
             select(
-                ResearchProject.status, func.count(ResearchProject.id).label("count"),
-            ).group_by(ResearchProject.status),
+                ResearchProject.status, func.count(ResearchProject.id).label("count")
+            ).group_by(ResearchProject.status)
         )
 
         status_counts = {row.status: row.count for row in result}
@@ -190,7 +191,7 @@ class TestComplexQueries:
             select(
                 ResearchResult.agent_type,
                 func.avg(ResearchResult.confidence_score).label("avg_confidence"),
-            ).group_by(ResearchResult.agent_type),
+            ).group_by(ResearchResult.agent_type)
         )
 
         agent_scores = {row.agent_type: row.avg_confidence for row in result}
@@ -202,7 +203,7 @@ class TestComplexQueries:
             "rejects the equality with 'operator does not exist: uuid = character "
             "varying' because user_id is no longer a typed FK to users.id. Un-skip "
             "after restoring a typed FK or rewrite to cast explicitly."
-        ),
+        )
     )
     @pytest.mark.asyncio
     async def test_join_queries(self, db_session: AsyncSession) -> None:
@@ -212,7 +213,7 @@ class TestComplexQueries:
         reason=(
             "User.id IN (select ResearchProject.user_id ...) hits the same UUID vs "
             "String type mismatch as test_join_queries — see that test's reason."
-        ),
+        )
     )
     @pytest.mark.asyncio
     async def test_subquery_operations(self, db_session: AsyncSession) -> None:
@@ -239,7 +240,7 @@ class TestComplexQueries:
                     order_by=desc(ResearchProject.created_at),
                 )
                 .label("rank"),
-            ),
+            )
         )
 
         ranked_projects = result.all()

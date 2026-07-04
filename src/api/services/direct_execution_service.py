@@ -1,4 +1,5 @@
-"""Direct Execution Service
+"""
+Direct Execution Service
 
 Replaces Temporal workflows with direct MASR routing and supervisor execution.
 Provides the same functionality as Temporal workflows but with a simpler,
@@ -72,7 +73,8 @@ class ExecutionStatus:
 
 
 class DirectExecutionService:
-    """Direct execution service using MASR routing and supervisor coordination.
+    """
+    Direct execution service using MASR routing and supervisor coordination.
 
     Replaces Temporal workflows with simplified direct execution that provides
     the same functionality with better performance and easier debugging.
@@ -88,6 +90,7 @@ class DirectExecutionService:
         session_factory: Any | None = None,
     ):
         """Initialize direct execution service."""
+
         # Initialize components (would be injected in production)
         self.gemini_service = gemini_service
         self.masr_router = masr_router or MASRouter()
@@ -121,7 +124,8 @@ class DirectExecutionService:
         }
 
     async def _checkpoint(self, execution_status: ExecutionStatus, phase: str) -> None:
-        """Create a checkpoint for the current execution state.
+        """
+        Create a checkpoint for the current execution state.
 
         Gracefully degrades when DB is unavailable — logs and continues.
         """
@@ -177,9 +181,10 @@ class DirectExecutionService:
             )
 
     async def start_research_execution(
-        self, project: ResearchProject, context: dict[str, Any] | None = None,
+        self, project: ResearchProject, context: dict[str, Any] | None = None
     ) -> str:
-        """Start direct research execution using MASR routing.
+        """
+        Start direct research execution using MASR routing.
 
         Args:
             project: Research project to execute
@@ -187,14 +192,14 @@ class DirectExecutionService:
 
         Returns:
             Execution ID for tracking progress
-
         """
+
         execution_id = str(uuid.uuid4())
 
         # Check capacity
         if len(self.active_executions) >= self.max_concurrent_executions:
             raise RuntimeError(
-                f"Maximum concurrent executions ({self.max_concurrent_executions}) reached",
+                f"Maximum concurrent executions ({self.max_concurrent_executions}) reached"
             )
 
         # Create execution status
@@ -211,7 +216,7 @@ class DirectExecutionService:
 
         # Start execution asynchronously
         task = asyncio.create_task(
-            self._execute_research_workflow(project, execution_status, context),
+            self._execute_research_workflow(project, execution_status, context)
         )
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
@@ -228,7 +233,8 @@ class DirectExecutionService:
         routing_context: dict[str, Any],
         supervisor_registry: dict[str, type[Any]],
     ) -> dict[str, Any]:
-        """Execute a single domain's sub-query via its supervisor.
+        """
+        Execute a single domain's sub-query via its supervisor.
 
         Args:
             domain: Domain name (research, content, analytics, finance)
@@ -239,12 +245,11 @@ class DirectExecutionService:
 
         Returns:
             Domain result dict with output, quality_score, and metadata
-
         """
         try:
             # Route domain-specific query
             routing_decision = await self.masr_router.route(
-                query=sub_query, context={**routing_context, "domain": domain},
+                query=sub_query, context={**routing_context, "domain": domain}
             )
 
             # Create task for this domain
@@ -285,11 +290,12 @@ class DirectExecutionService:
                     "workers_used": supervisor_result.workers_used,
                     "execution_time_seconds": supervisor_result.execution_time_seconds,
                 }
-            return {
-                "domain": domain,
-                "status": "failed",
-                "errors": supervisor_result.errors,
-            }
+            else:
+                return {
+                    "domain": domain,
+                    "status": "failed",
+                    "errors": supervisor_result.errors,
+                }
 
         except Exception as e:
             logger.error(f"Domain supervisor execution failed for {domain}: {e}")
@@ -301,7 +307,8 @@ class DirectExecutionService:
         succeeded_domains: list[str],
         failed_domains: list[dict[str, Any]],
     ) -> tuple[str, float]:
-        """Use LLM synthesis to compose per-domain outputs into one coherent answer.
+        """
+        Use LLM synthesis to compose per-domain outputs into one coherent answer.
 
         Args:
             domain_outputs: Dict mapping domain names to their outputs
@@ -313,7 +320,6 @@ class DirectExecutionService:
 
         Raises:
             Exception: If synthesis fails (caller handles fallback)
-
         """
         settings = get_settings()
         char_limit = settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT
@@ -363,9 +369,10 @@ class DirectExecutionService:
         return comprehensive_narrative, confidence
 
     async def _merge_domain_results(
-        self, domain_results: list[dict[str, Any]],
+        self, domain_results: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        """Merge per-domain results into one coherent result.
+        """
+        Merge per-domain results into one coherent result.
 
         Uses labeled concatenation (default) or LLM synthesis based on
         MULTI_DOMAIN_MERGE_STRATEGY config. LLM synthesis composes per-domain
@@ -376,7 +383,6 @@ class DirectExecutionService:
 
         Returns:
             Merged result with combined outputs and aggregated metadata
-
         """
         settings = get_settings()
         merge_strategy = settings.MULTI_DOMAIN_MERGE_STRATEGY
@@ -397,15 +403,15 @@ class DirectExecutionService:
                 merged_output[domain] = result.get("output", {})
                 quality_scores[f"{domain}_quality"] = result.get("quality_score", 0.0)
                 quality_scores[f"{domain}_consensus"] = result.get(
-                    "consensus_score", 0.0,
+                    "consensus_score", 0.0
                 )
                 workers_used_total += result.get("workers_used", 0)
                 execution_time_max = max(
-                    execution_time_max, result.get("execution_time_seconds", 0.0),
+                    execution_time_max, result.get("execution_time_seconds", 0.0)
                 )
             else:
                 failed_domains.append(
-                    {"domain": domain, "errors": result.get("errors", [])},
+                    {"domain": domain, "errors": result.get("errors", [])}
                 )
 
         # Attempt LLM synthesis if configured
@@ -416,7 +422,7 @@ class DirectExecutionService:
                     synthesized_output,
                     synthesis_confidence,
                 ) = await self._synthesize_domain_outputs(
-                    merged_output, succeeded_domains, failed_domains,
+                    merged_output, succeeded_domains, failed_domains
                 )
                 # Use synthesized output as primary while preserving per-domain outputs
                 final_output = {
@@ -426,7 +432,7 @@ class DirectExecutionService:
                 actual_strategy = "llm"
             except Exception as e:
                 logger.warning(
-                    f"LLM synthesis failed, falling back to concatenation: {e!s}",
+                    f"LLM synthesis failed, falling back to concatenation: {e!s}"
                 )
                 final_output = merged_output
                 actual_strategy = "concat_fallback"
@@ -456,7 +462,7 @@ class DirectExecutionService:
         }
 
     @retry(
-        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10),
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
     )
     async def _execute_research_workflow(
         self,
@@ -464,14 +470,15 @@ class DirectExecutionService:
         execution_status: ExecutionStatus,
         context: dict[str, Any] | None = None,
     ) -> None:
-        """Execute research workflow with retry logic.
+        """
+        Execute research workflow with retry logic.
 
         Args:
             project: Research project to execute
             execution_status: Execution status tracker
             context: Additional context
-
         """
+
         try:
             execution_status.status = "running"
             execution_status.current_phase = "masr_routing"
@@ -492,7 +499,7 @@ class DirectExecutionService:
                 routing_context.update(context)
 
             routing_decision = await self.masr_router.route(
-                query=project.query.text, context=routing_context,
+                query=project.query.text, context=routing_context
             )
 
             execution_status.routing_decision = asdict(routing_decision)
@@ -524,7 +531,7 @@ class DirectExecutionService:
             if is_multi_domain and decomposition is not None:
                 # Type narrowing: decomposition is non-None here
                 logger.info(
-                    f"Multi-domain query detected: {decomposition.detected_domains}",
+                    f"Multi-domain query detected: {decomposition.detected_domains}"
                 )
                 execution_status.current_phase = "multi_domain_execution"
                 execution_status.progress_percentage = 30.0
@@ -537,7 +544,7 @@ class DirectExecutionService:
                 current_decomposition = decomposition
 
                 async def bounded_domain_execution(
-                    domain: str, sub_query: str,
+                    domain: str, sub_query: str
                 ) -> dict[str, Any]:
                     async with semaphore:
                         return await self._execute_domain_supervisor(
@@ -551,14 +558,14 @@ class DirectExecutionService:
                 # Dispatch all domain sub-queries concurrently
                 domain_tasks = [
                     bounded_domain_execution(
-                        domain, current_decomposition.domain_subqueries[domain],
+                        domain, current_decomposition.domain_subqueries[domain]
                     )
                     for domain in current_decomposition.detected_domains
                 ]
 
                 # Gather with return_exceptions to handle partial failures
                 domain_results = await asyncio.gather(
-                    *domain_tasks, return_exceptions=True,
+                    *domain_tasks, return_exceptions=True
                 )
 
                 # Convert exceptions to error result dicts
@@ -572,7 +579,7 @@ class DirectExecutionService:
                                 "domain": domain,
                                 "status": "failed",
                                 "errors": [str(result)],
-                            },
+                            }
                         )
                     else:
                         # Type narrowing: result is dict[str, Any] here
@@ -600,14 +607,14 @@ class DirectExecutionService:
                     if merged["failed_domains"]:
                         execution_status.warnings.append(
                             f"Partial success: {len(merged['failed_domains'])} "
-                            f"domain(s) failed: {merged['failed_domains']}",
+                            f"domain(s) failed: {merged['failed_domains']}"
                         )
 
                     await self._checkpoint(execution_status, "completed")
                     logger.info(
                         f"Multi-domain execution {execution_status.execution_id} completed: "
                         f"{len(merged['succeeded_domains'])} succeeded, "
-                        f"{len(merged['failed_domains'])} failed",
+                        f"{len(merged['failed_domains'])} failed"
                     )
                 else:
                     execution_status.status = "failed"
@@ -615,13 +622,13 @@ class DirectExecutionService:
                     execution_status.current_phase = "failed"
                     self.execution_stats["failed_executions"] += 1
                     logger.error(
-                        f"Multi-domain execution {execution_status.execution_id} failed: all domains failed",
+                        f"Multi-domain execution {execution_status.execution_id} failed: all domains failed"
                     )
 
             else:
                 # Single-domain execution (existing path)
                 logger.info(
-                    f"Executing via {routing_decision.agent_allocation.supervisor_type} supervisor",
+                    f"Executing via {routing_decision.agent_allocation.supervisor_type} supervisor"
                 )
 
                 agent_task = AgentTask(
@@ -689,7 +696,7 @@ class DirectExecutionService:
                     await self._checkpoint(execution_status, "completed")
 
                     logger.info(
-                        f"Direct execution {execution_status.execution_id} completed successfully",
+                        f"Direct execution {execution_status.execution_id} completed successfully"
                     )
 
                 else:
@@ -701,12 +708,12 @@ class DirectExecutionService:
                     self.execution_stats["failed_executions"] += 1
 
                     logger.error(
-                        f"Direct execution {execution_status.execution_id} failed: {supervisor_result.errors}",
+                        f"Direct execution {execution_status.execution_id} failed: {supervisor_result.errors}"
                     )
 
         except Exception as e:
             logger.error(
-                f"Direct execution {execution_status.execution_id} failed with exception: {e}",
+                f"Direct execution {execution_status.execution_id} failed with exception: {e}"
             )
 
             execution_status.status = "failed"
@@ -752,28 +759,30 @@ class DirectExecutionService:
 
     async def get_execution_results(self, execution_id: str) -> dict[str, Any] | None:
         """Get results of completed execution."""
+
         execution = self.active_executions.get(execution_id)
         if not execution:
             return None
 
         if execution.status == "completed":
             return execution.final_output
-        if execution.status == "failed":
+        elif execution.status == "failed":
             return {"error": "Execution failed", "details": execution.errors}
-        return {
-            "status": execution.status,
-            "progress": execution.progress_percentage,
-        }
+        else:
+            return {
+                "status": execution.status,
+                "progress": execution.progress_percentage,
+            }
 
     async def resume_execution(self, project_id: uuid.UUID) -> str | None:
-        """Resume execution from the latest recoverable checkpoint.
+        """
+        Resume execution from the latest recoverable checkpoint.
 
         Args:
             project_id: Project UUID to resume
 
         Returns:
             Execution ID if resumed successfully, None otherwise
-
         """
         if not self.session_factory:
             logger.warning(
@@ -847,6 +856,7 @@ class DirectExecutionService:
 
     async def cancel_execution(self, execution_id: str) -> bool:
         """Cancel active execution."""
+
         execution = self.active_executions.get(execution_id)
         if not execution:
             return False
@@ -872,6 +882,7 @@ class DirectExecutionService:
 
     async def cleanup_completed_executions(self, max_age_hours: int = 24) -> int:
         """Clean up old completed executions."""
+
         cutoff_time = datetime.now(UTC) - timedelta(hours=max_age_hours)
 
         executions_to_remove = [
@@ -901,6 +912,7 @@ class DirectExecutionService:
         no PROGRESS event ever reached a subscribed ``/ws`` client during a
         live query.
         """
+
         if not self.event_publisher:
             return
 
@@ -931,6 +943,7 @@ class DirectExecutionService:
 
     async def get_service_stats(self) -> dict[str, Any]:
         """Get service statistics."""
+
         return {
             "execution_stats": self.execution_stats.copy(),
             "active_executions": len(self.active_executions),
@@ -961,6 +974,7 @@ class DirectExecutionService:
 
     async def health_check(self) -> dict[str, Any]:
         """Perform health check on service components."""
+
         components: dict[str, str] = {}
 
         # Check MASR router health
@@ -978,7 +992,7 @@ class DirectExecutionService:
             try:
                 bridge_health = await self.supervisor_bridge.health_check()
                 components["supervisor_bridge"] = str(
-                    bridge_health.get("status", "unknown"),
+                    bridge_health.get("status", "unknown")
                 )
             except Exception as e:
                 components["supervisor_bridge"] = f"unhealthy: {e}"
@@ -990,7 +1004,7 @@ class DirectExecutionService:
             try:
                 factory_health = await self.supervisor_factory.health_check()
                 components["supervisor_factory"] = str(
-                    factory_health.get("status", "unknown"),
+                    factory_health.get("status", "unknown")
                 )
             except Exception as e:
                 components["supervisor_factory"] = f"unhealthy: {e}"
@@ -1020,7 +1034,7 @@ class DirectExecutionService:
 async def create_research_plan(project_data: dict[str, Any]) -> dict[str, Any]:
     """Legacy function for compatibility during migration."""
     logger.warning(
-        "Using legacy create_research_plan - should migrate to direct execution",
+        "Using legacy create_research_plan - should migrate to direct execution"
     )
 
     return {
@@ -1067,7 +1081,7 @@ def get_direct_execution_service(
 
     if _direct_execution_service is None:
         _direct_execution_service = DirectExecutionService(
-            gemini_service=gemini_service,
+            gemini_service=gemini_service
         )
 
     return _direct_execution_service

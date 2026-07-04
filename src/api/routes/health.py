@@ -1,4 +1,5 @@
-"""Health check endpoints for Research Platform.
+"""
+Health check endpoints for Research Platform.
 """
 
 from fastapi import APIRouter, status
@@ -11,7 +12,7 @@ router = APIRouter()
 async def health_check() -> JSONResponse:
     """Basic health check endpoint."""
     return JSONResponse(
-        content={"status": "healthy", "service": "research-platform-api"},
+        content={"status": "healthy", "service": "research-platform-api"}
     )
 
 
@@ -31,7 +32,7 @@ async def readiness_check() -> JSONResponse:
                 "redis": "ok",
                 "temporal": "ok",
             },
-        },
+        }
     )
 
 

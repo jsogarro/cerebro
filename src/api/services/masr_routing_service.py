@@ -1,4 +1,5 @@
-"""MASR Routing Service Layer
+"""
+MASR Routing Service Layer
 
 Service layer for MASR routing intelligence, providing high-level
 interfaces to the MASR router and supervisor bridge systems.
@@ -44,7 +45,8 @@ from src.utils.type_coercion import coerce_float
 
 
 class MASRRoutingService:
-    """High-level service for MASR routing intelligence.
+    """
+    High-level service for MASR routing intelligence.
 
     Provides REST API access to MASR router capabilities including:
     - Intelligent routing decisions
@@ -63,7 +65,7 @@ class MASRRoutingService:
         self.bridge = MASRSupervisorBridge()
         base_cost_optimizer = CostOptimizer()
         self.cost_optimizer = HierarchicalCostOptimizer(
-            base_cost_optimizer=base_cost_optimizer,
+            base_cost_optimizer=base_cost_optimizer
         )
         self.config_manager = SupervisorConfigurationManager()
         self.feedback_learner = SupervisionFeedbackLearner()
@@ -85,21 +87,21 @@ class MASRRoutingService:
         self.start_time = datetime.now(UTC)
 
     async def get_routing_decision(
-        self, request: RoutingRequest,
+        self, request: RoutingRequest
     ) -> RoutingDecisionResponse:
-        """Get intelligent routing decision for a query.
+        """
+        Get intelligent routing decision for a query.
 
         Args:
             request: Routing request with query and constraints
 
         Returns:
             RoutingDecisionResponse with routing decision and allocations
-
         """
         try:
             # Get routing decision
             decision = await self.router.route(
-                request.query, context=request.context, strategy=request.strategy,
+                request.query, context=request.context, strategy=request.strategy
             )
 
             # Generate unique routing ID
@@ -117,7 +119,7 @@ class MASRRoutingService:
                         worker_count=supervisor.get("worker_count", 3),
                         refinement_rounds=supervisor.get("refinement_rounds", 1),
                         estimated_latency_ms=supervisor.get(
-                            "estimated_latency_ms", 1000,
+                            "estimated_latency_ms", 1000
                         ),
                     )
                     supervisor_allocations.append(allocation)
@@ -190,16 +192,16 @@ class MASRRoutingService:
             raise e
 
     async def estimate_cost(
-        self, request: CostEstimationRequest,
+        self, request: CostEstimationRequest
     ) -> CostEstimationResponse:
-        """Estimate cost for query execution with breakdown.
+        """
+        Estimate cost for query execution with breakdown.
 
         Args:
             request: Cost estimation request
 
         Returns:
             CostEstimationResponse with detailed breakdown
-
         """
         # Get routing decision for cost calculation
         decision = await self.router.route(request.query, strategy=request.strategy)
@@ -252,7 +254,7 @@ class MASRRoutingService:
             confidence_score=decision.confidence_score,
             cost_factors={
                 "query_complexity": coerce_float(
-                    complexity_value, 0.5, min_val=0.0, max_val=1.0,
+                    complexity_value, 0.5, min_val=0.0, max_val=1.0
                 ),
                 "model_tier": float(model_tier_map.get(model_tier, 2.0)),
                 "supervisor_count": 1.0,
@@ -265,16 +267,16 @@ class MASRRoutingService:
         return response
 
     async def evaluate_strategies(
-        self, request: StrategyEvaluationRequest,
+        self, request: StrategyEvaluationRequest
     ) -> StrategyEvaluationResponse:
-        """Evaluate and compare routing strategies.
+        """
+        Evaluate and compare routing strategies.
 
         Args:
             request: Strategy evaluation request
 
         Returns:
             StrategyEvaluationResponse with comparisons
-
         """
         # Determine strategies to evaluate
         strategies = request.strategies or list(RoutingStrategy)
@@ -337,16 +339,16 @@ class MASRRoutingService:
         return response
 
     async def analyze_complexity(
-        self, request: ComplexityAnalysisRequest,
+        self, request: ComplexityAnalysisRequest
     ) -> ComplexityAnalysisResponse:
-        """Analyze query complexity with feature breakdown.
+        """
+        Analyze query complexity with feature breakdown.
 
         Args:
             request: Complexity analysis request
 
         Returns:
             ComplexityAnalysisResponse with detailed analysis
-
         """
         # Get routing decision
         decision = await self.router.route(request.query)
@@ -399,14 +401,14 @@ class MASRRoutingService:
         return response
 
     async def submit_feedback(self, feedback: RoutingFeedback) -> dict[str, Any]:
-        """Submit feedback for routing decision learning.
+        """
+        Submit feedback for routing decision learning.
 
         Args:
             feedback: Routing feedback with actual metrics
 
         Returns:
             Acknowledgment response
-
         """
         # Get original routing decision
         if feedback.routing_id not in self.routing_history:
@@ -432,11 +434,11 @@ class MASRRoutingService:
         }
 
     async def get_available_strategies(self) -> StrategiesListResponse:
-        """Get list of available routing strategies.
+        """
+        Get list of available routing strategies.
 
         Returns:
             StrategiesListResponse with strategy details
-
         """
         strategies = []
 
@@ -460,11 +462,11 @@ class MASRRoutingService:
         return response
 
     async def get_available_models(self) -> ModelsListResponse:
-        """Get list of available models and tiers.
+        """
+        Get list of available models and tiers.
 
         Returns:
             ModelsListResponse with model information
-
         """
         models = []
         tiers: dict[str, list[str]] = {}
@@ -501,11 +503,11 @@ class MASRRoutingService:
         return response
 
     async def get_router_status(self) -> RouterStatus:
-        """Get MASR router health and performance status.
+        """
+        Get MASR router health and performance status.
 
         Returns:
             RouterStatus with health and metrics
-
         """
         # Calculate uptime
         uptime = (datetime.now(UTC) - self.start_time).total_seconds()
@@ -541,7 +543,7 @@ class MASRRoutingService:
 
         # Calculate total routes as int
         total_routes_int = int(
-            sum(m["total_requests"] for m in self.performance_metrics.values()),
+            sum(m["total_requests"] for m in self.performance_metrics.values())
         )
 
         # Determine overall status
@@ -624,7 +626,7 @@ class MASRRoutingService:
         return reasoning
 
     def _get_alternatives(
-        self, decision: RoutingDecision,
+        self, decision: RoutingDecision
     ) -> list[dict[str, Any]] | None:
         """Get alternative routing options considered"""
         alternatives = []
@@ -639,9 +641,9 @@ class MASRRoutingService:
                         "estimated_cost": decision.estimated_cost * 0.9,
                         "estimated_latency": decision.estimated_latency_ms * 0.9,
                         "reason_not_selected": self._get_rejection_reason(
-                            strategy, current_strategy,
+                            strategy, current_strategy
                         ),
-                    },
+                    }
                 )
 
         return alternatives[:3]
@@ -660,7 +662,7 @@ class MASRRoutingService:
             metrics["success_rate"] = 0.1 * 0.0 + 0.9 * metrics["success_rate"]
 
     def _update_performance_from_feedback(
-        self, strategy: RoutingStrategy, feedback: RoutingFeedback,
+        self, strategy: RoutingStrategy, feedback: RoutingFeedback
     ) -> None:
         """Update performance metrics from feedback"""
         metrics = self.performance_metrics[strategy.value]
@@ -720,7 +722,7 @@ class MASRRoutingService:
 
         if decision.estimated_cost > 0.5:
             recommendations.append(
-                "Consider using cost_efficient strategy for similar queries",
+                "Consider using cost_efficient strategy for similar queries"
             )
 
         complexity = (
@@ -730,7 +732,7 @@ class MASRRoutingService:
         )
         if complexity == ComplexityLevel.SIMPLE:
             recommendations.append(
-                "Simple queries can use budget tier models effectively",
+                "Simple queries can use budget tier models effectively"
             )
 
         worker_count = (
@@ -740,13 +742,13 @@ class MASRRoutingService:
         )
         if worker_count > 2:
             recommendations.append(
-                "Multiple supervisors increase coordination overhead",
+                "Multiple supervisors increase coordination overhead"
             )
 
         return recommendations
 
     def _estimate_quality(
-        self, strategy: RoutingStrategy, analysis: ComplexityAnalysis,
+        self, strategy: RoutingStrategy, analysis: ComplexityAnalysis
     ) -> float:
         """Estimate quality for a strategy"""
         base_quality = {
@@ -882,7 +884,7 @@ class MASRRoutingService:
         return trade_offs.get(strategy, {})
 
     def _generate_strategy_reasoning(
-        self, strategy: RoutingStrategy, comparisons: list[StrategyComparison],
+        self, strategy: RoutingStrategy, comparisons: list[StrategyComparison]
     ) -> str:
         """Generate reasoning for strategy recommendation"""
         reasoning = f"{strategy.value} strategy is recommended because it "
@@ -907,9 +909,9 @@ class MASRRoutingService:
             level = analysis.level
             if level == ComplexityLevel.SIMPLE:
                 return 1
-            if level == ComplexityLevel.MODERATE:
+            elif level == ComplexityLevel.MODERATE:
                 return 2
-            if level == ComplexityLevel.COMPLEX:
+            elif level == ComplexityLevel.COMPLEX:
                 return 3
         return 2
 
@@ -938,11 +940,12 @@ class MASRRoutingService:
             level = analysis.level
             if level == ComplexityLevel.SIMPLE:
                 return "Minimal coordination - single agent sufficient"
-            if level == ComplexityLevel.MODERATE:
+            elif level == ComplexityLevel.MODERATE:
                 return "Moderate coordination - 2-3 agents working sequentially"
-            if level == ComplexityLevel.COMPLEX:
+            elif level == ComplexityLevel.COMPLEX:
                 return "High coordination - multiple agents with refinement"
-            return "Extensive coordination - multi-supervisor orchestration"
+            else:
+                return "Extensive coordination - multi-supervisor orchestration"
         return "Moderate coordination - 2-3 agents working sequentially"
 
     def _recommend_approach(self, analysis: Any) -> str:
@@ -951,11 +954,12 @@ class MASRRoutingService:
             level = analysis.level
             if level == ComplexityLevel.SIMPLE:
                 return "Direct single-agent execution with minimal overhead"
-            if level == ComplexityLevel.MODERATE:
+            elif level == ComplexityLevel.MODERATE:
                 return "Chain-of-Agents pattern with sequential coordination"
-            if level == ComplexityLevel.COMPLEX:
+            elif level == ComplexityLevel.COMPLEX:
                 return "Hierarchical supervision with multiple refinement rounds"
-            return "Multi-supervisor orchestration with cross-domain synthesis"
+            else:
+                return "Multi-supervisor orchestration with cross-domain synthesis"
         return "Chain-of-Agents pattern with sequential coordination"
 
     def _generate_routing_recommendations(self, analysis: Any) -> list[str]:
@@ -970,7 +974,7 @@ class MASRRoutingService:
                 recommendations.append("Single supervisor allocation is sufficient")
             elif level == ComplexityLevel.COMPLEX:
                 recommendations.append(
-                    "Consider quality-focused strategy for best results",
+                    "Consider quality-focused strategy for best results"
                 )
                 recommendations.append("Multiple refinement rounds recommended")
 
@@ -984,7 +988,7 @@ class MASRRoutingService:
             first_domain = analysis.domains[0]
             if first_domain == QueryDomain.RESEARCH:
                 recommendations.append(
-                    "Allocate research supervisor with citation agents",
+                    "Allocate research supervisor with citation agents"
                 )
             elif first_domain == QueryDomain.ANALYTICS:
                 recommendations.append("Include data analysis and visualization agents")
@@ -992,7 +996,7 @@ class MASRRoutingService:
         return recommendations
 
     def _get_rejection_reason(
-        self, strategy: RoutingStrategy, selected: RoutingStrategy,
+        self, strategy: RoutingStrategy, selected: RoutingStrategy
     ) -> str:
         """Get reason why a strategy wasn't selected"""
         if (
@@ -1000,17 +1004,18 @@ class MASRRoutingService:
             and selected == RoutingStrategy.QUALITY_FOCUSED
         ):
             return "Quality requirements exceeded cost-efficient capabilities"
-        if (
+        elif (
             strategy == RoutingStrategy.QUALITY_FOCUSED
             and selected == RoutingStrategy.COST_EFFICIENT
         ):
             return "Cost constraints made quality-focused approach infeasible"
-        if (
+        elif (
             strategy == RoutingStrategy.SPEED_FIRST
             and selected != RoutingStrategy.SPEED_FIRST
         ):
             return "Query complexity requires more thorough processing"
-        return f"Selected strategy better optimizes for {self._get_optimization_focus(selected)}"
+        else:
+            return f"Selected strategy better optimizes for {self._get_optimization_focus(selected)}"
 
     def _check_model_availability(self) -> dict[str, bool]:
         """Check availability of model providers"""

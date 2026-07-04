@@ -1,4 +1,5 @@
-"""Base class for MCP tools.
+"""
+Base class for MCP tools.
 
 Provides common functionality for all MCP tool implementations.
 """
@@ -20,7 +21,7 @@ class ToolParameter(BaseModel):
     description: str = Field(..., description="Parameter description")
     required: bool = Field(default=True, description="Whether parameter is required")
     default: Any | None = Field(
-        default=None, description="Default value if not required",
+        default=None, description="Default value if not required"
     )
 
 
@@ -31,29 +32,30 @@ class ToolMetadata(BaseModel):
     description: str = Field(..., description="Tool description")
     version: str = Field(default="1.0.0", description="Tool version")
     parameters: list[ToolParameter] = Field(
-        default_factory=list, description="Tool parameters",
+        default_factory=list, description="Tool parameters"
     )
     examples: list[dict[str, Any]] = Field(
-        default_factory=list, description="Usage examples",
+        default_factory=list, description="Usage examples"
     )
     tags: list[str] = Field(
-        default_factory=list, description="Tool tags for categorization",
+        default_factory=list, description="Tool tags for categorization"
     )
 
 
 class BaseMCPTool(ABC):
-    """Abstract base class for MCP tools.
+    """
+    Abstract base class for MCP tools.
 
     All MCP tools must inherit from this class and implement
     the required methods.
     """
 
     def __init__(self, config: dict[str, Any] | None = None):
-        """Initialize the MCP tool.
+        """
+        Initialize the MCP tool.
 
         Args:
             config: Optional configuration dictionary
-
         """
         self.config = config or {}
         self.logger = get_logger(self.__class__.__name__)
@@ -61,80 +63,82 @@ class BaseMCPTool(ABC):
 
     @abstractmethod
     def _build_metadata(self) -> ToolMetadata:
-        """Build tool metadata.
+        """
+        Build tool metadata.
 
         Returns:
             Tool metadata object
-
         """
+        pass
 
     @abstractmethod
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """Execute the tool with given parameters.
+        """
+        Execute the tool with given parameters.
 
         Args:
             **kwargs: Tool parameters
 
         Returns:
             Tool execution result
-
         """
+        pass
 
     async def validate_parameters(self, **kwargs: Any) -> bool:
-        """Validate tool parameters.
+        """
+        Validate tool parameters.
 
         Args:
             **kwargs: Parameters to validate
 
         Returns:
             True if valid, False otherwise
-
         """
         required_params = [p.name for p in self._metadata.parameters if p.required]
 
         for param in required_params:
             if param not in kwargs:
                 self.logger.error(
-                    "mcp_tool_missing_required_parameter", parameter=param,
+                    "mcp_tool_missing_required_parameter", parameter=param
                 )
                 return False
 
         return True
 
     def get_metadata(self) -> ToolMetadata:
-        """Get tool metadata.
+        """
+        Get tool metadata.
 
         Returns:
             Tool metadata
-
         """
         return self._metadata
 
     def get_name(self) -> str:
-        """Get tool name.
+        """
+        Get tool name.
 
         Returns:
             Tool name
-
         """
         return self._metadata.name
 
     def get_description(self) -> str:
-        """Get tool description.
+        """
+        Get tool description.
 
         Returns:
             Tool description
-
         """
         return self._metadata.description
 
     def log_execution(self, params: dict[str, Any], result: dict[str, Any]) -> None:
-        """Log tool execution for monitoring.
+        """
+        Log tool execution for monitoring.
 
         Args:
             params: Execution parameters
             result: Execution result
-
         """
         self.logger.info(
             "mcp_tool_executed",
@@ -145,9 +149,10 @@ class BaseMCPTool(ABC):
         )
 
     async def handle_error(
-        self, error: Exception, params: dict[str, Any],
+        self, error: Exception, params: dict[str, Any]
     ) -> dict[str, Any]:
-        """Handle tool execution errors.
+        """
+        Handle tool execution errors.
 
         Args:
             error: Exception that occurred
@@ -155,7 +160,6 @@ class BaseMCPTool(ABC):
 
         Returns:
             Error response dictionary
-
         """
         self.logger.error(
             "mcp_tool_failed",
@@ -172,14 +176,14 @@ class BaseMCPTool(ABC):
         }
 
     async def __call__(self, **kwargs: Any) -> dict[str, Any]:
-        """Make tool callable.
+        """
+        Make tool callable.
 
         Args:
             **kwargs: Tool parameters
 
         Returns:
             Tool execution result
-
         """
         try:
             # Validate parameters

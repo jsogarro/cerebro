@@ -44,7 +44,7 @@ class ReportOutputGenerator:
         self._docx_exporter: DOCXExporter | None = None
 
     async def generate_formats(
-        self, report: Report, formats: list[ReportFormat],
+        self, report: Report, formats: list[ReportFormat]
     ) -> dict[ReportFormat, ReportOutput]:
         """Generate report outputs in the requested formats."""
         outputs = {}
@@ -69,7 +69,7 @@ class ReportOutputGenerator:
         return outputs
 
     async def generate_single_format(
-        self, report: Report, format: ReportFormat,
+        self, report: Report, format: ReportFormat
     ) -> ReportOutput:
         """Generate report output in a single format."""
         if format == ReportFormat.HTML:
@@ -124,7 +124,7 @@ class ReportOutputGenerator:
             markdown += "## References\n\n"
             for citation in report.citations:
                 formatted = citation.format_citation(
-                    report.configuration.citation_style,
+                    report.configuration.citation_style
                 )
                 markdown += f"- {formatted}\n"
 
@@ -157,7 +157,7 @@ class ReportOutputGenerator:
                 html_output = await self.generate_html(report)
                 if isinstance(html_output.content, str):
                     return self._get_pdf_exporter().export_to_pdf(
-                        html_output.content, report,
+                        html_output.content, report
                     )
             except PDFExportError as e:
                 logger.warning(f"PDF export unavailable, using legacy placeholder: {e}")
@@ -179,7 +179,7 @@ class ReportOutputGenerator:
                 return self._get_latex_exporter().export_to_latex(report)
             except LaTeXExportError as e:
                 logger.warning(
-                    f"LaTeX export unavailable, using legacy placeholder: {e}",
+                    f"LaTeX export unavailable, using legacy placeholder: {e}"
                 )
 
         latex_content = f"""\\documentclass{{article}}
@@ -267,7 +267,7 @@ class ReportOutputGenerator:
             html += "<div class='section'><h2>References</h2><ul>"
             for citation in report.citations:
                 formatted = citation.format_citation(
-                    report.configuration.citation_style,
+                    report.configuration.citation_style
                 )
                 html += f"<li>{formatted}</li>"
             html += "</ul></div>"

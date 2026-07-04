@@ -59,7 +59,7 @@ def _now_utc_naive_view() -> datetime:
 
 
 def _assert_close_to_now(
-    dt: datetime, *, tolerance: timedelta = WALL_CLOCK_TOLERANCE,
+    dt: datetime, *, tolerance: timedelta = WALL_CLOCK_TOLERANCE
 ) -> None:
     """Assert wall-clock value of dt is within `tolerance` of current UTC, regardless of tzinfo."""
     delta = abs(_now_utc_naive_view() - _to_utc_naive_view(dt))
@@ -174,8 +174,7 @@ class TestDatetimeArithmeticInvariants:
 
     def test_arithmetic_across_pydantic_and_dataclass_defaults(self) -> None:
         """Cross-cutting check: Pydantic and dataclass defaults must stay
-        compatible with each other (both naive or both aware — never mixed).
-        """
+        compatible with each other (both naive or both aware — never mixed)."""
         pyd_ts = WSMessage(type=WSMessageType.PROGRESS).timestamp
         dc_ts = _build_service_instance().registered_at
         # Must not raise TypeError "can't subtract offset-naive and offset-aware".
@@ -203,7 +202,7 @@ class TestSerializationRoundTrip:
         rebuilt = WSMessage.model_validate(as_dict)
         delta = abs(
             _to_utc_naive_view(rebuilt.timestamp)
-            - _to_utc_naive_view(original.timestamp),
+            - _to_utc_naive_view(original.timestamp)
         )
         assert delta < timedelta(seconds=1), (
             f"round-trip drifted by {delta}: {original.timestamp} vs {rebuilt.timestamp}"
@@ -244,7 +243,7 @@ class TestNaiveAwareConsistency:
                 data={},
             ).timestamp,
             ResearchProject(
-                title="t", query=ResearchQuery(text="q", domains=["g"]), user_id="u",
+                title="t", query=ResearchQuery(text="q", domains=["g"]), user_id="u"
             ).created_at,
             ReportMetadata().generated_at,
         ]

@@ -1,4 +1,5 @@
-"""Tests for MASR Dynamic Routing API
+"""
+Tests for MASR Dynamic Routing API
 
 Tests all MASR routing intelligence endpoints based on
 "MasRouter: Learning to Route LLMs" research patterns.
@@ -102,19 +103,19 @@ class TestRoutingDecision:
 
     @pytest.mark.asyncio
     async def test_get_routing_decision_success(
-        self, routing_service, mock_query_analysis, mock_routing_decision,
+        self, routing_service, mock_query_analysis, mock_routing_decision
     ):
         """Test successful routing decision"""
         # Mock the router methods
         with (
             patch.object(
-                routing_service.router, "analyze_query", new_callable=AsyncMock,
+                routing_service.router, "analyze_query", new_callable=AsyncMock
             ) as mock_analyze,
             patch.object(
-                routing_service.router, "select_strategy", new_callable=AsyncMock,
+                routing_service.router, "select_strategy", new_callable=AsyncMock
             ) as mock_select,
             patch.object(
-                routing_service.router, "route", new_callable=AsyncMock,
+                routing_service.router, "route", new_callable=AsyncMock
             ) as mock_route,
         ):
             mock_analyze.return_value = mock_query_analysis
@@ -143,24 +144,24 @@ class TestRoutingDecision:
 
     @pytest.mark.asyncio
     async def test_get_routing_decision_with_strategy_override(
-        self, routing_service, mock_query_analysis, mock_routing_decision,
+        self, routing_service, mock_query_analysis, mock_routing_decision
     ):
         """Test routing decision with strategy override"""
         mock_routing_decision.strategy = RoutingStrategy.COST_EFFICIENT
 
         with (
             patch.object(
-                routing_service.router, "analyze_query", new_callable=AsyncMock,
+                routing_service.router, "analyze_query", new_callable=AsyncMock
             ) as mock_analyze,
             patch.object(
-                routing_service.router, "route", new_callable=AsyncMock,
+                routing_service.router, "route", new_callable=AsyncMock
             ) as mock_route,
         ):
             mock_analyze.return_value = mock_query_analysis
             mock_route.return_value = mock_routing_decision
 
             request = RoutingRequest(
-                query="Simple query", strategy=RoutingStrategy.COST_EFFICIENT,
+                query="Simple query", strategy=RoutingStrategy.COST_EFFICIENT
             )
 
             response = await routing_service.get_routing_decision(request)
@@ -175,21 +176,21 @@ class TestCostEstimation:
 
     @pytest.mark.asyncio
     async def test_estimate_cost_with_breakdown(
-        self, routing_service, mock_query_analysis, mock_routing_decision,
+        self, routing_service, mock_query_analysis, mock_routing_decision
     ):
         """Test cost estimation with detailed breakdown"""
         with (
             patch.object(
-                routing_service.router, "analyze_query", new_callable=AsyncMock,
+                routing_service.router, "analyze_query", new_callable=AsyncMock
             ) as mock_analyze,
             patch.object(
-                routing_service.router, "select_strategy", new_callable=AsyncMock,
+                routing_service.router, "select_strategy", new_callable=AsyncMock
             ) as mock_select,
             patch.object(
-                routing_service.router, "route", new_callable=AsyncMock,
+                routing_service.router, "route", new_callable=AsyncMock
             ) as mock_route,
             patch.object(
-                routing_service.cost_optimizer, "calculate_total_cost",
+                routing_service.cost_optimizer, "calculate_total_cost"
             ) as mock_cost,
         ):
             mock_analyze.return_value = mock_query_analysis
@@ -203,7 +204,7 @@ class TestCostEstimation:
             }
 
             request = CostEstimationRequest(
-                query="Test query", include_breakdown=True, include_confidence=True,
+                query="Test query", include_breakdown=True, include_confidence=True
             )
 
             response = await routing_service.estimate_cost(request)
@@ -224,15 +225,15 @@ class TestStrategyEvaluation:
 
     @pytest.mark.asyncio
     async def test_evaluate_strategies(
-        self, routing_service, mock_query_analysis, mock_routing_decision,
+        self, routing_service, mock_query_analysis, mock_routing_decision
     ):
         """Test strategy evaluation and comparison"""
         with (
             patch.object(
-                routing_service.router, "analyze_query", new_callable=AsyncMock,
+                routing_service.router, "analyze_query", new_callable=AsyncMock
             ) as mock_analyze,
             patch.object(
-                routing_service.router, "route", new_callable=AsyncMock,
+                routing_service.router, "route", new_callable=AsyncMock
             ) as mock_route,
         ):
             mock_analyze.return_value = mock_query_analysis
@@ -294,11 +295,11 @@ class TestComplexityAnalysis:
 
     @pytest.mark.asyncio
     async def test_analyze_complexity_with_features(
-        self, routing_service, mock_query_analysis,
+        self, routing_service, mock_query_analysis
     ):
         """Test complexity analysis with feature breakdown"""
         with patch.object(
-            routing_service.router, "analyze_query", new_callable=AsyncMock,
+            routing_service.router, "analyze_query", new_callable=AsyncMock
         ) as mock_analyze:
             mock_analyze.return_value = mock_query_analysis
 
@@ -328,7 +329,7 @@ class TestFeedbackSubmission:
 
     @pytest.mark.asyncio
     async def test_submit_feedback_success(
-        self, routing_service, mock_routing_decision,
+        self, routing_service, mock_routing_decision
     ):
         """Test successful feedback submission"""
         # Add a routing decision to history
@@ -336,7 +337,7 @@ class TestFeedbackSubmission:
         routing_service.routing_history[routing_id] = mock_routing_decision
 
         with patch.object(
-            routing_service.feedback_learner, "submit_feedback", new_callable=AsyncMock,
+            routing_service.feedback_learner, "submit_feedback", new_callable=AsyncMock
         ) as mock_submit:
             feedback = RoutingFeedback(
                 routing_id=routing_id,
@@ -426,7 +427,7 @@ class TestRouterStatus:
     async def test_get_router_status(self, routing_service):
         """Test getting router health and performance status"""
         with patch.object(
-            routing_service.feedback_learner, "get_metrics", new_callable=AsyncMock,
+            routing_service.feedback_learner, "get_metrics", new_callable=AsyncMock
         ) as mock_metrics:
             mock_metrics.return_value = {
                 "total_feedback": 100,
@@ -457,27 +458,27 @@ class TestServiceHelpers:
     """Test service helper methods"""
 
     def test_calculate_confidence(
-        self, routing_service, mock_query_analysis, mock_routing_decision,
+        self, routing_service, mock_query_analysis, mock_routing_decision
     ):
         """Test confidence score calculation"""
         confidence = routing_service._calculate_confidence(
-            mock_query_analysis, mock_routing_decision,
+            mock_query_analysis, mock_routing_decision
         )
         assert 0 <= confidence <= 1
 
         # Test with high uncertainty
         mock_query_analysis.uncertainty_level = 0.9
         confidence_high_uncertainty = routing_service._calculate_confidence(
-            mock_query_analysis, mock_routing_decision,
+            mock_query_analysis, mock_routing_decision
         )
         assert confidence_high_uncertainty < confidence
 
     def test_generate_reasoning(
-        self, routing_service, mock_query_analysis, mock_routing_decision,
+        self, routing_service, mock_query_analysis, mock_routing_decision
     ):
         """Test reasoning generation"""
         reasoning = routing_service._generate_reasoning(
-            mock_query_analysis, mock_routing_decision,
+            mock_query_analysis, mock_routing_decision
         )
         assert isinstance(reasoning, str)
         assert "MODERATE" in reasoning
@@ -487,13 +488,13 @@ class TestServiceHelpers:
     def test_estimate_quality(self, routing_service, mock_query_analysis):
         """Test quality estimation"""
         quality_balanced = routing_service._estimate_quality(
-            RoutingStrategy.BALANCED, mock_query_analysis,
+            RoutingStrategy.BALANCED, mock_query_analysis
         )
         quality_focused = routing_service._estimate_quality(
-            RoutingStrategy.QUALITY_FOCUSED, mock_query_analysis,
+            RoutingStrategy.QUALITY_FOCUSED, mock_query_analysis
         )
         quality_efficient = routing_service._estimate_quality(
-            RoutingStrategy.COST_EFFICIENT, mock_query_analysis,
+            RoutingStrategy.COST_EFFICIENT, mock_query_analysis
         )
 
         assert quality_focused > quality_balanced > quality_efficient
@@ -520,7 +521,7 @@ class TestErrorHandling:
     async def test_routing_decision_error(self, routing_service):
         """Test error handling in routing decision"""
         with patch.object(
-            routing_service.router, "analyze_query", new_callable=AsyncMock,
+            routing_service.router, "analyze_query", new_callable=AsyncMock
         ) as mock_analyze:
             mock_analyze.side_effect = Exception("Analysis failed")
 
@@ -533,7 +534,7 @@ class TestErrorHandling:
     async def test_cost_estimation_error(self, routing_service):
         """Test error handling in cost estimation"""
         with patch.object(
-            routing_service.router, "analyze_query", new_callable=AsyncMock,
+            routing_service.router, "analyze_query", new_callable=AsyncMock
         ) as mock_analyze:
             mock_analyze.side_effect = Exception("Cost calculation failed")
 

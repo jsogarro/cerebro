@@ -1,4 +1,5 @@
-"""Agent API Models
+"""
+Agent API Models
 
 Request and response models for the Agent Framework API endpoints.
 Implements research-validated patterns for direct agent interaction,
@@ -57,27 +58,27 @@ class AgentExecutionRequest(BaseModel):
     """Request model for direct agent execution."""
 
     query: str = Field(
-        ..., min_length=1, max_length=2000, description="Query for agent to process",
+        ..., min_length=1, max_length=2000, description="Query for agent to process"
     )
     context: dict[str, Any] = Field(
-        default_factory=dict, description="Additional context for execution",
+        default_factory=dict, description="Additional context for execution"
     )
     parameters: dict[str, Any] = Field(
-        default_factory=dict, description="Agent-specific parameters",
+        default_factory=dict, description="Agent-specific parameters"
     )
 
     # Execution options
     timeout_seconds: int = Field(
-        default=300, ge=30, le=1800, description="Execution timeout",
+        default=300, ge=30, le=1800, description="Execution timeout"
     )
     quality_threshold: float = Field(
-        default=0.8, ge=0.0, le=1.0, description="Minimum quality threshold",
+        default=0.8, ge=0.0, le=1.0, description="Minimum quality threshold"
     )
     enable_refinement: bool = Field(
-        default=True, description="Enable TalkHier refinement",
+        default=True, description="Enable TalkHier refinement"
     )
     max_refinement_rounds: int = Field(
-        default=3, ge=1, le=5, description="Maximum refinement rounds",
+        default=3, ge=1, le=5, description="Maximum refinement rounds"
     )
 
     # Metadata
@@ -90,27 +91,27 @@ class ChainOfAgentsRequest(BaseModel):
 
     query: str = Field(..., min_length=1, max_length=2000, description="Initial query")
     agent_chain: list[AgentType] = Field(
-        ..., min_length=2, max_length=5, description="Ordered list of agents",
+        ..., min_length=2, max_length=5, description="Ordered list of agents"
     )
     context: dict[str, Any] = Field(
-        default_factory=dict, description="Execution context",
+        default_factory=dict, description="Execution context"
     )
 
     # Chain configuration
     pass_intermediate_results: bool = Field(
-        default=True, description="Pass results between agents",
+        default=True, description="Pass results between agents"
     )
     early_stopping: bool = Field(default=False, description="Stop on quality threshold")
     quality_threshold: float = Field(
-        default=0.85, ge=0.0, le=1.0, description="Early stopping threshold",
+        default=0.85, ge=0.0, le=1.0, description="Early stopping threshold"
     )
 
     # Execution options
     timeout_per_agent_seconds: int = Field(
-        default=180, ge=30, le=900, description="Timeout per agent",
+        default=180, ge=30, le=900, description="Timeout per agent"
     )
     enable_validation: bool = Field(
-        default=True, description="Enable result validation",
+        default=True, description="Enable result validation"
     )
 
 
@@ -118,32 +119,32 @@ class MixtureOfAgentsRequest(BaseModel):
     """Request model for Mixture-of-Agents execution (parallel)."""
 
     query: str = Field(
-        ..., min_length=1, max_length=2000, description="Query for all agents",
+        ..., min_length=1, max_length=2000, description="Query for all agents"
     )
     agent_types: list[AgentType] = Field(
-        ..., min_length=2, max_length=5, description="Agents to execute",
+        ..., min_length=2, max_length=5, description="Agents to execute"
     )
     context: dict[str, Any] = Field(
-        default_factory=dict, description="Execution context",
+        default_factory=dict, description="Execution context"
     )
 
     # Mixture configuration
     aggregation_strategy: str = Field(
-        default="consensus", description="Result aggregation method",
+        default="consensus", description="Result aggregation method"
     )
     weight_by_confidence: bool = Field(
-        default=True, description="Weight results by agent confidence",
+        default=True, description="Weight results by agent confidence"
     )
     consensus_threshold: float = Field(
-        default=0.8, ge=0.0, le=1.0, description="Consensus threshold",
+        default=0.8, ge=0.0, le=1.0, description="Consensus threshold"
     )
 
     # Execution options
     timeout_seconds: int = Field(
-        default=300, ge=60, le=1800, description="Total execution timeout",
+        default=300, ge=60, le=1800, description="Total execution timeout"
     )
     max_parallel: int = Field(
-        default=3, ge=1, le=5, description="Maximum parallel agents",
+        default=3, ge=1, le=5, description="Maximum parallel agents"
     )
 
 
@@ -152,10 +153,10 @@ class AgentValidationRequest(BaseModel):
 
     agent_type: AgentType = Field(..., description="Agent type to validate for")
     query: str = Field(
-        ..., min_length=1, max_length=2000, description="Query to validate",
+        ..., min_length=1, max_length=2000, description="Query to validate"
     )
     parameters: dict[str, Any] = Field(
-        default_factory=dict, description="Parameters to validate",
+        default_factory=dict, description="Parameters to validate"
     )
 
 

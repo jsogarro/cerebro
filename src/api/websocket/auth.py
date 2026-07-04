@@ -1,4 +1,5 @@
-"""WebSocket authentication utilities.
+"""
+WebSocket authentication utilities.
 
 This module provides authentication and authorization for WebSocket connections.
 """
@@ -25,7 +26,8 @@ async def verify_websocket_token(
     token: str | None,
     jwt_service: JWTService,
 ) -> str | None:
-    """Verify JWT token for WebSocket authentication.
+    """
+    Verify JWT token for WebSocket authentication.
 
     Args:
         token: JWT token string
@@ -38,13 +40,12 @@ async def verify_websocket_token(
 
     Raises:
         WebSocketAuthError: If authentication fails
-
     """
     if not token:
         # For development/testing, allow anonymous connections
         if settings.ENVIRONMENT == "development":
             logger.warning(
-                "Allowing anonymous WebSocket connection in development mode",
+                "Allowing anonymous WebSocket connection in development mode"
             )
             return None
 
@@ -52,7 +53,8 @@ async def verify_websocket_token(
 
     try:
         # Remove 'Bearer ' prefix if present
-        token = token.removeprefix("Bearer ")
+        if token.startswith("Bearer "):
+            token = token[7:]
 
         # Validate via the shared JWT service so RS256 keys and the Redis
         # blacklist match the rest of the auth stack.
@@ -88,7 +90,8 @@ async def verify_websocket_token(
 
 
 async def verify_project_access(user_id: str | None, project_id: str) -> bool:
-    """Verify that a user has access to a specific project.
+    """
+    Verify that a user has access to a specific project.
 
     Args:
         user_id: User ID (None for anonymous users)
@@ -96,7 +99,6 @@ async def verify_project_access(user_id: str | None, project_id: str) -> bool:
 
     Returns:
         True if user has access, False otherwise
-
     """
     # For development/testing, allow access to all projects
     if settings.ENVIRONMENT == "development":
@@ -109,14 +111,14 @@ async def verify_project_access(user_id: str | None, project_id: str) -> bool:
 
 
 def extract_client_type(user_agent: str | None) -> str:
-    """Extract client type from User-Agent header.
+    """
+    Extract client type from User-Agent header.
 
     Args:
         user_agent: User-Agent header value
 
     Returns:
         Client type string ("cli", "web", etc.)
-
     """
     if not user_agent:
         return "unknown"
@@ -125,11 +127,12 @@ def extract_client_type(user_agent: str | None) -> str:
 
     if "research-cli" in user_agent_lower:
         return "cli"
-    if "python" in user_agent_lower:
+    elif "python" in user_agent_lower:
         return "api"
-    if "websocket" in user_agent_lower:
+    elif "websocket" in user_agent_lower:
         return "websocket"
-    return "web"
+    else:
+        return "web"
 
 
 async def authenticate_websocket_connection(
@@ -137,7 +140,8 @@ async def authenticate_websocket_connection(
     user_agent: str | None,
     jwt_service: JWTService,
 ) -> tuple[str | None, str]:
-    """Authenticate a WebSocket connection and determine client type.
+    """
+    Authenticate a WebSocket connection and determine client type.
 
     Args:
         token: Authentication token
@@ -149,7 +153,6 @@ async def authenticate_websocket_connection(
 
     Raises:
         WebSocketAuthError: If authentication fails
-
     """
     # Authenticate user
     user_id = await verify_websocket_token(token, jwt_service)

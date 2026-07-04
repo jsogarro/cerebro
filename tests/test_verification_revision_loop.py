@@ -1,4 +1,5 @@
-"""Tests for bounded verification revision loop in supervisors.
+"""
+Tests for bounded verification revision loop in supervisors.
 
 Validates that supervisors can:
 1. Run workers and verify output with the VerificationAgent
@@ -74,12 +75,12 @@ class TestVerificationRevisionLoop:
 
     @pytest.mark.asyncio
     async def test_pass_on_first_round_no_extra_calls(
-        self, mock_supervisor, mock_worker_response,
+        self, mock_supervisor, mock_worker_response
     ):
         """Test PASS on round 1 → assert workers execute once and score unchanged."""
         # Mock send_talkhier_message to return worker response
         mock_supervisor.send_talkhier_message = AsyncMock(
-            return_value=mock_worker_response,
+            return_value=mock_worker_response
         )
 
         # Mock _run_verification to return PASS on first call
@@ -113,7 +114,7 @@ class TestVerificationRevisionLoop:
 
     @pytest.mark.asyncio
     async def test_revise_then_pass_two_rounds(
-        self, mock_supervisor, mock_worker_response,
+        self, mock_supervisor, mock_worker_response
     ):
         """Test REVISE then PASS → assert workers execute twice."""
         call_count = [0]
@@ -141,7 +142,7 @@ class TestVerificationRevisionLoop:
             return result
 
         with patch.object(
-            mock_supervisor, "_run_verification", side_effect=mock_verify,
+            mock_supervisor, "_run_verification", side_effect=mock_verify
         ):
             _, verification = await mock_supervisor._run_worker_with_verification_loop(
                 worker_type="test_worker",
@@ -158,7 +159,7 @@ class TestVerificationRevisionLoop:
 
     @pytest.mark.asyncio
     async def test_revise_on_every_round_stops_at_cap(
-        self, mock_supervisor, mock_worker_response,
+        self, mock_supervisor, mock_worker_response
     ):
         """Test REVISE on every round → assert stops at MAX_VERIFICATION_REVISION_ROUNDS."""
         call_count = [0]
@@ -194,7 +195,7 @@ class TestVerificationRevisionLoop:
 
     @pytest.mark.asyncio
     async def test_feedback_appended_to_content_on_revision(
-        self, mock_supervisor, mock_worker_response,
+        self, mock_supervisor, mock_worker_response
     ):
         """Test that verifier feedback is appended to worker prompt on REVISE."""
         sent_contents = []
@@ -222,7 +223,7 @@ class TestVerificationRevisionLoop:
             return result
 
         with patch.object(
-            mock_supervisor, "_run_verification", side_effect=mock_verify,
+            mock_supervisor, "_run_verification", side_effect=mock_verify
         ):
             await mock_supervisor._run_worker_with_verification_loop(
                 worker_type="test_worker",
@@ -281,7 +282,7 @@ class TestVerificationAgent:
             task_id="test",
             status="success",
             output={
-                "content": "VERDICT: PASS\nISSUES: None\n\nAll content looks good.",
+                "content": "VERDICT: PASS\nISSUES: None\n\nAll content looks good."
             },
             confidence=0.9,
             execution_time=1.0,
@@ -308,7 +309,7 @@ class TestVerificationAgent:
             task_id="test",
             status="success",
             output={
-                "content": "VERDICT: REVISE\nISSUES:\n1. Missing citation for claim X\n2. Arithmetic error in Table 1",
+                "content": "VERDICT: REVISE\nISSUES:\n1. Missing citation for claim X\n2. Arithmetic error in Table 1"
             },
             confidence=0.9,
             execution_time=1.0,

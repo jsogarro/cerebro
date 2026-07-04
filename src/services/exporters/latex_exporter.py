@@ -1,4 +1,5 @@
-"""LaTeX export functionality for academic papers.
+"""
+LaTeX export functionality for academic papers.
 
 This module provides LaTeX generation from report data,
 following functional programming principles with pure transformation functions.
@@ -27,6 +28,7 @@ logger = get_logger()
 class LaTeXExportError(Exception):
     """Exception raised during LaTeX export."""
 
+    pass
 
 
 class LaTeXExporter:
@@ -53,7 +55,7 @@ class LaTeXExporter:
         """Check if pdflatex is available for PDF compilation."""
         try:
             result = subprocess.run(
-                ["pdflatex", "--version"], capture_output=True, text=True, timeout=10,
+                ["pdflatex", "--version"], capture_output=True, text=True, timeout=10
             )
             return result.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -66,7 +68,8 @@ class LaTeXExporter:
         include_bibliography: bool = True,
         compile_to_pdf: bool = False,
     ) -> ReportOutput:
-        """Export report to LaTeX format.
+        """
+        Export report to LaTeX format.
 
         Args:
             report: Report object to export
@@ -75,7 +78,6 @@ class LaTeXExporter:
 
         Returns:
             ReportOutput with LaTeX content
-
         """
         try:
             logger.info(f"Starting LaTeX export for report: {report.id}")
@@ -94,21 +96,22 @@ class LaTeXExporter:
                     mime_type="application/pdf",
                     encoding="binary",
                 )
-            return ReportOutput(
-                format=ReportFormat.LATEX,
-                content=latex_content,
-                file_path=None,
-                file_size=len(latex_content.encode("utf-8")),
-                mime_type="application/x-latex",
-                encoding="utf-8",
-            )
+            else:
+                return ReportOutput(
+                    format=ReportFormat.LATEX,
+                    content=latex_content,
+                    file_path=None,
+                    file_size=len(latex_content.encode("utf-8")),
+                    mime_type="application/x-latex",
+                    encoding="utf-8",
+                )
 
         except Exception as e:
             logger.error(f"LaTeX export failed: {e}")
             raise LaTeXExportError(f"Failed to generate LaTeX: {e}") from e
 
     def _generate_latex_document(
-        self, report: Report, include_bibliography: bool = True,
+        self, report: Report, include_bibliography: bool = True
     ) -> str:
         """Generate complete LaTeX document from report."""
         sections = []
@@ -150,18 +153,18 @@ class LaTeXExporter:
 
         # Document class
         preamble_parts.append(
-            f"\\documentclass[{self.font_size},{self.paper_size}]{{{self.document_class}}}",
+            f"\\documentclass[{self.font_size},{self.paper_size}]{{{self.document_class}}}"
         )
 
         # Packages
         for package in self.packages:
             if package == "geometry":
                 preamble_parts.append(
-                    "\\usepackage[margin=2.5cm,top=3cm,bottom=3cm]{geometry}",
+                    "\\usepackage[margin=2.5cm,top=3cm,bottom=3cm]{geometry}"
                 )
             elif package == "hyperref":
                 preamble_parts.append(
-                    "\\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}",
+                    "\\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}"
                 )
             else:
                 preamble_parts.append(f"\\usepackage{{{package}}}")
@@ -171,16 +174,16 @@ class LaTeXExporter:
 
         if report.configuration.author_name:
             preamble_parts.append(
-                f"\\author{{{self._escape_latex(report.configuration.author_name)}}}",
+                f"\\author{{{self._escape_latex(report.configuration.author_name)}}}"
             )
 
         if report.configuration.institution:
             preamble_parts.append(
-                f"\\affil{{{self._escape_latex(report.configuration.institution)}}}",
+                f"\\affil{{{self._escape_latex(report.configuration.institution)}}}"
             )
 
         preamble_parts.append(
-            f"\\date{{{report.metadata.generated_at.strftime('%B %d, %Y')}}}",
+            f"\\date{{{report.metadata.generated_at.strftime('%B %d, %Y')}}}"
         )
 
         # Custom commands
@@ -190,7 +193,7 @@ class LaTeXExporter:
                 "\\newcommand{\\researchquery}[1]{\\textit{#1}}",
                 "\\newcommand{\\finding}[1]{\\textbf{#1}}",
                 "\\newcommand{\\confidence}[1]{\\textcolor{blue}{(Confidence: #1)}",
-            ],
+            ]
         )
 
         return "\n".join(preamble_parts)
@@ -210,7 +213,7 @@ class LaTeXExporter:
                 f"\\researchquery{{{self._escape_latex(report.query)}}}",
                 "}}",
                 "\\end{center}",
-            ],
+            ]
         )
 
         # Metadata table
@@ -223,19 +226,19 @@ class LaTeXExporter:
                     "\\hline",
                     "\\textbf{Research Metadata} & \\textbf{Value} \\\\",
                     "\\hline",
-                ],
+                ]
             )
 
             if report.domains:
                 domains_str = ", ".join(report.domains)
                 title_parts.append(
-                    f"Research Domains & {self._escape_latex(domains_str)} \\\\",
+                    f"Research Domains & {self._escape_latex(domains_str)} \\\\"
                 )
                 title_parts.append("\\hline")
 
             if report.metadata.total_sources > 0:
                 title_parts.append(
-                    f"Sources Analyzed & {report.metadata.total_sources} \\\\",
+                    f"Sources Analyzed & {report.metadata.total_sources} \\\\"
                 )
                 title_parts.append("\\hline")
 
@@ -248,7 +251,7 @@ class LaTeXExporter:
                 [
                     "\\end{tabular}",
                     "\\end{center}",
-                ],
+                ]
             )
 
         title_parts.append("\\newpage")
@@ -266,7 +269,7 @@ class LaTeXExporter:
         else:
             # Generate abstract from executive summary
             abstract_content = self._extract_abstract_from_summary(
-                report.executive_summary or "",
+                report.executive_summary or ""
             )
 
         abstract_parts.append(abstract_content)
@@ -278,7 +281,7 @@ class LaTeXExporter:
                 [
                     "\\vspace{0.5cm}",
                     f"\\textbf{{Keywords:}} {self._escape_latex(keywords)}",
-                ],
+                ]
             )
 
         abstract_parts.append("\\end{abstract}")
@@ -297,7 +300,7 @@ class LaTeXExporter:
             section_parts.append(f"\\subsection{{{self._escape_latex(section.title)}}}")
         elif section.level == 3:
             section_parts.append(
-                f"\\subsubsection{{{self._escape_latex(section.title)}}}",
+                f"\\subsubsection{{{self._escape_latex(section.title)}}}"
             )
         else:
             section_parts.append(f"\\paragraph{{{self._escape_latex(section.title)}}}")
@@ -320,15 +323,15 @@ class LaTeXExporter:
         # Subsection header
         if level == 2:
             subsection_parts.append(
-                f"\\subsection{{{self._escape_latex(section.title)}}}",
+                f"\\subsection{{{self._escape_latex(section.title)}}}"
             )
         elif level == 3:
             subsection_parts.append(
-                f"\\subsubsection{{{self._escape_latex(section.title)}}}",
+                f"\\subsubsection{{{self._escape_latex(section.title)}}}"
             )
         else:
             subsection_parts.append(
-                f"\\paragraph{{{self._escape_latex(section.title)}}}",
+                f"\\paragraph{{{self._escape_latex(section.title)}}}"
             )
 
         # Subsection content
@@ -465,7 +468,7 @@ class LaTeXExporter:
             else:
                 if in_list and stripped == "":
                     continue  # Skip empty lines in lists
-                if in_list:
+                elif in_list:
                     result_lines.append(f"\\end{{{list_type}}}")
                     in_list = False
                     list_type = None
@@ -559,7 +562,7 @@ class LaTeXExporter:
 
                     if result.returncode != 0:
                         logger.error(
-                            f"pdflatex compilation failed:\n{result.stdout}\n{result.stderr}",
+                            f"pdflatex compilation failed:\n{result.stdout}\n{result.stderr}"
                         )
                         if run == 0:  # Try once more
                             continue
@@ -585,7 +588,7 @@ class LaTeXExporter:
         close_braces = latex_content.count("}")
         if open_braces != close_braces:
             warnings.append(
-                f"Unmatched braces: {open_braces} open, {close_braces} close",
+                f"Unmatched braces: {open_braces} open, {close_braces} close"
             )
 
         # Check for common LaTeX errors

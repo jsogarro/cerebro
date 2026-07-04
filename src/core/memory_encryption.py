@@ -27,10 +27,12 @@ class MemoryEncryption:
     @property
     def enabled(self) -> bool:
         """Return whether memory encryption is configured."""
+
         return self._fernet is not None
 
     def encrypt_data(self, data: Any) -> dict[str, str] | Any:
         """Encrypt JSON-serializable data, or return it unchanged if disabled."""
+
         if self._fernet is None:
             return data
         token = self._fernet.encrypt(serialize(data)).decode("utf-8")
@@ -38,6 +40,7 @@ class MemoryEncryption:
 
     def decrypt_data(self, data: Any) -> Any:
         """Decrypt data produced by encrypt_data, or return plaintext unchanged."""
+
         if not self._is_encrypted_payload(data):
             return data
         if self._fernet is None:
@@ -50,6 +53,7 @@ class MemoryEncryption:
 
     def encrypt_text(self, value: str | None) -> str | None:
         """Encrypt a string value, or return it unchanged if disabled."""
+
         if value is None or self._fernet is None:
             return value
         token = self._fernet.encrypt(value.encode()).decode("utf-8")
@@ -57,6 +61,7 @@ class MemoryEncryption:
 
     def decrypt_text(self, value: str | None) -> str | None:
         """Decrypt a string produced by encrypt_text."""
+
         if value is None or not value.startswith(ENCRYPTED_TEXT_PREFIX):
             return value
         if self._fernet is None:

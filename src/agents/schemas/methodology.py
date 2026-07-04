@@ -1,11 +1,13 @@
-"""Methodology agent schemas for structured output.
+"""
+Methodology agent schemas for structured output.
 """
 
 from pydantic import BaseModel, Field
 
 
 class MethodologySchema(BaseModel):
-    """Schema for methodology analysis output.
+    """
+    Schema for methodology analysis output.
 
     Field names MUST match the keys used in methodology_agent.py output dict.
     """

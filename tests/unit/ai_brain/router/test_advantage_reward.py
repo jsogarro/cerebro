@@ -101,7 +101,7 @@ async def test_baseline_ema_converges(router):
     # Feed constant quality 0.85 for 100 updates
     for _ in range(100):
         await router.record_routing_outcome(
-            decision, quality_score=0.85, actual_cost=0.01,
+            decision, quality_score=0.85, actual_cost=0.01
         )
 
     # After many updates with alpha=0.05, baseline should converge close to 0.85
@@ -158,12 +158,12 @@ async def test_advantage_isolates_mode_intrinsic_quality(router):
 
     # DIRECT query with quality 0.87 (just above baseline 0.85) → advantage ≈ +0.02
     await router.record_routing_outcome(
-        direct_decision, quality_score=0.87, actual_cost=0.01,
+        direct_decision, quality_score=0.87, actual_cost=0.01
     )
 
     # HIERARCHICAL query with quality 0.72 (just above baseline 0.70) → advantage ≈ +0.02
     await router.record_routing_outcome(
-        hierarchical_decision, quality_score=0.72, actual_cost=0.02,
+        hierarchical_decision, quality_score=0.72, actual_cost=0.02
     )
 
     # Both should have similar advantage (~0.02) even though absolute quality differs

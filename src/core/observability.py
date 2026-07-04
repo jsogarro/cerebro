@@ -165,13 +165,13 @@ def record_llm_call(metrics: LLMCallMetrics) -> None:
     safe_cost_usd = max(metrics.cost_usd, 0.0)
 
     llm_call_duration_seconds.labels(model=model, provider=provider).observe(
-        metrics.latency_seconds,
+        metrics.latency_seconds
     )
     llm_tokens_total.labels(model=model, provider=provider, type="prompt").inc(
-        max(metrics.prompt_tokens, 0),
+        max(metrics.prompt_tokens, 0)
     )
     llm_tokens_total.labels(model=model, provider=provider, type="completion").inc(
-        max(metrics.completion_tokens, 0),
+        max(metrics.completion_tokens, 0)
     )
     llm_cost_usd_total.labels(model=model, provider=provider).inc(safe_cost_usd)
 

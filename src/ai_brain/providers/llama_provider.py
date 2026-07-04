@@ -1,4 +1,5 @@
-"""Llama Provider Implementation
+"""
+Llama Provider Implementation
 
 Provides integration with Llama 3.3 70B model via Ollama for cost-effective
 general-purpose language generation. Optimized for high-volume workloads
@@ -28,7 +29,8 @@ logger = get_logger(__name__)
 
 
 class LlamaProvider(BaseProvider):
-    """Llama 3.3 70B model provider via Ollama for cost-effective generation.
+    """
+    Llama 3.3 70B model provider via Ollama for cost-effective generation.
 
     Llama 3.3 70B excels at:
     - General-purpose text generation
@@ -97,6 +99,7 @@ class LlamaProvider(BaseProvider):
 
     async def load_configuration(self) -> None:
         """Load Llama-specific configuration."""
+
         # Load base configuration
         await super().load_configuration()
 
@@ -111,7 +114,7 @@ class LlamaProvider(BaseProvider):
             self.client = httpx.AsyncClient(
                 timeout=httpx.Timeout(timeout_ms / 1000.0),
                 limits=httpx.Limits(
-                    max_keepalive_connections=pool_size, max_connections=pool_size * 4,
+                    max_keepalive_connections=pool_size, max_connections=pool_size * 4
                 ),
             )
 
@@ -139,22 +142,23 @@ class LlamaProvider(BaseProvider):
         return float(cost)
 
     async def generate(
-        self, request: ModelRequest, model_name: str | None = None,
+        self, request: ModelRequest, model_name: str | None = None
     ) -> ModelResponse:
         """Generate response using Llama models via Ollama."""
+
         # Ensure configuration is loaded
         await self.ensure_configuration_loaded()
 
         if not await self.validate_request(request):
             return self._create_error_response(
-                request, ValueError("Invalid request"), "validation_error",
+                request, ValueError("Invalid request"), "validation_error"
             )
 
         model_name = model_name or self.default_model
 
         if not self.supports_model(model_name):
             return self._create_error_response(
-                request, ValueError(f"Unsupported model: {model_name}"), "model_error",
+                request, ValueError(f"Unsupported model: {model_name}"), "model_error"
             )
 
         start_time = datetime.now()
@@ -171,7 +175,7 @@ class LlamaProvider(BaseProvider):
 
             # Process response
             model_response = await self._process_api_response(
-                response, request, model_name, start_time,
+                response, request, model_name, start_time
             )
 
             return await self._postprocess_response(model_response, request)
@@ -181,9 +185,10 @@ class LlamaProvider(BaseProvider):
             return self._create_error_response(request, e, "generation_error")
 
     async def stream(
-        self, request: ModelRequest, model_name: str | None = None,
+        self, request: ModelRequest, model_name: str | None = None
     ) -> AsyncGenerator[str, None]:
         """Stream response using Llama models via Ollama."""
+
         model_name = model_name or self.default_model
 
         if not self.supports_model(model_name):
@@ -213,7 +218,7 @@ class LlamaProvider(BaseProvider):
                         else str(error_text)
                     )
                     raise Exception(
-                        f"Ollama error: {response.status_code} - {error_str}",
+                        f"Ollama error: {response.status_code} - {error_str}"
                     )
 
                 async for line in response.aiter_lines():
@@ -237,9 +242,10 @@ class LlamaProvider(BaseProvider):
             yield f"Error: {e!s}"
 
     def _build_request_payload(
-        self, request: ModelRequest, model_name: str,
+        self, request: ModelRequest, model_name: str
     ) -> dict[str, Any]:
         """Build Ollama API request payload."""
+
         # Ollama uses a different format than OpenAI-style APIs
         if request.messages:
             # Convert chat messages to single prompt
@@ -297,6 +303,7 @@ class LlamaProvider(BaseProvider):
 
     async def _ensure_model_available(self, model_name: str) -> None:
         """Ensure the model is available in Ollama, pull if needed."""
+
         try:
             if not self.client:
                 raise RuntimeError("HTTP client not initialized")
@@ -321,13 +328,14 @@ class LlamaProvider(BaseProvider):
 
     async def _pull_model(self, model_name: str) -> None:
         """Pull a model from Ollama registry."""
+
         if not self.client:
             raise RuntimeError("HTTP client not initialized")
 
         pull_payload = {"name": model_name}
 
         async with self.client.stream(
-            "POST", f"{self.ollama_endpoint}/api/pull", json=pull_payload,
+            "POST", f"{self.ollama_endpoint}/api/pull", json=pull_payload
         ) as response:
             if response.status_code != 200:
                 raise Exception(f"Failed to pull model {model_name}")
@@ -352,6 +360,7 @@ class LlamaProvider(BaseProvider):
 
     async def _make_api_request(self, payload: dict[str, Any]) -> httpx.Response:
         """Make API request to Ollama."""
+
         if not self.client:
             raise RuntimeError("HTTP client not initialized")
 
@@ -380,6 +389,7 @@ class LlamaProvider(BaseProvider):
         start_time: datetime,
     ) -> ModelResponse:
         """Process Ollama API response into ModelResponse."""
+
         response_data = response.json()
 
         # Extract response content
@@ -423,7 +433,7 @@ class LlamaProvider(BaseProvider):
 
         # Calculate confidence score
         confidence_score = self._calculate_confidence_score(
-            content, done, request, response_data,
+            content, done, request, response_data
         )
 
         return ModelResponse(
@@ -458,6 +468,7 @@ class LlamaProvider(BaseProvider):
         response_data: dict[str, Any],
     ) -> float:
         """Calculate confidence score for Llama response."""
+
         base_confidence = 0.75  # Base confidence for Llama
 
         # Adjust based on completion status
@@ -489,6 +500,7 @@ class LlamaProvider(BaseProvider):
 
     async def health_check(self) -> ProviderHealthStatus:
         """Perform Llama/Ollama-specific health check."""
+
         try:
             if not self.client:
                 raise RuntimeError("HTTP client not initialized")
@@ -500,7 +512,7 @@ class LlamaProvider(BaseProvider):
 
             # Test generation with a simple request
             test_request = ModelRequest(
-                prompt="Hello! How are you?", max_tokens=20, timeout_seconds=30,
+                prompt="Hello! How are you?", max_tokens=20, timeout_seconds=30
             )
 
             start_time = datetime.now()
@@ -528,6 +540,7 @@ class LlamaProvider(BaseProvider):
 
     async def validate_request(self, request: ModelRequest) -> bool:
         """Validate Llama-specific request requirements."""
+
         if not await super().validate_request(request):
             return False
 
@@ -541,6 +554,7 @@ class LlamaProvider(BaseProvider):
 
     def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get Llama model information."""
+
         if not self.supports_model(model_name):
             return None
 

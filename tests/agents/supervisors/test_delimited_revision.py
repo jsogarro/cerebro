@@ -66,7 +66,8 @@ class TestDelimitedRevisionFeedback:
         content = TalkHierContent(content="Original content")
 
         _, _ = await mock_supervisor.execute_worker_with_verification(
-            worker_type, content,
+            worker_type,
+            content,
         )
 
         # Check that send_talkhier_message was called twice (initial + revision)
@@ -84,7 +85,8 @@ class TestDelimitedRevisionFeedback:
 
     @pytest.mark.asyncio
     async def test_revision_feedback_has_anti_injection_instruction(
-        self, mock_supervisor,
+        self,
+        mock_supervisor,
     ):
         """Revision feedback should include anti-injection instruction."""
         verification_result = {
@@ -137,7 +139,8 @@ class TestDelimitedRevisionFeedback:
         )
 
         await mock_supervisor.execute_worker_with_verification(
-            "test_worker", TalkHierContent(content="Original"),
+            "test_worker",
+            TalkHierContent(content="Original"),
         )
 
         revision_call = mock_supervisor.send_talkhier_message.call_args_list[1]
@@ -166,7 +169,8 @@ class TestDelimitedRevisionFeedback:
         )
 
         await mock_supervisor.execute_worker_with_verification(
-            "test_worker", TalkHierContent(content="Original"),
+            "test_worker",
+            TalkHierContent(content="Original"),
         )
 
         revision_call = mock_supervisor.send_talkhier_message.call_args_list[1]
@@ -206,7 +210,8 @@ class TestDelimitedRevisionFeedback:
 
         # Pass string content instead of TalkHierContent
         await mock_supervisor.execute_worker_with_verification(
-            "test_worker", "Plain string content",
+            "test_worker",
+            "Plain string content",
         )
 
         revision_call = mock_supervisor.send_talkhier_message.call_args_list[1]

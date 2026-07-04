@@ -1,4 +1,5 @@
-"""Multi-agent research system.
+"""
+Multi-agent research system.
 
 This module provides specialized AI agents for conducting comprehensive research.
 """

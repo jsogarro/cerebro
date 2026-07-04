@@ -74,7 +74,7 @@ async def test_single_comparison_still_reports_corrected_p_value() -> None:
         {
             "control": [1.0, 1.1, 0.9],
             "variant_a": [1.2, 1.3, 1.1],
-        },
+        }
     )
 
     result = results["variant_a_vs_control"]
@@ -112,20 +112,20 @@ def test_research_claims_are_mapped_to_ab_test_execution_logs() -> None:
             experiment_id="routing_claim_test",
             experiment_type=AgentExperimentType.ROUTING_STRATEGY,
             variants={"control": {}, "treatment": {}},
-        ),
+        )
     }
     experimentor.results_buffer = [
         _experiment_result(
-            "routing_claim_test", "control", quality_score=0.80, total_cost=1.00,
+            "routing_claim_test", "control", quality_score=0.80, total_cost=1.00
         ),
         _experiment_result(
-            "routing_claim_test", "control", quality_score=0.80, total_cost=1.00,
+            "routing_claim_test", "control", quality_score=0.80, total_cost=1.00
         ),
         _experiment_result(
-            "routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50,
+            "routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50
         ),
         _experiment_result(
-            "routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50,
+            "routing_claim_test", "treatment", quality_score=1.00, total_cost=0.50
         ),
     ]
 

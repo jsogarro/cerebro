@@ -1,4 +1,5 @@
-"""Agent integrations package.
+"""
+Agent integrations package.
 
 This package provides integration capabilities for agents to use
 external tools and services.

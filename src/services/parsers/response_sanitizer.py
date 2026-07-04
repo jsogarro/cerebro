@@ -1,4 +1,5 @@
-"""Response sanitization utilities.
+"""
+Response sanitization utilities.
 
 This module provides functions for sanitizing and validating
 responses from the Gemini API.
@@ -8,18 +9,18 @@ import re
 
 
 def sanitize_html(text: str) -> str:
-    """Remove HTML tags from text.
+    """
+    Remove HTML tags from text.
 
     Args:
         text: Text potentially containing HTML
 
     Returns:
         Sanitized text without HTML tags
-
     """
     # Remove script and style tags with content
     text = re.sub(
-        r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE,
+        r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE
     )
     text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
 
@@ -42,18 +43,18 @@ def sanitize_html(text: str) -> str:
 
 
 def remove_personal_info(text: str) -> str:
-    """Remove potential personal information from text.
+    """
+    Remove potential personal information from text.
 
     Args:
         text: Text potentially containing personal info
 
     Returns:
         Text with personal info redacted
-
     """
     # Email addresses
     text = re.sub(
-        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[EMAIL]", text,
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[EMAIL]", text
     )
 
     # Phone numbers (various formats)
@@ -78,7 +79,8 @@ def remove_personal_info(text: str) -> str:
 
 
 def validate_response_length(text: str, max_length: int = 10000) -> str:
-    """Validate and truncate response if too long.
+    """
+    Validate and truncate response if too long.
 
     Args:
         text: Response text
@@ -86,7 +88,6 @@ def validate_response_length(text: str, max_length: int = 10000) -> str:
 
     Returns:
         Validated/truncated text
-
     """
     if len(text) <= max_length:
         return text
@@ -96,14 +97,14 @@ def validate_response_length(text: str, max_length: int = 10000) -> str:
 
 
 def detect_language(text: str) -> str:
-    """Detect the language of text (simplified).
+    """
+    Detect the language of text (simplified).
 
     Args:
         text: Text to analyze
 
     Returns:
         Detected language code
-
     """
     # Very simplified language detection based on character patterns
     # In production, use a proper library like langdetect
@@ -133,9 +134,9 @@ def detect_language(text: str) -> str:
         # Could be French, Spanish, German, etc.
         if " et " in text.lower() or " le " in text.lower() or " la " in text.lower():
             return "fr"
-        if " y " in text.lower() or " el " in text.lower() or " la " in text.lower():
+        elif " y " in text.lower() or " el " in text.lower() or " la " in text.lower():
             return "es"
-        if (
+        elif (
             " und " in text.lower()
             or " der " in text.lower()
             or " die " in text.lower()
@@ -147,14 +148,14 @@ def detect_language(text: str) -> str:
 
 
 def validate_citation(citation_data: dict[str, str]) -> bool:
-    """Validate that citation has required fields.
+    """
+    Validate that citation has required fields.
 
     Args:
         citation_data: Citation components dictionary
 
     Returns:
         True if citation has minimum required fields
-
     """
     # Minimum required fields
     required_fields = ["author", "title", "year"]

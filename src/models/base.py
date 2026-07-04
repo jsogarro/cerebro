@@ -1,4 +1,5 @@
-"""Base models and database configuration for Research Platform.
+"""
+Base models and database configuration for Research Platform.
 """
 
 from sqlalchemy.ext.declarative import declarative_base

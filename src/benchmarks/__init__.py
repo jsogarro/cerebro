@@ -30,7 +30,7 @@ class BenchmarkLibrary:
             difficulty="mixed",
             evaluation_metrics=["coverage", "accuracy", "synthesis"],
             human_baseline_score=0.85,
-        ),
+        )
     }
 
     def get_dataset(self, dataset_id: str) -> BenchmarkDataset | None:
@@ -73,13 +73,13 @@ class PeerReviewSystem:
     """Peer review workflow."""
 
     async def initiate_review(
-        self, project_id: str, num_reviewers: int = 2,
+        self, project_id: str, num_reviewers: int = 2
     ) -> dict[str, Any]:
         """Initiate review."""
         return {"project_id": project_id, "reviewers": []}
 
     async def submit_review(
-        self, assignment_id: str, review_data: dict[str, Any],
+        self, assignment_id: str, review_data: dict[str, Any]
     ) -> dict[str, Any]:
         """Submit review."""
         return {"status": "submitted"}

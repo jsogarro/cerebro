@@ -1,4 +1,5 @@
-"""Agent Factory for creating and managing research agents.
+"""
+Agent Factory for creating and managing research agents.
 
 This module provides a factory pattern for creating agent instances
 with appropriate configuration.
@@ -37,7 +38,8 @@ logger = get_logger()
 
 
 class AgentFactory:
-    """Factory class for creating research agents.
+    """
+    Factory class for creating research agents.
 
     Provides centralized agent creation and management.
     """
@@ -65,9 +67,10 @@ class AgentFactory:
 
     @classmethod
     def create_agent(
-        cls, agent_type: str, config: dict[str, Any] | None = None,
+        cls, agent_type: str, config: dict[str, Any] | None = None
     ) -> BaseAgent:
-        """Create an agent of the specified type.
+        """
+        Create an agent of the specified type.
 
         Args:
             agent_type: Type of agent to create
@@ -81,12 +84,11 @@ class AgentFactory:
 
         Raises:
             ValueError: If agent_type is not recognized
-
         """
         if agent_type not in cls._agent_registry:
             raise ValueError(
                 f"Unknown agent type: {agent_type}. "
-                f"Available types: {list(cls._agent_registry.keys())}",
+                f"Available types: {list(cls._agent_registry.keys())}"
             )
 
         config = config or {}
@@ -110,7 +112,7 @@ class AgentFactory:
 
         # Create agent instance
         agent = agent_class(
-            gemini_service=gemini_service, cache_client=cache_client, config=config,
+            gemini_service=gemini_service, cache_client=cache_client, config=config
         )
 
         logger.info("agent_created", agent_type=agent_type)
@@ -118,14 +120,14 @@ class AgentFactory:
 
     @classmethod
     def get_all_agents(cls, config: dict[str, Any] | None = None) -> list[BaseAgent]:
-        """Get instances of all available agents.
+        """
+        Get instances of all available agents.
 
         Args:
             config: Configuration to apply to all agents
 
         Returns:
             List of configured agent instances
-
         """
         config = config or {}
         agents = []
@@ -146,24 +148,24 @@ class AgentFactory:
 
     @classmethod
     def get_available_agent_types(cls) -> list[str]:
-        """Get list of available agent types.
+        """
+        Get list of available agent types.
 
         Returns:
             List of agent type identifiers
-
         """
         return list(cls._agent_registry.keys())
 
     @classmethod
     def register_agent(cls, agent_type: str, agent_class: type[BaseAgent]) -> None:
-        """Register a new agent type.
+        """
+        Register a new agent type.
 
         This allows for dynamic registration of custom agents.
 
         Args:
             agent_type: Identifier for the agent type
             agent_class: Agent class (must inherit from BaseAgent)
-
         """
         if not issubclass(agent_class, BaseAgent):
             raise ValueError(f"{agent_class} must inherit from BaseAgent")
@@ -173,22 +175,22 @@ class AgentFactory:
 
     @classmethod
     def unregister_agent(cls, agent_type: str) -> None:
-        """Unregister an agent type.
+        """
+        Unregister an agent type.
 
         Args:
             agent_type: Agent type to remove
-
         """
         if agent_type in cls._agent_registry:
             del cls._agent_registry[agent_type]
             logger.info("agent_type_unregistered", agent_type=agent_type)
 
     def get_agent_registry(self) -> dict[str, type[BaseAgent]]:
-        """Get the current agent registry.
+        """
+        Get the current agent registry.
 
         Returns:
             Dictionary mapping agent types to classes
-
         """
         return self._agent_registry.copy()
 
@@ -199,7 +201,8 @@ class AgentFactory:
         config: dict[str, Any] | None = None,
         fallback_type: str = "literature_review",
     ) -> BaseAgent:
-        """Create an agent with fallback to a default type if requested type unavailable.
+        """
+        Create an agent with fallback to a default type if requested type unavailable.
 
         Args:
             agent_type: Preferred agent type
@@ -208,7 +211,6 @@ class AgentFactory:
 
         Returns:
             Agent instance (preferred or fallback)
-
         """
         try:
             return cls.create_agent(agent_type, config)

@@ -112,9 +112,8 @@ class TestK8sDeploymentInvariants:
         assert spec["serviceAccountName"] == "research-platform-sa"
 
     def test_api_tmp_volume_writable_path(self) -> None:
-        """ReadOnlyRootFilesystem requires a writable mount; tmp emptyDir
-        already covers /tmp. This invariant must remain true post-refactor.
-        """
+        """readOnlyRootFilesystem requires a writable mount; tmp emptyDir
+        already covers /tmp. This invariant must remain true post-refactor."""
         doc = _load_yaml(DEPLOY_API)
         api = _container(doc, "api")
         mounts = {m["name"]: m["mountPath"] for m in api["volumeMounts"]}
@@ -139,8 +138,7 @@ class TestK8sDeploymentInvariants:
 class TestCIWorkflowInvariants:
     """Lock down the structural parts of ci.yml: job names, dependency graph,
     and the security-tool invocations themselves. The refactor only removes
-    advisory exit-code suppression; the actual scanners must still run.
-    """
+    advisory exit-code suppression; the actual scanners must still run."""
 
     @pytest.fixture(scope="class")
     def ci(self) -> dict[str, Any]:
@@ -188,8 +186,7 @@ class TestCIWorkflowInvariants:
         """The deprecated ``safety`` scanner was removed: it is redundant with
         pip-audit and its transitive nltk dependency carries an unfixed
         advisory (PYSEC-2026-597) that failed every scan. Lock in that it
-        stays out of the security job.
-        """
+        stays out of the security job."""
         runs = [s.get("run", "") for s in ci["jobs"]["security"]["steps"]]
         assert not any("safety" in r for r in runs)
 
@@ -203,8 +200,7 @@ class TestCIWorkflowInvariants:
 
     def test_validate_docker_lints_main_dockerfile(self, ci: dict[str, Any]) -> None:
         """Either an explicit reference to ``Dockerfile`` or a loop that would
-        cover it. Locks in that hadolint targets the production Dockerfile.
-        """
+        cover it. Locks in that hadolint targets the production Dockerfile."""
         runs = "\n".join(
             s.get("run", "") for s in ci["jobs"]["validate-docker"]["steps"]
         )
@@ -313,8 +309,7 @@ class TestCIBlockingGatesAcceptance:
 
     def test_security_artifact_upload_runs_on_failure(self, ci: dict[str, Any]) -> None:
         """When bandit fails (no `|| true`), artifact upload must still run.
-        Enforced via `if: always()` on the upload step.
-        """
+        Enforced via `if: always()` on the upload step."""
         steps = ci["jobs"]["security"]["steps"]
         upload = next(
             s for s in steps if s.get("uses", "").startswith("actions/upload-artifact")
@@ -326,18 +321,17 @@ class TestCIBlockingGatesAcceptance:
         )
 
     def test_hadolint_robust_to_missing_files(
-        self, ci: dict[str, Any], ci_text: str,
+        self, ci: dict[str, Any], ci_text: str
     ) -> None:
         """Worker Dockerfile is currently missing from the repo. The hadolint
         invocation must not hard-fail purely because a target file is absent
         (that's an inventory issue, not a security finding). Acceptable
         patterns: `if [ -f ... ]` guard, `[ -e ... ] &&`, or a for-loop with
-        `[ -f ]` test.
-        """
+        `[ -f ]` test."""
         runs = self._runs_in_job(ci, "validate-docker")
         # At least one defensive guard present
         defensive_pattern = re.compile(
-            r"\[\s*-f\s+|\[\s*-e\s+|test\s+-f\s+|test\s+-e\s+",
+            r"\[\s*-f\s+|\[\s*-e\s+|test\s+-f\s+|test\s+-e\s+"
         )
         assert defensive_pattern.search(runs), (
             "hadolint invocation must guard against missing Dockerfiles "
@@ -347,8 +341,7 @@ class TestCIBlockingGatesAcceptance:
     def test_bandit_invoked_exactly_once(self, ci: dict[str, Any]) -> None:
         """Phase 1 collapses the duplicated bandit pattern (lines 228 + 229)
         into a single invocation that BOTH gates on findings AND produces the
-        JSON report.
-        """
+        JSON report."""
         runs = self._runs_in_job(ci, "security")
         bandit_runs = re.findall(r"\bbandit\b\s+-r\s+src\b", runs)
         assert len(bandit_runs) == 1, (

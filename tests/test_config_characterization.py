@@ -67,7 +67,7 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     ]
     for k in keys_to_clear:
         monkeypatch.delenv(k, raising=False)
-    return
+    yield
 
 
 @pytest.fixture
@@ -217,7 +217,7 @@ def test_temporal_target_address(reload_config: Any) -> None:
 
 
 def test_db_host_env_var_overrides_default_in_production(
-    monkeypatch: pytest.MonkeyPatch, reload_config: Any,
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
     """Setting DB_HOST env var overrides the production default."""
     del reload_config  # fixture only ensures fresh import
@@ -238,7 +238,7 @@ def test_db_host_env_var_overrides_default_in_production(
 
 
 def test_db_port_env_var_coerced_to_int(
-    monkeypatch: pytest.MonkeyPatch, reload_config: Any,
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
     monkeypatch.setenv("DB_PORT", "6543")
     monkeypatch.setenv("DB_PASSWORD", "supersecret")
@@ -255,7 +255,7 @@ def test_db_port_env_var_coerced_to_int(
 
 
 def test_cors_origins_env_var_split_into_list(
-    monkeypatch: pytest.MonkeyPatch, reload_config: Any,
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
     monkeypatch.setenv("CORS_ORIGINS", "https://a.example,https://b.example")
     monkeypatch.setenv("DB_PASSWORD", "supersecret")
@@ -308,7 +308,7 @@ def test_get_config_unknown_environment_raises(reload_config: Any) -> None:
 
 
 def test_get_config_environment_var_drives_default(
-    monkeypatch: pytest.MonkeyPatch, reload_config: Any,
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
     cfg = reload_config
     monkeypatch.setenv("ENVIRONMENT", "testing")
@@ -343,7 +343,7 @@ def test_testing_disables_mcp(reload_config: Any) -> None:
 
 
 def test_staging_uses_debug_log_level(
-    monkeypatch: pytest.MonkeyPatch, reload_config: Any,
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
     monkeypatch.setenv("DB_PASSWORD", "supersecret")
     monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
@@ -364,7 +364,7 @@ def test_staging_uses_debug_log_level(
 
 
 def test_production_validate_required_env_vars_method_exists(
-    monkeypatch: pytest.MonkeyPatch, reload_config: Any,
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
     """ProductionConfig exposes validate_required_env_vars(). Post-refactor
     this becomes the eager startup check.
@@ -384,7 +384,7 @@ def test_production_validate_required_env_vars_method_exists(
 
 
 def test_production_construction_raises_on_empty_password(
-    monkeypatch: pytest.MonkeyPatch, reload_config: Any,
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
     """ProductionConfig() construction raises if DB_PASSWORD is missing.
 
@@ -404,7 +404,7 @@ def test_production_construction_raises_on_empty_password(
 
 
 def test_production_construction_raises_on_dev_default_jwt(
-    monkeypatch: pytest.MonkeyPatch, reload_config: Any,
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
     """ProductionConfig refuses known dev defaults like 'change-me-in-production'."""
     monkeypatch.setenv("DB_PASSWORD", "supersecret")

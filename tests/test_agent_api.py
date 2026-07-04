@@ -1,4 +1,5 @@
-"""Tests for Agent Framework API
+"""
+Tests for Agent Framework API
 
 Tests the research-informed agent API endpoints including:
 - Direct agent execution
@@ -54,6 +55,7 @@ class TestAgentAPI:
 
     def test_list_agents(self, client: TestClient) -> None:
         """Test agent listing endpoint."""
+
         response = client.get("/api/v1/agents")
 
         assert response.status_code == 200
@@ -66,6 +68,7 @@ class TestAgentAPI:
 
     def test_get_agent_info(self, client: TestClient) -> None:
         """Test individual agent info endpoint."""
+
         response = client.get("/api/v1/agents/literature-review")
 
         assert response.status_code == 200
@@ -78,6 +81,7 @@ class TestAgentAPI:
 
     def test_get_agent_info_not_found(self, client: TestClient) -> None:
         """Test agent info for non-existent agent."""
+
         response = client.get("/api/v1/agents/nonexistent-agent")
 
         assert response.status_code == 422  # Validation error for invalid enum
@@ -90,6 +94,7 @@ class TestAgentAPI:
         mock_agent_execution_service: Mock,
     ) -> None:
         """Test direct agent execution."""
+
         mock_get_service.return_value = mock_agent_execution_service
 
         request_data = {
@@ -99,7 +104,7 @@ class TestAgentAPI:
         }
 
         response = client.post(
-            "/api/v1/agents/literature-review/execute", json=request_data,
+            "/api/v1/agents/literature-review/execute", json=request_data
         )
 
         assert response.status_code == 200
@@ -119,6 +124,7 @@ class TestAgentAPI:
         mock_agent_execution_service: Mock,
     ) -> None:
         """Test Chain-of-Agents execution."""
+
         # Mock chain execution response
         from src.models.agent_api_models import ChainOfAgentsResponse
 
@@ -138,7 +144,7 @@ class TestAgentAPI:
         )
 
         mock_agent_execution_service.execute_chain_of_agents = AsyncMock(
-            return_value=mock_chain_response,
+            return_value=mock_chain_response
         )
         mock_get_service.return_value = mock_agent_execution_service
 
@@ -166,6 +172,7 @@ class TestAgentAPI:
         mock_agent_execution_service: Mock,
     ) -> None:
         """Test Mixture-of-Agents execution."""
+
         # Mock mixture execution response
         from src.models.agent_api_models import MixtureOfAgentsResponse
 
@@ -191,7 +198,7 @@ class TestAgentAPI:
         )
 
         mock_agent_execution_service.execute_mixture_of_agents = AsyncMock(
-            return_value=mock_mixture_response,
+            return_value=mock_mixture_response
         )
         mock_get_service.return_value = mock_agent_execution_service
 
@@ -214,6 +221,7 @@ class TestAgentAPI:
 
     def test_agent_validation(self, client: TestClient) -> None:
         """Test agent input validation."""
+
         request_data = {
             "agent_type": "literature-review",
             "query": "Test query for validation",
@@ -221,7 +229,7 @@ class TestAgentAPI:
         }
 
         response = client.post(
-            "/api/v1/agents/literature-review/validate", json=request_data,
+            "/api/v1/agents/literature-review/validate", json=request_data
         )
 
         assert response.status_code == 200
@@ -234,6 +242,7 @@ class TestAgentAPI:
 
     def test_agent_metrics(self, client: TestClient) -> None:
         """Test agent performance metrics."""
+
         response = client.get("/api/v1/agents/literature-review/metrics")
 
         assert response.status_code == 200
@@ -246,6 +255,7 @@ class TestAgentAPI:
 
     def test_agent_health(self, client: TestClient) -> None:
         """Test agent health status."""
+
         response = client.get("/api/v1/agents/literature-review/health")
 
         assert response.status_code == 200
@@ -257,6 +267,7 @@ class TestAgentAPI:
 
     def test_system_stats(self, client: TestClient) -> None:
         """Test system statistics endpoint."""
+
         response = client.get("/api/v1/agents/system/stats")
 
         assert response.status_code == 200
@@ -268,6 +279,7 @@ class TestAgentAPI:
 
     def test_active_executions(self, client: TestClient) -> None:
         """Test active executions monitoring."""
+
         response = client.get("/api/v1/agents/executions/active")
 
         assert response.status_code == 200
@@ -281,6 +293,7 @@ class TestAgentAPI:
 
     def test_literature_search_convenience(self, client: TestClient) -> None:
         """Test literature search convenience endpoint."""
+
         response = client.post(
             "/api/v1/agents/literature-review/search",
             params={
@@ -298,6 +311,7 @@ class TestAgentAPI:
 
     def test_citation_format_convenience(self, client: TestClient) -> None:
         """Test citation formatting convenience endpoint."""
+
         response = client.post(
             "/api/v1/agents/citation/format",
             json={
@@ -313,6 +327,7 @@ class TestAgentAPI:
 
     def test_research_workflow_convenience(self, client: TestClient) -> None:
         """Test literature analysis workflow convenience endpoint."""
+
         response = client.post(
             "/api/v1/agents/workflows/literature-analysis",
             params={

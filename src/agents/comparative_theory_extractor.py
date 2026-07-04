@@ -38,7 +38,7 @@ class TheoryExtractor:
                 mcp_integration.search_academic_sources
             )
             result = await search_sources(
-                query=query, databases=["arxiv", "pubmed"], max_results=10,
+                query=query, databases=["arxiv", "pubmed"], max_results=10
             )
 
             if result.get("success"):
@@ -46,7 +46,7 @@ class TheoryExtractor:
                 return dict(result)
 
             raise Exception(
-                f"Comparative research search failed: {result.get('error')}",
+                f"Comparative research search failed: {result.get('error')}"
             )
 
         except Exception as exc:
@@ -82,7 +82,7 @@ class TheoryExtractor:
                     "name": theory_name,
                     "source": str(source.get("source", "literature")),
                     "year": str(source.get("year", "n.d.")),
-                },
+                }
             )
 
         return theories
@@ -112,7 +112,7 @@ class TheoryExtractor:
                         f"{criteria[0] if criteria else 'multiple criteria'}..."
                     ),
                     "source": "fallback",
-                },
+                }
             )
 
         return {

@@ -1,4 +1,5 @@
-"""Report data models and schemas.
+"""
+Report data models and schemas.
 
 This module defines the Pydantic models for representing research reports
 and their components following functional programming principles.
@@ -65,11 +66,11 @@ class ReportSection(BaseModel):
     title: str = Field(..., description="Section title")
     content: str = Field(..., description="Section content in markdown")
     subsections: list["ReportSection"] = Field(
-        default_factory=list, description="Nested subsections",
+        default_factory=list, description="Nested subsections"
     )
     level: int = Field(default=1, ge=1, le=6, description="Heading level (1-6)")
     metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional section metadata",
+        default_factory=dict, description="Additional section metadata"
     )
 
     @field_validator("level")
@@ -87,7 +88,7 @@ class Visualization(BaseModel):
     title: str = Field(..., description="Visualization title")
     data: dict[str, Any] = Field(..., description="Data for the visualization")
     config: dict[str, Any] = Field(
-        default_factory=dict, description="Visualization configuration",
+        default_factory=dict, description="Visualization configuration"
     )
     caption: str | None = Field(None, description="Caption text")
     width: int | None = Field(None, ge=100, description="Width in pixels")
@@ -119,15 +120,16 @@ class Citation(BaseModel):
 
         if style == CitationStyle.APA:
             return self._format_apa(authors_str, year_str)
-        if style == CitationStyle.MLA:
+        elif style == CitationStyle.MLA:
             return self._format_mla(authors_str)
-        if style == CitationStyle.CHICAGO:
+        elif style == CitationStyle.CHICAGO:
             return self._format_chicago(authors_str, year_str)
-        if style == CitationStyle.IEEE:
+        elif style == CitationStyle.IEEE:
             return self._format_ieee(authors_str, year_str)
-        if style == CitationStyle.HARVARD:
+        elif style == CitationStyle.HARVARD:
             return self._format_harvard(authors_str, year_str)
-        return f"{authors_str} {year_str}. {self.title}."
+        else:
+            return f"{authors_str} {year_str}. {self.title}."
 
     def _format_apa(self, authors: str, year: str) -> str:
         """Format citation in APA style."""
@@ -208,10 +210,10 @@ class ReportMetadata(BaseModel):
     project_id: UUID | None = Field(None, description="Associated project ID")
     user_id: UUID | None = Field(None, description="Report creator ID")
     quality_score: float = Field(
-        0.0, ge=0.0, le=1.0, description="Quality assessment score",
+        0.0, ge=0.0, le=1.0, description="Quality assessment score"
     )
     confidence_score: float = Field(
-        0.0, ge=0.0, le=1.0, description="Overall confidence",
+        0.0, ge=0.0, le=1.0, description="Overall confidence"
     )
     total_sources: int = Field(0, ge=0, description="Number of sources analyzed")
     total_citations: int = Field(0, ge=0, description="Number of citations")
@@ -259,7 +261,7 @@ class ReportConfiguration(BaseModel):
             "footer_text": "Page {page_number}",
             "font_family": "Arial",
             "font_size": "11pt",
-        },
+        }
     )
 
     # LaTeX-specific settings
@@ -270,7 +272,7 @@ class ReportConfiguration(BaseModel):
             "bibliography_style": "plain",
             "font_size": "11pt",
             "paper_size": "a4paper",
-        },
+        }
     )
 
 
@@ -302,16 +304,16 @@ class Report(BaseModel):
 
     # Report structure
     sections: list[ReportSection] = Field(
-        default_factory=list, description="Main report sections",
+        default_factory=list, description="Main report sections"
     )
     appendices: list[ReportSection] = Field(
-        default_factory=list, description="Report appendices",
+        default_factory=list, description="Report appendices"
     )
 
     # Content elements
     citations: list[Citation] = Field(default_factory=list, description="Bibliography")
     visualizations: list[Visualization] = Field(
-        default_factory=list, description="Charts and graphs",
+        default_factory=list, description="Charts and graphs"
     )
 
     # Metadata and configuration
@@ -343,7 +345,7 @@ class Report(BaseModel):
 
     # Generated outputs
     outputs: dict[ReportFormat, ReportOutput] = Field(
-        default_factory=dict, description="Generated outputs by format",
+        default_factory=dict, description="Generated outputs by format"
     )
 
     def add_section(
@@ -355,7 +357,7 @@ class Report(BaseModel):
     ) -> ReportSection:
         """Add a new section to the report."""
         section = ReportSection(
-            title=title, content=content, level=level, metadata=metadata or {},
+            title=title, content=content, level=level, metadata=metadata or {}
         )
         self.sections.append(section)
         return section
@@ -414,10 +416,10 @@ class ReportGenerationRequest(BaseModel):
     """Request model for report generation."""
 
     project_id: UUID | None = Field(
-        None, description="Project ID to generate report for",
+        None, description="Project ID to generate report for"
     )
     workflow_data: dict[str, Any] | None = Field(
-        None, description="Direct workflow data if no project",
+        None, description="Direct workflow data if no project"
     )
     configuration: ReportConfiguration = Field(
         default_factory=lambda: ReportConfiguration(
@@ -430,11 +432,11 @@ class ReportGenerationRequest(BaseModel):
         description="Generation configuration",
     )
     formats: list[ReportFormat] = Field(
-        default=[ReportFormat.HTML], description="Desired output formats",
+        default=[ReportFormat.HTML], description="Desired output formats"
     )
     save_to_storage: bool = Field(default=True, description="Save generated reports")
     notify_completion: bool = Field(
-        default=False, description="Send completion notification",
+        default=False, description="Send completion notification"
     )
 
 
@@ -444,13 +446,13 @@ class ReportGenerationResponse(BaseModel):
     report_id: str = Field(..., description="Generated report ID")
     status: str = Field(..., description="Generation status")
     formats_generated: list[ReportFormat] = Field(
-        ..., description="Successfully generated formats",
+        ..., description="Successfully generated formats"
     )
     generation_time: float = Field(..., description="Total generation time in seconds")
     word_count: int = Field(..., description="Report word count")
     page_count: int = Field(..., description="Estimated page count")
     download_urls: dict[ReportFormat, str] = Field(
-        default_factory=dict, description="Download URLs by format",
+        default_factory=dict, description="Download URLs by format"
     )
     errors: list[str] = Field(default_factory=list, description="Generation errors")
 

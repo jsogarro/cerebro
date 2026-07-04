@@ -27,10 +27,10 @@ def _session():
         current_result=None,
         participants=[
             ParticipantInfo(
-                agent_id="w1", agent_type="literature_review", role=MessageRole.WORKER,
+                agent_id="w1", agent_type="literature_review", role=MessageRole.WORKER
             ),
             ParticipantInfo(
-                agent_id="sup", agent_type="research", role=MessageRole.SUPERVISOR,
+                agent_id="sup", agent_type="research", role=MessageRole.SUPERVISOR
             ),
         ],
     )
@@ -59,7 +59,7 @@ async def test_direct_refinement_invokes_real_agent_not_placeholder() -> None:
         return_value=_FakeAgent("real agent analysis of energy tradeoffs"),
     ):
         responses = await executor.execute_direct_refinement(
-            _session(), request, SimpleNamespace(),
+            _session(), request, SimpleNamespace()
         )
 
     # Only the worker participant is invoked, with real agent output.
@@ -79,7 +79,7 @@ async def test_supervisor_refinement_invokes_real_agent() -> None:
         return_value=_FakeAgent("refined supervisor-guided output"),
     ):
         result = await executor.execute_supervisor_refinement(
-            _session(), request, SimpleNamespace(),
+            _session(), request, SimpleNamespace()
         )
 
     assert result["responses"]["w1"]["content"] == "refined supervisor-guided output"
@@ -95,7 +95,7 @@ async def test_worker_failure_degrades_gracefully() -> None:
         side_effect=RuntimeError("agent boom"),
     ):
         responses = await executor.execute_direct_refinement(
-            _session(), request, SimpleNamespace(),
+            _session(), request, SimpleNamespace()
         )
 
     assert responses["w1"]["content"] == ""

@@ -1,4 +1,5 @@
-"""Tests for agent base classes and models.
+"""
+Tests for agent base classes and models.
 
 Following TDD principles - tests written before implementation.
 """

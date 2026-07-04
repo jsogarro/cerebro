@@ -1,4 +1,5 @@
-"""Citation agent schemas for structured output.
+"""
+Citation agent schemas for structured output.
 """
 
 from pydantic import BaseModel, Field

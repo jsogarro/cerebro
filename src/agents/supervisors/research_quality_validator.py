@@ -85,7 +85,7 @@ If a paper exists but with slightly different details, mark exists=true and prov
 
         try:
             validation = await self.gemini_service.generate_structured_content(
-                prompt, SourceValidationResult,
+                prompt, SourceValidationResult
             )
 
             verified_sources = []
@@ -179,7 +179,7 @@ If a paper exists but with slightly different details, mark exists=true and prov
         try:
             if self.gemini_service:
                 review = await self.gemini_service.generate_structured_content(
-                    prompt, PaperReview,
+                    prompt, PaperReview
                 )
 
                 state.worker_results["graduate_review"] = TalkHierContent(
@@ -326,7 +326,7 @@ If a paper exists but with slightly different details, mark exists=true and prov
 
             # Run verification QA gate
             verification_result = await self._run_verification_via_supervisor(
-                aggregated_content, langgraph_state,
+                aggregated_content, langgraph_state
             )
 
             logger.info(
@@ -387,13 +387,13 @@ If a paper exists but with slightly different details, mark exists=true and prov
                         message_type=MessageType.WORKER_REPORT,
                         content=result,
                         conversation_id=state.task_id,
-                    ),
+                    )
                 )
 
         if worker_messages:
             consensus_score = (
                 await self.communication_protocol.consensus_builder.evaluate_consensus(
-                    worker_messages,
+                    worker_messages
                 )
             )
 
@@ -450,7 +450,7 @@ If a paper exists but with slightly different details, mark exists=true and prov
         return "\n\n".join(parts) if parts else ""
 
     async def _run_verification_via_supervisor(
-        self, content: str, langgraph_state: dict[str, Any],
+        self, content: str, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Run verification by borrowing the supervisor's _run_verification method."""
         # Get the supervisor from the langgraph state context
@@ -532,7 +532,7 @@ If a paper exists but with slightly different details, mark exists=true and prov
         expected_workers = ["literature_review", "methodology", "synthesis"]
         completed_workers = [w for w in expected_workers if w in state.worker_results]
         quality_assessment["research_completeness"] = len(completed_workers) / len(
-            expected_workers,
+            expected_workers
         )
 
         return quality_assessment
@@ -651,7 +651,7 @@ Revise this section addressing all feedback. Strengthen argumentation, add evide
 
             try:
                 revised_text = await self.gemini_service.generate_content(
-                    revision_prompt,
+                    revision_prompt
                 )
                 revised_dict[section] = revised_text.strip()
             except Exception as e:

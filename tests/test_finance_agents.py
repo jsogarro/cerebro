@@ -90,7 +90,7 @@ async def test_masr_routes_finance_queries_to_finance_supervisor() -> None:
         context={},
     )
     risk = await router.route(
-        "Assess the risks of a portfolio concentrated in tech equities", context={},
+        "Assess the risks of a portfolio concentrated in tech equities", context={}
     )
     assert dcf.agent_allocation.supervisor_type == "finance"
     assert risk.agent_allocation.supervisor_type == "finance"

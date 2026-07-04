@@ -1,4 +1,5 @@
-"""Regression tests for the dependency-drift cleanup (group-002).
+"""
+Regression tests for the dependency-drift cleanup (group-002).
 
 These tests pin two invariants:
 
@@ -99,7 +100,7 @@ class TestNoOrphanTemporalImports:
                 # A simpler heuristic: any ImportFrom at column 0 is module-level.
                 if node.col_offset == 0:
                     offenders.append(
-                        f"{py_file.relative_to(REPO_ROOT)}:{node.lineno} → {module}",
+                        f"{py_file.relative_to(REPO_ROOT)}:{node.lineno} → {module}"
                     )
         assert not offenders, (
             "These src/ modules import the phantom src.temporal namespace at "

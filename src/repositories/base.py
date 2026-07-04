@@ -1,4 +1,5 @@
-"""Base repository implementation.
+"""
+Base repository implementation.
 
 Provides generic CRUD operations for all repositories.
 """
@@ -22,31 +23,32 @@ ModelType = TypeVar("ModelType", bound=BaseModel)
 
 
 class BaseRepository(Generic[ModelType]):
-    """Base repository with generic CRUD operations.
+    """
+    Base repository with generic CRUD operations.
 
     Provides common database operations for all model types.
     """
 
     def __init__(self, model: type[ModelType], session: AsyncSession):
-        """Initialize base repository.
+        """
+        Initialize base repository.
 
         Args:
             model: SQLAlchemy model class
             session: Async database session
-
         """
         self.model = model
         self.session = session
 
     async def create(self, **kwargs: Any) -> ModelType:
-        """Create new entity.
+        """
+        Create new entity.
 
         Args:
             **kwargs: Entity attributes
 
         Returns:
             Created entity
-
         """
         entity = self.model(**kwargs)
         self.session.add(entity)
@@ -61,7 +63,8 @@ class BaseRepository(Generic[ModelType]):
         load_relationships: list[str] | None = None,
         organization_id: str | UUID | None = None,
     ) -> ModelType | None:
-        """Get entity by ID.
+        """
+        Get entity by ID.
 
         Args:
             id: Entity ID
@@ -71,7 +74,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             Entity or None if not found
-
         """
         query = select(self.model).where(self.model.id == id)
         query = self.apply_organization_scope(query, organization_id)
@@ -98,7 +100,8 @@ class BaseRepository(Generic[ModelType]):
         load_relationships: list[str] | None = None,
         organization_id: str | UUID | None = None,
     ) -> list[ModelType]:
-        """Get multiple entities with filters.
+        """
+        Get multiple entities with filters.
 
         Args:
             filters: Filter criteria as dict
@@ -112,7 +115,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             List of entities
-
         """
         query = select(self.model)
         query = self.apply_organization_scope(query, organization_id)
@@ -168,7 +170,8 @@ class BaseRepository(Generic[ModelType]):
         updated_by: str | None = None,
         organization_id: str | UUID | None = None,
     ) -> ModelType | None:
-        """Update entity by ID.
+        """
+        Update entity by ID.
 
         Args:
             id: Entity ID
@@ -178,7 +181,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             Updated entity or None if not found
-
         """
         entity = await self.get(id, organization_id=organization_id)
 
@@ -206,7 +208,8 @@ class BaseRepository(Generic[ModelType]):
         deleted_by: str | None = None,
         organization_id: str | UUID | None = None,
     ) -> bool:
-        """Delete entity by ID.
+        """
+        Delete entity by ID.
 
         Args:
             id: Entity ID
@@ -216,7 +219,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             True if deleted, False if not found
-
         """
         entity = await self.get(id, organization_id=organization_id)
 
@@ -237,21 +239,22 @@ class BaseRepository(Generic[ModelType]):
         return True
 
     async def hard_delete(self, id: str | UUID) -> bool:
-        """Permanently delete entity.
+        """
+        Permanently delete entity.
 
         Args:
             id: Entity ID
 
         Returns:
             True if deleted, False if not found
-
         """
         return await self.delete(id, soft=False)
 
     async def restore(
-        self, id: str | UUID, restored_by: str | None = None,
+        self, id: str | UUID, restored_by: str | None = None
     ) -> ModelType | None:
-        """Restore soft-deleted entity.
+        """
+        Restore soft-deleted entity.
 
         Args:
             id: Entity ID
@@ -259,7 +262,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             Restored entity or None if not found
-
         """
         entity = await self.get(id, include_deleted=True)
 
@@ -282,7 +284,8 @@ class BaseRepository(Generic[ModelType]):
         include_deleted: bool = False,
         organization_id: str | UUID | None = None,
     ) -> bool:
-        """Check if entity exists.
+        """
+        Check if entity exists.
 
         Args:
             id: Entity ID
@@ -292,7 +295,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             True if exists
-
         """
         query = select(func.count(self.model.id))
         query = self.apply_organization_scope(query, organization_id)
@@ -319,7 +321,8 @@ class BaseRepository(Generic[ModelType]):
         include_deleted: bool = False,
         organization_id: str | UUID | None = None,
     ) -> int:
-        """Count entities.
+        """
+        Count entities.
 
         Args:
             filters: Filter criteria
@@ -328,7 +331,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             Entity count
-
         """
         query = select(func.count(self.model.id))
         query = self.apply_organization_scope(query, organization_id)
@@ -352,14 +354,14 @@ class BaseRepository(Generic[ModelType]):
         return result.scalar() or 0
 
     async def bulk_create(self, entities: list[dict[str, Any]]) -> list[ModelType]:
-        """Create multiple entities.
+        """
+        Create multiple entities.
 
         Args:
             entities: List of entity data
 
         Returns:
             List of created entities
-
         """
         created = []
 
@@ -377,9 +379,10 @@ class BaseRepository(Generic[ModelType]):
         return created
 
     async def bulk_update(
-        self, updates: list[dict[str, Any]], updated_by: str | None = None,
+        self, updates: list[dict[str, Any]], updated_by: str | None = None
     ) -> int:
-        """Update multiple entities.
+        """
+        Update multiple entities.
 
         Args:
             updates: List of dicts with 'id' and update data
@@ -387,7 +390,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             Number of updated entities
-
         """
         updated_count = 0
 
@@ -406,7 +408,8 @@ class BaseRepository(Generic[ModelType]):
         soft: bool = True,
         deleted_by: str | None = None,
     ) -> int:
-        """Delete multiple entities.
+        """
+        Delete multiple entities.
 
         Args:
             ids: List of entity IDs
@@ -415,7 +418,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             Number of deleted entities
-
         """
         deleted_count = 0
 
@@ -434,7 +436,8 @@ class BaseRepository(Generic[ModelType]):
         offset: int | None = None,
         organization_id: str | UUID | None = None,
     ) -> list[ModelType]:
-        """Search entities by text.
+        """
+        Search entities by text.
 
         Args:
             search_term: Search term
@@ -446,7 +449,6 @@ class BaseRepository(Generic[ModelType]):
 
         Returns:
             List of matching entities
-
         """
         query = select(self.model)
         query = self.apply_organization_scope(query, organization_id)
@@ -457,7 +459,7 @@ class BaseRepository(Generic[ModelType]):
             if hasattr(self.model, field):
                 column = getattr(self.model, field)
                 search_conditions.append(
-                    func.lower(column).contains(search_term.lower()),
+                    func.lower(column).contains(search_term.lower())
                 )
 
         if search_conditions:
@@ -482,11 +484,11 @@ class BaseRepository(Generic[ModelType]):
         return list(result.scalars().all())
 
     def build_query(self) -> Select[tuple[ModelType]]:
-        """Build base query for custom operations.
+        """
+        Build base query for custom operations.
 
         Returns:
             SQLAlchemy Select query
-
         """
         return select(self.model).where(self.model.deleted_at.is_(None))
 
@@ -495,7 +497,8 @@ class BaseRepository(Generic[ModelType]):
         query: Select[Any],
         organization_id: str | UUID | None,
     ) -> Select[Any]:
-        """Apply tenant organization filtering when a scoped query is requested.
+        """
+        Apply tenant organization filtering when a scoped query is requested.
 
         Repositories stay backward-compatible while API boundaries are migrated:
         callers that have tenant context pass organization_id, and models without
@@ -506,7 +509,7 @@ class BaseRepository(Generic[ModelType]):
 
         if not hasattr(self.model, "organization_id"):
             raise ValueError(
-                f"{self.model.__name__} does not support organization scoping",
+                f"{self.model.__name__} does not support organization scoping"
             )
 
         model: Any = self.model

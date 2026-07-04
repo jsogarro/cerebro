@@ -1,4 +1,5 @@
-"""User repository.
+"""
+User repository.
 
 Specialized repository for user operations.
 """
@@ -14,7 +15,8 @@ from src.repositories.base import BaseRepository
 
 
 class UserRepository(BaseRepository[User]):
-    """Repository for user operations.
+    """
+    Repository for user operations.
 
     Provides specialized queries for user management.
     """
@@ -24,9 +26,10 @@ class UserRepository(BaseRepository[User]):
         super().__init__(User, session)
 
     async def get_by_email(
-        self, email: str, include_deleted: bool = False,
+        self, email: str, include_deleted: bool = False
     ) -> User | None:
-        """Get user by email.
+        """
+        Get user by email.
 
         Args:
             email: User email
@@ -34,7 +37,6 @@ class UserRepository(BaseRepository[User]):
 
         Returns:
             User or None
-
         """
         query = select(User).where(func.lower(User.email) == email.lower())
 
@@ -45,9 +47,10 @@ class UserRepository(BaseRepository[User]):
         return result.scalar_one_or_none()
 
     async def get_by_username(
-        self, username: str, include_deleted: bool = False,
+        self, username: str, include_deleted: bool = False
     ) -> User | None:
-        """Get user by username.
+        """
+        Get user by username.
 
         Args:
             username: Username
@@ -55,7 +58,6 @@ class UserRepository(BaseRepository[User]):
 
         Returns:
             User or None
-
         """
         query = select(User).where(func.lower(User.username) == username.lower())
 
@@ -66,14 +68,14 @@ class UserRepository(BaseRepository[User]):
         return result.scalar_one_or_none()
 
     async def update_last_login(self, user_id: UUID) -> User | None:
-        """Update user's last login time.
+        """
+        Update user's last login time.
 
         Args:
             user_id: User ID
 
         Returns:
             Updated user
-
         """
         user = await self.get(user_id)
         if user:
@@ -83,9 +85,10 @@ class UserRepository(BaseRepository[User]):
         return user
 
     async def get_active_users(
-        self, limit: int | None = None, offset: int | None = None,
+        self, limit: int | None = None, offset: int | None = None
     ) -> list[User]:
-        """Get active users.
+        """
+        Get active users.
 
         Args:
             limit: Maximum results
@@ -93,7 +96,6 @@ class UserRepository(BaseRepository[User]):
 
         Returns:
             List of active users
-
         """
         return await self.get_many(
             filters={"is_active": True, "is_verified": True},
@@ -111,7 +113,8 @@ class UserRepository(BaseRepository[User]):
         full_name: str | None = None,
         **kwargs: Any,
     ) -> User:
-        """Create user with hashed password.
+        """
+        Create user with hashed password.
 
         Args:
             email: User email
@@ -122,7 +125,6 @@ class UserRepository(BaseRepository[User]):
 
         Returns:
             Created user
-
         """
         # Check if email already exists
         existing = await self.get_by_email(email)
@@ -149,9 +151,10 @@ class UserRepository(BaseRepository[User]):
         return user
 
     async def verify_credentials(
-        self, email_or_username: str, password: str,
+        self, email_or_username: str, password: str
     ) -> User | None:
-        """Verify user credentials.
+        """
+        Verify user credentials.
 
         Args:
             email_or_username: Email or username
@@ -159,7 +162,6 @@ class UserRepository(BaseRepository[User]):
 
         Returns:
             User if credentials valid, None otherwise
-
         """
         # Try email first
         user = await self.get_by_email(email_or_username)
@@ -182,7 +184,8 @@ class UserRepository(BaseRepository[User]):
         limit: int = 20,
         offset: int = 0,
     ) -> list[User]:
-        """Search users.
+        """
+        Search users.
 
         Args:
             query: Search query
@@ -193,7 +196,6 @@ class UserRepository(BaseRepository[User]):
 
         Returns:
             List of matching users
-
         """
         stmt = self.build_query()
 
@@ -205,7 +207,7 @@ class UserRepository(BaseRepository[User]):
                     func.lower(User.email).like(search_term),
                     func.lower(User.username).like(search_term),
                     func.lower(User.full_name).like(search_term),
-                ),
+                )
             )
 
         # Filter by role
@@ -226,11 +228,11 @@ class UserRepository(BaseRepository[User]):
         return list(result.scalars().all())
 
     async def get_user_statistics(self) -> dict[str, Any]:
-        """Get user statistics.
+        """
+        Get user statistics.
 
         Returns:
             User statistics
-
         """
         # Total users
         total_query = select(func.count(User.id)).where(User.deleted_at.is_(None))
@@ -239,21 +241,21 @@ class UserRepository(BaseRepository[User]):
 
         # Active users
         active_query = select(func.count(User.id)).where(
-            and_(User.deleted_at.is_(None), User.is_active),
+            and_(User.deleted_at.is_(None), User.is_active)
         )
         result = await self.session.execute(active_query)
         active = result.scalar() or 0
 
         # Verified users
         verified_query = select(func.count(User.id)).where(
-            and_(User.deleted_at.is_(None), User.is_verified),
+            and_(User.deleted_at.is_(None), User.is_verified)
         )
         result = await self.session.execute(verified_query)
         verified = result.scalar() or 0
 
         # Superusers
         super_query = select(func.count(User.id)).where(
-            and_(User.deleted_at.is_(None), User.is_superuser),
+            and_(User.deleted_at.is_(None), User.is_superuser)
         )
         result = await self.session.execute(super_query)
         superusers = result.scalar() or 0
@@ -268,7 +270,8 @@ class UserRepository(BaseRepository[User]):
         }
 
     async def update_password(self, user_id: UUID, new_password: str) -> User | None:
-        """Update user password.
+        """
+        Update user password.
 
         Args:
             user_id: User ID
@@ -276,7 +279,6 @@ class UserRepository(BaseRepository[User]):
 
         Returns:
             Updated user
-
         """
         user = await self.get(user_id)
         if user:
@@ -286,14 +288,14 @@ class UserRepository(BaseRepository[User]):
         return user
 
     async def toggle_active(self, user_id: UUID) -> User | None:
-        """Toggle user active status.
+        """
+        Toggle user active status.
 
         Args:
             user_id: User ID
 
         Returns:
             Updated user
-
         """
         user = await self.get(user_id)
         if user:
@@ -306,14 +308,14 @@ class UserRepository(BaseRepository[User]):
         return user
 
     async def verify_email(self, user_id: UUID) -> User | None:
-        """Mark user email as verified.
+        """
+        Mark user email as verified.
 
         Args:
             user_id: User ID
 
         Returns:
             Updated user
-
         """
         user = await self.get(user_id)
         if user:

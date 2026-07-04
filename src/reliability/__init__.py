@@ -1,4 +1,5 @@
-"""Reliability module for production-grade service resilience.
+"""
+Reliability module for production-grade service resilience.
 
 This module provides connection pooling, retry strategies, circuit breakers,
 and service discovery mechanisms for high availability.

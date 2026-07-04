@@ -1,4 +1,5 @@
-"""Research Project database model.
+"""
+Research Project database model.
 
 Represents a research project in the system.
 """
@@ -34,7 +35,8 @@ class ProjectStatus(StrEnum):
 
 
 class ResearchProject(BaseModel):
-    """Research project model.
+    """
+    Research project model.
 
     Stores information about research projects including their
     query, status, quality scores, and metadata.
@@ -47,15 +49,15 @@ class ResearchProject(BaseModel):
     query: Mapped[str] = mapped_column(Text, nullable=False)
 
     domains: Mapped[list[Any]] = mapped_column(
-        JSON, nullable=False, default=list, comment="List of research domains",
+        JSON, nullable=False, default=list, comment="List of research domains"
     )
 
     status: Mapped[ProjectStatus] = mapped_column(
-        SQLEnum(ProjectStatus), nullable=False, default=ProjectStatus.DRAFT, index=True,
+        SQLEnum(ProjectStatus), nullable=False, default=ProjectStatus.DRAFT, index=True
     )
 
     quality_score: Mapped[float | None] = mapped_column(
-        Float, nullable=True, comment="Overall quality score (0.0 to 1.0)",
+        Float, nullable=True, comment="Overall quality score (0.0 to 1.0)"
     )
 
     user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
@@ -120,39 +122,40 @@ class ResearchProject(BaseModel):
     )
 
     def update_status(self, new_status: ProjectStatus) -> None:
-        """Update project status.
+        """
+        Update project status.
 
         Args:
             new_status: New status for the project
-
         """
         self.status = new_status
 
     def set_quality_score(self, score: float) -> None:
-        """Set quality score.
+        """
+        Set quality score.
 
         Args:
             score: Quality score (0.0 to 1.0)
-
         """
         if not 0.0 <= score <= 1.0:
             raise ValueError("Quality score must be between 0.0 and 1.0")
         self.quality_score = score
 
     def add_metadata(self, key: str, value: Any) -> None:
-        """Add or update metadata.
+        """
+        Add or update metadata.
 
         Args:
             key: Metadata key
             value: Metadata value
-
         """
         if self.project_metadata is None:
             self.project_metadata = {}
         self.project_metadata[key] = value
 
     def get_metadata(self, key: str, default: Any = None) -> Any:
-        """Get metadata value.
+        """
+        Get metadata value.
 
         Args:
             key: Metadata key
@@ -160,7 +163,6 @@ class ResearchProject(BaseModel):
 
         Returns:
             Metadata value
-
         """
         if self.project_metadata is None:
             return default

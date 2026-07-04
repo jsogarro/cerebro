@@ -1,11 +1,12 @@
-"""User database model.
+"""
+User database model.
 
 Represents users of the research platform.
 """
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from passlib.context import CryptContext
 from sqlalchemy import Boolean, DateTime, Index, Integer, String
@@ -14,12 +15,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.db.base import UUID as DBUUID
 from src.models.db.base import BaseModel
 
+if TYPE_CHECKING:
+    pass
+
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class User(BaseModel):
-    """User model.
+    """
+    User model.
 
     Stores user account information including authentication
     credentials and profile data.
@@ -29,11 +34,11 @@ class User(BaseModel):
 
     # Authentication fields
     email: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True, index=True,
+        String(255), nullable=False, unique=True, index=True
     )
 
     username: Mapped[str] = mapped_column(
-        String(100), nullable=False, unique=True, index=True,
+        String(100), nullable=False, unique=True, index=True
     )
 
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -54,7 +59,7 @@ class User(BaseModel):
 
     # Account status
     is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, index=True,
+        Boolean, nullable=False, default=True, index=True
     )
 
     is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -63,7 +68,7 @@ class User(BaseModel):
 
     # Activity tracking
     last_login: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True), nullable=True
     )
 
     login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -76,7 +81,7 @@ class User(BaseModel):
     # Relationships removed: user_id is now a plain string, not a FK
 
     api_keys = relationship(
-        "APIKey", back_populates="user", lazy="dynamic", cascade="all, delete-orphan",
+        "APIKey", back_populates="user", lazy="dynamic", cascade="all, delete-orphan"
     )
 
     # Authentication relationships
@@ -134,7 +139,8 @@ class User(BaseModel):
         full_name: str | None = None,
         **kwargs: Any,
     ) -> "User":
-        """Create a new user with hashed password.
+        """
+        Create a new user with hashed password.
 
         Args:
             email: User email
@@ -145,7 +151,6 @@ class User(BaseModel):
 
         Returns:
             User instance
-
         """
         hashed_password = pwd_context.hash(password)
 
@@ -158,23 +163,23 @@ class User(BaseModel):
         )
 
     def verify_password(self, password: str) -> bool:
-        """Verify password against hash.
+        """
+        Verify password against hash.
 
         Args:
             password: Plain text password
 
         Returns:
             True if password matches
-
         """
         return pwd_context.verify(password, self.hashed_password)
 
     def update_password(self, new_password: str) -> None:
-        """Update user password.
+        """
+        Update user password.
 
         Args:
             new_password: New plain text password
-
         """
         self.hashed_password = pwd_context.hash(new_password)
         self.updated_at = datetime.now(UTC)
@@ -227,14 +232,14 @@ class User(BaseModel):
         return str(self.full_name or self.username)
 
     def to_dict(self, include_sensitive: bool = False) -> dict[str, Any]:
-        """Convert to dictionary.
+        """
+        Convert to dictionary.
 
         Args:
             include_sensitive: Include sensitive fields
 
         Returns:
             Dictionary representation
-
         """
         data: dict[str, Any] = {
             "id": str(self.id),

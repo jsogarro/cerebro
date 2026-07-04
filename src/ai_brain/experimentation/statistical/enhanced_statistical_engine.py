@@ -1,4 +1,5 @@
-"""Enhanced Statistical Engine for System-Wide A/B Testing
+"""
+Enhanced Statistical Engine for System-Wide A/B Testing
 
 Comprehensive statistical framework supporting:
 - Classical frequentist A/B testing with proper significance testing
@@ -168,7 +169,7 @@ class FrequentistAnalyzer:
         self.config = config or {}
         self.default_alpha = self.config.get("significance_level", 0.05)
         self.multiple_comparison_method = self.config.get(
-            "multiple_comparison", "bonferroni",
+            "multiple_comparison", "bonferroni"
         )
 
     async def analyze_ab_test(
@@ -178,7 +179,8 @@ class FrequentistAnalyzer:
         metric_type: str = "continuous",
         alternative: str = "two-sided",
     ) -> StatisticalTestResult:
-        """Perform frequentist A/B test analysis.
+        """
+        Perform frequentist A/B test analysis.
 
         Args:
             control_data: Control group measurements
@@ -188,19 +190,20 @@ class FrequentistAnalyzer:
 
         Returns:
             Statistical test results with significance and effect size
-
         """
+
         if metric_type == "continuous":
             return await self._analyze_continuous_metric(
-                control_data, treatment_data, alternative,
+                control_data, treatment_data, alternative
             )
-        if metric_type == "proportion":
+        elif metric_type == "proportion":
             return await self._analyze_proportion_metric(
-                control_data, treatment_data, alternative,
+                control_data, treatment_data, alternative
             )
-        return await self._analyze_continuous_metric(
-            control_data, treatment_data, alternative,
-        )
+        else:
+            return await self._analyze_continuous_metric(
+                control_data, treatment_data, alternative
+            )
 
     async def _analyze_continuous_metric(
         self,
@@ -209,9 +212,10 @@ class FrequentistAnalyzer:
         alternative: str,
     ) -> StatisticalTestResult:
         """Analyze continuous metrics using t-test."""
+
         # Perform Welch's t-test (unequal variances)
         t_stat, p_value = stats.ttest_ind(
-            treatment_data, control_data, equal_var=False, alternative=alternative,
+            treatment_data, control_data, equal_var=False, alternative=alternative
         )
 
         # Calculate effect size (Cohen's d)
@@ -220,7 +224,7 @@ class FrequentistAnalyzer:
                 (len(control_data) - 1) * np.var(control_data, ddof=1)
                 + (len(treatment_data) - 1) * np.var(treatment_data, ddof=1)
             )
-            / (len(control_data) + len(treatment_data) - 2),
+            / (len(control_data) + len(treatment_data) - 2)
         )
 
         effect_size = (np.mean(treatment_data) - np.mean(control_data)) / pooled_std
@@ -229,7 +233,7 @@ class FrequentistAnalyzer:
         diff_mean = np.mean(treatment_data) - np.mean(control_data)
         se_diff = np.sqrt(
             np.var(control_data, ddof=1) / len(control_data)
-            + np.var(treatment_data, ddof=1) / len(treatment_data),
+            + np.var(treatment_data, ddof=1) / len(treatment_data)
         )
 
         df = len(control_data) + len(treatment_data) - 2
@@ -248,7 +252,7 @@ class FrequentistAnalyzer:
                 )
             except (ImportError, ValueError, AttributeError) as e:
                 logger.warning(
-                    f"statistical_power_calculation_failed: {type(e).__name__}: {e}",
+                    f"statistical_power_calculation_failed: {type(e).__name__}: {e}"
                 )
                 power = 0.8  # Default assumption when statsmodels unavailable
         else:
@@ -276,6 +280,7 @@ class FrequentistAnalyzer:
         alternative: str,
     ) -> StatisticalTestResult:
         """Analyze proportion metrics using proportion z-test."""
+
         # Convert to counts for proportion test
         control_successes = int(sum(control_data))
         control_total = len(control_data)
@@ -292,7 +297,7 @@ class FrequentistAnalyzer:
                 )
             except (ImportError, ValueError, AttributeError) as e:
                 logger.info(
-                    f"falling_back_to_manual_proportion_test: {type(e).__name__}",
+                    f"falling_back_to_manual_proportion_test: {type(e).__name__}"
                 )
                 # Fallback to manual calculation
                 p_value, z_stat = self._manual_proportion_test(
@@ -303,7 +308,7 @@ class FrequentistAnalyzer:
                 )
         else:
             p_value, z_stat = self._manual_proportion_test(
-                control_successes, control_total, treatment_successes, treatment_total,
+                control_successes, control_total, treatment_successes, treatment_total
             )
 
         # Calculate effect size (Cohen's h)
@@ -314,7 +319,7 @@ class FrequentistAnalyzer:
         # Confidence interval for difference in proportions
         diff_prop = p2 - p1
         se_diff = np.sqrt(
-            p1 * (1 - p1) / control_total + p2 * (1 - p2) / treatment_total,
+            p1 * (1 - p1) / control_total + p2 * (1 - p2) / treatment_total
         )
         z_critical = stats.norm.ppf(1 - self.default_alpha / 2)
         ci_lower = diff_prop - z_critical * se_diff
@@ -335,9 +340,10 @@ class FrequentistAnalyzer:
         )
 
     def _manual_proportion_test(
-        self, c_successes: int, c_total: int, t_successes: int, t_total: int,
+        self, c_successes: int, c_total: int, t_successes: int, t_total: int
     ) -> tuple[float, float]:
         """Manual proportion test calculation."""
+
         p1 = c_successes / c_total
         p2 = t_successes / t_total
         p_pool = (c_successes + t_successes) / (c_total + t_total)
@@ -356,7 +362,8 @@ class FrequentistAnalyzer:
         power_target: float = 0.8,
         metric_type: str = "continuous",
     ) -> PowerAnalysisResult:
-        """Calculate required sample size for desired power.
+        """
+        Calculate required sample size for desired power.
 
         Args:
             baseline_metric: Expected baseline value
@@ -367,8 +374,8 @@ class FrequentistAnalyzer:
 
         Returns:
             Power analysis results with sample size recommendations
-
         """
+
         if metric_type == "continuous":
             # Use Cohen's d for effect size
             effect_size = minimum_effect / (baseline_metric * 0.2)  # Assume 20% CV
@@ -384,7 +391,7 @@ class FrequentistAnalyzer:
                     required_n = int(np.ceil(sample_size))
                 except (ImportError, ValueError, ZeroDivisionError) as e:
                     logger.warning(
-                        f"sample_size_calculation_fallback: {type(e).__name__} (effect_size={effect_size})",
+                        f"sample_size_calculation_fallback: {type(e).__name__} (effect_size={effect_size})"
                     )
                     # Fallback to Cohen's approximation for two-sample t-test
                     required_n = int(np.ceil(16 * (1 / effect_size) ** 2))
@@ -409,8 +416,8 @@ class FrequentistAnalyzer:
                         + z_beta * np.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
                     )
                     ** 2
-                    / (p2 - p1) ** 2,
-                ),
+                    / (p2 - p1) ** 2
+                )
             )
 
         else:
@@ -429,7 +436,7 @@ class FrequentistAnalyzer:
             recommendations.append("Consider sequential testing for faster results")
         if total_cost > 1000:
             recommendations.append(
-                "Consider cost optimization through bandit algorithms",
+                "Consider cost optimization through bandit algorithms"
             )
 
         return PowerAnalysisResult(
@@ -446,6 +453,7 @@ class FrequentistAnalyzer:
 
     def _interpret_ttest_result(self, p_value: float, effect_size: float) -> str:
         """Interpret t-test results."""
+
         if p_value < 0.001:
             significance = "highly significant"
         elif p_value < 0.01:
@@ -470,6 +478,7 @@ class FrequentistAnalyzer:
 
     def _interpret_proportion_result(self, p_value: float, diff_prop: float) -> str:
         """Interpret proportion test results."""
+
         significance = "significant" if p_value < 0.05 else "not significant"
         direction = "increase" if diff_prop > 0 else "decrease"
         magnitude = abs(diff_prop) * 100
@@ -485,13 +494,13 @@ class BayesianAnalyzer:
         self.config = config or {}
         self.credible_interval_level = self.config.get("credible_interval", 0.95)
         self.rope_lower = self.config.get(
-            "rope_lower", -0.01,
+            "rope_lower", -0.01
         )  # Region of practical equivalence
         self.rope_upper = self.config.get("rope_upper", 0.01)
 
         if not BAYESIAN_AVAILABLE:
             raise ImportError(
-                "PyMC required for Bayesian analysis - install with: pip install pymc",
+                "PyMC required for Bayesian analysis - install with: pip install pymc"
             )
 
     async def analyze_bayesian_ab_test(
@@ -501,7 +510,8 @@ class BayesianAnalyzer:
         prior_mean: float = 0.0,
         prior_std: float = 1.0,
     ) -> StatisticalTestResult:
-        """Perform Bayesian A/B test with early stopping capability.
+        """
+        Perform Bayesian A/B test with early stopping capability.
 
         Args:
             control_data: Control group measurements
@@ -511,23 +521,23 @@ class BayesianAnalyzer:
 
         Returns:
             Bayesian test results with credible intervals and posterior
-
         """
+
         try:
             # Create Bayesian model
             with pm.Model() as _model:
                 # Priors
                 mu_control = pm.Normal(
-                    "mu_control", mu=np.mean(control_data), sigma=prior_std,
+                    "mu_control", mu=np.mean(control_data), sigma=prior_std
                 )
                 mu_treatment = pm.Normal(
-                    "mu_treatment", mu=np.mean(treatment_data), sigma=prior_std,
+                    "mu_treatment", mu=np.mean(treatment_data), sigma=prior_std
                 )
                 sigma = pm.HalfNormal("sigma", sigma=1.0)
 
                 # Likelihood
                 _control_obs = pm.Normal(
-                    "control_obs", mu=mu_control, sigma=sigma, observed=control_data,
+                    "control_obs", mu=mu_control, sigma=sigma, observed=control_data
                 )
                 _treatment_obs = pm.Normal(
                     "treatment_obs",
@@ -541,7 +551,7 @@ class BayesianAnalyzer:
 
                 # Sample posterior
                 trace = pm.sample(
-                    2000, tune=1000, return_inferencedata=True, progressbar=False,
+                    2000, tune=1000, return_inferencedata=True, progressbar=False
                 )
 
             # Extract results
@@ -563,8 +573,8 @@ class BayesianAnalyzer:
             prob_rope = float(
                 np.mean(
                     (posterior_diff >= self.rope_lower)
-                    & (posterior_diff <= self.rope_upper),
-                ),
+                    & (posterior_diff <= self.rope_upper)
+                )
             )
 
             # Decision making
@@ -578,7 +588,7 @@ class BayesianAnalyzer:
             return StatisticalTestResult(
                 method=StatisticalMethod.BAYESIAN_TTEST,
                 p_value=float(
-                    1 - prob_better if prob_better > 0.5 else prob_better,
+                    1 - prob_better if prob_better > 0.5 else prob_better
                 ),  # Bayesian p-value analog
                 confidence_interval=(ci_lower, ci_upper),
                 effect_size=effect_size,
@@ -598,22 +608,24 @@ class BayesianAnalyzer:
             # Fallback to frequentist
             fallback_analyzer = FrequentistAnalyzer(self.config)
             return await fallback_analyzer.analyze_ab_test(
-                control_data, treatment_data, "continuous",
+                control_data, treatment_data, "continuous"
             )
 
     def _interpret_bayesian_result(self, prob_better: float, prob_rope: float) -> str:
         """Interpret Bayesian test results."""
+
         if prob_rope > 0.95:
             return f"Results are practically equivalent (ROPE probability: {prob_rope:.3f})"
-        if prob_better > 0.95:
+        elif prob_better > 0.95:
             return f"Treatment is decisively better (probability: {prob_better:.3f})"
-        if prob_better < 0.05:
+        elif prob_better < 0.05:
             return f"Control is decisively better (probability: {1 - prob_better:.3f})"
-        if prob_better > 0.8:
+        elif prob_better > 0.8:
             return f"Treatment is likely better (probability: {prob_better:.3f})"
-        if prob_better < 0.2:
+        elif prob_better < 0.2:
             return f"Control is likely better (probability: {1 - prob_better:.3f})"
-        return f"Results are inconclusive (probability treatment better: {prob_better:.3f})"
+        else:
+            return f"Results are inconclusive (probability treatment better: {prob_better:.3f})"
 
 
 class MultiBanditOptimizer:
@@ -642,6 +654,7 @@ class MultiBanditOptimizer:
         context_features: list[str] | None = None,
     ) -> None:
         """Initialize bandit algorithm with specified number of arms."""
+
         self.num_arms = num_arms
         self.algorithm = algorithm
         self.context_features = context_features or []
@@ -658,27 +671,30 @@ class MultiBanditOptimizer:
             self.beta_params = [1.0] * num_arms  # Failures + 1
 
     async def select_arm(self, context: dict[str, Any] | None = None) -> BanditResult:
-        """Select arm using specified bandit algorithm.
+        """
+        Select arm using specified bandit algorithm.
 
         Args:
             context: Context features for contextual bandits
 
         Returns:
             Bandit result with selected arm and confidence
-
         """
+
         if self.algorithm == BanditAlgorithm.EPSILON_GREEDY:
             return await self._epsilon_greedy_selection()
-        if self.algorithm == BanditAlgorithm.THOMPSON_SAMPLING:
+        elif self.algorithm == BanditAlgorithm.THOMPSON_SAMPLING:
             return await self._thompson_sampling_selection()
-        if self.algorithm == BanditAlgorithm.UPPER_CONFIDENCE_BOUND:
+        elif self.algorithm == BanditAlgorithm.UPPER_CONFIDENCE_BOUND:
             return await self._ucb_selection()
-        if self.algorithm == BanditAlgorithm.CONTEXTUAL_BANDIT:
+        elif self.algorithm == BanditAlgorithm.CONTEXTUAL_BANDIT:
             return await self._epsilon_greedy_selection()
-        return await self._epsilon_greedy_selection()
+        else:
+            return await self._epsilon_greedy_selection()
 
     async def _epsilon_greedy_selection(self) -> BanditResult:
         """Epsilon-greedy arm selection."""
+
         if np.random.random() < self.epsilon or sum(self.arm_counts) == 0:
             # Exploration: random selection
             selected_arm = np.random.randint(0, self.num_arms)
@@ -707,6 +723,7 @@ class MultiBanditOptimizer:
 
     async def _thompson_sampling_selection(self) -> BanditResult:
         """Thompson sampling arm selection."""
+
         # Apply posterior temperature (exploration decay) if enabled and threshold met
         total_samples = sum(self.arm_counts)
         use_temp = (
@@ -735,7 +752,7 @@ class MultiBanditOptimizer:
         alpha, beta = self.alpha_params[selected_arm], self.beta_params[selected_arm]
         variance = (alpha * beta) / ((alpha + beta) ** 2 * (alpha + beta + 1))
         confidence = max(
-            0.1, 1.0 - variance,
+            0.1, 1.0 - variance
         )  # Higher concentration = higher confidence
 
         return BanditResult(
@@ -756,6 +773,7 @@ class MultiBanditOptimizer:
 
     async def _ucb_selection(self) -> BanditResult:
         """Upper Confidence Bound arm selection."""
+
         total_counts = sum(self.arm_counts)
         ucb_values = []
 
@@ -766,7 +784,7 @@ class MultiBanditOptimizer:
             else:
                 mean_reward = self.arm_values[i]
                 confidence_bound = np.sqrt(
-                    2 * np.log(total_counts) / self.arm_counts[i],
+                    2 * np.log(total_counts) / self.arm_counts[i]
                 )
                 ucb_values.append(mean_reward + confidence_bound)
 
@@ -777,7 +795,7 @@ class MultiBanditOptimizer:
 
         # Confidence based on number of samples
         confidence = min(
-            0.95, self.arm_counts[selected_arm] / max(100, sum(self.arm_counts)),
+            0.95, self.arm_counts[selected_arm] / max(100, sum(self.arm_counts))
         )
 
         return BanditResult(
@@ -795,6 +813,7 @@ class MultiBanditOptimizer:
 
     async def update_bandit(self, arm: int, reward: float) -> None:
         """Update bandit with observed reward."""
+
         self.arm_counts[arm] += 1
         self.arm_rewards[arm].append(reward)
 
@@ -815,6 +834,7 @@ class MultiBanditOptimizer:
 
     def _calculate_arm_probabilities(self) -> list[float]:
         """Calculate current arm selection probabilities."""
+
         if sum(self.arm_counts) == 0:
             return [1.0 / self.num_arms] * self.num_arms
 
@@ -824,6 +844,7 @@ class MultiBanditOptimizer:
 
     def _calculate_regret(self) -> float:
         """Calculate cumulative regret."""
+
         if not self.arm_values or max(self.arm_values) == 0:
             return 0.0
 
@@ -838,7 +859,8 @@ class MultiBanditOptimizer:
 
 
 class EnhancedStatisticalEngine:
-    """Main statistical engine integrating all analysis methods.
+    """
+    Main statistical engine integrating all analysis methods.
 
     Provides comprehensive statistical analysis for system-wide A/B testing
     including frequentist, Bayesian, and bandit optimization approaches.
@@ -853,7 +875,7 @@ class EnhancedStatisticalEngine:
 
         if BAYESIAN_AVAILABLE:
             self.bayesian: BayesianAnalyzer | None = BayesianAnalyzer(
-                self.config.get("bayesian", {}),
+                self.config.get("bayesian", {})
             )
         else:
             self.bayesian = None
@@ -872,7 +894,8 @@ class EnhancedStatisticalEngine:
         method: StatisticalMethod = StatisticalMethod.FREQUENTIST_TTEST,
         multiple_comparison: str = DEFAULT_MULTIPLE_COMPARISON_METHOD,
     ) -> dict[str, StatisticalTestResult]:
-        """Perform comprehensive statistical analysis across all variants.
+        """
+        Perform comprehensive statistical analysis across all variants.
 
         Args:
             experiment_data: Dictionary mapping variant names to measurement lists
@@ -881,8 +904,8 @@ class EnhancedStatisticalEngine:
 
         Returns:
             Dictionary of pairwise comparison results
-
         """
+
         results = {}
         p_values = []
 
@@ -913,12 +936,12 @@ class EnhancedStatisticalEngine:
                 )
             elif method in [StatisticalMethod.BAYESIAN_TTEST] and self.bayesian:
                 result = await self.bayesian.analyze_bayesian_ab_test(
-                    control_data, treatment_data,
+                    control_data, treatment_data
                 )
             else:
                 # Fallback to frequentist
                 result = await self.frequentist.analyze_ab_test(
-                    control_data, treatment_data, "continuous",
+                    control_data, treatment_data, "continuous"
                 )
 
             results[f"{treatment_name}_vs_{control_name}"] = result
@@ -947,7 +970,8 @@ class EnhancedStatisticalEngine:
         minimum_sample_size: int = 100,
         check_interval: int = 50,
     ) -> dict[str, Any]:
-        """Analyze whether experiment can be stopped early.
+        """
+        Analyze whether experiment can be stopped early.
 
         Args:
             experiment_data: Current experiment data
@@ -956,8 +980,8 @@ class EnhancedStatisticalEngine:
 
         Returns:
             Early stopping recommendation with reasoning
-
         """
+
         variant_names = list(experiment_data.keys())
 
         if len(variant_names) < 2:
@@ -980,7 +1004,7 @@ class EnhancedStatisticalEngine:
                 treatment_data = list(experiment_data.values())[1]
 
                 result = await self.bayesian.analyze_bayesian_ab_test(
-                    control_data, treatment_data,
+                    control_data, treatment_data
                 )
 
                 # Early stopping criteria for Bayesian
@@ -1016,7 +1040,7 @@ class EnhancedStatisticalEngine:
 
             if significant_results:
                 best_result = max(
-                    significant_results, key=lambda x: abs(x[1].effect_size),
+                    significant_results, key=lambda x: abs(x[1].effect_size)
                 )
                 comparison_name, result = best_result
 
@@ -1074,6 +1098,7 @@ class EnhancedStatisticalEngine:
 
     async def get_engine_stats(self) -> dict[str, Any]:
         """Get statistical engine performance statistics."""
+
         return {
             "capabilities": {
                 "frequentist_analysis": True,

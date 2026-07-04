@@ -1,4 +1,5 @@
-"""Experiment database models for A/B Testing System.
+"""
+Experiment database models for A/B Testing System.
 
 This module provides the database schema for tracking experiments,
 variants, assignments, and results across the Cerebro AI Brain platform.
@@ -68,20 +69,20 @@ class Experiment(BaseModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     experiment_type: Mapped[ExperimentType] = mapped_column(
-        Enum(ExperimentType), nullable=False,
+        Enum(ExperimentType), nullable=False
     )
     status: Mapped[ExperimentStatus] = mapped_column(
-        Enum(ExperimentStatus), default=ExperimentStatus.DRAFT,
+        Enum(ExperimentStatus), default=ExperimentStatus.DRAFT
     )
 
     allocation_strategy: Mapped[AllocationStrategy] = mapped_column(
-        Enum(AllocationStrategy), default=AllocationStrategy.RANDOM,
+        Enum(AllocationStrategy), default=AllocationStrategy.RANDOM
     )
     traffic_percentage: Mapped[float] = mapped_column(
-        Float, default=100.0,
+        Float, default=100.0
     )  # % of traffic to include
     target_segments: Mapped[dict[str, Any]] = mapped_column(
-        JSON, default=dict,
+        JSON, default=dict
     )  # User segments to target
 
     # Scheduling
@@ -90,11 +91,11 @@ class Experiment(BaseModel):
 
     # Configuration
     config: Mapped[dict[str, Any]] = mapped_column(
-        JSON, default=dict,
+        JSON, default=dict
     )  # Experiment-specific configuration
     metrics: Mapped[list[str]] = mapped_column(JSON, default=list)  # Metrics to track
     success_criteria: Mapped[dict[str, Any]] = mapped_column(
-        JSON, default=dict,
+        JSON, default=dict
     )  # Success criteria
 
     # Statistical Settings
@@ -105,7 +106,7 @@ class Experiment(BaseModel):
 
     # Relationships
     variants = relationship(
-        "ExperimentVariant", back_populates="experiment", cascade="all, delete-orphan",
+        "ExperimentVariant", back_populates="experiment", cascade="all, delete-orphan"
     )
     assignments = relationship(
         "ExperimentAssignment",
@@ -113,7 +114,7 @@ class Experiment(BaseModel):
         cascade="all, delete-orphan",
     )
     results = relationship(
-        "ExperimentResult", back_populates="experiment", cascade="all, delete-orphan",
+        "ExperimentResult", back_populates="experiment", cascade="all, delete-orphan"
     )
 
     # Indexes
@@ -131,7 +132,7 @@ class ExperimentVariant(BaseModel):
 
     # Foreign Keys
     experiment_id = Column(
-        PGUUID(as_uuid=True), ForeignKey("experiments.id"), nullable=False,
+        PGUUID(as_uuid=True), ForeignKey("experiments.id"), nullable=False
     )
 
     # Variant Information
@@ -170,10 +171,10 @@ class ExperimentAssignment(BaseModel):
 
     # Foreign Keys
     experiment_id = Column(
-        PGUUID(as_uuid=True), ForeignKey("experiments.id"), nullable=False,
+        PGUUID(as_uuid=True), ForeignKey("experiments.id"), nullable=False
     )
     variant_id = Column(
-        PGUUID(as_uuid=True), ForeignKey("experiment_variants.id"), nullable=False,
+        PGUUID(as_uuid=True), ForeignKey("experiment_variants.id"), nullable=False
     )
 
     # Assignment Information
@@ -186,7 +187,7 @@ class ExperimentAssignment(BaseModel):
 
     # Timestamps
     assigned_at = Column(
-        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
     exposed_at = Column(DateTime)  # When user was actually exposed to variant
 
@@ -197,7 +198,7 @@ class ExperimentAssignment(BaseModel):
     # Constraints and Indexes
     __table_args__ = (
         UniqueConstraint(
-            "experiment_id", "assignment_key", name="uq_experiment_assignment",
+            "experiment_id", "assignment_key", name="uq_experiment_assignment"
         ),
         Index("idx_assignment_experiment_variant", "experiment_id", "variant_id"),
         Index("idx_assignment_user", "user_id"),
@@ -212,13 +213,13 @@ class ExperimentResult(BaseModel):
 
     # Foreign Keys
     experiment_id = Column(
-        PGUUID(as_uuid=True), ForeignKey("experiments.id"), nullable=False,
+        PGUUID(as_uuid=True), ForeignKey("experiments.id"), nullable=False
     )
     variant_id = Column(
-        PGUUID(as_uuid=True), ForeignKey("experiment_variants.id"), nullable=False,
+        PGUUID(as_uuid=True), ForeignKey("experiment_variants.id"), nullable=False
     )
     assignment_id = Column(
-        PGUUID(as_uuid=True), ForeignKey("experiment_assignments.id"),
+        PGUUID(as_uuid=True), ForeignKey("experiment_assignments.id")
     )
 
     # Metric Information
@@ -235,7 +236,7 @@ class ExperimentResult(BaseModel):
 
     # Timestamps
     recorded_at = Column(
-        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
 
     # Relationships
@@ -257,7 +258,7 @@ class ExperimentAnalysis(BaseModel):
 
     # Foreign Key
     experiment_id = Column(
-        PGUUID(as_uuid=True), ForeignKey("experiments.id"), nullable=False,
+        PGUUID(as_uuid=True), ForeignKey("experiments.id"), nullable=False
     )
 
     # Analysis Type
@@ -281,7 +282,7 @@ class ExperimentAnalysis(BaseModel):
 
     # Metadata
     analyzed_at = Column(
-        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
     analyst = Column(String(100))  # System or user who ran analysis
 

@@ -1,4 +1,5 @@
-"""JSON response parsing utilities.
+"""
+JSON response parsing utilities.
 
 This module provides functions for parsing and validating JSON responses
 from the Gemini API, following functional programming principles.
@@ -10,7 +11,8 @@ from typing import Any, Union
 
 
 def parse_json_response(response: str) -> dict[str, Any]:
-    """Parse JSON from Gemini response.
+    """
+    Parse JSON from Gemini response.
 
     Handles various formats including:
     - Direct JSON strings
@@ -25,7 +27,6 @@ def parse_json_response(response: str) -> dict[str, Any]:
 
     Raises:
         ValueError: If no valid JSON can be extracted
-
     """
     try:
         parsed: dict[str, Any] = json.loads(response.strip())
@@ -74,7 +75,8 @@ def parse_json_response(response: str) -> dict[str, Any]:
 
 
 def validate_schema(data: dict[str, Any], schema: dict[str, type]) -> bool:
-    """Validate data against a simple type schema.
+    """
+    Validate data against a simple type schema.
 
     Pure function that checks if data matches expected types.
 
@@ -84,7 +86,6 @@ def validate_schema(data: dict[str, Any], schema: dict[str, type]) -> bool:
 
     Returns:
         True if data matches schema, False otherwise
-
     """
     if not isinstance(data, dict):
         return False
@@ -119,9 +120,10 @@ def validate_schema(data: dict[str, Any], schema: dict[str, type]) -> bool:
 
 
 def extract_nested(
-    data: dict[str, Any], path: str, default: Any | None = None, separator: str = ".",
+    data: dict[str, Any], path: str, default: Any | None = None, separator: str = "."
 ) -> Any:
-    """Extract nested value from dictionary using dot notation.
+    """
+    Extract nested value from dictionary using dot notation.
 
     Pure function for safe nested dictionary access.
 
@@ -133,7 +135,6 @@ def extract_nested(
 
     Returns:
         Value at path or default if not found
-
     """
     if not data or not path:
         return default
@@ -161,7 +162,8 @@ def extract_nested(
 
 
 def clean_json_string(json_str: str) -> str:
-    """Clean common issues in JSON strings.
+    """
+    Clean common issues in JSON strings.
 
     Handles:
     - Trailing commas
@@ -174,7 +176,6 @@ def clean_json_string(json_str: str) -> str:
 
     Returns:
         Cleaned JSON string
-
     """
     # Remove comments
     json_str = re.sub(r"//.*?$", "", json_str, flags=re.MULTILINE)
@@ -195,7 +196,8 @@ def clean_json_string(json_str: str) -> str:
 
 
 def merge_json_objects(obj1: dict[str, Any], obj2: dict[str, Any]) -> dict[str, Any]:
-    """Deep merge two JSON objects.
+    """
+    Deep merge two JSON objects.
 
     Pure function that merges obj2 into obj1 recursively.
 
@@ -205,7 +207,6 @@ def merge_json_objects(obj1: dict[str, Any], obj2: dict[str, Any]) -> dict[str, 
 
     Returns:
         Merged object (new object, doesn't modify inputs)
-
     """
     result = obj1.copy()
 
@@ -223,9 +224,10 @@ def merge_json_objects(obj1: dict[str, Any], obj2: dict[str, Any]) -> dict[str, 
 
 
 def flatten_json(
-    data: dict[str, Any], parent_key: str = "", separator: str = ".",
+    data: dict[str, Any], parent_key: str = "", separator: str = "."
 ) -> dict[str, Any]:
-    """Flatten nested JSON structure.
+    """
+    Flatten nested JSON structure.
 
     Pure function that converts nested dict to flat dict with dot notation keys.
 
@@ -236,7 +238,6 @@ def flatten_json(
 
     Returns:
         Flattened dictionary
-
     """
     items: list[tuple[str, Any]] = []
 
@@ -249,7 +250,7 @@ def flatten_json(
             for i, item in enumerate(value):
                 if isinstance(item, dict):
                     items.extend(
-                        flatten_json(item, f"{new_key}[{i}]", separator).items(),
+                        flatten_json(item, f"{new_key}[{i}]", separator).items()
                     )
                 else:
                     items.append((f"{new_key}[{i}]", item))

@@ -63,7 +63,7 @@ class ComparativeInsightSynthesizer:
 
             if all_scores:
                 variance = sum((score - 0.5) ** 2 for score in all_scores) / len(
-                    all_scores,
+                    all_scores
                 )
 
                 if variance > 0.2:
@@ -98,7 +98,7 @@ class ComparativeInsightSynthesizer:
                     {
                         relationship.get("type", "unknown")
                         for relationship in relationships
-                    },
+                    }
                 ),
             }
 
@@ -239,7 +239,7 @@ class ComparativeInsightSynthesizer:
                         f"{criteria[0] if criteria else 'multiple criteria'}..."
                     ),
                     "source": "fallback",
-                },
+                }
             )
 
         return {

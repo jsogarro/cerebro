@@ -1,4 +1,5 @@
-"""Query Complexity Analyzer for MASR
+"""
+Query Complexity Analyzer for MASR
 
 Analyzes incoming queries to determine complexity score, required capabilities,
 and optimal routing strategy based on multiple factors including:
@@ -77,7 +78,8 @@ class ComplexityAnalysis:
 
 
 class QueryComplexityAnalyzer:
-    """Analyzes queries to determine optimal routing and resource allocation.
+    """
+    Analyzes queries to determine optimal routing and resource allocation.
 
     Uses multiple heuristics and pattern matching to assess complexity
     and provide routing recommendations for the MASR system.
@@ -159,9 +161,10 @@ class QueryComplexityAnalyzer:
         }
 
     async def analyze(
-        self, query: str, context: dict[str, Any] | None = None,
+        self, query: str, context: dict[str, Any] | None = None
     ) -> ComplexityAnalysis:
-        """Analyze query complexity and provide routing recommendations.
+        """
+        Analyze query complexity and provide routing recommendations.
 
         Args:
             query: The input query to analyze
@@ -169,7 +172,6 @@ class QueryComplexityAnalyzer:
 
         Returns:
             ComplexityAnalysis with routing recommendations
-
         """
         logger.info("Analyzing query complexity: %s...", redact_pii(query)[:100])
 
@@ -197,7 +199,7 @@ class QueryComplexityAnalyzer:
 
         # Estimate token usage
         estimated_tokens = self._estimate_token_usage(
-            cleaned_query, level, subtask_count,
+            cleaned_query, level, subtask_count
         )
 
         # Determine priority
@@ -227,7 +229,7 @@ class QueryComplexityAnalyzer:
 
         logger.info(
             f"Analysis complete: {level.value} complexity ({score:.2f}), "
-            f"{len(domains)} domains, {subtask_count} subtasks",
+            f"{len(domains)} domains, {subtask_count} subtasks"
         )
 
         return analysis
@@ -243,9 +245,10 @@ class QueryComplexityAnalyzer:
         return cleaned
 
     async def _analyze_factors(
-        self, query: str, context: dict[str, Any] | None = None,
+        self, query: str, context: dict[str, Any] | None = None
     ) -> ComplexityFactors:
         """Analyze individual complexity factors."""
+
         # Linguistic complexity based on word choice and structure
         linguistic = self._analyze_linguistic_complexity(query)
 
@@ -364,7 +367,7 @@ class QueryComplexityAnalyzer:
         return min(domain_complexity, 1.0)
 
     def _analyze_data_requirements(
-        self, query: str, context: dict[str, Any] | None = None,
+        self, query: str, context: dict[str, Any] | None = None
     ) -> float:
         """Analyze external data requirements."""
         data_complexity = 0.0
@@ -404,7 +407,7 @@ class QueryComplexityAnalyzer:
         return min(output_complexity, 1.0)
 
     def _analyze_time_sensitivity(
-        self, query: str, context: dict[str, Any] | None = None,
+        self, query: str, context: dict[str, Any] | None = None
     ) -> float:
         """Analyze time sensitivity requirements."""
         time_sensitivity = 0.0
@@ -428,7 +431,7 @@ class QueryComplexityAnalyzer:
         return time_sensitivity
 
     def _analyze_quality_requirements(
-        self, query: str, context: dict[str, Any] | None = None,
+        self, query: str, context: dict[str, Any] | None = None
     ) -> float:
         """Analyze quality and validation requirements."""
         quality = 0.0
@@ -468,9 +471,10 @@ class QueryComplexityAnalyzer:
         # once). The previous 0.3/0.7 cut-offs left almost every query "simple".
         if score < 0.12:
             return ComplexityLevel.SIMPLE
-        if score < 0.22:
+        elif score < 0.22:
             return ComplexityLevel.MODERATE
-        return ComplexityLevel.COMPLEX
+        else:
+            return ComplexityLevel.COMPLEX
 
     def _identify_domains(self, query: str) -> list[QueryDomain]:
         """Identify relevant domains for the query."""
@@ -553,7 +557,7 @@ class QueryComplexityAnalyzer:
         return agents
 
     def _estimate_token_usage(
-        self, query: str, level: ComplexityLevel, subtask_count: int,
+        self, query: str, level: ComplexityLevel, subtask_count: int
     ) -> int:
         """Estimate token usage for the query."""
         # Base token estimate
@@ -567,13 +571,13 @@ class QueryComplexityAnalyzer:
         }
 
         estimated_tokens = int(
-            base_tokens + (complexity_multiplier[level] * subtask_count),
+            base_tokens + (complexity_multiplier[level] * subtask_count)
         )
 
         return estimated_tokens
 
     def _determine_priority(
-        self, query: str, context: dict[str, Any] | None = None,
+        self, query: str, context: dict[str, Any] | None = None
     ) -> str:
         """Determine query priority level."""
         for priority, pattern in self.priority_patterns.items():
@@ -587,7 +591,7 @@ class QueryComplexityAnalyzer:
         return "normal"
 
     def _calculate_uncertainty(
-        self, factors: ComplexityFactors, domains: list[QueryDomain],
+        self, factors: ComplexityFactors, domains: list[QueryDomain]
     ) -> float:
         """Calculate uncertainty in the analysis."""
         uncertainty = 0.0

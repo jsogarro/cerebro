@@ -1,4 +1,5 @@
-"""Result repository for research findings management.
+"""
+Result repository for research findings management.
 
 Provides specialized operations for research results and findings.
 """
@@ -16,7 +17,8 @@ from src.repositories.base import BaseRepository
 
 
 class ResultRepository(BaseRepository[ResearchResult]):
-    """Repository for research result operations.
+    """
+    Repository for research result operations.
 
     Manages findings, sources, citations, and analysis results.
     """
@@ -32,7 +34,8 @@ class ResultRepository(BaseRepository[ResearchResult]):
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[ResearchResult]:
-        """Get results for a project.
+        """
+        Get results for a project.
 
         Args:
             project_id: Project ID
@@ -42,7 +45,6 @@ class ResultRepository(BaseRepository[ResearchResult]):
 
         Returns:
             List of results
-
         """
         filters: dict[str, Any] = {"project_id": project_id}
 
@@ -58,9 +60,10 @@ class ResultRepository(BaseRepository[ResearchResult]):
         )
 
     async def get_by_agent(
-        self, project_id: UUID, agent_type: str,
+        self, project_id: UUID, agent_type: str
     ) -> list[ResearchResult]:
-        """Get results produced by a specific agent.
+        """
+        Get results produced by a specific agent.
 
         Args:
             project_id: Project ID
@@ -68,7 +71,6 @@ class ResultRepository(BaseRepository[ResearchResult]):
 
         Returns:
             List of results from agent
-
         """
         query = (
             self.build_query()
@@ -76,7 +78,7 @@ class ResultRepository(BaseRepository[ResearchResult]):
                 and_(
                     ResearchResult.project_id == project_id,
                     ResearchResult.agent_type == agent_type,
-                ),
+                )
             )
             .order_by(ResearchResult.created_at.desc())
         )
@@ -85,14 +87,14 @@ class ResultRepository(BaseRepository[ResearchResult]):
         return list(result.scalars().all())
 
     async def bulk_create(self, results: list[dict[str, Any]]) -> list[ResearchResult]:
-        """Efficiently create multiple results.
+        """
+        Efficiently create multiple results.
 
         Args:
             results: List of result data
 
         Returns:
             List of created results
-
         """
         if not results:
             return []
@@ -107,9 +109,10 @@ class ResultRepository(BaseRepository[ResearchResult]):
         return created_results
 
     async def get_high_confidence(
-        self, project_id: UUID, min_confidence: float = 0.7,
+        self, project_id: UUID, min_confidence: float = 0.7
     ) -> list[ResearchResult]:
-        """Get high-confidence results.
+        """
+        Get high-confidence results.
 
         Args:
             project_id: Project ID
@@ -117,7 +120,6 @@ class ResultRepository(BaseRepository[ResearchResult]):
 
         Returns:
             List of high-confidence results
-
         """
         query = (
             self.build_query()
@@ -125,7 +127,7 @@ class ResultRepository(BaseRepository[ResearchResult]):
                 and_(
                     ResearchResult.project_id == project_id,
                     ResearchResult.confidence_score >= min_confidence,
-                ),
+                )
             )
             .order_by(ResearchResult.confidence_score.desc())
         )
@@ -134,16 +136,16 @@ class ResultRepository(BaseRepository[ResearchResult]):
         return list(result.scalars().all())
 
     async def aggregate_by_type(
-        self, project_id: UUID,
+        self, project_id: UUID
     ) -> dict[str, list[ResearchResult]]:
-        """Group results by type.
+        """
+        Group results by type.
 
         Args:
             project_id: Project ID
 
         Returns:
             Dictionary of results grouped by type
-
         """
         results = await self.get_by_project(project_id)
 
@@ -160,7 +162,8 @@ class ResultRepository(BaseRepository[ResearchResult]):
         result_types: list[str] | None = None,
         limit: int = 50,
     ) -> list[ResearchResult]:
-        """Search in result content.
+        """
+        Search in result content.
 
         Args:
             search_term: Search term
@@ -170,14 +173,13 @@ class ResultRepository(BaseRepository[ResearchResult]):
 
         Returns:
             List of matching results
-
         """
         query = self.build_query()
 
         # Search in JSON content (PostgreSQL specific)
         # This searches for the term in any JSON field
         query = query.where(
-            func.cast(ResearchResult.content, String).ilike(f"%{search_term}%"),
+            func.cast(ResearchResult.content, String).ilike(f"%{search_term}%")
         )
 
         if project_id:
@@ -192,23 +194,24 @@ class ResultRepository(BaseRepository[ResearchResult]):
         return list(result.scalars().all())
 
     async def get_citations(self, project_id: UUID) -> list[ResearchResult]:
-        """Get all citations for a project.
+        """
+        Get all citations for a project.
 
         Args:
             project_id: Project ID
 
         Returns:
             List of citation results
-
         """
         return await self.get_by_project(
-            project_id, result_type=ResultType.CITATION.value,
+            project_id, result_type=ResultType.CITATION.value
         )
 
     async def get_sources(
-        self, project_id: UUID, unique: bool = True,
+        self, project_id: UUID, unique: bool = True
     ) -> list[ResearchResult]:
-        """Get all sources for a project.
+        """
+        Get all sources for a project.
 
         Args:
             project_id: Project ID
@@ -216,13 +219,12 @@ class ResultRepository(BaseRepository[ResearchResult]):
 
         Returns:
             List of source results
-
         """
         query = self.build_query().where(
             and_(
                 ResearchResult.project_id == project_id,
                 ResearchResult.result_type == ResultType.SOURCE.value,
-            ),
+            )
         )
 
         if unique:
@@ -230,21 +232,21 @@ class ResultRepository(BaseRepository[ResearchResult]):
             query = query.distinct(ResearchResult.source_id)
 
         query = query.order_by(
-            ResearchResult.source_id, ResearchResult.confidence_score.desc(),
+            ResearchResult.source_id, ResearchResult.confidence_score.desc()
         )
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def merge_duplicates(self, project_id: UUID) -> int:
-        """Merge duplicate results based on content similarity.
+        """
+        Merge duplicate results based on content similarity.
 
         Args:
             project_id: Project ID
 
         Returns:
             Number of duplicates merged
-
         """
         # Get all results for project
         results = await self.get_by_project(project_id)
@@ -281,21 +283,21 @@ class ResultRepository(BaseRepository[ResearchResult]):
         return merged_count
 
     async def get_statistics(self, project_id: UUID) -> dict[str, Any]:
-        """Get result statistics for a project.
+        """
+        Get result statistics for a project.
 
         Args:
             project_id: Project ID
 
         Returns:
             Statistics dictionary
-
         """
         # Total results
         total_query = select(func.count(ResearchResult.id)).where(
             and_(
                 ResearchResult.project_id == project_id,
                 ResearchResult.deleted_at.is_(None),
-            ),
+            )
         )
         result = await self.session.execute(total_query)
         total = result.scalar() or 0
@@ -303,13 +305,13 @@ class ResultRepository(BaseRepository[ResearchResult]):
         # Results by type
         type_query = (
             select(
-                ResearchResult.result_type, func.count(ResearchResult.id).label("count"),
+                ResearchResult.result_type, func.count(ResearchResult.id).label("count")
             )
             .where(
                 and_(
                     ResearchResult.project_id == project_id,
                     ResearchResult.deleted_at.is_(None),
-                ),
+                )
             )
             .group_by(ResearchResult.result_type)
         )
@@ -323,7 +325,7 @@ class ResultRepository(BaseRepository[ResearchResult]):
                 ResearchResult.project_id == project_id,
                 ResearchResult.confidence_score.isnot(None),
                 ResearchResult.deleted_at.is_(None),
-            ),
+            )
         )
         result = await self.session.execute(avg_conf_query)
         avg_confidence = result.scalar() or 0.0
@@ -334,20 +336,20 @@ class ResultRepository(BaseRepository[ResearchResult]):
                 ResearchResult.project_id == project_id,
                 ResearchResult.confidence_score >= 0.7,
                 ResearchResult.deleted_at.is_(None),
-            ),
+            )
         )
         result = await self.session.execute(high_conf_query)
         high_confidence_count = result.scalar() or 0
 
         # Unique sources
         unique_sources_query = select(
-            func.count(func.distinct(ResearchResult.source_id)),
+            func.count(func.distinct(ResearchResult.source_id))
         ).where(
             and_(
                 ResearchResult.project_id == project_id,
                 ResearchResult.source_id.isnot(None),
                 ResearchResult.deleted_at.is_(None),
-            ),
+            )
         )
         result = await self.session.execute(unique_sources_query)
         unique_sources = result.scalar() or 0
@@ -355,14 +357,14 @@ class ResultRepository(BaseRepository[ResearchResult]):
         # Agent contribution
         agent_query = (
             select(
-                ResearchResult.agent_type, func.count(ResearchResult.id).label("count"),
+                ResearchResult.agent_type, func.count(ResearchResult.id).label("count")
             )
             .where(
                 and_(
                     ResearchResult.project_id == project_id,
                     ResearchResult.agent_type.isnot(None),
                     ResearchResult.deleted_at.is_(None),
-                ),
+                )
             )
             .group_by(ResearchResult.agent_type)
         )
@@ -383,14 +385,14 @@ class ResultRepository(BaseRepository[ResearchResult]):
         }
 
     async def update_confidence_scores(self, updates: list[dict[str, Any]]) -> int:
-        """Batch update confidence scores.
+        """
+        Batch update confidence scores.
 
         Args:
             updates: List of dicts with 'id' and 'confidence_score'
 
         Returns:
             Number of updated results
-
         """
         updated_count = 0
 

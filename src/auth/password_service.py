@@ -1,4 +1,5 @@
-"""Password service for secure password handling.
+"""
+Password service for secure password handling.
 
 Provides password hashing, validation, and management features.
 """
@@ -19,7 +20,8 @@ logger = structlog.get_logger(__name__)
 
 
 class PasswordService:
-    """Secure password management service.
+    """
+    Secure password management service.
 
     Features:
     - Bcrypt password hashing with configurable rounds
@@ -38,7 +40,8 @@ class PasswordService:
         password_history_limit: int = 5,
         check_breaches: bool = True,
     ):
-        """Initialize password service.
+        """
+        Initialize password service.
 
         Args:
             redis_client: Redis client for caching
@@ -46,7 +49,6 @@ class PasswordService:
             min_password_length: Minimum password length
             password_history_limit: Number of previous passwords to track
             check_breaches: Enable breach checking
-
         """
         self.redis_client = redis_client
         self.bcrypt_rounds = bcrypt_rounds
@@ -56,7 +58,7 @@ class PasswordService:
 
         # Initialize password context
         self.pwd_context = CryptContext(
-            schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=bcrypt_rounds,
+            schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=bcrypt_rounds
         )
 
         # Password history prefix in Redis
@@ -78,19 +80,20 @@ class PasswordService:
             await self.http_client.aclose()
 
     def hash_password(self, password: str) -> str:
-        """Hash password using bcrypt.
+        """
+        Hash password using bcrypt.
 
         Args:
             password: Plain text password
 
         Returns:
             Hashed password
-
         """
         return self.pwd_context.hash(password)
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        """Verify password against hash.
+        """
+        Verify password against hash.
 
         Args:
             plain_password: Plain text password
@@ -98,7 +101,6 @@ class PasswordService:
 
         Returns:
             True if password matches
-
         """
         return self.pwd_context.verify(plain_password, hashed_password)
 
@@ -108,7 +110,8 @@ class PasswordService:
         username: str | None = None,
         email: str | None = None,
     ) -> dict[str, Any]:
-        """Validate password strength.
+        """
+        Validate password strength.
 
         Args:
             password: Password to validate
@@ -117,7 +120,6 @@ class PasswordService:
 
         Returns:
             Validation result with score and issues
-
         """
         issues = []
         score = 100
@@ -125,7 +127,7 @@ class PasswordService:
         # Length check
         if len(password) < self.min_password_length:
             issues.append(
-                f"Password must be at least {self.min_password_length} characters",
+                f"Password must be at least {self.min_password_length} characters"
             )
             score -= 30
         elif len(password) < 16:
@@ -208,14 +210,14 @@ class PasswordService:
         }
 
     async def check_password_breach(self, password: str) -> bool:
-        """Check if password has been breached using HaveIBeenPwned API.
+        """
+        Check if password has been breached using HaveIBeenPwned API.
 
         Args:
             password: Password to check
 
         Returns:
             True if password has been breached
-
         """
         if not self.check_breaches or not self.http_client:
             return False
@@ -238,7 +240,7 @@ class PasswordService:
                     hash_suffix, count = line.split(":")
                     if hash_suffix == suffix:
                         logger.warning(
-                            "Password found in breach database", occurrences=count,
+                            "Password found in breach database", occurrences=count
                         )
                         return True
 
@@ -250,12 +252,12 @@ class PasswordService:
             return False
 
     async def add_to_password_history(self, user_id: str, password_hash: str) -> None:
-        """Add password to user's password history.
+        """
+        Add password to user's password history.
 
         Args:
             user_id: User identifier
             password_hash: Hashed password
-
         """
         if not self.redis_client:
             return
@@ -272,7 +274,8 @@ class PasswordService:
         await self.redis_client.expire(history_key, 365 * 24 * 3600)
 
     async def check_password_history(self, user_id: str, password: str) -> bool:
-        """Check if password was recently used.
+        """
+        Check if password was recently used.
 
         Args:
             user_id: User identifier
@@ -280,7 +283,6 @@ class PasswordService:
 
         Returns:
             True if password was recently used
-
         """
         if not self.redis_client:
             return False
@@ -298,27 +300,27 @@ class PasswordService:
         return False
 
     def generate_reset_token(self, length: int = 32) -> str:
-        """Generate secure password reset token.
+        """
+        Generate secure password reset token.
 
         Args:
             length: Token length
 
         Returns:
             Secure random token
-
         """
         return secrets.token_urlsafe(length)
 
     async def store_reset_token(
-        self, user_id: str, token: str, expires_in: int = 3600,
+        self, user_id: str, token: str, expires_in: int = 3600
     ) -> None:
-        """Store password reset token.
+        """
+        Store password reset token.
 
         Args:
             user_id: User identifier
             token: Reset token
             expires_in: Expiration time in seconds
-
         """
         if not self.redis_client:
             return
@@ -327,14 +329,14 @@ class PasswordService:
         await self.redis_client.setex(token_key, expires_in, user_id)
 
     async def validate_reset_token(self, token: str) -> str | None:
-        """Validate password reset token.
+        """
+        Validate password reset token.
 
         Args:
             token: Reset token
 
         Returns:
             User ID if valid, None otherwise
-
         """
         if not self.redis_client:
             return None
@@ -355,7 +357,8 @@ class PasswordService:
         include_symbols: bool = True,
         exclude_ambiguous: bool = True,
     ) -> str:
-        """Generate secure random password.
+        """
+        Generate secure random password.
 
         Args:
             length: Password length
@@ -364,7 +367,6 @@ class PasswordService:
 
         Returns:
             Generated password
-
         """
         # Character sets
         lowercase = string.ascii_lowercase
@@ -451,10 +453,11 @@ class PasswordService:
         """Get password strength label from score."""
         if score >= 80:
             return "strong"
-        if score >= 60:
+        elif score >= 60:
             return "good"
-        if score >= 40:
+        elif score >= 40:
             return "fair"
-        if score >= 20:
+        elif score >= 20:
             return "weak"
-        return "very_weak"
+        else:
+            return "very_weak"

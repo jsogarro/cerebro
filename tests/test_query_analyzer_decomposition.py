@@ -1,4 +1,5 @@
-"""Tests for QueryComplexityAnalyzer integration with QueryDecomposer
+"""
+Tests for QueryComplexityAnalyzer integration with QueryDecomposer
 
 Ensures decomposition is properly wired into the complexity analysis pipeline.
 """

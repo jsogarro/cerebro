@@ -1,4 +1,5 @@
-"""Tests for Research Platform CLI.
+"""
+Tests for Research Platform CLI.
 """
 
 import json
@@ -108,7 +109,7 @@ class TestCLICommands:
     def test_config_set(self, runner):
         """Test config set command."""
         result = runner.invoke(
-            cli, ["config", "set", "api_url", "http://new-api.local"],
+            cli, ["config", "set", "api_url", "http://new-api.local"]
         )
         assert result.exit_code == 0
         assert "Set api_url = http://new-api.local" in result.output
@@ -247,7 +248,7 @@ class TestProjectCommands:
 
     @patch("src.cli.commands.projects.ResearchAPIClient")
     def test_create_project_from_file(
-        self, mock_client_class, runner, sample_project, tmp_path,
+        self, mock_client_class, runner, sample_project, tmp_path
     ):
         """Test creating projects from file."""
         # Create test file
@@ -258,7 +259,7 @@ class TestProjectCommands:
                 "query_text": "Test query",
                 "domains": ["AI", "Ethics"],
                 "user_id": "test-user",
-            },
+            }
         ]
 
         with open(test_file, "w") as f:

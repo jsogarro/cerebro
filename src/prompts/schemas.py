@@ -1,4 +1,5 @@
-"""Prompt Template Schemas
+"""
+Prompt Template Schemas
 
 Defines Pydantic schemas for prompt templates, enabling validation,
 type safety, and structured prompt management.
@@ -74,7 +75,7 @@ class PromptVariable(BaseModel):
     required: bool = Field(True, description="Whether variable is required")
     default: Any | None = Field(None, description="Default value if not provided")
     validation_rules: list[str] = Field(
-        default_factory=list, description="Validation rules",
+        default_factory=list, description="Validation rules"
     )
     examples: list[Any] = Field(default_factory=list, description="Example values")
 
@@ -133,18 +134,18 @@ class PromptTemplate(BaseModel):
 
     # Template configuration
     variables: list[PromptVariable] = Field(
-        default_factory=list, description="Template variables",
+        default_factory=list, description="Template variables"
     )
     examples: list[PromptExample] = Field(
-        default_factory=list, description="Few-shot examples",
+        default_factory=list, description="Few-shot examples"
     )
 
     # Output specification
     expected_output_schema: dict[str, Any] | None = Field(
-        None, description="Expected JSON output schema",
+        None, description="Expected JSON output schema"
     )
     output_format: str = Field(
-        "json", description="Output format (json, text, structured)",
+        "json", description="Output format (json, text, structured)"
     )
 
     # Template behavior
@@ -154,16 +155,16 @@ class PromptTemplate(BaseModel):
     # Advanced features
     inherits_from: str | None = Field(None, description="Base template to inherit from")
     requires_refinement: bool = Field(
-        False, description="Requires multi-round refinement",
+        False, description="Requires multi-round refinement"
     )
     consensus_threshold: float = Field(0.95, description="Required consensus level")
 
     # Safety and validation
     safety_checks: list[str] = Field(
-        default_factory=list, description="Safety validation rules",
+        default_factory=list, description="Safety validation rules"
     )
     quality_checks: list[str] = Field(
-        default_factory=list, description="Quality validation rules",
+        default_factory=list, description="Quality validation rules"
     )
 
     @field_validator("metadata")
@@ -190,16 +191,16 @@ class PromptCollection(BaseModel):
     version: str = Field("1.0.0", description="Collection version")
 
     templates: dict[str, PromptTemplate] = Field(
-        default_factory=dict, description="Template name to template mapping",
+        default_factory=dict, description="Template name to template mapping"
     )
 
     # Collection metadata
     domain: str | None = Field(None, description="Target domain")
     agent_types: list[str] = Field(
-        default_factory=list, description="Compatible agent types",
+        default_factory=list, description="Compatible agent types"
     )
     dependencies: list[str] = Field(
-        default_factory=list, description="Required dependencies",
+        default_factory=list, description="Required dependencies"
     )
 
     # Performance tracking
@@ -219,7 +220,7 @@ class PromptCollection(BaseModel):
         }
 
     def get_templates_by_type(
-        self, prompt_type: PromptType,
+        self, prompt_type: PromptType
     ) -> dict[str, PromptTemplate]:
         """Get all templates of a specific type."""
         return {

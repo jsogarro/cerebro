@@ -1,4 +1,5 @@
-"""Database utilities for integration testing.
+"""
+Database utilities for integration testing.
 """
 
 import logging
@@ -103,7 +104,7 @@ class TestDatabaseManager:
             await session.commit()
 
         logger.info(
-            f"Seeded database with {sum(len(r) for r in data.values())} records",
+            f"Seeded database with {sum(len(r) for r in data.values())} records"
         )
 
     async def execute_sql(self, sql: str, params: dict | None = None):
@@ -155,7 +156,7 @@ class TestDataSeeder:
         return users
 
     async def seed_projects(
-        self, users: list[User], projects_per_user: int = 3,
+        self, users: list[User], projects_per_user: int = 3
     ) -> list[ResearchProject]:
         """Seed test research projects."""
         from tests.factories.project_factory import ResearchProjectFactory
@@ -164,7 +165,7 @@ class TestDataSeeder:
         for user in users:
             for i in range(projects_per_user):
                 project = ResearchProjectFactory(
-                    user_id=user.id, title=f"{user.username} Project {i + 1}",
+                    user_id=user.id, title=f"{user.username} Project {i + 1}"
                 )
                 self.session.add(project)
                 projects.append(project)
@@ -173,7 +174,7 @@ class TestDataSeeder:
         return projects
 
     async def seed_results(
-        self, projects: list[ResearchProject],
+        self, projects: list[ResearchProject]
     ) -> list[ResearchResult]:
         """Seed test research results."""
         from tests.factories.project_factory import ResearchResultFactory
@@ -191,7 +192,7 @@ class TestDataSeeder:
             if project.status == ProjectStatus.COMPLETED:
                 for agent in agents:
                     result = ResearchResultFactory(
-                        project_id=project.id, agent_type=agent,
+                        project_id=project.id, agent_type=agent
                     )
                     self.session.add(result)
                     results.append(result)
@@ -228,7 +229,7 @@ class DatabaseAssertion:
 
         if not record:
             raise AssertionError(
-                f"Record not found in {model.__name__} with filters: {filters}",
+                f"Record not found in {model.__name__} with filters: {filters}"
             )
 
         return record
@@ -247,11 +248,11 @@ class DatabaseAssertion:
         if actual_count != expected_count:
             raise AssertionError(
                 f"Expected {expected_count} records in {model.__name__}, "
-                f"but found {actual_count}",
+                f"but found {actual_count}"
             )
 
     async def assert_field_value(
-        self, model: Any, record_id: str, field_name: str, expected_value: Any,
+        self, model: Any, record_id: str, field_name: str, expected_value: Any
     ):
         """Assert a field value for a record."""
         from sqlalchemy import select
@@ -267,7 +268,7 @@ class DatabaseAssertion:
         if actual_value != expected_value:
             raise AssertionError(
                 f"Expected {field_name}={expected_value}, "
-                f"but got {field_name}={actual_value}",
+                f"but got {field_name}={actual_value}"
             )
 
     async def assert_relationship_exists(
@@ -302,7 +303,7 @@ class DatabaseAssertion:
             if actual_count != expected_count:
                 raise AssertionError(
                     f"Expected {expected_count} related records, "
-                    f"but found {actual_count}",
+                    f"but found {actual_count}"
                 )
 
 

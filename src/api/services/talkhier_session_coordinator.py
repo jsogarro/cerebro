@@ -111,7 +111,7 @@ class TalkHierSessionCoordinator:
             return supervisor_type
 
         for supervisor_allocation in getattr(
-            routing_decision, "supervisor_allocations", [],
+            routing_decision, "supervisor_allocations", []
         ):
             supervisor_type = getattr(supervisor_allocation, "supervisor_type", None)
             if isinstance(supervisor_type, str):
@@ -135,7 +135,7 @@ class TalkHierSessionCoordinator:
                 agent_ids = [
                     agent.agent_type
                     for agent in getattr(
-                        routing_decision.agent_allocation, "agents", [],
+                        routing_decision.agent_allocation, "agents", []
                     )
                     if isinstance(getattr(agent, "agent_type", None), str)
                 ]
@@ -149,7 +149,7 @@ class TalkHierSessionCoordinator:
                     confidence=0.5,
                     rounds_participated=0,
                     quality_scores=[],
-                ),
+                )
             )
 
         if supervisor:
@@ -161,7 +161,7 @@ class TalkHierSessionCoordinator:
                     confidence=0.8,
                     rounds_participated=0,
                     quality_scores=[],
-                ),
+                )
             )
 
         return participants

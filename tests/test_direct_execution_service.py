@@ -1,4 +1,5 @@
-"""Tests for Direct Execution Service
+"""
+Tests for Direct Execution Service
 
 Tests the direct MASR routing and supervisor execution service that replaces
 the Temporal workflow system.
@@ -35,7 +36,7 @@ class _FakeAgentAllocation:
     supervisor_type: str = "research"
     worker_count: int = 3
     worker_types: list[str] = field(
-        default_factory=lambda: ["literature", "analysis", "synthesis"],
+        default_factory=lambda: ["literature", "analysis", "synthesis"]
     )
 
 
@@ -52,7 +53,7 @@ class _FakeRoutingDecision:
     collaboration_mode: str = "hierarchical"
     agent_allocation: _FakeAgentAllocation = field(default_factory=_FakeAgentAllocation)
     complexity_analysis: _FakeComplexityAnalysis = field(
-        default_factory=_FakeComplexityAnalysis,
+        default_factory=_FakeComplexityAnalysis
     )
     estimated_cost: float = 0.015
     estimated_latency_ms: int = 120000
@@ -127,9 +128,10 @@ class TestDirectExecutionService:
 
     @pytest.mark.asyncio
     async def test_start_research_execution_success(
-        self, execution_service, sample_project,
+        self, execution_service, sample_project
     ):
         """Test successful research execution start."""
+
         execution_id = await execution_service.start_research_execution(sample_project)
 
         assert execution_id is not None
@@ -142,9 +144,10 @@ class TestDirectExecutionService:
 
     @pytest.mark.asyncio
     async def test_execution_workflow_complete_flow(
-        self, execution_service, sample_project,
+        self, execution_service, sample_project
     ):
         """Test complete execution workflow from start to finish."""
+
         # Start execution
         execution_id = await execution_service.start_research_execution(sample_project)
 
@@ -170,6 +173,7 @@ class TestDirectExecutionService:
     @pytest.mark.asyncio
     async def test_get_execution_status(self, execution_service, sample_project):
         """Test getting execution status."""
+
         execution_id = await execution_service.start_research_execution(sample_project)
 
         status = await execution_service.get_execution_status(execution_id)
@@ -180,12 +184,14 @@ class TestDirectExecutionService:
     @pytest.mark.asyncio
     async def test_get_execution_status_nonexistent(self, execution_service):
         """Test getting status for non-existent execution."""
+
         status = await execution_service.get_execution_status("nonexistent-id")
         assert status is None
 
     @pytest.mark.asyncio
     async def test_cancel_execution(self, execution_service, sample_project):
         """Test canceling an active execution."""
+
         execution_id = await execution_service.start_research_execution(sample_project)
 
         # Cancel execution
@@ -199,12 +205,14 @@ class TestDirectExecutionService:
     @pytest.mark.asyncio
     async def test_cancel_execution_nonexistent(self, execution_service):
         """Test canceling non-existent execution."""
+
         success = await execution_service.cancel_execution("nonexistent-id")
         assert success is False
 
     @pytest.mark.asyncio
     async def test_max_concurrent_executions(self, execution_service, sample_project):
         """Test maximum concurrent executions limit."""
+
         # Set low limit for testing
         execution_service.max_concurrent_executions = 2
 
@@ -221,9 +229,10 @@ class TestDirectExecutionService:
     @pytest.mark.asyncio
     async def test_execution_error_handling(self, execution_service, sample_project):
         """Test error handling in execution workflow."""
+
         # Mock MASR router to raise an exception
         execution_service.masr_router.route.side_effect = Exception(
-            "MASR routing failed",
+            "MASR routing failed"
         )
 
         execution_id = await execution_service.start_research_execution(sample_project)
@@ -241,6 +250,7 @@ class TestDirectExecutionService:
     @pytest.mark.asyncio
     async def test_get_execution_results(self, execution_service, sample_project):
         """Test getting execution results."""
+
         execution_id = await execution_service.start_research_execution(sample_project)
 
         # Wait for execution
@@ -252,12 +262,13 @@ class TestDirectExecutionService:
     @pytest.mark.asyncio
     async def test_list_active_executions(self, execution_service, sample_project):
         """Test listing active executions."""
+
         # Start multiple executions
         execution_id_1 = await execution_service.start_research_execution(
-            sample_project,
+            sample_project
         )
         execution_id_2 = await execution_service.start_research_execution(
-            sample_project,
+            sample_project
         )
 
         active_executions = await execution_service.list_active_executions()
@@ -269,9 +280,10 @@ class TestDirectExecutionService:
 
     @pytest.mark.asyncio
     async def test_cleanup_completed_executions(
-        self, execution_service, sample_project,
+        self, execution_service, sample_project
     ):
         """Test cleanup of old completed executions."""
+
         # Start and complete an execution
         execution_id = await execution_service.start_research_execution(sample_project)
 
@@ -282,7 +294,7 @@ class TestDirectExecutionService:
 
         # Test cleanup (with 0 hour limit to clean immediately)
         cleaned_count = await execution_service.cleanup_completed_executions(
-            max_age_hours=0,
+            max_age_hours=0
         )
 
         assert cleaned_count == 1
@@ -291,6 +303,7 @@ class TestDirectExecutionService:
     @pytest.mark.asyncio
     async def test_service_stats(self, execution_service, sample_project):
         """Test service statistics."""
+
         stats = await execution_service.get_service_stats()
 
         assert "execution_stats" in stats
@@ -303,6 +316,7 @@ class TestDirectExecutionService:
     @pytest.mark.asyncio
     async def test_health_check(self, execution_service):
         """Test service health check."""
+
         health = await execution_service.health_check()
 
         assert "status" in health
@@ -316,6 +330,7 @@ class TestDirectExecutionService:
 
     def test_get_direct_execution_service_singleton(self):
         """Test that get_direct_execution_service returns singleton."""
+
         service1 = get_direct_execution_service()
         service2 = get_direct_execution_service()
 
@@ -328,8 +343,9 @@ class TestExecutionStatus:
 
     def test_execution_status_initialization(self):
         """Test ExecutionStatus initialization."""
+
         status = ExecutionStatus(
-            execution_id="test-123", project_id="project-456", status="pending",
+            execution_id="test-123", project_id="project-456", status="pending"
         )
 
         assert status.execution_id == "test-123"
@@ -352,6 +368,7 @@ class TestExecutionStatus:
         Explicit ``None`` is no longer accepted as input; callers should omit
         the field to get the default empty container.
         """
+
         status = ExecutionStatus(
             execution_id="test-123",
             project_id="project-456",
@@ -371,6 +388,7 @@ class TestDirectExecutionIntegration:
     @pytest.mark.asyncio
     async def test_full_integration_flow(self):
         """Test full integration flow with real components."""
+
         # This would test with real MASR and supervisor components
         # in an integration test environment
 
@@ -406,6 +424,7 @@ class TestDirectExecutionPerformance:
     @pytest.mark.benchmark
     async def test_execution_startup_time(self, execution_service, sample_project):
         """Benchmark execution startup time."""
+
         start_time = datetime.now()
 
         execution_id = await execution_service.start_research_execution(sample_project)
@@ -418,14 +437,15 @@ class TestDirectExecutionPerformance:
 
     @pytest.mark.asyncio
     async def test_concurrent_execution_performance(
-        self, execution_service, sample_project,
+        self, execution_service, sample_project
     ):
         """Test performance with multiple concurrent executions."""
+
         # Start multiple executions concurrently
         tasks = []
         for _i in range(5):
             task = asyncio.create_task(
-                execution_service.start_research_execution(sample_project),
+                execution_service.start_research_execution(sample_project)
             )
             tasks.append(task)
 

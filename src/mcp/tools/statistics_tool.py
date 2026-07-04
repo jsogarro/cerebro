@@ -1,4 +1,5 @@
-"""Statistics Tool for MCP.
+"""
+Statistics Tool for MCP.
 
 Provides statistical analysis and visualization capabilities.
 """
@@ -16,7 +17,8 @@ logger = get_logger()
 
 
 class StatisticsTool(BaseMCPTool):
-    """MCP tool for statistical analysis and visualization.
+    """
+    MCP tool for statistical analysis and visualization.
 
     Supports descriptive statistics, hypothesis testing, and plotting.
     """
@@ -80,31 +82,32 @@ class StatisticsTool(BaseMCPTool):
         )
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """Execute statistical operation.
+        """
+        Execute statistical operation.
 
         Args:
             **kwargs: Operation parameters
 
         Returns:
             Analysis results
-
         """
         try:
             operation = kwargs.get("operation", "")
 
             if operation == "descriptive":
                 return self._descriptive_statistics(kwargs.get("data", []))
-            if operation == "t_test":
+            elif operation == "t_test":
                 return self._t_test(kwargs.get("group1", []), kwargs.get("group2", []))
-            if operation == "correlation":
+            elif operation == "correlation":
                 return self._correlation_analysis(
-                    kwargs.get("x", []), kwargs.get("y", []),
+                    kwargs.get("x", []), kwargs.get("y", [])
                 )
-            if operation == "plot":
+            elif operation == "plot":
                 return self._generate_plot(
-                    kwargs.get("data", []), kwargs.get("plot_type", "histogram"),
+                    kwargs.get("data", []), kwargs.get("plot_type", "histogram")
                 )
-            return {"success": False, "error": f"Unknown operation: {operation}"}
+            else:
+                return {"success": False, "error": f"Unknown operation: {operation}"}
 
         except Exception as e:
             logger.error(f"Statistical operation failed: {e!s}")
@@ -226,17 +229,17 @@ class StatisticsTool(BaseMCPTool):
             if plot_type == "histogram":
                 fig = go.Figure(data=[go.Histogram(x=data)])
                 fig.update_layout(
-                    title="Histogram", xaxis_title="Value", yaxis_title="Frequency",
+                    title="Histogram", xaxis_title="Value", yaxis_title="Frequency"
                 )
             elif plot_type == "box":
                 fig = go.Figure(data=[go.Box(y=data)])
                 fig.update_layout(title="Box Plot", yaxis_title="Value")
             elif plot_type == "scatter":
                 fig = go.Figure(
-                    data=[go.Scatter(x=list(range(len(data))), y=data, mode="markers")],
+                    data=[go.Scatter(x=list(range(len(data))), y=data, mode="markers")]
                 )
                 fig.update_layout(
-                    title="Scatter Plot", xaxis_title="Index", yaxis_title="Value",
+                    title="Scatter Plot", xaxis_title="Index", yaxis_title="Value"
                 )
             else:
                 # Default to histogram

@@ -34,14 +34,14 @@ class ResultAggregator:
         for supervisor_type, result_data in results.items():
             weight = priority_weights.get(supervisor_type, 1.0)
             synthesis_parts.append(
-                f"{supervisor_type} (weight={weight}): {result_data['result']}",
+                f"{supervisor_type} (weight={weight}): {result_data['result']}"
             )
 
         synthesized = f"Synthesized result combining: {'; '.join(synthesis_parts)}"
 
         quality_scores = [result["quality_score"] for result in results.values()]
         consensus = bool(
-            all(abs(score - quality_scores[0]) < 0.1 for score in quality_scores),
+            all(abs(score - quality_scores[0]) < 0.1 for score in quality_scores)
         )
 
         return synthesized, consensus

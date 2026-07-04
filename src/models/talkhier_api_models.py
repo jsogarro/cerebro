@@ -1,4 +1,5 @@
-"""TalkHier Protocol API Models
+"""
+TalkHier Protocol API Models
 
 This module defines request and response models for the TalkHier Protocol API,
 implementing structured dialogue patterns from "Talk Structurally, Act Hierarchically" research.
@@ -89,26 +90,26 @@ class TalkHierSessionRequest(BaseModel):
                 "max_rounds": 3,
                 "quality_threshold": 0.85,
                 "consensus_type": "weighted",
-            },
-        },
+            }
+        }
     )
 
     query: str = Field(
-        ..., min_length=1, description="Query to refine through structured dialogue",
+        ..., min_length=1, description="Query to refine through structured dialogue"
     )
     domains: list[str] = Field(
-        default_factory=list, description="Relevant domains for the query",
+        default_factory=list, description="Relevant domains for the query"
     )
     participants: list[str] | None = Field(
-        None, description="Specific agents to participate",
+        None, description="Specific agents to participate"
     )
     supervisor_type: str | None = Field(
-        None, description="Type of supervisor to coordinate",
+        None, description="Type of supervisor to coordinate"
     )
 
     # Protocol configuration
     protocol_type: ProtocolType = Field(
-        ProtocolType.STANDARD, description="TalkHier protocol variant",
+        ProtocolType.STANDARD, description="TalkHier protocol variant"
     )
     refinement_strategy: RefinementStrategy = Field(
         RefinementStrategy.QUALITY_FOCUSED,
@@ -119,22 +120,22 @@ class TalkHierSessionRequest(BaseModel):
     max_rounds: int = Field(3, ge=1, le=10, description="Maximum refinement rounds")
     min_rounds: int = Field(1, ge=1, le=5, description="Minimum refinement rounds")
     quality_threshold: float = Field(
-        0.85, ge=0.0, le=1.0, description="Target quality score",
+        0.85, ge=0.0, le=1.0, description="Target quality score"
     )
     consensus_type: ConsensusType = Field(
-        ConsensusType.WEIGHTED, description="Consensus mechanism",
+        ConsensusType.WEIGHTED, description="Consensus mechanism"
     )
     consensus_threshold: float = Field(
-        0.8, ge=0.5, le=1.0, description="Consensus agreement threshold",
+        0.8, ge=0.5, le=1.0, description="Consensus agreement threshold"
     )
 
     # Optional parameters
     timeout_seconds: int | None = Field(
-        300, ge=30, le=3600, description="Session timeout",
+        300, ge=30, le=3600, description="Session timeout"
     )
     enable_debate: bool = Field(True, description="Allow agents to debate and disagree")
     require_evidence: bool = Field(
-        True, description="Require supporting evidence in responses",
+        True, description="Require supporting evidence in responses"
     )
 
     @field_validator("min_rounds")
@@ -160,17 +161,17 @@ class RefinementRoundRequest(BaseModel):
                     "literature-review": "Need more recent sources",
                     "synthesis": "Conclusion needs strengthening",
                 },
-            },
-        },
+            }
+        }
     )
 
     round_number: int = Field(..., ge=1, description="Current round number")
     previous_result: dict[str, Any] | None = Field(
-        None, description="Result from previous round",
+        None, description="Result from previous round"
     )
     refinement_focus: str | None = Field(None, description="Specific areas to refine")
     participant_feedback: dict[str, str] | None = Field(
-        None, description="Feedback from each participant",
+        None, description="Feedback from each participant"
     )
     force_consensus: bool = Field(False, description="Force consensus in this round")
 
@@ -191,18 +192,18 @@ class ConsensusCheckRequest(BaseModel):
                 ],
                 "check_quality": True,
                 "include_minority_report": True,
-            },
-        },
+            }
+        }
     )
 
     round_results: list[dict[str, Any]] = Field(
-        ..., description="Results from current round",
+        ..., description="Results from current round"
     )
     check_quality: bool = Field(
-        True, description="Include quality assessment in consensus",
+        True, description="Include quality assessment in consensus"
     )
     include_minority_report: bool = Field(
-        False, description="Include dissenting opinions",
+        False, description="Include dissenting opinions"
     )
 
 
@@ -234,13 +235,13 @@ class ProtocolValidationRequest(BaseModel):
                 ],
                 "expected_protocol": "standard",
                 "check_timing": True,
-            },
-        },
+            }
+        }
     )
 
     messages: list[dict[str, Any]] = Field(..., description="Messages to validate")
     expected_protocol: ProtocolType | None = Field(
-        None, description="Expected protocol type",
+        None, description="Expected protocol type"
     )
     check_timing: bool = Field(True, description="Validate message timing")
     check_structure: bool = Field(True, description="Validate dialogue structure")
@@ -258,13 +259,13 @@ class ParticipantInfo(BaseModel):
     agent_type: str = Field(..., description="Type of agent")
     role: MessageRole = Field(..., description="Role in the session")
     confidence: float = Field(
-        0.0, ge=0.0, le=1.0, description="Current confidence level",
+        0.0, ge=0.0, le=1.0, description="Current confidence level"
     )
     rounds_participated: int = Field(
-        0, ge=0, description="Number of rounds participated",
+        0, ge=0, description="Number of rounds participated"
     )
     quality_scores: list[float] = Field(
-        default_factory=list, description="Quality scores per round",
+        default_factory=list, description="Quality scores per round"
     )
 
 
@@ -278,13 +279,13 @@ class RefinementRound(BaseModel):
 
     participants: list[str] = Field(..., description="Participating agents")
     messages: list[dict[str, Any]] = Field(
-        default_factory=list, description="Round messages",
+        default_factory=list, description="Round messages"
     )
 
     quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Round quality score")
     consensus_score: float = Field(0.0, ge=0.0, le=1.0, description="Consensus level")
     refinement_delta: float = Field(
-        0.0, description="Quality improvement from previous round",
+        0.0, description="Quality improvement from previous round"
     )
 
     result: dict[str, Any] | None = Field(None, description="Round result")
@@ -296,7 +297,7 @@ class ConsensusResult(BaseModel):
     has_consensus: bool = Field(..., description="Whether consensus was achieved")
     consensus_type: ConsensusType = Field(..., description="Type of consensus checked")
     consensus_score: float = Field(
-        ..., ge=0.0, le=1.0, description="Consensus strength",
+        ..., ge=0.0, le=1.0, description="Consensus strength"
     )
 
     agreement_matrix: dict[str, dict[str, float]] = Field(
@@ -305,11 +306,11 @@ class ConsensusResult(BaseModel):
     )
 
     quality_scores: dict[str, float] = Field(
-        default_factory=dict, description="Quality scores per participant",
+        default_factory=dict, description="Quality scores per participant"
     )
 
     minority_reports: list[dict[str, Any]] | None = Field(
-        None, description="Dissenting opinions if requested",
+        None, description="Dissenting opinions if requested"
     )
 
     recommendation: str = Field(..., description="Recommended next action")
@@ -325,7 +326,7 @@ class TalkHierSessionResponse(BaseModel):
 
     protocol_type: ProtocolType = Field(..., description="Active protocol type")
     refinement_strategy: RefinementStrategy = Field(
-        ..., description="Active refinement strategy",
+        ..., description="Active refinement strategy"
     )
 
     participants: list[ParticipantInfo] = Field(..., description="Session participants")
@@ -335,10 +336,10 @@ class TalkHierSessionResponse(BaseModel):
     quality_threshold: float = Field(..., description="Target quality threshold")
 
     websocket_url: str | None = Field(
-        None, description="WebSocket URL for live updates",
+        None, description="WebSocket URL for live updates"
     )
     estimated_duration_seconds: int = Field(
-        ..., description="Estimated session duration",
+        ..., description="Estimated session duration"
     )
 
 
@@ -352,14 +353,14 @@ class SessionStatusResponse(BaseModel):
     total_rounds: int = Field(0, description="Total rounds completed")
 
     rounds: list[RefinementRound] = Field(
-        default_factory=list, description="Round history",
+        default_factory=list, description="Round history"
     )
 
     current_quality: float = Field(
-        0.0, ge=0.0, le=1.0, description="Current quality score",
+        0.0, ge=0.0, le=1.0, description="Current quality score"
     )
     current_consensus: float = Field(
-        0.0, ge=0.0, le=1.0, description="Current consensus level",
+        0.0, ge=0.0, le=1.0, description="Current consensus level"
     )
 
     elapsed_seconds: int = Field(0, description="Time elapsed")
@@ -378,22 +379,22 @@ class RefinementRoundResponse(BaseModel):
     duration_ms: int = Field(..., description="Round duration in milliseconds")
 
     participant_responses: dict[str, dict[str, Any]] = Field(
-        ..., description="Responses from each participant",
+        ..., description="Responses from each participant"
     )
 
     aggregated_result: dict[str, Any] = Field(
-        ..., description="Aggregated round result",
+        ..., description="Aggregated round result"
     )
 
     quality_score: float = Field(..., ge=0.0, le=1.0, description="Round quality score")
     consensus_score: float = Field(
-        ..., ge=0.0, le=1.0, description="Round consensus score",
+        ..., ge=0.0, le=1.0, description="Round consensus score"
     )
     improvement_delta: float = Field(..., description="Improvement from previous round")
 
     continue_refinement: bool = Field(..., description="Whether to continue refinement")
     refinement_suggestion: str | None = Field(
-        None, description="Suggested refinement focus",
+        None, description="Suggested refinement focus"
     )
 
 
@@ -407,18 +408,18 @@ class SessionCloseResponse(BaseModel):
     total_duration_seconds: int = Field(..., description="Total session duration")
 
     final_result: dict[str, Any] | None = Field(
-        None, description="Final refined result",
+        None, description="Final refined result"
     )
     final_quality: float = Field(0.0, ge=0.0, le=1.0, description="Final quality score")
     final_consensus: float = Field(
-        0.0, ge=0.0, le=1.0, description="Final consensus score",
+        0.0, ge=0.0, le=1.0, description="Final consensus score"
     )
 
     transcript_url: str | None = Field(None, description="URL to session transcript")
     summary: dict[str, Any] | None = Field(None, description="Session summary")
 
     performance_metrics: dict[str, Any] = Field(
-        default_factory=dict, description="Session performance metrics",
+        default_factory=dict, description="Session performance metrics"
     )
 
 
@@ -426,12 +427,12 @@ class ProtocolListResponse(BaseModel):
     """Response listing available TalkHier protocols"""
 
     protocols: list[dict[str, Any]] = Field(
-        ..., description="Available protocol configurations",
+        ..., description="Available protocol configurations"
     )
     default_protocol: ProtocolType = Field(..., description="Default protocol type")
 
     recommended_protocols: dict[str, ProtocolType] = Field(
-        default_factory=dict, description="Recommended protocols by query type",
+        default_factory=dict, description="Recommended protocols by query type"
     )
 
 
@@ -440,22 +441,22 @@ class ValidationResponse(BaseModel):
 
     is_valid: bool = Field(..., description="Whether communication follows protocol")
     protocol_detected: ProtocolType | None = Field(
-        None, description="Detected protocol type",
+        None, description="Detected protocol type"
     )
 
     structural_errors: list[str] = Field(
-        default_factory=list, description="Structure violations",
+        default_factory=list, description="Structure violations"
     )
     timing_errors: list[str] = Field(
-        default_factory=list, description="Timing violations",
+        default_factory=list, description="Timing violations"
     )
     role_errors: list[str] = Field(default_factory=list, description="Role violations")
 
     quality_assessment: float | None = Field(
-        None, description="Communication quality score",
+        None, description="Communication quality score"
     )
     recommendations: list[str] = Field(
-        default_factory=list, description="Improvement recommendations",
+        default_factory=list, description="Improvement recommendations"
     )
 
 
@@ -473,19 +474,19 @@ class AnalyticsResponse(BaseModel):
     timeout_rate: float = Field(..., ge=0.0, le=1.0, description="Session timeout rate")
 
     protocol_usage: dict[str, int] = Field(
-        default_factory=dict, description="Usage count by protocol type",
+        default_factory=dict, description="Usage count by protocol type"
     )
 
     strategy_performance: dict[str, dict[str, float]] = Field(
-        default_factory=dict, description="Performance metrics by refinement strategy",
+        default_factory=dict, description="Performance metrics by refinement strategy"
     )
 
     quality_trends: list[dict[str, Any]] = Field(
-        default_factory=list, description="Quality score trends over time",
+        default_factory=list, description="Quality score trends over time"
     )
 
     consensus_patterns: dict[str, Any] = Field(
-        default_factory=dict, description="Consensus achievement patterns",
+        default_factory=dict, description="Consensus achievement patterns"
     )
 
 
@@ -500,7 +501,7 @@ class TalkHierWebSocketEvent(BaseModel):
     event_type: str = Field(..., description="Type of event")
     session_id: str = Field(..., description="Session identifier")
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), description="Event timestamp",
+        default_factory=lambda: datetime.now(UTC), description="Event timestamp"
     )
     data: dict[str, Any] = Field(..., description="Event-specific data")
 
@@ -529,7 +530,7 @@ class ConsensusUpdateEvent(TalkHierWebSocketEvent):
     event_type: Literal["consensus_update"] = "consensus_update"
     current_consensus: float = Field(..., description="Current consensus level")
     trending_direction: Literal["improving", "declining", "stable"] = Field(
-        ..., description="Consensus trend",
+        ..., description="Consensus trend"
     )
 
 
@@ -568,8 +569,8 @@ class InteractiveMessage(BaseModel):
                 "agent_id": "literature-review",
                 "confidence": 0.85,
                 "supporting_evidence": ["Reference 1", "Reference 2"],
-            },
-        },
+            }
+        }
     )
 
     content: str = Field(..., min_length=1, description="Message content")
@@ -577,7 +578,7 @@ class InteractiveMessage(BaseModel):
     agent_id: str | None = Field(None, description="Sender agent ID")
     confidence: float = Field(0.5, ge=0.0, le=1.0, description="Message confidence")
     supporting_evidence: list[str] | None = Field(
-        None, description="Supporting evidence",
+        None, description="Supporting evidence"
     )
     in_response_to: str | None = Field(None, description="Message being responded to")
 
@@ -607,20 +608,20 @@ class CoordinationRequest(BaseModel):
                 "coordination_type": "sequential",
                 "share_context": True,
                 "aggregate_results": True,
-            },
-        },
+            }
+        }
     )
 
     session_ids: list[str] = Field(
-        ..., min_length=2, description="Sessions to coordinate",
+        ..., min_length=2, description="Sessions to coordinate"
     )
     coordination_type: Literal["sequential", "parallel", "hierarchical"] = Field(
-        ..., description="Coordination pattern",
+        ..., description="Coordination pattern"
     )
     share_context: bool = Field(True, description="Share context between sessions")
     aggregate_results: bool = Field(True, description="Aggregate final results")
     master_session_id: str | None = Field(
-        None, description="Master session for hierarchical",
+        None, description="Master session for hierarchical"
     )
 
 
@@ -629,15 +630,15 @@ class CoordinationStatus(BaseModel):
 
     coordination_id: str = Field(..., description="Coordination identifier")
     session_statuses: dict[str, SessionStatus] = Field(
-        ..., description="Individual session statuses",
+        ..., description="Individual session statuses"
     )
     overall_progress: float = Field(..., ge=0.0, le=1.0, description="Overall progress")
     aggregated_quality: float = Field(
-        ..., ge=0.0, le=1.0, description="Aggregated quality score",
+        ..., ge=0.0, le=1.0, description="Aggregated quality score"
     )
     estimated_completion: datetime | None = Field(
-        None, description="Estimated completion time",
+        None, description="Estimated completion time"
     )
     coordination_insights: list[str] = Field(
-        default_factory=list, description="Coordination insights",
+        default_factory=list, description="Coordination insights"
     )

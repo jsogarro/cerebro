@@ -15,7 +15,7 @@ class PIIRedactor:
         ),
         (
             re.compile(
-                r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)",
+                r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)"
             ),
             "[PHONE]",
         ),
@@ -29,6 +29,7 @@ class PIIRedactor:
     @classmethod
     def redact(cls, value: object) -> str:
         """Return a string with common PII values replaced by placeholders."""
+
         redacted = str(value)
         for pattern, replacement in cls.PATTERNS:
             redacted = pattern.sub(replacement, redacted)
@@ -37,6 +38,7 @@ class PIIRedactor:
 
 def redact_pii(value: object) -> str:
     """Convenience wrapper for log-call sites."""
+
     return PIIRedactor.redact(value)
 
 

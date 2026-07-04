@@ -1,4 +1,5 @@
-"""Utility functions for Research Platform CLI.
+"""
+Utility functions for Research Platform CLI.
 """
 
 import re
@@ -117,7 +118,7 @@ def load_projects_from_file(file_path: Path) -> list[dict[str, Any]]:
             data = json.load(f)
         else:
             raise click.BadParameter(
-                f"Unsupported file format: {file_path.suffix}. Use .yaml or .json",
+                f"Unsupported file format: {file_path.suffix}. Use .yaml or .json"
             )
 
     # Ensure it's a list
@@ -126,7 +127,7 @@ def load_projects_from_file(file_path: Path) -> list[dict[str, Any]]:
 
     if not isinstance(data, list):
         raise click.BadParameter(
-            "File must contain a list of projects or a single project",
+            "File must contain a list of projects or a single project"
         )
 
     # Validate each project
@@ -201,10 +202,11 @@ def format_duration(seconds: int) -> str:
     """Format duration in seconds to human-readable string."""
     if seconds < 60:
         return f"{seconds}s"
-    if seconds < 3600:
+    elif seconds < 3600:
         minutes = seconds // 60
         secs = seconds % 60
         return f"{minutes}m {secs}s"
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    return f"{hours}h {minutes}m"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours}h {minutes}m"

@@ -1,4 +1,5 @@
-"""MASR Service
+"""
+MASR Service
 
 Standalone service for the Multi-Agent System Router that can run independently
 and provide routing decisions via HTTP API. Designed for microservice deployments.
@@ -37,11 +38,11 @@ class RoutingRequest(BaseModel):
 
     query: str = Field(..., description="Query to route")
     context: dict[str, Any] | None = Field(
-        default_factory=dict, description="Additional context",
+        default_factory=dict, description="Additional context"
     )
     strategy: str | None = Field(None, description="Routing strategy override")
     constraints: dict[str, Any] | None = Field(
-        default_factory=dict, description="Routing constraints",
+        default_factory=dict, description="Routing constraints"
     )
 
 
@@ -105,6 +106,7 @@ class MASRService:
 
     def _setup_middleware(self) -> None:
         """Setup FastAPI middleware."""
+
         # CORS middleware
         self.app.add_middleware(
             CORSMiddleware,
@@ -123,7 +125,7 @@ class MASRService:
             logger.info(
                 f"{request.method} {request.url.path} - "
                 f"Status: {response.status_code} - "
-                f"Time: {process_time:.2f}ms",
+                f"Time: {process_time:.2f}ms"
             )
 
             return response
@@ -134,6 +136,7 @@ class MASRService:
         @self.app.get("/health", response_model=HealthResponse)
         async def health_check() -> HealthResponse:
             """Health check endpoint."""
+
             components_health = {
                 "masr_router": "healthy" if self.masr_router else "unavailable",
                 "redis": "healthy" if self.redis_client else "unavailable",
@@ -152,7 +155,7 @@ class MASRService:
                 try:
                     masr_health = await self.masr_router.health_check()
                     components_health["masr_router"] = masr_health.get(
-                        "status", "unknown",
+                        "status", "unknown"
                     )
                 except Exception:
                     components_health["masr_router"] = "unhealthy"
@@ -176,6 +179,7 @@ class MASRService:
         @self.app.post("/route", response_model=RoutingResponse)
         async def route_query(request: RoutingRequest) -> RoutingResponse:
             """Route a query using MASR intelligence."""
+
             if not self.masr_router:
                 raise HTTPException(status_code=503, detail="MASR router not available")
 
@@ -245,12 +249,13 @@ class MASRService:
                     int(self.service_stats["requests_failed"]) + 1
                 )
                 raise HTTPException(
-                    status_code=500, detail=f"Routing failed: {e!s}",
+                    status_code=500, detail=f"Routing failed: {e!s}"
                 ) from e
 
         @self.app.get("/metrics")
         async def get_metrics() -> dict[str, Any]:
             """Get service metrics."""
+
             metrics = self.service_stats.copy()
 
             if self.masr_router:
@@ -262,6 +267,7 @@ class MASRService:
         @self.app.get("/stats")
         async def get_detailed_stats() -> dict[str, Any]:
             """Get detailed service statistics."""
+
             started_at_str = str(self.service_stats["started_at"])
             stats: dict[str, Any] = {
                 "service": self.service_stats.copy(),
@@ -291,6 +297,7 @@ class MASRService:
 
     async def _initialize_components(self) -> None:
         """Initialize MASR service components."""
+
         logger.info("Initializing MASR service components...")
 
         try:
@@ -330,6 +337,7 @@ class MASRService:
 
     async def _cleanup_components(self) -> None:
         """Cleanup service components."""
+
         logger.info("Cleaning up MASR service components...")
 
         if self.redis_client:
@@ -338,6 +346,7 @@ class MASRService:
 
     def _update_average_response_time(self, response_time_ms: float) -> None:
         """Update average response time metric."""
+
         current_avg = float(self.service_stats["average_response_time_ms"])
         total_requests = int(self.service_stats["requests_successful"])
 
@@ -351,6 +360,7 @@ class MASRService:
 
     def run(self) -> None:
         """Run MASR service."""
+
         logger.info(f"Starting MASR service on {self.host}:{self.port}")
 
         # Configure uvicorn
@@ -369,9 +379,9 @@ class MASRService:
                     "worker_class": "uvicorn.workers.UvicornWorker",
                     "max_requests": int(os.getenv("MASR_MAX_REQUESTS", "1000")),
                     "max_requests_jitter": int(
-                        os.getenv("MASR_MAX_REQUESTS_JITTER", "50"),
+                        os.getenv("MASR_MAX_REQUESTS_JITTER", "50")
                     ),
-                },
+                }
             )
 
         def signal_handler(signum: int, frame: Any) -> None:
@@ -397,6 +407,7 @@ masr_service = MASRService()
 # Entry point for module execution
 def main() -> None:
     """Main entry point for MASR service."""
+
     logger.info("Cerebro MASR Service Starting...")
     logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
     logger.info(f"Port: {os.getenv('MASR_PORT', '9100')}")

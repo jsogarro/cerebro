@@ -1,4 +1,5 @@
-"""MCP Tools for research platform.
+"""
+MCP Tools for research platform.
 
 This module contains specialized tools for academic research,
 citation management, statistical analysis, and knowledge graphs.

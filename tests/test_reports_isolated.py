@@ -1,4 +1,5 @@
-"""Isolated tests for reports API functionality.
+"""
+Isolated tests for reports API functionality.
 
 This module tests the report API logic without importing the full application,
 avoiding SQLAlchemy model conflicts.
@@ -119,7 +120,7 @@ class TestReportModels:
         mock_report.formats = [mock_format1, mock_format2]
 
         response = ReportResponse.from_db_report(
-            mock_report, base_url="http://localhost:8000",
+            mock_report, base_url="http://localhost:8000"
         )
 
         assert response.id == report_id
@@ -170,7 +171,7 @@ class TestReportModels:
         ]
 
         list_response = ReportListResponse(
-            reports=reports, total_count=2, page=1, page_size=10, has_more=False,
+            reports=reports, total_count=2, page=1, page_size=10, has_more=False
         )
 
         assert len(list_response.reports) == 2
@@ -282,7 +283,7 @@ class TestReportLogic:
                 "aggregated_results": {
                     "sources": [{"title": "AI Paper", "year": 2024}],
                     "findings": {"key_insights": ["AI improves learning"]},
-                },
+                }
             },
         )
 

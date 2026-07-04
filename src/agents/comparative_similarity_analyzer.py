@@ -106,7 +106,7 @@ class SimilarityAnalyzer:
                 else:
                     distance = sum(
                         abs(
-                            matrix[left_item][criterion] - matrix[right_item][criterion],
+                            matrix[left_item][criterion] - matrix[right_item][criterion]
                         )
                         for criterion in shared_criteria
                     ) / len(shared_criteria)
@@ -117,7 +117,7 @@ class SimilarityAnalyzer:
                         "items": [left_item, right_item],
                         "similarity": similarity,
                         "shared_criteria": len(shared_criteria),
-                    },
+                    }
                 )
 
         average_similarity = (

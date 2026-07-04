@@ -1,4 +1,5 @@
-"""Docker utilities for integration testing.
+"""
+Docker utilities for integration testing.
 """
 
 import logging
@@ -93,7 +94,7 @@ class DockerTestManager:
         }
 
     def start_temporal(
-        self, name: str = "test_temporal", port: int = 7234,
+        self, name: str = "test_temporal", port: int = 7234
     ) -> dict[str, Any]:
         """Start a Temporal server for testing."""
         container = self.client.containers.run(
@@ -123,7 +124,7 @@ class DockerTestManager:
         }
 
     def _wait_for_postgres(
-        self, container: Any, password: str, max_retries: int = 30, retry_delay: int = 1,
+        self, container: Any, password: str, max_retries: int = 30, retry_delay: int = 1
     ):
         """Wait for PostgreSQL to be ready."""
         for _i in range(max_retries):
@@ -143,7 +144,7 @@ class DockerTestManager:
         raise TimeoutError("PostgreSQL failed to start")
 
     def _wait_for_redis(
-        self, container: Any, max_retries: int = 30, retry_delay: int = 1,
+        self, container: Any, max_retries: int = 30, retry_delay: int = 1
     ):
         """Wait for Redis to be ready."""
         for _i in range(max_retries):
@@ -160,13 +161,13 @@ class DockerTestManager:
         raise TimeoutError("Redis failed to start")
 
     def _wait_for_temporal(
-        self, container: Any, max_retries: int = 60, retry_delay: int = 2,
+        self, container: Any, max_retries: int = 60, retry_delay: int = 2
     ):
         """Wait for Temporal to be ready."""
         for _i in range(max_retries):
             try:
                 result = container.exec_run(
-                    ["tctl", "--address", "localhost:7233", "namespace", "list"],
+                    ["tctl", "--address", "localhost:7233", "namespace", "list"]
                 )
                 if result.exit_code == 0:
                     logger.info("Temporal is ready")
@@ -330,7 +331,7 @@ class DockerComposeManager:
         for _i in range(max_retries):
             result = os.system(
                 f"docker-compose -f {self.compose_file} -p {self.project_name} "
-                f"exec -T {service} {' '.join(check_command)} > /dev/null 2>&1",
+                f"exec -T {service} {' '.join(check_command)} > /dev/null 2>&1"
             )
 
             if result == 0:
@@ -352,11 +353,11 @@ def docker_compose_environment(compose_file: str):
 
         # Wait for services to be ready
         manager.wait_for_service(
-            "postgres", ["pg_isready", "-U", "test_user", "-d", "test_research_db"],
+            "postgres", ["pg_isready", "-U", "test_user", "-d", "test_research_db"]
         )
         manager.wait_for_service("redis", ["redis-cli", "ping"])
         manager.wait_for_service(
-            "temporal", ["tctl", "--address", "temporal:7233", "namespace", "list"],
+            "temporal", ["tctl", "--address", "temporal:7233", "namespace", "list"]
         )
 
         yield manager

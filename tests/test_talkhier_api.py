@@ -1,4 +1,5 @@
-"""Test Suite for TalkHier Protocol API
+"""
+Test Suite for TalkHier Protocol API
 
 Comprehensive tests for TalkHier session management, refinement rounds,
 consensus building, and WebSocket communication.
@@ -108,7 +109,7 @@ class TestTalkHierRoundExecutor:
                     confidence=0.5,
                     rounds_participated=0,
                     quality_scores=[],
-                ),
+                )
             ],
             started_at=datetime.now(UTC),
         )
@@ -138,7 +139,7 @@ class TestTalkHierConsensusEvaluator:
             [
                 {"agent": "agent-1", "confidence": 0.9},
                 {"agent": "agent-2", "confidence": 0.6},
-            ],
+            ]
         )
 
         assert matrix["agent-1"]["agent-1"] == 1.0
@@ -173,7 +174,7 @@ class TestTalkHierSessionCoordinator:
         )
 
     def test_estimate_duration_uses_protocol_multiplier(
-        self, coordinator: TalkHierSessionCoordinator,
+        self, coordinator: TalkHierSessionCoordinator
     ) -> None:
         """Test duration estimate includes participant and protocol factors."""
         duration = coordinator.estimate_duration(
@@ -186,7 +187,7 @@ class TestTalkHierSessionCoordinator:
 
     @pytest.mark.asyncio
     async def test_determine_participants_uses_agent_allocation_agents(
-        self, coordinator: TalkHierSessionCoordinator,
+        self, coordinator: TalkHierSessionCoordinator
     ) -> None:
         """Test participant fallback for routing decisions exposing agents."""
         routing_decision = MagicMock()
@@ -218,7 +219,7 @@ class TestTalkHierSessionService:
 
     @pytest.mark.asyncio
     async def test_create_session(
-        self, session_service: TalkHierSessionService,
+        self, session_service: TalkHierSessionService
     ) -> None:
         """Test session creation"""
         request = TalkHierSessionRequest(
@@ -237,7 +238,7 @@ class TestTalkHierSessionService:
                     agents=[
                         MagicMock(agent_type="literature-review"),
                         MagicMock(agent_type="synthesis"),
-                    ],
+                    ]
                 ),
             )
 
@@ -255,7 +256,7 @@ class TestTalkHierSessionService:
 
     @pytest.mark.asyncio
     async def test_execute_refinement_round(
-        self, session_service: TalkHierSessionService,
+        self, session_service: TalkHierSessionService
     ) -> None:
         """Test refinement round execution"""
         # Create a session first
@@ -281,7 +282,7 @@ class TestTalkHierSessionService:
 
         # Execute refinement round
         request = RefinementRoundRequest(
-            round_number=1, refinement_focus="Improve evidence quality",
+            round_number=1, refinement_focus="Improve evidence quality"
         )
 
         response = await session_service.execute_refinement_round(session_id, request)
@@ -297,7 +298,7 @@ class TestTalkHierSessionService:
 
     @pytest.mark.asyncio
     async def test_check_consensus(
-        self, session_service: TalkHierSessionService,
+        self, session_service: TalkHierSessionService
     ) -> None:
         """Test consensus checking"""
         # Create session
@@ -392,7 +393,7 @@ class TestTalkHierSessionService:
 
     @pytest.mark.asyncio
     async def test_validate_protocol(
-        self, session_service: TalkHierSessionService,
+        self, session_service: TalkHierSessionService
     ) -> None:
         """Test protocol validation"""
         from src.models.talkhier_api_models import ProtocolValidationRequest

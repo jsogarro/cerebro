@@ -30,7 +30,7 @@ async def test_synthesis_uses_llm_not_placeholder() -> None:
     service._gemini_service = _FakeGemini()
 
     synthesized, consensus = await service._synthesize_results(
-        _results(), {"research": 2.0, "analytics": 1.0},
+        _results(), {"research": 2.0, "analytics": 1.0}
     )
 
     assert synthesized == "Integrated cross-domain synthesis of the supervisor outputs."

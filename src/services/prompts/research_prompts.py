@@ -1,4 +1,5 @@
-"""Research-specific prompt templates.
+"""
+Research-specific prompt templates.
 
 This module contains prompts for various research tasks.
 """
@@ -14,7 +15,8 @@ from src.services.prompts.base_prompts import (
 
 
 def generate_query_decomposition_prompt(query: Any) -> str:
-    """Generate prompt for decomposing research query into sub-questions.
+    """
+    Generate prompt for decomposing research query into sub-questions.
 
     Pure function that creates query decomposition prompt.
 
@@ -23,7 +25,6 @@ def generate_query_decomposition_prompt(query: Any) -> str:
 
     Returns:
         Formatted prompt for query decomposition
-
     """
     # Extract query parameters
     if hasattr(query, "text"):
@@ -86,7 +87,7 @@ Your task is to create a comprehensive research plan that:
             "resource_requirements": [str],
             "potential_challenges": [str],
             "success_criteria": [str],
-        },
+        }
     }
 
     # Compose final prompt
@@ -97,9 +98,10 @@ Your task is to create a comprehensive research plan that:
 
 
 def generate_literature_review_prompt(
-    sources: list[str], focus: str | None = None,
+    sources: list[str], focus: str | None = None
 ) -> str:
-    """Generate prompt for literature review analysis.
+    """
+    Generate prompt for literature review analysis.
 
     Pure function that creates literature review prompt.
 
@@ -109,7 +111,6 @@ def generate_literature_review_prompt(
 
     Returns:
         Formatted prompt for literature review
-
     """
     system_prompt = create_system_prompt(
         role="expert literature reviewer",
@@ -153,7 +154,7 @@ Your analysis should include:
             "quality_assessment": str,
             "synthesis": str,
             "recommendations": [str],
-        },
+        }
     }
 
     prompt = compose_prompt([system_prompt, task])
@@ -161,7 +162,8 @@ Your analysis should include:
 
 
 def generate_synthesis_prompt(findings: list[dict[str, Any]]) -> str:
-    """Generate prompt for synthesizing research findings.
+    """
+    Generate prompt for synthesizing research findings.
 
     Pure function that creates synthesis prompt.
 
@@ -170,7 +172,6 @@ def generate_synthesis_prompt(findings: list[dict[str, Any]]) -> str:
 
     Returns:
         Formatted prompt for synthesis
-
     """
     system_prompt = create_system_prompt(
         role="expert research synthesizer",
@@ -215,7 +216,7 @@ Your synthesis should:
             "future_directions": [str],
             "limitations": [str],
             "confidence_level": str,
-        },
+        }
     }
 
     prompt = compose_prompt([system_prompt, task])
@@ -223,7 +224,8 @@ Your synthesis should:
 
 
 def generate_conclusion_prompt(synthesis: dict[str, Any]) -> str:
-    """Generate prompt for drawing research conclusions.
+    """
+    Generate prompt for drawing research conclusions.
 
     Pure function that creates conclusion prompt.
 
@@ -232,7 +234,6 @@ def generate_conclusion_prompt(synthesis: dict[str, Any]) -> str:
 
     Returns:
         Formatted prompt for conclusions
-
     """
     system_prompt = create_system_prompt(
         role="expert research analyst",
@@ -284,7 +285,7 @@ Please provide:
             "limitations": [str],
             "practical_implications": [str],
             "confidence_assessment": str,
-        },
+        }
     }
 
     prompt = compose_prompt([system_prompt, task])

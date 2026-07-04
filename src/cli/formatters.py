@@ -1,4 +1,5 @@
-"""Output formatting utilities for Research Platform CLI.
+"""
+Output formatting utilities for Research Platform CLI.
 """
 
 import json
@@ -33,15 +34,15 @@ class OutputFormatter:
         """Format a single project."""
         if self.format_type == "json":
             return json.dumps(project.model_dump(), indent=2, default=str)
-        if self.format_type == "yaml":
+        elif self.format_type == "yaml":
             result: str = yaml.dump(
-                project.model_dump(), default_flow_style=False, default=str,
+                project.model_dump(), default_flow_style=False, default=str
             )
             return result
-        if self.format_type == "csv":
+        elif self.format_type == "csv":
             return self._project_to_csv(project)
-        # table
-        return self._project_to_table(project)
+        else:  # table
+            return self._project_to_table(project)
 
     def format_projects_list(self, projects: list[ResearchProject]) -> str:
         """Format a list of projects."""
@@ -54,35 +55,36 @@ class OutputFormatter:
                 indent=2,
                 default=str,
             )
-        if self.format_type == "yaml":
+        elif self.format_type == "yaml":
             result: str = yaml.dump(
                 [p.model_dump() for p in projects],
                 default_flow_style=False,
                 default=str,
             )
             return result
-        if self.format_type == "csv":
+        elif self.format_type == "csv":
             return self._projects_to_csv(projects)
-        # table
-        return self._projects_to_list_table(projects)
+        else:  # table
+            return self._projects_to_list_table(projects)
 
     def format_progress(self, progress: ResearchProgress) -> str:
         """Format project progress."""
         if self.format_type == "json":
             return json.dumps(progress.model_dump(), indent=2, default=str)
-        if self.format_type == "yaml":
+        elif self.format_type == "yaml":
             result: str = yaml.dump(
-                progress.model_dump(), default_flow_style=False, default=str,
+                progress.model_dump(), default_flow_style=False, default=str
             )
             return result
-        # table or csv
-        return self._progress_to_display(progress)
+        else:  # table or csv
+            return self._progress_to_display(progress)
 
     def format_error(self, error: Exception) -> str:
         """Format error message."""
         if self.format_type == "json":
             return json.dumps({"error": str(error)}, indent=2)
-        return f"[red]Error: {error}[/red]" if self.color else f"Error: {error}"
+        else:
+            return f"[red]Error: {error}[/red]" if self.color else f"Error: {error}"
 
     def _project_to_table(self, project: ResearchProject) -> str:
         """Convert project to rich table display."""
@@ -182,7 +184,7 @@ class OutputFormatter:
             console.print("\n[bold]Current Agent Activities:[/bold]")
             for activity in progress.current_agent_activities:
                 console.print(
-                    f"  • {activity.get('agent', 'Unknown')}: {activity.get('task', 'Working...')}",
+                    f"  • {activity.get('agent', 'Unknown')}: {activity.get('task', 'Working...')}"
                 )
 
         return ""
@@ -218,7 +220,7 @@ class OutputFormatter:
                     self._format_datetime(project.created_at),
                     project.query.text,
                     ";".join(project.query.domains),
-                ],
+                ]
             )
 
         result: str = tabulate(rows, headers=headers, tablefmt="csv")

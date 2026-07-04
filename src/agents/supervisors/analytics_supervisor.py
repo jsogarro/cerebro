@@ -1,4 +1,5 @@
-"""Analytics Supervisor Agent
+"""
+Analytics Supervisor Agent
 
 Coordinates analytics teams for data analysis, statistical modeling, and insight
 generation. Implements proven analytics workflows with TalkHier protocol and
@@ -28,7 +29,8 @@ logger = get_logger()
 
 
 class AnalyticsSupervisor(BaseSupervisor):
-    """Analytics team supervisor implementing data analysis workflows.
+    """
+    Analytics team supervisor implementing data analysis workflows.
 
     Manages the complete analytics lifecycle:
     1. Data exploration and statistical analysis
@@ -115,7 +117,7 @@ class AnalyticsSupervisor(BaseSupervisor):
                     reliability_score=0.91,
                     quality_score=0.87,
                 ),
-            },
+            }
         )
 
     def _build_workflow_graph(self) -> None:
@@ -130,25 +132,25 @@ class AnalyticsSupervisor(BaseSupervisor):
         self.workflow_graph.add_node(
             "coordinate_data_analysis",
             self._create_langgraph_node(
-                "coordinate_data_analysis", self._coordinate_data_analysis_phase,
+                "coordinate_data_analysis", self._coordinate_data_analysis_phase
             ),
         )
         self.workflow_graph.add_node(
             "coordinate_modeling",
             self._create_langgraph_node(
-                "coordinate_modeling", self._coordinate_modeling_phase,
+                "coordinate_modeling", self._coordinate_modeling_phase
             ),
         )
         self.workflow_graph.add_node(
             "coordinate_insights",
             self._create_langgraph_node(
-                "coordinate_insights", self._coordinate_insights_phase,
+                "coordinate_insights", self._coordinate_insights_phase
             ),
         )
         self.workflow_graph.add_node(
             "evaluate_confidence",
             self._create_langgraph_node(
-                "evaluate_confidence", self._evaluate_confidence_phase,
+                "evaluate_confidence", self._evaluate_confidence_phase
             ),
         )
 
@@ -164,7 +166,7 @@ class AnalyticsSupervisor(BaseSupervisor):
         self.workflow_graph = self.workflow_graph.compile()  # type: Any
 
     async def _coordinate_workers(
-        self, state: SupervisionState, task: AgentTask,
+        self, state: SupervisionState, task: AgentTask
     ) -> SupervisionState:
         """Analytics-specific worker coordination."""
         allocated_workers = await self.allocate_workers(task)
@@ -173,12 +175,12 @@ class AnalyticsSupervisor(BaseSupervisor):
             {
                 "analysis_depth": self.analysis_depth,
                 "confidence_level": self.confidence_level,
-            },
+            }
         )
         return state
 
     async def _plan_analysis_phase(
-        self, langgraph_state: dict[str, Any],
+        self, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Plan analytics execution strategy."""
         state = langgraph_state["supervision_state"]
@@ -198,14 +200,14 @@ class AnalyticsSupervisor(BaseSupervisor):
                     "analysis_depth": self.analysis_depth,
                     "confidence_level": self.confidence_level,
                 },
-            },
+            }
         }
 
         langgraph_state["supervision_state"] = state
         return langgraph_state
 
     async def _coordinate_data_analysis_phase(
-        self, langgraph_state: dict[str, Any],
+        self, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Coordinate data analysis worker."""
         state = langgraph_state["supervision_state"]
@@ -220,7 +222,7 @@ class AnalyticsSupervisor(BaseSupervisor):
                 intermediate_outputs=state.context,
             )
             response = await self.send_talkhier_message(
-                "data_analysis", MessageType.SUPERVISOR_ASSIGNMENT, message_content,
+                "data_analysis", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
                 state.worker_results["data_analysis"] = response.talkhier_content
@@ -229,7 +231,7 @@ class AnalyticsSupervisor(BaseSupervisor):
         return langgraph_state
 
     async def _coordinate_modeling_phase(
-        self, langgraph_state: dict[str, Any],
+        self, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Coordinate statistical modeling worker."""
         state = langgraph_state["supervision_state"]
@@ -261,7 +263,7 @@ class AnalyticsSupervisor(BaseSupervisor):
         return langgraph_state
 
     async def _coordinate_insights_phase(
-        self, langgraph_state: dict[str, Any],
+        self, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Coordinate insight synthesis worker."""
         state = langgraph_state["supervision_state"]
@@ -279,7 +281,7 @@ class AnalyticsSupervisor(BaseSupervisor):
                 intermediate_outputs={"focus": "actionable_insights"},
             )
             response = await self.send_talkhier_message(
-                "insight_synthesis", MessageType.SUPERVISOR_ASSIGNMENT, message_content,
+                "insight_synthesis", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
                 state.worker_results["insight_synthesis"] = response.talkhier_content
@@ -288,7 +290,7 @@ class AnalyticsSupervisor(BaseSupervisor):
         return langgraph_state
 
     async def _evaluate_confidence_phase(
-        self, langgraph_state: dict[str, Any],
+        self, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Evaluate confidence in analytics results."""
         state = langgraph_state["supervision_state"]

@@ -71,7 +71,7 @@ async def test_flag_off_no_memory_calls(masr_router_flag_off, mock_episodic_memo
 
     with (
         patch.object(
-            masr_router_flag_off.complexity_analyzer, "analyze",
+            masr_router_flag_off.complexity_analyzer, "analyze"
         ) as mock_analyze,
         patch.object(masr_router_flag_off.cost_optimizer, "optimize") as mock_optimize,
     ):
@@ -133,14 +133,14 @@ async def test_flag_off_no_memory_calls(masr_router_flag_off, mock_episodic_memo
 
 @pytest.mark.asyncio
 async def test_flag_off_allocation_matches_analytic(
-    masr_router_flag_off, mock_episodic_memory,
+    masr_router_flag_off, mock_episodic_memory
 ):
     """Flag OFF: agent allocation is purely analytic (regression guard)."""
     masr_router_flag_off.episodic_memory = mock_episodic_memory
 
     with (
         patch.object(
-            masr_router_flag_off.complexity_analyzer, "analyze",
+            masr_router_flag_off.complexity_analyzer, "analyze"
         ) as mock_analyze,
         patch.object(masr_router_flag_off.cost_optimizer, "optimize") as mock_optimize,
     ):
@@ -205,7 +205,7 @@ async def test_flag_off_allocation_matches_analytic(
 
 @pytest.mark.asyncio
 async def test_flag_on_episodic_prior_nudges_allocation(
-    masr_router_flag_on, mock_episodic_memory,
+    masr_router_flag_on, mock_episodic_memory
 ):
     """Flag ON: episodic prior nudges worker_count within bounds."""
     # Seed episodic memory with 3 past episodes suggesting worker_count=6
@@ -221,14 +221,14 @@ async def test_flag_on_episodic_prior_nudges_allocation(
                 timestamp=datetime.now() - timedelta(days=i * 5),
                 quality_score=0.9,
                 tags=[],
-            ),
+            )
         )
     mock_episodic_memory.retrieve_episodes.return_value = episodes
     masr_router_flag_on.episodic_memory = mock_episodic_memory
 
     with (
         patch.object(
-            masr_router_flag_on.complexity_analyzer, "analyze",
+            masr_router_flag_on.complexity_analyzer, "analyze"
         ) as mock_analyze,
         patch.object(masr_router_flag_on.cost_optimizer, "optimize") as mock_optimize,
     ):
@@ -300,14 +300,14 @@ async def test_flag_on_cap_enforced(masr_router_flag_on, mock_episodic_memory):
             timestamp=datetime.now() - timedelta(days=1),
             quality_score=0.9,
             tags=[],
-        ),
+        )
     ]
     mock_episodic_memory.retrieve_episodes.return_value = episodes
     masr_router_flag_on.episodic_memory = mock_episodic_memory
 
     with (
         patch.object(
-            masr_router_flag_on.complexity_analyzer, "analyze",
+            masr_router_flag_on.complexity_analyzer, "analyze"
         ) as mock_analyze,
         patch.object(masr_router_flag_on.cost_optimizer, "optimize") as mock_optimize,
     ):
@@ -373,7 +373,7 @@ async def test_flag_on_cold_memory_graceful(masr_router_flag_on, mock_episodic_m
 
     with (
         patch.object(
-            masr_router_flag_on.complexity_analyzer, "analyze",
+            masr_router_flag_on.complexity_analyzer, "analyze"
         ) as mock_analyze,
         patch.object(masr_router_flag_on.cost_optimizer, "optimize") as mock_optimize,
     ):
@@ -430,7 +430,7 @@ async def test_flag_on_cold_memory_graceful(masr_router_flag_on, mock_episodic_m
 
 @pytest.mark.asyncio
 async def test_flag_on_memory_raises_resilient(
-    masr_router_flag_on, mock_episodic_memory,
+    masr_router_flag_on, mock_episodic_memory
 ):
     """Flag ON, memory backend raises: request still routes (resilience)."""
     mock_episodic_memory.retrieve_episodes.side_effect = RuntimeError("DB down")
@@ -438,7 +438,7 @@ async def test_flag_on_memory_raises_resilient(
 
     with (
         patch.object(
-            masr_router_flag_on.complexity_analyzer, "analyze",
+            masr_router_flag_on.complexity_analyzer, "analyze"
         ) as mock_analyze,
         patch.object(masr_router_flag_on.cost_optimizer, "optimize") as mock_optimize,
     ):

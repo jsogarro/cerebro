@@ -1,4 +1,5 @@
-"""Base prompt utilities and templates.
+"""
+Base prompt utilities and templates.
 
 This module provides pure functions for prompt composition and manipulation.
 """
@@ -8,7 +9,8 @@ from typing import Any
 
 
 def substitute_template(template: str, variables: dict[str, str]) -> str:
-    """Substitute variables in a template string.
+    """
+    Substitute variables in a template string.
 
     Pure function that replaces {variable} patterns with values.
 
@@ -18,7 +20,6 @@ def substitute_template(template: str, variables: dict[str, str]) -> str:
 
     Returns:
         Template with variables substituted
-
     """
     result = template
     for key, value in variables.items():
@@ -27,7 +28,8 @@ def substitute_template(template: str, variables: dict[str, str]) -> str:
 
 
 def compose_prompt(parts: list[str], separator: str = "\n\n") -> str:
-    """Compose multiple prompt parts into a single prompt.
+    """
+    Compose multiple prompt parts into a single prompt.
 
     Pure function that joins prompt parts with separators.
 
@@ -37,13 +39,13 @@ def compose_prompt(parts: list[str], separator: str = "\n\n") -> str:
 
     Returns:
         Composed prompt string
-
     """
     return separator.join(part.strip() for part in parts if part.strip())
 
 
 def validate_prompt_length(prompt: str, max_tokens: int = 4000) -> bool:
-    """Validate prompt length against token limits.
+    """
+    Validate prompt length against token limits.
 
     Pure function that estimates token count and validates.
 
@@ -53,7 +55,6 @@ def validate_prompt_length(prompt: str, max_tokens: int = 4000) -> bool:
 
     Returns:
         True if prompt is within limits
-
     """
     # Rough estimation: 1 token ≈ 4 characters
     estimated_tokens = len(prompt) / 4
@@ -61,7 +62,8 @@ def validate_prompt_length(prompt: str, max_tokens: int = 4000) -> bool:
 
 
 def sanitize_prompt(prompt: str) -> str:
-    """Sanitize prompt for safety.
+    """
+    Sanitize prompt for safety.
 
     Pure function that removes potentially problematic content.
 
@@ -70,7 +72,6 @@ def sanitize_prompt(prompt: str) -> str:
 
     Returns:
         Sanitized prompt
-
     """
     # Remove potential prompt injection attempts
     dangerous_patterns = [
@@ -91,7 +92,8 @@ def sanitize_prompt(prompt: str) -> str:
 
 
 def add_output_format(prompt: str, schema: dict[str, Any]) -> str:
-    """Add structured output format specification to prompt.
+    """
+    Add structured output format specification to prompt.
 
     Pure function that appends format requirements.
 
@@ -101,7 +103,6 @@ def add_output_format(prompt: str, schema: dict[str, Any]) -> str:
 
     Returns:
         Prompt with format specification
-
     """
     format_instruction = f"""
 
@@ -115,7 +116,8 @@ Ensure your response is valid JSON that can be parsed programmatically.
 
 
 def _format_schema(schema: dict[str, Any], indent: int = 0) -> str:
-    """Format schema into readable text.
+    """
+    Format schema into readable text.
 
     Pure function that converts schema dict to string representation.
     """
@@ -146,9 +148,10 @@ def _format_schema(schema: dict[str, Any], indent: int = 0) -> str:
 
 
 def create_system_prompt(
-    role: str, context: str, constraints: list[str] | None = None,
+    role: str, context: str, constraints: list[str] | None = None
 ) -> str:
-    """Create a system prompt with role and constraints.
+    """
+    Create a system prompt with role and constraints.
 
     Pure function that builds structured system prompts.
 
@@ -159,7 +162,6 @@ def create_system_prompt(
 
     Returns:
         Formatted system prompt
-
     """
     parts = [
         f"You are a {role}.",
@@ -175,7 +177,8 @@ def create_system_prompt(
 
 
 def add_examples(prompt: str, examples: list[dict[str, str]]) -> str:
-    """Add examples to a prompt for few-shot learning.
+    """
+    Add examples to a prompt for few-shot learning.
 
     Pure function that appends examples to prompts.
 
@@ -185,7 +188,6 @@ def add_examples(prompt: str, examples: list[dict[str, str]]) -> str:
 
     Returns:
         Prompt with examples
-
     """
     if not examples:
         return prompt
@@ -198,7 +200,7 @@ def add_examples(prompt: str, examples: list[dict[str, str]]) -> str:
                 f"Example {i}:",
                 f"Input: {example.get('input', '')}",
                 f"Output: {example.get('output', '')}",
-            ],
+            ]
         )
 
     example_parts.append("Now, please process the following:")
@@ -207,9 +209,10 @@ def add_examples(prompt: str, examples: list[dict[str, str]]) -> str:
 
 
 def create_research_context(
-    query: str, domains: list[str], depth: str, scope: dict[str, Any] | None = None,
+    query: str, domains: list[str], depth: str, scope: dict[str, Any] | None = None
 ) -> str:
-    """Create research context from query parameters.
+    """
+    Create research context from query parameters.
 
     Pure function that builds research context.
 
@@ -221,7 +224,6 @@ def create_research_context(
 
     Returns:
         Formatted research context
-
     """
     parts = [
         f"Research Question: {query}",

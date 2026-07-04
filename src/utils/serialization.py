@@ -1,4 +1,5 @@
-"""Centralized serialization utilities using orjson for performance.
+"""
+Centralized serialization utilities using orjson for performance.
 
 This module provides high-performance JSON serialization/deserialization
 using orjson, with proper handling of Pydantic models, datetimes, and other
@@ -14,7 +15,8 @@ from pydantic import BaseModel
 
 
 def _default_serializer(obj: Any) -> Any:
-    """Custom serializer for types not natively supported by orjson.
+    """
+    Custom serializer for types not natively supported by orjson.
 
     Handles:
     - Pydantic models
@@ -30,21 +32,21 @@ def _default_serializer(obj: Any) -> Any:
 
     Raises:
         TypeError: If object type is not supported
-
     """
     if isinstance(obj, BaseModel):
         return obj.model_dump()
-    if isinstance(obj, UUID):
+    elif isinstance(obj, UUID):
         return str(obj)
-    if isinstance(obj, (datetime, date)):
+    elif isinstance(obj, (datetime, date)):
         return obj.isoformat()
-    if isinstance(obj, set):
+    elif isinstance(obj, set):
         return list(obj)
     raise TypeError(f"Type {type(obj)} not serializable")
 
 
 def serialize(data: Any) -> bytes:
-    """Serialize data to JSON bytes using orjson.
+    """
+    Serialize data to JSON bytes using orjson.
 
     This is the fastest serialization method, returning bytes.
     Use for internal APIs, message queues, or when bytes are acceptable.
@@ -58,7 +60,6 @@ def serialize(data: Any) -> bytes:
     Example:
         >>> serialize({"key": "value"})
         b'{"key":"value"}'
-
     """
     return orjson.dumps(
         data,
@@ -68,7 +69,8 @@ def serialize(data: Any) -> bytes:
 
 
 def deserialize(data: bytes | str) -> Any:
-    """Deserialize JSON bytes or string to Python object using orjson.
+    """
+    Deserialize JSON bytes or string to Python object using orjson.
 
     Args:
         data: JSON bytes or string
@@ -79,7 +81,6 @@ def deserialize(data: bytes | str) -> Any:
     Example:
         >>> deserialize(b'{"key":"value"}')
         {'key': 'value'}
-
     """
     if isinstance(data, str):
         data = data.encode("utf-8")
@@ -87,7 +88,8 @@ def deserialize(data: bytes | str) -> Any:
 
 
 def serialize_to_str(data: Any) -> str:
-    """Serialize data to JSON string using orjson.
+    """
+    Serialize data to JSON string using orjson.
 
     Use for APIs or protocols that require strings (like WebSocket messages).
 
@@ -100,13 +102,13 @@ def serialize_to_str(data: Any) -> str:
     Example:
         >>> serialize_to_str({"key": "value"})
         '{"key":"value"}'
-
     """
     return serialize(data).decode("utf-8")
 
 
 def serialize_for_cache(data: Any) -> bytes:
-    """Serialize data for Redis caching using orjson.
+    """
+    Serialize data for Redis caching using orjson.
 
     Optimized for cache storage with compact output.
 
@@ -119,7 +121,6 @@ def serialize_for_cache(data: Any) -> bytes:
     Example:
         >>> serialize_for_cache({"user_id": 123, "name": "Alice"})
         b'{"user_id":123,"name":"Alice"}'
-
     """
     return orjson.dumps(
         data,
@@ -129,7 +130,8 @@ def serialize_for_cache(data: Any) -> bytes:
 
 
 def deserialize_from_cache(data: bytes | str | None) -> Any:
-    """Deserialize data from Redis cache using orjson.
+    """
+    Deserialize data from Redis cache using orjson.
 
     Handles None values gracefully for cache misses.
 
@@ -144,7 +146,6 @@ def deserialize_from_cache(data: bytes | str | None) -> Any:
         {'user_id': 123}
         >>> deserialize_from_cache(None)
         None
-
     """
     if data is None:
         return None

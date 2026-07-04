@@ -1,4 +1,5 @@
-"""Database migration utilities.
+"""
+Database migration utilities.
 
 Provides utilities for managing Alembic migrations programmatically.
 """
@@ -19,17 +20,18 @@ logger = get_logger(__name__)
 
 
 class MigrationManager:
-    """Manager for database migrations.
+    """
+    Manager for database migrations.
 
     Provides programmatic access to Alembic migration operations.
     """
 
     def __init__(self, alembic_ini_path: str | None = None):
-        """Initialize migration manager.
+        """
+        Initialize migration manager.
 
         Args:
             alembic_ini_path: Path to alembic.ini (defaults to project root)
-
         """
         if alembic_ini_path is None:
             # Find alembic.ini in project root
@@ -40,11 +42,11 @@ class MigrationManager:
         self.script_dir = ScriptDirectory.from_config(self.config)
 
     def run_migrations(self, revision: str = "head") -> None:
-        """Run migrations up to specified revision.
+        """
+        Run migrations up to specified revision.
 
         Args:
             revision: Target revision (default: "head" for latest)
-
         """
         logger.info("running_migrations", revision=revision)
         try:
@@ -55,11 +57,11 @@ class MigrationManager:
             raise
 
     def rollback_migration(self, revision: str = "-1") -> None:
-        """Rollback migrations to specified revision.
+        """
+        Rollback migrations to specified revision.
 
         Args:
             revision: Target revision (default: "-1" for previous)
-
         """
         logger.info("rolling_back_migration", revision=revision)
         try:
@@ -70,11 +72,11 @@ class MigrationManager:
             raise
 
     def get_current_revision(self) -> str | None:
-        """Get current database revision.
+        """
+        Get current database revision.
 
         Returns:
             Current revision ID or None if no migrations applied
-
         """
         from src.models.db.session import get_database_url
 
@@ -93,21 +95,21 @@ class MigrationManager:
         return current_rev
 
     def get_head_revision(self) -> str:
-        """Get the latest revision in migration scripts.
+        """
+        Get the latest revision in migration scripts.
 
         Returns:
             Head revision ID
-
         """
         head = self.script_dir.get_current_head()
         return str(head) if head is not None else ""
 
     def check_migration_status(self) -> dict[str, Any]:
-        """Check migration status.
+        """
+        Check migration status.
 
         Returns:
             Dictionary with migration status information
-
         """
         current = self.get_current_revision()
         head = self.get_head_revision()
@@ -129,13 +131,14 @@ class MigrationManager:
                         "branch_labels": (
                             list(script.branch_labels) if script.branch_labels else []
                         ),
-                    },
+                    }
                 )
 
         return status
 
     def create_migration(self, message: str, autogenerate: bool = True) -> str:
-        """Create a new migration.
+        """
+        Create a new migration.
 
         Args:
             message: Migration message
@@ -143,7 +146,6 @@ class MigrationManager:
 
         Returns:
             Path to created migration file
-
         """
         logger.info("creating_migration", message=message)
 
@@ -160,14 +162,14 @@ class MigrationManager:
         return script.path
 
     def show_history(self, verbose: bool = False) -> list[dict[str, Any]]:
-        """Show migration history.
+        """
+        Show migration history.
 
         Args:
             verbose: Include detailed information
 
         Returns:
             List of migration information
-
         """
         history = []
         current = self.get_current_revision()
@@ -192,11 +194,11 @@ class MigrationManager:
         return history
 
     def verify_migration(self) -> bool:
-        """Verify that migrations can be applied successfully.
+        """
+        Verify that migrations can be applied successfully.
 
         Returns:
             True if migrations are valid
-
         """
         try:
             # Check if we can get status
@@ -229,22 +231,22 @@ def get_migration_manager() -> MigrationManager:
 
 
 async def run_migrations(revision: str = "head") -> None:
-    """Run migrations (async wrapper).
+    """
+    Run migrations (async wrapper).
 
     Args:
         revision: Target revision
-
     """
     manager = get_migration_manager()
     manager.run_migrations(revision)
 
 
 async def rollback_migration(revision: str = "-1") -> None:
-    """Rollback migration (async wrapper).
+    """
+    Rollback migration (async wrapper).
 
     Args:
         revision: Target revision
-
     """
     manager = get_migration_manager()
     manager.rollback_migration(revision)
@@ -264,14 +266,14 @@ async def check_migration_status() -> dict[str, Any]:
 
 # CLI commands for migrations
 def run_migration_command(args: list[str]) -> int:
-    """Run migration command via subprocess.
+    """
+    Run migration command via subprocess.
 
     Args:
         args: Command arguments
 
     Returns:
         Exit code
-
     """
     cmd = ["alembic", *args]
     logger.info("running_migration_command", command=cmd)

@@ -68,7 +68,7 @@ class TestTierOverridePrecedence:
 
             # Call with explicit tier="simple" (should override task's 0.9 complexity)
             result = await agent._generate_structured_with_routing(
-                "Test prompt", _TestSchema, task=task, tier="simple",
+                "Test prompt", _TestSchema, task=task, tier="simple"
             )
 
             # Verify the router was called with tier="simple", not "complex"
@@ -107,7 +107,7 @@ class TestTierOverridePrecedence:
             agent._model_router = mock_router
 
             result = await agent._generate_structured_with_routing(
-                "Test prompt", _TestSchema, task=task,
+                "Test prompt", _TestSchema, task=task
             )
 
             call_args = mock_router.route_and_generate.call_args
@@ -137,7 +137,7 @@ class TestTierOverridePrecedence:
             agent._model_router = mock_router
 
             result = await agent._generate_structured_with_routing(
-                "Test prompt", _TestSchema, task=None, tier=None,
+                "Test prompt", _TestSchema, task=None, tier=None
             )
 
             call_args = mock_router.route_and_generate.call_args
@@ -155,7 +155,7 @@ class TestVerificationEmptyContentSkip:
         from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
 
         supervisor = AnalyticsSupervisor(
-            gemini_service=MagicMock(), cache_client=MagicMock(),
+            gemini_service=MagicMock(), cache_client=MagicMock()
         )
 
         # Test with empty string
@@ -177,7 +177,7 @@ class TestVerificationEmptyContentSkip:
         from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
 
         supervisor = AnalyticsSupervisor(
-            gemini_service=MagicMock(), cache_client=MagicMock(),
+            gemini_service=MagicMock(), cache_client=MagicMock()
         )
         with _patch("src.agents.supervisors.base_supervisor.logger") as log_spy:
             await supervisor._run_verification("")
@@ -194,7 +194,7 @@ class TestComparativeAnalysisGracefulDegradation:
     async def test_zero_items_structured_success(self):
         """Zero items should return structured success, not error."""
         agent = ComparativeAnalysisAgent(
-            gemini_service=MagicMock(), cache_client=MagicMock(),
+            gemini_service=MagicMock(), cache_client=MagicMock()
         )
 
         task = AgentTask(
@@ -218,7 +218,7 @@ class TestComparativeAnalysisGracefulDegradation:
     async def test_one_item_structured_success(self):
         """One item should return single-item analysis, not error."""
         agent = ComparativeAnalysisAgent(
-            gemini_service=MagicMock(), cache_client=MagicMock(),
+            gemini_service=MagicMock(), cache_client=MagicMock()
         )
 
         task = AgentTask(
@@ -285,12 +285,12 @@ class TestTruncationAwareRetry:
             )
 
             mock_router.route_and_generate = AsyncMock(
-                side_effect=[truncated_response, retry_response],
+                side_effect=[truncated_response, retry_response]
             )
             agent._model_router = mock_router
 
             result = await agent._generate_structured_with_routing(
-                "Test prompt", _TestSchema, task=task, max_tokens=100,
+                "Test prompt", _TestSchema, task=task, max_tokens=100
             )
 
             # Should have made TWO calls: initial + retry
@@ -341,12 +341,12 @@ class TestTruncationAwareRetry:
             )
 
             mock_router.route_and_generate = AsyncMock(
-                side_effect=[bad_json_response, good_response],
+                side_effect=[bad_json_response, good_response]
             )
             agent._model_router = mock_router
 
             result = await agent._generate_structured_with_routing(
-                "Test prompt", _TestSchema, task=task, max_tokens=500,
+                "Test prompt", _TestSchema, task=task, max_tokens=500
             )
 
             # Should retry after parse failure
@@ -388,13 +388,13 @@ class TestTruncationAwareRetry:
             )
 
             mock_router.route_and_generate = AsyncMock(
-                side_effect=[truncated, retry_ok],
+                side_effect=[truncated, retry_ok]
             )
             agent._model_router = mock_router
 
             # Start with 6000 tokens -> retry should be capped at 8000, not 12000
             _ = await agent._generate_structured_with_routing(
-                "Test prompt", _TestSchema, task=None, max_tokens=6000,
+                "Test prompt", _TestSchema, task=None, max_tokens=6000
             )
 
             retry_request = mock_router.route_and_generate.call_args_list[1][0][0]
@@ -413,7 +413,7 @@ class TestTruncationAwareRetry:
 
             mock_gemini = MagicMock()
             mock_gemini.generate_structured_content = AsyncMock(
-                return_value=_TestSchema(result="gemini_fallback", count=0),
+                return_value=_TestSchema(result="gemini_fallback", count=0)
             )
 
             mock_router = MagicMock()
@@ -429,7 +429,7 @@ class TestTruncationAwareRetry:
             agent.gemini_service = mock_gemini
 
             result = await agent._generate_structured_with_routing(
-                "Test prompt", _TestSchema, task=None, max_tokens=8000,
+                "Test prompt", _TestSchema, task=None, max_tokens=8000
             )
 
             # Should only call OpenRouter ONCE (no retry because already at cap)
@@ -463,12 +463,12 @@ class TestTierPrecedenceWithBoth:
                     content='{"result": "ok", "count": 1}',
                     success=True,
                     finish_reason="stop",
-                ),
+                )
             )
             agent._model_router = mock_router
 
             await agent._generate_structured_with_routing(
-                "p", _TestSchema, task=task, tier="simple",
+                "p", _TestSchema, task=task, tier="simple"
             )
             request = mock_router.route_and_generate.call_args_list[0].args[0]
             assert request.metadata["tier"] == "simple"
@@ -514,7 +514,7 @@ class TestRetryFailurePaths:
             gemini.generate_structured_content = AsyncMock(return_value=gemini_result)
             with patch.object(agent, "_ensure_gemini_service", return_value=gemini):
                 result = await agent._generate_structured_with_routing(
-                    "p", _TestSchema, task=task, max_tokens=100,
+                    "p", _TestSchema, task=task, max_tokens=100
                 )
             assert mock_router.route_and_generate.call_count == 2
             gemini.generate_structured_content.assert_awaited_once()
@@ -523,8 +523,7 @@ class TestRetryFailurePaths:
     @pytest.mark.asyncio
     async def test_valid_truncated_first_attempt_survives_failed_retry(self):
         """If the first parse was schema-valid (finish=length) and the retry
-        fails, the truncated-but-valid first result is returned - NOT Gemini.
-        """
+        fails, the truncated-but-valid first result is returned - NOT Gemini."""
         agent = _TestWorkerForTier()
         task = AgentTask(
             id="retry-fail-002",
@@ -553,7 +552,7 @@ class TestRetryFailurePaths:
             gemini.generate_structured_content = AsyncMock()
             with patch.object(agent, "_ensure_gemini_service", return_value=gemini):
                 result = await agent._generate_structured_with_routing(
-                    "p", _TestSchema, task=task, max_tokens=100,
+                    "p", _TestSchema, task=task, max_tokens=100
                 )
             assert result.result == "truncated but valid"
             gemini.generate_structured_content.assert_not_awaited()
@@ -586,7 +585,7 @@ class TestRetryFailurePaths:
             agent._model_router = mock_router
 
             await agent._generate_structured_with_routing(
-                "p", _TestSchema, task=task, max_tokens=150,
+                "p", _TestSchema, task=task, max_tokens=150
             )
             calls = mock_router.route_and_generate.call_args_list
             assert calls[0].args[0].max_tokens == 150
@@ -671,7 +670,7 @@ class TestExternalRoundFixes:
             gemini.generate_structured_content = AsyncMock()
             with patch.object(agent, "_ensure_gemini_service", return_value=gemini):
                 result = await agent._generate_structured_with_routing(
-                    "p", _TestSchema, task=task, max_tokens=100,
+                    "p", _TestSchema, task=task, max_tokens=100
                 )
         assert result.result == "v"
         assert agent.last_structured_truncated is True
@@ -720,7 +719,7 @@ class TestExternalRoundFixes:
             mock_router.route_and_generate = AsyncMock(side_effect=[first, second])
             agent._model_router = mock_router
             await agent._generate_structured_with_routing(
-                "p", _TestSchema, task=task, max_tokens=100,
+                "p", _TestSchema, task=task, max_tokens=100
             )
             retry_decision = mock_router.route_and_generate.call_args_list[1].kwargs[
                 "routing_decision"

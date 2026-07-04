@@ -1,4 +1,5 @@
-"""Retry strategies and circuit breaker patterns.
+"""
+Retry strategies and circuit breaker patterns.
 
 This module provides advanced retry mechanisms, circuit breakers,
 and bulkhead patterns for fault-tolerant operation execution.
@@ -40,7 +41,8 @@ class RetryDecision(Enum):
 
 @dataclass
 class RetryPolicy:
-    """Retry policy configuration.
+    """
+    Retry policy configuration.
 
     Attributes:
         max_attempts: Maximum number of retry attempts
@@ -50,7 +52,6 @@ class RetryPolicy:
         jitter: Whether to add random jitter
         retryable_exceptions: Exceptions that trigger retry
         non_retryable_exceptions: Exceptions that don't trigger retry
-
     """
 
     max_attempts: int = 3
@@ -63,7 +64,8 @@ class RetryPolicy:
     retry_budget: Optional["RetryBudget"] = None
 
     def should_retry(self, exception: Exception, attempt: int) -> bool:
-        """Determine if operation should be retried.
+        """
+        Determine if operation should be retried.
 
         Args:
             exception: The exception that occurred
@@ -71,7 +73,6 @@ class RetryPolicy:
 
         Returns:
             True if should retry, False otherwise
-
         """
         # Check retry budget if configured
         if self.retry_budget and not self.retry_budget.can_retry():
@@ -90,18 +91,18 @@ class RetryPolicy:
         return isinstance(exception, self.retryable_exceptions)
 
     def get_delay(self, attempt: int) -> float:
-        """Calculate delay for the given attempt.
+        """
+        Calculate delay for the given attempt.
 
         Args:
             attempt: Attempt number (0-indexed)
 
         Returns:
             Delay in seconds
-
         """
         # Exponential backoff
         delay = min(
-            self.initial_delay * (self.exponential_base**attempt), self.max_delay,
+            self.initial_delay * (self.exponential_base**attempt), self.max_delay
         )
 
         # Add jitter if enabled
@@ -150,18 +151,19 @@ class CircuitBreakerMetrics:
 
 
 class CircuitBreaker:
-    """Circuit breaker implementation.
+    """
+    Circuit breaker implementation.
 
     Prevents cascading failures by temporarily blocking calls to a failing service.
     """
 
     def __init__(self, name: str, config: CircuitBreakerConfig | None = None):
-        """Initialize circuit breaker.
+        """
+        Initialize circuit breaker.
 
         Args:
             name: Circuit breaker name
             config: Circuit breaker configuration
-
         """
         self.name = name
         self.config = config or CircuitBreakerConfig()
@@ -177,18 +179,18 @@ class CircuitBreaker:
         return self._state
 
     async def _transition_to(self, new_state: CircuitState) -> None:
-        """Transition to a new state.
+        """
+        Transition to a new state.
 
         Args:
             new_state: New circuit state
-
         """
         if self._state != new_state:
             old_state = self._state
             self._state = new_state
             self._state_changed_at = datetime.now(UTC)
             self._metrics.state_transitions.append(
-                (old_state, new_state, datetime.now(UTC)),
+                (old_state, new_state, datetime.now(UTC))
             )
 
             if new_state == CircuitState.HALF_OPEN:
@@ -210,7 +212,8 @@ class CircuitBreaker:
         )
 
     async def call(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-        """Execute function through circuit breaker.
+        """
+        Execute function through circuit breaker.
 
         Args:
             func: Function to execute
@@ -222,7 +225,6 @@ class CircuitBreaker:
 
         Raises:
             Exception: If circuit is open or function fails
-
         """
         async with self._lock:
             # Check if we should transition from OPEN to HALF_OPEN
@@ -239,7 +241,7 @@ class CircuitBreaker:
                 if self._half_open_counter >= self.config.half_open_requests:
                     self._metrics.rejected_calls += 1
                     raise Exception(
-                        f"Circuit breaker '{self.name}' is HALF_OPEN (limit reached)",
+                        f"Circuit breaker '{self.name}' is HALF_OPEN (limit reached)"
                     )
                 self._half_open_counter += 1
 
@@ -304,22 +306,24 @@ class CircuitBreaker:
 
 
 class ExponentialBackoff:
-    """Exponential backoff retry strategy.
+    """
+    Exponential backoff retry strategy.
 
     Implements exponential backoff with jitter for retry delays.
     """
 
     def __init__(self, policy: RetryPolicy | None = None):
-        """Initialize exponential backoff.
+        """
+        Initialize exponential backoff.
 
         Args:
             policy: Retry policy configuration
-
         """
         self.policy = policy or RetryPolicy()
 
     async def execute(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-        """Execute function with exponential backoff retry.
+        """
+        Execute function with exponential backoff retry.
 
         Args:
             func: Function to execute
@@ -331,7 +335,6 @@ class ExponentialBackoff:
 
         Raises:
             Exception: If all retries fail
-
         """
         last_exception = None
 
@@ -392,24 +395,25 @@ class BulkheadConfig:
 
 
 class BulkheadExecutor:
-    """Bulkhead pattern implementation.
+    """
+    Bulkhead pattern implementation.
 
     Isolates resources to prevent failure propagation.
     """
 
     def __init__(self, name: str, config: BulkheadConfig | None = None):
-        """Initialize bulkhead executor.
+        """
+        Initialize bulkhead executor.
 
         Args:
             name: Bulkhead name
             config: Bulkhead configuration
-
         """
         self.name = name
         self.config = config or BulkheadConfig()
         self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
         self._queue: asyncio.Queue[bool] = asyncio.Queue(
-            maxsize=self.config.max_queue_size,
+            maxsize=self.config.max_queue_size
         )
         self._active_tasks = 0
         self._total_executed = 0
@@ -417,7 +421,8 @@ class BulkheadExecutor:
         self._total_timeout = 0
 
     async def execute(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-        """Execute function with bulkhead isolation.
+        """
+        Execute function with bulkhead isolation.
 
         Args:
             func: Function to execute
@@ -429,7 +434,6 @@ class BulkheadExecutor:
 
         Raises:
             Exception: If queue is full or execution times out
-
         """
         # Check queue size
         if self._queue.full():
@@ -450,12 +454,12 @@ class BulkheadExecutor:
                     result: T
                     if inspect.iscoroutinefunction(func):
                         result = await asyncio.wait_for(
-                            func(*args, **kwargs), timeout=self.config.timeout,
+                            func(*args, **kwargs), timeout=self.config.timeout
                         )
                     else:
                         result = await asyncio.wait_for(
                             asyncio.get_event_loop().run_in_executor(
-                                None, func, *args, **kwargs,
+                                None, func, *args, **kwargs
                             ),
                             timeout=self.config.timeout,
                         )
@@ -465,7 +469,7 @@ class BulkheadExecutor:
                 except TimeoutError:
                     self._total_timeout += 1
                     raise Exception(
-                        f"Bulkhead '{self.name}' execution timeout",
+                        f"Bulkhead '{self.name}' execution timeout"
                     ) from None
                 finally:
                     self._active_tasks -= 1
@@ -486,18 +490,19 @@ class BulkheadExecutor:
 
 
 class RetryBudget:
-    """Retry budget to limit total retry attempts.
+    """
+    Retry budget to limit total retry attempts.
 
     Prevents retry storms by limiting the number of retries across all operations.
     """
 
     def __init__(self, budget_size: int = 100, refill_rate: float = 10.0):
-        """Initialize retry budget.
+        """
+        Initialize retry budget.
 
         Args:
             budget_size: Maximum budget size
             refill_rate: Tokens refilled per second
-
         """
         self.budget_size = budget_size
         self.refill_rate = refill_rate
@@ -512,14 +517,14 @@ class RetryBudget:
             return self._tokens > 0
 
     async def consume(self, tokens: int = 1) -> bool:
-        """Consume tokens from budget.
+        """
+        Consume tokens from budget.
 
         Args:
             tokens: Number of tokens to consume
 
         Returns:
             True if tokens were consumed, False if insufficient budget
-
         """
         async with self._lock:
             await self._refill()
@@ -547,14 +552,14 @@ class RetryBudget:
 def with_retry(
     policy: RetryPolicy | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator for adding retry logic to functions.
+    """
+    Decorator for adding retry logic to functions.
 
     Args:
         policy: Retry policy configuration
 
     Returns:
         Decorated function
-
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -575,9 +580,10 @@ def with_retry(
 
 
 def with_circuit_breaker(
-    name: str, config: CircuitBreakerConfig | None = None,
+    name: str, config: CircuitBreakerConfig | None = None
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator for adding circuit breaker to functions.
+    """
+    Decorator for adding circuit breaker to functions.
 
     Args:
         name: Circuit breaker name
@@ -585,7 +591,6 @@ def with_circuit_breaker(
 
     Returns:
         Decorated function
-
     """
     circuit_breaker = CircuitBreaker(name, config)
 
@@ -605,9 +610,10 @@ def with_circuit_breaker(
 
 
 def with_bulkhead(
-    name: str, config: BulkheadConfig | None = None,
+    name: str, config: BulkheadConfig | None = None
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator for adding bulkhead isolation to functions.
+    """
+    Decorator for adding bulkhead isolation to functions.
 
     Args:
         name: Bulkhead name
@@ -615,7 +621,6 @@ def with_bulkhead(
 
     Returns:
         Decorated function
-
     """
     bulkhead = BulkheadExecutor(name, config)
 

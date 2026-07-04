@@ -1,4 +1,5 @@
-"""System Experiment Registry
+"""
+System Experiment Registry
 
 Central registry for all active experiments across system components.
 Manages experiment lifecycle, coordination, and integration with existing systems.
@@ -61,7 +62,8 @@ class ExperimentEventType(Enum):
 
 
 class SystemExperimentRegistry:
-    """Central registry managing all experiments across Cerebro systems.
+    """
+    Central registry managing all experiments across Cerebro systems.
     Coordinates between experiment manager and system components.
     """
 
@@ -82,14 +84,14 @@ class SystemExperimentRegistry:
         capabilities: dict[str, Any] | None = None,
         health_check: Callable[..., Any] | None = None,
     ) -> None:
-        """Register a system component for experimentation.
+        """
+        Register a system component for experimentation.
 
         Args:
             component: The system component being registered
             handler: Async function to handle experiment updates for this component
             capabilities: Component capabilities and constraints
             health_check: Optional health check function for the component
-
         """
         registration = ComponentRegistration(
             component=component,
@@ -107,11 +109,11 @@ class SystemExperimentRegistry:
                 raise RuntimeError(f"Component {component.value} failed health check")
 
     async def register_experiment(self, experiment: SystemExperiment) -> None:
-        """Register a new experiment with affected components.
+        """
+        Register a new experiment with affected components.
 
         Args:
             experiment: The experiment to register
-
         """
         # Create lock for this experiment
         self.experiment_locks[experiment.id] = asyncio.Lock()
@@ -138,15 +140,15 @@ class SystemExperimentRegistry:
                 event_type=ExperimentEventType.CREATED.value,
                 timestamp=datetime.now(UTC),
                 data={"experiment": experiment.__dict__},
-            ),
+            )
         )
 
     async def start_experiment(self, experiment_id: str) -> None:
-        """Start an experiment across all affected components.
+        """
+        Start an experiment across all affected components.
 
         Args:
             experiment_id: ID of the experiment to start
-
         """
         async with self.experiment_locks[experiment_id]:
             affected_components = self.experiment_components[experiment_id]
@@ -156,7 +158,7 @@ class SystemExperimentRegistry:
             for component in affected_components:
                 registration = self.component_registrations[component]
                 task = registration.handler(
-                    "experiment_started", {"experiment_id": experiment_id},
+                    "experiment_started", {"experiment_id": experiment_id}
                 )
                 start_tasks.append(task)
 
@@ -177,18 +179,18 @@ class SystemExperimentRegistry:
                     event_type=ExperimentEventType.STARTED.value,
                     timestamp=datetime.now(UTC),
                     data={"components": [c.value for c in affected_components]},
-                ),
+                )
             )
 
     async def update_experiment_allocation(
-        self, experiment_id: str, new_allocations: dict[str, float],
+        self, experiment_id: str, new_allocations: dict[str, float]
     ) -> None:
-        """Update variant allocations (for adaptive experiments).
+        """
+        Update variant allocations (for adaptive experiments).
 
         Args:
             experiment_id: ID of the experiment
             new_allocations: New allocation percentages by variant ID
-
         """
         async with self.experiment_locks[experiment_id]:
             affected_components = self.experiment_components[experiment_id]
@@ -202,14 +204,14 @@ class SystemExperimentRegistry:
                 )
 
     async def stop_experiment(
-        self, experiment_id: str, reason: str = "completed",
+        self, experiment_id: str, reason: str = "completed"
     ) -> None:
-        """Stop an experiment across all components.
+        """
+        Stop an experiment across all components.
 
         Args:
             experiment_id: ID of the experiment to stop
             reason: Reason for stopping (completed, safety, manual)
-
         """
         async with self.experiment_locks[experiment_id]:
             affected_components = self.experiment_components[experiment_id]
@@ -238,18 +240,18 @@ class SystemExperimentRegistry:
                     event_type=ExperimentEventType.STOPPED.value,
                     timestamp=datetime.now(UTC),
                     data={"reason": reason},
-                ),
+                )
             )
 
     async def promote_winner(
-        self, experiment_id: str, winning_variant: ExperimentVariant,
+        self, experiment_id: str, winning_variant: ExperimentVariant
     ) -> None:
-        """Promote winning variant configuration to production.
+        """
+        Promote winning variant configuration to production.
 
         Args:
             experiment_id: ID of the experiment
             winning_variant: The winning variant to promote
-
         """
         # Get affected components (from history if experiment is stopped)
         affected_components = self._get_experiment_components(experiment_id)
@@ -279,15 +281,15 @@ class SystemExperimentRegistry:
                 event_type=ExperimentEventType.WINNER_PROMOTED.value,
                 timestamp=datetime.now(UTC),
                 data={"winning_variant": winning_variant.__dict__},
-            ),
+            )
         )
 
     async def check_component_health(self) -> dict[SystemComponent, bool]:
-        """Check health of all registered components.
+        """
+        Check health of all registered components.
 
         Returns:
             Dictionary mapping components to health status
-
         """
         health_status = {}
 
@@ -305,31 +307,31 @@ class SystemExperimentRegistry:
         return health_status
 
     async def get_active_experiments_for_component(
-        self, component: SystemComponent,
+        self, component: SystemComponent
     ) -> set[str]:
-        """Get all active experiments for a specific component.
+        """
+        Get all active experiments for a specific component.
 
         Args:
             component: The system component
 
         Returns:
             Set of experiment IDs
-
         """
         if component in self.component_registrations:
             return self.component_registrations[component].active_experiments.copy()
         return set()
 
     async def record_variant_assignment(
-        self, experiment_id: str, variant_id: str, context: dict[str, Any],
+        self, experiment_id: str, variant_id: str, context: dict[str, Any]
     ) -> None:
-        """Record a variant assignment event.
+        """
+        Record a variant assignment event.
 
         Args:
             experiment_id: ID of the experiment
             variant_id: ID of the assigned variant
             context: Context of the assignment
-
         """
         await self._record_event(
             ExperimentEvent(
@@ -337,7 +339,7 @@ class SystemExperimentRegistry:
                 event_type=ExperimentEventType.VARIANT_ASSIGNED.value,
                 timestamp=datetime.now(UTC),
                 data={"variant_id": variant_id, "context": context},
-            ),
+            )
         )
 
     async def record_metric(
@@ -348,7 +350,8 @@ class SystemExperimentRegistry:
         variant_id: str | None = None,
         component: SystemComponent | None = None,
     ) -> None:
-        """Record a metric value for an experiment.
+        """
+        Record a metric value for an experiment.
 
         Args:
             experiment_id: ID of the experiment
@@ -356,7 +359,6 @@ class SystemExperimentRegistry:
             value: Metric value
             variant_id: Optional variant ID
             component: Optional component that recorded the metric
-
         """
         await self._record_event(
             ExperimentEvent(
@@ -369,18 +371,18 @@ class SystemExperimentRegistry:
                     "variant_id": variant_id,
                 },
                 component=component,
-            ),
+            )
         )
 
     def register_event_handler(
-        self, event_type: ExperimentEventType, handler: Callable[..., Any],
+        self, event_type: ExperimentEventType, handler: Callable[..., Any]
     ) -> None:
-        """Register a handler for experiment events.
+        """
+        Register a handler for experiment events.
 
         Args:
             event_type: Type of event to handle
             handler: Async function to handle the event
-
         """
         self.event_handlers[event_type].append(handler)
 
@@ -391,7 +393,8 @@ class SystemExperimentRegistry:
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[ExperimentEvent]:
-        """Get events for an experiment.
+        """
+        Get events for an experiment.
 
         Args:
             experiment_id: ID of the experiment
@@ -401,7 +404,6 @@ class SystemExperimentRegistry:
 
         Returns:
             List of matching events
-
         """
         events = []
 
@@ -442,7 +444,7 @@ class SystemExperimentRegistry:
                     )
 
     async def _rollback_experiment_start(
-        self, experiment_id: str, errors: list[Exception],
+        self, experiment_id: str, errors: list[Exception]
     ) -> None:
         """Rollback a failed experiment start."""
         affected_components = self.experiment_components[experiment_id]
@@ -466,7 +468,7 @@ class SystemExperimentRegistry:
                 event_type=ExperimentEventType.ROLLBACK.value,
                 timestamp=datetime.now(UTC),
                 data={"errors": [str(e) for e in errors]},
-            ),
+            )
         )
 
     def _get_experiment_components(self, experiment_id: str) -> set[SystemComponent]:

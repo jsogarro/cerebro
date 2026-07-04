@@ -1,4 +1,5 @@
-"""Multi-Variate Analysis for System-Wide Optimization
+"""
+Multi-Variate Analysis for System-Wide Optimization
 
 This module provides advanced multi-variate statistical analysis for optimizing
 multiple metrics simultaneously across the entire Cerebro system. It includes
@@ -58,15 +59,16 @@ class SystemMetric:
         """Normalize metric value to [0, 1] range."""
         if self.metric_type == MetricType.MAXIMIZE:
             return (value - min_val) / (max_val - min_val + 1e-9)
-        if self.metric_type == MetricType.MINIMIZE:
+        elif self.metric_type == MetricType.MINIMIZE:
             return (max_val - value) / (max_val - min_val + 1e-9)
-        if self.metric_type == MetricType.TARGET and self.target_value:
+        elif self.metric_type == MetricType.TARGET and self.target_value:
             distance = abs(value - self.target_value)
             max_distance = max(
-                abs(max_val - self.target_value), abs(min_val - self.target_value),
+                abs(max_val - self.target_value), abs(min_val - self.target_value)
             )
             return 1.0 - (distance / (max_distance + 1e-9))
-        return 0.5
+        else:
+            return 0.5
 
 
 @dataclass
@@ -93,7 +95,7 @@ class ParetoSolution:
     rank: int = 0
 
     def dominates(
-        self, other: "ParetoSolution", metric_types: dict[str, MetricType],
+        self, other: "ParetoSolution", metric_types: dict[str, MetricType]
     ) -> bool:
         """Check if this solution dominates another."""
         better_in_at_least_one = False
@@ -108,12 +110,12 @@ class ParetoSolution:
             if metric_type == MetricType.MAXIMIZE:
                 if value < other_value:
                     return False
-                if value > other_value:
+                elif value > other_value:
                     better_in_at_least_one = True
             elif metric_type == MetricType.MINIMIZE:
                 if value > other_value:
                     return False
-                if value < other_value:
+                elif value < other_value:
                     better_in_at_least_one = True
 
         return better_in_at_least_one
@@ -133,7 +135,8 @@ class MultiVariateResult:
 
 
 class MultiVariateAnalyzer:
-    """Advanced multi-variate analysis for system-wide optimization.
+    """
+    Advanced multi-variate analysis for system-wide optimization.
 
     This class provides sophisticated methods for optimizing multiple metrics
     simultaneously, understanding interaction effects, and finding globally
@@ -146,13 +149,13 @@ class MultiVariateAnalyzer:
         constraints: list[Callable[..., Any]] | None = None,
         optimization_objective: OptimizationObjective = OptimizationObjective.PARETO_OPTIMAL,
     ):
-        """Initialize multi-variate analyzer.
+        """
+        Initialize multi-variate analyzer.
 
         Args:
             metrics: List of system metrics to optimize
             constraints: Optional constraint functions
             optimization_objective: Optimization strategy to use
-
         """
         self.metrics = {m.name: m for m in metrics}
         self.constraints = constraints or []
@@ -174,7 +177,8 @@ class MultiVariateAnalyzer:
         n_iterations: int = 100,
         population_size: int = 50,
     ) -> MultiVariateResult:
-        """Perform comprehensive multi-variate analysis of the system.
+        """
+        Perform comprehensive multi-variate analysis of the system.
 
         Args:
             evaluation_function: Function to evaluate system configuration
@@ -184,22 +188,21 @@ class MultiVariateAnalyzer:
 
         Returns:
             MultiVariateResult with analysis results
-
         """
         logger.info("Starting multi-variate system analysis")
 
         # Run optimization based on selected objective
         if self.optimization_objective == OptimizationObjective.PARETO_OPTIMAL:
             pareto_frontier = await self._find_pareto_frontier(
-                evaluation_function, parameter_bounds, n_iterations, population_size,
+                evaluation_function, parameter_bounds, n_iterations, population_size
             )
         elif self.optimization_objective == OptimizationObjective.WEIGHTED_SUM:
             pareto_frontier = await self._weighted_sum_optimization(
-                evaluation_function, parameter_bounds, n_iterations,
+                evaluation_function, parameter_bounds, n_iterations
             )
         else:
             pareto_frontier = await self._multi_objective_optimization(
-                evaluation_function, parameter_bounds, n_iterations,
+                evaluation_function, parameter_bounds, n_iterations
             )
 
         # Analyze interaction effects
@@ -210,7 +213,7 @@ class MultiVariateAnalyzer:
 
         # Determine component importance
         component_importance = self._analyze_component_importance(
-            pareto_frontier, interaction_effects,
+            pareto_frontier, interaction_effects
         )
 
         # Select optimal solution based on preferences
@@ -218,7 +221,7 @@ class MultiVariateAnalyzer:
 
         # Perform sensitivity analysis
         sensitivity_analysis = await self._sensitivity_analysis(
-            optimal_solution, evaluation_function, parameter_bounds,
+            optimal_solution, evaluation_function, parameter_bounds
         )
 
         return MultiVariateResult(
@@ -238,7 +241,8 @@ class MultiVariateAnalyzer:
         n_iterations: int,
         population_size: int,
     ) -> list[ParetoSolution]:
-        """Find Pareto frontier using NSGA-II inspired algorithm.
+        """
+        Find Pareto frontier using NSGA-II inspired algorithm.
         """
         population = self._initialize_population(parameter_bounds, population_size)
 
@@ -247,10 +251,10 @@ class MultiVariateAnalyzer:
             evaluated_pop = []
             for individual in population:
                 metrics = await self._evaluate_individual(
-                    individual, evaluation_function,
+                    individual, evaluation_function
                 )
                 evaluated_pop.append(
-                    ParetoSolution(parameters=individual, metrics=metrics),
+                    ParetoSolution(parameters=individual, metrics=metrics)
                 )
 
             # Non-dominated sorting
@@ -276,7 +280,7 @@ class MultiVariateAnalyzer:
             # Log progress
             if iteration % 10 == 0:
                 logger.info(
-                    f"Iteration {iteration}: Pareto front size = {len(fronts[0])}",
+                    f"Iteration {iteration}: Pareto front size = {len(fronts[0])}"
                 )
 
         # Return final Pareto frontier
@@ -284,14 +288,14 @@ class MultiVariateAnalyzer:
         for individual in population:
             metrics = await self._evaluate_individual(individual, evaluation_function)
             final_evaluated.append(
-                ParetoSolution(parameters=individual, metrics=metrics),
+                ParetoSolution(parameters=individual, metrics=metrics)
             )
 
         fronts = self._non_dominated_sorting(final_evaluated)
         return fronts[0] if fronts else []
 
     def _non_dominated_sorting(
-        self, population: list[ParetoSolution],
+        self, population: list[ParetoSolution]
     ) -> list[list[ParetoSolution]]:
         """Perform non-dominated sorting on population."""
         fronts = []
@@ -308,11 +312,11 @@ class MultiVariateAnalyzer:
                     continue
 
                 if sol1.dominates(
-                    sol2, {m.name: m.metric_type for m in self.metrics.values()},
+                    sol2, {m.name: m.metric_type for m in self.metrics.values()}
                 ):
                     dominated_solutions.append(j)
                 elif sol2.dominates(
-                    sol1, {m.name: m.metric_type for m in self.metrics.values()},
+                    sol1, {m.name: m.metric_type for m in self.metrics.values()}
                 ):
                     domination_count += 1
 
@@ -357,7 +361,7 @@ class MultiVariateAnalyzer:
 
             # Calculate distances for intermediate points
             metric_range = front[-1].metrics.get(metric_name, 0) - front[0].metrics.get(
-                metric_name, 0,
+                metric_name, 0
             )
 
             if metric_range > 0:
@@ -368,7 +372,7 @@ class MultiVariateAnalyzer:
                     front[i].crowding_distance += distance / metric_range
 
     async def _analyze_interactions(
-        self, solutions: list[ParetoSolution],
+        self, solutions: list[ParetoSolution]
     ) -> list[InteractionEffect]:
         """Analyze interaction effects between system components."""
         interactions = []
@@ -437,7 +441,7 @@ class MultiVariateAnalyzer:
         return df.corr(method="spearman")
 
     def _analyze_component_importance(
-        self, solutions: list[ParetoSolution], interactions: list[InteractionEffect],
+        self, solutions: list[ParetoSolution], interactions: list[InteractionEffect]
     ) -> dict[str, float]:
         """Analyze relative importance of system components."""
         importance = {}
@@ -454,7 +458,7 @@ class MultiVariateAnalyzer:
         # Calculate centrality measures
         if self.component_graph.nodes():
             centrality = nx.eigenvector_centrality(
-                self.component_graph, weight="weight", max_iter=1000,
+                self.component_graph, weight="weight", max_iter=1000
             )
 
             # Normalize importance scores
@@ -470,7 +474,7 @@ class MultiVariateAnalyzer:
         return importance
 
     def _select_optimal_solution(
-        self, pareto_frontier: list[ParetoSolution],
+        self, pareto_frontier: list[ParetoSolution]
     ) -> ParetoSolution | None:
         """Select optimal solution from Pareto frontier."""
         if not pareto_frontier:
@@ -491,7 +495,7 @@ class MultiVariateAnalyzer:
                         s.metrics.get(metric_name, 0) for s in pareto_frontier
                     ]
                     normalized = metric.normalize(
-                        value, min(all_values), max(all_values),
+                        value, min(all_values), max(all_values)
                     )
 
                     # Apply weight
@@ -537,13 +541,13 @@ class MultiVariateAnalyzer:
 
                     # Evaluate
                     metrics = await self._evaluate_individual(
-                        perturbed_params, evaluation_function,
+                        perturbed_params, evaluation_function
                     )
 
                     # Calculate sensitivity
                     if metric_name in metrics:
                         sensitivity_value = abs(
-                            metrics[metric_name] - solution.metrics.get(metric_name, 0),
+                            metrics[metric_name] - solution.metrics.get(metric_name, 0)
                         )
                         sensitivities.append(sensitivity_value)
 
@@ -564,7 +568,8 @@ class MultiVariateAnalyzer:
         soft_constraints: list[Callable[..., Any]],
         penalty_weights: dict[str, float] | None = None,
     ) -> ParetoSolution:
-        """Optimize with both hard and soft constraints.
+        """
+        Optimize with both hard and soft constraints.
 
         Args:
             evaluation_function: Function to evaluate configurations
@@ -575,7 +580,6 @@ class MultiVariateAnalyzer:
 
         Returns:
             Optimal solution satisfying constraints
-
         """
         penalty_weights = penalty_weights or {}
 
@@ -593,7 +597,7 @@ class MultiVariateAnalyzer:
             # Evaluate objective
             loop = asyncio.new_event_loop()
             metrics = loop.run_until_complete(
-                self._evaluate_individual(params, evaluation_function),
+                self._evaluate_individual(params, evaluation_function)
             )
 
             # Calculate objective value
@@ -618,7 +622,7 @@ class MultiVariateAnalyzer:
         # Run optimization
         bounds = [(b[0], b[1]) for b in parameter_bounds.values()]
         result = differential_evolution(
-            constrained_objective, bounds, maxiter=100, popsize=50, seed=42,
+            constrained_objective, bounds, maxiter=100, popsize=50, seed=42
         )
 
         # Convert result to ParetoSolution
@@ -631,9 +635,10 @@ class MultiVariateAnalyzer:
         return ParetoSolution(parameters=params, metrics=metrics)
 
     def visualize_pareto_frontier(
-        self, solutions: list[ParetoSolution], metric_x: str, metric_y: str,
+        self, solutions: list[ParetoSolution], metric_x: str, metric_y: str
     ) -> dict[str, Any]:
-        """Create visualization data for Pareto frontier.
+        """
+        Create visualization data for Pareto frontier.
 
         Args:
             solutions: Pareto solutions to visualize
@@ -642,7 +647,6 @@ class MultiVariateAnalyzer:
 
         Returns:
             Dictionary with visualization data
-
         """
         x_values = [s.metrics.get(metric_x, 0) for s in solutions]
         y_values = [s.metrics.get(metric_y, 0) for s in solutions]
@@ -658,17 +662,17 @@ class MultiVariateAnalyzer:
             "metric_x": metric_x,
             "metric_y": metric_y,
             "x_type": self.metrics.get(
-                metric_x, SystemMetric(metric_x, MetricType.MAXIMIZE),
+                metric_x, SystemMetric(metric_x, MetricType.MAXIMIZE)
             ).metric_type.value,
             "y_type": self.metrics.get(
-                metric_y, SystemMetric(metric_y, MetricType.MAXIMIZE),
+                metric_y, SystemMetric(metric_y, MetricType.MAXIMIZE)
             ).metric_type.value,
         }
 
     # Helper methods
 
     def _initialize_population(
-        self, bounds: dict[str, tuple[float, float]], size: int,
+        self, bounds: dict[str, tuple[float, float]], size: int
     ) -> list[dict[str, float]]:
         """Initialize random population."""
         population = []
@@ -680,7 +684,7 @@ class MultiVariateAnalyzer:
         return population
 
     async def _evaluate_individual(
-        self, params: dict[str, float], evaluation_function: Callable[..., Any],
+        self, params: dict[str, float], evaluation_function: Callable[..., Any]
     ) -> dict[str, float]:
         """Evaluate an individual configuration."""
         result: dict[str, float]
@@ -692,13 +696,13 @@ class MultiVariateAnalyzer:
         return result
 
     def _tournament_selection(
-        self, population: list[ParetoSolution], n_select: int, tournament_size: int = 2,
+        self, population: list[ParetoSolution], n_select: int, tournament_size: int = 2
     ) -> list[dict[str, float]]:
         """Tournament selection for genetic algorithm."""
         selected = []
         for _ in range(n_select):
             tournament_indices = np.random.choice(
-                len(population), tournament_size, replace=False,
+                len(population), tournament_size, replace=False
             )
             tournament = [population[i] for i in tournament_indices]
             winner = min(tournament, key=lambda x: (x.rank, -x.crowding_distance))
@@ -706,7 +710,7 @@ class MultiVariateAnalyzer:
         return selected
 
     def _create_offspring(
-        self, parents: list[dict[str, float]], bounds: dict[str, tuple[float, float]],
+        self, parents: list[dict[str, float]], bounds: dict[str, tuple[float, float]]
     ) -> list[ParetoSolution]:
         """Create offspring through crossover and mutation."""
         offspring = []
@@ -764,13 +768,13 @@ class MultiVariateAnalyzer:
                 current = mutated.get(param, (min_val + max_val) / 2)
                 delta = (max_val - min_val) * mutation_strength
                 mutated[param] = np.clip(
-                    current + np.random.normal(0, delta), min_val, max_val,
+                    current + np.random.normal(0, delta), min_val, max_val
                 )
 
         return mutated
 
     def _environmental_selection(
-        self, combined: list[ParetoSolution], size: int,
+        self, combined: list[ParetoSolution], size: int
     ) -> list[dict[str, float]]:
         """Select next generation using NSGA-II environmental selection."""
         # Sort by rank and crowding distance
@@ -816,7 +820,7 @@ class MultiVariateAnalyzer:
 
             # Optimize with current weights
             solution = await self.optimize_with_constraints(
-                evaluation_function, parameter_bounds, self.constraints, [], {},
+                evaluation_function, parameter_bounds, self.constraints, [], {}
             )
             solutions.append(solution)
 
@@ -840,7 +844,7 @@ class MultiVariateAnalyzer:
 
             # Optimize
             solution = await self.optimize_with_constraints(
-                evaluation_function, parameter_bounds, self.constraints, [], {},
+                evaluation_function, parameter_bounds, self.constraints, [], {}
             )
             solutions.append(solution)
 

@@ -53,7 +53,7 @@ async def test_service_keeps_result_aggregator_delegates() -> None:
         {
             "research": {"quality_score": 0.7},
             "content": {"quality_score": 0.9},
-        },
+        }
     )
     synthesized, consensus = await service._synthesize_results(
         {"research": {"result": "A", "quality_score": 0.7}},

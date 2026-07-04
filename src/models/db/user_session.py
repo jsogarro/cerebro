@@ -1,4 +1,5 @@
-"""User session database model.
+"""
+User session database model.
 
 Tracks active user sessions with device information for security
 monitoring and session management.
@@ -25,7 +26,8 @@ from src.models.db.base import BaseModel
 
 
 class UserSession(BaseModel):
-    """User session model.
+    """
+    User session model.
 
     Tracks active sessions including device information,
     location, and activity for security monitoring.
@@ -128,7 +130,7 @@ class UserSession(BaseModel):
     )
 
     revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True), nullable=True
     )
 
     revoke_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -157,7 +159,8 @@ class UserSession(BaseModel):
         location_info: dict[str, Any] | None = None,
         mfa_verified: bool = False,
     ) -> "UserSession":
-        """Create a new user session.
+        """
+        Create a new user session.
 
         Args:
             user_id: User ID
@@ -170,7 +173,6 @@ class UserSession(BaseModel):
 
         Returns:
             UserSession instance
-
         """
         session_token = secrets.token_urlsafe(32)
         refresh_token = secrets.token_urlsafe(32)
@@ -209,14 +211,14 @@ class UserSession(BaseModel):
         return session
 
     def update_activity(
-        self, ip_address: str | None = None, extend_duration: bool = True,
+        self, ip_address: str | None = None, extend_duration: bool = True
     ) -> None:
-        """Update session activity.
+        """
+        Update session activity.
 
         Args:
             ip_address: Current IP address
             extend_duration: Whether to extend session duration
-
         """
         self.last_activity = datetime.now(UTC)
         self.request_count += 1
@@ -234,25 +236,25 @@ class UserSession(BaseModel):
             self.expires_at = datetime.now(UTC) + timedelta(hours=24)
 
     def revoke(self, reason: str | None = None) -> None:
-        """Revoke the session.
+        """
+        Revoke the session.
 
         Args:
             reason: Reason for revocation
-
         """
         self.is_active = False
         self.revoked_at = datetime.now(UTC)
         self.revoke_reason = reason
 
     def refresh(self, duration_hours: int = 24) -> str:
-        """Refresh the session with a new token.
+        """
+        Refresh the session with a new token.
 
         Args:
             duration_hours: New session duration in hours
 
         Returns:
             New session token
-
         """
         new_token = secrets.token_urlsafe(32)
         self.session_token = new_token
@@ -263,11 +265,11 @@ class UserSession(BaseModel):
         return new_token
 
     def mark_suspicious(self, reason: str | None = None) -> None:
-        """Mark session as suspicious.
+        """
+        Mark session as suspicious.
 
         Args:
             reason: Reason for marking suspicious
-
         """
         self.is_suspicious = True
         if reason and self.session_metadata:
@@ -294,14 +296,15 @@ class UserSession(BaseModel):
     def idle_time(self) -> timedelta:
         """Get time since last activity."""
         return timedelta(
-            seconds=(datetime.now(UTC) - self.last_activity).total_seconds(),
+            seconds=(datetime.now(UTC) - self.last_activity).total_seconds()
         )
 
     @classmethod
     def get_active_sessions(
-        cls, user_id: str, session: Any = None,
+        cls, user_id: str, session: Any = None
     ) -> list["UserSession"]:
-        """Get all active sessions for a user.
+        """
+        Get all active sessions for a user.
 
         Args:
             user_id: User ID
@@ -309,7 +312,6 @@ class UserSession(BaseModel):
 
         Returns:
             List of active UserSession instances
-
         """
         if not session:
             return []
@@ -328,9 +330,10 @@ class UserSession(BaseModel):
 
     @classmethod
     def revoke_all_sessions(
-        cls, user_id: str, reason: str = "Manual revocation", session: Any = None,
+        cls, user_id: str, reason: str = "Manual revocation", session: Any = None
     ) -> int:
-        """Revoke all sessions for a user.
+        """
+        Revoke all sessions for a user.
 
         Args:
             user_id: User ID
@@ -339,7 +342,6 @@ class UserSession(BaseModel):
 
         Returns:
             Number of sessions revoked
-
         """
         if not session:
             return 0
@@ -353,14 +355,14 @@ class UserSession(BaseModel):
         return len(active_sessions)
 
     def to_dict(self, include_tokens: bool = False) -> dict[str, Any]:
-        """Convert to dictionary.
+        """
+        Convert to dictionary.
 
         Args:
             include_tokens: Include session tokens
 
         Returns:
             Dictionary representation
-
         """
         data = {
             "id": str(self.id),

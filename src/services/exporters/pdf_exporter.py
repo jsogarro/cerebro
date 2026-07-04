@@ -1,4 +1,5 @@
-"""PDF export functionality using WeasyPrint.
+"""
+PDF export functionality using WeasyPrint.
 
 This module provides PDF generation from HTML reports using WeasyPrint,
 following functional programming principles with pure transformation functions.
@@ -33,6 +34,7 @@ logger = get_logger()
 class PDFExportError(Exception):
     """Exception raised during PDF export."""
 
+    pass
 
 
 class PDFExporter:
@@ -42,7 +44,7 @@ class PDFExporter:
         """Initialize PDF exporter."""
         if not WEASYPRINT_AVAILABLE:
             raise PDFExportError(
-                "WeasyPrint is not available. Install with: pip install weasyprint",
+                "WeasyPrint is not available. Install with: pip install weasyprint"
             )
 
         self.settings = settings or ReportSettings()
@@ -64,9 +66,10 @@ class PDFExporter:
             # Don't fail on warnings, but log them
 
     def export_to_pdf(
-        self, html_content: str, report: Report, custom_css: str | None = None,
+        self, html_content: str, report: Report, custom_css: str | None = None
     ) -> ReportOutput:
-        """Export HTML content to PDF.
+        """
+        Export HTML content to PDF.
 
         This is a pure function that transforms HTML content into PDF bytes.
 
@@ -77,7 +80,6 @@ class PDFExporter:
 
         Returns:
             ReportOutput with PDF content
-
         """
         try:
             logger.info(f"Starting PDF export for report: {report.id}")
@@ -92,7 +94,7 @@ class PDFExporter:
             css_objects = []
             for css_content in css_styles:
                 css_objects.append(
-                    CSS(string=css_content, font_config=self.font_config),
+                    CSS(string=css_content, font_config=self.font_config)
                 )
 
             # Generate PDF
@@ -116,7 +118,7 @@ class PDFExporter:
             raise PDFExportError(f"Failed to generate PDF: {e}") from e
 
     def _build_css_styles(
-        self, report: Report, custom_css: str | None = None,
+        self, report: Report, custom_css: str | None = None
     ) -> list[str]:
         """Build CSS styles for PDF generation."""
         css_styles = []
@@ -403,7 +405,7 @@ class PDFExporter:
         """
 
     def _generate_pdf_bytes(
-        self, html_doc: Any, css_objects: list[Any], report: Report,
+        self, html_doc: Any, css_objects: list[Any], report: Report
     ) -> bytes:
         """Generate PDF bytes from HTML document and CSS."""
         try:
@@ -437,9 +439,10 @@ class PDFExporter:
             raise PDFExportError(f"WeasyPrint failed: {e}") from e
 
     def export_to_pdf_stream(
-        self, html_content: str, report: Report, custom_css: str | None = None,
+        self, html_content: str, report: Report, custom_css: str | None = None
     ) -> io.BytesIO:
-        """Export HTML content to PDF as a BytesIO stream.
+        """
+        Export HTML content to PDF as a BytesIO stream.
 
         Args:
             html_content: HTML content to convert
@@ -448,23 +451,23 @@ class PDFExporter:
 
         Returns:
             BytesIO stream containing PDF data
-
         """
         pdf_output = self.export_to_pdf(html_content, report, custom_css)
 
         if isinstance(pdf_output.content, bytes):
             return io.BytesIO(pdf_output.content)
-        raise PDFExportError("PDF export did not return bytes")
+        else:
+            raise PDFExportError("PDF export did not return bytes")
 
     def validate_html_for_pdf(self, html_content: str) -> list[str]:
-        """Validate HTML content for PDF generation and return warnings.
+        """
+        Validate HTML content for PDF generation and return warnings.
 
         Args:
             html_content: HTML content to validate
 
         Returns:
             List of validation warnings
-
         """
         warnings = []
 
@@ -495,20 +498,20 @@ class PDFExporter:
         for element in form_elements:
             if element in html_content:
                 warnings.append(
-                    f"Form element detected: {element} - may not render properly",
+                    f"Form element detected: {element} - may not render properly"
                 )
 
         return warnings
 
     def get_pdf_info(self, pdf_bytes: bytes) -> dict[str, Any]:
-        """Extract information from generated PDF.
+        """
+        Extract information from generated PDF.
 
         Args:
             pdf_bytes: PDF content as bytes
 
         Returns:
             Dictionary with PDF information
-
         """
         try:
             info = {
@@ -536,7 +539,8 @@ def create_pdf_exporter(settings: ReportSettings | None = None) -> PDFExporter:
 
 # Utility functions for PDF generation
 def optimize_html_for_pdf(html_content: str) -> str:
-    """Optimize HTML content for better PDF generation.
+    """
+    Optimize HTML content for better PDF generation.
 
     This function applies transformations to make HTML more PDF-friendly.
     """
@@ -557,9 +561,10 @@ def optimize_html_for_pdf(html_content: str) -> str:
 
 
 def add_pdf_page_breaks(
-    html_content: str, break_elements: list[str] | None = None,
+    html_content: str, break_elements: list[str] | None = None
 ) -> str:
-    """Add strategic page breaks to HTML content for better PDF layout.
+    """
+    Add strategic page breaks to HTML content for better PDF layout.
 
     Args:
         html_content: Original HTML content
@@ -567,7 +572,6 @@ def add_pdf_page_breaks(
 
     Returns:
         HTML with page break classes added
-
     """
     if break_elements is None:
         break_elements = ["h1", "h2.major-section", ".new-page"]

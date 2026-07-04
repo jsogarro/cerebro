@@ -109,10 +109,10 @@ class ResearchExecutionCoordinator:
             analysis_task = state.worker_tasks["comparative_analysis"]
 
             analysis_task["literature_findings"] = state.worker_results.get(
-                "literature_review",
+                "literature_review"
             )
             analysis_task["methodology_framework"] = state.worker_results.get(
-                "methodology",
+                "methodology"
             )
 
             response = await self.send_talkhier_message(
@@ -227,7 +227,7 @@ class ResearchExecutionCoordinator:
 
         lit_result = worker_results["literature_review"]
         if not hasattr(lit_result, "intermediate_outputs") or not isinstance(
-            lit_result.intermediate_outputs, dict,
+            lit_result.intermediate_outputs, dict
         ):
             return []
 

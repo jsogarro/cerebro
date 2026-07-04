@@ -1,4 +1,5 @@
-"""Research Project models for the Research Platform.
+"""
+Research Project models for the Research Platform.
 Implements domain models following TDD principles.
 """
 

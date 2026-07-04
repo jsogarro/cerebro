@@ -185,7 +185,7 @@ def _parse_case(case_data: object) -> GoldenDatasetCase:
             _require_str_list(
                 case_map.get("expected_insights"),
                 "expected_insights",
-            ),
+            )
         ),
         trusted_sources=tuple(
             _parse_trusted_source(source)
@@ -224,13 +224,13 @@ def _parse_trusted_source(source_data: object) -> TrustedSource:
         source_type=_require_str(source.get("source_type"), "source source_type"),
         snippet=_require_str(source.get("snippet"), "source snippet"),
         supported_claims=tuple(
-            _require_str_list(source.get("supported_claims"), "supported_claims"),
+            _require_str_list(source.get("supported_claims"), "supported_claims")
         ),
         contradicted_claims=tuple(
             _require_str_list(
                 source.get("contradicted_claims", []),
                 "contradicted_claims",
-            ),
+            )
         ),
     )
 

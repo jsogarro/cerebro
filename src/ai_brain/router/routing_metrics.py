@@ -1,4 +1,5 @@
-"""Routing Metrics Collector for MASR
+"""
+Routing Metrics Collector for MASR
 
 Tracks routing performance, strategy effectiveness, and enables adaptive
 routing through historical analysis of routing decisions.
@@ -16,7 +17,8 @@ if TYPE_CHECKING:
 
 
 class RoutingMetricsCollector:
-    """Collects and analyzes routing metrics for performance tracking and
+    """
+    Collects and analyzes routing metrics for performance tracking and
     adaptive routing strategies.
 
     Maintains historical routing decisions and provides analytics for
@@ -29,13 +31,13 @@ class RoutingMetricsCollector:
         adaptation_window_hours: int = 24,
         min_history_for_adaptation: int = 100,
     ):
-        """Initialize routing metrics collector.
+        """
+        Initialize routing metrics collector.
 
         Args:
             default_strategy: Default routing strategy when no adaptation available
             adaptation_window_hours: Time window for adaptive strategy analysis
             min_history_for_adaptation: Minimum decisions needed for adaptation
-
         """
         self.default_strategy = default_strategy
         self.adaptation_window_hours = adaptation_window_hours
@@ -45,36 +47,37 @@ class RoutingMetricsCollector:
         self.routing_history: list[RoutingDecision] = []
 
     def update_metrics(self, decision: RoutingDecision) -> None:
-        """Update routing metrics with new decision.
+        """
+        Update routing metrics with new decision.
 
         Args:
             decision: The routing decision to record
-
         """
         self.metrics.total_requests += 1
         self.metrics.last_updated = datetime.now()
         # Additional metrics would be updated after execution feedback
 
     def get_metrics(self) -> RoutingMetrics:
-        """Get current routing metrics.
+        """
+        Get current routing metrics.
 
         Returns:
             Current RoutingMetrics snapshot
-
         """
         return self.metrics
 
     def add_to_history(self, decision: RoutingDecision) -> None:
-        """Add a routing decision to history for adaptive learning.
+        """
+        Add a routing decision to history for adaptive learning.
 
         Args:
             decision: The routing decision to store
-
         """
         self.routing_history.append(decision)
 
     def get_adaptive_strategy(self, complexity_analysis: Any) -> RoutingStrategy:
-        """Get adaptive routing strategy based on historical performance.
+        """
+        Get adaptive routing strategy based on historical performance.
 
         Analyzes recent routing decisions to select the strategy with
         the best average confidence score.
@@ -84,7 +87,6 @@ class RoutingMetricsCollector:
 
         Returns:
             Recommended RoutingStrategy based on historical performance
-
         """
         if len(self.routing_history) < self.min_history_for_adaptation:
             return self.default_strategy
@@ -108,13 +110,14 @@ class RoutingMetricsCollector:
 
         # Select strategy with highest average confidence
         best_strategy = max(
-            strategy_performance.items(), key=lambda x: sum(x[1]) / len(x[1]),
+            strategy_performance.items(), key=lambda x: sum(x[1]) / len(x[1])
         )[0]
 
         return RoutingStrategy(best_strategy)
 
     async def adapt_from_decision(self, decision: RoutingDecision) -> None:
-        """Adapt routing parameters based on decision outcomes.
+        """
+        Adapt routing parameters based on decision outcomes.
 
         This is a placeholder for future ML-based adaptation that would
         learn from execution feedback and continuously improve routing
@@ -122,10 +125,10 @@ class RoutingMetricsCollector:
 
         Args:
             decision: The routing decision to learn from
-
         """
         # This would implement learning from execution feedback
         # For now, it's a placeholder for future ML-based adaptation
+        pass
 
     def get_history_size(self) -> int:
         """Get current routing history size."""
