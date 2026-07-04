@@ -43,6 +43,43 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         """Return the agent type identifier."""
         return "comparative_analysis"
 
+    def _handle_insufficient_items(
+        self, task: AgentTask, items: list[dict[str, Any]]
+    ) -> AgentResult:
+        """Return a structured success for <2 comparison items (no hard error)."""
+        item_count = len(items) if items else 0
+        self.log_info(
+            "comparative_analysis_insufficient_items",
+            item_count=item_count,
+            task_id=task.id,
+        )
+        if item_count == 1:
+            analysis_text = (
+                f"Single item provided: {items[0].get('name', 'Unknown')}. "
+                "Comparison requires at least 2 items; provided standalone analysis "
+                "of available characteristics instead of comparative assessment."
+            )
+        else:
+            analysis_text = (
+                "No items provided for comparison. "
+                "Cannot perform comparative analysis with zero items."
+            )
+        return AgentResult(
+            task_id=task.id,
+            status="success",  # Structured success, not error
+            output={
+                "comparison_matrix": {},
+                "rankings": [],
+                "trade_offs": [],
+                "recommendations": [analysis_text],
+                "synthesis": analysis_text,
+                "citations": [],
+            },
+            confidence=0.5 if item_count == 1 else 0.0,
+            execution_time=0.0,  # Immediate return, no processing
+            metadata={"insufficient_items": True, "item_count": item_count},
+        )
+
     async def execute(self, task: AgentTask) -> AgentResult:
         """
         Execute a comparative analysis task.
@@ -59,42 +96,8 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             criteria = task.input_data.get("criteria", [])
 
             # Degrade gracefully for insufficient items (< 2) instead of hard error.
-            # Return a structured success noting the limitation.
             if not items or len(items) < 2:
-                self.log_info(
-                    "comparative_analysis_insufficient_items",
-                    item_count=len(items) if items else 0,
-                    task_id=task.id,
-                )
-                # Construct a single-item or zero-item analysis response
-                if len(items) == 1:
-                    single_item = items[0]
-                    analysis_text = (
-                        f"Single item provided: {single_item.get('name', 'Unknown')}. "
-                        "Comparison requires at least 2 items; provided standalone analysis "
-                        "of available characteristics instead of comparative assessment."
-                    )
-                else:
-                    analysis_text = (
-                        "No items provided for comparison. "
-                        "Cannot perform comparative analysis with zero items."
-                    )
-
-                return AgentResult(
-                    task_id=task.id,
-                    status="success",  # Structured success, not error
-                    output={
-                        "comparison_matrix": {},
-                        "rankings": [],
-                        "trade_offs": [],
-                        "recommendations": [analysis_text],
-                        "synthesis": analysis_text,
-                        "citations": [],
-                    },
-                    confidence=0.5 if len(items) == 1 else 0.0,
-                    execution_time=0.0,  # Immediate return, no processing
-                    metadata={"insufficient_items": True, "item_count": len(items)},
-                )
+                return self._handle_insufficient_items(task, items)
 
             if not criteria:
                 return self.handle_error(

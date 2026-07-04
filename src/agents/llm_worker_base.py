@@ -265,6 +265,16 @@ class LLMWorkerAgentBase(BaseAgent):
     ) -> Any:
         """Generate structured content via ModelRouter or GeminiService with graceful fallback.
 
+        Callers can check `self.last_structured_truncated` (reset on every
+        call) for a programmatic signal that the returned object came from a
+        truncated generation.
+
+        Truncation semantics: if the first attempt parses as schema-valid but
+        hit the token cap (finish_reason == "length") and the retry then fails,
+        the truncated-but-valid first result IS returned (with a warning
+        logged). Callers requiring complete content should treat that warning
+        as a quality signal.
+
         When MULTI_PROVIDER_ROUTING_ENABLED=True and OPENROUTER_API_KEY is set,
         routes through ModelRouter/OpenRouterProvider using JSON mode. Otherwise
         falls back to GeminiService (preserves current behavior).
@@ -283,6 +293,7 @@ class LLMWorkerAgentBase(BaseAgent):
         Raises:
             Exception: If generation and fallback both fail
         """
+        self.last_structured_truncated = False
         from src.core.config import settings
 
         # Check if multi-provider routing is enabled
@@ -363,6 +374,9 @@ class LLMWorkerAgentBase(BaseAgent):
 
                 needs_retry = False
                 retry_reason = None
+                # Best-effort fallback: a schema-valid parse whose generation
+                # hit the token cap (content may be truncated mid-field).
+                truncated_but_valid = None
 
                 try:
                     parsed_data = parse_json_response(response.content)
@@ -372,6 +386,7 @@ class LLMWorkerAgentBase(BaseAgent):
                     if response.finish_reason == "length":
                         needs_retry = True
                         retry_reason = "finish_reason_length"
+                        truncated_but_valid = validated
                         self.log_info(
                             "structured_generation_truncated",
                             finish_reason=response.finish_reason,
@@ -409,10 +424,15 @@ class LLMWorkerAgentBase(BaseAgent):
                         metadata=metadata,
                     )
 
+                    # Pin the retry to the model that produced the first
+                    # attempt so the retry is a continuation, not a re-roll.
                     retry_response = await self._model_router.route_and_generate(
                         retry_request,
                         routing_decision={
-                            "primary_model": {"provider": "openrouter", "name": None},
+                            "primary_model": {
+                                "provider": "openrouter",
+                                "name": getattr(response, "model_name", None),
+                            },
                             "fallback_models": [],
                         },
                     )
@@ -427,16 +447,37 @@ class LLMWorkerAgentBase(BaseAgent):
                             )
                             return retry_validated
                         except (ValueError, TypeError) as retry_parse_err:
+                            if truncated_but_valid is not None:
+                                self.log_warning(
+                                    "Retry parse failed; returning the schema-valid "
+                                    f"but truncated first attempt: {retry_parse_err}"
+                                )
+                                self.last_structured_truncated = True
+                                return truncated_but_valid
                             self.log_warning(
                                 f"Retry parse/validation also failed: {retry_parse_err}, "
                                 "falling back to GeminiService"
                             )
                     else:
+                        if truncated_but_valid is not None:
+                            self.log_warning(
+                                "Retry generation failed; returning the schema-valid "
+                                f"but truncated first attempt: {retry_response.error_message}"
+                            )
+                            self.last_structured_truncated = True
+                            return truncated_but_valid
                         self.log_warning(
                             f"Retry generation failed: {retry_response.error_message}, "
                             "falling back to GeminiService"
                         )
                 elif needs_retry:
+                    if truncated_but_valid is not None:
+                        self.log_warning(
+                            f"Truncation at max_tokens={max_tokens} >= 8000 cap; "
+                            "returning the schema-valid but truncated result"
+                        )
+                        self.last_structured_truncated = True
+                        return truncated_but_valid
                     # Already at or above 8000 token cap, skip retry
                     self.log_warning(
                         f"Truncation detected but max_tokens={max_tokens} >= 8000 cap, "
