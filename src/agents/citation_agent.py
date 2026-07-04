@@ -326,7 +326,7 @@ Return formatted citations as structured JSON."""
 
         try:
             result = await self._generate_structured_with_routing(
-                prompt, CitationSchema, task=None
+                prompt, CitationSchema, task=None, tier="simple"
             )
 
             # Convert Pydantic model to expected dict format

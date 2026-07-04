@@ -277,7 +277,7 @@ class TestComparativeAnalysisAgent:
 
     @pytest.mark.asyncio
     async def test_empty_items_handling(self) -> None:
-        """Test handling of empty items list."""
+        """Test handling of empty items list - graceful degradation."""
         agent = ComparativeAnalysisAgent()
 
         task = AgentTask(
@@ -289,6 +289,8 @@ class TestComparativeAnalysisAgent:
 
         result = await agent.execute(task)
 
-        assert result.status == "failed"
-        assert "error" in result.output
+        # Changed behavior: gracefully degrades to structured success
+        assert result.status == "success"
+        assert result.metadata.get("insufficient_items") is True
+        assert result.metadata.get("item_count") == 0
         assert result.confidence == 0.0

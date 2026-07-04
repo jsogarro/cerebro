@@ -261,6 +261,7 @@ class LLMWorkerAgentBase(BaseAgent):
         schema: type[Any],
         task: AgentTask | None = None,
         max_tokens: int = 4000,
+        tier: str | None = None,
     ) -> Any:
         """Generate structured content via ModelRouter or GeminiService with graceful fallback.
 
@@ -272,6 +273,9 @@ class LLMWorkerAgentBase(BaseAgent):
             prompt: The prompt to generate content for
             schema: Pydantic model class for output validation
             task: Optional AgentTask context (for metadata/tier information)
+            max_tokens: Maximum tokens for generation (default 4000)
+            tier: Optional explicit tier override ("simple"/"balanced"/"complex").
+                  Precedence: explicit tier > task-derived > "balanced"
 
         Returns:
             Validated Pydantic model instance
@@ -300,9 +304,17 @@ class LLMWorkerAgentBase(BaseAgent):
             schema_instructions = self._build_json_schema_instructions(schema)
             enhanced_prompt = f"{prompt}\n\n{schema_instructions}"
 
+            # Determine tier with precedence: explicit > task-derived > balanced
+            if tier is not None:
+                routing_tier = tier
+            elif task is not None:
+                routing_tier = self._determine_tier(task)
+            else:
+                routing_tier = "balanced"
+
             # Build ModelRequest with JSON response format in metadata
             metadata = {
-                "tier": self._determine_tier(task) if task else "balanced",
+                "tier": routing_tier,
                 "response_format": {
                     "type": "json_object"
                 },  # OpenAI-compatible JSON mode
@@ -334,7 +346,7 @@ class LLMWorkerAgentBase(BaseAgent):
                 }
                 self._model_router = ModelRouter(router_config)
 
-            # Route and generate via OpenRouter
+            # Route and generate via OpenRouter with truncation-aware retry
             response = await self._model_router.route_and_generate(
                 request,
                 routing_decision={
@@ -349,15 +361,89 @@ class LLMWorkerAgentBase(BaseAgent):
                 # so use the fence-tolerant parser rather than bare json.loads.
                 from src.services.parsers.json_parser import parse_json_response
 
+                needs_retry = False
+                retry_reason = None
+
                 try:
                     parsed_data = parse_json_response(response.content)
                     validated = schema.model_validate(parsed_data)
-                    return validated
+
+                    # Check if truncation occurred (finish_reason == "length")
+                    if response.finish_reason == "length":
+                        needs_retry = True
+                        retry_reason = "finish_reason_length"
+                        self.log_info(
+                            "structured_generation_truncated",
+                            finish_reason=response.finish_reason,
+                            max_tokens=max_tokens,
+                        )
+                    else:
+                        # Success: no truncation, valid parse
+                        return validated
+
                 except (ValueError, TypeError) as parse_err:
+                    needs_retry = True
+                    retry_reason = "parse_validation_failed"
                     self.log_warning(
-                        f"OpenRouter JSON parse/validation failed: {parse_err}, "
+                        f"OpenRouter JSON parse/validation failed: {parse_err}"
+                    )
+
+                # Retry ONCE with doubled max_tokens (capped at 8000) if needed
+                if needs_retry and max_tokens < 8000:
+                    retry_max_tokens = min(max_tokens * 2, 8000)
+                    self.log_info(
+                        "structured_generation_retry",
+                        reason=retry_reason,
+                        original_max_tokens=max_tokens,
+                        retry_max_tokens=retry_max_tokens,
+                    )
+
+                    # Build retry request with increased token budget
+                    retry_request = ModelRequest(
+                        prompt=enhanced_prompt,
+                        max_tokens=retry_max_tokens,
+                        temperature=0.7,
+                        complexity_score=task.input_data.get("complexity_score", 0.5)
+                        if task
+                        else 0.5,
+                        metadata=metadata,
+                    )
+
+                    retry_response = await self._model_router.route_and_generate(
+                        retry_request,
+                        routing_decision={
+                            "primary_model": {"provider": "openrouter", "name": None},
+                            "fallback_models": [],
+                        },
+                    )
+
+                    if retry_response.success:
+                        try:
+                            retry_parsed = parse_json_response(retry_response.content)
+                            retry_validated = schema.model_validate(retry_parsed)
+                            self.log_info(
+                                "structured_generation_retry_success",
+                                reason=retry_reason,
+                            )
+                            return retry_validated
+                        except (ValueError, TypeError) as retry_parse_err:
+                            self.log_warning(
+                                f"Retry parse/validation also failed: {retry_parse_err}, "
+                                "falling back to GeminiService"
+                            )
+                    else:
+                        self.log_warning(
+                            f"Retry generation failed: {retry_response.error_message}, "
+                            "falling back to GeminiService"
+                        )
+                elif needs_retry:
+                    # Already at or above 8000 token cap, skip retry
+                    self.log_warning(
+                        f"Truncation detected but max_tokens={max_tokens} >= 8000 cap, "
                         "falling back to GeminiService"
                     )
+                # If we get here, both initial and retry (if attempted) failed
+                # Fall through to Gemini fallback
 
             else:
                 # OpenRouter failed, log and fall back to Gemini

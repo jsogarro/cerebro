@@ -653,11 +653,15 @@ class BaseSupervisor(BaseAgent, ABC):
                 - report: full verification report text
                 - issues: list of specific issues (empty if pass)
         """
-        # Degrade gracefully if content is empty or missing
+        # Degrade gracefully if content is empty or missing.
+        # Check explicitly before creating the verification task to avoid
+        # "Query cannot be empty" errors when VerificationAgent's execute
+        # method tries to extract query/content from empty input_data.
         if not content or not content.strip():
-            logger.warning(
+            logger.info(
                 "supervisor_verification_skipped_empty_content",
                 supervisor_type=self.supervisor_type,
+                reason="no_aggregated_content_to_verify",
             )
             return {"verdict": "pass", "report": "No content to verify.", "issues": []}
 
