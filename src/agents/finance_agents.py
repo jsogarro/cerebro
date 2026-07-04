@@ -9,13 +9,13 @@ from typing import Any
 
 from structlog import get_logger
 
-from src.agents.base import BaseAgent
-from src.agents.models import AgentResult, AgentTask
+from src.agents.llm_worker_base import LLMWorkerAgentBase
+from src.agents.models import AgentTask
 
 logger = get_logger()
 
 
-class _FinanceAgentBase(BaseAgent):
+class _FinanceAgentBase(LLMWorkerAgentBase):
     """Shared execute/validate scaffolding for finance worker agents."""
 
     agent_type: str = "finance"
@@ -37,89 +37,6 @@ class _FinanceAgentBase(BaseAgent):
         Returns None by default (no precomputation).
         """
         return None
-
-    def _ensure_gemini_service(self) -> Any:
-        """Lazily obtain a Gemini service when one was not injected.
-
-        Supervisors inject a shared service; the Bypass single-agent path does
-        not, so build one on demand (cached on the instance). Returns None if a
-        service cannot be constructed, in which case a deterministic fallback is
-        used instead of failing.
-        """
-        if self.gemini_service is not None:
-            return self.gemini_service
-        try:
-            from src.core.config import settings
-            from src.services.gemini_service import GeminiService
-
-            self.gemini_service = GeminiService(api_key=settings.GEMINI_API_KEY)
-        except Exception as exc:  # pragma: no cover - env-dependent
-            self.log_warning(f"gemini_service_unavailable: {exc}")
-            self.gemini_service = None
-        return self.gemini_service
-
-    async def execute(self, task: AgentTask) -> AgentResult:
-        query = str(task.input_data.get("query", "")).strip()
-        if not query:
-            return self.handle_error(task, ValueError("Query cannot be empty"))
-
-        # Run optional precomputation hook
-        computed = self._precompute(task)
-
-        # Build base prompt
-        prompt = self._build_prompt(query, task)
-
-        # Append precomputed values to prompt if present
-        if computed:
-            import json
-
-            computed_block = "\n\nPrecomputed exact values:\n" + json.dumps(
-                computed, indent=2
-            )
-            prompt += computed_block
-
-        gemini = self.gemini_service or self._ensure_gemini_service()
-        if gemini is None:
-            # Deterministic, dependency-free fallback so the agent still returns
-            # a well-formed result when no LLM is available (e.g. unit tests).
-            content = (
-                f"[{self.agent_type}] No language model configured; unable to "
-                f"produce a full {self.agent_type.replace('_', ' ')}."
-            )
-            confidence = 0.3
-        else:
-            try:
-                content = await gemini.generate_content(prompt)
-                confidence = 0.85 if content and content.strip() else 0.3
-            except Exception as exc:
-                self.log_error(f"{self.agent_type} generation failed: {exc}")
-                return self.handle_error(task, exc)
-
-        # Build output with optional computed field
-        output: dict[str, Any] = {
-            "content": content,
-            "analysis": content,
-            "agent_type": self.agent_type,
-        }
-        if computed:
-            output["computed"] = computed
-
-        result = AgentResult(
-            task_id=task.id,
-            status="success",
-            output=output,
-            confidence=confidence,
-            execution_time=0.0,
-            metadata=self.build_execution_metadata(agent_type=self.agent_type),
-        )
-        return result
-
-    async def validate_result(self, result: AgentResult) -> bool:
-        return (
-            result.status == "success"
-            and bool(result.output)
-            and bool(result.output.get("content"))
-        )
 
 
 class FinancialAnalysisAgent(_FinanceAgentBase):
