@@ -619,33 +619,34 @@ class MASTLabeler:
         ...
 ```
 
-**Integration with Verification Loop**:
+**Integration — production QA gate (single-shot)**:
+
+The path that runs in production is `BaseSupervisor._run_verification`, called
+once per task by each supervisor's verification phase. Labeling is applied to
+its return value on all paths (empty content, success, error fallback) via
+`_label_qa_gate`, which constructs a fresh labeler per call and never raises:
 
 ```python
-# In base_supervisor.py: _run_worker_with_verification_loop
-for round_num in range(1, MAX_VERIFICATION_REVISION_ROUNDS + 1):
-    # Execute worker and run verification
-    verification_result = await self._run_verification(aggregated_content)
-    
-    # Phase S: Apply MAST labeling (READ-ONLY side effect, zero LLM cost)
-    mast_result = self.mast_labeler.label_verification_result(
-        verdict=verification_result["verdict"],
-        issues=verification_result["issues"],
-        round_num=round_num,
-        content=aggregated_content,
-        previous_content=previous_content,
-    )
-    
-    # Store MAST labels in verification result (new keys)
-    verification_result["mast_labels"] = mast_result.detected_modes
-    verification_result["mast_confidence"] = mast_result.confidence
-    verification_result["revision_history"].append({
-        "round": round_num,
-        "verdict": verdict,
-        "mast_labels": mast_result.detected_modes,
-        ...
-    })
+# In base_supervisor.py: _run_verification (single-shot; round_num is always 1)
+mast_labels, mast_confidence = self._label_qa_gate(verdict, issues, content)
+return {
+    "verdict": verdict,
+    "report": report_text,
+    "issues": issues,
+    "mast_labels": mast_labels,        # e.g. ["1.1"]
+    "mast_confidence": mast_confidence,
+}
 ```
+
+`_build_supervision_result` then copies these into
+`state.supervision_metadata` (via `_store_mast_labels_in_state`), which lands
+in `AgentResult.metadata`.
+
+There is also a bounded revision loop
+(`_run_worker_with_verification_loop`) that labels per round and accumulates
+`revision_history`; it is **not currently wired into production supervisors**
+(tracked in issue #74). The `revision_history`/multi-round fields below only
+appear if that loop is invoked.
 
 **Storage in AgentResult**:
 
@@ -655,14 +656,11 @@ AgentResult.metadata = {
     "agent_type": "research_supervisor",
     "supervision_mode": "parallel",
     "workers_coordinated": 3,
-    # MAST fields (present only if verification failed)
-    "mast_failures": ["1.3", "1.1"],  # Detected failure mode codes
-    "mast_confidence": 0.85,          # Overall confidence
-    "verification_rounds": 2,
-    "revision_history": [              # Per-round tracking
-        {"round": 1, "verdict": "revise", "mast_labels": ["1.1"], ...},
-        {"round": 2, "verdict": "revise", "mast_labels": ["1.3", "1.5"], ...},
-    ],
+    # MAST fields (present only when labels were detected)
+    "mast_failures": ["1.1"],   # Detected failure mode codes
+    "mast_confidence": 0.85,    # Max confidence across detected labels
+    "verification_rounds": 0,   # 0 for the single-shot QA gate
+    "revision_history": [],     # Populated only by the revision loop (issue #74)
 }
 ```
 

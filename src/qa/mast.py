@@ -22,7 +22,7 @@ import structlog
 logger = structlog.get_logger()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MASTLabel:
     """Represents a single MAST failure mode label with confidence."""
 
@@ -31,7 +31,7 @@ class MASTLabel:
     evidence: str  # Human-readable justification for the label
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MASTLabelingResult:
     """Result of MAST labeling with all detected modes."""
 
@@ -91,6 +91,34 @@ class MASTLabeler:
         "3.2": "No or incomplete verification",
         "3.3": "Incorrect verification",
     }
+
+    # Detector keyword lists (lowercase; matched against casefolded issues)
+    SPEC_VIOLATION_KEYWORDS = (
+        "missing required",
+        "does not match schema",
+        "cardinality",
+        "expected format",
+        "expected schema",
+        "expected output",
+        "must contain",
+        "cannot be empty",
+        "<2 items",
+        "fewer than",
+    )
+    MISMATCH_KEYWORD_PAIRS = (
+        ("claims", "but"),
+        ("states", "however"),
+        ("says", "actually"),
+        ("declares", "produces"),
+    )
+    INCOMPLETE_KEYWORDS = (
+        "missing",
+        "incomplete",
+        "partial",
+        "lacks",
+        "absent",
+        "not provided",
+    )
 
     def __init__(self, max_revision_rounds: int = 2):
         """
@@ -206,20 +234,9 @@ class MASTLabeler:
 
         Detects keywords in issues that suggest output doesn't match spec.
         """
-        spec_violation_keywords = [
-            "missing required",
-            "does not match schema",
-            "cardinality",
-            "expected",
-            "must contain",
-            "cannot be empty",
-            "<2 items",
-            "fewer than",
-        ]
-
         for issue in issues:
-            issue_lower = issue.lower()
-            if any(kw in issue_lower for kw in spec_violation_keywords):
+            issue_folded = issue.casefold()
+            if any(kw in issue_folded for kw in self.SPEC_VIOLATION_KEYWORDS):
                 return MASTLabel(
                     mode="1.1",
                     confidence=0.85,
@@ -244,16 +261,12 @@ class MASTLabeler:
 
         Detects issues mentioning discrepancies between what was claimed vs done.
         """
-        mismatch_keywords = [
-            ("claims", "but"),
-            ("states", "however"),
-            ("says", "actually"),
-            ("declares", "produces"),
-        ]
-
         for issue in issues:
-            issue_lower = issue.lower()
-            if any(all(kw in issue_lower for kw in pair) for pair in mismatch_keywords):
+            issue_folded = issue.casefold()
+            if any(
+                all(kw in issue_folded for kw in pair)
+                for pair in self.MISMATCH_KEYWORD_PAIRS
+            ):
                 return MASTLabel(
                     mode="2.6",
                     confidence=0.8,
@@ -270,18 +283,9 @@ class MASTLabeler:
 
         Detects issues mentioning missing or partial content.
         """
-        incomplete_keywords = [
-            "missing",
-            "incomplete",
-            "partial",
-            "lacks",
-            "absent",
-            "not provided",
-        ]
-
         for issue in issues:
-            issue_lower = issue.lower()
-            if any(kw in issue_lower for kw in incomplete_keywords):
+            issue_folded = issue.casefold()
+            if any(kw in issue_folded for kw in self.INCOMPLETE_KEYWORDS):
                 return MASTLabel(
                     mode="3.2",
                     confidence=0.75,

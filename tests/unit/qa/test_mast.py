@@ -566,9 +566,11 @@ class TestEdgeCases:
             verdict="revise", issues=issues, round_num=1, content="Output"
         )
         assert "1.1" in result.detected_modes
-        # Evidence should be truncated (check implementation truncates to 100 chars)
+        # Detectors embed at most issue[:100] in evidence: the first 100
+        # chars must appear, the 101st must not.
         for label in result.labels:
-            assert len(label.evidence) <= 150  # Reasonable upper bound
+            assert long_issue[:100] in label.evidence
+            assert long_issue[:101] not in label.evidence
 
     def test_case_insensitive_keyword_matching(self):
         """Keyword matching should be case-insensitive."""
@@ -656,3 +658,28 @@ class TestQAGateMASTWiring:
         supervisor._store_mast_labels_in_state(state, verification)
         assert state.supervision_metadata["mast_failures"] == ["1.1"]
         assert state.supervision_metadata["mast_confidence"] == 0.7
+
+    @pytest.mark.asyncio
+    async def test_label_qa_gate_degrades_on_labeler_exception(self):
+        """Labeling failures must never break verification (never-raises)."""
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+
+        supervisor = AnalyticsSupervisor(
+            gemini_service=MagicMock(), cache_client=MagicMock()
+        )
+        with patch(
+            "src.qa.mast.MASTLabeler.label_verification_result",
+            side_effect=RuntimeError("labeler exploded"),
+        ) as mock_label:
+            labels, confidence = supervisor._label_qa_gate("pass", [], "content")
+            result = await supervisor._run_verification("")
+        # Non-vacuous: the patched labeler must actually have been hit
+        # (class-level patching intercepts the per-call local instance).
+        assert mock_label.call_count >= 2
+        assert labels == []
+        assert confidence == 0.0
+        assert result["verdict"] == "pass"
+        assert result["mast_labels"] == []
+        assert result["mast_confidence"] == 0.0

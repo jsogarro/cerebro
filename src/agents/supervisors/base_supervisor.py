@@ -24,6 +24,7 @@ from langgraph.graph import StateGraph
 from structlog import get_logger
 
 from src.core.types import SupervisionStatsDict
+from src.qa.mast import MASTLabeler, format_mast_labels_for_metadata
 
 from ...prompts.manager import get_prompt_manager
 from ..base import BaseAgent
@@ -173,13 +174,6 @@ class BaseSupervisor(BaseAgent, ABC):
         self.supervised_tasks = 0
         self.successful_supervisions = 0
         self.average_supervision_time = 0.0
-
-        # MAST (Multi-Agent System failure Taxonomy) labeling
-        from src.qa.mast import MASTLabeler
-
-        self.mast_labeler = MASTLabeler(
-            max_revision_rounds=MAX_VERIFICATION_REVISION_ROUNDS
-        )
 
         # Initialize supervisor-specific components
         self._register_worker_types()
@@ -800,10 +794,11 @@ class BaseSupervisor(BaseAgent, ABC):
             the observability layer.
         """
         try:
-            from src.qa.mast import format_mast_labels_for_metadata
-
-            self.mast_labeler.reset_hash_tracker()
-            mast_result = self.mast_labeler.label_verification_result(
+            # Per-call labeler: a shared instance would hold a mutable hash
+            # tracker, and concurrent tasks on one supervisor would
+            # cross-contaminate FM-1.3 repetition detection.
+            labeler = MASTLabeler(max_revision_rounds=MAX_VERIFICATION_REVISION_ROUNDS)
+            mast_result = labeler.label_verification_result(
                 verdict=verdict,
                 issues=issues,
                 round_num=1,
@@ -904,8 +899,10 @@ class BaseSupervisor(BaseAgent, ABC):
         worker_response = None
         previous_content: str | None = None
 
-        # Reset hash tracker for this worker execution
-        self.mast_labeler.reset_hash_tracker()
+        # Per-invocation labeler: isolates hash-tracker state across
+        # concurrent worker executions while persisting it across rounds
+        # within this one (required for FM-1.3 repetition detection).
+        loop_labeler = MASTLabeler(max_revision_rounds=MAX_VERIFICATION_REVISION_ROUNDS)
 
         for round_num in range(1, MAX_VERIFICATION_REVISION_ROUNDS + 1):
             logger.info(
@@ -948,22 +945,30 @@ class BaseSupervisor(BaseAgent, ABC):
             issues_list = verification_result.get("issues", [])
 
             # Phase S: Apply MAST labeling (rule-based heuristics, zero LLM cost)
-            from src.qa.mast import format_mast_labels_for_metadata
-
             # Type-safe extraction for mypy
             verdict_str = str(verification_result.get("verdict", "pass"))
             issues_seq = list(issues_list) if isinstance(issues_list, list) else []
 
-            mast_result = self.mast_labeler.label_verification_result(
-                verdict=verdict_str,
-                issues=issues_seq,
-                round_num=round_num,
-                content=aggregated_content,
-                previous_content=previous_content,
-            )
+            try:
+                mast_result = loop_labeler.label_verification_result(
+                    verdict=verdict_str,
+                    issues=issues_seq,
+                    round_num=round_num,
+                    content=aggregated_content,
+                    previous_content=previous_content,
+                )
+                mast_metadata = format_mast_labels_for_metadata(mast_result)
+            except Exception as e:
+                # Labeling must never break verification — degrade to no labels.
+                logger.error(
+                    "mast_loop_labeling_failed",
+                    worker_type=worker_type,
+                    round=round_num,
+                    error=str(e),
+                )
+                mast_metadata = {"mast_failures": [], "mast_confidence": 0.0}
 
             # Store MAST labels in verification result
-            mast_metadata = format_mast_labels_for_metadata(mast_result)
             verification_result["mast_labels"] = mast_metadata["mast_failures"]
             verification_result["mast_confidence"] = mast_metadata["mast_confidence"]
 

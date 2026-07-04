@@ -226,9 +226,9 @@ Single-domain queries bypass this path entirely (zero overhead).
 **Note**: MAST (Multi-Agent System failure Taxonomy) labeling in Phase S has no configurable settings — it operates as a zero-cost, deterministic rule-based system. All configuration constants are hardcoded for Phase S. Future phases will add opt-in LLM classifier and guard behavior flags.
 
 **Current Behavior** (Phase S):
-1. Every verification round automatically applies MAST labeling (zero LLM cost, ~0ms overhead)
+1. Every verification QA-gate call automatically applies MAST labeling (zero LLM cost, ~0ms overhead)
 2. Labels stored in `AgentResult.metadata["mast_failures"]` as list of mode codes (e.g., `["1.3", "1.1"]`)
-3. Per-round history tracked in `AgentResult.metadata["revision_history"]`
+3. Per-round history tracked in `AgentResult.metadata["revision_history"]` (revision-loop path only, not yet wired into production — issue #74; the single-shot QA gate emits `mast_labels`/`mast_confidence` with no round history)
 4. Guards observe and log patterns but **do not block execution** (observability-only)
 5. Five modes detected via rule-based heuristics:
    - **FM-1.1** (Task spec violation): Keywords in issues ("missing required", "cannot be empty", "<2 items")
