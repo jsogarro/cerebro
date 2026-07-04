@@ -34,6 +34,7 @@ from ...agents.supervisors.research_supervisor import ResearchSupervisor
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.masr import MASRouter
+from ...ai_brain.router.routing_types import CollaborationMode
 from ...models.research_project import ResearchProject
 from ...models.websocket_messages import ProgressUpdate
 from .event_publisher import EventPublisher
@@ -224,6 +225,127 @@ class DirectExecutionService:
         logger.info(f"Started direct execution {execution_id} for project {project.id}")
 
         return execution_id
+
+    def _fast_path_passes_quality(self, response: str) -> bool:
+        """Minimal quality gate for fast-path responses.
+
+        Args:
+            response: The LLM response text
+
+        Returns:
+            True if response passes basic quality checks
+        """
+        if not response or len(response.strip()) < 50:
+            return False
+        if response.strip().startswith("Error:"):
+            return False
+        return not response.strip().startswith("I'm sorry")
+
+    async def _execute_fast_path(
+        self,
+        query: str,
+        routing_decision: Any,
+        execution_status: ExecutionStatus,
+    ) -> dict[str, Any]:
+        """Execute fast path: single LLM call through multi-provider routing.
+
+        Args:
+            query: The user query
+            routing_decision: MASR routing decision (for model selection)
+            execution_status: Execution status tracker
+
+        Returns:
+            Result dict compatible with supervisor output
+
+        Raises:
+            RuntimeError: If fast path fails quality check (triggers escalation)
+        """
+        start_time = datetime.now(UTC)
+
+        try:
+            # Route through the multi-provider layer when enabled; fall back to
+            # GeminiService otherwise (matching the platform-wide convention).
+            settings = get_settings()
+            model_used = "unknown"
+            provider_used = "unknown"
+
+            if settings.MULTI_PROVIDER_ROUTING_ENABLED and settings.OPENROUTER_API_KEY:
+                from src.ai_brain.providers.base_provider import ModelRequest
+                from src.ai_brain.providers.openrouter_provider import (
+                    OpenRouterProvider,
+                )
+
+                # Lazily cache the provider: constructing per call would re-run
+                # startup slug validation (a catalog fetch) on every fast-path
+                # query. NOTE: no await between the hasattr check and the
+                # assignment - safe under asyncio; keep it that way.
+                if not hasattr(self, "_fast_path_provider"):
+                    self._fast_path_provider = OpenRouterProvider(
+                        {
+                            "enabled": True,
+                            "api_key": settings.OPENROUTER_API_KEY,
+                            "endpoint": settings.OPENROUTER_ENDPOINT,
+                            "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
+                        }
+                    )
+
+                # Simple tier by construction: the fast path only ever serves
+                # classifier-approved trivial queries.
+                request = ModelRequest(
+                    prompt=query,
+                    max_tokens=2048,
+                    temperature=0.7,
+                    complexity_score=0.1,
+                    metadata={"tier": "simple"},
+                )
+                provider_response = await self._fast_path_provider.generate(request)
+                if not provider_response.success or not provider_response.content:
+                    raise RuntimeError(
+                        "Fast path generation failed: "
+                        f"{provider_response.error_message}"
+                    )
+                response = provider_response.content
+                model_used = provider_response.model_name or "openrouter"
+                provider_used = "openrouter"
+
+            elif self.gemini_service:
+                # Fallback to Gemini when multi-provider routing is disabled
+                response = await self.gemini_service.generate_content(query)
+                model_used = "gemini"
+                provider_used = "gemini"
+            else:
+                raise RuntimeError("No LLM service available for fast path")
+
+            # Quality gate
+            if not self._fast_path_passes_quality(response):
+                logger.info(
+                    "fast_path_quality_check_failed",
+                    execution_id=execution_status.execution_id,
+                    response_length=len(response),
+                )
+                raise RuntimeError("Fast path quality check failed")
+
+            execution_time = (datetime.now(UTC) - start_time).total_seconds()
+
+            return {
+                "output": response,
+                "quality_score": 0.8,  # Default for fast path
+                "metadata": {
+                    "collaboration_mode": "fast_path",
+                    "execution_time": execution_time,
+                    "model_used": model_used,
+                    "provider_used": provider_used,
+                    "workers_used": 1,
+                },
+            }
+
+        except Exception as e:
+            logger.warning(
+                "fast_path_execution_failed",
+                execution_id=execution_status.execution_id,
+                error=str(e),
+            )
+            raise
 
     async def _execute_domain_supervisor(
         self,
@@ -512,6 +634,63 @@ class DirectExecutionService:
             await self._publish_progress_update(execution_status)
             await self._checkpoint(execution_status, "masr_routing")
 
+            # Check for fast path (bypass orchestration entirely)
+            if routing_decision.collaboration_mode == CollaborationMode.FAST_PATH:
+                logger.info(
+                    "fast_path_selected",
+                    execution_id=execution_status.execution_id,
+                    query_preview=project.query.text[:100],
+                )
+
+                try:
+                    execution_status.current_phase = "fast_path_execution"
+                    execution_status.progress_percentage = 40.0
+                    await self._publish_progress_update(execution_status)
+
+                    # Single LLM call
+                    result = await self._execute_fast_path(
+                        query=project.query.text,
+                        routing_decision=routing_decision,
+                        execution_status=execution_status,
+                    )
+
+                    # Fast path succeeded
+                    execution_status.final_output = result
+                    execution_status.quality_scores["fast_path"] = result.get(
+                        "quality_score", 0.8
+                    )
+                    execution_status.workers_used = 1
+                    execution_status.current_phase = "completed"
+                    execution_status.progress_percentage = 100.0
+                    execution_status.status = "completed"
+                    execution_status.completed_at = datetime.now(UTC)
+                    execution_status.execution_time_seconds = (
+                        execution_status.completed_at - execution_status.started_at
+                    ).total_seconds()
+
+                    await self._publish_progress_update(execution_status)
+                    await self._checkpoint(execution_status, "fast_path_completed")
+
+                    self.execution_stats["successful_executions"] += 1
+
+                    logger.info(
+                        "fast_path_execution_completed",
+                        execution_id=execution_status.execution_id,
+                        execution_time=execution_status.execution_time_seconds,
+                    )
+                    return
+
+                except RuntimeError as e:
+                    # Fast path quality check failed → escalate to DIRECT mode
+                    logger.info(
+                        "fast_path_escalating_to_direct",
+                        execution_id=execution_status.execution_id,
+                        reason=str(e),
+                    )
+                    # Mutate routing decision to DIRECT mode
+                    routing_decision.collaboration_mode = CollaborationMode.DIRECT
+                    # Continue to normal supervisor path below
+
             # Get supervisor registry
             from ...agents.supervisors.base_supervisor import BaseSupervisor
 
@@ -570,20 +749,21 @@ class DirectExecutionService:
 
                 # Convert exceptions to error result dicts
                 processed_results: list[dict[str, Any]] = []
-                for i, result in enumerate(domain_results):
-                    if isinstance(result, BaseException):
+                for i, domain_result in enumerate(domain_results):
+                    if isinstance(domain_result, BaseException):
                         domain = current_decomposition.detected_domains[i]
-                        logger.error(f"Domain {domain} execution raised: {result}")
+                        logger.error(
+                            f"Domain {domain} execution raised: {domain_result}"
+                        )
                         processed_results.append(
                             {
                                 "domain": domain,
                                 "status": "failed",
-                                "errors": [str(result)],
+                                "errors": [str(domain_result)],
                             }
                         )
                     else:
-                        # Type narrowing: result is dict[str, Any] here
-                        processed_results.append(result)
+                        processed_results.append(domain_result)
 
                 execution_status.progress_percentage = 80.0
                 execution_status.current_phase = "result_merging"

@@ -12,6 +12,7 @@ from enum import StrEnum
 class CollaborationMode(StrEnum):
     """Agent collaboration modes for different query types."""
 
+    FAST_PATH = "fast_path"  # Bypass orchestration for trivial queries
     DIRECT = "direct"  # Single agent handles everything
     PARALLEL = "parallel"  # Multiple agents work simultaneously
     HIERARCHICAL = "hierarchical"  # Supervisor coordinates workers

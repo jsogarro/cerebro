@@ -1165,3 +1165,24 @@ slug, empty content, truncation) fails the run.
 - Nightly scheduling: copy `docs/ci/nightly-live-eval.yml.example` to
   `.github/workflows/` and add `OPENROUTER_API_KEY` / `GEMINI_API_KEY` as
   repository secrets (both steps are maintainer actions).
+
+
+## Single-Agent Fast Path, Strategy Budgets, and Delegation Contracts
+
+**Fast path** (`MASR_FAST_PATH_ENABLED`, default on): queries that pass a strict
+five-signal classifier (SIMPLE complexity, single domain, one subtask,
+uncertainty <= 0.3, non-critical priority) skip orchestration entirely - one
+routed LLM call on the simple tier (multi-provider when enabled, Gemini
+otherwise). A quality gate (length/error heuristics) escalates failures to the
+normal DIRECT supervisor path automatically. Any query failing any classifier
+signal takes the existing orchestrated paths unchanged.
+
+**Per-strategy agent budgets**: hard caps on worker counts per
+strategy x collaboration-mode combination (e.g. COST_EFFICIENT parallel <= 2,
+QUALITY_FOCUSED hierarchical <= 10), enforced after memory and adaptive
+adjustments - the final allocation is `min(adjusted, budget cap)`.
+
+**Delegation contracts**: supervisor dispatch validates a four-field contract
+(objective, output format, tool guidance, task boundaries) in lenient mode -
+missing fields are auto-filled with structured warnings, hardening task
+construction against under-specified delegation.

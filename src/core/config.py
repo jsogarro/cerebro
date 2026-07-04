@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     )
     MASR_ENABLE_CACHING: bool = True
     MASR_ENABLE_ADAPTIVE: bool = True
+    MASR_FAST_PATH_ENABLED: bool = True  # Bypass orchestration for trivial queries
     MASR_COMPLEXITY_WEIGHTS: dict[str, float] = {
         "linguistic": 0.15,
         "reasoning": 0.25,

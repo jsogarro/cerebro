@@ -22,6 +22,7 @@ from structlog import get_logger
 
 from src.core.types import HealthCheckDict
 
+from ...agents.delegation_contract import DelegationContract
 from ...agents.models import AgentResult, AgentTask
 from ...agents.supervisors.base_supervisor import BaseSupervisor
 from ..router.masr import CollaborationMode, RoutingDecision, RoutingStrategy
@@ -603,6 +604,27 @@ class MASRSupervisorBridge:
         self.bridge_stats["total_requests"] += 1
 
         try:
+            # Validate delegation contract (lenient mode: auto-fill with warnings)
+            contract = DelegationContract.from_agent_task(task)
+            validation_errors = contract.validate(mode="lenient")
+
+            if validation_errors:
+                logger.warning(
+                    "delegation_contract_incomplete",
+                    query_id=routing_decision.query_id,
+                    task_id=task.id,
+                    errors=validation_errors,
+                )
+                # Auto-fill missing fields in lenient mode
+                query_text = task.input_data.get("query", "")
+                agent_type = task.agent_type
+                contract = contract.auto_fill_defaults(agent_type, query_text)
+                logger.info(
+                    "delegation_contract_auto_filled",
+                    query_id=routing_decision.query_id,
+                    task_id=task.id,
+                )
+
             # Translate routing decision to supervisor configuration
             supervisor_config = self.translator.translate(routing_decision)
 
