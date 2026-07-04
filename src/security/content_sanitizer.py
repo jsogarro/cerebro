@@ -101,13 +101,15 @@ class ContentSanitizer:
     def _compile_patterns(self) -> None:
         """Compile regex patterns for performance."""
         self._goal_hijacking_re = [
-            re.compile(p, re.IGNORECASE) for p in self.GOAL_HIJACKING_PATTERNS
+            re.compile(p, re.IGNORECASE | re.DOTALL)
+            for p in self.GOAL_HIJACKING_PATTERNS
         ]
         self._delimiter_escape_re = [
-            re.compile(p, re.IGNORECASE) for p in self.DELIMITER_ESCAPE_PATTERNS
+            re.compile(p, re.IGNORECASE | re.DOTALL)
+            for p in self.DELIMITER_ESCAPE_PATTERNS
         ]
         self._encoded_payload_re = [
-            re.compile(p) for p in self.ENCODED_PAYLOAD_PATTERNS
+            re.compile(p, re.DOTALL) for p in self.ENCODED_PAYLOAD_PATTERNS
         ]
 
     def sanitize(self, text: str) -> SanitizationResult:
@@ -192,3 +194,12 @@ class ContentSanitizer:
 
         """
         return [self.sanitize(text) for text in texts]
+
+
+def escape_for_delimited_prompt(text: str) -> str:
+    """Escape angle brackets so untrusted content cannot break out of an
+    XML-style delimited prompt block (e.g. <WORKER_OUTPUT>, <REVISION_FEEDBACK>).
+
+    Ampersand is escaped first so the other replacements are not double-escaped.
+    """
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

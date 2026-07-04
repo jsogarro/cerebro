@@ -366,8 +366,9 @@ class MCPIntegration:
     ) -> list[dict[str, Any]]:
         """Sanitize academic sources at the MCP boundary.
 
-        Applies conservative sanitization to titles and abstracts to neutralize
-        instruction-like injection patterns while preserving legitimate academic text.
+        Applies conservative sanitization to all string-valued fields (title,
+        abstract, authors, journal, etc.) to neutralize instruction-like
+        injection patterns while preserving legitimate academic text.
 
         Args:
             sources: Raw source dicts from MCP (each has title, abstract, authors, etc.)
@@ -378,18 +379,23 @@ class MCPIntegration:
         """
         sanitized_sources = []
 
+        # Sanitize every string-valued field: any of them may reach a
+        # downstream prompt (author/journal names appear in citation and
+        # summary prompts), so do not assume which fields are "safe".
         for source in sources:
             sanitized_source = source.copy()
-
-            # Sanitize title
-            if source.get("title"):
-                title_result = self._content_sanitizer.sanitize(source["title"])
-                sanitized_source["title"] = title_result.sanitized_text
-
-            # Sanitize abstract
-            if source.get("abstract"):
-                abstract_result = self._content_sanitizer.sanitize(source["abstract"])
-                sanitized_source["abstract"] = abstract_result.sanitized_text
+            for key, value in source.items():
+                if isinstance(value, str):
+                    sanitized_source[key] = self._content_sanitizer.sanitize(
+                        value
+                    ).sanitized_text
+                elif isinstance(value, list):
+                    sanitized_source[key] = [
+                        self._content_sanitizer.sanitize(item).sanitized_text
+                        if isinstance(item, str)
+                        else item
+                        for item in value
+                    ]
 
             sanitized_sources.append(sanitized_source)
 

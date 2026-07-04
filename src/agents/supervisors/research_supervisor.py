@@ -17,6 +17,8 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 from structlog import get_logger
 
+from src.security.content_sanitizer import escape_for_delimited_prompt
+
 from ..communication.talkhier_message import TalkHierContent
 from ..models import AgentTask
 from .base_supervisor import (
@@ -398,15 +400,15 @@ class ResearchSupervisor(BaseSupervisor):
         context = f"""Research Question: {query}
 
 <WORKER_OUTPUT source="literature_review" trust_level="internal">
-{literature_findings[:3000]}
+{escape_for_delimited_prompt(literature_findings[:3000])}
 </WORKER_OUTPUT>
 
 <WORKER_OUTPUT source="methodology" trust_level="internal">
-{methodology_design[:2000]}
+{escape_for_delimited_prompt(methodology_design[:2000])}
 </WORKER_OUTPUT>
 
 <WORKER_OUTPUT source="synthesis" trust_level="internal">
-{synthesis_findings[:2000]}
+{escape_for_delimited_prompt(synthesis_findings[:2000])}
 </WORKER_OUTPUT>
 
 REFERENCES:
