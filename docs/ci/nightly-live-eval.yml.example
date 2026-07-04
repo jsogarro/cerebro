@@ -31,6 +31,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ENABLE_LIVE_EVAL: '1'
+          LIVE_EVAL_REQUIRED: '1'  # misconfigured secrets => loud failure, never silent green
           LIVE_EVAL_BUDGET_USD: '0.25'
         run: |
           bash scripts/run_live_evals.sh

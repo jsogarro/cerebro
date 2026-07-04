@@ -1,4 +1,8 @@
-"""Pytest configuration for live evaluation suite."""
+"""Pytest configuration for live evaluation suite.
+CONCURRENCY: this suite is SERIAL-ONLY. The cost meter, report collector,
+and class-level provider spies are not thread- or process-safe by design;
+running under pytest-xdist (or any parallel runner) is unsupported.
+"""
 
 import os
 from collections.abc import Generator
@@ -52,6 +56,13 @@ def live_eval_settings_guard() -> None:
     enable_flag = os.getenv("ENABLE_LIVE_EVAL", "0")
 
     if not api_key or enable_flag != "1":
+        if os.getenv("LIVE_EVAL_REQUIRED", "0") == "1":
+            # Nightly/CI mode: a misconfigured runner must FAIL LOUDLY,
+            # never produce a green run of skipped checks.
+            pytest.fail(
+                "LIVE_EVAL_REQUIRED=1 but OPENROUTER_API_KEY/ENABLE_LIVE_EVAL "
+                "are not configured - failing instead of silently skipping."
+            )
         pytest.skip(
             "Live eval suite requires OPENROUTER_API_KEY and ENABLE_LIVE_EVAL=1. "
             "Set both environment variables to run live provider checks."
@@ -85,6 +96,21 @@ def live_eval_cost_meter(
 @pytest.fixture(autouse=True)
 def _require_settings_guard(live_eval_settings_guard: None) -> None:
     """Auto-apply settings guard to all tests in this directory."""
+
+
+@pytest.fixture(autouse=True)
+def _budget_precheck(live_eval_report: LiveEvalReport) -> None:
+    """Fail fast BEFORE each test once the budget is exhausted.
+
+    The session-teardown check reports the final total, but only this
+    per-test gate actually stops further spending mid-run.
+    """
+    budget_usd = float(os.getenv("LIVE_EVAL_BUDGET_USD", "0.25"))
+    if live_eval_report.total_cost_usd > budget_usd:
+        pytest.fail(
+            f"Budget exhausted before test start: "
+            f"${live_eval_report.total_cost_usd:.4f} > ${budget_usd:.4f}"
+        )
 
 
 _session_report: LiveEvalReport | None = None
@@ -125,11 +151,21 @@ def _capture_llm_costs(live_eval_report: LiveEvalReport) -> Generator[None, None
                 cost_usd=float(getattr(metrics, "cost_usd", 0.0) or 0.0),
             )
         )
+        # Hard stop the moment the budget is crossed - do not wait for the
+        # next test boundary while a runaway test keeps spending.
+        budget_usd = float(os.getenv("LIVE_EVAL_BUDGET_USD", "0.25"))
+        if live_eval_report.total_cost_usd > budget_usd:
+            raise RuntimeError(
+                f"live-eval budget exceeded mid-test: "
+                f"${live_eval_report.total_cost_usd:.4f} > ${budget_usd:.4f}"
+            )
         return original(metrics)
 
     bp.record_llm_call = wrapper
-    yield
-    bp.record_llm_call = original
+    try:
+        yield
+    finally:
+        bp.record_llm_call = original
 
 
 @pytest.fixture()
@@ -151,8 +187,10 @@ def openrouter_spy() -> Generator[list[dict[str, Any]], None, None]:
         return await original(self, payload)
 
     OpenRouterProvider._make_api_request = spy  # type: ignore[method-assign]
-    yield calls
-    OpenRouterProvider._make_api_request = original  # type: ignore[method-assign]
+    try:
+        yield calls
+    finally:
+        OpenRouterProvider._make_api_request = original  # type: ignore[method-assign]
 
 
 @pytest.fixture()
@@ -174,6 +212,8 @@ def gemini_fallback_guard() -> Generator[dict[str, int], None, None]:
 
     GeminiService.generate_content = text_spy  # type: ignore[method-assign]
     GeminiService.generate_structured_content = structured_spy  # type: ignore[method-assign]
-    yield counter
-    GeminiService.generate_content = orig_text  # type: ignore[method-assign]
-    GeminiService.generate_structured_content = orig_structured  # type: ignore[method-assign]
+    try:
+        yield counter
+    finally:
+        GeminiService.generate_content = orig_text  # type: ignore[method-assign]
+        GeminiService.generate_structured_content = orig_structured  # type: ignore[method-assign]

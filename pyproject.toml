@@ -112,6 +112,8 @@ target-version = ["py311"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
+# live_eval is excluded from normal runs (live provider calls, real cost);
+# coverage numbers therefore reflect the non-live surface only.
 addopts = "-ra -q --strict-markers --cov=src --cov-report=term-missing -m 'not live_eval'"
 testpaths = ["tests"]
 python_files = "test_*.py"
