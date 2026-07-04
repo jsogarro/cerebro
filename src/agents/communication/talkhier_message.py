@@ -326,6 +326,8 @@ class TalkHierMessage:
                 "evidence": self.talkhier_content.evidence,
                 "assumptions": self.talkhier_content.assumptions,
                 "limitations": self.talkhier_content.limitations,
+                "source_type": self.talkhier_content.source_type.value,
+                "provenance_chain": self.talkhier_content.provenance_chain,
             },
             "hierarchy_metadata": {
                 "hierarchy_level": self.hierarchy_metadata.hierarchy_level,
@@ -349,7 +351,12 @@ class TalkHierMessage:
     def from_dict(cls, data: dict[str, Any]) -> "TalkHierMessage":
         """Create message from dictionary."""
         # Reconstruct TalkHier content
-        content_data = data.get("talkhier_content", {})
+        content_data = dict(data.get("talkhier_content", {}))
+        # Reconstruct the provenance enum from its serialized string value so
+        # source_type survives a to_dict/from_dict round-trip (S1).
+        source_type = content_data.get("source_type")
+        if isinstance(source_type, str):
+            content_data["source_type"] = ProvenanceType(source_type)
         talkhier_content = TalkHierContent(**content_data)
 
         # Reconstruct hierarchy metadata

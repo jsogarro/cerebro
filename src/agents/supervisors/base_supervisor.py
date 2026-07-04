@@ -888,7 +888,15 @@ class BaseSupervisor(BaseAgent, ABC):
 
             # Build revision content with delimited feedback (S2: prompt injection defense)
             # Wrap verifier feedback in explicit delimiters with anti-injection instruction
-            raw_feedback = str(verification_result["report"])
+            # Escape angle brackets so a malicious verifier report cannot
+            # close the <REVISION_FEEDBACK> block early and smuggle
+            # instructions outside the delimited-data region (S2).
+            raw_feedback = (
+                str(verification_result["report"])
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
             feedback_text = f"""
 
 <REVISION_FEEDBACK round="{round_num}" source="verifier">

@@ -63,7 +63,7 @@ class ContentSanitizer:
         r"system\s*:\s*(ignore|disregard|override)",
         # Goal redirection
         r"your\s+(new\s+)?(goal|task|objective)\s+is\s+(now\s+)?to",
-        r"instead\s+of.*?you\s+(should|must|will)",
+        r"instead\s+of(?:(?!you).){0,120}you\s+(should|must|will)",
     ]
 
     # Delimiter escape patterns
@@ -84,7 +84,7 @@ class ContentSanitizer:
     # Encoded payloads
     ENCODED_PAYLOAD_PATTERNS = [
         r"data:text/plain;base64,",  # Base64 embedding
-        r"[a-zA-Z0-9+/]{60,}={0,2}",  # Raw base64 (60+ chars)
+        r"(?:[A-Za-z0-9+/]{4}){20,}={0,2}",  # Raw base64 (80+ chars, 4-aligned)
         r"%[0-9A-Fa-f]{2}(%[0-9A-Fa-f]{2}){10,}",  # URL encoding chain
     ]
 

@@ -131,3 +131,34 @@ class TestProvenanceTagging:
         assert content.source_type == ProvenanceType.LLM_GENERATED
         # Should have default empty chain
         assert content.provenance_chain == []
+
+
+class TestProvenanceSerialization:
+    """source_type/provenance_chain must survive to_dict/from_dict (R1 review)."""
+
+    def test_source_type_survives_roundtrip(self):
+        content = TalkHierContent(
+            content="external abstract",
+            source_type=ProvenanceType.EXTERNAL_WEB,
+            provenance_chain=["mcp:arxiv", "sanitizer"],
+        )
+        msg = TalkHierMessage(
+            from_agent="lit_review",
+            to_agent="supervisor",
+            message_type=MessageType.RESPONSE,
+            content=content,
+        )
+        restored = TalkHierMessage.from_dict(msg.to_dict())
+        assert restored.talkhier_content.source_type is ProvenanceType.EXTERNAL_WEB
+        assert restored.talkhier_content.provenance_chain == ["mcp:arxiv", "sanitizer"]
+
+    def test_default_provenance_survives_roundtrip(self):
+        content = TalkHierContent(content="worker output")
+        msg = TalkHierMessage(
+            from_agent="worker",
+            to_agent="supervisor",
+            message_type=MessageType.RESPONSE,
+            content=content,
+        )
+        restored = TalkHierMessage.from_dict(msg.to_dict())
+        assert restored.talkhier_content.source_type is ProvenanceType.LLM_GENERATED

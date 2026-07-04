@@ -1,10 +1,10 @@
 {
-  "timestamp": "2026-07-04T05:39:42.196546+00:00",
+  "timestamp": "2026-07-04T06:59:31.274027+00:00",
   "summary": {
-    "total_checks": 9,
-    "passed_checks": 9,
+    "total_checks": 10,
+    "passed_checks": 10,
     "failed_checks": 0,
-    "total_cost_usd": 0.0816
+    "total_cost_usd": 0.0777
   },
   "cost_breakdown": [
     {
@@ -18,8 +18,8 @@
       "check_name": "openrouter",
       "model": "anthropic/claude-sonnet-4.6",
       "input_tokens": 1326,
-      "output_tokens": 1378,
-      "cost_usd": 0.04056
+      "output_tokens": 1239,
+      "cost_usd": 0.038475
     },
     {
       "check_name": "openrouter",
@@ -32,8 +32,8 @@
       "check_name": "openrouter",
       "model": "deepseek/deepseek-chat",
       "input_tokens": 411,
-      "output_tokens": 200,
-      "cost_usd": 0.001222
+      "output_tokens": 194,
+      "cost_usd": 0.00121
     },
     {
       "check_name": "openrouter",
@@ -46,8 +46,8 @@
       "check_name": "openrouter",
       "model": "anthropic/claude-sonnet-4.6",
       "input_tokens": 1167,
-      "output_tokens": 1417,
-      "cost_usd": 0.03876
+      "output_tokens": 1291,
+      "cost_usd": 0.03687
     },
     {
       "check_name": "openrouter",
@@ -60,22 +60,22 @@
       "check_name": "openrouter",
       "model": "deepseek/deepseek-chat",
       "input_tokens": 17,
-      "output_tokens": 192,
-      "cost_usd": 0.000418
+      "output_tokens": 178,
+      "cost_usd": 0.00039
     },
     {
       "check_name": "openrouter",
       "model": "deepseek/deepseek-chat",
       "input_tokens": 10,
-      "output_tokens": 10,
-      "cost_usd": 4e-05
+      "output_tokens": 9,
+      "cost_usd": 3.8e-05
     },
     {
       "check_name": "openrouter",
       "model": "deepseek/deepseek-chat",
       "input_tokens": 18,
-      "output_tokens": 65,
-      "cost_usd": 0.000166
+      "output_tokens": 58,
+      "cost_usd": 0.000152
     },
     {
       "check_name": "openrouter",
@@ -88,8 +88,22 @@
       "check_name": "openrouter",
       "model": "deepseek/deepseek-chat",
       "input_tokens": 32,
-      "output_tokens": 64,
-      "cost_usd": 0.000192
+      "output_tokens": 61,
+      "cost_usd": 0.000186
+    },
+    {
+      "check_name": "openrouter",
+      "model": "deepseek/deepseek-chat",
+      "input_tokens": 10,
+      "output_tokens": 10,
+      "cost_usd": 4e-05
+    },
+    {
+      "check_name": "openrouter",
+      "model": "deepseek/deepseek-chat",
+      "input_tokens": 18,
+      "output_tokens": 59,
+      "cost_usd": 0.000154
     }
   ],
   "check_results": {
@@ -104,7 +118,7 @@
     "multi_domain.llm": {
       "status": "passed",
       "strategy": "llm",
-      "synthesis_len": 2353,
+      "synthesis_len": 1585,
       "models": [
         "deepseek/deepseek-chat",
         "anthropic/claude-sonnet-4.6"
@@ -146,7 +160,7 @@
     },
     "structured_routing.synthesis_scale": {
       "status": "passed",
-      "narrative_len": 2336,
+      "narrative_len": 2131,
       "budgets": [
         4000
       ],
@@ -168,7 +182,7 @@
         "deepseek/deepseek-chat",
         "deepseek/deepseek-chat"
       ],
-      "content_len": 1178,
+      "content_len": 1018,
       "confidence": 0.9,
       "gemini_fallbacks": {
         "text": 0,
@@ -181,7 +195,7 @@
         "deepseek/deepseek-chat",
         "deepseek/deepseek-chat"
       ],
-      "content_len": 351,
+      "content_len": 303,
       "confidence": 0.9,
       "gemini_fallbacks": {
         "text": 0,
@@ -194,7 +208,20 @@
         "deepseek/deepseek-chat",
         "deepseek/deepseek-chat"
       ],
-      "content_len": 212,
+      "content_len": 245,
+      "confidence": 0.9,
+      "gemini_fallbacks": {
+        "text": 0,
+        "structured": 0
+      }
+    },
+    "text_routing.finance": {
+      "status": "passed",
+      "models": [
+        "deepseek/deepseek-chat",
+        "deepseek/deepseek-chat"
+      ],
+      "content_len": 331,
       "confidence": 0.9,
       "gemini_fallbacks": {
         "text": 0,
