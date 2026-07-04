@@ -905,10 +905,11 @@ class BaseSupervisor(BaseAgent, ABC):
             verification_result["mast_confidence"] = mast_metadata["mast_confidence"]
 
             # Track per-round history for analysis
-            revision_history: list[dict[str, Any]] = verification_result.setdefault(
-                "revision_history", []
-            )
-            revision_history.append(
+            if "revision_history" not in verification_result:
+                verification_result["revision_history"] = []
+            revision_history_list = verification_result["revision_history"]
+            assert isinstance(revision_history_list, list)  # Type narrow for mypy
+            revision_history_list.append(
                 {
                     "round": round_num,
                     "verdict": verdict_str,
