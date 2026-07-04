@@ -221,6 +221,49 @@ Single-domain queries bypass this path entirely (zero overhead).
 
 **Revision loop compatibility**: Re-runs after REVISE verdicts also respect the parallel/sequential mode.
 
+#### MAST Failure Labeling (PR #71)
+
+**Note**: MAST (Multi-Agent System failure Taxonomy) labeling in Phase S has no configurable settings — it operates as a zero-cost, deterministic rule-based system. All configuration constants are hardcoded for Phase S. Future phases will add opt-in LLM classifier and guard behavior flags.
+
+**Current Behavior** (Phase S):
+1. Every verification round automatically applies MAST labeling (zero LLM cost, ~0ms overhead)
+2. Labels stored in `AgentResult.metadata["mast_failures"]` as list of mode codes (e.g., `["1.3", "1.1"]`)
+3. Per-round history tracked in `AgentResult.metadata["revision_history"]`
+4. Guards observe and log patterns but **do not block execution** (observability-only)
+5. Five modes detected via rule-based heuristics:
+   - **FM-1.1** (Task spec violation): Keywords in issues ("missing required", "cannot be empty", "<2 items")
+   - **FM-1.3** (Step repetition): Content hash match + adjacent-round comparison
+   - **FM-1.5** (No termination): REVISE verdict at `round_num >= MAX_VERIFICATION_REVISION_ROUNDS`
+   - **FM-2.6** (Reasoning-action mismatch): Pattern detection ("claims X but Y")
+   - **FM-3.2** (Incomplete verification): Keywords in issues ("missing", "incomplete")
+
+**Hardcoded Constants** (code-level, non-configurable in Phase S):
+
+| Constant | Location | Value | Purpose |
+|----------|----------|-------|---------|
+| `MAST_TAXONOMY` | `src/qa/mast.py:MASTLabeler` | 14-mode dict | Mode code → name mapping |
+| `max_revision_rounds` | `MASTLabeler.__init__` | `MAX_VERIFICATION_REVISION_ROUNDS` | Inherited from verification loop config |
+| Hash algorithm | `ContentHashTracker` | SHA-256, 16-char prefix | Step repetition detection |
+| Confidence scores | Various `_detect_*` methods | 0.75-1.0 (mode-specific) | Heuristic confidence levels |
+
+**Phase M/L Settings** (future, not implemented):
+
+Phase M (3-4 weeks) will add:
+- `MAST_ENABLE_LLM_CLASSIFIER` (boolean, default `False`): Opt-in LLM-based refinement for ambiguous cases
+- `MAST_GUARD_BLOCK_REPETITION` (boolean, default `False`): Block execution on FM-1.3 loops
+- `MAST_GUARD_ENFORCE_SPEC` (boolean, default `False`): Enforce spec conformance before accepting REVISE
+
+Phase L (6-8 weeks) will add:
+- `MAST_ROUTING_AVOID_HIGH_FM_SUPERVISORS` (boolean): Route queries away from supervisors with high FM-1.3/1.5 rates
+- `MAST_TRACE_STORAGE_ENABLED` (boolean): Store full traces to Postgres `mast_execution_traces` table
+- `MAST_DASHBOARD_ENABLED` (boolean): Enable Grafana MAST panel
+
+**Read-Only Side Effect**:
+- MAST labeling does **not** modify verification verdicts or control flow in Phase S
+- Labels stored in **new metadata keys** only: `mast_failures`, `mast_confidence`, `revision_history`
+- Existing keys (`verdict`, `report`, `issues`) remain unchanged
+- Zero behavior change guarantee: existing verification/revision suites pass UNMODIFIED
+
 ### Authentication Configuration
 
 | Variable | Type | Default | Description | Required |

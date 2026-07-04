@@ -887,9 +887,13 @@ class BaseSupervisor(BaseAgent, ABC):
             # Phase S: Apply MAST labeling (rule-based heuristics, zero LLM cost)
             from src.qa.mast import format_mast_labels_for_metadata
 
+            # Type-safe extraction for mypy
+            verdict_str = str(verification_result.get("verdict", "pass"))
+            issues_seq = list(issues_list) if isinstance(issues_list, list) else []
+
             mast_result = self.mast_labeler.label_verification_result(
-                verdict=verification_result["verdict"],
-                issues=issues_list,
+                verdict=verdict_str,
+                issues=issues_seq,
                 round_num=round_num,
                 content=aggregated_content,
                 previous_content=previous_content,
@@ -901,13 +905,16 @@ class BaseSupervisor(BaseAgent, ABC):
             verification_result["mast_confidence"] = mast_metadata["mast_confidence"]
 
             # Track per-round history for analysis
-            verification_result.setdefault("revision_history", []).append(
+            revision_history: list[dict[str, Any]] = verification_result.setdefault(
+                "revision_history", []
+            )
+            revision_history.append(
                 {
                     "round": round_num,
-                    "verdict": verification_result["verdict"],
+                    "verdict": verdict_str,
                     "mast_labels": mast_metadata["mast_failures"],
                     "mast_confidence": mast_metadata["mast_confidence"],
-                    "issues": issues_list[:],  # shallow copy
+                    "issues": issues_seq[:],  # shallow copy
                 }
             )
 

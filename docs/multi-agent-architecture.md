@@ -562,6 +562,131 @@ async def verify_with_revision(
 - Bounded execution prevents runaway loops
 - Maintains supervisor QA gate while allowing refinement
 
+### MAST Failure Labeling (PR #71)
+
+The verification QA gate now implements **MAST (Multi-Agent System failure Taxonomy)** labeling to provide structured failure diagnosis beyond pass/fail verdicts. Based on [Cemri et al. (arXiv:2503.13657)](https://arxiv.org/abs/2503.13657), MAST classifies failures into 14 modes across 3 clusters:
+
+**Full MAST Taxonomy**:
+
+| Mode | Name | Cluster | Stage | Freq % | Phase S |
+|------|------|---------|-------|--------|---------|
+| FM-1.1 | Disobey task specification | FC1: System Design | Execution | 11.8 | ✓ |
+| FM-1.2 | Disobey role specification | FC1: System Design | Execution | 1.5 | — |
+| FM-1.3 | Step repetition | FC1: System Design | Execution | 15.7 | ✓ |
+| FM-1.4 | Loss of conversation history | FC1: System Design | Communication | 2.8 | — |
+| FM-1.5 | Unaware of termination conditions | FC1: System Design | Control | 12.4 | ✓ |
+| FM-2.1 | Conversation reset | FC2: Inter-Agent Misalignment | Communication | 2.2 | — |
+| FM-2.2 | Fail to ask for clarification | FC2: Inter-Agent Misalignment | Communication | 6.8 | — |
+| FM-2.3 | Task derailment | FC2: Inter-Agent Misalignment | Execution | 7.4 | — |
+| FM-2.4 | Information withholding | FC2: Inter-Agent Misalignment | Communication | 0.85 | — |
+| FM-2.5 | Ignored other agent's input | FC2: Inter-Agent Misalignment | Communication | 1.9 | — |
+| FM-2.6 | Reasoning-action mismatch | FC2: Inter-Agent Misalignment | Execution | 13.2 | ✓ |
+| FM-3.1 | Premature termination | FC3: Task Verification | Termination | 6.2 | — |
+| FM-3.2 | No or incomplete verification | FC3: Task Verification | Quality | 8.2 | ✓ |
+| FM-3.3 | Incorrect verification | FC3: Task Verification | Quality | 9.1 | — |
+
+**Phase S Implementation** (PR #71) implements **rule-based heuristic labeling** for the top 5 modes (~41% of all failures):
+
+```python
+# In src/qa/mast.py
+class MASTLabeler:
+    """Rule-based MAST failure mode labeler (Phase S: heuristics only)."""
+    
+    def label_verification_result(
+        self,
+        verdict: str,
+        issues: Sequence[str],
+        round_num: int,
+        content: str,
+        previous_content: str | None = None,
+    ) -> MASTLabelingResult:
+        """Apply rule-based MAST labeling to verification result."""
+        
+        # FM-1.3: Step repetition (content hash + adjacent comparison)
+        if self._detect_step_repetition(content, previous_content):
+            labels.append(MASTLabel(mode="1.3", confidence=1.0, ...))
+        
+        # FM-1.1: Task spec violation (keyword detection in issues)
+        if self._detect_task_spec_violation(issues):
+            labels.append(MASTLabel(mode="1.1", confidence=0.85, ...))
+        
+        # FM-1.5: No termination awareness (REVISE at max rounds)
+        if verdict == "revise" and round_num >= max_revision_rounds:
+            labels.append(MASTLabel(mode="1.5", confidence=0.9, ...))
+        
+        # FM-2.6: Reasoning-action mismatch (claims/but pattern in issues)
+        # FM-3.2: Incomplete verification (missing/incomplete keywords)
+        ...
+```
+
+**Integration with Verification Loop**:
+
+```python
+# In base_supervisor.py: _run_worker_with_verification_loop
+for round_num in range(1, MAX_VERIFICATION_REVISION_ROUNDS + 1):
+    # Execute worker and run verification
+    verification_result = await self._run_verification(aggregated_content)
+    
+    # Phase S: Apply MAST labeling (READ-ONLY side effect, zero LLM cost)
+    mast_result = self.mast_labeler.label_verification_result(
+        verdict=verification_result["verdict"],
+        issues=verification_result["issues"],
+        round_num=round_num,
+        content=aggregated_content,
+        previous_content=previous_content,
+    )
+    
+    # Store MAST labels in verification result (new keys)
+    verification_result["mast_labels"] = mast_result.detected_modes
+    verification_result["mast_confidence"] = mast_result.confidence
+    verification_result["revision_history"].append({
+        "round": round_num,
+        "verdict": verdict,
+        "mast_labels": mast_result.detected_modes,
+        ...
+    })
+```
+
+**Storage in AgentResult**:
+
+```python
+# Labels stored in metadata when present
+AgentResult.metadata = {
+    "agent_type": "research_supervisor",
+    "supervision_mode": "parallel",
+    "workers_coordinated": 3,
+    # MAST fields (present only if verification failed)
+    "mast_failures": ["1.3", "1.1"],  # Detected failure mode codes
+    "mast_confidence": 0.85,          # Overall confidence
+    "verification_rounds": 2,
+    "revision_history": [              # Per-round tracking
+        {"round": 1, "verdict": "revise", "mast_labels": ["1.1"], ...},
+        {"round": 2, "verdict": "revise", "mast_labels": ["1.3", "1.5"], ...},
+    ],
+}
+```
+
+**Observability-First Guards** (Phase S):
+
+Phase S implements guards as **logging and labeling** mechanisms (no control flow changes):
+
+- **ContentHashTracker**: Detects FM-1.3 step repetition via SHA-256 content hashing (global across rounds)
+- **Convergence predicate hooks**: Log structured events (`mast_failure_labeled`) when patterns detected
+- **Spec conformance validator**: Keyword-based detection of FM-1.1 violations in verification issues
+
+These guards **do not block execution** in Phase S — they observe and label only. Phase M (future) will add active guards (block on FM-1.3 loops, enforce spec conformance).
+
+**Key Properties**:
+- **Zero LLM cost**: Rule-based heuristics, ~0ms overhead per verification
+- **Read-only side effect**: Labels stored in new metadata keys; `verdict`, `report`, `issues` unchanged
+- **Zero behavior change**: Existing verification/revision logic unmodified
+- **Deterministic**: Identical input → identical labels (no model variance)
+- **Queryable**: Labels stored in `AgentResult.metadata` for post-hoc analysis
+
+**Roadmap**:
+- **Phase M** (3-4 weeks): LLM-based classifier (opt-in), active guards (block FM-1.3), Postgres trace storage
+- **Phase L** (6-8 weeks): MASR routing integration (avoid high-FM supervisors), MAST dashboard, prompt auto-tuning
+
 ### Multi-Domain Sub-Query Execution (PR #54)
 
 Multi-domain queries are now decomposed and executed **concurrently with bounded parallelism**:

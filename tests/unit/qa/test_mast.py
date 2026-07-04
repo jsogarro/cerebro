@@ -11,6 +11,8 @@ Tests cover positive/negative cases, real historical failures, edge cases,
 and the overall labeling workflow.
 """
 
+# ruff: noqa: N801 - Test class names use FM codes (FM11, FM13, etc.) for clarity
+
 import pytest
 
 from src.qa.mast import (
