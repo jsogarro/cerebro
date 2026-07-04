@@ -1,30 +1,32 @@
 # Live Eval Report
 
-**Generated:** 2026-07-04T05:39:42.196546+00:00
+**Generated:** 2026-07-04T06:30:33.091604+00:00
 
 ## Summary
 
-- **Total Checks:** 9
-- **Passed:** 9 ✅
+- **Total Checks:** 10
+- **Passed:** 10 ✅
 - **Failed:** 0 ❌
-- **Total Cost:** $0.0816
+- **Total Cost:** $0.0761
 
 ## Cost Breakdown
 
 | Check | Model | Input Tokens | Output Tokens | Cost (USD) |
 |-------|-------|--------------|---------------|------------|
 | openrouter | deepseek/deepseek-chat | 10 | 10 | $0.000040 |
-| openrouter | anthropic/claude-sonnet-4.6 | 1326 | 1378 | $0.040560 |
+| openrouter | anthropic/claude-sonnet-4.6 | 1326 | 1110 | $0.036540 |
 | openrouter | deepseek/deepseek-chat | 10 | 10 | $0.000040 |
-| openrouter | deepseek/deepseek-chat | 411 | 200 | $0.001222 |
+| openrouter | deepseek/deepseek-chat | 435 | 208 | $0.001286 |
 | openrouter | deepseek/deepseek-chat | 10 | 10 | $0.000040 |
-| openrouter | anthropic/claude-sonnet-4.6 | 1167 | 1417 | $0.038760 |
+| openrouter | anthropic/claude-sonnet-4.6 | 1167 | 1307 | $0.037110 |
 | openrouter | deepseek/deepseek-chat | 10 | 10 | $0.000040 |
-| openrouter | deepseek/deepseek-chat | 17 | 192 | $0.000418 |
+| openrouter | deepseek/deepseek-chat | 17 | 171 | $0.000376 |
 | openrouter | deepseek/deepseek-chat | 10 | 10 | $0.000040 |
-| openrouter | deepseek/deepseek-chat | 18 | 65 | $0.000166 |
+| openrouter | deepseek/deepseek-chat | 18 | 66 | $0.000168 |
 | openrouter | deepseek/deepseek-chat | 10 | 10 | $0.000040 |
-| openrouter | deepseek/deepseek-chat | 32 | 64 | $0.000192 |
+| openrouter | deepseek/deepseek-chat | 32 | 43 | $0.000150 |
+| openrouter | deepseek/deepseek-chat | 10 | 10 | $0.000040 |
+| openrouter | deepseek/deepseek-chat | 18 | 68 | $0.000172 |
 
 ## Check Results
 
@@ -40,7 +42,7 @@
 **Status:** passed
 
 - **strategy:** llm
-- **synthesis_len:** 2353
+- **synthesis_len:** 1571
 - **models:** ['deepseek/deepseek-chat', 'anthropic/claude-sonnet-4.6']
 - **gemini_fallbacks:** {'text': 0, 'structured': 0}
 
@@ -71,7 +73,7 @@
 
 **Status:** passed
 
-- **narrative_len:** 2336
+- **narrative_len:** 1963
 - **budgets:** [4000]
 - **structured_calls:** [{'model': 'anthropic/claude-sonnet-4.6', 'response_format': 'json_object', 'max_tokens': 4000}]
 - **gemini_fallbacks:** {'text': 0, 'structured': 0}
@@ -81,7 +83,7 @@
 **Status:** passed
 
 - **models:** ['deepseek/deepseek-chat', 'deepseek/deepseek-chat']
-- **content_len:** 1178
+- **content_len:** 1032
 - **confidence:** 0.9
 - **gemini_fallbacks:** {'text': 0, 'structured': 0}
 
@@ -90,7 +92,7 @@
 **Status:** passed
 
 - **models:** ['deepseek/deepseek-chat', 'deepseek/deepseek-chat']
-- **content_len:** 351
+- **content_len:** 373
 - **confidence:** 0.9
 - **gemini_fallbacks:** {'text': 0, 'structured': 0}
 
@@ -99,6 +101,15 @@
 **Status:** passed
 
 - **models:** ['deepseek/deepseek-chat', 'deepseek/deepseek-chat']
-- **content_len:** 212
+- **content_len:** 226
+- **confidence:** 0.9
+- **gemini_fallbacks:** {'text': 0, 'structured': 0}
+
+### text_routing.finance ✅
+
+**Status:** passed
+
+- **models:** ['deepseek/deepseek-chat', 'deepseek/deepseek-chat']
+- **content_len:** 422
 - **confidence:** 0.9
 - **gemini_fallbacks:** {'text': 0, 'structured': 0}

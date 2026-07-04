@@ -114,6 +114,16 @@ class MASRouter:
     Now supports dynamic model configuration for flexible routing.
     """
 
+    # Fast-path uncertainty ceiling. The query analyzer uses INVERTED
+    # uncertainty semantics for simple queries: an unclassifiable (GENERAL)
+    # single-domain query is floored at exactly 0.30, while confidently
+    # classified complex queries score lower. Trivial/chit-chat queries are
+    # legitimately GENERAL, so the fast path INCLUDES them by accepting
+    # uncertainty at or below this ceiling. This is a deliberately tight
+    # coupling to the analyzer's GENERAL penalty (query_analyzer.py); if that
+    # penalty changes, revisit this constant and the fast-path tests.
+    _FAST_PATH_UNCERTAINTY_CEILING = 0.3
+
     def __init__(
         self,
         config: dict[str, Any] | None = None,
@@ -440,12 +450,15 @@ class MASRouter:
         if not settings.MASR_FAST_PATH_ENABLED:
             return False
 
+        # Complexity==SIMPLE is the hard guard against false-accepts: a
+        # MODERATE/COMPLEX query cannot fast-path no matter how the other
+        # signals read. GENERAL-domain queries are intentionally eligible
+        # (see _FAST_PATH_UNCERTAINTY_CEILING).
         return (
             complexity_analysis.level == ComplexityLevel.SIMPLE
             and len(complexity_analysis.domains) == 1
             and complexity_analysis.subtask_count == 1
-            and complexity_analysis.uncertainty
-            <= 0.3  # analyzer floors simple queries at exactly 0.3
+            and complexity_analysis.uncertainty <= self._FAST_PATH_UNCERTAINTY_CEILING
             and "critical" not in complexity_analysis.priority_level
         )
 

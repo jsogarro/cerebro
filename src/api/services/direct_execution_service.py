@@ -81,6 +81,11 @@ class DirectExecutionService:
     the same functionality with better performance and easier debugging.
     """
 
+    # Fast-path quality gate: a response shorter than this, or opening with a
+    # known apology/error prefix, is treated as degraded and escalated.
+    _FAST_PATH_MIN_RESPONSE_CHARS = 50
+    _FAST_PATH_FAILURE_PREFIXES = ("Error:", "I'm sorry")
+
     def __init__(
         self,
         masr_router: MASRouter | None = None,
@@ -235,11 +240,10 @@ class DirectExecutionService:
         Returns:
             True if response passes basic quality checks
         """
-        if not response or len(response.strip()) < 50:
+        stripped = response.strip() if response else ""
+        if len(stripped) < self._FAST_PATH_MIN_RESPONSE_CHARS:
             return False
-        if response.strip().startswith("Error:"):
-            return False
-        return not response.strip().startswith("I'm sorry")
+        return not stripped.startswith(self._FAST_PATH_FAILURE_PREFIXES)
 
     async def _execute_fast_path(
         self,

@@ -101,6 +101,25 @@ class TestFastPathClassifier:
         should_use = router._should_use_fast_path(complexity)
         assert should_use is False, "Complex query should NOT use fast path"
 
+    def test_fast_path_rejected_for_moderate_despite_all_other_signals(self, router):
+        """SIMPLE-level is the hard guard: a MODERATE query with every other
+        signal green (single domain, single subtask, low uncertainty,
+        non-critical) must still NOT fast-path."""
+        complexity = make_complexity(
+            level=ComplexityLevel.MODERATE,
+            domains=["research"],
+            subtask_count=1,
+            uncertainty=0.2,
+            priority_level="normal",
+        )
+        assert router._should_use_fast_path(complexity) is False
+
+    def test_fast_path_rejected_just_above_uncertainty_ceiling(self, router):
+        """Uncertainty just above the ceiling must reject (the accept case at
+        exactly 0.3 is covered by test_fast_path_accepts_uncertainty_boundary)."""
+        complexity = make_complexity(uncertainty=0.31)
+        assert router._should_use_fast_path(complexity) is False
+
     @patch("src.core.config.get_settings")
     def test_fast_path_respects_feature_flag(self, mock_settings, router):
         """Fast path should respect MASR_FAST_PATH_ENABLED flag."""
