@@ -453,6 +453,13 @@ class BaseSupervisor(BaseAgent, ABC):
             "refinement_rounds": state.refinement_round,
         }
 
+        # Wire MAST labels from the verification QA gate into
+        # supervision_metadata (Phase S). Supervisors store the
+        # _run_verification result under worker_results["verification"].
+        verification = state.worker_results.get("verification")
+        if isinstance(verification, dict):
+            self._store_mast_labels_in_state(state, verification)
+
         # Include MAST failure metadata if present (Phase S labeling)
         if "mast_failures" in state.supervision_metadata:
             result_metadata["mast_failures"] = state.supervision_metadata[
@@ -678,6 +685,8 @@ class BaseSupervisor(BaseAgent, ABC):
                 - verdict: "pass" or "revise"
                 - report: full verification report text
                 - issues: list of specific issues (empty if pass)
+                - mast_labels: list of detected MAST failure mode codes (Phase S)
+                - mast_confidence: max confidence across detected labels
         """
         # Degrade gracefully if content is empty or missing.
         # Check explicitly before creating the verification task to avoid
@@ -689,7 +698,14 @@ class BaseSupervisor(BaseAgent, ABC):
                 supervisor_type=self.supervisor_type,
                 reason="no_aggregated_content_to_verify",
             )
-            return {"verdict": "pass", "report": "No content to verify.", "issues": []}
+            mast_labels, mast_confidence = self._label_qa_gate("pass", [], "")
+            return {
+                "verdict": "pass",
+                "report": "No content to verify.",
+                "issues": [],
+                "mast_labels": mast_labels,
+                "mast_confidence": mast_confidence,
+            }
 
         try:
             # Import lazily to avoid circular dependency
@@ -744,7 +760,14 @@ class BaseSupervisor(BaseAgent, ABC):
                 issue_count=len(issues),
             )
 
-            return {"verdict": verdict, "report": report_text, "issues": issues}
+            mast_labels, mast_confidence = self._label_qa_gate(verdict, issues, content)
+            return {
+                "verdict": verdict,
+                "report": report_text,
+                "issues": issues,
+                "mast_labels": mast_labels,
+                "mast_confidence": mast_confidence,
+            }
 
         except Exception as e:
             # Degrade gracefully on error — don't break the workflow
@@ -753,11 +776,51 @@ class BaseSupervisor(BaseAgent, ABC):
                 supervisor_type=self.supervisor_type,
                 error=str(e),
             )
+            mast_labels, mast_confidence = self._label_qa_gate("pass", [], content)
             return {
                 "verdict": "pass",  # neutral fallback
                 "report": f"Verification error: {e!s}",
                 "issues": [],
+                "mast_labels": mast_labels,
+                "mast_confidence": mast_confidence,
             }
+
+    def _label_qa_gate(
+        self, verdict: str, issues: list[str], content: str
+    ) -> tuple[list[str], float]:
+        """
+        Apply MAST labeling to a single-shot QA-gate verification result.
+
+        The QA gate runs once per task (no revision rounds), so labeling uses
+        round_num=1 with no previous content and a fresh hash tracker.
+
+        Returns:
+            Tuple of (mast_labels, mast_confidence). Never raises — labeling
+            failures degrade to no labels so verification is never broken by
+            the observability layer.
+        """
+        try:
+            from src.qa.mast import format_mast_labels_for_metadata
+
+            self.mast_labeler.reset_hash_tracker()
+            mast_result = self.mast_labeler.label_verification_result(
+                verdict=verdict,
+                issues=issues,
+                round_num=1,
+                content=content,
+            )
+            mast_metadata = format_mast_labels_for_metadata(mast_result)
+            return (
+                list(mast_metadata["mast_failures"]),
+                float(mast_metadata["mast_confidence"]),
+            )
+        except Exception as e:
+            logger.error(
+                "mast_qa_gate_labeling_failed",
+                supervisor_type=self.supervisor_type,
+                error=str(e),
+            )
+            return [], 0.0
 
     def _extract_issues_from_report(self, report: str) -> list[str]:
         """Extract structured issues from verification report.

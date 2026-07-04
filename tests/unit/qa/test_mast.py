@@ -591,3 +591,68 @@ class TestEdgeCases:
         )
         assert "1.1" in result.detected_modes
         assert "2.6" in result.detected_modes
+
+
+class TestQAGateMASTWiring:
+    """MAST labels must be attached on the production QA-gate path.
+
+    Regression guard: labeling was originally wired only into
+    _run_worker_with_verification_loop, which has no production callers.
+    The real path is BaseSupervisor._run_verification, called by every
+    supervisor's confidence/verification phase.
+    """
+
+    @pytest.mark.asyncio
+    async def test_run_verification_returns_mast_keys_on_empty_content(self):
+        from unittest.mock import MagicMock
+
+        from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+
+        supervisor = AnalyticsSupervisor(
+            gemini_service=MagicMock(), cache_client=MagicMock()
+        )
+        result = await supervisor._run_verification("")
+        assert "mast_labels" in result
+        assert "mast_confidence" in result
+        assert isinstance(result["mast_labels"], list)
+
+    @pytest.mark.asyncio
+    async def test_run_verification_returns_mast_keys_on_error_fallback(self):
+        """Even the graceful-degradation path must carry MAST keys."""
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+
+        supervisor = AnalyticsSupervisor(
+            gemini_service=MagicMock(), cache_client=MagicMock()
+        )
+        with patch(
+            "src.agents.factory.AgentFactory.create_agent",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = await supervisor._run_verification("some content")
+        assert result["verdict"] == "pass"
+        assert "mast_labels" in result
+        assert "mast_confidence" in result
+
+    def test_build_supervision_result_wires_labels_from_verification(self):
+        """Labels stored in worker_results['verification'] must reach
+        supervision_metadata via _store_mast_labels_in_state."""
+        from unittest.mock import MagicMock
+
+        from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+
+        supervisor = AnalyticsSupervisor(
+            gemini_service=MagicMock(), cache_client=MagicMock()
+        )
+        state = MagicMock()
+        state.supervision_metadata = {}
+        verification = {
+            "verdict": "revise",
+            "issues": ["missing required field"],
+            "mast_labels": ["1.1"],
+            "mast_confidence": 0.7,
+        }
+        supervisor._store_mast_labels_in_state(state, verification)
+        assert state.supervision_metadata["mast_failures"] == ["1.1"]
+        assert state.supervision_metadata["mast_confidence"] == 0.7
