@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-07-04T04:51:26.008272+00:00",
+  "summary": {
+    "total_checks": 0,
+    "passed_checks": 0,
+    "failed_checks": 0,
+    "total_cost_usd": 0.0
+  },
+  "cost_breakdown": [],
+  "check_results": {}
+}

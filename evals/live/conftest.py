@@ -106,3 +106,74 @@ def _report_finalizer(
     if _session_report is not None:
         output_dir = Path("evals/out")
         generate_report(_session_report, output_dir)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _capture_llm_costs(live_eval_report: LiveEvalReport) -> Generator[None, None, None]:
+    """Capture every LLM call's cost/model into the report via the telemetry hook."""
+    import src.ai_brain.providers.base_provider as bp
+
+    original = bp.record_llm_call
+
+    def wrapper(metrics):  # type: ignore[no-untyped-def]
+        live_eval_report.add_cost(
+            LiveEvalCostRecord(
+                check_name=getattr(metrics, "provider", "unknown"),
+                model=getattr(metrics, "model", "unknown") or "unknown",
+                input_tokens=int(getattr(metrics, "prompt_tokens", 0) or 0),
+                output_tokens=int(getattr(metrics, "completion_tokens", 0) or 0),
+                cost_usd=float(getattr(metrics, "cost_usd", 0.0) or 0.0),
+            )
+        )
+        return original(metrics)
+
+    bp.record_llm_call = wrapper
+    yield
+    bp.record_llm_call = original
+
+
+@pytest.fixture()
+def openrouter_spy() -> Generator[list[dict[str, Any]], None, None]:
+    """Record every OpenRouter request payload (model, response_format, max_tokens)."""
+    from src.ai_brain.providers.openrouter_provider import OpenRouterProvider
+
+    calls: list[dict[str, Any]] = []
+    original = OpenRouterProvider._make_api_request
+
+    async def spy(self, payload):  # type: ignore[no-untyped-def]
+        calls.append(
+            {
+                "model": payload.get("model"),
+                "response_format": (payload.get("response_format") or {}).get("type"),
+                "max_tokens": payload.get("max_tokens"),
+            }
+        )
+        return await original(self, payload)
+
+    OpenRouterProvider._make_api_request = spy  # type: ignore[method-assign]
+    yield calls
+    OpenRouterProvider._make_api_request = original  # type: ignore[method-assign]
+
+
+@pytest.fixture()
+def gemini_fallback_guard() -> Generator[dict[str, int], None, None]:
+    """Count Gemini fallback invocations - fail-loudly doctrine wants ZERO."""
+    from src.services.gemini_service import GeminiService
+
+    counter = {"text": 0, "structured": 0}
+    orig_text = GeminiService.generate_content
+    orig_structured = GeminiService.generate_structured_content
+
+    async def text_spy(self, prompt):  # type: ignore[no-untyped-def]
+        counter["text"] += 1
+        return await orig_text(self, prompt)
+
+    async def structured_spy(self, prompt, schema):  # type: ignore[no-untyped-def]
+        counter["structured"] += 1
+        return await orig_structured(self, prompt, schema)
+
+    GeminiService.generate_content = text_spy  # type: ignore[method-assign]
+    GeminiService.generate_structured_content = structured_spy  # type: ignore[method-assign]
+    yield counter
+    GeminiService.generate_content = orig_text  # type: ignore[method-assign]
+    GeminiService.generate_structured_content = orig_structured  # type: ignore[method-assign]

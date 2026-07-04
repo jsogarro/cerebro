@@ -1,201 +1,123 @@
-"""Structured routing checks: schema validation, citation simple-tier, synthesis-scale budget."""
+"""Live structured-output routing: schema-validated results via OpenRouter.
 
-import os
+Two checks: a simple-tier citation call (cheap) and one synthesis-scale call
+at the default structured budget (the class of call that once truncated at a
+hardcoded token cap and silently degraded).
+"""
+
+import asyncio
 
 import pytest
-from pydantic import BaseModel, ValidationError
 
-from evals.live.conftest import LiveEvalCostRecord, LiveEvalReport
+from src.agents.factory import AgentFactory
+from src.agents.models import AgentTask
+from src.agents.schemas import CitationSchema
+from src.agents.schemas.synthesis import SynthesisSchema
+from src.core.config import settings
 
-
-class CitationResult(BaseModel):
-    """Expected schema for citation-enhanced queries."""
-
-    answer: str
-    citations: list[str]
+pytestmark = pytest.mark.live_eval
 
 
-class SynthesisResult(BaseModel):
-    """Expected schema for synthesis queries."""
-
-    summary: str
-    key_points: list[str]
-    confidence_score: float
-
-
-@pytest.mark.live_eval
+@pytest.mark.asyncio
 async def test_citation_simple_tier(
-    live_eval_cost_meter: LiveEvalReport,
-    caplog: pytest.LogCaptureFixture,
+    openrouter_spy, gemini_fallback_guard, live_eval_report
 ) -> None:
-    """Citation query uses simple tier with schema validation."""
-    # Import here to avoid triggering settings validation at module load
-    from src.ai_brain.router.routing_types import RoutingStrategy
-    from src.api.services.masr_routing_service import MASRRoutingService
-    from src.core.observability import get_llm_request_cost_tracking
-    from src.models.masr_api_models import RoutingRequest
-
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    assert api_key, "OPENROUTER_API_KEY required"
-
-    service = MASRRoutingService()
-
-    # Citation query should use simple tier for cost efficiency
-    request = RoutingRequest(
-        query="What are the three primary benefits of remote work? Provide citations.",
-        strategy=RoutingStrategy.COST_EFFICIENT,
-        context={"require_citations": True, "domain": "content"},
+    worker = AgentFactory().create_agent("citation")
+    task = AgentTask(
+        id="live-eval-citation",
+        agent_type="citation",
+        input_data={"query": "format citations", "complexity_score": 0.1},
+    )
+    prompt = (
+        "Format these sources as APA citations. Return JSON with a 'citations' "
+        "array of {citation_text, source_id}.\n"
+        "1. 'Attention Is All You Need', Vaswani et al., 2017, NeurIPS.\n"
+        "2. 'BERT: Pre-training of Deep Bidirectional Transformers', Devlin et al., 2019, NAACL."
     )
 
-    decision = await service.get_routing_decision(request)
-
-    # Verify simple tier selection
-    assert decision.model_tier.value == "simple", (
-        f"Expected simple tier for citation query, got {decision.model_tier.value}"
+    result = await asyncio.wait_for(
+        worker._generate_structured_with_routing(prompt, CitationSchema, task),
+        timeout=120,
     )
 
-    # Mock structured output (in a real scenario, this would come from the LLM)
-    # For live eval, we're testing the routing path, not the actual LLM output
-    mock_structured_output = {
-        "answer": "Remote work offers flexibility, cost savings, and improved work-life balance.",
-        "citations": [
-            "https://example.com/remote-work-study-2024",
-            "https://example.com/work-flexibility-benefits",
-        ],
-    }
-
-    # Validate schema
-    try:
-        result = CitationResult(**mock_structured_output)
-        assert result.answer, "Answer field is empty"
-        assert len(result.citations) > 0, "No citations provided"
-        schema_valid = True
-    except ValidationError as e:
-        pytest.fail(f"Schema validation failed: {e}")
-        schema_valid = False
-
-    # Check for fallback warnings - MUST BE ZERO
-    fallback_warnings = [
-        record
-        for record in caplog.records
-        if "fallback" in record.message.lower() and "gemini" in record.message.lower()
+    simple_model = settings.OPENROUTER_TIER_MAPPING["simple"]
+    structured_calls = [
+        c for c in openrouter_spy if c["response_format"] == "json_object"
     ]
-    assert not fallback_warnings, f"Gemini fallback warnings: {fallback_warnings}"
-
-    # Record cost
-    tracking = get_llm_request_cost_tracking()
-    cost_record = LiveEvalCostRecord(
-        check_name="citation_simple_tier",
-        model="deepseek/deepseek-chat",
-        input_tokens=60,
-        output_tokens=50,
-        cost_usd=tracking.actual_cost_usd if tracking else 0.0,
+    ok = (
+        isinstance(result, CitationSchema)
+        and len(result.citations) >= 1
+        and any(c["model"] == simple_model for c in structured_calls)
+        and gemini_fallback_guard["structured"] == 0
     )
-    live_eval_cost_meter.add_cost(cost_record)
-
-    live_eval_cost_meter.add_check_result(
-        "citation_simple_tier",
-        "passed",
+    live_eval_report.add_check_result(
+        "structured_routing.citation_simple_tier",
+        "passed" if ok else "failed",
         {
-            "tier": decision.model_tier.value,
-            "schema_valid": schema_valid,
-            "fallback_warnings": len(fallback_warnings),
-            "cost_usd": cost_record.cost_usd,
+            "type": type(result).__name__,
+            "n_citations": len(getattr(result, "citations", [])),
+            "structured_calls": structured_calls,
+            "gemini_fallbacks": dict(gemini_fallback_guard),
         },
     )
 
+    assert isinstance(result, CitationSchema)
+    assert len(result.citations) >= 1
+    assert any(c["model"] == simple_model for c in structured_calls), (
+        f"citation structured call not on simple tier: {structured_calls}"
+    )
+    assert gemini_fallback_guard["structured"] == 0, "silent Gemini structured fallback"
 
-@pytest.mark.live_eval
+
+@pytest.mark.asyncio
 async def test_synthesis_scale_budget(
-    live_eval_cost_meter: LiveEvalReport,
-    caplog: pytest.LogCaptureFixture,
+    openrouter_spy, gemini_fallback_guard, live_eval_report
 ) -> None:
-    """Synthesis query uses balanced/complex tier with finish_reason != length check."""
-    # Import here to avoid triggering settings validation at module load
-    from src.ai_brain.router.routing_types import RoutingStrategy
-    from src.api.services.masr_routing_service import MASRRoutingService
-    from src.core.observability import get_llm_request_cost_tracking
-    from src.models.masr_api_models import RoutingRequest
-
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    assert api_key, "OPENROUTER_API_KEY required"
-
-    service = MASRRoutingService()
-
-    # This is the ONE deliberate synthesis-scale call allowed in the budget
-    request = RoutingRequest(
-        query=(
-            "Synthesize the key findings from the following research abstracts into a "
-            "comprehensive summary with confidence scoring: [abstract1, abstract2, abstract3]"
-        ),
-        strategy=RoutingStrategy.QUALITY_FOCUSED,
-        context={"task_type": "synthesis", "domain": "research"},
+    """Synthesis-scale structured call at the default budget must not degrade."""
+    worker = AgentFactory().create_agent("synthesis")
+    task = AgentTask(
+        id="live-eval-synthesis",
+        agent_type="synthesis",
+        input_data={"query": "synthesize findings", "complexity_score": 0.5},
+    )
+    findings = (
+        "Renewable adoption grew 18% YoY on falling storage costs and policy support. "
+        "Panel regression shows subsidies correlate with installation growth (r=0.72). "
+    ) * 20
+    prompt = (
+        "Synthesize the following findings into a coherent narrative with "
+        "integrated findings and meta insights. Return JSON matching the schema.\n\n"
+        + findings
     )
 
-    decision = await service.get_routing_decision(request)
-
-    # Verify balanced or complex tier (quality-focused should choose higher tier)
-    assert decision.model_tier.value in {"balanced", "complex"}, (
-        f"Expected balanced/complex tier for synthesis, got {decision.model_tier.value}"
+    result = await asyncio.wait_for(
+        worker._generate_structured_with_routing(prompt, SynthesisSchema, task),
+        timeout=180,
     )
 
-    # Mock structured output with finish_reason check
-    mock_structured_output = {
-        "summary": "The research consistently shows that multi-agent systems benefit from hierarchical coordination.",
-        "key_points": [
-            "Hierarchical coordination reduces latency",
-            "Cost optimization is crucial for production",
-            "Adaptive routing improves quality",
-        ],
-        "confidence_score": 0.87,
-    }
-    finish_reason = "stop"  # Simulated - in real scenario from API response
-
-    # Validate schema
-    try:
-        result = SynthesisResult(**mock_structured_output)
-        assert result.summary, "Summary field is empty"
-        assert len(result.key_points) > 0, "No key points provided"
-        assert 0.0 <= result.confidence_score <= 1.0, "Invalid confidence score"
-        schema_valid = True
-    except ValidationError as e:
-        pytest.fail(f"Schema validation failed: {e}")
-        schema_valid = False
-
-    # Check finish_reason - MUST NOT BE "length" (truncation indicator)
-    assert finish_reason != "length", (
-        "finish_reason='length' indicates token cap truncation - increase max_tokens"
-    )
-
-    # Check for fallback warnings - MUST BE ZERO
-    fallback_warnings = [
-        record
-        for record in caplog.records
-        if "fallback" in record.message.lower() and "gemini" in record.message.lower()
+    structured_calls = [
+        c for c in openrouter_spy if c["response_format"] == "json_object"
     ]
-    assert not fallback_warnings, f"Gemini fallback warnings: {fallback_warnings}"
-
-    # Record cost (this is the expensive call)
-    tracking = get_llm_request_cost_tracking()
-    cost_record = LiveEvalCostRecord(
-        check_name="synthesis_scale_budget",
-        model=decision.selected_models[0].name
-        if decision.selected_models
-        else "unknown",
-        input_tokens=200,
-        output_tokens=150,
-        cost_usd=tracking.actual_cost_usd if tracking else 0.0,
+    budgets = [c["max_tokens"] for c in structured_calls]
+    narrative = getattr(result, "comprehensive_narrative", "") or ""
+    ok = (
+        isinstance(result, SynthesisSchema)
+        and len(narrative) > 200
+        and all(b >= 4000 for b in budgets)
+        and gemini_fallback_guard["structured"] == 0
     )
-    live_eval_cost_meter.add_cost(cost_record)
-
-    live_eval_cost_meter.add_check_result(
-        "synthesis_scale_budget",
-        "passed",
+    live_eval_report.add_check_result(
+        "structured_routing.synthesis_scale",
+        "passed" if ok else "failed",
         {
-            "tier": decision.model_tier.value,
-            "schema_valid": schema_valid,
-            "finish_reason": finish_reason,
-            "fallback_warnings": len(fallback_warnings),
-            "cost_usd": cost_record.cost_usd,
+            "narrative_len": len(narrative),
+            "budgets": budgets,
+            "structured_calls": structured_calls,
+            "gemini_fallbacks": dict(gemini_fallback_guard),
         },
     )
+
+    assert isinstance(result, SynthesisSchema)
+    assert len(narrative) > 200, "synthesis narrative suspiciously short/empty"
+    assert all(b >= 4000 for b in budgets), f"structured budget regressed: {budgets}"
+    assert gemini_fallback_guard["structured"] == 0, "silent Gemini structured fallback"
