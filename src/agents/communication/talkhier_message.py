@@ -14,7 +14,11 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+import structlog
+
 from ..models import AgentMessage
+
+logger = structlog.get_logger(__name__)
 
 
 class MessageType(Enum):
@@ -353,10 +357,19 @@ class TalkHierMessage:
         # Reconstruct TalkHier content
         content_data = dict(data.get("talkhier_content", {}))
         # Reconstruct the provenance enum from its serialized string value so
-        # source_type survives a to_dict/from_dict round-trip (S1).
+        # source_type survives a to_dict/from_dict round-trip (S1). An unknown
+        # value (corruption or tampering) must not crash deserialization —
+        # fail safe to the least-trusted provenance so it still gets sanitized.
         source_type = content_data.get("source_type")
         if isinstance(source_type, str):
-            content_data["source_type"] = ProvenanceType(source_type)
+            try:
+                content_data["source_type"] = ProvenanceType(source_type)
+            except ValueError:
+                logger.warning(
+                    "talkhier_unknown_provenance_defaulting_untrusted",
+                    received=source_type,
+                )
+                content_data["source_type"] = ProvenanceType.EXTERNAL_WEB
         talkhier_content = TalkHierContent(**content_data)
 
         # Reconstruct hierarchy metadata

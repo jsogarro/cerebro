@@ -162,3 +162,21 @@ class TestProvenanceSerialization:
         )
         restored = TalkHierMessage.from_dict(msg.to_dict())
         assert restored.talkhier_content.source_type is ProvenanceType.LLM_GENERATED
+
+
+class TestProvenanceDeserializationSafety:
+    """from_dict must not crash on tampered/unknown provenance (R2 review)."""
+
+    def test_unknown_source_type_defaults_untrusted(self):
+        content = TalkHierContent(content="x")
+        msg = TalkHierMessage(
+            from_agent="a",
+            to_agent="b",
+            message_type=MessageType.RESPONSE,
+            content=content,
+        )
+        payload = msg.to_dict()
+        payload["talkhier_content"]["source_type"] = "totally_bogus_value"
+        restored = TalkHierMessage.from_dict(payload)
+        # Fail safe: unknown provenance is treated as least-trusted external.
+        assert restored.talkhier_content.source_type is ProvenanceType.EXTERNAL_WEB

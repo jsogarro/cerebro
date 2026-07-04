@@ -63,7 +63,7 @@ class ContentSanitizer:
         r"system\s*:\s*(ignore|disregard|override)",
         # Goal redirection
         r"your\s+(new\s+)?(goal|task|objective)\s+is\s+(now\s+)?to",
-        r"instead\s+of(?:(?!you).){0,120}you\s+(should|must|will)",
+        r"instead\s+of(?:(?!you).){0,300}you\s+(should|must|will)",
     ]
 
     # Delimiter escape patterns
