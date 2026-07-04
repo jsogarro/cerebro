@@ -6,7 +6,6 @@ between labeled concatenation (default) and LLM synthesis for merging
 per-domain results from multi-domain queries.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -53,6 +52,19 @@ class _FakeRoutingDecision:
         default_factory=_FakeComplexityAnalysis
     )
     context: dict[str, Any] = field(default_factory=dict)
+
+
+async def _wait_for_completion(service, execution_id, timeout_s: float = 10.0):
+    """Poll active_executions until the run leaves 'running' (CI-safe wait)."""
+    import asyncio as _asyncio
+
+    deadline = _asyncio.get_event_loop().time() + timeout_s
+    while _asyncio.get_event_loop().time() < deadline:
+        status = service.active_executions.get(execution_id)
+        if status is not None and status.status not in ("pending", "running"):
+            return status
+        await _asyncio.sleep(0.1)
+    return service.active_executions.get(execution_id)
 
 
 @pytest.fixture
@@ -203,11 +215,7 @@ async def test_concat_strategy_default_behavior(service_with_concat_strategy):
 
     execution_id = await service_with_concat_strategy.start_research_execution(project)
 
-    # Wait for async execution
-    await asyncio.sleep(0.15)
-
-    # Get execution status
-    status = service_with_concat_strategy.active_executions.get(execution_id)
+    status = await _wait_for_completion(service_with_concat_strategy, execution_id)
     assert status is not None
     assert status.status == "completed"
     assert status.final_output is not None
@@ -258,10 +266,7 @@ async def test_llm_strategy_synthesis(service_with_llm_strategy):
 
         execution_id = await service_with_llm_strategy.start_research_execution(project)
 
-        # Wait for async execution
-        await asyncio.sleep(0.15)
-
-        status = service_with_llm_strategy.active_executions.get(execution_id)
+        status = await _wait_for_completion(service_with_llm_strategy, execution_id)
         assert status is not None
         assert status.status == "completed"
         assert status.final_output is not None
@@ -308,10 +313,7 @@ async def test_llm_strategy_fallback_on_synthesis_failure(service_with_llm_strat
 
         execution_id = await service_with_llm_strategy.start_research_execution(project)
 
-        # Wait for async execution
-        await asyncio.sleep(0.15)
-
-        status = service_with_llm_strategy.active_executions.get(execution_id)
+        status = await _wait_for_completion(service_with_llm_strategy, execution_id)
         assert status is not None
         assert status.status == "completed"
         assert status.final_output is not None
@@ -383,8 +385,7 @@ async def test_partial_domain_failure_with_llm_synthesis(service_with_llm_strate
         )
 
         execution_id = await service_with_llm_strategy.start_research_execution(project)
-        await asyncio.sleep(0.15)
-        status = service_with_llm_strategy.active_executions.get(execution_id)
+        status = await _wait_for_completion(service_with_llm_strategy, execution_id)
         assert status is not None
 
         assert status.status == "completed"
@@ -439,11 +440,7 @@ async def test_single_domain_path_unchanged():
         )
 
         execution_id = await service.start_research_execution(project)
-
-        # Wait for async execution
-        await asyncio.sleep(0.15)
-
-        status = service.active_executions.get(execution_id)
+        status = await _wait_for_completion(service, execution_id)
         assert status is not None
         assert status.status == "completed"
         # Single-domain path doesn't call _merge_domain_results at all

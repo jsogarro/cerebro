@@ -1148,3 +1148,20 @@ MCP_CITATION_TOOL_ENDPOINT=http://localhost:8002
 - Advanced coordination strategies
 
 This multi-agent architecture provides a robust, scalable foundation for conducting comprehensive research across multiple domains while maintaining flexibility for future enhancements and customizations.
+
+## Live Evaluation Suite
+
+Mocked tests repeatedly missed live-only failures (retired model slugs, silent
+provider fallbacks, fence-format parse failures, token-cap truncation). The
+`evals/live/` suite runs REAL provider calls with behavioral assertions and a
+fail-loudly doctrine: any silent-degradation signal (Gemini fallback, stale
+slug, empty content, truncation) fails the run.
+
+- Run locally: `ENABLE_LIVE_EVAL=1 bash scripts/run_live_evals.sh` (requires
+  `OPENROUTER_API_KEY`; budget-capped via `LIVE_EVAL_BUDGET_USD`, default $0.25;
+  typical run ≈ $0.08).
+- Excluded from normal CI via the `live_eval` marker (default addopts).
+- Report artifact: `evals/out/live_eval_report.{json,md}`.
+- Nightly scheduling: copy `docs/ci/nightly-live-eval.yml.example` to
+  `.github/workflows/` and add `OPENROUTER_API_KEY` / `GEMINI_API_KEY` as
+  repository secrets (both steps are maintainer actions).

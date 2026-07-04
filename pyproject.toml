@@ -112,7 +112,9 @@ target-version = ["py311"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q --strict-markers --cov=src --cov-report=term-missing"
+# live_eval is excluded from normal runs (live provider calls, real cost);
+# coverage numbers therefore reflect the non-live surface only.
+addopts = "-ra -q --strict-markers --cov=src --cov-report=term-missing -m 'not live_eval'"
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
@@ -130,6 +132,7 @@ markers = [
     "e2e: end-to-end tests against a live server",
     "slow: tests that take more than a few seconds",
     "asyncio: async tests (auto-applied by pytest-asyncio in asyncio_mode=auto)",
+    "live_eval: live provider evaluation suite (excluded from normal CI; requires OPENROUTER_API_KEY + ENABLE_LIVE_EVAL=1)",
 ]
 
 [tool.mypy]

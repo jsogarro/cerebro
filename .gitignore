@@ -73,3 +73,4 @@ cerebro_dev.db
 /tmp/refactorit/
 .refactorit/
 *.refactorit.checkpoint
+evals/out/
