@@ -956,12 +956,22 @@ class MASRouter:
             )
 
         elif collaboration_mode == CollaborationMode.DEBATE:
-            # DEBATE: cap at budget (plan specifies 3 fixed, but allow budget override)
-            worker_count = min(3, budget_cap)
+            # DEBATE uses three fixed roles; the budget can only cap below that.
+            debate_roles = ["analyst", "critic", "synthesizer"]
+            worker_count = min(len(debate_roles), budget_cap)
+            if worker_count < len(debate_roles):
+                logger.warning(
+                    "debate_budget_below_role_count",
+                    budget_cap=budget_cap,
+                    role_count=len(debate_roles),
+                    routing_strategy=str(routing_strategy),
+                )
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
                 worker_count=worker_count,
-                worker_types=["analyst", "critic", "synthesizer"],
+                # Keep roles and count in lockstep so a sub-3 budget can never
+                # leave the supervisor expecting a role it was not allocated.
+                worker_types=debate_roles[:worker_count],
                 max_parallel=LOW_PARALLELISM,
                 timeout_seconds=LONG_TIMEOUT,
                 retry_attempts=DEFAULT_RETRY_ATTEMPTS,

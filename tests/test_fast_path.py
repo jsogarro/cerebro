@@ -140,6 +140,21 @@ class TestStrategyBudgets:
         config = {"default_strategy": "cost_efficient"}
         return MASRouter(config=config)
 
+    def test_debate_roles_track_worker_count_when_budget_below_three(self, router):
+        """A DEBATE budget below 3 must not leave worker_types longer than
+        worker_count (would make the supervisor expect an unallocated role)."""
+        from unittest.mock import patch
+
+        with patch.object(router, "_get_strategy_budget", return_value=2):
+            allocation = router._allocate_agents(
+                make_complexity(level=ComplexityLevel.MODERATE),
+                CollaborationMode.DEBATE,
+                None,
+                None,
+            )
+        assert allocation.worker_count == len(allocation.worker_types)
+        assert allocation.worker_count == 2
+
     def test_cost_efficient_budget_caps(self, router):
         """COST_EFFICIENT strategy should have tight budget caps."""
         router.routing_strategy = RoutingStrategy.COST_EFFICIENT
