@@ -204,3 +204,107 @@ class TestEnabledEmitsSpans:
                 cost_usd=0.0,
                 latency_ms=1,
             )
+
+
+# --------------------------------------------------------------------------
+# Integration: the MASR router call-site actually fires the tracer on a real
+# route() call (flag on → trace created; flag off → zero tracing calls).
+# --------------------------------------------------------------------------
+
+
+class TestMasrRouteWiring:
+    def _mock_analysis_and_optimization(self, router):
+        from unittest.mock import patch as _patch
+
+        from src.ai_brain.router.cost_optimizer import (
+            CostEstimate,
+            ModelSpec,
+            ModelTier,
+            OptimizationResult,
+        )
+        from src.ai_brain.router.query_analyzer import (
+            ComplexityAnalysis,
+            ComplexityFactors,
+            ComplexityLevel,
+        )
+
+        analyze = _patch.object(router.complexity_analyzer, "analyze")
+        optimize = _patch.object(router.cost_optimizer, "optimize")
+        m_analyze = analyze.start()
+        m_optimize = optimize.start()
+        m_analyze.return_value = ComplexityAnalysis(
+            score=0.6,
+            level=ComplexityLevel.MODERATE,
+            factors=ComplexityFactors(),
+            domains=["research"],
+            subtask_count=1,
+            uncertainty=0.3,
+            reasoning_types=["analytical"],
+            recommended_agents={"research": 1},
+            estimated_tokens=1000,
+        )
+        m_optimize.return_value = OptimizationResult(
+            primary_model=ModelSpec(
+                name="gemini-pro",
+                provider="google",
+                tier=ModelTier.STANDARD,
+                cost_per_1k_tokens=0.001,
+                avg_latency_ms=50,
+                context_window=32000,
+                quality_score=0.85,
+            ),
+            estimated_cost=CostEstimate(
+                model_name="gemini-pro",
+                estimated_tokens=1000,
+                cost_per_request=0.001,
+                total_monthly_cost=100.0,
+                latency_estimate_ms=50,
+                quality_score=0.85,
+                confidence=0.9,
+            ),
+            reasoning="test",
+        )
+        return [analyze, optimize]
+
+    @pytest.mark.asyncio
+    async def test_route_creates_trace_when_enabled(self, monkeypatch):
+        from src.ai_brain.router.masr import MASRouter
+
+        router = MASRouter(config={"default_strategy": "balanced"})
+        patchers = self._mock_analysis_and_optimization(router)
+        client = MagicMock(name="LangfuseClient")
+        client.trace.return_value = MagicMock(name="Trace")
+        try:
+            with patch.object(tracing, "get_langfuse_client", return_value=client):
+                decision = await router.route("What is AI?", context={})
+        finally:
+            for p in patchers:
+                p.stop()
+
+        assert decision.agent_allocation.worker_count >= 1
+        client.trace.assert_called_once()
+        kwargs = client.trace.call_args.kwargs
+        assert kwargs["name"] == "masr_routing"
+        # query_id is a UUID string minted inside route()
+        assert isinstance(kwargs["id"], str) and len(kwargs["id"]) >= 32
+        # the trace is threaded into context for the provider span
+        assert kwargs["input"] == {"query": "What is AI?"}
+
+    @pytest.mark.asyncio
+    async def test_route_makes_zero_tracing_calls_when_disabled(self, monkeypatch):
+        from src.ai_brain.router.masr import MASRouter
+
+        router = MASRouter(config={"default_strategy": "balanced"})
+        patchers = self._mock_analysis_and_optimization(router)
+        client = MagicMock(name="LangfuseClient")
+        try:
+            # get_langfuse_client returns None when disabled → tracer never
+            # touches the client.
+            with patch.object(tracing, "get_langfuse_client", return_value=None):
+                decision = await router.route("What is AI?", context={})
+        finally:
+            for p in patchers:
+                p.stop()
+
+        assert decision.agent_allocation.worker_count >= 1
+        client.trace.assert_not_called()
