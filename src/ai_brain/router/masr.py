@@ -114,6 +114,16 @@ class MASRouter:
     Now supports dynamic model configuration for flexible routing.
     """
 
+    # Fast-path uncertainty ceiling. The query analyzer uses INVERTED
+    # uncertainty semantics for simple queries: an unclassifiable (GENERAL)
+    # single-domain query is floored at exactly 0.30, while confidently
+    # classified complex queries score lower. Trivial/chit-chat queries are
+    # legitimately GENERAL, so the fast path INCLUDES them by accepting
+    # uncertainty at or below this ceiling. This is a deliberately tight
+    # coupling to the analyzer's GENERAL penalty (query_analyzer.py); if that
+    # penalty changes, revisit this constant and the fast-path tests.
+    _FAST_PATH_UNCERTAINTY_CEILING = 0.3
+
     def __init__(
         self,
         config: dict[str, Any] | None = None,
@@ -317,6 +327,7 @@ class MASRouter:
                 collaboration_mode,
                 episodic_prior,
                 adaptive_recommendation,
+                routing_strategy=routing_strategy,
             )
 
             # Step 5: Calculate performance predictions
@@ -423,12 +434,44 @@ class MASRouter:
 
         return mapping.get(routing_strategy, OptimizationStrategy.BALANCED)
 
+    def _should_use_fast_path(self, complexity_analysis: ComplexityAnalysis) -> bool:
+        """Return True if query can bypass orchestration entirely.
+
+        Fast path criteria (based on arXiv:2604.02460):
+        - SIMPLE complexity (strong model saturates capability)
+        - Single domain (no parallelization benefit)
+        - Single subtask (no decomposition needed)
+        - Low uncertainty (<=0.3; the analyzer floors simple queries at exactly 0.3)
+        - Non-critical priority (no speed requirement)
+        """
+        from src.core.config import get_settings
+
+        settings = get_settings()
+        if not settings.MASR_FAST_PATH_ENABLED:
+            return False
+
+        # Complexity==SIMPLE is the hard guard against false-accepts: a
+        # MODERATE/COMPLEX query cannot fast-path no matter how the other
+        # signals read. GENERAL-domain queries are intentionally eligible
+        # (see _FAST_PATH_UNCERTAINTY_CEILING).
+        return (
+            complexity_analysis.level == ComplexityLevel.SIMPLE
+            and len(complexity_analysis.domains) == 1
+            and complexity_analysis.subtask_count == 1
+            and complexity_analysis.uncertainty <= self._FAST_PATH_UNCERTAINTY_CEILING
+            and "critical" not in complexity_analysis.priority_level
+        )
+
     def _determine_collaboration_mode(
         self,
         complexity_analysis: ComplexityAnalysis,
         optimization_result: OptimizationResult,
     ) -> CollaborationMode:
         """Determine optimal agent collaboration mode."""
+
+        # Check for fast path first (bypass all orchestration)
+        if self._should_use_fast_path(complexity_analysis):
+            return CollaborationMode.FAST_PATH
 
         # Simple queries can use direct mode
         if complexity_analysis.level == ComplexityLevel.SIMPLE:
@@ -758,12 +801,73 @@ class MASRouter:
 
         return result
 
+    def _get_strategy_budget(
+        self, strategy: RoutingStrategy, mode: CollaborationMode
+    ) -> int:
+        """Return hard worker-count cap for strategy+mode combination.
+
+        Budgets based on Anthropic research (arXiv:2604.02460):
+        - Simple fact-finding: 1 agent
+        - Comparisons: 2-4 agents
+        - Complex research: 10+ agents
+
+        Returns:
+            Hard cap on worker_count for this strategy+mode combo
+        """
+        budgets = {
+            RoutingStrategy.COST_EFFICIENT: {
+                CollaborationMode.FAST_PATH: 1,
+                CollaborationMode.DIRECT: 2,  # 1 worker + 1 supervisor
+                CollaborationMode.PARALLEL: 2,
+                CollaborationMode.HIERARCHICAL: 2,
+                CollaborationMode.DEBATE: 3,
+                CollaborationMode.ENSEMBLE: 2,
+            },
+            RoutingStrategy.SPEED_FIRST: {
+                CollaborationMode.FAST_PATH: 1,
+                CollaborationMode.DIRECT: 1,
+                CollaborationMode.PARALLEL: 3,  # Bounded concurrency
+                CollaborationMode.HIERARCHICAL: 4,
+                CollaborationMode.DEBATE: 3,
+                CollaborationMode.ENSEMBLE: 3,
+            },
+            RoutingStrategy.QUALITY_FOCUSED: {
+                CollaborationMode.FAST_PATH: 1,  # Quality mode doesn't use fast path in practice
+                CollaborationMode.DIRECT: 2,
+                CollaborationMode.PARALLEL: 4,
+                CollaborationMode.HIERARCHICAL: 10,  # Complex research
+                CollaborationMode.DEBATE: 3,  # Fixed
+                CollaborationMode.ENSEMBLE: 5,
+            },
+            RoutingStrategy.BALANCED: {
+                CollaborationMode.FAST_PATH: 1,
+                CollaborationMode.DIRECT: 2,
+                CollaborationMode.PARALLEL: 3,
+                CollaborationMode.HIERARCHICAL: 6,
+                CollaborationMode.DEBATE: 3,
+                CollaborationMode.ENSEMBLE: 3,
+            },
+            RoutingStrategy.ADAPTIVE: {
+                # Same as BALANCED (adaptive adjusts within bounds)
+                CollaborationMode.FAST_PATH: 1,
+                CollaborationMode.DIRECT: 2,
+                CollaborationMode.PARALLEL: 3,
+                CollaborationMode.HIERARCHICAL: 6,
+                CollaborationMode.DEBATE: 3,
+                CollaborationMode.ENSEMBLE: 3,
+            },
+        }
+
+        strategy_budgets = budgets.get(strategy, budgets[RoutingStrategy.BALANCED])
+        return strategy_budgets.get(mode, 10)  # Global max fallback
+
     def _allocate_agents(
         self,
         complexity_analysis: ComplexityAnalysis,
         collaboration_mode: CollaborationMode,
         episodic_prior: int | None = None,
         adaptive_recommendation: int | None = None,
+        routing_strategy: RoutingStrategy | None = None,
     ) -> AgentAllocation:
         """Determine optimal agent allocation with supervisor-based hierarchical routing.
 
@@ -780,8 +884,24 @@ class MASRouter:
         )
         primary_supervisor = supervisor_types[0] if supervisor_types else "research"
 
+        # Get budget cap for this strategy+mode combination (enforced AFTER adjustments)
+        budget_cap = self._get_strategy_budget(
+            routing_strategy or self.default_strategy, collaboration_mode
+        )
+
         # Base allocation by collaboration mode
-        if collaboration_mode == CollaborationMode.DIRECT:
+        if collaboration_mode == CollaborationMode.FAST_PATH:
+            # Fast path: no supervisor, single LLM call
+            return AgentAllocation(
+                supervisor_type=primary_supervisor,  # Placeholder (not used)
+                worker_count=1,
+                worker_types=[],  # No workers (direct LLM call)
+                max_parallel=1,
+                timeout_seconds=SHORT_TIMEOUT,
+                retry_attempts=MIN_RETRY_ATTEMPTS,
+            )
+
+        elif collaboration_mode == CollaborationMode.DIRECT:
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
                 worker_count=1,
@@ -795,14 +915,15 @@ class MASRouter:
             analytic_count = min(
                 len(complexity_analysis.domains) + 1, self.max_parallel_workers
             )
-            # Sequential composition: memory first, then adaptive
+            # Sequential composition: memory first, then adaptive, THEN budget cap
             memory_adjusted = self._apply_memory_adjustment(
                 analytic_count, episodic_prior
             )
-            worker_count = self._apply_adaptive_adjustment(
+            adaptive_adjusted = self._apply_adaptive_adjustment(
                 memory_adjusted, adaptive_recommendation
             )
-            worker_count = min(worker_count, self.max_parallel_workers)  # Hard cap
+            # Enforce budget cap AFTER all adjustments
+            worker_count = min(adaptive_adjusted, budget_cap, self.max_parallel_workers)
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
                 worker_count=worker_count,
@@ -816,14 +937,15 @@ class MASRouter:
             analytic_count = min(
                 complexity_analysis.subtask_count, self.max_agents_per_query
             )
-            # Sequential composition: memory first, then adaptive
+            # Sequential composition: memory first, then adaptive, THEN budget cap
             memory_adjusted = self._apply_memory_adjustment(
                 analytic_count, episodic_prior
             )
-            worker_count = self._apply_adaptive_adjustment(
+            adaptive_adjusted = self._apply_adaptive_adjustment(
                 memory_adjusted, adaptive_recommendation
             )
-            worker_count = min(worker_count, self.max_agents_per_query)  # Hard cap
+            # Enforce budget cap AFTER all adjustments
+            worker_count = min(adaptive_adjusted, budget_cap, self.max_agents_per_query)
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
                 worker_count=worker_count,
@@ -834,11 +956,22 @@ class MASRouter:
             )
 
         elif collaboration_mode == CollaborationMode.DEBATE:
-            # DEBATE is fixed at 3 (no memory adjustment)
+            # DEBATE uses three fixed roles; the budget can only cap below that.
+            debate_roles = ["analyst", "critic", "synthesizer"]
+            worker_count = min(len(debate_roles), budget_cap)
+            if worker_count < len(debate_roles):
+                logger.warning(
+                    "debate_budget_below_role_count",
+                    budget_cap=budget_cap,
+                    role_count=len(debate_roles),
+                    routing_strategy=str(routing_strategy),
+                )
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
-                worker_count=3,
-                worker_types=["analyst", "critic", "synthesizer"],
+                worker_count=worker_count,
+                # Keep roles and count in lockstep so a sub-3 budget can never
+                # leave the supervisor expecting a role it was not allocated.
+                worker_types=debate_roles[:worker_count],
                 max_parallel=LOW_PARALLELISM,
                 timeout_seconds=LONG_TIMEOUT,
                 retry_attempts=DEFAULT_RETRY_ATTEMPTS,
@@ -846,14 +979,16 @@ class MASRouter:
 
         else:  # ENSEMBLE
             analytic_count = 5
-            # Sequential composition: memory first, then adaptive
+            # Sequential composition: memory first, then adaptive, THEN budget cap
             memory_adjusted = self._apply_memory_adjustment(
                 analytic_count, episodic_prior
             )
-            worker_count = self._apply_adaptive_adjustment(
+            adaptive_adjusted = self._apply_adaptive_adjustment(
                 memory_adjusted, adaptive_recommendation
             )
-            worker_count = max(3, min(worker_count, 7))  # Ensemble: 3-7 range
+            # Enforce budget cap AFTER all adjustments; ensemble range is 3-7 but budget may restrict further
+            worker_count = min(adaptive_adjusted, budget_cap)
+            worker_count = max(3, min(worker_count, 7))  # Clamp to ensemble range
             return AgentAllocation(
                 supervisor_type=primary_supervisor,
                 worker_count=worker_count,
