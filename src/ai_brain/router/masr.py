@@ -277,7 +277,11 @@ class MASRouter:
             query_id=query_id,
             query=query,
             metadata={
-                "strategy_override": strategy.value if strategy else None,
+                "strategy_override": (
+                    strategy.value
+                    if isinstance(strategy, RoutingStrategy)
+                    else strategy
+                ),
                 "has_constraints": constraints is not None,
             },
         ) as trace:
