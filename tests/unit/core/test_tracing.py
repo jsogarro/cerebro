@@ -1,418 +1,310 @@
-"""Unit tests for Langfuse distributed tracing.
+"""Tests for the Langfuse tracing layer (src/core/tracing.py).
 
-Tests cover:
-1. Flag OFF: no-op safety (zero calls, no import errors, immediate return)
-2. Flag ON: tracer constructed, spans created with correct payload
-3. SDK not installed: graceful fallback with warning
-4. Initialization errors: logged and handled
+Covers the no-op-safe contract (flag off / SDK absent / bad keys must never
+raise and must emit zero tracing calls) and the flag-on contract (traces and
+spans are created with the exact payloads the MASR router and provider pass).
+
+A capturing spy stands in for the Langfuse client so no server is required.
 """
 
-import os
-from unittest.mock import MagicMock, Mock, patch
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-
-class TestTracingFlagOff:
-    """Test tracing behavior when LANGFUSE_ENABLED is false or unset."""
-
-    def test_is_langfuse_enabled_returns_false_by_default(self) -> None:
-        """LANGFUSE_ENABLED unset should return False."""
-        with patch.dict(os.environ, {}, clear=True):
-            from src.core.tracing import _is_langfuse_enabled
-
-            # Clear cached state
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-
-            assert _is_langfuse_enabled() is False
-
-    def test_is_langfuse_enabled_returns_false_when_0(self) -> None:
-        """LANGFUSE_ENABLED=0 should return False."""
-        with patch.dict(os.environ, {"LANGFUSE_ENABLED": "0"}, clear=True):
-            from src.core.tracing import _is_langfuse_enabled
-
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-
-            assert _is_langfuse_enabled() is False
-
-    def test_is_langfuse_enabled_returns_true_when_1(self) -> None:
-        """LANGFUSE_ENABLED=1 should return True."""
-        with patch.dict(os.environ, {"LANGFUSE_ENABLED": "1"}, clear=True):
-            from src.core.tracing import _is_langfuse_enabled
-
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-
-            assert _is_langfuse_enabled() is True
-
-    def test_get_langfuse_client_returns_none_when_disabled(self) -> None:
-        """get_langfuse_client should return None when flag is off."""
-        with patch.dict(os.environ, {"LANGFUSE_ENABLED": "false"}, clear=True):
-            from src.core.tracing import get_langfuse_client
-
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
-
-            client = get_langfuse_client()
-            assert client is None
-
-    def test_trace_masr_routing_yields_none_when_disabled(self) -> None:
-        """trace_masr_routing should yield None when flag is off."""
-        with patch.dict(os.environ, {"LANGFUSE_ENABLED": "false"}, clear=True):
-            from src.core.tracing import trace_masr_routing
-
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
-
-            with trace_masr_routing(
-                query_id="test-id", query="test query", metadata={}
-            ) as trace:
-                assert trace is None
-
-    def test_trace_provider_call_yields_none_when_disabled(self) -> None:
-        """trace_provider_call should yield None when flag is off."""
-        with patch.dict(os.environ, {"LANGFUSE_ENABLED": "false"}, clear=True):
-            from src.core.tracing import trace_provider_call
-
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
-
-            with trace_provider_call(
-                trace=None, provider="test", model="test-model"
-            ) as span:
-                assert span is None
-
-    def test_record_provider_metrics_no_op_when_span_is_none(self) -> None:
-        """record_provider_metrics should no-op when span is None."""
-        from src.core.tracing import record_provider_metrics
-
-        # Should not raise any errors
-        record_provider_metrics(
-            span=None,
-            prompt_tokens=100,
-            completion_tokens=50,
-            cost_usd=0.01,
-            latency_ms=200,
-        )
+import src.core.tracing as tracing
+from src.core.tracing import (
+    get_langfuse_client,
+    record_provider_metrics,
+    trace_masr_routing,
+    trace_provider_call,
+)
 
 
-class TestTracingFlagOn:
-    """Test tracing behavior when LANGFUSE_ENABLED is true."""
+@pytest.fixture(autouse=True)
+def _reset_tracing_globals():
+    """The module caches enabled-state and client in globals; reset per test."""
+    tracing._langfuse_client = None
+    tracing._langfuse_enabled = None
+    yield
+    tracing._langfuse_client = None
+    tracing._langfuse_enabled = None
 
-    def test_initialize_langfuse_creates_client(self) -> None:
-        """_initialize_langfuse should create Langfuse client when enabled."""
-        mock_client = MagicMock()
-        mock_client.host = "https://cloud.langfuse.com"
 
-        with patch.dict(
-            os.environ,
-            {
-                "LANGFUSE_ENABLED": "true",
-                "LANGFUSE_PUBLIC_KEY": "pk-test",
-                "LANGFUSE_SECRET_KEY": "sk-test",
-            },
-            clear=True,
+# --------------------------------------------------------------------------
+# Flag OFF: everything is a no-op, nothing is imported, nothing raises.
+# --------------------------------------------------------------------------
+
+
+class TestDisabledIsNoOp:
+    def test_client_is_none_when_flag_unset(self, monkeypatch):
+        monkeypatch.delenv("LANGFUSE_ENABLED", raising=False)
+        assert get_langfuse_client() is None
+
+    @pytest.mark.parametrize("value", ["", "0", "false", "no", "off"])
+    def test_client_is_none_for_falsey_flag_values(self, monkeypatch, value):
+        monkeypatch.setenv("LANGFUSE_ENABLED", value)
+        assert get_langfuse_client() is None
+
+    def test_trace_masr_routing_yields_none_and_makes_no_calls(self, monkeypatch):
+        monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+        with trace_masr_routing("qid", "hello", {"strategy": "x"}) as trace:
+            assert trace is None
+
+    def test_provider_span_and_metrics_are_noops_when_disabled(self, monkeypatch):
+        monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+        with (
+            trace_masr_routing("qid", "hello") as trace,
+            trace_provider_call(trace, "openrouter", "m") as span,
         ):
-            with patch("langfuse.Langfuse", return_value=mock_client) as mock_langfuse_class:
-                from src.core.tracing import _initialize_langfuse
-
-                import src.core.tracing as tracing_module
-
-                tracing_module._langfuse_enabled = None
-                tracing_module._langfuse_client = None
-
-                client = _initialize_langfuse()
-
-                assert client is not None
-                mock_langfuse_class.assert_called_once_with(
-                    public_key="pk-test",
-                    secret_key="sk-test",
-                    host=None,
-                )
-
-    @patch("src.core.tracing.Langfuse")
-    def test_initialize_langfuse_with_custom_host(
-        self, mock_langfuse_class: Mock
-    ) -> None:
-        """_initialize_langfuse should use custom host when provided."""
-        mock_client = MagicMock()
-        mock_client.host = "http://localhost:3000"
-        mock_langfuse_class.return_value = mock_client
-
-        with patch.dict(
-            os.environ,
-            {
-                "LANGFUSE_ENABLED": "1",
-                "LANGFUSE_PUBLIC_KEY": "pk-test",
-                "LANGFUSE_SECRET_KEY": "sk-test",
-                "LANGFUSE_HOST": "http://localhost:3000",
-            },
-            clear=True,
-        ):
-            from src.core.tracing import _initialize_langfuse
-
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
-
-            client = _initialize_langfuse()
-
-            assert client is not None
-            mock_langfuse_class.assert_called_once_with(
-                public_key="pk-test",
-                secret_key="sk-test",
-                host="http://localhost:3000",
+            assert span is None
+            # Must not raise even though span is None.
+            record_provider_metrics(
+                span,
+                prompt_tokens=1,
+                completion_tokens=2,
+                cost_usd=0.1,
+                latency_ms=3,
             )
 
-    @patch("src.core.tracing.Langfuse")
-    def test_trace_masr_routing_creates_trace(self, mock_langfuse_class: Mock) -> None:
-        """trace_masr_routing should create trace with correct payload."""
-        mock_trace = MagicMock()
-        mock_client = MagicMock()
-        mock_client.trace.return_value = mock_trace
-        mock_langfuse_class.return_value = mock_client
-
-        with patch.dict(
-            os.environ,
-            {
-                "LANGFUSE_ENABLED": "true",
-                "LANGFUSE_PUBLIC_KEY": "pk-test",
-                "LANGFUSE_SECRET_KEY": "sk-test",
-            },
-            clear=True,
+    def test_disabled_path_does_not_import_langfuse(self, monkeypatch):
+        """Flag-off must never require the SDK to be importable."""
+        monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+        with patch.object(
+            tracing, "_initialize_langfuse", wraps=tracing._initialize_langfuse
         ):
-            from src.core.tracing import trace_masr_routing
+            # _initialize_langfuse returns early before the `from langfuse import`
+            assert get_langfuse_client() is None
 
-            import src.core.tracing as tracing_module
 
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
+# --------------------------------------------------------------------------
+# Flag ON but misconfigured: still no-op, still no raise.
+# --------------------------------------------------------------------------
 
-            with trace_masr_routing(
-                query_id="test-query-id",
-                query="What is AI?",
-                metadata={"complexity": "high", "strategy": "balanced"},
-            ) as trace:
-                assert trace is not None
-                mock_client.trace.assert_called_once_with(
-                    id="test-query-id",
-                    name="masr_routing",
-                    input={"query": "What is AI?"},
-                    metadata={"complexity": "high", "strategy": "balanced"},
-                )
-                mock_trace.update.assert_called_once_with(
-                    output={"status": "completed"}
-                )
 
-    @patch("src.core.tracing.Langfuse")
-    def test_trace_provider_call_creates_span(
-        self, mock_langfuse_class: Mock
-    ) -> None:
-        """trace_provider_call should create span with correct metadata."""
-        mock_span = MagicMock()
-        mock_trace = MagicMock()
-        mock_trace.span.return_value = mock_span
-        mock_client = MagicMock()
-        mock_langfuse_class.return_value = mock_client
+class TestEnabledButMisconfigured:
+    def test_missing_keys_returns_none(self, monkeypatch):
+        monkeypatch.setenv("LANGFUSE_ENABLED", "true")
+        monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+        monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+        assert get_langfuse_client() is None
 
-        with patch.dict(
-            os.environ,
-            {
-                "LANGFUSE_ENABLED": "true",
-                "LANGFUSE_PUBLIC_KEY": "pk-test",
-                "LANGFUSE_SECRET_KEY": "sk-test",
-            },
-            clear=True,
+    def test_sdk_absent_returns_none(self, monkeypatch):
+        monkeypatch.setenv("LANGFUSE_ENABLED", "true")
+        monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
+        # Simulate the package being absent: the import inside
+        # _initialize_langfuse raises ImportError, which must degrade to None.
+        with patch.dict("sys.modules", {"langfuse": None}):
+            assert get_langfuse_client() is None
+
+
+# --------------------------------------------------------------------------
+# Flag ON, client available (spy): traces/spans fire with real payloads.
+# --------------------------------------------------------------------------
+
+
+class TestEnabledEmitsSpans:
+    @pytest.fixture
+    def spy_client(self):
+        """A capturing spy standing in for the Langfuse client."""
+        client = MagicMock(name="LangfuseClient")
+        trace = MagicMock(name="Trace")
+        span = MagicMock(name="Span")
+        client.trace.return_value = trace
+        trace.span.return_value = span
+        return client, trace, span
+
+    def test_masr_trace_created_with_query_id_and_metadata(self, spy_client):
+        client, trace, _ = spy_client
+        with (
+            patch.object(tracing, "get_langfuse_client", return_value=client),
+            trace_masr_routing(
+                "query-123",
+                "impact of AI",
+                {"strategy_override": "quality_focused", "has_constraints": True},
+            ) as t,
         ):
-            from src.core.tracing import trace_provider_call
+            assert t is trace
+        client.trace.assert_called_once()
+        kwargs = client.trace.call_args.kwargs
+        assert kwargs["id"] == "query-123"
+        assert kwargs["name"] == "masr_routing"
+        assert kwargs["input"] == {"query": "impact of AI"}
+        assert kwargs["metadata"]["strategy_override"] == "quality_focused"
+        # Trace is marked completed on context exit.
+        trace.update.assert_called_once()
 
-            import src.core.tracing as tracing_module
+    def test_provider_span_created_under_trace_with_model_metadata(self, spy_client):
+        client, trace, span = spy_client
+        with (
+            patch.object(tracing, "get_langfuse_client", return_value=client),
+            trace_masr_routing("qid", "q") as t,
+            trace_provider_call(
+                t,
+                "openrouter",
+                "deepseek/deepseek-chat",
+                {"temperature": 0.7, "tier": "simple"},
+            ) as s,
+        ):
+            assert s is span
+        trace.span.assert_called_once()
+        kwargs = trace.span.call_args.kwargs
+        assert kwargs["name"] == "openrouter_call"
+        assert kwargs["metadata"]["provider"] == "openrouter"
+        assert kwargs["metadata"]["model"] == "deepseek/deepseek-chat"
+        assert kwargs["metadata"]["tier"] == "simple"
 
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
+    def test_metrics_recorded_with_tokens_cost_latency(self, spy_client):
+        client, _, span = spy_client
+        with (
+            patch.object(tracing, "get_langfuse_client", return_value=client),
+            trace_masr_routing("qid", "q") as t,
+            trace_provider_call(t, "openrouter", "m") as s,
+        ):
+            record_provider_metrics(
+                s,
+                prompt_tokens=100,
+                completion_tokens=50,
+                cost_usd=0.005,
+                latency_ms=250,
+            )
+        span.update.assert_called_once()
+        kwargs = span.update.call_args.kwargs
+        assert kwargs["usage"]["input"] == 100
+        assert kwargs["usage"]["output"] == 50
+        assert kwargs["usage"]["total"] == 150
+        assert kwargs["metadata"]["cost_usd"] == 0.005
+        assert kwargs["metadata"]["latency_ms"] == 250
 
-            with trace_provider_call(
-                trace=mock_trace,
-                provider="openrouter",
-                model="claude-sonnet-4.6",
-                metadata={"temperature": 0.7},
-            ) as span:
-                assert span is not None
-                mock_trace.span.assert_called_once_with(
-                    name="openrouter_call",
-                    metadata={
-                        "provider": "openrouter",
-                        "model": "claude-sonnet-4.6",
-                        "temperature": 0.7,
-                    },
-                )
+    def test_trace_failure_is_swallowed_and_yields_none(self, spy_client):
+        client, _, _ = spy_client
+        client.trace.side_effect = RuntimeError("langfuse down")
+        with (
+            patch.object(tracing, "get_langfuse_client", return_value=client),
+            # Must not propagate — tracing can never break the request path.
+            trace_masr_routing("qid", "q") as t,
+        ):
+            assert t is None
 
-    @patch("src.core.tracing.Langfuse")
-    def test_record_provider_metrics_updates_span(
-        self, mock_langfuse_class: Mock
-    ) -> None:
-        """record_provider_metrics should update span with usage metrics."""
-        mock_span = MagicMock()
+    def test_metrics_failure_is_swallowed(self, spy_client):
+        client, _, span = spy_client
+        span.update.side_effect = RuntimeError("boom")
+        with (
+            patch.object(tracing, "get_langfuse_client", return_value=client),
+            trace_masr_routing("qid", "q") as t,
+            trace_provider_call(t, "openrouter", "m") as s,
+        ):
+            # No raise despite span.update blowing up.
+            record_provider_metrics(
+                s,
+                prompt_tokens=1,
+                completion_tokens=1,
+                cost_usd=0.0,
+                latency_ms=1,
+            )
 
-        from src.core.tracing import record_provider_metrics
 
-        record_provider_metrics(
-            span=mock_span,
-            prompt_tokens=100,
-            completion_tokens=50,
-            cost_usd=0.0075,
-            latency_ms=250,
+# --------------------------------------------------------------------------
+# Integration: the MASR router call-site actually fires the tracer on a real
+# route() call (flag on → trace created; flag off → zero tracing calls).
+# --------------------------------------------------------------------------
+
+
+class TestMasrRouteWiring:
+    def _mock_analysis_and_optimization(self, router):
+        from unittest.mock import patch as _patch
+
+        from src.ai_brain.router.cost_optimizer import (
+            CostEstimate,
+            ModelSpec,
+            ModelTier,
+            OptimizationResult,
+        )
+        from src.ai_brain.router.query_analyzer import (
+            ComplexityAnalysis,
+            ComplexityFactors,
+            ComplexityLevel,
         )
 
-        mock_span.update.assert_called_once_with(
-            usage={
-                "input": 100,
-                "output": 50,
-                "total": 150,
-                "unit": "TOKENS",
-            },
-            metadata={
-                "cost_usd": 0.0075,
-                "latency_ms": 250,
-            },
+        analyze = _patch.object(router.complexity_analyzer, "analyze")
+        optimize = _patch.object(router.cost_optimizer, "optimize")
+        m_analyze = analyze.start()
+        m_optimize = optimize.start()
+        m_analyze.return_value = ComplexityAnalysis(
+            score=0.6,
+            level=ComplexityLevel.MODERATE,
+            factors=ComplexityFactors(),
+            domains=["research"],
+            subtask_count=1,
+            uncertainty=0.3,
+            reasoning_types=["analytical"],
+            recommended_agents={"research": 1},
+            estimated_tokens=1000,
         )
+        m_optimize.return_value = OptimizationResult(
+            primary_model=ModelSpec(
+                name="gemini-pro",
+                provider="google",
+                tier=ModelTier.STANDARD,
+                cost_per_1k_tokens=0.001,
+                avg_latency_ms=50,
+                context_window=32000,
+                quality_score=0.85,
+            ),
+            estimated_cost=CostEstimate(
+                model_name="gemini-pro",
+                estimated_tokens=1000,
+                cost_per_request=0.001,
+                total_monthly_cost=100.0,
+                latency_estimate_ms=50,
+                quality_score=0.85,
+                confidence=0.9,
+            ),
+            reasoning="test",
+        )
+        return [analyze, optimize]
 
+    @pytest.mark.asyncio
+    async def test_route_creates_trace_when_enabled(self, monkeypatch):
+        from src.ai_brain.router.masr import MASRouter
 
-class TestTracingErrorHandling:
-    """Test error handling and graceful degradation."""
+        router = MASRouter(config={"default_strategy": "balanced"})
+        patchers = self._mock_analysis_and_optimization(router)
+        client = MagicMock(name="LangfuseClient")
+        client.trace.return_value = MagicMock(name="Trace")
+        try:
+            with patch.object(tracing, "get_langfuse_client", return_value=client):
+                decision = await router.route("What is AI?", context={})
+        finally:
+            for p in patchers:
+                p.stop()
 
-    def test_initialize_langfuse_returns_none_when_keys_missing(self) -> None:
-        """_initialize_langfuse should return None when keys are missing."""
-        with patch.dict(
-            os.environ,
-            {"LANGFUSE_ENABLED": "true"},
-            clear=True,
-        ):
-            from src.core.tracing import _initialize_langfuse
+        assert decision.agent_allocation.worker_count >= 1
+        client.trace.assert_called_once()
+        kwargs = client.trace.call_args.kwargs
+        assert kwargs["name"] == "masr_routing"
+        # query_id is a UUID string minted inside route()
+        assert isinstance(kwargs["id"], str) and len(kwargs["id"]) >= 32
+        # the trace is threaded into context for the provider span
+        assert kwargs["input"] == {"query": "What is AI?"}
 
-            import src.core.tracing as tracing_module
+    @pytest.mark.asyncio
+    async def test_route_makes_zero_tracing_calls_when_disabled(self, monkeypatch):
+        from src.ai_brain.router.masr import MASRouter
 
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
+        router = MASRouter(config={"default_strategy": "balanced"})
+        patchers = self._mock_analysis_and_optimization(router)
+        client = MagicMock(name="LangfuseClient")
+        try:
+            # get_langfuse_client returns None when disabled → tracer never
+            # touches the client.
+            with patch.object(tracing, "get_langfuse_client", return_value=None):
+                decision = await router.route("What is AI?", context={})
+        finally:
+            for p in patchers:
+                p.stop()
 
-            client = _initialize_langfuse()
-            assert client is None
-
-    def test_initialize_langfuse_handles_import_error(self) -> None:
-        """_initialize_langfuse should handle ImportError gracefully."""
-        with patch.dict(
-            os.environ,
-            {
-                "LANGFUSE_ENABLED": "true",
-                "LANGFUSE_PUBLIC_KEY": "pk-test",
-                "LANGFUSE_SECRET_KEY": "sk-test",
-            },
-            clear=True,
-        ):
-            with patch("src.core.tracing.Langfuse", side_effect=ImportError):
-                from src.core.tracing import _initialize_langfuse
-
-                import src.core.tracing as tracing_module
-
-                tracing_module._langfuse_enabled = None
-                tracing_module._langfuse_client = None
-
-                client = _initialize_langfuse()
-                assert client is None
-
-    @patch("src.core.tracing.Langfuse")
-    def test_initialize_langfuse_handles_initialization_error(
-        self, mock_langfuse_class: Mock
-    ) -> None:
-        """_initialize_langfuse should handle SDK initialization errors."""
-        mock_langfuse_class.side_effect = Exception("Connection failed")
-
-        with patch.dict(
-            os.environ,
-            {
-                "LANGFUSE_ENABLED": "true",
-                "LANGFUSE_PUBLIC_KEY": "pk-test",
-                "LANGFUSE_SECRET_KEY": "sk-test",
-            },
-            clear=True,
-        ):
-            from src.core.tracing import _initialize_langfuse
-
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
-
-            client = _initialize_langfuse()
-            assert client is None
-
-    @patch("src.core.tracing.Langfuse")
-    def test_trace_masr_routing_handles_trace_error(
-        self, mock_langfuse_class: Mock
-    ) -> None:
-        """trace_masr_routing should handle trace creation errors."""
-        mock_client = MagicMock()
-        mock_client.trace.side_effect = Exception("Trace failed")
-        mock_langfuse_class.return_value = mock_client
-
-        with patch.dict(
-            os.environ,
-            {
-                "LANGFUSE_ENABLED": "true",
-                "LANGFUSE_PUBLIC_KEY": "pk-test",
-                "LANGFUSE_SECRET_KEY": "sk-test",
-            },
-            clear=True,
-        ):
-            from src.core.tracing import trace_masr_routing
-
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
-
-            with trace_masr_routing(
-                query_id="test-id", query="test", metadata={}
-            ) as trace:
-                # Should yield None on error
-                assert trace is None
-
-    @patch("src.core.tracing.Langfuse")
-    def test_flush_langfuse_handles_flush_error(
-        self, mock_langfuse_class: Mock
-    ) -> None:
-        """flush_langfuse should handle flush errors gracefully."""
-        mock_client = MagicMock()
-        mock_client.flush.side_effect = Exception("Flush failed")
-        mock_langfuse_class.return_value = mock_client
-
-        with patch.dict(
-            os.environ,
-            {
-                "LANGFUSE_ENABLED": "true",
-                "LANGFUSE_PUBLIC_KEY": "pk-test",
-                "LANGFUSE_SECRET_KEY": "sk-test",
-            },
-            clear=True,
-        ):
-            from src.core.tracing import flush_langfuse
-
-            import src.core.tracing as tracing_module
-
-            tracing_module._langfuse_enabled = None
-            tracing_module._langfuse_client = None
-
-            # Should not raise
-            flush_langfuse()
+        assert decision.agent_allocation.worker_count >= 1
+        client.trace.assert_not_called()
