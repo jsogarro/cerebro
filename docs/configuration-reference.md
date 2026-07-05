@@ -141,6 +141,7 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 | `ADAPTIVE_ROUTING_UPDATE_INTERVAL_SECONDS` | integer | `300` | Interval for bandit model updates (seconds) | No |
 | `ADAPTIVE_ROUTING_POSTERIOR_TEMP_ENABLED` | boolean | `true` | Convergence lever: sharpen Thompson posteriors after warm-up to shift exploration toward exploitation | No |
 | `ADAPTIVE_ROUTING_POSTERIOR_TEMP_THRESHOLD` | integer | `150` | Per-experiment sample count after which posterior sharpening activates | No |
+| `MASR_FAST_PATH_ENABLED` | boolean | `true` | Single-agent fast path: classifier-approved trivial queries (SIMPLE, single-domain, one subtask, uncertainty <= 0.3, non-critical) bypass supervisors/TalkHier/verification for one routed simple-tier LLM call, with automatic escalation to DIRECT on quality-gate failure | No |
 | `ADAPTIVE_ROUTING_POSTERIOR_TEMP_FACTOR` | float | `3.0` | Sharpening factor applied to Beta posterior parameters (higher = stronger exploitation) | No |
 
 **Behavior when enabled**:

@@ -155,12 +155,14 @@ async def test_flag_off_allocation_matches_analytic(
             ComplexityFactors,
         )
 
-        # PARALLEL mode with 3 domains → should allocate 4 workers (domains + 1)
+        # PARALLEL mode with 2 domains -> analytic 3 workers (domains + 1),
+        # which sits within the BALANCED-strategy PARALLEL budget cap (3) so
+        # the assertion still measures the pure analytic value.
         mock_analyze.return_value = ComplexityAnalysis(
             score=0.6,
             level=ComplexityLevel.MODERATE,
             factors=ComplexityFactors(),
-            domains=["research", "analytics", "content"],
+            domains=["research", "analytics"],
             subtask_count=4,
             uncertainty=0.3,
             reasoning_types=["analytical"],
@@ -192,8 +194,9 @@ async def test_flag_off_allocation_matches_analytic(
 
         decision = await masr_router_flag_off.route("Multi-domain query", context={})
 
-    # Assert: analytic allocation (3 domains + 1 = 4)
-    assert decision.agent_allocation.worker_count == 4
+    # Assert: analytic allocation (2 domains + 1 = 3); equals the budget cap
+    # boundary so no clamping occurs and the value is purely analytic.
+    assert decision.agent_allocation.worker_count == 3
     # No memory influence
     mock_episodic_memory.retrieve_episodes.assert_not_called()
 
@@ -248,7 +251,7 @@ async def test_flag_on_episodic_prior_nudges_allocation(
             score=0.6,
             level=ComplexityLevel.MODERATE,
             factors=ComplexityFactors(),
-            domains=["research", "analytics", "content"],
+            domains=["research", "analytics"],
             subtask_count=4,
             uncertainty=0.3,
             reasoning_types=["analytical"],
@@ -278,11 +281,16 @@ async def test_flag_on_episodic_prior_nudges_allocation(
             reasoning="Balanced",
         )
 
-        decision = await masr_router_flag_on.route("Test query", context={})
+        decision = await masr_router_flag_on.route(
+            "Test query", context={}, strategy="quality_focused"
+        )
 
     # Analytic: 4, prior: 6 → delta +2 (within cap of ±2) → adjusted to 4+2=6
     # But hard cap (max_parallel_workers default = 5) applies → final count is 5
-    assert decision.agent_allocation.worker_count == 5
+    # Analytic = 3 (2 domains + 1); prior 6 -> memory-capped to 5; the
+    # QUALITY_FOCUSED PARALLEL budget cap (4) then applies -> 4. The nudge
+    # is visible (4 > 3) and both caps are exercised.
+    assert decision.agent_allocation.worker_count == 4
     mock_episodic_memory.retrieve_episodes.assert_called_once()
 
 
@@ -357,10 +365,14 @@ async def test_flag_on_cap_enforced(masr_router_flag_on, mock_episodic_memory):
             reasoning="Balanced",
         )
 
-        decision = await masr_router_flag_on.route("Test query", context={})
+        decision = await masr_router_flag_on.route(
+            "Test query", context={}, strategy="quality_focused"
+        )
 
     # Analytic: 3, prior: 20 → delta +17, but cap is ±2 → adjusted to 3 + 2 = 5
-    assert decision.agent_allocation.worker_count == 5
+    # Wild prior (20) -> memory cap limits to analytic+2 = 5; the
+    # QUALITY_FOCUSED PARALLEL budget cap (4) is the final bound.
+    assert decision.agent_allocation.worker_count == 4
     # Hard cap should also apply (max_parallel_workers default is 5)
     assert decision.agent_allocation.worker_count <= 5
 
