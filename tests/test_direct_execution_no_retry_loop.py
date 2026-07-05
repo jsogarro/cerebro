@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+from src.ai_brain.router.routing_types import CollaborationMode
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
@@ -47,6 +48,9 @@ class _DecisionStub:
 
     agent_allocation: _AllocStub
     complexity_analysis: _ComplexityAnalysisStub
+    # Real RoutingDecision always carries a collaboration_mode; the service
+    # checks it for the fast-path bypass before entering orchestration.
+    collaboration_mode: CollaborationMode = CollaborationMode.HIERARCHICAL
 
 
 def _make_service() -> DirectExecutionService:

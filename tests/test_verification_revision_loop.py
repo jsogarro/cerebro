@@ -241,7 +241,7 @@ class TestVerificationRevisionLoop:
             # Second call: should have feedback appended
             second_content = sent_contents[1]
             assert isinstance(second_content, TalkHierContent)
-            assert "REVISION FEEDBACK" in second_content.content
+            assert "<REVISION_FEEDBACK" in second_content.content
             assert "Missing citation" in second_content.content
 
     @pytest.mark.asyncio
