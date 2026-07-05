@@ -1,8 +1,10 @@
-"""
-MCP Integration for Agents.
+"""MCP Integration for Agents.
 
 This module provides the integration layer between agents and MCP tools,
 enabling agents to use real external services in production.
+
+Security: Applies content sanitization at external source boundaries to
+defend against prompt injection via malicious titles/abstracts (Phase S3).
 """
 
 import asyncio
@@ -14,13 +16,13 @@ from structlog import get_logger
 
 from src.mcp.client import MCPClient
 from src.mcp.server import MCPServerConfig
+from src.security.content_sanitizer import ContentSanitizer
 
 logger = get_logger()
 
 
 class MCPIntegration:
-    """
-    Integration layer between agents and MCP tools.
+    """Integration layer between agents and MCP tools.
 
     Provides a production-ready interface for agents to access
     external tools with proper error handling and fallback mechanisms.
@@ -32,13 +34,13 @@ class MCPIntegration:
         config: dict[str, Any] | None = None,
         enable_fallback: bool = True,
     ):
-        """
-        Initialize MCP integration.
+        """Initialize MCP integration.
 
         Args:
             mcp_client: Optional pre-configured MCP client
             config: Configuration dictionary
             enable_fallback: Whether to enable fallback when tools fail
+
         """
         self.config = config or {}
         self.enable_fallback = enable_fallback
@@ -51,6 +53,9 @@ class MCPIntegration:
         self._max_failures = self.config.get("max_failures", 5)
         self._circuit_breaker_timeout = self.config.get("circuit_breaker_timeout", 60)
         self._last_failure_time: float = 0
+
+        # S3: Content sanitizer for prompt injection defense at external boundaries
+        self._content_sanitizer = ContentSanitizer(enable_logging=True)
 
         logger.info("mcp_integration_initialized", fallback_enabled=enable_fallback)
 
@@ -115,8 +120,7 @@ class MCPIntegration:
         max_results: int = 20,
         filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Search academic databases using MCP tools.
+        """Search academic databases using MCP tools.
 
         Args:
             query: Search query
@@ -126,6 +130,7 @@ class MCPIntegration:
 
         Returns:
             Search results with metadata
+
         """
         await self.initialize()
 
@@ -137,26 +142,31 @@ class MCPIntegration:
                 if self._client is None:
                     raise Exception("MCP client not initialized")
                 result = await self._client.search_academic(
-                    query=query, databases=databases, max_results=max_results
+                    query=query,
+                    databases=databases,
+                    max_results=max_results,
                 )
 
                 if result.get("success"):
+                    # S3: Sanitize external sources at MCP boundary (prompt injection defense)
+                    raw_sources = result.get("results", [])
+                    sanitized_sources = self._sanitize_academic_sources(raw_sources)
+
                     logger.info(
                         "mcp_academic_search_succeeded",
-                        result_count=len(result.get("results", [])),
+                        result_count=len(sanitized_sources),
                         database_count=len(databases),
                     )
                     return {
                         "success": True,
-                        "sources": result.get("results", []),
-                        "total_found": len(result.get("results", [])),
+                        "sources": sanitized_sources,
+                        "total_found": len(sanitized_sources),
                         "databases_searched": databases,
                         "search_strategy": f"Multi-database search across {', '.join(databases)}",
                     }
-                else:
-                    raise Exception(
-                        f"Academic search failed: {result.get('error', 'Unknown error')}"
-                    )
+                raise Exception(
+                    f"Academic search failed: {result.get('error', 'Unknown error')}",
+                )
 
         except Exception as e:
             logger.error("mcp_academic_search_failed", error=str(e))
@@ -165,10 +175,11 @@ class MCPIntegration:
             raise
 
     async def format_citations(
-        self, sources: list[dict[str, Any]], style: str = "APA"
+        self,
+        sources: list[dict[str, Any]],
+        style: str = "APA",
     ) -> dict[str, Any]:
-        """
-        Format citations using MCP citation tool.
+        """Format citations using MCP citation tool.
 
         Args:
             sources: List of source dictionaries
@@ -176,6 +187,7 @@ class MCPIntegration:
 
         Returns:
             Formatted citations
+
         """
         await self.initialize()
 
@@ -184,7 +196,8 @@ class MCPIntegration:
                 if self._client is None:
                     raise Exception("MCP client not initialized")
                 result = await self._client.format_citations(
-                    sources=sources, style=style
+                    sources=sources,
+                    style=style,
                 )
 
                 if result.get("success"):
@@ -199,10 +212,9 @@ class MCPIntegration:
                         "style": style,
                         "total_sources": len(sources),
                     }
-                else:
-                    raise Exception(
-                        f"Citation formatting failed: {result.get('error', 'Unknown error')}"
-                    )
+                raise Exception(
+                    f"Citation formatting failed: {result.get('error', 'Unknown error')}",
+                )
 
         except Exception as e:
             logger.error("mcp_citation_formatting_failed", style=style, error=str(e))
@@ -211,10 +223,12 @@ class MCPIntegration:
             raise
 
     async def analyze_statistics(
-        self, operation: str, data: list[Any] | None = None, **kwargs: Any
+        self,
+        operation: str,
+        data: list[Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
-        """
-        Perform statistical analysis using MCP statistics tool.
+        """Perform statistical analysis using MCP statistics tool.
 
         Args:
             operation: Statistical operation to perform
@@ -223,6 +237,7 @@ class MCPIntegration:
 
         Returns:
             Statistical analysis results
+
         """
         await self.initialize()
 
@@ -231,7 +246,9 @@ class MCPIntegration:
                 if self._client is None:
                     raise Exception("MCP client not initialized")
                 result = await self._client.analyze_statistics(
-                    operation=operation, data=data, **kwargs
+                    operation=operation,
+                    data=data,
+                    **kwargs,
                 )
 
                 if result.get("success"):
@@ -246,10 +263,9 @@ class MCPIntegration:
                         "operation": operation,
                         "data_points": len(data) if data else 0,
                     }
-                else:
-                    raise Exception(
-                        f"Statistical analysis failed: {result.get('error', 'Unknown error')}"
-                    )
+                raise Exception(
+                    f"Statistical analysis failed: {result.get('error', 'Unknown error')}",
+                )
 
         except Exception as e:
             logger.error(
@@ -267,8 +283,7 @@ class MCPIntegration:
         entities: list[Any] | None = None,
         relationships: list[Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Build knowledge graph using MCP knowledge graph tool.
+        """Build knowledge graph using MCP knowledge graph tool.
 
         Args:
             text: Text for entity extraction
@@ -277,6 +292,7 @@ class MCPIntegration:
 
         Returns:
             Knowledge graph data
+
         """
         await self.initialize()
 
@@ -285,7 +301,9 @@ class MCPIntegration:
                 if self._client is None:
                     raise Exception("MCP client not initialized")
                 result = await self._client.build_knowledge_graph(
-                    text=text, entities=entities, relationships=relationships
+                    text=text,
+                    entities=entities,
+                    relationships=relationships,
                 )
 
                 if result.get("success"):
@@ -296,10 +314,9 @@ class MCPIntegration:
                         "entities": result.get("entities", []),
                         "relationships": result.get("relationships", []),
                     }
-                else:
-                    raise Exception(
-                        f"Knowledge graph building failed: {result.get('error', 'Unknown error')}"
-                    )
+                raise Exception(
+                    f"Knowledge graph building failed: {result.get('error', 'Unknown error')}",
+                )
 
         except Exception as e:
             logger.error("mcp_knowledge_graph_build_failed", error=str(e))
@@ -308,11 +325,11 @@ class MCPIntegration:
             raise
 
     async def get_tool_status(self) -> dict[str, Any]:
-        """
-        Get status of all available MCP tools.
+        """Get status of all available MCP tools.
 
         Returns:
             Tool status information
+
         """
         await self.initialize()
 
@@ -341,10 +358,56 @@ class MCPIntegration:
                 "fallback_enabled": self.enable_fallback,
             }
 
+    # S3: Content sanitization for prompt injection defense
+
+    def _sanitize_academic_sources(
+        self,
+        sources: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Sanitize academic sources at the MCP boundary.
+
+        Applies conservative sanitization to all string-valued fields (title,
+        abstract, authors, journal, etc.) to neutralize instruction-like
+        injection patterns while preserving legitimate academic text.
+
+        Args:
+            sources: Raw source dicts from MCP (each has title, abstract, authors, etc.)
+
+        Returns:
+            Sanitized source dicts with neutralization events logged
+
+        """
+        sanitized_sources = []
+
+        # Sanitize every string-valued field: any of them may reach a
+        # downstream prompt (author/journal names appear in citation and
+        # summary prompts), so do not assume which fields are "safe".
+        for source in sources:
+            sanitized_source = source.copy()
+            for key, value in source.items():
+                if isinstance(value, str):
+                    sanitized_source[key] = self._content_sanitizer.sanitize(
+                        value
+                    ).sanitized_text
+                elif isinstance(value, list):
+                    sanitized_source[key] = [
+                        self._content_sanitizer.sanitize(item).sanitized_text
+                        if isinstance(item, str)
+                        else item
+                        for item in value
+                    ]
+
+            sanitized_sources.append(sanitized_source)
+
+        return sanitized_sources
+
     # Fallback implementations for when MCP tools are unavailable
 
     def _fallback_academic_search(
-        self, query: str, databases: list[str], max_results: int
+        self,
+        query: str,
+        databases: list[str],
+        max_results: int,
     ) -> dict[str, Any]:
         """Fallback implementation for academic search."""
         logger.info(
@@ -361,11 +424,11 @@ class MCPIntegration:
                     "title": f"Research Paper {i + 1}: {query}",
                     "authors": [f"Author {i + 1}"],
                     "year": 2024 - i,
-                    "journal": f"Journal of {query.split()[0] if query.split() else 'Research'}",
+                    "journal": f"Journal of {query.split(maxsplit=1)[0] if query.split() else 'Research'}",
                     "abstract": f"This paper investigates {query} using systematic methodology...",
                     "source": "fallback",
                     "relevance_score": 0.8 - (i * 0.1),
-                }
+                },
             )
 
         return {
@@ -378,7 +441,9 @@ class MCPIntegration:
         }
 
     def _fallback_citation_formatting(
-        self, sources: list[dict[str, Any]], style: str
+        self,
+        sources: list[dict[str, Any]],
+        style: str,
     ) -> dict[str, Any]:
         """Fallback implementation for citation formatting."""
         logger.info(
@@ -395,7 +460,7 @@ class MCPIntegration:
                 citation = f"{source.get('title', 'Untitled')} by {source.get('authors', ['Unknown'])[0]} ({source.get('year', 'n.d.')})"
 
             formatted_citations.append(
-                {"citation": citation, "style": style, "source": source}
+                {"citation": citation, "style": style, "source": source},
             )
 
         return {
@@ -407,7 +472,10 @@ class MCPIntegration:
         }
 
     def _fallback_statistical_analysis(
-        self, operation: str, data: list[Any] | None, **kwargs: Any
+        self,
+        operation: str,
+        data: list[Any] | None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Fallback implementation for statistical analysis."""
         logger.info(
@@ -427,7 +495,7 @@ class MCPIntegration:
                     "median": statistics.median(data),
                     "std_dev": statistics.stdev(data) if len(data) > 1 else 0,
                     "count": len(data),
-                }
+                },
             )
         else:
             result["message"] = f"Basic {operation} analysis completed (fallback mode)"
@@ -459,7 +527,7 @@ class MCPIntegration:
             for i, word in enumerate(words):
                 if word[0].isupper() and len(word) > 2:
                     extracted_entities.append(
-                        {"id": str(i), "text": word, "type": "entity", "position": i}
+                        {"id": str(i), "text": word, "type": "entity", "position": i},
                     )
 
         return {
@@ -472,10 +540,10 @@ class MCPIntegration:
 
 
 def create_mcp_integrated_agent(
-    agent_class: type, config: dict[str, Any] | None = None
+    agent_class: type,
+    config: dict[str, Any] | None = None,
 ) -> Any:
-    """
-    Factory function to create an agent with MCP integration.
+    """Factory function to create an agent with MCP integration.
 
     Args:
         agent_class: Agent class to instantiate
@@ -483,13 +551,15 @@ def create_mcp_integrated_agent(
 
     Returns:
         Agent instance with MCP integration
+
     """
     config = config or {}
 
     # Create MCP integration
     mcp_config = config.get("mcp", {})
     mcp_integration = MCPIntegration(
-        config=mcp_config, enable_fallback=mcp_config.get("enable_fallback", True)
+        config=mcp_config,
+        enable_fallback=mcp_config.get("enable_fallback", True),
     )
 
     # Add MCP integration to agent config
