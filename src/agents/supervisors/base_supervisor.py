@@ -25,6 +25,13 @@ from structlog import get_logger
 from src.core.types import SupervisionStatsDict
 from src.qa.mast import MASTLabeler, format_mast_labels_for_metadata
 
+try:
+    import tiktoken
+
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
+
 from ...prompts.manager import get_prompt_manager
 from ..base import BaseAgent
 from ..communication.communication_protocol import (
@@ -176,6 +183,60 @@ class BaseSupervisor(BaseAgent, ABC):
         # Initialize supervisor-specific components
         self._register_worker_types()
         self._build_workflow_graph()
+
+    def _measure_worker_results_tokens(
+        self, worker_results: dict[str, Any], round_number: int = 0
+    ) -> int:
+        """
+        Measure token count of worker results using tiktoken.
+
+        Args:
+            worker_results: Dict of worker outputs to measure
+            round_number: Refinement round number for logging context
+
+        Returns:
+            Token count (0 if tiktoken unavailable or measurement fails)
+        """
+        if not TIKTOKEN_AVAILABLE:
+            return 0
+
+        try:
+            # Import settings inline to avoid circular dependency
+            from src.core.config import get_settings
+
+            settings = get_settings()
+
+            # Only measure if telemetry is enabled
+            if not settings.ENABLE_CONTEXT_COMPACTION_TELEMETRY:
+                return 0
+
+            # Convert worker_results to string for token counting
+            import json
+
+            text = json.dumps(worker_results, default=str)
+
+            # Use cl100k_base encoding (used by GPT-3.5-turbo, GPT-4)
+            encoding = tiktoken.get_encoding("cl100k_base")
+            token_count = len(encoding.encode(text))
+
+            logger.info(
+                "Worker results token measurement",
+                supervisor_type=self.supervisor_type,
+                round_number=round_number,
+                token_count=token_count,
+                content_length_chars=len(text),
+                worker_count=len(worker_results),
+            )
+
+            return token_count
+
+        except Exception as e:
+            logger.debug(
+                "Failed to measure worker results tokens",
+                supervisor_type=self.supervisor_type,
+                error=str(e),
+            )
+            return 0
 
     @abstractmethod
     def _register_worker_types(self) -> None:
@@ -594,6 +655,9 @@ class BaseSupervisor(BaseAgent, ABC):
 
             # Update state with refinement round results
             state.refinement_round = round_number
+
+            # Measure worker_results token size for this round
+            self._measure_worker_results_tokens(state.worker_results, round_number)
 
             # Evaluate consensus for this round
             if responses:

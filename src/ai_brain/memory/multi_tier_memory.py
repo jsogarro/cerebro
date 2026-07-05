@@ -27,6 +27,13 @@ from .procedural_memory import ProceduralMemoryManager, Procedure
 from .semantic_memory import SemanticMemoryManager
 from .working_memory import ConversationContext, WorkingMemoryManager
 
+try:
+    import tiktoken
+
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
+
 logger = get_logger()
 
 
@@ -112,6 +119,63 @@ class MultiTierMemorySystem:
 
         # Background tasks
         self._consolidation_task: asyncio.Task[None] | None = None
+
+    def _measure_recall_result_tokens(self, recall: IntelligentRecall) -> int:
+        """
+        Measure token count of recall result using tiktoken.
+
+        Args:
+            recall: IntelligentRecall result to measure
+
+        Returns:
+            Token count (0 if tiktoken unavailable or measurement fails)
+        """
+        if not TIKTOKEN_AVAILABLE:
+            return 0
+
+        try:
+            # Import settings inline to avoid circular dependency
+            from src.core.config import get_settings
+
+            settings = get_settings()
+
+            # Only measure if telemetry is enabled
+            if not settings.ENABLE_CONTEXT_COMPACTION_TELEMETRY:
+                return 0
+
+            # Convert recall result to string for token counting
+            import json
+
+            recall_dict = {
+                "primary_results_count": len(recall.primary_results),
+                "supporting_context": recall.supporting_context,
+                "related_episodes_count": len(recall.related_episodes),
+                "applicable_procedures_count": len(recall.applicable_procedures),
+                "confidence_score": recall.confidence_score,
+                "recall_reasoning": recall.recall_reasoning,
+            }
+            text = json.dumps(recall_dict, default=str)
+
+            # Use cl100k_base encoding (used by GPT-3.5-turbo, GPT-4)
+            encoding = tiktoken.get_encoding("cl100k_base")
+            token_count = len(encoding.encode(text))
+
+            logger.info(
+                "Memory recall result token measurement",
+                token_count=token_count,
+                content_length_chars=len(text),
+                primary_results_count=len(recall.primary_results),
+                confidence_score=recall.confidence_score,
+            )
+
+            return token_count
+
+        except Exception as e:
+            logger.debug(
+                "Failed to measure recall result tokens",
+                error=str(e),
+            )
+            return 0
 
     async def initialize(self) -> None:
         """Initialize all memory tiers."""
@@ -254,6 +318,9 @@ class MultiTierMemorySystem:
                 query,
                 max_results,
             )
+
+            # Measure token size of recall result
+            self._measure_recall_result_tokens(recall)
 
             return recall
 

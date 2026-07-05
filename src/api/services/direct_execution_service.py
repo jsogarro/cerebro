@@ -26,6 +26,13 @@ from src.core.config import get_settings
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.repositories.checkpoint_repository import CheckpointRepository
 
+try:
+    import tiktoken
+
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
+
 from ...agents.models import AgentTask
 from ...agents.supervisors.analytics_supervisor import AnalyticsSupervisor
 from ...agents.supervisors.content_supervisor import ContentSupervisor
@@ -128,6 +135,56 @@ class DirectExecutionService:
             "average_execution_time": 0.0,
             "concurrent_executions": 0,
         }
+
+    def _measure_domain_output_tokens(
+        self, domain: str, output: Any, label: str = "domain_output"
+    ) -> int:
+        """
+        Measure token count of domain output using tiktoken.
+
+        Args:
+            domain: Domain name for context
+            output: Output content to measure
+            label: Label for logging (e.g., "before_truncation", "after_truncation")
+
+        Returns:
+            Token count (0 if tiktoken unavailable or measurement fails)
+        """
+        if not TIKTOKEN_AVAILABLE:
+            return 0
+
+        try:
+            settings = get_settings()
+
+            # Only measure if telemetry is enabled
+            if not settings.ENABLE_CONTEXT_COMPACTION_TELEMETRY:
+                return 0
+
+            # Convert output to string for token counting
+            output_str = str(output)
+
+            # Use cl100k_base encoding (used by GPT-3.5-turbo, GPT-4)
+            encoding = tiktoken.get_encoding("cl100k_base")
+            token_count = len(encoding.encode(output_str))
+
+            logger.info(
+                "Domain output token measurement",
+                domain=domain,
+                label=label,
+                token_count=token_count,
+                content_length_chars=len(output_str),
+            )
+
+            return token_count
+
+        except Exception as e:
+            logger.debug(
+                "Failed to measure domain output tokens",
+                domain=domain,
+                label=label,
+                error=str(e),
+            )
+            return 0
 
     async def _checkpoint(self, execution_status: ExecutionStatus, phase: str) -> None:
         """
@@ -455,8 +512,30 @@ class DirectExecutionService:
         for domain in succeeded_domains:
             output = domain_outputs.get(domain, {})
             output_str = str(output)
+
+            # Measure before truncation
+            tokens_before = self._measure_domain_output_tokens(
+                domain, output_str, label="before_truncation"
+            )
+
             if len(output_str) > char_limit:
-                truncated_outputs[domain] = output_str[:char_limit] + "..."
+                truncated_str = output_str[:char_limit] + "..."
+                truncated_outputs[domain] = truncated_str
+
+                # Measure after truncation
+                tokens_after = self._measure_domain_output_tokens(
+                    domain, truncated_str, label="after_truncation"
+                )
+
+                logger.info(
+                    "Domain output truncated",
+                    domain=domain,
+                    chars_before=len(output_str),
+                    chars_after=len(truncated_str),
+                    tokens_before=tokens_before,
+                    tokens_after=tokens_after,
+                    tokens_saved=tokens_before - tokens_after,
+                )
             else:
                 truncated_outputs[domain] = output_str
 
