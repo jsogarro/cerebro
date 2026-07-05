@@ -23,6 +23,7 @@ from langgraph.graph import StateGraph
 from structlog import get_logger
 
 from src.core.types import SupervisionStatsDict
+from src.qa.mast import MASTLabeler, format_mast_labels_for_metadata
 
 from ...prompts.manager import get_prompt_manager
 from ..base import BaseAgent
@@ -436,18 +437,44 @@ class BaseSupervisor(BaseAgent, ABC):
         )
         confidence = min(state.consensus_score, state.quality_score)
 
+        # Build base metadata
+        result_metadata = {
+            "agent_type": self.get_agent_type(),
+            "supervision_mode": state.supervision_mode.value,
+            "workers_coordinated": len(state.allocated_workers),
+            "refinement_rounds": state.refinement_round,
+        }
+
+        # Wire MAST labels from the verification QA gate into
+        # supervision_metadata (Phase S). Supervisors store the
+        # _run_verification result under worker_results["verification"].
+        verification = state.worker_results.get("verification")
+        if isinstance(verification, dict):
+            self._store_mast_labels_in_state(state, verification)
+
+        # Include MAST failure metadata if present (Phase S labeling)
+        if "mast_failures" in state.supervision_metadata:
+            result_metadata["mast_failures"] = state.supervision_metadata[
+                "mast_failures"
+            ]
+            result_metadata["mast_confidence"] = state.supervision_metadata.get(
+                "mast_confidence", 0.0
+            )
+            result_metadata["verification_rounds"] = state.supervision_metadata.get(
+                "verification_rounds", 0
+            )
+            if "revision_history" in state.supervision_metadata:
+                result_metadata["revision_history"] = state.supervision_metadata[
+                    "revision_history"
+                ]
+
         return AgentResult(
             task_id=task.id,
             status=status,
             output=aggregated_output,
             confidence=confidence,
             execution_time=execution_time,
-            metadata={
-                "agent_type": self.get_agent_type(),
-                "supervision_mode": state.supervision_mode.value,
-                "workers_coordinated": len(state.allocated_workers),
-                "refinement_rounds": state.refinement_round,
-            },
+            metadata=result_metadata,
         )
 
     async def send_talkhier_message(
@@ -651,7 +678,8 @@ class BaseSupervisor(BaseAgent, ABC):
                 - verdict: "pass" or "revise"
                 - report: full verification report text
                 - issues: list of specific issues (empty if pass)
-
+                - mast_labels: list of detected MAST failure mode codes (Phase S)
+                - mast_confidence: max confidence across detected labels
         """
         # Degrade gracefully if content is empty or missing.
         # Check explicitly before creating the verification task to avoid
@@ -663,7 +691,14 @@ class BaseSupervisor(BaseAgent, ABC):
                 supervisor_type=self.supervisor_type,
                 reason="no_aggregated_content_to_verify",
             )
-            return {"verdict": "pass", "report": "No content to verify.", "issues": []}
+            mast_labels, mast_confidence = self._label_qa_gate("pass", [], "")
+            return {
+                "verdict": "pass",
+                "report": "No content to verify.",
+                "issues": [],
+                "mast_labels": mast_labels,
+                "mast_confidence": mast_confidence,
+            }
 
         try:
             # Import lazily to avoid circular dependency
@@ -718,7 +753,14 @@ class BaseSupervisor(BaseAgent, ABC):
                 issue_count=len(issues),
             )
 
-            return {"verdict": verdict, "report": report_text, "issues": issues}
+            mast_labels, mast_confidence = self._label_qa_gate(verdict, issues, content)
+            return {
+                "verdict": verdict,
+                "report": report_text,
+                "issues": issues,
+                "mast_labels": mast_labels,
+                "mast_confidence": mast_confidence,
+            }
 
         except Exception as e:
             # Degrade gracefully on error — don't break the workflow
@@ -727,11 +769,52 @@ class BaseSupervisor(BaseAgent, ABC):
                 supervisor_type=self.supervisor_type,
                 error=str(e),
             )
+            mast_labels, mast_confidence = self._label_qa_gate("pass", [], content)
             return {
                 "verdict": "pass",  # neutral fallback
                 "report": f"Verification error: {e!s}",
                 "issues": [],
+                "mast_labels": mast_labels,
+                "mast_confidence": mast_confidence,
             }
+
+    def _label_qa_gate(
+        self, verdict: str, issues: list[str], content: str
+    ) -> tuple[list[str], float]:
+        """
+        Apply MAST labeling to a single-shot QA-gate verification result.
+
+        The QA gate runs once per task (no revision rounds), so labeling uses
+        round_num=1 with no previous content and a fresh hash tracker.
+
+        Returns:
+            Tuple of (mast_labels, mast_confidence). Never raises — labeling
+            failures degrade to no labels so verification is never broken by
+            the observability layer.
+        """
+        try:
+            # Per-call labeler: a shared instance would hold a mutable hash
+            # tracker, and concurrent tasks on one supervisor would
+            # cross-contaminate FM-1.3 repetition detection.
+            labeler = MASTLabeler(max_revision_rounds=MAX_VERIFICATION_REVISION_ROUNDS)
+            mast_result = labeler.label_verification_result(
+                verdict=verdict,
+                issues=issues,
+                round_num=1,
+                content=content,
+            )
+            mast_metadata = format_mast_labels_for_metadata(mast_result)
+            return (
+                list(mast_metadata["mast_failures"]),
+                float(mast_metadata["mast_confidence"]),
+            )
+        except Exception as e:
+            logger.error(
+                "mast_qa_gate_labeling_failed",
+                supervisor_type=self.supervisor_type,
+                error=str(e),
+            )
+            return [], 0.0
 
     def _extract_issues_from_report(self, report: str) -> list[str]:
         """Extract structured issues from verification report.
@@ -799,15 +882,26 @@ class BaseSupervisor(BaseAgent, ABC):
             - report: full verification report
             - issues: list of issues
             - rounds: number of rounds executed
-
+            - mast_labels: list of MAST failure mode codes (Phase S)
+            - mast_confidence: overall MAST labeling confidence
+            - revision_history: per-round MAST labels and verdicts
         """
         verification_result = {
             "verdict": "pass",
             "report": "",
             "issues": [],
             "rounds": 0,
+            "mast_labels": [],
+            "mast_confidence": 0.0,
+            "revision_history": [],
         }
         worker_response = None
+        previous_content: str | None = None
+
+        # Per-invocation labeler: isolates hash-tracker state across
+        # concurrent worker executions while persisting it across rounds
+        # within this one (required for FM-1.3 repetition detection).
+        loop_labeler = MASTLabeler(max_revision_rounds=MAX_VERIFICATION_REVISION_ROUNDS)
 
         for round_num in range(1, MAX_VERIFICATION_REVISION_ROUNDS + 1):
             logger.info(
@@ -851,13 +945,62 @@ class BaseSupervisor(BaseAgent, ABC):
             verification_result["rounds"] = round_num
 
             issues_list = verification_result.get("issues", [])
+
+            # Phase S: Apply MAST labeling (rule-based heuristics, zero LLM cost)
+            # Type-safe extraction for mypy
+            verdict_str = str(verification_result.get("verdict", "pass"))
+            issues_seq = list(issues_list) if isinstance(issues_list, list) else []
+
+            try:
+                mast_result = loop_labeler.label_verification_result(
+                    verdict=verdict_str,
+                    issues=issues_seq,
+                    round_num=round_num,
+                    content=aggregated_content,
+                    previous_content=previous_content,
+                )
+                mast_metadata = format_mast_labels_for_metadata(mast_result)
+            except Exception as e:
+                # Labeling must never break verification — degrade to no labels.
+                logger.error(
+                    "mast_loop_labeling_failed",
+                    worker_type=worker_type,
+                    round=round_num,
+                    error=str(e),
+                )
+                mast_metadata = {"mast_failures": [], "mast_confidence": 0.0}
+
+            # Store MAST labels in verification result
+            verification_result["mast_labels"] = mast_metadata["mast_failures"]
+            verification_result["mast_confidence"] = mast_metadata["mast_confidence"]
+
+            # Track per-round history for analysis
+            if "revision_history" not in verification_result:
+                verification_result["revision_history"] = []
+            revision_history_list = verification_result["revision_history"]
+            assert isinstance(revision_history_list, list)  # Type narrow for mypy
+            revision_history_list.append(
+                {
+                    "round": round_num,
+                    "verdict": verdict_str,
+                    "mast_labels": mast_metadata["mast_failures"],
+                    "mast_confidence": mast_metadata["mast_confidence"],
+                    "issues": issues_seq[:],  # shallow copy
+                }
+            )
+
             logger.info(
                 "worker_verification_round_completed",
                 worker_type=worker_type,
                 round=round_num,
                 verdict=verification_result["verdict"],
                 issue_count=len(issues_list) if isinstance(issues_list, list) else 0,
+                mast_failures=mast_metadata["mast_failures"],
+                mast_confidence=mast_metadata["mast_confidence"],
             )
+
+            # Update previous_content for next round's repetition detection
+            previous_content = aggregated_content
 
             # PASS → break with current response
             if verification_result["verdict"] == "pass":
@@ -938,6 +1081,45 @@ Task: Revise your previous response addressing the feedback while maintaining yo
             content = revised_content
 
         return worker_response, verification_result
+
+    def _store_mast_labels_in_state(
+        self, state: SupervisionState, verification_result: dict[str, Any]
+    ) -> None:
+        """
+        Store MAST labeling results from verification into supervision state.
+
+        Args:
+            state: Current supervision state to update
+            verification_result: Verification result dict with MAST labels
+
+        This method merges MAST failure metadata into state.supervision_metadata
+        for inclusion in the final AgentResult.
+        """
+        if not verification_result:
+            return
+
+        mast_labels = verification_result.get("mast_labels", [])
+        if not mast_labels:
+            return
+
+        # Merge into supervision_metadata for _build_supervision_result
+        state.supervision_metadata["mast_failures"] = mast_labels
+        state.supervision_metadata["mast_confidence"] = verification_result.get(
+            "mast_confidence", 0.0
+        )
+        state.supervision_metadata["verification_rounds"] = verification_result.get(
+            "rounds", 0
+        )
+        state.supervision_metadata["revision_history"] = verification_result.get(
+            "revision_history", []
+        )
+
+        logger.info(
+            "mast_labels_stored_in_state",
+            supervisor_type=self.supervisor_type,
+            mast_failures=mast_labels,
+            confidence=verification_result.get("mast_confidence", 0.0),
+        )
 
     async def execute_workers_parallel(
         self,
