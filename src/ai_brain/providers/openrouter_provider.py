@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from structlog import get_logger
 
+from src.core.tracing import record_provider_metrics, trace_provider_call
+
 from .base_provider import (
     BaseProvider,
     ModelCapability,
@@ -316,23 +318,59 @@ class OpenRouterProvider(BaseProvider):
 
         start_time = datetime.now()
 
-        try:
-            # Build OpenAI-compatible request payload
-            payload = self._build_request_payload(request, selected_model)
+        # Extract trace from request metadata (passed from MASR)
+        trace = (
+            request.metadata.get("_langfuse_trace")
+            if hasattr(request, "metadata")
+            else None
+        )
 
-            # Make API request
-            response_data = await self._make_api_request(payload)
+        # Trace provider call
+        with trace_provider_call(
+            trace=trace,
+            provider="openrouter",
+            model=selected_model,
+            metadata={
+                "temperature": request.temperature,
+                "max_tokens": request.max_tokens,
+                "tier": request.metadata.get("tier")
+                if hasattr(request, "metadata")
+                else None,
+            },
+        ) as span:
+            try:
+                # Build OpenAI-compatible request payload
+                payload = self._build_request_payload(request, selected_model)
 
-            # Process response
-            model_response = self._process_api_response(
-                response_data, request, selected_model, start_time
-            )
+                # Make API request
+                response_data = await self._make_api_request(payload)
 
-            return await self._postprocess_response(model_response, request)
+                # Process response
+                model_response = self._process_api_response(
+                    response_data, request, selected_model, start_time
+                )
 
-        except Exception as e:
-            logger.error("OpenRouter generation failed", error=str(e), exc_info=True)
-            return self._create_error_response(request, e, "generation_error")
+                # Record metrics to trace span
+                record_provider_metrics(
+                    span,
+                    prompt_tokens=model_response.prompt_tokens,
+                    completion_tokens=model_response.completion_tokens,
+                    cost_usd=model_response.cost_estimate,
+                    latency_ms=model_response.latency_ms,
+                )
+
+                return await self._postprocess_response(model_response, request)
+
+            except Exception as e:
+                logger.error(
+                    "OpenRouter generation failed", error=str(e), exc_info=True
+                )
+                # Update span with error if tracing enabled
+                if span is not None:
+                    span.update(
+                        metadata={"error": str(e), "error_type": type(e).__name__}
+                    )
+                return self._create_error_response(request, e, "generation_error")
 
     def _build_request_payload(
         self, request: ModelRequest, model_name: str
