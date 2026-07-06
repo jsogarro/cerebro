@@ -82,7 +82,7 @@ dev = [
     "locust>=2.34.0",
     "pytest-playwright>=0.6.0",
     "aiosqlite>=0.20.0",
-    "bcrypt<5.0",  # Pin for passlib 1.7.4 compatibility
+    "bcrypt<6.0",  # Pin for passlib 1.7.4 compatibility
 ]
 
 [project.scripts]
