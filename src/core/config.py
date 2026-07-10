@@ -70,6 +70,17 @@ class Settings(BaseSettings):
     MAX_REQUESTS_PER_MINUTE: int = 100
     ENABLE_CONTEXT_COMPACTION_TELEMETRY: bool = False
 
+    # Context Compaction Settings (Dark Launch)
+    ENABLE_CONSTRAINT_PINNING: bool = (
+        False  # Dark launch: extraction-only, no compaction
+    )
+    # Accepted env formats: JSON array (["routing","qa"]) or comma-separated (routing,qa).
+    # The field_validator below normalises both forms and validates element values.
+    # Note: an empty value (CONSTRAINT_TYPES="") is not permitted by the validator;
+    # if ConstraintRegistry receives an empty list it falls back to all types and
+    # emits a "constraint_registry_empty_types_fallback" structured warning log.
+    CONSTRAINT_TYPES: str | list[str] = ["routing", "qa", "format", "security"]
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -335,6 +346,52 @@ class Settings(BaseSettings):
                         f"DATABASE_URL contains default credentials ('{pattern}') in production. "
                         "Set secure credentials via environment variable."
                     )
+
+        return v
+
+    @field_validator("CONSTRAINT_TYPES", mode="before")
+    @classmethod
+    def validate_constraint_types(cls, v: Any) -> list[str]:
+        """Accept JSON-array string or comma-separated string for CONSTRAINT_TYPES.
+
+        Validates that every element is a known ConstraintType value.
+        Raises at startup with a clear message if any element is invalid.
+        """
+        import json
+
+        _valid = {"routing", "qa", "format", "security"}
+
+        # Normalise: JSON array string or comma-separated string → list[str]
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"CONSTRAINT_TYPES: invalid JSON array string: {v!r}"
+                    ) from exc
+                if not isinstance(parsed, list):
+                    raise ValueError(
+                        f"CONSTRAINT_TYPES: JSON value must be an array, got {type(parsed).__name__}"
+                    )
+                v = [str(item) for item in parsed]
+            else:
+                v = [item.strip() for item in stripped.split(",") if item.strip()]
+
+        # At this point v should be a list (either parsed above or already a list
+        # from pydantic's own env-parsing for list[str] fields).
+        if not isinstance(v, list):
+            raise ValueError(
+                f"CONSTRAINT_TYPES must be a list, JSON array, or comma-separated string; got {type(v).__name__}"
+            )
+
+        invalid = [item for item in v if item not in _valid]
+        if invalid:
+            raise ValueError(
+                f"CONSTRAINT_TYPES contains unrecognised values: {invalid}. "
+                f"Accepted values: {sorted(_valid)}"
+            )
 
         return v
 
