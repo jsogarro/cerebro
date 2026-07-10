@@ -22,6 +22,7 @@ from typing import Any
 from langgraph.graph import StateGraph
 from structlog import get_logger
 
+from src.ai_brain.compaction import ConstraintRegistry
 from src.core.telemetry import count_tokens_capped, telemetry_enabled
 from src.core.types import SupervisionStatsDict
 from src.qa.mast import MASTLabeler, format_mast_labels_for_metadata
@@ -303,6 +304,49 @@ class BaseSupervisor(BaseAgent, ABC):
                 supervision_mode=self._determine_supervision_mode(task),
                 context=task.input_data,
             )
+
+            # Extract constraints before any compaction point (STUB for PR2).
+            # Registry is request-local — MUST NOT be stored on self; supervisors
+            # are shared across concurrent requests (cross-request leakage).
+            # inject() wiring lands in PR3.
+            # self.config is a dict[str,Any] at runtime (BaseAgent); read the flag
+            # from the global Settings object, exactly as the telemetry path does.
+            try:
+                from src.core.config import (
+                    get_settings,  # inline — avoids circular import
+                )
+
+                _cs = get_settings()
+                if _cs.ENABLE_CONSTRAINT_PINNING:
+                    # CONSTRAINT_TYPES validator always returns list[str]; cast to
+                    # satisfy mypy (field annotation is str | list[str] for env parsing).
+                    _ctypes: list[str] | None = (
+                        _cs.CONSTRAINT_TYPES
+                        if isinstance(_cs.CONSTRAINT_TYPES, list)
+                        else None
+                    )
+                    constraint_registry = ConstraintRegistry(
+                        enabled=True,
+                        constraint_types=_ctypes,
+                    )
+                    # Extract from original query.
+                    # TODO: Read source_type from TalkHierMessage when security branch lands.
+                    extraction_result = constraint_registry.extract(
+                        context=state.original_query,
+                        source_type="USER_INPUT",
+                    )
+                    logger.info(
+                        "constraints_extracted_before_compaction",
+                        task_id=task.id,
+                        total_extracted=extraction_result.total_extracted,
+                        extraction_time_ms=extraction_result.extraction_time_ms,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "constraint_extraction_failed",
+                    task_id=task.id,
+                    error=str(e),
+                )
 
             # Execute LangGraph workflow
             final_state = await self._execute_supervision_workflow(state, task)

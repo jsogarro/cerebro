@@ -103,6 +103,27 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 
 ### AI Brain Platform Configuration
 
+#### Context Compaction (PR #78)
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `ENABLE_CONSTRAINT_PINNING` | boolean | `false` | Enable constraint extraction before compaction points. **Dark-launch flag**: extraction runs and is logged, but the [PINNED CONSTRAINTS] block is not injected into the model context until PR3 wires the callsite. Safe to enable in production for observability. | No |
+| `CONSTRAINT_TYPES` | list | `["routing","qa","format","security"]` | Constraint types to extract. Accepted values: `routing`, `qa`, `format`, `security`. Env formats: JSON array (`["routing","qa"]`) or comma-separated (`routing,qa`). Any unrecognised value causes a startup validation error. | No |
+
+**`ENABLE_CONSTRAINT_PINNING` lifecycle**:
+- **PR2 (current)**: When `true`, the supervisor extracts constraints from the incoming user query on every request and logs `constraints_extracted_before_compaction`. The `inject()` method is fully implemented and hardened but has no production callsite yet.
+- **PR3**: `inject()` will be called at the compaction boundary; `ENABLE_CONSTRAINT_PINNING=true` will then cause the [PINNED CONSTRAINTS] block to appear in the compacted context before it is handed to the model.
+
+**`CONSTRAINT_TYPES` accepted values**:
+| Value | Captures |
+|---|---|
+| `routing` | `routing strategy:`, `route to:`, `routing mode:`, `use … routing` |
+| `qa` | `quality threshold:`, `verification required:`, `must verify:`, `qa criteria:` |
+| `format` | `format:`, `output format:`, `must be formatted as:`, `structured as:` |
+| `security` | `security requirement:`, `must sanitize:`, `authentication required:`, `access control:` |
+
+**Security note**: constraint content originates from raw user queries. The `inject()` method applies the PR #72 defense chain (newline stripping, delimiter neutralisation, `ContentSanitizer`) before interpolating content into the [PINNED CONSTRAINTS] block.
+
 #### Multi-Provider Routing (PR #56)
 
 | Variable | Type | Default | Description | Required |
