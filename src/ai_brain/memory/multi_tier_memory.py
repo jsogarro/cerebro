@@ -22,6 +22,8 @@ from typing import Any
 
 from structlog import get_logger
 
+from src.core.telemetry import count_tokens, telemetry_enabled
+
 from .episodic_memory import Episode, EpisodeQuery, EpisodicMemoryManager, EventType
 from .procedural_memory import ProceduralMemoryManager, Procedure
 from .semantic_memory import SemanticMemoryManager
@@ -112,6 +114,53 @@ class MultiTierMemorySystem:
 
         # Background tasks
         self._consolidation_task: asyncio.Task[None] | None = None
+
+    def _measure_recall_result_tokens(self, recall: IntelligentRecall) -> int:
+        """Measure token count of recall result using tiktoken.
+
+        Measures a metadata summary dict (not full recall content) —
+        see measurement_scope field in the log event.
+
+        Args:
+            recall: IntelligentRecall result to measure
+
+        Returns:
+            Token count (0 if telemetry disabled, tiktoken unavailable, or on error)
+        """
+        if not telemetry_enabled():
+            return 0
+
+        try:
+            import json
+
+            recall_dict = {
+                "primary_results_count": len(recall.primary_results),
+                "supporting_context": recall.supporting_context,
+                "related_episodes_count": len(recall.related_episodes),
+                "applicable_procedures_count": len(recall.applicable_procedures),
+                "confidence_score": recall.confidence_score,
+                "recall_reasoning": recall.recall_reasoning,
+            }
+            text = json.dumps(recall_dict, default=str)
+            token_count = count_tokens(text)
+
+            logger.info(
+                "memory_recall_result_token_measurement",
+                token_count=token_count,
+                content_length_chars=len(text),
+                primary_results_count=len(recall.primary_results),
+                confidence_score=recall.confidence_score,
+                measurement_scope="metadata_summary",
+            )
+
+            return token_count
+
+        except Exception as e:
+            logger.debug(
+                "Failed to measure recall result tokens",
+                error=str(e),
+            )
+            return 0
 
     async def initialize(self) -> None:
         """Initialize all memory tiers."""
@@ -254,6 +303,9 @@ class MultiTierMemorySystem:
                 query,
                 max_results,
             )
+
+            # Measure token size of recall result
+            self._measure_recall_result_tokens(recall)
 
             return recall
 

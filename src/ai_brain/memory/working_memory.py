@@ -20,6 +20,7 @@ from typing import Any
 from structlog import get_logger
 
 from src.core.memory_encryption import MemoryEncryption
+from src.core.telemetry import count_tokens, telemetry_enabled
 from src.utils.async_helpers import BackgroundTaskTracker
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
@@ -109,6 +110,50 @@ class WorkingMemoryManager:
 
         # Background cleanup task
         self._cleanup_task: asyncio.Task[None] | None = None
+
+    def _measure_context_tokens(
+        self, content: Any, context_label: str = "unknown"
+    ) -> int:
+        """Measure token count of context content using tiktoken.
+
+        Args:
+            content: Content to measure (dict, list, str, etc.)
+            context_label: Label for logging (e.g., "messages", "context_variables")
+
+        Returns:
+            Token count (0 if telemetry disabled, tiktoken unavailable, or on error)
+        """
+        if not telemetry_enabled():
+            return 0
+
+        try:
+            import json
+
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, (dict, list)):
+                text = json.dumps(content)
+            else:
+                text = str(content)
+
+            token_count = count_tokens(text)
+
+            logger.info(
+                "context_token_measurement",
+                context_label=context_label,
+                token_count=token_count,
+                content_length_chars=len(text),
+            )
+
+            return token_count
+
+        except Exception as e:
+            logger.debug(
+                "Failed to measure context tokens",
+                context_label=context_label,
+                error=str(e),
+            )
+            return 0
 
     async def initialize(self) -> None:
         """Initialize the working memory system."""
@@ -313,7 +358,31 @@ class WorkingMemoryManager:
         # Limit message history to prevent memory bloat
         max_messages = self.config.get("max_messages_in_context", 50)
         if len(context.messages) > max_messages:
+            # Capture true pre-truncation count BEFORE the slice (fix: the
+            # expression used after the slice always equals max_messages).
+            original_count = len(context.messages)
+
+            # Measure before truncation — inside branch so 99% no-op path
+            # pays zero tiktoken cost.
+            tokens_before = self._measure_context_tokens(
+                context.messages, context_label="messages_before_truncation"
+            )
+
             context.messages = context.messages[-max_messages:]
+
+            tokens_after = self._measure_context_tokens(
+                context.messages, context_label="messages_after_truncation"
+            )
+
+            logger.info(
+                "conversation_context_truncated",
+                session_id=session_id,
+                messages_before=original_count,
+                messages_after=len(context.messages),
+                tokens_before=tokens_before,
+                tokens_after=tokens_after,
+                tokens_saved=tokens_before - tokens_after,
+            )
 
         return await self.store_conversation_context(context)
 

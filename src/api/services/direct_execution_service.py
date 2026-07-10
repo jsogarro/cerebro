@@ -24,6 +24,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import get_settings
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
+from src.core.telemetry import count_tokens, telemetry_enabled
 from src.repositories.checkpoint_repository import CheckpointRepository
 
 from ...agents.models import AgentTask
@@ -128,6 +129,47 @@ class DirectExecutionService:
             "average_execution_time": 0.0,
             "concurrent_executions": 0,
         }
+
+    def _measure_domain_output_tokens(
+        self, domain: str, output: str, label: str = "domain_output"
+    ) -> int:
+        """Measure token count of a pre-stringified domain output using tiktoken.
+
+        Callers must pass an already-stringified value; this method does not
+        call str() again to avoid double-conversion (fix #9).
+
+        Args:
+            domain: Domain name for logging context
+            output: Pre-stringified output content
+            label: Log label (e.g., "before_truncation", "after_truncation")
+
+        Returns:
+            Token count (0 if telemetry disabled, tiktoken unavailable, or on error)
+        """
+        if not telemetry_enabled():
+            return 0
+
+        try:
+            token_count = count_tokens(output)
+
+            logger.info(
+                "domain_output_token_measurement",
+                domain=domain,
+                label=label,
+                token_count=token_count,
+                content_length_chars=len(output),
+            )
+
+            return token_count
+
+        except Exception as e:
+            logger.debug(
+                "Failed to measure domain output tokens",
+                domain=domain,
+                label=label,
+                error=str(e),
+            )
+            return 0
 
     async def _checkpoint(self, execution_status: ExecutionStatus, phase: str) -> None:
         """
@@ -455,8 +497,30 @@ class DirectExecutionService:
         for domain in succeeded_domains:
             output = domain_outputs.get(domain, {})
             output_str = str(output)
+
+            # Measure before truncation
+            tokens_before = self._measure_domain_output_tokens(
+                domain, output_str, label="before_truncation"
+            )
+
             if len(output_str) > char_limit:
-                truncated_outputs[domain] = output_str[:char_limit] + "..."
+                truncated_str = output_str[:char_limit] + "..."
+                truncated_outputs[domain] = truncated_str
+
+                # Measure after truncation
+                tokens_after = self._measure_domain_output_tokens(
+                    domain, truncated_str, label="after_truncation"
+                )
+
+                logger.info(
+                    "Domain output truncated",
+                    domain=domain,
+                    chars_before=len(output_str),
+                    chars_after=len(truncated_str),
+                    tokens_before=tokens_before,
+                    tokens_after=tokens_after,
+                    tokens_saved=tokens_before - tokens_after,
+                )
             else:
                 truncated_outputs[domain] = output_str
 
@@ -824,9 +888,9 @@ class DirectExecutionService:
                         "context": routing_context,
                         "project_data": {
                             "title": project.title,
-                            "scope": project.scope.model_dump()
-                            if project.scope
-                            else {},
+                            "scope": (
+                                project.scope.model_dump() if project.scope else {}
+                            ),
                             "query": project.query.model_dump(),
                         },
                         "routing_decision": asdict(routing_decision),
@@ -1147,12 +1211,12 @@ class DirectExecutionService:
             ],
             "component_health": {
                 "masr_router": "healthy" if self.masr_router else "unavailable",
-                "supervisor_bridge": "healthy"
-                if self.supervisor_bridge
-                else "unavailable",
-                "supervisor_factory": "healthy"
-                if self.supervisor_factory
-                else "unavailable",
+                "supervisor_bridge": (
+                    "healthy" if self.supervisor_bridge else "unavailable"
+                ),
+                "supervisor_factory": (
+                    "healthy" if self.supervisor_factory else "unavailable"
+                ),
             },
         }
 

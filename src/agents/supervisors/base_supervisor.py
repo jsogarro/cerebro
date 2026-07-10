@@ -22,6 +22,8 @@ from typing import Any
 from langgraph.graph import StateGraph
 from structlog import get_logger
 
+from src.ai_brain.compaction import ConstraintRegistry
+from src.core.telemetry import count_tokens_capped, telemetry_enabled
 from src.core.types import SupervisionStatsDict
 from src.qa.mast import MASTLabeler, format_mast_labels_for_metadata
 
@@ -177,6 +179,67 @@ class BaseSupervisor(BaseAgent, ABC):
         self._register_worker_types()
         self._build_workflow_graph()
 
+    def _measure_worker_results_tokens(
+        self, worker_results: dict[str, Any], round_number: int = 0
+    ) -> int:
+        """Measure token count of worker results using tiktoken.
+
+        Serializes TalkHierMessage values via to_dict() so actual message
+        content is measured rather than the short object repr.
+
+        Args:
+            worker_results: Dict of worker outputs to measure
+            round_number: Refinement round number for logging context
+
+        Returns:
+            Token count (0 if tiktoken unavailable, telemetry off, or on error)
+        """
+        if not telemetry_enabled():
+            return 0
+
+        try:
+            import json
+
+            # Serialize structured worker outputs via their content fields so
+            # token counts reflect actual content, not the short object repr
+            # (fix #7). Finance/research supervisors store TalkHierContent
+            # directly; it has no to_dict(), so extract its text parts.
+            serializable: dict[str, Any] = {}
+            for k, v in worker_results.items():
+                if isinstance(v, TalkHierMessage):
+                    serializable[k] = v.to_dict()
+                elif isinstance(v, TalkHierContent):
+                    serializable[k] = {
+                        "content": v.content,
+                        "background": v.background,
+                        "intermediate_outputs": v.intermediate_outputs,
+                    }
+                else:
+                    serializable[k] = v
+
+            text = json.dumps(serializable, default=str)
+            token_count, truncated = count_tokens_capped(text)
+
+            logger.info(
+                "worker_results_token_measurement",
+                supervisor_type=self.supervisor_type,
+                round_number=round_number,
+                token_count=token_count,
+                content_length_chars=len(text),
+                worker_count=len(worker_results),
+                truncated=truncated,
+            )
+
+            return token_count
+
+        except Exception as e:
+            logger.debug(
+                "Failed to measure worker results tokens",
+                supervisor_type=self.supervisor_type,
+                error=str(e),
+            )
+            return 0
+
     @abstractmethod
     def _register_worker_types(self) -> None:
         """Register worker types for this supervisor."""
@@ -241,6 +304,49 @@ class BaseSupervisor(BaseAgent, ABC):
                 supervision_mode=self._determine_supervision_mode(task),
                 context=task.input_data,
             )
+
+            # Extract constraints before any compaction point (STUB for PR2).
+            # Registry is request-local — MUST NOT be stored on self; supervisors
+            # are shared across concurrent requests (cross-request leakage).
+            # inject() wiring lands in PR3.
+            # self.config is a dict[str,Any] at runtime (BaseAgent); read the flag
+            # from the global Settings object, exactly as the telemetry path does.
+            try:
+                from src.core.config import (
+                    get_settings,  # inline — avoids circular import
+                )
+
+                _cs = get_settings()
+                if _cs.ENABLE_CONSTRAINT_PINNING:
+                    # CONSTRAINT_TYPES validator always returns list[str]; cast to
+                    # satisfy mypy (field annotation is str | list[str] for env parsing).
+                    _ctypes: list[str] | None = (
+                        _cs.CONSTRAINT_TYPES
+                        if isinstance(_cs.CONSTRAINT_TYPES, list)
+                        else None
+                    )
+                    constraint_registry = ConstraintRegistry(
+                        enabled=True,
+                        constraint_types=_ctypes,
+                    )
+                    # Extract from original query.
+                    # TODO: Read source_type from TalkHierMessage when security branch lands.
+                    extraction_result = constraint_registry.extract(
+                        context=state.original_query,
+                        source_type="USER_INPUT",
+                    )
+                    logger.info(
+                        "constraints_extracted_before_compaction",
+                        task_id=task.id,
+                        total_extracted=extraction_result.total_extracted,
+                        extraction_time_ms=extraction_result.extraction_time_ms,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "constraint_extraction_failed",
+                    task_id=task.id,
+                    error=str(e),
+                )
 
             # Execute LangGraph workflow
             final_state = await self._execute_supervision_workflow(state, task)
@@ -594,6 +700,13 @@ class BaseSupervisor(BaseAgent, ABC):
 
             # Update state with refinement round results
             state.refinement_round = round_number
+
+            # Measure the FRESH responses returned by broadcast_to_workers, not
+            # the stale state.worker_results which hasn't been updated yet at
+            # this point in the flow.  Measuring stale data produced identical
+            # counts across refinement rounds, defeating the sizing signal.
+            responses_as_dict = {str(i): msg for i, msg in enumerate(responses)}
+            self._measure_worker_results_tokens(responses_as_dict, round_number)
 
             # Evaluate consensus for this round
             if responses:
