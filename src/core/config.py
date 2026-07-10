@@ -145,6 +145,13 @@ class Settings(BaseSettings):
         "complex": 1.0,
     }
 
+    # Langfuse Observability (opt-in distributed tracing for MASR routing +
+    # provider calls). Keys are only required when LANGFUSE_ENABLED is true.
+    LANGFUSE_ENABLED: bool = False
+    LANGFUSE_PUBLIC_KEY: str | None = None
+    LANGFUSE_SECRET_KEY: str | None = None
+    LANGFUSE_HOST: str | None = None
+
     # Foundation Model Providers Configuration
     MODEL_PROVIDERS_ENABLED: bool = True
 

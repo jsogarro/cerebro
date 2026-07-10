@@ -110,6 +110,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     get_direct_execution_service(gemini_service=gemini_service)
 
+    # FIX 4: Eagerly initialize the Langfuse client at startup (when enabled) so
+    # the first real request does not pay the SDK-import + client-construction cost
+    # synchronously on the event loop.  Guarded: a failure here logs a warning and
+    # never prevents the app from starting.
+    if settings.LANGFUSE_ENABLED:
+        try:
+            import asyncio as _asyncio
+
+            from src.core.tracing import get_langfuse_client as _get_lf_client
+
+            await _asyncio.to_thread(_get_lf_client)
+            logger.info("Langfuse client pre-initialized")
+        except Exception as _lf_init_err:
+            logger.warning(
+                f"Langfuse pre-initialization failed (non-fatal): {_lf_init_err}"
+            )
+
     yield
 
     # Shutdown
@@ -122,6 +139,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("WebSocket services shut down")
     except Exception as e:
         logger.warning(f"Error shutting down WebSocket services: {e}")
+
+    # Flush + stop Langfuse background export threads (no-op when disabled).
+    # Run off the event loop since the SDK shutdown is blocking.  A 5-second
+    # timeout prevents a hung/unreachable Langfuse endpoint from blocking SIGTERM
+    # indefinitely (FIX 2).  Both TimeoutError and any other exception are caught
+    # so a tracing failure can never block a clean application shutdown.
+    try:
+        import asyncio
+
+        from src.core.tracing import shutdown_langfuse
+
+        await asyncio.wait_for(
+            asyncio.to_thread(shutdown_langfuse),
+            timeout=5.0,
+        )
+        logger.info("Langfuse tracing shut down")
+    except TimeoutError:
+        logger.warning(
+            "Langfuse shutdown timed out after 5 s — background export threads may still be running"
+        )
+    except Exception as e:
+        logger.warning(f"Error shutting down Langfuse: {e}")
 
     # await close_database()
     # await close_redis()

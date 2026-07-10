@@ -25,6 +25,7 @@ import numpy as np
 from structlog import get_logger
 
 from src.core.pii_redactor import redact_pii
+from src.core.tracing import trace_masr_routing
 from src.core.types import HealthCheckDict
 
 if TYPE_CHECKING:
@@ -272,124 +273,215 @@ class MASRouter:
 
         logger.info("Routing query %s: %s...", query_id, redact_pii(query)[:100])
 
-        try:
-            await self._routing_circuit_breaker.call(lambda: None)
+        # Langfuse v4 sits on OTel, whose set_attributes REPLACES by key rather
+        # than merging. Keep the initial request fields in a local and re-send
+        # them on every trace.update() so they are not dropped from the trace.
+        initial_trace_metadata = {
+            "strategy_override": (
+                strategy.value if isinstance(strategy, RoutingStrategy) else strategy
+            ),
+            "has_constraints": constraints is not None,
+        }
 
-            # Check cache first if enabled. The strategy and constraints are
-            # part of the cache identity — the same query routes differently
-            # under a different strategy or cost/quality constraints.
-            cached_decision = self.cache_manager.check_cache(
-                query, context, strategy, constraints
-            )
-            if cached_decision:
-                logger.info(f"Using cached routing for {query_id}")
+        with trace_masr_routing(
+            query_id=query_id,
+            query=query,
+            metadata=initial_trace_metadata,
+        ) as trace:
+            if context is None:
+                context = {}
+            # Do NOT mutate the caller's context dict — the trace handle is a
+            # per-request, non-serializable object, and writing it into the
+            # shared context leaks it back into the caller and into the cached
+            # decision's stored context (a confirmed cross-request hazard). The
+            # trace handle is already available as the local ``trace`` below and
+            # is threaded to the provider via request.metadata at the call site,
+            # so no context mutation is needed here.
+
+            try:
+                await self._routing_circuit_breaker.call(lambda: None)
+
+                # Check cache first if enabled. The strategy and constraints are
+                # part of the cache identity — the same query routes differently
+                # under a different strategy or cost/quality constraints.
+                cached_decision = self.cache_manager.check_cache(
+                    query, context, strategy, constraints
+                )
+                if cached_decision:
+                    logger.info("routing_cache_hit", query_id=query_id)
+                    await self._routing_circuit_breaker._on_success()
+                    if trace is not None:
+                        try:
+                            trace.update(
+                                metadata={
+                                    **initial_trace_metadata,
+                                    "cache_hit": True,
+                                    "collaboration_mode": cached_decision.collaboration_mode.value,
+                                    "worker_count": cached_decision.agent_allocation.worker_count,
+                                }
+                            )
+                        except Exception as trace_err:
+                            logger.debug(
+                                "trace_update_failed",
+                                error=str(trace_err),
+                                query_id=query_id,
+                            )
+                    return cached_decision
+
+                # Step 1: Analyze query complexity
+                complexity_analysis = await self.complexity_analyzer.analyze(
+                    query, context
+                )
+
+                # Step 2: Optimize model selection.
+                # ``strategy`` may arrive as a bare string when the caller used a
+                # Pydantic model with ``use_enum_values=True`` (e.g. RoutingRequest),
+                # so normalize to a RoutingStrategy member before it is stored on the
+                # decision and used for ``.value`` lookups downstream.
+                if strategy is not None:
+                    routing_strategy = RoutingStrategy(strategy)
+                else:
+                    routing_strategy = self._select_routing_strategy(
+                        complexity_analysis, context
+                    )
+                optimization_strategy = self._map_to_optimization_strategy(
+                    routing_strategy
+                )
+
+                optimization_result = await self.cost_optimizer.optimize(
+                    complexity_analysis, optimization_strategy, constraints
+                )
+
+                # Step 3: Determine collaboration mode
+                collaboration_mode = self._determine_collaboration_mode(
+                    complexity_analysis, optimization_result
+                )
+
+                # Step 3.5: Query episodic memory for routing prior (if enabled)
+                episodic_prior = await self._get_episodic_routing_prior(
+                    complexity_analysis, query
+                )
+
+                # Step 3.6: Query adaptive engine for allocation adjustment (if enabled)
+                adaptive_recommendation = (
+                    await self._get_adaptive_allocation_adjustment(
+                        complexity_analysis, collaboration_mode, episodic_prior
+                    )
+                )
+
+                # Step 4: Allocate agents (with optional memory + adaptive adjustment)
+                agent_allocation = self._allocate_agents(
+                    complexity_analysis,
+                    collaboration_mode,
+                    episodic_prior,
+                    adaptive_recommendation,
+                    routing_strategy=routing_strategy,
+                )
+
+                # Step 5: Calculate performance predictions
+                predictions = self._predict_performance(
+                    complexity_analysis, optimization_result, agent_allocation
+                )
+
+                # Step 6: Create routing decision
+                decision = RoutingDecision(
+                    query_id=query_id,
+                    timestamp=start_time,
+                    complexity_analysis=complexity_analysis,
+                    optimization_result=optimization_result,
+                    routing_strategy=routing_strategy,
+                    collaboration_mode=collaboration_mode,
+                    agent_allocation=agent_allocation,
+                    estimated_cost=predictions["cost"],
+                    estimated_latency_ms=int(predictions["latency"]),
+                    estimated_quality=predictions["quality"],
+                    confidence_score=predictions["confidence"],
+                    fallback_strategy=self._select_fallback_strategy(
+                        complexity_analysis
+                    ),
+                    monitoring_level=self._select_monitoring_level(complexity_analysis),
+                    context_requirements=self._determine_context_requirements(
+                        complexity_analysis, context
+                    ),
+                    memory_allocation=self._allocate_memory(complexity_analysis),
+                )
+
+                # Cache decision
+                self.cache_manager.cache_decision(
+                    query, context, decision, strategy, constraints
+                )
+
+                # Update metrics
+                self.metrics_collector.update_metrics(decision)
+
+                # Store in history for learning
+                self.metrics_collector.add_to_history(decision)
+
+                # Trigger adaptive learning if enabled
+                if self.learning_enabled:
+                    task = asyncio.create_task(
+                        self.metrics_collector.adapt_from_decision(decision)
+                    )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
+
+                processing_time = (datetime.now() - start_time).total_seconds() * 1000
+                logger.info(
+                    f"Routing complete for {query_id}: {decision.collaboration_mode.value} "
+                    f"mode with {decision.agent_allocation.worker_count} agents "
+                    f"(processing: {processing_time:.1f}ms)"
+                )
+
+                # Update trace with final routing decision details
+                if trace is not None:
+                    try:
+                        trace.update(
+                            metadata={
+                                **initial_trace_metadata,
+                                "cache_hit": False,
+                                "complexity_level": complexity_analysis.level.value,
+                                "complexity_score": complexity_analysis.score,
+                                "routing_strategy": routing_strategy.value,
+                                "collaboration_mode": collaboration_mode.value,
+                                "worker_count": agent_allocation.worker_count,
+                                "estimated_cost": predictions["cost"],
+                                "estimated_latency_ms": predictions["latency"],
+                                "estimated_quality": predictions["quality"],
+                                "confidence_score": predictions["confidence"],
+                                "processing_time_ms": processing_time,
+                            }
+                        )
+                    except Exception as trace_err:
+                        logger.debug(
+                            "trace_update_failed",
+                            error=str(trace_err),
+                            query_id=query_id,
+                        )
+
                 await self._routing_circuit_breaker._on_success()
-                return cached_decision
+                return decision
 
-            # Step 1: Analyze query complexity
-            complexity_analysis = await self.complexity_analyzer.analyze(query, context)
-
-            # Step 2: Optimize model selection.
-            # ``strategy`` may arrive as a bare string when the caller used a
-            # Pydantic model with ``use_enum_values=True`` (e.g. RoutingRequest),
-            # so normalize to a RoutingStrategy member before it is stored on the
-            # decision and used for ``.value`` lookups downstream.
-            if strategy is not None:
-                routing_strategy = RoutingStrategy(strategy)
-            else:
-                routing_strategy = self._select_routing_strategy(
-                    complexity_analysis, context
-                )
-            optimization_strategy = self._map_to_optimization_strategy(routing_strategy)
-
-            optimization_result = await self.cost_optimizer.optimize(
-                complexity_analysis, optimization_strategy, constraints
-            )
-
-            # Step 3: Determine collaboration mode
-            collaboration_mode = self._determine_collaboration_mode(
-                complexity_analysis, optimization_result
-            )
-
-            # Step 3.5: Query episodic memory for routing prior (if enabled)
-            episodic_prior = await self._get_episodic_routing_prior(
-                complexity_analysis, query
-            )
-
-            # Step 3.6: Query adaptive engine for allocation adjustment (if enabled)
-            adaptive_recommendation = await self._get_adaptive_allocation_adjustment(
-                complexity_analysis, collaboration_mode, episodic_prior
-            )
-
-            # Step 4: Allocate agents (with optional memory + adaptive adjustment)
-            agent_allocation = self._allocate_agents(
-                complexity_analysis,
-                collaboration_mode,
-                episodic_prior,
-                adaptive_recommendation,
-                routing_strategy=routing_strategy,
-            )
-
-            # Step 5: Calculate performance predictions
-            predictions = self._predict_performance(
-                complexity_analysis, optimization_result, agent_allocation
-            )
-
-            # Step 6: Create routing decision
-            decision = RoutingDecision(
-                query_id=query_id,
-                timestamp=start_time,
-                complexity_analysis=complexity_analysis,
-                optimization_result=optimization_result,
-                routing_strategy=routing_strategy,
-                collaboration_mode=collaboration_mode,
-                agent_allocation=agent_allocation,
-                estimated_cost=predictions["cost"],
-                estimated_latency_ms=int(predictions["latency"]),
-                estimated_quality=predictions["quality"],
-                confidence_score=predictions["confidence"],
-                fallback_strategy=self._select_fallback_strategy(complexity_analysis),
-                monitoring_level=self._select_monitoring_level(complexity_analysis),
-                context_requirements=self._determine_context_requirements(
-                    complexity_analysis, context
-                ),
-                memory_allocation=self._allocate_memory(complexity_analysis),
-            )
-
-            # Cache decision
-            self.cache_manager.cache_decision(
-                query, context, decision, strategy, constraints
-            )
-
-            # Update metrics
-            self.metrics_collector.update_metrics(decision)
-
-            # Store in history for learning
-            self.metrics_collector.add_to_history(decision)
-
-            # Trigger adaptive learning if enabled
-            if self.learning_enabled:
-                task = asyncio.create_task(
-                    self.metrics_collector.adapt_from_decision(decision)
-                )
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
-
-            processing_time = (datetime.now() - start_time).total_seconds() * 1000
-            logger.info(
-                f"Routing complete for {query_id}: {decision.collaboration_mode.value} "
-                f"mode with {decision.agent_allocation.worker_count} agents "
-                f"(processing: {processing_time:.1f}ms)"
-            )
-
-            await self._routing_circuit_breaker._on_success()
-            return decision
-
-        except Exception as e:
-            logger.error(f"Routing failed for {query_id}: {e}")
-            await self._routing_circuit_breaker._on_failure()
-            # Return fallback routing decision
-            return self._create_fallback_decision(query_id, query, e)
+            except Exception as e:
+                logger.error(f"Routing failed for {query_id}: {e}")
+                await self._routing_circuit_breaker._on_failure()
+                # Update trace with error metadata. Exception messages may contain
+                # payloads or PII, so redact before sending to Langfuse (external SaaS).
+                if trace is not None:
+                    try:
+                        trace.update(
+                            metadata={
+                                "error": redact_pii(str(e))[:300],
+                                "error_type": type(e).__name__,
+                            }
+                        )
+                    except Exception as trace_err:
+                        logger.debug(
+                            "trace_update_failed",
+                            error=str(trace_err),
+                            query_id=query_id,
+                        )
+                # Return fallback routing decision
+                return self._create_fallback_decision(query_id, query, e)
 
     def _select_routing_strategy(
         self, complexity_analysis: ComplexityAnalysis, context: dict[str, Any] | None

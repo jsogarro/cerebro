@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from structlog import get_logger
 
+from src.core.pii_redactor import redact_pii
+from src.core.tracing import record_provider_metrics, trace_provider_call
+
 from .base_provider import (
     BaseProvider,
     ModelCapability,
@@ -303,36 +306,84 @@ class OpenRouterProvider(BaseProvider):
                 request, ValueError("Invalid request"), "validation_error"
             )
 
+        # ModelRequest.metadata is a dataclass field(default_factory=dict), so
+        # it is always a dict — but tolerate metadata=None defensively.
+        metadata = request.metadata or {}
+
         # Determine model to use
         if model_name:
             # Explicit model override
             selected_model = model_name
         else:
             # Map from optimization tier if available
-            tier = (
-                request.metadata.get("tier") if hasattr(request, "metadata") else None
-            )
-            selected_model = self._select_model_from_tier(tier)
+            selected_model = self._select_model_from_tier(metadata.get("tier"))
 
         start_time = datetime.now()
 
-        try:
-            # Build OpenAI-compatible request payload
-            payload = self._build_request_payload(request, selected_model)
+        # Extract the parent routing observation from request metadata (threaded
+        # from MASR). None when tracing is disabled or not wired for this call.
+        parent_observation = metadata.get("_langfuse_trace")
 
-            # Make API request
-            response_data = await self._make_api_request(payload)
+        # Trace provider call
+        with trace_provider_call(
+            parent_observation,
+            provider="openrouter",
+            model=selected_model,
+            metadata={
+                "temperature": request.temperature,
+                "max_tokens": request.max_tokens,
+                "tier": metadata.get("tier"),
+            },
+        ) as span:
+            try:
+                # Build OpenAI-compatible request payload
+                payload = self._build_request_payload(request, selected_model)
 
-            # Process response
-            model_response = self._process_api_response(
-                response_data, request, selected_model, start_time
-            )
+                # Make API request
+                response_data = await self._make_api_request(payload)
 
-            return await self._postprocess_response(model_response, request)
+                # Process response
+                model_response = self._process_api_response(
+                    response_data, request, selected_model, start_time
+                )
 
-        except Exception as e:
-            logger.error("OpenRouter generation failed", error=str(e), exc_info=True)
-            return self._create_error_response(request, e, "generation_error")
+                # Record metrics to trace span
+                record_provider_metrics(
+                    span,
+                    prompt_tokens=model_response.prompt_tokens,
+                    completion_tokens=model_response.completion_tokens,
+                    cost_usd=model_response.cost_estimate,
+                    latency_ms=model_response.latency_ms,
+                )
+
+                return await self._postprocess_response(model_response, request)
+
+            except Exception as e:
+                logger.error(
+                    "OpenRouter generation failed", error=str(e), exc_info=True
+                )
+                # Update span with error if tracing enabled. Guard in its own
+                # try/except so a tracing failure can never replace the original
+                # provider exception. The observation itself is ended in the
+                # trace_provider_call context manager's finally block.
+                # Exception messages may contain request payloads or PII —
+                # redact before sending to Langfuse (external SaaS).
+                if span is not None:
+                    try:
+                        redacted_err = redact_pii(str(e))[:300]
+                        span.update(
+                            level="ERROR",
+                            status_message=redacted_err,
+                            metadata={
+                                "error": redacted_err,
+                                "error_type": type(e).__name__,
+                            },
+                        )
+                    except Exception as trace_err:
+                        logger.debug(
+                            "provider_span_update_failed", error=str(trace_err)
+                        )
+                return self._create_error_response(request, e, "generation_error")
 
     def _build_request_payload(
         self, request: ModelRequest, model_name: str
