@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from structlog import get_logger
 
+from src.core.pii_redactor import redact_pii
 from src.core.tracing import record_provider_metrics, trace_provider_call
 
 from .base_provider import (
@@ -305,37 +306,33 @@ class OpenRouterProvider(BaseProvider):
                 request, ValueError("Invalid request"), "validation_error"
             )
 
+        # ModelRequest.metadata is a dataclass field(default_factory=dict), so
+        # it is always a dict — but tolerate metadata=None defensively.
+        metadata = request.metadata or {}
+
         # Determine model to use
         if model_name:
             # Explicit model override
             selected_model = model_name
         else:
             # Map from optimization tier if available
-            tier = (
-                request.metadata.get("tier") if hasattr(request, "metadata") else None
-            )
-            selected_model = self._select_model_from_tier(tier)
+            selected_model = self._select_model_from_tier(metadata.get("tier"))
 
         start_time = datetime.now()
 
-        # Extract trace from request metadata (passed from MASR)
-        trace = (
-            request.metadata.get("_langfuse_trace")
-            if hasattr(request, "metadata")
-            else None
-        )
+        # Extract the parent routing observation from request metadata (threaded
+        # from MASR). None when tracing is disabled or not wired for this call.
+        parent_observation = metadata.get("_langfuse_trace")
 
         # Trace provider call
         with trace_provider_call(
-            trace=trace,
+            parent_observation,
             provider="openrouter",
             model=selected_model,
             metadata={
                 "temperature": request.temperature,
                 "max_tokens": request.max_tokens,
-                "tier": request.metadata.get("tier")
-                if hasattr(request, "metadata")
-                else None,
+                "tier": metadata.get("tier"),
             },
         ) as span:
             try:
@@ -365,11 +362,27 @@ class OpenRouterProvider(BaseProvider):
                 logger.error(
                     "OpenRouter generation failed", error=str(e), exc_info=True
                 )
-                # Update span with error if tracing enabled
+                # Update span with error if tracing enabled. Guard in its own
+                # try/except so a tracing failure can never replace the original
+                # provider exception. The observation itself is ended in the
+                # trace_provider_call context manager's finally block.
+                # Exception messages may contain request payloads or PII —
+                # redact before sending to Langfuse (external SaaS).
                 if span is not None:
-                    span.update(
-                        metadata={"error": str(e), "error_type": type(e).__name__}
-                    )
+                    try:
+                        redacted_err = redact_pii(str(e))[:300]
+                        span.update(
+                            level="ERROR",
+                            status_message=redacted_err,
+                            metadata={
+                                "error": redacted_err,
+                                "error_type": type(e).__name__,
+                            },
+                        )
+                    except Exception as trace_err:
+                        logger.debug(
+                            "provider_span_update_failed", error=str(trace_err)
+                        )
                 return self._create_error_response(request, e, "generation_error")
 
     def _build_request_payload(

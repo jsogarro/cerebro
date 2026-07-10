@@ -1,115 +1,132 @@
-"""Distributed tracing with Langfuse.
+"""Distributed tracing with Langfuse (v4 SDK).
 
-This module provides opt-in distributed tracing for LLM calls and agent orchestration.
-Traces are sent to Langfuse for debugging, cost tracking, and performance analysis.
+This module provides opt-in distributed tracing for MASR routing decisions and
+LLM provider calls. Traces are sent to Langfuse for debugging, cost tracking,
+and performance analysis.
 
-The implementation is no-op safe: if LANGFUSE_ENABLED is false or the SDK import fails,
-all tracing functions become no-ops without breaking the application.
+The implementation is no-op safe: if tracing is disabled (via ``Settings``) or
+the SDK import/initialization fails, all tracing functions become no-ops that
+never raise. Every individual interaction with the Langfuse SDK (client init,
+observation creation, ``update``, ``end``) is guarded, so a tracing error can
+never escape into — or replace — the caller's control flow.
 
-Environment Variables:
-    LANGFUSE_ENABLED: "1" or "true" to enable tracing (default: disabled)
-    LANGFUSE_PUBLIC_KEY: Langfuse public API key (from Langfuse UI)
-    LANGFUSE_SECRET_KEY: Langfuse secret API key (from Langfuse UI)
-    LANGFUSE_HOST: Langfuse server URL (optional, defaults to cloud)
+Configuration (see ``src.core.config.Settings``):
+    LANGFUSE_ENABLED: enable tracing (default: False)
+    LANGFUSE_PUBLIC_KEY: Langfuse public API key (required when enabled)
+    LANGFUSE_SECRET_KEY: Langfuse secret API key (required when enabled)
+    LANGFUSE_HOST: Langfuse server URL (optional; defaults to Langfuse cloud)
 
-Example Usage:
+This targets the Langfuse v4 API. Routing decisions are modelled as ``span``
+observations; provider calls as ``generation`` observations (first-class
+model/usage/cost fields). Observation handles are threaded from the router to
+the provider through call-site state rather than mutating caller data.
+
+Example:
     ```python
-    from src.core.tracing import trace_masr_routing, trace_provider_call, record_provider_metrics
+    from src.core.tracing import (
+        trace_masr_routing,
+        trace_provider_call,
+        record_provider_metrics,
+    )
 
-    # In MASR router
-    with trace_masr_routing(
-        query_id=str(decision.query_id),
-        query=query,
-        metadata={"complexity": "high", "strategy": "balanced"},
-    ) as trace:
-        # routing logic
-        pass
-
-    # In provider
-    with trace_provider_call(
-        trace=trace,
-        provider="openrouter",
-        model="claude-sonnet-4.6",
-    ) as span:
-        # make LLM call
-        record_provider_metrics(
-            span,
-            prompt_tokens=100,
-            completion_tokens=50,
-            cost_usd=0.005,
-            latency_ms=250,
-        )
+    with trace_masr_routing(query_id, query, metadata={...}) as routing_obs:
+        # routing logic ...
+        with trace_provider_call(
+            routing_obs, provider="openrouter", model="claude-sonnet-4.6"
+        ) as gen_obs:
+            # make LLM call ...
+            record_provider_metrics(
+                gen_obs,
+                prompt_tokens=100,
+                completion_tokens=50,
+                cost_usd=0.005,
+                latency_ms=250,
+            )
     ```
 """
 
 from __future__ import annotations
 
-import os
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from structlog import get_logger
 
+from src.core.config import get_settings
+from src.core.pii_redactor import redact_pii
+
 if TYPE_CHECKING:
     from langfuse import Langfuse
-    from langfuse.client import StatefulSpanClient, StatefulTraceClient
+    from langfuse._client.span import LangfuseGeneration, LangfuseSpan
 
 logger = get_logger(__name__)
 
+# Cap on the redacted query text stored as trace input. Traces are for
+# debugging, not full-fidelity capture; a bounded prefix keeps payloads small.
+_MAX_TRACE_INPUT_CHARS = 500
+
+# Lazy singleton client + guard. The lock prevents a double-init race when
+# concurrent tasks call get_langfuse_client() before the singleton is set.
 _langfuse_client: Langfuse | None = None
-_langfuse_enabled: bool | None = None
+_langfuse_lock = threading.Lock()
+_langfuse_initialized = False
 
 
-def _is_langfuse_enabled() -> bool:
-    """Check if Langfuse tracing is enabled via environment variable."""
-    global _langfuse_enabled
-    if _langfuse_enabled is None:
-        env_value = os.getenv("LANGFUSE_ENABLED", "").lower()
-        _langfuse_enabled = env_value in ("1", "true", "yes")
-    return _langfuse_enabled
+def _tracing_enabled() -> bool:
+    """Return True if Langfuse tracing is enabled via Settings.
+
+    This is the single source of truth for the enabled check; callers (and the
+    verify script) MUST route through here rather than parsing env vars.
+    """
+    try:
+        return bool(get_settings().LANGFUSE_ENABLED)
+    except Exception:
+        return False
 
 
 def _initialize_langfuse() -> Langfuse | None:
-    """Initialize Langfuse client if enabled.
+    """Initialize the Langfuse v4 client if enabled and configured.
 
-    Returns:
-        Langfuse client instance if initialization succeeds, None otherwise.
-
-    This function handles three failure modes gracefully:
-    1. LANGFUSE_ENABLED=false → returns None immediately
-    2. SDK not installed → logs warning, returns None
-    3. Initialization error (bad keys, network) → logs error, returns None
+    Handles every failure mode gracefully:
+    1. tracing disabled -> None
+    2. SDK not installed -> logs warning, returns None
+    3. keys missing / init error -> logs, returns None
     """
-    if not _is_langfuse_enabled():
+    settings = get_settings()
+    if not settings.LANGFUSE_ENABLED:
         logger.debug("langfuse_disabled")
+        return None
+
+    public_key = settings.LANGFUSE_PUBLIC_KEY
+    secret_key = settings.LANGFUSE_SECRET_KEY
+    host = settings.LANGFUSE_HOST
+
+    if not public_key or not secret_key:
+        logger.warning(
+            "langfuse_keys_missing",
+            message=(
+                "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are required "
+                "when LANGFUSE_ENABLED is true"
+            ),
+        )
         return None
 
     try:
         from langfuse import Langfuse
 
-        public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-        secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-        host = os.getenv("LANGFUSE_HOST")
-
-        if not public_key or not secret_key:
-            logger.warning(
-                "langfuse_keys_missing",
-                message="LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY required when LANGFUSE_ENABLED=true",
-            )
-            return None
-
         client = Langfuse(
             public_key=public_key,
             secret_key=secret_key,
-            host=host,  # Optional, defaults to Langfuse cloud
+            host=host,  # None -> Langfuse cloud default
         )
         logger.info("langfuse_initialized", host=host or "cloud")
         return client
     except ImportError:
         logger.warning(
             "langfuse_sdk_not_installed",
-            message="Install langfuse package to enable tracing: uv pip install langfuse",
+            message="Install langfuse (>=4.13,<5) to enable tracing.",
         )
         return None
     except Exception as e:
@@ -118,18 +135,33 @@ def _initialize_langfuse() -> Langfuse | None:
 
 
 def get_langfuse_client() -> Langfuse | None:
-    """Get or initialize Langfuse client.
+    """Get or lazily initialize the Langfuse client (thread-safe singleton).
 
-    Returns:
-        Langfuse client instance if available, None if disabled or failed to initialize.
-
-    This function is idempotent: the client is initialized once on first call,
-    then cached for subsequent calls.
+    Returns None if tracing is disabled or initialization failed. Initialization
+    is attempted at most once; the (possibly None) result is cached.
     """
-    global _langfuse_client
-    if _langfuse_client is None:
-        _langfuse_client = _initialize_langfuse()
+    global _langfuse_client, _langfuse_initialized
+
+    # Fast path: if disabled, never touch the SDK or the lock.
+    if not _tracing_enabled():
+        return None
+
+    if _langfuse_initialized:
+        return _langfuse_client
+
+    with _langfuse_lock:
+        if not _langfuse_initialized:
+            _langfuse_client = _initialize_langfuse()
+            _langfuse_initialized = True
     return _langfuse_client
+
+
+def reset_langfuse_state() -> None:
+    """Reset the cached client + init flag. Intended for tests only."""
+    global _langfuse_client, _langfuse_initialized
+    with _langfuse_lock:
+        _langfuse_client = None
+        _langfuse_initialized = False
 
 
 @contextmanager
@@ -137,170 +169,166 @@ def trace_masr_routing(
     query_id: str,
     query: str,
     metadata: dict[str, Any] | None = None,
-) -> Generator[StatefulTraceClient | None, None, None]:
-    """Trace MASR routing decision.
+) -> Generator[LangfuseSpan | None, None, None]:
+    """Trace a MASR routing decision as a root ``span`` observation.
 
-    Creates a new distributed trace for the query. The trace ID is set to the query_id
-    so traces can be correlated with query execution logs.
+    The observation's ``trace_id`` is derived deterministically from ``query_id``
+    so traces correlate with query-execution logs. The raw query is NEVER sent:
+    a PII-redacted, length-capped prefix is used as the observation input.
+
+    Contract:
+    - Yields exactly once. Body exceptions propagate UNCHANGED to the caller;
+      tracing never replaces or swallows a real error.
+    - Every Langfuse interaction is individually guarded, so an SDK failure can
+      never escape. On any tracing failure the block yields None and runs
+      normally.
+    - The observation is always ended in ``finally``.
 
     Args:
-        query_id: Unique query identifier (UUID)
-        query: Raw query text (will be PII-redacted in metadata)
-        metadata: Additional trace metadata (complexity, strategy, estimated_cost, etc.)
+        query_id: Unique query identifier (UUID string).
+        query: Raw query text (redacted + truncated before being sent).
+        metadata: Additional observation metadata.
 
     Yields:
-        StatefulTraceClient if tracing is enabled, None otherwise.
-
-    Example:
-        ```python
-        with trace_masr_routing(
-            query_id="123e4567-e89b-12d3-a456-426614174000",
-            query="What is the impact of AI on healthcare?",
-            metadata={
-                "complexity_level": "high",
-                "routing_strategy": "quality_focused",
-                "estimated_cost": 0.15,
-                "estimated_tokens": 5000,
-            },
-        ) as trace:
-            # MASR routing logic
-            decision = await self.route(query)
-        ```
+        A LangfuseSpan handle when tracing is active, else None.
     """
     client = get_langfuse_client()
     if client is None:
         yield None
         return
 
+    observation: LangfuseSpan | None = None
     try:
-        trace = client.trace(  # type: ignore[attr-defined]
-            id=query_id,
+        trace_id = client.create_trace_id(seed=query_id)
+        redacted_input = redact_pii(query)[:_MAX_TRACE_INPUT_CHARS]
+        observation = client.start_observation(  # type: ignore[assignment]
+            trace_context={"trace_id": trace_id},
             name="masr_routing",
-            input={"query": query},
+            as_type="span",
+            input={"query": redacted_input},
             metadata=metadata or {},
         )
-        yield trace
-        # Mark trace as completed (trace auto-flushes on context exit)
-        trace.update(output={"status": "completed"})
     except Exception as e:
         logger.warning(
-            "langfuse_trace_failed",
+            "langfuse_trace_create_failed",
             error=str(e),
             error_type=type(e).__name__,
             query_id=query_id,
         )
-        yield None
+        observation = None
+
+    try:
+        # Body runs regardless of whether the observation was created. Body
+        # exceptions are NOT caught here — they propagate to the caller.
+        yield observation
+    finally:
+        if observation is not None:
+            try:
+                observation.end()
+            except Exception as e:
+                logger.warning(
+                    "langfuse_trace_end_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    query_id=query_id,
+                )
 
 
 @contextmanager
 def trace_provider_call(
-    trace: StatefulTraceClient | None,
+    parent: LangfuseSpan | None,
     provider: str,
     model: str,
     metadata: dict[str, Any] | None = None,
-) -> Generator[StatefulSpanClient | None, None, None]:
-    """Trace LLM provider call as a span within a trace.
+) -> Generator[LangfuseGeneration | None, None, None]:
+    """Trace an LLM provider call as a nested ``generation`` observation.
+
+    Contract mirrors :func:`trace_masr_routing`: yields exactly once, body
+    exceptions propagate unchanged, all SDK interactions are guarded, and the
+    observation is ended in ``finally``.
 
     Args:
-        trace: Parent trace (from trace_masr_routing), or None if tracing disabled
-        provider: Provider name (e.g., "openrouter", "gemini")
-        model: Model identifier (e.g., "claude-sonnet-4.6", "gemini-pro")
-        metadata: Additional span metadata (temperature, strategy, etc.)
+        parent: Parent routing observation (from :func:`trace_masr_routing`), or
+            None when tracing is disabled.
+        provider: Provider name (e.g. "openrouter").
+        model: Model identifier (e.g. "claude-sonnet-4.6").
+        metadata: Additional observation metadata.
 
     Yields:
-        StatefulSpanClient if tracing is enabled, None otherwise.
-
-    Example:
-        ```python
-        with trace_provider_call(
-            trace=trace,
-            provider="openrouter",
-            model="claude-sonnet-4.6",
-            metadata={"temperature": 0.7, "strategy": "balanced"},
-        ) as span:
-            response = await httpx_client.post(...)
-            record_provider_metrics(
-                span,
-                prompt_tokens=response.usage.prompt_tokens,
-                completion_tokens=response.usage.completion_tokens,
-                cost_usd=response.cost,
-                latency_ms=response.latency_ms,
-            )
-        ```
+        A LangfuseGeneration handle when tracing is active, else None.
     """
-    if trace is None:
+    if parent is None:
         yield None
         return
 
+    observation: LangfuseGeneration | None = None
     try:
-        span = trace.span(
+        observation = parent.start_observation(  # type: ignore[assignment]
             name=f"{provider}_call",
-            metadata={
-                "provider": provider,
-                "model": model,
-                **(metadata or {}),
-            },
+            as_type="generation",
+            model=model,
+            metadata={"provider": provider, **(metadata or {})},
         )
-        yield span
-        # Span auto-closes on context exit
     except Exception as e:
         logger.warning(
-            "langfuse_span_failed",
+            "langfuse_generation_create_failed",
             error=str(e),
             error_type=type(e).__name__,
             provider=provider,
             model=model,
         )
-        yield None
+        observation = None
+
+    try:
+        yield observation
+    finally:
+        if observation is not None:
+            try:
+                observation.end()
+            except Exception as e:
+                logger.warning(
+                    "langfuse_generation_end_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    provider=provider,
+                    model=model,
+                )
 
 
 def record_provider_metrics(
-    span: StatefulSpanClient | None,
+    observation: LangfuseGeneration | None,
     *,
     prompt_tokens: int,
     completion_tokens: int,
     cost_usd: float,
     latency_ms: int,
 ) -> None:
-    """Record LLM provider call metrics to a span.
+    """Record token usage, cost, and latency onto a generation observation.
 
-    This updates the span with token usage, cost, and latency metadata.
-    The metrics are displayed in Langfuse UI and used for cost tracking.
+    Uses the v4 first-class ``usage_details`` and ``cost_details`` fields so the
+    values render natively in the Langfuse UI. No-op (and never raises) when the
+    observation is None.
 
     Args:
-        span: Span from trace_provider_call, or None if tracing disabled
-        prompt_tokens: Number of tokens in the prompt
-        completion_tokens: Number of tokens in the completion
-        cost_usd: Estimated cost in USD
-        latency_ms: Provider call latency in milliseconds
-
-    Example:
-        ```python
-        record_provider_metrics(
-            span,
-            prompt_tokens=100,
-            completion_tokens=50,
-            cost_usd=0.005,
-            latency_ms=250,
-        )
-        ```
+        observation: Generation handle from :func:`trace_provider_call`, or None.
+        prompt_tokens: Tokens in the prompt.
+        completion_tokens: Tokens in the completion.
+        cost_usd: Estimated cost in USD.
+        latency_ms: Provider call latency in milliseconds.
     """
-    if span is None:
+    if observation is None:
         return
 
     try:
         total_tokens = prompt_tokens + completion_tokens
-        span.update(
-            usage={
+        observation.update(
+            usage_details={
                 "input": prompt_tokens,
                 "output": completion_tokens,
                 "total": total_tokens,
-                "unit": "TOKENS",
             },
-            metadata={
-                "cost_usd": cost_usd,
-                "latency_ms": latency_ms,
-            },
+            cost_details={"total": cost_usd},
+            metadata={"latency_ms": latency_ms},
         )
     except Exception as e:
         logger.warning(
@@ -311,21 +339,15 @@ def record_provider_metrics(
 
 
 def flush_langfuse() -> None:
-    """Flush pending traces to Langfuse server.
+    """Flush pending traces to the Langfuse server (guarded, no-op if disabled).
 
-    This is useful at application shutdown to ensure all traces are sent.
-    Langfuse SDK normally flushes async in the background, but explicit flush
-    ensures no traces are lost on shutdown.
-
-    Example:
-        ```python
-        # In FastAPI shutdown handler
-        @app.on_event("shutdown")
-        async def shutdown_event():
-            flush_langfuse()
-        ```
+    Inspects the cached client directly WITHOUT calling get_langfuse_client(),
+    so this function never triggers lazy initialization at shutdown time.
     """
-    client = get_langfuse_client()
+    # Read the cached client under the lock to avoid a race with concurrent init.
+    with _langfuse_lock:
+        client = _langfuse_client
+
     if client is None:
         return
 
@@ -335,6 +357,35 @@ def flush_langfuse() -> None:
     except Exception as e:
         logger.warning(
             "langfuse_flush_failed",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+
+
+def shutdown_langfuse() -> None:
+    """Shut the Langfuse client down cleanly.
+
+    Calls ``client.shutdown()``, which flushes pending traces AND stops the
+    SDK's background export threads (a bare ``flush()`` leaves them running).
+
+    Inspects the cached client directly WITHOUT calling get_langfuse_client(),
+    so this function never triggers lazy initialization at shutdown time (e.g.
+    when tracing was enabled but no request was ever routed).  Guarded and a
+    no-op when tracing is disabled or the client was never constructed.
+    """
+    # Read the cached client under the lock to avoid a race with concurrent init.
+    with _langfuse_lock:
+        client = _langfuse_client
+
+    if client is None:
+        return
+
+    try:
+        client.shutdown()
+        logger.debug("langfuse_shutdown")
+    except Exception as e:
+        logger.warning(
+            "langfuse_shutdown_failed",
             error=str(e),
             error_type=type(e).__name__,
         )

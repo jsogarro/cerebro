@@ -1,16 +1,17 @@
-"""Live verification script for Langfuse tracing.
+"""Live verification script for Langfuse tracing (v4 SDK).
 
-Run with LANGFUSE_ENABLED=true and keys set to verify traces are created.
-Run with LANGFUSE_ENABLED=false to verify zero overhead.
+Verifies the no-op-safe contract and, when enabled + keyed, that a real client
+initializes. Uses the SAME enabled-check as the tracing layer
+(``src.core.tracing._tracing_enabled``) so there is no duplicated env parsing.
 
 Usage:
-    # With tracing enabled (requires Langfuse keys)
+    # Tracing enabled (requires Langfuse keys via Settings/env)
     export LANGFUSE_ENABLED=true
     export LANGFUSE_PUBLIC_KEY=pk-lf-...
     export LANGFUSE_SECRET_KEY=sk-lf-...
     python scripts/verify_tracing.py
 
-    # With tracing disabled (no keys needed)
+    # Tracing disabled (no keys needed)
     export LANGFUSE_ENABLED=false
     python scripts/verify_tracing.py
 """
@@ -18,62 +19,50 @@ Usage:
 import asyncio
 import os
 import sys
-from unittest.mock import MagicMock
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.ai_brain.router.masr import MASRouter
-from src.ai_brain.providers.openrouter_provider import OpenRouterProvider
-from src.ai_brain.providers.base_provider import ModelRequest
+from src.core.tracing import (
+    _tracing_enabled,
+    get_langfuse_client,
+    reset_langfuse_state,
+    shutdown_langfuse,
+)
 
 
 async def verify_tracing_enabled() -> None:
     """Verify tracing with LANGFUSE_ENABLED=true."""
     print("\n=== Verifying Tracing ENABLED ===\n")
 
-    # Check environment
-    enabled = os.getenv("LANGFUSE_ENABLED", "").lower() in ("1", "true", "yes")
-    if not enabled:
-        print("ERROR: LANGFUSE_ENABLED must be set to 'true'")
+    if not _tracing_enabled():
+        print("ERROR: LANGFUSE_ENABLED must be true (set via Settings/env)")
         sys.exit(1)
 
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-
-    if not public_key or not secret_key:
-        print("WARNING: LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY not set")
-        print("Traces will fail to initialize but code should not crash")
-
-    # Create MASR router
     print("1. Creating MASR router...")
     router = MASRouter()
 
-    # Route a test query
     print("2. Routing test query...")
-    query = "What is artificial intelligence?"
-
     try:
-        decision = await router.route(query)
-        print(f"✓ Routing succeeded: query_id={decision.query_id}")
-        print(f"  - Complexity: {decision.complexity_analysis.complexity_level.value}")
+        decision = await router.route("What is artificial intelligence?")
+        print(f"OK Routing succeeded: query_id={decision.query_id}")
+        print(f"  - Complexity: {decision.complexity_analysis.level.value}")
         print(f"  - Strategy: {decision.routing_strategy.value}")
         print(f"  - Estimated cost: ${decision.estimated_cost:.4f}")
 
-        # Check if trace was created (indirect - we can't access the trace object)
-        print("\n3. Checking trace creation...")
-        from src.core.tracing import get_langfuse_client
+        print("\n3. Checking client + shutdown...")
         client = get_langfuse_client()
-
         if client is not None:
-            print(f"✓ Langfuse client initialized (host: {getattr(client, 'host', 'unknown')})")
-            print("  Note: Actual trace visibility requires checking Langfuse UI")
+            print("OK Langfuse client initialized")
         else:
-            print("✗ Langfuse client is None (check keys and SDK installation)")
-
+            print("!! Langfuse client is None (check keys / SDK install)")
+        shutdown_langfuse()
+        print("OK shutdown_langfuse() ran without raising")
     except Exception as e:
-        print(f"✗ Routing failed: {e}")
+        print(f"FAIL Routing failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
@@ -82,45 +71,40 @@ async def verify_tracing_disabled() -> None:
     """Verify zero overhead with LANGFUSE_ENABLED=false."""
     print("\n=== Verifying Tracing DISABLED ===\n")
 
-    # Check environment
-    enabled = os.getenv("LANGFUSE_ENABLED", "").lower() in ("1", "true", "yes")
-    if enabled:
-        print("ERROR: LANGFUSE_ENABLED must be set to 'false' or unset")
+    if _tracing_enabled():
+        print("ERROR: LANGFUSE_ENABLED must be false/unset for this check")
         sys.exit(1)
 
     print("1. Creating MASR router...")
     router = MASRouter()
 
     print("2. Routing test query...")
-    query = "What is machine learning?"
-
     try:
-        decision = await router.route(query)
-        print(f"✓ Routing succeeded: query_id={decision.query_id}")
+        decision = await router.route("What is machine learning?")
+        print(f"OK Routing succeeded: query_id={decision.query_id}")
 
-        # Verify no client was created
         print("\n3. Verifying zero tracing overhead...")
-        from src.core.tracing import get_langfuse_client
         client = get_langfuse_client()
-
         if client is None:
-            print("✓ Langfuse client is None (no overhead)")
+            print("OK Langfuse client is None (no overhead, SDK untouched)")
         else:
-            print("✗ Langfuse client was created despite flag being off!")
+            print("FAIL Langfuse client was created despite flag being off!")
             sys.exit(1)
 
+        shutdown_langfuse()
+        print("OK shutdown_langfuse() is a clean no-op when disabled")
     except Exception as e:
-        print(f"✗ Routing failed: {e}")
+        print(f"FAIL Routing failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
 
 async def main() -> None:
-    """Run verification based on LANGFUSE_ENABLED setting."""
-    enabled = os.getenv("LANGFUSE_ENABLED", "").lower() in ("1", "true", "yes")
-
-    if enabled:
+    """Run verification based on the shared enabled-check."""
+    reset_langfuse_state()
+    if _tracing_enabled():
         await verify_tracing_enabled()
     else:
         await verify_tracing_disabled()

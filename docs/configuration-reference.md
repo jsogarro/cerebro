@@ -172,6 +172,43 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 - All adjustments respect shared hard caps (`max_parallel_workers`, `max_agents_per_query`)
 - Structured log event emitted when adaptation changes allocation (includes deltas, confidence)
 
+#### Langfuse Observability
+
+Opt-in distributed tracing for MASR routing decisions and LLM provider calls,
+using the Langfuse v4 SDK. Routing decisions are recorded as `span` observations
+and provider calls as `generation` observations (with first-class model, token
+usage, and cost fields). Tracing is **no-op safe**: when disabled, missing keys,
+or on any SDK error, the tracing layer never raises and never touches the SDK.
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `LANGFUSE_ENABLED` | boolean | `false` | Master switch for Langfuse tracing. When `false`, no client is created and the SDK is never imported. | No |
+| `LANGFUSE_PUBLIC_KEY` | string | `null` | Langfuse public API key (`pk-lf-...`). Only required when `LANGFUSE_ENABLED=true`. | Only when enabled |
+| `LANGFUSE_SECRET_KEY` | string | `null` | Langfuse secret API key (`sk-lf-...`). Only required when `LANGFUSE_ENABLED=true`. | Only when enabled |
+| `LANGFUSE_HOST` | string | `null` | Langfuse server URL. Leave unset to use Langfuse cloud. | No |
+
+**Behavior when enabled**:
+- Each `route()` call opens a `masr_routing` span whose trace ID is derived
+  deterministically from the query ID (correlates with execution logs).
+- The trace input is the **PII-redacted, length-capped** (≤500 char) query — the
+  raw query is never sent.  Exception strings sent on error paths are also
+  PII-redacted and capped at 300 characters before being sent to Langfuse.
+- **Active today**: MASR routing spans (`masr_routing`) are the primary
+  observability output.  The provider code implements `generation` observation
+  support (model, token usage, cost, latency fields) and correctly attaches them
+  when a parent trace handle is present in `request.metadata["_langfuse_trace"]`.
+  However, the execution path that threads the trace handle from the router into
+  provider requests is not yet wired up, so provider-generation observations are
+  not produced in the current flow.  This is a planned follow-up.
+- Pending traces are flushed and background export threads stopped on API
+  shutdown (`shutdown_langfuse` in the lifespan handler), with a 5-second
+  timeout so an unreachable Langfuse endpoint cannot block process termination.
+
+**Behavior when disabled** (default): Zero overhead. No client is initialized,
+the `langfuse` package is not imported, and all tracing calls are no-ops. If
+both keys are absent while enabled, tracing degrades to a no-op with a logged
+warning rather than failing.
+
 #### Multi-Domain Execution (PR #54)
 
 | Variable | Type | Default | Description | Required |
