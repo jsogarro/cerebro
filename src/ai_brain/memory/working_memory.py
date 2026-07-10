@@ -20,15 +20,9 @@ from typing import Any
 from structlog import get_logger
 
 from src.core.memory_encryption import MemoryEncryption
+from src.core.telemetry import count_tokens, telemetry_enabled
 from src.utils.async_helpers import BackgroundTaskTracker
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
-
-try:
-    import tiktoken
-
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    TIKTOKEN_AVAILABLE = False
 
 try:
     import redis.asyncio as redis_module
@@ -120,49 +114,32 @@ class WorkingMemoryManager:
     def _measure_context_tokens(
         self, content: Any, context_label: str = "unknown"
     ) -> int:
-        """
-        Measure token count of context content using tiktoken.
+        """Measure token count of context content using tiktoken.
 
         Args:
             content: Content to measure (dict, list, str, etc.)
-            context_label: Label for logging context (e.g., "messages", "context_variables")
+            context_label: Label for logging (e.g., "messages", "context_variables")
 
         Returns:
-            Token count (0 if tiktoken unavailable or measurement fails)
+            Token count (0 if telemetry disabled, tiktoken unavailable, or on error)
         """
-        if not TIKTOKEN_AVAILABLE:
-            logger.debug(
-                "tiktoken not available for token measurement",
-                context_label=context_label,
-            )
+        if not telemetry_enabled():
             return 0
 
         try:
-            # Import settings inline to avoid circular dependency
-            from src.core.config import get_settings
+            import json
 
-            settings = get_settings()
-
-            # Only measure if telemetry is enabled
-            if not settings.ENABLE_CONTEXT_COMPACTION_TELEMETRY:
-                return 0
-
-            # Convert content to string for token counting
             if isinstance(content, str):
                 text = content
             elif isinstance(content, (dict, list)):
-                import json
-
                 text = json.dumps(content)
             else:
                 text = str(content)
 
-            # Use cl100k_base encoding (used by GPT-3.5-turbo, GPT-4)
-            encoding = tiktoken.get_encoding("cl100k_base")
-            token_count = len(encoding.encode(text))
+            token_count = count_tokens(text)
 
             logger.info(
-                "Context token measurement",
+                "context_token_measurement",
                 context_label=context_label,
                 token_count=token_count,
                 content_length_chars=len(text),
@@ -378,26 +355,29 @@ class WorkingMemoryManager:
         message_with_timestamp = {**message, "timestamp": datetime.now().isoformat()}
         context.messages.append(message_with_timestamp)
 
-        # Measure before truncation
-        tokens_before = self._measure_context_tokens(
-            context.messages, context_label="messages_before_truncation"
-        )
-
         # Limit message history to prevent memory bloat
         max_messages = self.config.get("max_messages_in_context", 50)
         if len(context.messages) > max_messages:
+            # Capture true pre-truncation count BEFORE the slice (fix: the
+            # expression used after the slice always equals max_messages).
+            original_count = len(context.messages)
+
+            # Measure before truncation — inside branch so 99% no-op path
+            # pays zero tiktoken cost.
+            tokens_before = self._measure_context_tokens(
+                context.messages, context_label="messages_before_truncation"
+            )
+
             context.messages = context.messages[-max_messages:]
 
-            # Measure after truncation
             tokens_after = self._measure_context_tokens(
                 context.messages, context_label="messages_after_truncation"
             )
 
             logger.info(
-                "Conversation context truncated",
+                "conversation_context_truncated",
                 session_id=session_id,
-                messages_before=len(context.messages)
-                + (len(context.messages) - max_messages),
+                messages_before=original_count,
                 messages_after=len(context.messages),
                 tokens_before=tokens_before,
                 tokens_after=tokens_after,

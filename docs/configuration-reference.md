@@ -316,6 +316,12 @@ Phase L (6-8 weeks) will add:
 | `STORAGE_GCS_BUCKET` | string | - | GCS bucket name | No |
 | `STORAGE_GCS_CREDENTIALS` | string | - | GCS credentials JSON | No |
 
+### Context Compaction Telemetry
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `ENABLE_CONTEXT_COMPACTION_TELEMETRY` | boolean | `false` | Enable INFO-level token telemetry at 4 context hotspots (working memory truncation, multi-tier memory recall, supervisor worker results, domain output synthesis). When `false`, no per-request tiktoken encoding occurs (zero runtime overhead); the tiktoken dependency is imported at process startup regardless. Set to `true` to observe token counts at each measurement point. | No |
+
 ### Monitoring and Observability
 
 | Variable | Type | Default | Description | Required |

@@ -22,15 +22,9 @@ from typing import Any
 from langgraph.graph import StateGraph
 from structlog import get_logger
 
+from src.core.telemetry import count_tokens_capped, telemetry_enabled
 from src.core.types import SupervisionStatsDict
 from src.qa.mast import MASTLabeler, format_mast_labels_for_metadata
-
-try:
-    import tiktoken
-
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    TIKTOKEN_AVAILABLE = False
 
 from ...prompts.manager import get_prompt_manager
 from ..base import BaseAgent
@@ -187,45 +181,52 @@ class BaseSupervisor(BaseAgent, ABC):
     def _measure_worker_results_tokens(
         self, worker_results: dict[str, Any], round_number: int = 0
     ) -> int:
-        """
-        Measure token count of worker results using tiktoken.
+        """Measure token count of worker results using tiktoken.
+
+        Serializes TalkHierMessage values via to_dict() so actual message
+        content is measured rather than the short object repr.
 
         Args:
             worker_results: Dict of worker outputs to measure
             round_number: Refinement round number for logging context
 
         Returns:
-            Token count (0 if tiktoken unavailable or measurement fails)
+            Token count (0 if tiktoken unavailable, telemetry off, or on error)
         """
-        if not TIKTOKEN_AVAILABLE:
+        if not telemetry_enabled():
             return 0
 
         try:
-            # Import settings inline to avoid circular dependency
-            from src.core.config import get_settings
-
-            settings = get_settings()
-
-            # Only measure if telemetry is enabled
-            if not settings.ENABLE_CONTEXT_COMPACTION_TELEMETRY:
-                return 0
-
-            # Convert worker_results to string for token counting
             import json
 
-            text = json.dumps(worker_results, default=str)
+            # Serialize structured worker outputs via their content fields so
+            # token counts reflect actual content, not the short object repr
+            # (fix #7). Finance/research supervisors store TalkHierContent
+            # directly; it has no to_dict(), so extract its text parts.
+            serializable: dict[str, Any] = {}
+            for k, v in worker_results.items():
+                if isinstance(v, TalkHierMessage):
+                    serializable[k] = v.to_dict()
+                elif isinstance(v, TalkHierContent):
+                    serializable[k] = {
+                        "content": v.content,
+                        "background": v.background,
+                        "intermediate_outputs": v.intermediate_outputs,
+                    }
+                else:
+                    serializable[k] = v
 
-            # Use cl100k_base encoding (used by GPT-3.5-turbo, GPT-4)
-            encoding = tiktoken.get_encoding("cl100k_base")
-            token_count = len(encoding.encode(text))
+            text = json.dumps(serializable, default=str)
+            token_count, truncated = count_tokens_capped(text)
 
             logger.info(
-                "Worker results token measurement",
+                "worker_results_token_measurement",
                 supervisor_type=self.supervisor_type,
                 round_number=round_number,
                 token_count=token_count,
                 content_length_chars=len(text),
                 worker_count=len(worker_results),
+                truncated=truncated,
             )
 
             return token_count
@@ -656,8 +657,12 @@ class BaseSupervisor(BaseAgent, ABC):
             # Update state with refinement round results
             state.refinement_round = round_number
 
-            # Measure worker_results token size for this round
-            self._measure_worker_results_tokens(state.worker_results, round_number)
+            # Measure the FRESH responses returned by broadcast_to_workers, not
+            # the stale state.worker_results which hasn't been updated yet at
+            # this point in the flow.  Measuring stale data produced identical
+            # counts across refinement rounds, defeating the sizing signal.
+            responses_as_dict = {str(i): msg for i, msg in enumerate(responses)}
+            self._measure_worker_results_tokens(responses_as_dict, round_number)
 
             # Evaluate consensus for this round
             if responses:

@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     ENABLE_CACHE: bool = True
     ENABLE_RATE_LIMITING: bool = True
     MAX_REQUESTS_PER_MINUTE: int = 100
-    ENABLE_CONTEXT_COMPACTION_TELEMETRY: bool = True
+    ENABLE_CONTEXT_COMPACTION_TELEMETRY: bool = False
 
     # Logging
     LOG_LEVEL: str = "INFO"

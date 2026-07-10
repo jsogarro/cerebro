@@ -22,17 +22,12 @@ from typing import Any
 
 from structlog import get_logger
 
+from src.core.telemetry import count_tokens, telemetry_enabled
+
 from .episodic_memory import Episode, EpisodeQuery, EpisodicMemoryManager, EventType
 from .procedural_memory import ProceduralMemoryManager, Procedure
 from .semantic_memory import SemanticMemoryManager
 from .working_memory import ConversationContext, WorkingMemoryManager
-
-try:
-    import tiktoken
-
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    TIKTOKEN_AVAILABLE = False
 
 logger = get_logger()
 
@@ -121,29 +116,21 @@ class MultiTierMemorySystem:
         self._consolidation_task: asyncio.Task[None] | None = None
 
     def _measure_recall_result_tokens(self, recall: IntelligentRecall) -> int:
-        """
-        Measure token count of recall result using tiktoken.
+        """Measure token count of recall result using tiktoken.
+
+        Measures a metadata summary dict (not full recall content) —
+        see measurement_scope field in the log event.
 
         Args:
             recall: IntelligentRecall result to measure
 
         Returns:
-            Token count (0 if tiktoken unavailable or measurement fails)
+            Token count (0 if telemetry disabled, tiktoken unavailable, or on error)
         """
-        if not TIKTOKEN_AVAILABLE:
+        if not telemetry_enabled():
             return 0
 
         try:
-            # Import settings inline to avoid circular dependency
-            from src.core.config import get_settings
-
-            settings = get_settings()
-
-            # Only measure if telemetry is enabled
-            if not settings.ENABLE_CONTEXT_COMPACTION_TELEMETRY:
-                return 0
-
-            # Convert recall result to string for token counting
             import json
 
             recall_dict = {
@@ -155,17 +142,15 @@ class MultiTierMemorySystem:
                 "recall_reasoning": recall.recall_reasoning,
             }
             text = json.dumps(recall_dict, default=str)
-
-            # Use cl100k_base encoding (used by GPT-3.5-turbo, GPT-4)
-            encoding = tiktoken.get_encoding("cl100k_base")
-            token_count = len(encoding.encode(text))
+            token_count = count_tokens(text)
 
             logger.info(
-                "Memory recall result token measurement",
+                "memory_recall_result_token_measurement",
                 token_count=token_count,
                 content_length_chars=len(text),
                 primary_results_count=len(recall.primary_results),
                 confidence_score=recall.confidence_score,
+                measurement_scope="metadata_summary",
             )
 
             return token_count
@@ -475,19 +460,19 @@ class MultiTierMemorySystem:
 
         try:
             # Clean up expired working memory
-            consolidation_results[
-                "working_cleaned"
-            ] = await self.working_memory.cleanup_expired()
+            consolidation_results["working_cleaned"] = (
+                await self.working_memory.cleanup_expired()
+            )
 
             # Clean up old episodic memories
-            consolidation_results[
-                "episodic_cleaned"
-            ] = await self.episodic_memory.cleanup_old_episodes()
+            consolidation_results["episodic_cleaned"] = (
+                await self.episodic_memory.cleanup_old_episodes()
+            )
 
             # Clean up old procedures
-            consolidation_results[
-                "procedures_optimized"
-            ] = await self.procedural_memory.cleanup_old_procedures()
+            consolidation_results["procedures_optimized"] = (
+                await self.procedural_memory.cleanup_old_procedures()
+            )
 
             # TODO: Implement semantic memory optimization
             # This could include:

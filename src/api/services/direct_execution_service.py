@@ -24,14 +24,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import get_settings
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
+from src.core.telemetry import count_tokens, telemetry_enabled
 from src.repositories.checkpoint_repository import CheckpointRepository
-
-try:
-    import tiktoken
-
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    TIKTOKEN_AVAILABLE = False
 
 from ...agents.models import AgentTask
 from ...agents.supervisors.analytics_supervisor import AnalyticsSupervisor
@@ -137,42 +131,33 @@ class DirectExecutionService:
         }
 
     def _measure_domain_output_tokens(
-        self, domain: str, output: Any, label: str = "domain_output"
+        self, domain: str, output: str, label: str = "domain_output"
     ) -> int:
-        """
-        Measure token count of domain output using tiktoken.
+        """Measure token count of a pre-stringified domain output using tiktoken.
+
+        Callers must pass an already-stringified value; this method does not
+        call str() again to avoid double-conversion (fix #9).
 
         Args:
-            domain: Domain name for context
-            output: Output content to measure
-            label: Label for logging (e.g., "before_truncation", "after_truncation")
+            domain: Domain name for logging context
+            output: Pre-stringified output content
+            label: Log label (e.g., "before_truncation", "after_truncation")
 
         Returns:
-            Token count (0 if tiktoken unavailable or measurement fails)
+            Token count (0 if telemetry disabled, tiktoken unavailable, or on error)
         """
-        if not TIKTOKEN_AVAILABLE:
+        if not telemetry_enabled():
             return 0
 
         try:
-            settings = get_settings()
-
-            # Only measure if telemetry is enabled
-            if not settings.ENABLE_CONTEXT_COMPACTION_TELEMETRY:
-                return 0
-
-            # Convert output to string for token counting
-            output_str = str(output)
-
-            # Use cl100k_base encoding (used by GPT-3.5-turbo, GPT-4)
-            encoding = tiktoken.get_encoding("cl100k_base")
-            token_count = len(encoding.encode(output_str))
+            token_count = count_tokens(output)
 
             logger.info(
-                "Domain output token measurement",
+                "domain_output_token_measurement",
                 domain=domain,
                 label=label,
                 token_count=token_count,
-                content_length_chars=len(output_str),
+                content_length_chars=len(output),
             )
 
             return token_count
@@ -903,9 +888,9 @@ class DirectExecutionService:
                         "context": routing_context,
                         "project_data": {
                             "title": project.title,
-                            "scope": project.scope.model_dump()
-                            if project.scope
-                            else {},
+                            "scope": (
+                                project.scope.model_dump() if project.scope else {}
+                            ),
                             "query": project.query.model_dump(),
                         },
                         "routing_decision": asdict(routing_decision),
@@ -1226,12 +1211,12 @@ class DirectExecutionService:
             ],
             "component_health": {
                 "masr_router": "healthy" if self.masr_router else "unavailable",
-                "supervisor_bridge": "healthy"
-                if self.supervisor_bridge
-                else "unavailable",
-                "supervisor_factory": "healthy"
-                if self.supervisor_factory
-                else "unavailable",
+                "supervisor_bridge": (
+                    "healthy" if self.supervisor_bridge else "unavailable"
+                ),
+                "supervisor_factory": (
+                    "healthy" if self.supervisor_factory else "unavailable"
+                ),
             },
         }
 
