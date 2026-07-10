@@ -712,20 +712,20 @@ class TestPIIRedactionInErrorPaths:
         assert decision is not None
 
         # The trace.update() call that carries the error must have been made.
-        assert (
-            routing_span.update.called
-        ), "trace.update() should have been called on error"
+        assert routing_span.update.called, (
+            "trace.update() should have been called on error"
+        )
         update_kwargs = routing_span.update.call_args.kwargs
         sent_metadata = update_kwargs.get("metadata", {})
 
         # The raw PII email must NOT appear in either the "error" or any field.
-        assert "secret@pii-test.com" not in sent_metadata.get(
-            "error", ""
-        ), "Raw PII email must be redacted in Langfuse error metadata"
+        assert "secret@pii-test.com" not in sent_metadata.get("error", ""), (
+            "Raw PII email must be redacted in Langfuse error metadata"
+        )
         # The placeholder should be present instead.
-        assert "[EMAIL]" in sent_metadata.get(
-            "error", ""
-        ), "Redacted placeholder must be present in error metadata"
+        assert "[EMAIL]" in sent_metadata.get("error", ""), (
+            "Redacted placeholder must be present in error metadata"
+        )
         # error_type is safe (class name only) and must still be present.
         assert sent_metadata.get("error_type") == "RuntimeError"
 
@@ -770,27 +770,27 @@ class TestPIIRedactionInErrorPaths:
         assert result.success is False
 
         # The span.update() on the error path must have been called.
-        assert (
-            gen.update.called
-        ), "span.update() should have been called on provider error"
+        assert gen.update.called, (
+            "span.update() should have been called on provider error"
+        )
         update_kwargs = gen.update.call_args.kwargs
 
         # status_message and metadata["error"] must both be redacted.
         status_msg = update_kwargs.get("status_message", "")
         meta_error = update_kwargs.get("metadata", {}).get("error", "")
 
-        assert (
-            "admin@secret-corp.com" not in status_msg
-        ), "PII must be redacted in status_message"
-        assert (
-            "admin@secret-corp.com" not in meta_error
-        ), "PII must be redacted in metadata['error']"
-        assert (
-            "[EMAIL]" in status_msg
-        ), "Redacted placeholder must appear in status_message"
-        assert (
-            "[EMAIL]" in meta_error
-        ), "Redacted placeholder must appear in metadata['error']"
+        assert "admin@secret-corp.com" not in status_msg, (
+            "PII must be redacted in status_message"
+        )
+        assert "admin@secret-corp.com" not in meta_error, (
+            "PII must be redacted in metadata['error']"
+        )
+        assert "[EMAIL]" in status_msg, (
+            "Redacted placeholder must appear in status_message"
+        )
+        assert "[EMAIL]" in meta_error, (
+            "Redacted placeholder must appear in metadata['error']"
+        )
         assert update_kwargs.get("metadata", {}).get("error_type") == "RuntimeError"
 
 
