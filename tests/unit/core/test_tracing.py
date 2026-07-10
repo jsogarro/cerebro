@@ -111,7 +111,7 @@ class TestEnabledButMisconfigured:
         fake_settings.LANGFUSE_PUBLIC_KEY = None
         fake_settings.LANGFUSE_SECRET_KEY = None
         fake_settings.LANGFUSE_HOST = None
-        monkeypatch.setattr(tracing, "get_settings", lambda: fake_settings)
+        monkeypatch.setattr("src.core.config.get_settings", lambda: fake_settings)
         assert get_langfuse_client() is None
 
     def test_sdk_absent_returns_none(self, monkeypatch):
@@ -121,7 +121,7 @@ class TestEnabledButMisconfigured:
         fake_settings.LANGFUSE_PUBLIC_KEY = "pk"
         fake_settings.LANGFUSE_SECRET_KEY = "sk"
         fake_settings.LANGFUSE_HOST = None
-        monkeypatch.setattr(tracing, "get_settings", lambda: fake_settings)
+        monkeypatch.setattr("src.core.config.get_settings", lambda: fake_settings)
         # Simulate the package being absent: importing langfuse raises ImportError.
         with patch.dict("sys.modules", {"langfuse": None}):
             assert get_langfuse_client() is None

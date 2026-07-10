@@ -54,8 +54,14 @@ from typing import TYPE_CHECKING, Any
 
 from structlog import get_logger
 
-from src.core.config import get_settings
 from src.core.pii_redactor import redact_pii
+
+# NOTE: src.core.config is imported lazily inside the functions below. Importing
+# it at module level would instantiate the Settings() singleton at import time,
+# and because this module is pulled in via the provider import chain
+# (ai_brain/__init__ -> providers -> openrouter_provider -> tracing), that would
+# force Settings validation during early startup — before the service env is
+# available — crashing containers that set SECRET_KEY only at runtime.
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -81,6 +87,8 @@ def _tracing_enabled() -> bool:
     verify script) MUST route through here rather than parsing env vars.
     """
     try:
+        from src.core.config import get_settings
+
         return bool(get_settings().LANGFUSE_ENABLED)
     except Exception:
         return False
@@ -94,6 +102,8 @@ def _initialize_langfuse() -> Langfuse | None:
     2. SDK not installed -> logs warning, returns None
     3. keys missing / init error -> logs, returns None
     """
+    from src.core.config import get_settings
+
     settings = get_settings()
     if not settings.LANGFUSE_ENABLED:
         logger.debug("langfuse_disabled")
