@@ -604,9 +604,7 @@ class TestRefinementRoundMeasuresFreshResponses:
             ),
             patch.object(supervisor, "_measure_worker_results_tokens", capture_measure),
         ):
-            asyncio.run(
-                supervisor.coordinate_refinement_round(state, round_number=1)
-            )
+            asyncio.run(supervisor.coordinate_refinement_round(state, round_number=1))
 
         assert len(captured_args) == 1, (
             "Expected exactly one call to _measure_worker_results_tokens"
