@@ -304,9 +304,9 @@ class TestBaseSupervisorTalkhierMeasurement:
                 {"worker1": msg}, round_number=1
             )
 
-        assert (
-            result > 100
-        ), f"Expected token_count > 100 for ~1000-char content, got {result}"
+        assert result > 100, (
+            f"Expected token_count > 100 for ~1000-char content, got {result}"
+        )
 
     def test_plain_dict_still_works(self, supervisor):
         """Non-TalkHierMessage values fall back to json.dumps(default=str)."""
@@ -355,9 +355,9 @@ class TestMultiTierMemoryTelemetry:
 
         assert result > 0
         assert logs, "Expected at least one log event"
-        assert (
-            logs[0].get("measurement_scope") == "metadata_summary"
-        ), f"Expected measurement_scope='metadata_summary', got: {logs[0]}"
+        assert logs[0].get("measurement_scope") == "metadata_summary", (
+            f"Expected measurement_scope='metadata_summary', got: {logs[0]}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -385,9 +385,9 @@ class TestDirectExecutionServiceTelemetry:
         assert "output" in params
         # Annotation should be str (fix 9)
         annotation = params["output"].annotation
-        assert (
-            annotation is str or annotation == "str"
-        ), f"Expected output: str, got {annotation}"
+        assert annotation is str or annotation == "str", (
+            f"Expected output: str, got {annotation}"
+        )
 
     def test_returns_positive_count_for_real_text(self, des):
         text = "This is a domain output with plenty of tokens. " * 10
@@ -470,9 +470,9 @@ class TestCountTokensCapped:
         assert token_count > 0, "Capped token count must be > 0"
         # The capped text is _MAX_MEASURE_CHARS chars; tokens ~= chars/4 at
         # minimum, so the count should be well under 2x the cap in tokens.
-        assert (
-            token_count < _MAX_MEASURE_CHARS
-        ), f"Token count {token_count} should be less than char cap {_MAX_MEASURE_CHARS}"
+        assert token_count < _MAX_MEASURE_CHARS, (
+            f"Token count {token_count} should be less than char cap {_MAX_MEASURE_CHARS}"
+        )
         # Must complete well under 1 s (typical: <100 ms even on a slow machine)
         assert elapsed < 1.0, f"count_tokens_capped took {elapsed:.3f}s on large input"
 
@@ -514,12 +514,12 @@ class TestCountTokensCapped:
         assert token_count > 0, "Token count must be > 0 for non-empty payload"
         # After capping at _MAX_MEASURE_CHARS chars the token count must be
         # less than the char cap (tokens are always <= chars for ASCII).
-        assert (
-            token_count < _MAX_MEASURE_CHARS
-        ), f"Token count {token_count} must be < char cap {_MAX_MEASURE_CHARS}"
-        assert (
-            elapsed < 1.0
-        ), f"_measure_worker_results_tokens took {elapsed:.3f}s on large blob"
+        assert token_count < _MAX_MEASURE_CHARS, (
+            f"Token count {token_count} must be < char cap {_MAX_MEASURE_CHARS}"
+        )
+        assert elapsed < 1.0, (
+            f"_measure_worker_results_tokens took {elapsed:.3f}s on large blob"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -608,15 +608,15 @@ class TestRefinementRoundMeasuresFreshResponses:
                 supervisor.coordinate_refinement_round(state, round_number=1)
             )
 
-        assert (
-            len(captured_args) == 1
-        ), "Expected exactly one call to _measure_worker_results_tokens"
+        assert len(captured_args) == 1, (
+            "Expected exactly one call to _measure_worker_results_tokens"
+        )
         measured = captured_args[0]["worker_results"]
 
         # The measured dict must NOT be the stale state.worker_results keys
-        assert (
-            "stale_worker" not in measured
-        ), "Stale worker_results key found in measurement — fix 2 not applied correctly"
+        assert "stale_worker" not in measured, (
+            "Stale worker_results key found in measurement — fix 2 not applied correctly"
+        )
         # The measured dict must be keyed by integer indices (the responses_as_dict pattern)
         assert len(measured) == 1, "Expected one entry (one fresh response)"
         assert "0" in measured, "Expected string index key '0' from responses_as_dict"
