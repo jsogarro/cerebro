@@ -604,7 +604,7 @@ class TestRefinementRoundMeasuresFreshResponses:
             ),
             patch.object(supervisor, "_measure_worker_results_tokens", capture_measure),
         ):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 supervisor.coordinate_refinement_round(state, round_number=1)
             )
 
