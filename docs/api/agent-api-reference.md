@@ -1,200 +1,197 @@
 # Agent Framework API Reference
 
-## Overview
+Canonical, detailed reference for Cerebro's Agent Framework APIs: the **Primary API**
+(MASR-routed, via `/api/v1/query/*`) and the **Bypass API** (direct agent access, via
+`/api/v1/agents/*`). This is the detailed companion to `docs/api-documentation.md`.
 
-Complete API reference for Cerebro's Agent Framework APIs, including both the Primary API (MASR-routed) and Bypass API (direct access) with comprehensive examples, request/response schemas, and usage patterns.
+> **Cerebro** is the product; current focus is **financial research (US equities)**. The
+> deployment artifacts still carry the pre-rebrand **`research-platform`** identity (FastAPI
+> title `Research Platform API`, k8s namespace, `research-platform-api` images, `research_db`,
+> the `research-cli`/`research-platform` CLI entrypoints). Those infra names are legacy and are
+> not the product name.
 
-## API Base URL
+## Base URL
 
 - **Development**: `http://localhost:8000`
-- **Production**: `https://api.cerebro.ai`
+
+`/docs` (Swagger) and `/redoc` are served only when `DEBUG=True`; `DEBUG` defaults to `False`,
+so interactive docs are off unless explicitly enabled.
 
 ## Authentication
 
-**Current**: Basic validation only (full authentication in Task #18)
-**Future**: JWT tokens, API keys, role-based access control
+`AuthMiddleware` in the middleware stack is a **no-op**: it initializes
+`request.state.user`/`token_payload`/`organization_id` to `None` and validates nothing.
+Authentication is enforced **per endpoint** via FastAPI `Depends(...)`, not globally.
+
+Consequently, the Agent Framework surfaces documented here — **`/api/v1/query/*`,
+`/api/v1/agents/*`, and `/api/v1/masr/*`** — are **effectively unauthenticated**. Only endpoints
+that declare `Depends(get_current_user)` / `require_*` (the `auth`, `users` GDPR, and parts of
+`research`/`reports` routers) are protected.
+
+Where auth *is* enforced it uses:
+
+- JWT **RS256** (keys at `/secrets/jwt_private.pem` + `/secrets/jwt_public.pem`)
+- Access tokens **15 min**, refresh tokens **7 days**
+- bcrypt password hashing (12 rounds), `PASSWORD_MIN_LENGTH=12`
+
+Do not describe the Agent Framework API as JWT-gated. It is not, with default configuration.
 
 ---
 
-## Primary API Endpoints (Recommended - 90% usage)
+## Request flow (what actually happens)
 
-### Intelligent Query API (`/api/v1/query/*`)
+```
+Client -> FastAPI -> DirectExecutionService (asyncio background task)
+       -> MASRouter -> MASRSupervisorBridge -> domain supervisors -> workers
+       -> verification QA gate
+```
 
-The Primary API routes all requests through MASR intelligence for optimal agent selection, cost optimization, and quality assurance.
+- **`DirectExecutionService`** (`src/api/services/direct_execution_service.py`) is the in-process
+  asyncio execution engine. It **replaced Temporal**; Temporal is removed (no `temporalio`
+  dependency; `TEMPORAL_HOST`/`TEMPORAL_NAMESPACE` are dead vestigial settings).
+- **MASR (Multi-Agent System Router)** is the in-process `MASRouter` class
+  (`src/ai_brain/router/masr.py`). The standalone `masr-router` container (:9100) is legacy and
+  is **not** on the query path (`MASR_SERVICE_URL` is not read anywhere in `src/`).
+- **`MASRSupervisorBridge`** maps MASR routing decisions onto domain supervisors.
+- **Domain supervisors** — Research, Content, Analytics, Finance — each run an internal LangGraph
+  `StateGraph`. LangGraph exists only inside supervisors; the top-level `src/orchestration/`
+  subsystem was deleted.
+- Workers subclass **`LLMWorkerAgentBase`** and are **LLM-reasoning (prompt-driven)**, not coded
+  decision engines. Confidence scores they report are **hardcoded heuristics** (0.85 on success,
+  0.3 on empty output, 0.8 on the fast path), not measured quality signals.
 
-#### Research Query Endpoint
+### Provider default
+
+Runtime is **Gemini-only** by default (`GEMINI_DEFAULT_MODEL=gemini-pro`). OpenRouter
+multi-provider routing (DeepSeek for simple tiers, Claude Sonnet for complex tiers) is
+**flag-gated OFF**: it requires both `MULTI_PROVIDER_ROUTING_ENABLED=True` **and**
+`OPENROUTER_API_KEY`. `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, and `OPENROUTER_ENABLED` all default
+to `False`.
+
+---
+
+## Primary API — Intelligent Query (`/api/v1/query/*`)
+
+The Primary API submits a query for MASR-routed execution. `POST /research` is the main handler;
+`/analyze`, `/synthesize`, `/literature`, `/methodology`, and `/comparison` are thin wrappers
+that build an equivalent request and call the same handler.
+
+MASR selects a **`CollaborationMode`** — `FAST_PATH`, `DIRECT`, `PARALLEL`, `HIERARCHICAL`,
+`DEBATE`, or `ENSEMBLE`. `FAST_PATH` is a single LLM call that bypasses supervisors entirely.
+MASR never selects Chain-of-Agents or Mixture-of-Agents; those exist only as Bypass endpoints
+(see below).
+
+### Submit a research query
 
 ```http
 POST /api/v1/query/research
 ```
 
-**Purpose**: General research queries with intelligent MASR routing  
-**Research Basis**: "MasRouter: Learning to Route LLMs" cost optimization patterns
-
-**Request Schema**:
+**Request** (representative fields):
 ```json
 {
-  "query": "What are the ethical implications of AI in healthcare?",
-  "domains": ["ai", "healthcare", "ethics"],
-  "context": {
-    "user_preference": "comprehensive",
-    "time_sensitivity": "normal"
-  },
-  "routing_strategy": "quality_focused",
-  "quality_preference": 0.9,
-  "cost_preference": 0.3,
-  "enable_real_time_updates": true,
-  "timeout_seconds": 300,
+  "query": "Estimate a DCF fair value for a US large-cap given these fundamentals",
+  "domains": ["finance"],
+  "context": {},
+  "routing_strategy": "balanced",
   "user_id": "researcher-123",
   "session_id": "session-456"
 }
 ```
 
-**Response Schema**:
+**Immediate response — contains hardcoded placeholders, not real routing output.**
+The handler returns before execution finishes, and several fields are stubbed:
+
 ```json
 {
   "execution_id": "exec-789",
-  "query_id": "query-101112", 
-  "status": "completed",
-  "routing_decision": {
-    "collaboration_mode": "hierarchical",
-    "supervisor_type": "research",
-    "estimated_cost": 0.025,
-    "estimated_quality": 0.91,
-    "confidence_score": 0.87
-  },
-  "results": {
-    "literature_findings": [...],
-    "ethical_analysis": [...],
-    "recommendations": [...]
-  },
-  "quality_scores": {
-    "overall": 0.89,
-    "consensus": 0.92
-  },
-  "confidence": 0.88,
-  "routing_time_ms": 45.2,
-  "execution_time_seconds": 267.8,
-  "started_at": "2025-09-08T10:30:00Z",
-  "completed_at": "2025-09-08T10:34:27Z"
+  "query_id": "…",
+  "status": "pending",
+  "supervisor_type": "research",
+  "selected_agents": [],
+  "estimated_cost": 0.015,
+  "estimated_quality": 0.85,
+  "confidence": 0.85,
+  "routing_time_ms": 50.0,
+  "results": {},
+  "quality_scores": {},
+  "execution_time_seconds": 0.0
 }
 ```
 
-**Example Usage**:
+> **Do not treat these as live metrics.** `selected_agents=[]`, `estimated_cost=0.015`,
+> `estimated_quality=0.85`, `confidence=0.85`, and `routing_time_ms=50.0` are hardcoded in the
+> handler. `status` starts at `pending` (or the current status if already available). For real
+> routing decisions, agent selection, and results, **poll the execution status/results
+> endpoints below.**
+
+**Example**:
 ```bash
 curl -X POST "http://localhost:8000/api/v1/query/research" \
   -H "Content-Type: application/json" \
-  -d '{
-    "query": "Impact of AI on employment in healthcare sector",
-    "domains": ["ai", "healthcare", "employment"],
-    "routing_strategy": "balanced"
-  }'
+  -d '{"query": "Compare two US equities on valuation multiples", "domains": ["finance"]}'
 ```
 
-#### Analysis Query Endpoint
+### Wrapper endpoints
+
+Each accepts its own request shape and delegates to the same execution handler:
 
 ```http
 POST /api/v1/query/analyze
-```
-
-**Purpose**: Analysis-focused queries with methodological emphasis  
-**Research Basis**: Domain-specific optimization for analytical tasks
-
-**Request Schema**:
-```json
-{
-  "query": "Analyze the effectiveness of remote learning technologies",
-  "analysis_type": "comparative",
-  "domains": ["education", "technology"],
-  "depth": "comprehensive",
-  "include_methodology": true,
-  "include_citations": true,
-  "enable_comparison": true,
-  "context": {},
-  "user_id": "analyst-456"
-}
-```
-
-**Example Usage**:
-```bash
-curl -X POST "http://localhost:8000/api/v1/query/analyze" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Effectiveness of renewable energy policies",
-    "analysis_type": "comprehensive",
-    "include_methodology": true
-  }'
-```
-
-#### Synthesis Query Endpoint
-
-```http
 POST /api/v1/query/synthesize
+POST /api/v1/query/literature
+POST /api/v1/query/methodology
+POST /api/v1/query/comparison
 ```
 
-**Purpose**: Synthesis-focused queries for integration and narrative building
+### Execution status, results, resume
 
-**Request Schema**:
-```json
-{
-  "query": "Synthesize findings on AI impact across multiple sectors",
-  "synthesis_focus": "comprehensive",
-  "source_materials": [
-    {"source": "healthcare_analysis", "content": "..."},
-    {"source": "education_study", "content": "..."}
-  ],
-  "narrative_style": "academic",
-  "include_visualizations": true,
-  "citation_style": "APA",
-  "context": {},
-  "user_id": "researcher-789"
-}
-```
-
-### Execution Status and Results
-
-#### Get Execution Status
+Real routing data and outputs are available only via these endpoints once the background task
+has progressed:
 
 ```http
-GET /api/v1/query/execution/{execution_id}/status
+GET  /api/v1/query/execution/{execution_id}/status
+GET  /api/v1/query/execution/{execution_id}/results
+POST /api/v1/query/execution/{project_id}/resume
 ```
 
-**Response**:
+**`GET …/status`** response:
 ```json
 {
   "execution_id": "exec-789",
   "status": "running",
   "progress_percentage": 65.0,
-  "current_phase": "synthesis",
-  "supervisor_type": "research",
-  "workers_used": 4,
+  "current_phase": "supervisor_execution",
+  "supervisor_type": "finance",
+  "workers_used": 3,
   "execution_time_seconds": 142.3,
   "errors": []
 }
 ```
 
-#### Get Execution Results
+**`GET …/results`** returns the completed execution's outputs, quality scores, and metadata.
+
+**`POST …/resume`** resumes an execution from its last checkpoint
+(`masr_routing` / `supervisor_execution` / `fast_path_completed` / `completed`).
+
+### Routing intelligence
 
 ```http
-GET /api/v1/query/execution/{execution_id}/results
+GET /api/v1/query/routing/strategies
+GET /api/v1/query/routing/recommend?query=<text>
 ```
 
-**Response**: Complete execution results with all agent outputs, quality scores, and metadata.
+`GET /routing/strategies` lists the available routing strategies.
 
-### Routing Intelligence Endpoints
+`GET /routing/recommend` returns **static, canned recommendations keyed by query length** — it
+does not run MASR. Treat its `estimated_*` fields and suggested agents as a rough, length-based
+heuristic, not a routing decision:
 
-#### Get Routing Recommendation
-
-```http
-GET /api/v1/query/routing/recommend?query=Complex+analysis+query
-```
-
-**Response**:
 ```json
 {
   "query_analysis": {
     "complexity": "moderate",
-    "estimated_domains": ["research"],
+    "estimated_domains": [],
     "confidence": 0.85
   },
   "routing_recommendation": {
@@ -202,690 +199,319 @@ GET /api/v1/query/routing/recommend?query=Complex+analysis+query
     "expected_agents": ["literature-review", "methodology", "synthesis"],
     "estimated_cost": 0.015,
     "estimated_time_seconds": 180,
-    "estimated_quality": 0.87
+    "estimated_quality": 0.85
   },
-  "explanation": "Query classified as moderate complexity - routing through balanced strategy"
+  "explanation": "Canned recommendation selected by query length."
 }
 ```
 
-#### Get Available Routing Strategies
-
-```http
-GET /api/v1/query/routing/strategies
-```
-
-**Response**: Complete list of routing strategies with characteristics and use cases.
-
 ---
 
-## Bypass API Endpoints (Specialized - 10% usage)
+## Bypass API — Direct Agent Access (`/api/v1/agents/*`)
 
-### Direct Agent API (`/api/v1/agents/*`)
+The Bypass API calls a single agent (or an explicit multi-agent pattern) directly, skipping MASR
+routing. It is a catalog surface backed by `AgentFactory` — useful for testing and targeted
+execution, not the MASR-routed production path.
 
-The Bypass API provides direct access to individual agents and manual execution pattern control.
+### Callable agent types (10)
 
-#### List Available Agents
+The Bypass `AgentType` enum (`src/models/agent_api_models.py:16-28`) exposes exactly **10**
+values:
+
+| Agent type | Domain |
+|---|---|
+| `literature-review` | Research |
+| `citation` | Research |
+| `methodology` | Research |
+| `comparative-analysis` | Research |
+| `synthesis` | Research |
+| `financial-analysis` | Finance |
+| `valuation` | Finance |
+| `risk-assessment` | Finance |
+| `financial-calculator` | Finance (deterministic, no LLM) |
+| `verification` | Cross-cutting QA gate |
+
+> **Content and Analytics workers are NOT bypass-callable.** They exist in the runtime registry
+> but are not exposed through `/api/v1/agents`.
+
+This differs from the platform's full **17-agent registry** — 15 domain workers (Research 5,
+Content 4, Analytics 3, Finance 3) plus `verification` and `financial_calculator`
+(`src/agents/factory.py:48-66`). `AgentFactory` is the catalog for the Bypass API; it is **not**
+the MASR-routed runtime execution path (supervisors instantiate their own workers).
+
+`financial-calculator` is a **deterministic** tool agent: pure finance math (DCF, NPV, ratios,
+amortization, descriptive stats) with no LLM, no API keys, and no external data.
+
+### List agents
 
 ```http
 GET /api/v1/agents
 ```
 
-**Response**:
-```json
-{
-  "agents": [
-    {
-      "agent_type": "literature-review",
-      "name": "Literature Review Agent",
-      "description": "Searches and analyzes academic literature from multiple databases",
-      "capabilities": ["database_search", "source_evaluation"],
-      "average_execution_time_ms": 45000,
-      "reliability_score": 0.95,
-      "quality_score": 0.90,
-      "endpoints": [
-        "/api/v1/agents/literature-review/execute",
-        "/api/v1/agents/literature-review/metrics"
-      ]
-    }
-  ],
-  "total_agents": 5,
-  "system_health": "healthy"
-}
-```
+Returns the catalog of Bypass-callable agents with their capabilities and per-agent endpoint
+paths.
 
-#### Get Agent Information
+### Get agent info
 
 ```http
 GET /api/v1/agents/{agent_type}
 ```
 
-**Agent Types**: `literature-review`, `citation`, `methodology`, `comparative-analysis`, `synthesis`
-
-**Example**:
 ```bash
-curl "http://localhost:8000/api/v1/agents/literature-review"
+curl "http://localhost:8000/api/v1/agents/financial-analysis"
 ```
 
-#### Execute Single Agent
+### Execute a single agent
 
 ```http
 POST /api/v1/agents/{agent_type}/execute
 ```
 
-**Request Schema**:
+**Request**:
 ```json
 {
-  "query": "Find recent papers on AI ethics in healthcare",
-  "context": {"domain": "healthcare"},
-  "parameters": {
-    "max_sources": 50,
-    "date_range": "2020-2025"
-  },
+  "query": "Compute liquidity and leverage ratios from these financials",
+  "context": {"domain": "finance"},
+  "parameters": {},
   "timeout_seconds": 300,
   "quality_threshold": 0.8,
-  "enable_refinement": true,
-  "max_refinement_rounds": 3,
   "user_id": "researcher-123"
 }
 ```
 
-**Response Schema**:
+**Response** (`ExecutionMode.DIRECT`):
 ```json
 {
   "execution_id": "agent-exec-123",
-  "agent_type": "literature-review", 
+  "agent_type": "financial-analysis",
   "status": "completed",
-  "output": {
-    "sources": [...],
-    "analysis": {...},
-    "quality_metrics": {...}
-  },
-  "confidence": 0.87,
-  "quality_score": 0.89,
+  "output": {},
+  "confidence": 0.85,
+  "quality_score": 0.85,
   "execution_time_seconds": 42.3,
-  "refinement_rounds": 2,
-  "consensus_achieved": true,
-  "started_at": "2025-09-08T10:30:00Z",
-  "completed_at": "2025-09-08T10:30:42Z",
   "errors": [],
   "warnings": []
 }
 ```
 
-**Example Usage**:
-```bash
-curl -X POST "http://localhost:8000/api/v1/agents/literature-review/execute" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "AI ethics in healthcare applications",
-    "parameters": {"max_sources": 25}
-  }'
-```
+> `confidence`/`quality_score` are the same hardcoded worker heuristics described above, not
+> measured quality.
 
-#### Execute Chain-of-Agents
+### Chain-of-Agents
 
 ```http
 POST /api/v1/agents/chain
 ```
 
-**Request Schema**:
+Sequential execution (`ExecutionMode.CHAIN`) over an explicit `agent_chain`, optionally passing
+intermediate results forward. CoA is a Bypass-only pattern; MASR never selects it.
+
 ```json
 {
-  "query": "Comprehensive AI ethics analysis",
+  "query": "Full research pass over a US equity",
   "agent_chain": ["literature-review", "methodology", "comparative-analysis", "synthesis"],
-  "context": {"analysis_depth": "comprehensive"},
   "pass_intermediate_results": true,
-  "early_stopping": false,
   "quality_threshold": 0.85,
-  "timeout_per_agent_seconds": 180,
-  "enable_validation": true
+  "timeout_per_agent_seconds": 180
 }
 ```
 
-**Response Schema**:
-```json
-{
-  "execution_id": "chain-exec-456",
-  "status": "completed",
-  "agent_chain": ["literature-review", "methodology", "comparative-analysis", "synthesis"],
-  "intermediate_results": [
-    {"agent": "literature-review", "output": {...}},
-    {"agent": "methodology", "output": {...}},
-    {"agent": "comparative-analysis", "output": {...}},
-    {"agent": "synthesis", "output": {...}}
-  ],
-  "final_result": {"comprehensive_analysis": "..."},
-  "overall_confidence": 0.88,
-  "chain_quality_score": 0.91,
-  "quality_improvement": 0.15,
-  "total_execution_time_seconds": 267.4,
-  "agent_execution_times": [45.2, 67.8, 78.1, 76.3],
-  "early_stopped": false
-}
-```
-
-#### Execute Mixture-of-Agents
+### Mixture-of-Agents
 
 ```http
 POST /api/v1/agents/mixture
 ```
 
-**Request Schema**:
+Parallel execution (`ExecutionMode.MIXTURE`) across `agent_types`, then aggregation. MoA is a
+Bypass-only pattern; MASR never selects it.
+
 ```json
 {
-  "query": "Multi-perspective analysis of AI regulation",
-  "agent_types": ["literature-review", "methodology", "comparative-analysis"],
-  "context": {"perspective": "multi-stakeholder"},
+  "query": "Multi-perspective valuation view",
+  "agent_types": ["financial-analysis", "valuation", "risk-assessment"],
   "aggregation_strategy": "consensus",
-  "weight_by_confidence": true,
   "consensus_threshold": 0.8,
-  "timeout_seconds": 300,
   "max_parallel": 3
 }
 ```
 
-**Response Schema**:
-```json
-{
-  "execution_id": "mixture-exec-789",
-  "status": "completed",
-  "agent_types": ["literature-review", "methodology", "comparative-analysis"],
-  "agent_results": {
-    "literature-review": {"output": {...}, "confidence": 0.87},
-    "methodology": {"output": {...}, "confidence": 0.82},
-    "comparative-analysis": {"output": {...}, "confidence": 0.91}
-  },
-  "aggregated_result": {"consensus_analysis": "..."},
-  "consensus_score": 0.87,
-  "agent_weights": {
-    "literature-review": 0.33,
-    "methodology": 0.31,
-    "comparative-analysis": 0.36
-  },
-  "consensus_achieved": true,
-  "parallel_efficiency": 1.8,
-  "mixture_quality_score": 0.88,
-  "inter_agent_agreement": 0.85
-}
-```
-
-### Agent-Specific Endpoints
-
-#### Validate Agent Input
+### Per-agent utility endpoints
 
 ```http
 POST /api/v1/agents/{agent_type}/validate
+GET  /api/v1/agents/{agent_type}/metrics
+GET  /api/v1/agents/{agent_type}/health
 ```
 
-**Purpose**: Validate query and parameters before execution
+- `…/validate` checks a query/parameters payload before execution.
+- `…/metrics` and `…/health` return per-agent counters and status. **Several of these surfaces
+  return stub or hardcoded values** — treat them as scaffolding, not production telemetry.
 
-**Request**:
-```json
-{
-  "agent_type": "literature-review",
-  "query": "Find papers on machine learning in education",
-  "parameters": {"max_sources": 100}
-}
-```
-
-**Response**:
-```json
-{
-  "valid": true,
-  "validation_score": 0.92,
-  "query_suitability": 0.89,
-  "estimated_quality": 0.85,
-  "estimated_cost": 0.012,
-  "recommendations": ["Consider narrowing domain scope for better results"],
-  "validation_issues": []
-}
-```
-
-#### Agent Performance Metrics
+### Convenience endpoints
 
 ```http
-GET /api/v1/agents/{agent_type}/metrics
+POST /api/v1/agents/literature-review/search?query=<text>&max_sources=<n>
+POST /api/v1/agents/citation/format
+POST /api/v1/agents/synthesis/combine
+POST /api/v1/agents/workflows/literature-analysis
+POST /api/v1/agents/workflows/comprehensive-research
 ```
 
-**Response**:
-```json
-{
-  "agent_type": "literature-review",
-  "total_executions": 1247,
-  "success_rate": 0.94,
-  "average_execution_time_ms": 43200,
-  "average_quality_score": 0.87,
-  "average_cost_per_execution": 0.014,
-  "quality_trend_7_days": 0.03,
-  "recent_success_rate": 0.96,
-  "peak_usage_hour": 14,
-  "most_common_domains": ["research", "academic"],
-  "complexity_distribution": {
-    "simple": 156,
-    "moderate": 623,
-    "complex": 468
-  }
-}
-```
+For `literature-review/search`, `query` and `max_sources` are query-string parameters. For
+`citation/format` and `synthesis/combine`, the parameters are **request-body fields, not query
+strings**: `citation/format` takes `sources: list[str]` plus `style` (body, default `"APA"`), and
+`synthesis/combine` takes `findings: list[dict]` plus `synthesis_focus` (body, default
+`"comprehensive"`).
 
-#### Agent Health Status
-
-```http
-GET /api/v1/agents/{agent_type}/health
-```
-
-**Response**:
-```json
-{
-  "agent_type": "literature-review",
-  "status": "healthy",
-  "success_rate_24h": 0.96,
-  "average_response_time_ms": 41200,
-  "error_rate": 0.04,
-  "resource_utilization": 0.67,
-  "queue_length": 3,
-  "current_issues": [],
-  "last_health_check": "2025-09-08T15:45:00Z"
-}
-```
-
-### Convenience Endpoints
-
-#### Literature Search
-
-```http
-POST /api/v1/agents/literature-review/search?query=AI+ethics&max_sources=25&domains=ai,ethics
-```
-
-#### Citation Formatting
-
-```http
-POST /api/v1/agents/citation/format?sources=["Source1","Source2"]&style=APA
-```
-
-#### Synthesis
-
-```http
-POST /api/v1/agents/synthesis/combine?synthesis_focus=comprehensive
-```
-
-### System Monitoring Endpoints
-
-#### System Statistics
+### System-monitoring endpoints
 
 ```http
 GET /api/v1/agents/system/stats
-```
-
-#### Active Executions
-
-```http
 GET /api/v1/agents/executions/active
-```
-
-#### Health Summary
-
-```http
 GET /api/v1/agents/health/summary
+GET /api/v1/agents/performance/comparison
 ```
 
-#### Performance Comparison
+> These aggregate views may return stub or hardcoded values in the current build; do not present
+> their numbers as measured system metrics.
 
-```http
-GET /api/v1/agents/performance/comparison?metric=quality_score&time_period_hours=24
+---
+
+## Related mounted routers
+
+The following routers are live alongside the Query and Agents APIs and are the correct
+endpoints for MASR, supervisor, and TalkHier interaction:
+
+- `/api/v1/masr` — routing, cost estimation, strategy evaluation, feedback, status.
+- `/api/v1/supervisors` — supervisor coordination and per-supervisor endpoints (plus the
+  WebSocket routes below).
+- `/api/v1/talkhier` — TalkHier structured multi-round refinement (plus the WebSocket routes
+  below).
+
+Health/liveness: `GET /health`, `GET /ready`, `GET /live`. Prometheus metrics: `GET /metrics`.
+
+---
+
+## WebSocket API
+
+These are the **only** WebSocket routes that exist. There is no `ws/query/execution/{id}` and no
+`ws/agents/{type}/interactive` stream, and there is no MASR WebSocket (it is commented out) and
+no SSE.
+
+| Route | Purpose |
+|---|---|
+| `/ws` | General WebSocket entry |
+| `/ws/projects/{project_id}` | Per-project updates |
+| `/ws/cli/{project_id}` | CLI-driven session channel |
+| `GET /ws/health` | WebSocket health probe |
+| `/api/v1/supervisors/coordination/ws` | Supervisor coordination stream |
+| `/api/v1/supervisors/{type}/ws` | Per-supervisor stream |
+| `/api/v1/talkhier/sessions/{id}/live` | Live TalkHier session |
+| `/api/v1/talkhier/interactive` | Interactive TalkHier channel |
+| `/api/v1/talkhier/coordination` | TalkHier coordination channel |
+
+WebSocket auth allows anonymous connections when `ENVIRONMENT=='development'`; otherwise the
+token is validated with the shared RS256 `JWTService`.
+
+**Example** (project updates):
+```javascript
+const ws = new WebSocket('ws://localhost:8000/ws/projects/project-123');
+ws.onmessage = (event) => {
+  const update = JSON.parse(event.data);
+  console.log(update);
+};
 ```
 
 ---
 
-## WebSocket Real-Time API
+## Error handling
 
-### Agent Execution Streaming
-
-```javascript
-// Connect to execution progress stream
-const ws = new WebSocket('ws://localhost:8000/ws/query/execution/exec-123');
-
-ws.onmessage = (event) => {
-    const update = JSON.parse(event.data);
-    console.log('Progress:', update.progress_percentage);
-    console.log('Phase:', update.current_phase);
-    console.log('Quality:', update.quality_scores);
-};
-```
-
-### Interactive Agent Sessions
-
-```javascript
-// Interactive agent conversation
-const ws = new WebSocket('ws://localhost:8000/ws/agents/literature-review/interactive');
-
-// Send query
-ws.send(JSON.stringify({
-    "action": "execute",
-    "query": "Find papers on AI ethics",
-    "parameters": {"max_sources": 20}
-}));
-
-// Receive real-time results
-ws.onmessage = (event) => {
-    const result = JSON.parse(event.data);
-    if (result.type === 'progress') {
-        console.log('Search progress:', result.sources_found);
-    } else if (result.type === 'result') {
-        console.log('Final results:', result.sources);
-    }
-};
-```
-
----
-
-## Error Handling
-
-### Standard Error Response
+### Standard error response
 
 ```json
 {
   "error": {
-    "code": "AGENT_EXECUTION_FAILED",
-    "message": "Literature review agent execution failed",
-    "details": {
-      "agent_type": "literature-review",
-      "execution_id": "exec-123",
-      "error_category": "timeout",
-      "recoverable": true,
-      "suggested_action": "Retry with increased timeout"
-    },
-    "timestamp": "2025-09-08T15:45:00Z"
+    "code": "INTERNAL_SERVER_ERROR",
+    "message": "Agent execution failed",
+    "details": {}
   }
 }
 ```
 
-### Common Error Codes
+The envelope shape (`{"error": {code, message, details}}`) is always the same, but the `code` is
+derived from the HTTP status, not from a bespoke per-failure vocabulary.
 
-- `AGENT_NOT_FOUND`: Specified agent type doesn't exist
-- `INVALID_PARAMETERS`: Request parameters don't meet validation requirements
-- `EXECUTION_TIMEOUT`: Agent execution exceeded timeout limit
-- `CAPACITY_EXCEEDED`: System at maximum concurrent execution capacity
-- `ROUTING_FAILED`: MASR routing decision failed
-- `QUALITY_THRESHOLD_NOT_MET`: Result quality below required threshold
+### Error codes
 
-### Error Recovery Strategies
+The `code` field comes from `ERROR_CODES_BY_STATUS` in
+`src/api/middleware/error_envelope.py`, keyed by HTTP status:
 
-- **Automatic Retry**: Failed executions automatically retried with exponential backoff
-- **Fallback Routing**: MASR provides fallback routing strategies for failures
-- **Quality Recovery**: Low-quality results trigger refinement rounds
-- **Graceful Degradation**: System maintains core functionality during partial failures
+- `BAD_REQUEST` (400)
+- `AUTHENTICATION_REQUIRED` (401)
+- `FORBIDDEN` (403)
+- `NOT_FOUND` (404)
+- `CONFLICT` (409)
+- `VALIDATION_ERROR` (422)
+- `RATE_LIMIT_EXCEEDED` (429)
+- `INTERNAL_SERVER_ERROR` (500)
+- `API_ERROR` — fallback when the status has no mapped code.
 
----
+Agent handlers raise `HTTPException`s with string details, so failures map onto these
+status-derived codes rather than agent-specific strings:
 
-## Rate Limiting
+- An **invalid agent type** is rejected by the enum path parameter and surfaces as
+  `VALIDATION_ERROR` (422).
+- An **agent execution failure** surfaces as `INTERNAL_SERVER_ERROR` (500).
+- The **capacity limit** — when `DirectExecutionService` hits its
+  `max_concurrent_executions` cap and raises a `RuntimeError` — also surfaces as
+  `INTERNAL_SERVER_ERROR` (500), not a dedicated capacity code.
 
-### Current Limits (Development)
+### Recovery behavior
 
-- **Primary API**: 100 requests/hour per user
-- **Bypass API**: 50 requests/hour per user  
-- **WebSocket**: 10 concurrent connections per user
-- **System Total**: 1000 concurrent executions
+- **Fast-path escalation**: if a `FAST_PATH` response fails the quality gate (too short, or an
+  error/apology prefix), the execution mutates its collaboration mode to `DIRECT` and falls
+  through to the full supervisor path. A single request can therefore incur both a fast-path LLM
+  call and a full supervisor execution.
+- **Verification QA gate**: verification runs as a cross-cutting gate (initial attempt plus at
+  most one revision) rather than as a normal worker.
+- **Checkpoint/resume**: executions checkpoint at defined phases and can be resumed via
+  `POST /api/v1/query/execution/{project_id}/resume`.
 
-### Future Authentication-Aware Limits (Task #18)
-
-Rate limits will be aligned with MASR cost predictions and user roles:
-
-- **Cost-Based Limiting**: Expensive operations have lower rate limits
-- **Role-Based Limits**: Higher limits for premium users and service accounts
-- **Dynamic Adjustment**: Rate limits adjust based on system load and user behavior
-
----
-
-## Performance Guidelines
-
-### Optimal Usage Patterns
-
-#### For Best Performance:
-- ✅ Use Primary API for production workloads (automatic optimization)
-- ✅ Provide relevant context and domain hints for better routing
-- ✅ Enable real-time updates for long-running queries
-- ✅ Use appropriate timeout values based on query complexity
-
-#### For Cost Optimization:
-- ✅ Use `cost_efficient` routing strategy for budget-conscious queries
-- ✅ Provide accurate domain hints to avoid unnecessary cross-domain routing
-- ✅ Cache results when appropriate for repeated similar queries
-- ✅ Monitor usage through metrics endpoints
-
-#### For Quality Optimization:
-- ✅ Use `quality_focused` routing strategy for critical analysis
-- ✅ Enable refinement rounds for important queries
-- ✅ Use Mixture-of-Agents pattern for consensus building
-- ✅ Monitor quality scores and confidence metrics
-
-### Performance Expectations
-
-| Query Type | Primary API Latency | Bypass API Latency | Quality Score |
-|------------|--------------------|--------------------|---------------|
-| Simple | 2.1s | 1.2s | 0.82 |
-| Moderate | 3.4s | 2.8s | 0.87 |
-| Complex | 5.8s | 4.9s | 0.91 |
+> There is **no whole-workflow automatic retry**. (An earlier `@retry` on the workflow was a bug
+> that re-ran the entire pipeline and has been removed.)
 
 ---
 
-## Examples and Use Cases
+## Rate limiting
 
-### Production Research Workflow
-
-```python
-import asyncio
-import httpx
-
-async def comprehensive_research(query: str, domains: list):
-    """Production research workflow using Primary API."""
-    
-    async with httpx.AsyncClient() as client:
-        # Start intelligent research
-        response = await client.post(
-            "http://localhost:8000/api/v1/query/research",
-            json={
-                "query": query,
-                "domains": domains,
-                "routing_strategy": "quality_focused",
-                "enable_real_time_updates": True
-            }
-        )
-        
-        execution_id = response.json()["execution_id"]
-        
-        # Monitor progress
-        while True:
-            status = await client.get(
-                f"/api/v1/query/execution/{execution_id}/status"
-            )
-            
-            status_data = status.json()
-            print(f"Progress: {status_data['progress_percentage']}%")
-            
-            if status_data["status"] in ["completed", "failed"]:
-                break
-                
-            await asyncio.sleep(5)
-        
-        # Get final results
-        results = await client.get(
-            f"/api/v1/query/execution/{execution_id}/results"
-        )
-        
-        return results.json()
-
-# Usage
-results = await comprehensive_research(
-    "AI impact on educational outcomes",
-    ["ai", "education"]
-)
-```
-
-### Development Testing Workflow
-
-```python
-async def test_agent_performance(agent_type: str, test_queries: list):
-    """Test specific agent using Bypass API."""
-    
-    async with httpx.AsyncClient() as client:
-        results = []
-        
-        for query in test_queries:
-            response = await client.post(
-                f"http://localhost:8000/api/v1/agents/{agent_type}/execute",
-                json={
-                    "query": query,
-                    "enable_refinement": False,  # Faster testing
-                    "timeout_seconds": 120
-                }
-            )
-            
-            results.append(response.json())
-        
-        # Analyze performance
-        avg_quality = sum(r["quality_score"] for r in results) / len(results)
-        avg_time = sum(r["execution_time_seconds"] for r in results) / len(results)
-        
-        print(f"Agent {agent_type} - Avg Quality: {avg_quality:.3f}, Avg Time: {avg_time:.1f}s")
-        
-        return results
-
-# Usage
-test_results = await test_agent_performance(
-    "literature-review",
-    ["AI ethics", "Machine learning applications", "Educational technology"]
-)
-```
-
-### Custom Workflow Example
-
-```python
-async def custom_research_workflow(query: str):
-    """Custom workflow using Chain-of-Agents pattern."""
-    
-    async with httpx.AsyncClient() as client:
-        # Execute custom chain
-        response = await client.post(
-            "http://localhost:8000/api/v1/agents/chain",
-            json={
-                "query": query,
-                "agent_chain": ["literature-review", "methodology", "synthesis"],
-                "pass_intermediate_results": True,
-                "early_stopping": True,
-                "quality_threshold": 0.9
-            }
-        )
-        
-        chain_result = response.json()
-        
-        # If quality not sufficient, run mixture for consensus
-        if chain_result["chain_quality_score"] < 0.9:
-            mixture_response = await client.post(
-                "http://localhost:8000/api/v1/agents/mixture",
-                json={
-                    "query": query,
-                    "agent_types": ["literature-review", "comparative-analysis", "synthesis"],
-                    "aggregation_strategy": "consensus"
-                }
-            )
-            return mixture_response.json()
-        
-        return chain_result
-```
+A **single global rate limiter** applies: **100 requests per minute**
+(`MAX_REQUESTS_PER_MINUTE=100`, `ENABLE_RATE_LIMITING=True`). It is **not** per-hour, not
+per-endpoint, not per-role, and there is no concurrent-execution or burst tier. On the inbound
+request path the limiter runs **after** the (no-op) auth and cost-drift middleware: because
+Starlette wraps the last-added middleware outermost, the effective order is
+Auth -> CostDrift -> RateLimit -> Idempotency -> CORS.
 
 ---
 
-## Integration Examples
+## Observability
 
-### MASR Routing Decision Analysis
+- **Prometheus** at `/metrics` is the real LLM observability surface. Metrics include
+  `llm_call_duration_seconds`, `llm_tokens_total`, `llm_cost_usd_total`,
+  `llm_request_cost_drift_ratio`, and `llm_cost_drift_events_total`.
+- **structlog** provides structured logging throughout.
+- **Langfuse** tracing is opt-in (`LANGFUSE_ENABLED` defaults to `False`).
 
-```python
-async def analyze_routing_decisions(queries: list):
-    """Analyze MASR routing decisions for optimization."""
-    
-    async with httpx.AsyncClient() as client:
-        routing_data = []
-        
-        for query in queries:
-            # Get routing recommendation
-            recommendation = await client.get(
-                "/api/v1/query/routing/recommend",
-                params={"query": query}
-            )
-            
-            # Execute with recommended strategy
-            execution = await client.post(
-                "/api/v1/query/research",
-                json={
-                    "query": query,
-                    "routing_strategy": recommendation.json()["routing_recommendation"]["suggested_strategy"]
-                }
-            )
-            
-            routing_data.append({
-                "query": query,
-                "recommendation": recommendation.json(),
-                "execution": execution.json()
-            })
-        
-        return routing_data
-```
-
-### Multi-Domain Coordination
-
-```python
-async def cross_domain_analysis(query: str, domains: list):
-    """Example of cross-domain query handling."""
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://localhost:8000/api/v1/query/research",
-            json={
-                "query": query,
-                "domains": domains,
-                "context": {
-                    "cross_domain": True,
-                    "require_synthesis": True
-                },
-                "routing_strategy": "quality_focused"
-            }
-        )
-        
-        execution_id = response.json()["execution_id"]
-        
-        # MASR will automatically coordinate multiple supervisors
-        # for cross-domain queries
-        
-        results = await wait_for_completion(client, execution_id)
-        return results
-```
+There is no OpenTelemetry backbone and no Grafana/Loki/Jaeger/CloudWatch/Sentry integration in
+this codebase.
 
 ---
 
-## Next Steps
+## Notes on interpreting responses
 
-### Upcoming API Enhancements (Weeks 2-4)
-
-**Week 2: MASR Dynamic Routing API** (`/api/v1/masr/*`)
-- Expose full MASR routing intelligence and cost optimization capabilities
-- Strategy evaluation and adaptation endpoints
-- Real-time cost prediction and optimization
-
-**Week 3: Hierarchical Supervisor API** (`/api/v1/supervisors/*`)
-- Multi-supervisor coordination for complex cross-domain queries
-- Supervisor health monitoring and capability management
-- Worker pool allocation and performance optimization
-
-**Week 4: TalkHier Protocol API** (`/api/v1/talkhier/*`)
-- Structured communication and multi-round refinement
-- Interactive WebSocket sessions with consensus building
-- Enterprise-grade quality assurance and validation
-
-### Integration with Future Features
-
-- **Authentication Strategy (Task #18)**: Secure access control and cost-aware rate limiting
-- **A/B Testing System (Task #16)**: Experiment management and optimization
-- **Advanced Patterns**: Enhanced Chain-of-Agents and Mixture-of-Agents implementations
-
-The Agent Framework APIs establish Cerebro as a cutting-edge platform that exposes sophisticated multi-agent capabilities through research-validated, production-ready interfaces that balance automation with control, cost with quality, and sophistication with usability.
+- The immediate `POST /research` response is a placeholder; poll `…/status` and `…/results`.
+- `GET /routing/recommend` is canned by query length; it is not a MASR decision.
+- Agent `metrics`/`health` and the `system-monitoring` endpoints may return stub values.
+- Reported `confidence`/`quality_score` values are hardcoded heuristics, not measured quality.
+- The design-target split of ~90% Primary / ~10% Bypass usage is a goal, not a measurement.
+- Cited "50–60% cost reduction" / "20–25% quality improvement" figures are **research-paper
+  targets from the routing literature, not measurements of Cerebro**.

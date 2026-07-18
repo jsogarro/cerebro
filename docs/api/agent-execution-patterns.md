@@ -1,185 +1,153 @@
-# Agent Execution Patterns
+# Agent Execution Patterns (Bypass API)
 
 ## Introduction
 
-Cerebro's Agent Framework APIs implement sophisticated execution patterns based on cutting-edge research in multi-agent coordination. This document details the implementation and usage of Chain-of-Agents, Mixture-of-Agents, and other coordination patterns that enable optimal task execution.
+Cerebro's **bypass agent API** (`/api/v1/agents`) exposes two multi-agent execution
+patterns that a caller invokes explicitly: **Chain-of-Agents (CoA)** and
+**Mixture-of-Agents (MoA)**. This document describes those two endpoints — their
+request fields, execution behavior, and response shapes — as implemented in
+`src/api/services/agent_execution_service.py` and modeled in
+`src/models/agent_api_models.py`.
 
-## Research Foundation
+> **Scope note — these patterns are bypass-only.** Chain-of-Agents and
+> Mixture-of-Agents exist **only** as the bypass endpoints
+> `POST /api/v1/agents/chain` and `POST /api/v1/agents/mixture`. The primary,
+> MASR-routed query API (`/api/v1/query/research`, `/analyze`, `/synthesize`,
+> `/literature`, `/methodology`, `/comparison`) does **not** select or route to
+> CoA/MoA — see [How this relates to the primary API](#how-this-relates-to-the-primary-api).
 
-### "LLMs Working in Harmony" (2025)
+## How this relates to the primary API
 
-This foundational survey paper identifies several key agent coordination patterns that significantly improve performance over single-agent approaches:
-
-- **Chain-of-Agents (CoA)**: Sequential execution where agents build on previous results
-- **Mixture-of-Agents (MoA)**: Parallel execution with intelligent result aggregation
-- **Performance Improvements**: 20-25% quality improvement over baseline approaches
-
-### Implementation Philosophy
-
-Our implementation follows the research by providing:
-1. **Automatic Pattern Selection**: MASR routing chooses optimal patterns based on query analysis
-2. **Manual Pattern Control**: Bypass API allows explicit pattern specification
-3. **Quality Assurance**: Built-in validation and consensus mechanisms
-4. **Performance Optimization**: Efficient execution with real-time monitoring
-
-## Chain-of-Agents Pattern
-
-### Concept and Benefits
-
-**Chain-of-Agents** implements sequential agent execution where each agent builds upon the outputs of previous agents in the chain. This pattern is optimal for tasks requiring progressive refinement and structured analysis.
+The primary query endpoints are thin wrappers over a single handler
+(`intelligent_research_query`). A request there flows:
 
 ```
-Literature Review → Methodology → Analysis → Synthesis → Citation
-      ↓              ↓           ↓          ↓          ↓
-   Sources      Methods    Comparisons  Narrative  References
+Client -> FastAPI -> DirectExecutionService (asyncio background task)
+       -> MASRouter -> MASRSupervisorBridge -> domain supervisors -> workers -> verification
 ```
 
-### Research Validation
+MASR's routing decision produces a **`CollaborationMode`**, one of:
+`FAST_PATH`, `DIRECT`, `PARALLEL`, `HIERARCHICAL`, `DEBATE`, `ENSEMBLE`.
+`MASRSupervisorBridge` maps those to supervisor coordination styles
+(`masr_supervisor_bridge.py:136-140`): `DIRECT -> sequential`,
+`PARALLEL -> parallel`, `HIERARCHICAL -> hybrid`, `DEBATE -> adaptive`,
+`ENSEMBLE -> parallel`. `FAST_PATH` is a single LLM call that bypasses
+supervisors entirely.
 
-Studies show Chain-of-Agents patterns achieve:
-- **15-30% quality improvement** over single-agent execution
-- **Structured thinking**: Each agent contributes specialized expertise
-- **Error correction**: Later agents can identify and correct earlier issues
-- **Comprehensive coverage**: Sequential execution ensures thorough analysis
+There is **no `CollaborationMode` value for Chain-of-Agents or Mixture-of-Agents**,
+and neither `masr.py` nor `query_api.py` references CoA/MoA. To run these patterns
+you must call the bypass endpoints directly with an explicit agent list.
 
-### Implementation Details
+> **Confidence and quality values are heuristics, not measurements.** How a worker's
+> `confidence` is produced depends on the agent. Agents that use
+> `LLMWorkerAgentBase`'s default generation path — the finance agents and
+> verification — get a hardcoded value (`0.85` on a non-empty generation, `0.3` on an
+> empty/error response, `llm_worker_base.py:252`). The five research agents
+> (`literature-review`, `citation`, `methodology`, `comparative-analysis`,
+> `synthesis`) override `execute()` and compute their own additive heuristic starting
+> from a base of `0.5` (e.g. `literature_review_agent.py:344`,
+> `citation_agent.py:153`, `methodology_agent.py:137`, `synthesis_agent.py:138`).
+> Either way the value is heuristic, not a measured quality signal. Per-agent
+> `quality_score` is set equal to that confidence (`quality_score = agent_result.confidence`,
+> `agent_execution_service.py:168`). Every derived score below
+> (`overall_confidence`, `chain_quality_score`, `quality_improvement`,
+> `consensus_score`, `mixture_quality_score`, `inter_agent_agreement`) is computed
+> from those heuristics. They are **not** independent quality signals.
 
-#### Primary API Usage (Recommended)
+## Bypass agent types
 
-```http
-POST /api/v1/query/research
-{
-  "query": "Analyze the impact of AI on educational outcomes",
-  "domains": ["ai", "education"],
-  "context": {
-    "analysis_depth": "comprehensive",
-    "include_methodology": true,
-    "require_citations": true
-  }
-}
-```
+The bypass API accepts only these 10 `AgentType` values
+(`src/models/agent_api_models.py:16-28`):
 
-**MASR Automatically Selects Chain Pattern When**:
-- Query requires multi-step analysis
-- Domain expertise needs to build progressively
-- Quality requirements are high
-- Intermediate validation would improve results
+`literature-review`, `citation`, `methodology`, `comparative-analysis`,
+`synthesis`, `financial-analysis`, `valuation`, `risk-assessment`,
+`financial-calculator`, `verification`.
 
-#### Bypass API Usage (Manual Control)
+Content and Analytics domain workers are **not** exposed through the bypass API
+and cannot appear in a chain or mixture.
+
+## Chain-of-Agents
+
+**Chain-of-Agents** executes a list of agents **sequentially**, each optionally
+receiving the accumulated outputs of the agents before it. It is a **synchronous
+request/response** call: the endpoint runs the full chain and returns the
+complete result — there is no background task and no per-step streaming.
+
+### Endpoint
 
 ```http
 POST /api/v1/agents/chain
 {
-  "query": "Analyze AI impact on education",
-  "agent_chain": ["literature-review", "methodology", "comparative-analysis", "synthesis"],
+  "query": "Assess the valuation risk of a US equity given its filings",
+  "agent_chain": ["financial-analysis", "valuation", "risk-assessment"],
   "pass_intermediate_results": true,
   "early_stopping": false,
   "quality_threshold": 0.85
 }
 ```
 
-**Chain Configuration Options**:
-- `pass_intermediate_results`: Whether agents receive previous agent outputs
-- `early_stopping`: Stop chain if quality threshold not met
-- `quality_threshold`: Minimum quality score to continue chain
-- `timeout_per_agent_seconds`: Maximum execution time per agent
+### Request fields (`ChainOfAgentsRequest`)
 
-### Chain Execution Flow
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `query` | string (1–2000 chars) | — | Initial query passed to every agent in the chain |
+| `agent_chain` | list of `AgentType` (2–5) | — | Ordered list of agents to run |
+| `context` | object | `{}` | Initial execution context |
+| `pass_intermediate_results` | bool | `true` | Inject each agent's output into the next agent's context (as `previous_<agent>_result`) |
+| `early_stopping` | bool | `false` | Stop the chain when an agent's quality falls below `quality_threshold` |
+| `quality_threshold` | float 0–1 | `0.85` | Early-stopping threshold (only consulted when `early_stopping` is true) |
+| `timeout_per_agent_seconds` | int 30–900 | `180` | Per-agent execution timeout (passed to each agent as `timeout_seconds`) |
 
-1. **Agent₁ Execution**: Literature Review agent searches and analyzes sources
-2. **Result Validation**: Quality check and intermediate result processing
-3. **Agent₂ Execution**: Methodology agent receives literature context, designs approach
-4. **Progressive Building**: Each agent builds on accumulated results
-5. **Final Synthesis**: Last agent creates comprehensive final output
+### Execution behavior
 
-### Chain Response Structure
+1. Agents run in order. Each agent receives `query` plus the accumulated context.
+2. After each agent, its output, execution time, quality score, and confidence are
+   recorded.
+3. If `early_stopping` is true and the agent's `quality_score < quality_threshold`,
+   the chain stops and records `early_stopped: true` and `stopped_at_agent`.
+4. If `pass_intermediate_results` is true, the agent's output and the current step
+   number are added to the context before the next agent runs.
+5. `final_result` is the last agent's output. `overall_confidence` and
+   `chain_quality_score` are the means of the per-agent confidences and quality
+   scores. `quality_improvement` is `quality_scores[-1] - quality_scores[0]`
+   (only when more than one agent ran) — the difference between the last and first
+   agent's heuristic quality values.
+
+### Response (`ChainOfAgentsResponse`)
 
 ```json
 {
-  "execution_id": "chain-exec-123",
+  "execution_id": "…",
   "status": "completed",
-  "agent_chain": ["literature-review", "methodology", "synthesis"],
-  "intermediate_results": [
-    {"step": 1, "agent": "literature-review", "output": {...}},
-    {"step": 2, "agent": "methodology", "output": {...}},
-    {"step": 3, "agent": "synthesis", "output": {...}}
-  ],
-  "final_result": {"synthesized_analysis": "..."},
-  "overall_confidence": 0.87,
-  "quality_improvement": 0.12,
-  "chain_quality_score": 0.89,
-  "total_execution_time_seconds": 185.4
+  "agent_chain": ["financial-analysis", "valuation", "risk-assessment"],
+  "intermediate_results": [ {"…": "…"}, {"…": "…"}, {"…": "…"} ],
+  "final_result": {"…": "…"},
+  "overall_confidence": 0.85,
+  "total_execution_time_seconds": 12.4,
+  "agent_execution_times": [4.1, 3.9, 4.4],
+  "early_stopped": false,
+  "stopped_at_agent": null,
+  "chain_quality_score": 0.85,
+  "quality_improvement": 0.0,
+  "started_at": "…",
+  "completed_at": "…",
+  "errors": []
 }
 ```
 
-### Chain Optimization Strategies
+## Mixture-of-Agents
 
-#### Quality-Driven Chain Construction
-- **Dynamic Length**: MASR determines optimal chain length based on query complexity
-- **Agent Selection**: Choose agents based on query domain and requirements
-- **Validation Points**: Insert validation agents based on confidence scores
-- **Early Termination**: Stop chain early if quality threshold achieved
+**Mixture-of-Agents** runs a set of agents **in parallel** against the same query,
+then aggregates their outputs into a single result. Like the chain endpoint, it is
+a **synchronous request/response** call with no streaming.
 
-#### Performance Optimization
-- **Parallel Subchains**: Independent subtasks executed in parallel
-- **Caching**: Intermediate results cached to avoid recomputation
-- **Resource Management**: Optimal resource allocation across chain steps
-- **Error Recovery**: Graceful handling of individual agent failures
-
-## Mixture-of-Agents Pattern
-
-### Concept and Benefits
-
-**Mixture-of-Agents** implements parallel agent execution where multiple agents process the same query simultaneously, with results intelligently aggregated to produce superior consensus output.
-
-```
-                    Query
-                      ↓
-        Literature ∥ Methodology ∥ Analysis
-            ↓            ↓           ↓
-        Result₁    Result₂     Result₃
-            ↓            ↓           ↓
-          Aggregation & Consensus
-                      ↓
-               Final Result
-```
-
-### Research Validation
-
-Studies demonstrate Mixture-of-Agents benefits:
-- **Quality Enhancement**: 20-25% improvement through consensus
-- **Perspective Diversity**: Multiple agent viewpoints reduce bias
-- **Confidence Scoring**: Uncertainty quantification through agreement analysis
-- **Robustness**: Resilient to individual agent failures
-
-### Implementation Details
-
-#### Primary API Usage (Recommended)
-
-```http
-POST /api/v1/query/analyze
-{
-  "query": "Comprehensive analysis of renewable energy adoption",
-  "analysis_type": "comprehensive",
-  "domains": ["energy", "economics", "policy"],
-  "include_methodology": true,
-  "enable_comparison": true
-}
-```
-
-**MASR Automatically Uses Mixture Pattern When**:
-- Query benefits from multiple perspectives
-- High confidence/consensus required
-- Cross-domain analysis needed
-- Parallel execution would improve efficiency
-
-#### Bypass API Usage (Manual Control)
+### Endpoint
 
 ```http
 POST /api/v1/agents/mixture
 {
-  "query": "Evaluate renewable energy policies",
-  "agent_types": ["literature-review", "methodology", "comparative-analysis"],
+  "query": "Evaluate this company's investment risk",
+  "agent_types": ["financial-analysis", "valuation", "risk-assessment"],
   "aggregation_strategy": "consensus",
   "weight_by_confidence": true,
   "consensus_threshold": 0.8,
@@ -187,205 +155,112 @@ POST /api/v1/agents/mixture
 }
 ```
 
-**Mixture Configuration Options**:
-- `aggregation_strategy`: Method for combining results (consensus, weighted_average, best_quality)
-- `weight_by_confidence`: Use agent confidence scores for result weighting
-- `consensus_threshold`: Minimum consensus score for result acceptance
-- `max_parallel`: Maximum number of agents executing simultaneously
+### Request fields (`MixtureOfAgentsRequest`)
 
-### Aggregation Strategies
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `query` | string (1–2000 chars) | — | Query sent to every agent |
+| `agent_types` | list of `AgentType` (2–5) | — | Agents to run in parallel |
+| `context` | object | `{}` | Shared execution context |
+| `aggregation_strategy` | string | `"consensus"` | One of `consensus`, `weighted_average`, `best_quality` (any other value falls back to `consensus`) |
+| `weight_by_confidence` | bool | `true` | Weight each agent's contribution by its confidence; otherwise weights are uniform |
+| `consensus_threshold` | float 0–1 | `0.8` | Minimum consensus score to mark `consensus_achieved` |
+| `timeout_seconds` | int 60–1800 | `300` | Total execution timeout; applied per agent as `min(timeout_seconds, 600)` (`agent_execution_service.py:413`) |
+| `max_parallel` | int 1–5 | `3` | Intended concurrency limit, but currently **has no runtime effect** — see note below |
 
-#### Consensus Aggregation
-- **Method**: Weighted combination based on agent confidence
-- **Use Case**: General queries requiring balanced perspective
-- **Benefits**: Robust results with uncertainty quantification
+> **`max_parallel` is inert.** Every agent coroutine is started eagerly with
+> `asyncio.create_task` (`agent_execution_service.py:419`) before the
+> `asyncio.Semaphore(max_parallel)` (:426) is ever acquired, and the collecting loop
+> only `await`s the already-running tasks one at a time (:437-439). All agents run
+> fully in parallel regardless of `max_parallel`; the field has no effect on
+> concurrency today.
 
-#### Weighted Average Aggregation
-- **Method**: Mathematical weighted average of agent outputs
-- **Use Case**: Numerical analysis and quantitative results
-- **Benefits**: Precise confidence interval calculation
+### Aggregation strategies
 
-#### Best Quality Aggregation
-- **Method**: Select highest quality result with alternatives
-- **Use Case**: When one agent clearly outperforms others
-- **Benefits**: Maintains best result while providing alternatives
+- **`consensus`** — combines each agent's output weighted by confidence into a
+  single synthesized structure.
+- **`weighted_average`** — multiplies each agent's confidence by its weight and sums
+  the products into an `overall_confidence`, recording each agent's output, weight,
+  and weighted contribution (`_weighted_average_aggregation`,
+  `agent_execution_service.py:609-638`). It does not inspect output content, so
+  there is no numeric/quantitative bias.
+- **`best_quality`** — selects the highest-quality agent output and retains the
+  others as alternatives.
 
-### Mixture Response Structure
+`consensus_score` is derived from the spread of agent confidences
+(`1 - stdev(confidences)`, or `1.0` when only one agent produced a result), and
+`consensus_achieved` is `consensus_score >= consensus_threshold`. Note that failed
+agents are **not** excluded from aggregation. `execute_single_agent` catches
+`TimeoutError` and every other exception internally and returns a `failed`
+`AgentExecutionResponse` with `confidence` `0.0` rather than raising
+(`agent_execution_service.py:188-228`), so the mixture loop's `except`/`continue`
+(:444-447) almost never fires. A failed agent is therefore included in
+`agent_results` and aggregation: its `{"error": …}` output appears in the agent
+contributions, it receives roughly zero weight, and its `0.0` confidence widens the
+confidence spread — lowering `consensus_score` through the `1 - stdev` formula.
+
+### Response (`MixtureOfAgentsResponse`)
 
 ```json
 {
-  "execution_id": "mixture-exec-456",
+  "execution_id": "…",
   "status": "completed",
-  "agent_types": ["literature-review", "methodology", "comparative-analysis"],
+  "agent_types": ["financial-analysis", "valuation", "risk-assessment"],
   "agent_results": {
-    "literature-review": {"findings": [...], "confidence": 0.89},
-    "methodology": {"methods": [...], "confidence": 0.82},
-    "comparative-analysis": {"comparison": [...], "confidence": 0.91}
+    "financial-analysis": {"…": "…"},
+    "valuation": {"…": "…"},
+    "risk-assessment": {"…": "…"}
   },
-  "aggregated_result": {"consensus_analysis": "..."},
+  "aggregated_result": {"…": "…"},
   "consensus_score": 0.87,
+  "aggregation_strategy": "consensus",
   "agent_weights": {
-    "literature-review": 0.35,
-    "methodology": 0.28,
-    "comparative-analysis": 0.37
+    "financial-analysis": 0.34,
+    "valuation": 0.33,
+    "risk-assessment": 0.33
   },
-  "parallel_efficiency": 1.8,
-  "mixture_quality_score": 0.88
+  "consensus_achieved": true,
+  "total_execution_time_seconds": 5.2,
+  "parallel_efficiency": 1.9,
+  "mixture_quality_score": 0.85,
+  "inter_agent_agreement": 1.0,
+  "started_at": "…",
+  "completed_at": "…",
+  "errors": []
 }
 ```
 
-## Hybrid Execution Patterns
+`parallel_efficiency` is `sum(per_agent_times) / max(per_agent_time)` — the observed
+speedup from running the agents concurrently rather than sequentially.
+`inter_agent_agreement` is `1 - stdev(quality_scores)` (or `1.0` for a single
+result).
 
-### Chain-Mixture Combinations
+## Choosing between the primary and bypass APIs
 
-**Pattern**: Chains containing Mixture steps for complex workflows
+**Use the primary query API** (`/api/v1/query/*`) for normal usage. It is
+MASR-routed and coordinates domain supervisors and their workers. It does **not**
+run Chain-of-Agents or Mixture-of-Agents — those patterns are not part of the
+MASR routing path.
 
-```
-Phase 1: Literature Review (Single Agent)
-          ↓
-Phase 2: Analysis (Mixture of 3 Agents)
-          ↓
-Phase 3: Synthesis (Chain of 2 Agents)
-```
+**Use the bypass agent API** (`/api/v1/agents/chain` or `/mixture`) when you
+specifically want to:
 
-**Use Cases**:
-- Complex research requiring both depth and breadth
-- Enterprise workflows with validation requirements
-- Critical analysis needing multiple validation stages
+- run an explicit, fixed sequence of agents (chain), or
+- fan a single query out across several agents and aggregate (mixture),
+- experiment with agent composition, or debug individual agents in a controlled
+  order.
 
-### Adaptive Execution
+The bypass endpoints require you to name the agents yourself; there is no
+automatic pattern selection.
 
-**Pattern**: MASR dynamically adjusts execution pattern based on intermediate results
+## Related workflow endpoints
 
-- **Quality Monitoring**: Switch patterns if quality thresholds not met
-- **Performance Adaptation**: Optimize pattern based on real-time performance
-- **Cost Control**: Adjust execution complexity based on budget constraints
-- **Error Recovery**: Fallback to simpler patterns if complex execution fails
+Two convenience endpoints on the bypass API wrap these patterns with preset agent
+lists:
 
-## Performance Optimization
+- `POST /api/v1/agents/workflows/literature-analysis` → `ChainOfAgentsResponse`
+  (calls the chain handler internally).
+- `POST /api/v1/agents/workflows/comprehensive-research` → `MixtureOfAgentsResponse`
+  (calls the mixture handler internally).
 
-### Execution Efficiency
-
-#### Chain Optimization
-- **Dependency Analysis**: Identify independent subtasks for parallelization
-- **Caching Strategy**: Cache intermediate results for reuse
-- **Resource Pooling**: Optimal agent instance management
-- **Early Termination**: Stop when sufficient quality achieved
-
-#### Mixture Optimization
-- **Parallel Execution**: Efficient concurrent agent coordination
-- **Aggregation Efficiency**: Fast consensus calculation algorithms
-- **Resource Balancing**: Even load distribution across agents
-- **Result Caching**: Cache aggregated results for similar queries
-
-### Quality Assurance
-
-#### Chain Quality Control
-- **Intermediate Validation**: Quality checks between chain steps
-- **Progressive Enhancement**: Each agent improves on previous results
-- **Error Detection**: Early identification of quality issues
-- **Recovery Mechanisms**: Restart from last successful step
-
-#### Mixture Quality Control
-- **Consensus Monitoring**: Real-time consensus score calculation
-- **Outlier Detection**: Identify and handle divergent agent results
-- **Confidence Weighting**: Emphasize high-confidence contributions
-- **Uncertainty Quantification**: Provide confidence intervals for results
-
-## Real-Time Monitoring
-
-### WebSocket Integration
-
-Both execution patterns support comprehensive real-time monitoring:
-
-```javascript
-// Chain execution monitoring
-ws.onmessage = (event) => {
-    const update = JSON.parse(event.data);
-    
-    if (update.pattern_type === 'chain') {
-        console.log('Chain progress:', update.current_step, '/', update.total_steps);
-        console.log('Current agent:', update.current_agent);
-        console.log('Quality trend:', update.quality_improvement);
-    }
-    
-    if (update.pattern_type === 'mixture') {
-        console.log('Mixture progress:', update.completed_agents, '/', update.total_agents);
-        console.log('Consensus score:', update.consensus_score);
-        console.log('Agent weights:', update.agent_weights);
-    }
-};
-```
-
-### Progress Tracking
-
-- **Execution Phases**: Real-time updates on current execution phase
-- **Quality Metrics**: Live quality scores and confidence updates
-- **Performance Data**: Execution time, resource usage, cost tracking
-- **Error Notifications**: Immediate notification of issues with recovery options
-
-## Best Practices
-
-### Pattern Selection Guidelines
-
-#### Use Chain-of-Agents When:
-- ✅ Sequential logic is important (methodology before analysis)
-- ✅ Each step builds on previous results
-- ✅ Quality improves through progressive refinement
-- ✅ Structured workflow is beneficial
-
-#### Use Mixture-of-Agents When:
-- ✅ Multiple perspectives improve results
-- ✅ Parallel execution saves time
-- ✅ Consensus building is valuable
-- ✅ Risk reduction through redundancy is important
-
-#### Use Primary API When:
-- ✅ Cost optimization is important (90% of cases)
-- ✅ Quality assurance is critical
-- ✅ Learning and improvement are desired
-- ✅ Production reliability is required
-
-#### Use Bypass API When:
-- 🔧 Debugging specific agents
-- 🔬 Experimenting with custom patterns
-- 🎛️ Manual workflow control needed
-- 🔌 Third-party integration requirements
-
-## Performance Benchmarks
-
-### Chain-of-Agents Performance
-
-| Chain Length | Average Latency | Quality Improvement | Cost Efficiency |
-|-------------|-----------------|--------------------|-----------------| 
-| 2 agents | 2.3s | +12% | 95% |
-| 3 agents | 3.1s | +18% | 92% |
-| 4 agents | 4.2s | +23% | 89% |
-| 5 agents | 5.8s | +25% | 86% |
-
-### Mixture-of-Agents Performance
-
-| Agent Count | Parallel Latency | Consensus Quality | Resource Utilization |
-|-------------|------------------|-------------------|---------------------|
-| 2 agents | 1.4s | 0.82 | 78% |
-| 3 agents | 1.6s | 0.87 | 85% |
-| 4 agents | 1.9s | 0.91 | 92% |
-| 5 agents | 2.2s | 0.93 | 98% |
-
-## Future Enhancements
-
-### Advanced Patterns (Upcoming)
-
-- **Hybrid Chains**: Mixture steps within Chain execution
-- **Adaptive Execution**: Dynamic pattern switching based on intermediate results
-- **Quality-Driven Routing**: Pattern selection based on quality requirements
-- **Cost-Aware Execution**: Budget-constrained pattern optimization
-
-### Integration Improvements
-
-- **TalkHier Enhancement**: Multi-round refinement within patterns
-- **Memory Integration**: Pattern learning and optimization through procedural memory
-- **A/B Testing**: Experimental pattern evaluation and optimization
-- **Enterprise Features**: SLA monitoring and quality gate enforcement
-
-The Agent Execution Patterns establish Cerebro as a sophisticated multi-agent platform that leverages research-validated coordination strategies to achieve superior performance, cost efficiency, and quality assurance for complex AI tasks.
+Both are synchronous and return the same response shapes documented above.

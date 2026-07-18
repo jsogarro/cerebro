@@ -1,3 +1,5 @@
+*OUTDATED — superseded by [security-authentication.md](./security-authentication.md) (canonical security reference). This guide describes mostly unwired scaffolding as if implemented: there is no security-headers middleware, no multi-strategy rate limiter in the request path (production is a flat 100 req/min Redis limiter), no input-validation layer, no MFA or OAuth endpoints (ENABLE_MFA=False; only DB models exist), no wired audit-logging or security-alert subsystem, and no RBAC beyond an is_superuser boolean. Several documented details are also wrong: password minimum is 12 (not 8), JWT access expiry is 15 min (not 30), key paths are /secrets/ (not /keys/), hashing is bcrypt (no Argon2 settings), and the real endpoints are /api/v1/auth/forgot-password, /reset-password, /sessions/{device_id}, /revoke-all. AuthMiddleware is a no-op; /api/v1/query, /agents, /masr routes are effectively unauthenticated.*
+
 # Security and Authentication Implementation Guide
 
 ## Overview

@@ -54,11 +54,11 @@ Enable when there is a concrete need for models beyond Gemini (cost optimization
 - Episodic memory integration in `src/ai_brain/router/masr.py` nudges worker allocation based on past similar queries
 - Procedural memory integration in `src/agents/llm_worker_base.py` injects successful past approaches into worker prompts
 - Bounded adaptation: worker count adjustment capped at `±MEMORY_ROUTING_MAX_WORKER_ADJUST` (default `±2`)
-- Freshness decay: older routing history contributes less weight (exponential decay over `MEMORY_ROUTING_FRESHNESS_DAYS`, default 30 days)
+- Freshness decay: older routing history contributes less weight (linear decay over `MEMORY_ROUTING_FRESHNESS_DAYS`, default 30 days — weight ramps linearly to zero at the horizon)
 
-**Broader adaptive learning** (outcome → feedback → allocation) remains experiment-scoped:
-- `src/ai_brain/experimentation/core/adaptive_allocation_engine.py` and feedback loop optimizer are wired **only** into experiment APIs (`/api/routes/experiment_agent_api.py`)
-- **NOT wired** into the main `/query` → MASR → supervisor → worker path
+**Broader adaptive learning** (outcome → feedback → allocation):
+- The Thompson-sampling adaptive bandit (`src/ai_brain/experimentation/core/adaptive_allocation_engine.py`) **IS wired** into `MASRouter.route` behind `ADAPTIVE_ROUTING_ENABLED` (default OFF). It is imported at `masr.py:36` and invoked in Step 3.6 (`masr.py:365-369`; implementation `_get_adaptive_allocation_adjustment` at `masr.py:649`) as a 5-arm bandit rewarded by `quality_score` from `routing_history`.
+- The closed outcome → feedback loop **does not run on live traffic because the flag is off**; the `experiment_agent_api` surface that also uses it is unmounted (`src/api/routes/experiment_agent_api.py` is never `include_router`'d — dead).
 - Memory subsystem (procedural, episodic, semantic, multi-tier) is partially wired but the closed feedback loop does not run on live traffic
 
 ### Configuration (memory-informed routing only)
@@ -69,6 +69,7 @@ MEMORY_INFORMED_ROUTING_ENABLED=true
 MEMORY_ROUTING_MAX_WORKER_ADJUST=2     # Max ±N from analytic baseline
 MEMORY_ROUTING_FRESHNESS_DAYS=30       # Decay weight for older history
 MEMORY_PROMPT_MAX_PROCEDURES=3         # Max procedural context items
+ADAPTIVE_ROUTING_ENABLED=false         # Gate for the Thompson-sampling bandit loop (config.py:236, default False)
 ```
 
 **Behavior when enabled**:

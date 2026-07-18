@@ -1,8 +1,12 @@
 # MASR Dynamic Routing API Guide
 
+> **Canonical MASR API reference.** This document supersedes `masr-api-complete-guide.md`.
+
 ## Overview
 
-The MASR (Multi-Agent System Router) Dynamic Routing API exposes Cerebro's intelligent routing capabilities through RESTful endpoints and WebSocket connections. Based on the "MasRouter: Learning to Route LLMs" research, this API enables cost-optimized, quality-aware routing decisions that can reduce costs by 50-60% while maintaining high output quality.
+The MASR (Multi-Agent System Router) Dynamic Routing API exposes Cerebro's routing capabilities through RESTful endpoints. It is informed by the "MasRouter: Learning to Route LLMs" research. The 50-60% cost-reduction and 20-25% quality-improvement figures cited throughout this guide are **research-paper design goals, not Cerebro-measured results** — treat them as target-setting context, not achieved metrics.
+
+All 8 REST endpoints below (`/route`, `/estimate-cost`, `/evaluate-strategies`, `/analyze-complexity`, `/strategies`, `/models`, `/feedback`, `/status`) are live and mounted at the `/api/v1/masr` prefix.
 
 ## Key Features
 
@@ -10,19 +14,22 @@ The MASR (Multi-Agent System Router) Dynamic Routing API exposes Cerebro's intel
 - **Cost Optimization**: Real-time cost estimation with hierarchical breakdown
 - **Strategy Evaluation**: Compare multiple routing strategies for optimal selection
 - **Complexity Analysis**: Deep query analysis with feature extraction
-- **Learning Integration**: Continuous improvement through feedback loops
-- **Real-time Updates**: WebSocket support for live routing events
-- **Performance Analytics**: Comprehensive metrics and trend analysis
+- **Feedback Endpoint**: Accepts performance feedback (see the learning-loop caveat under `/feedback` — the closed-loop learning it feeds is a design goal, not yet implemented)
+- **Performance Analytics**: Metrics surfaced via the `/status` endpoint (see caveats — several fields are static/illustrative)
 
 ## Base URL
 
 ```
-https://api.cerebro.ai/api/v1/masr
+http://localhost:8000/api/v1/masr
 ```
+
+> No public `api.cerebro.ai` host exists today. Use the local dev server (`uvicorn src.api.main:app --port 8000`, or `docker-compose up`). Any `*.cerebro.ai` URL in this guide is aspirational.
 
 ## Authentication
 
-All endpoints require authentication via Bearer token:
+**These endpoints are currently effectively unauthenticated.** The `masr_api` router is mounted with no auth dependency, and the application's `AuthMiddleware` is a no-op that validates nothing. All `/api/v1/masr/*` endpoints accept requests without a token.
+
+Cerebro does implement JWT auth (RS256, per-endpoint `Depends(...)`) for the `auth`, `users`, and parts of the `research`/`reports` routers, but the MASR routes do not currently declare those dependencies. Do not assume a Bearer token is required or enforced here. If/when auth is added to these routes, requests would carry:
 
 ```http
 Authorization: Bearer YOUR_API_TOKEN
@@ -44,7 +51,7 @@ Get an intelligent routing decision for a query with optimal supervisor allocati
     "domain": "research",
     "priority": "high"
   },
-  "strategy": "balanced",  // Optional: cost_efficient, quality_focused, balanced, speed_optimized
+  "strategy": "balanced",  // Optional: speed_first, cost_efficient, quality_focused, balanced, adaptive
   "max_cost": 0.5,         // Optional: Maximum cost constraint in USD
   "min_quality": 0.85,     // Optional: Minimum quality requirement (0-1)
   "timeout_ms": 30000      // Optional: Timeout in milliseconds
@@ -120,11 +127,11 @@ Get detailed cost estimation with breakdown for query execution.
   },
   "confidence_score": 0.85,
   "cost_factors": {
-    "query_complexity": "complex",
-    "model_tier": "premium",
-    "supervisor_count": 2,
-    "total_workers": 6,
-    "refinement_rounds": 3
+    "query_complexity": 0.85,
+    "model_tier": 4.0,
+    "supervisor_count": 1.0,
+    "total_workers": 6.0,
+    "refinement_rounds": 1.0
   },
   "recommendations": [
     "Consider using balanced strategy for 30% cost reduction",
@@ -226,7 +233,9 @@ Analyze query complexity with detailed feature breakdown.
 
 **POST** `/feedback`
 
-Submit performance feedback for continuous learning and optimization.
+Submit performance feedback for a completed routing decision.
+
+> **Design-goal caveat.** This endpoint accepts and acknowledges feedback, but there is no closed learning loop behind it today. The `learning_updated: true` field is hardcoded (`src/api/services/masr_routing_service.py:433`) and does not indicate a model was updated. The reward/learning subsystem (`src/improvement`) is stub code — `RewardModel.predict_quality` returns a constant `0.5`. Continuous-learning language elsewhere in this guide describes an intended design, not current behavior.
 
 **Request Body:**
 ```json
@@ -277,7 +286,7 @@ Get list of available routing strategies with characteristics.
     }
   ],
   "default_strategy": "balanced",
-  "total_count": 4
+  "total_count": 5
 }
 ```
 
@@ -286,6 +295,8 @@ Get list of available routing strategies with characteristics.
 **GET** `/models`
 
 Get available models and their tier classifications.
+
+> **Static/illustrative response.** The model catalog and the `model_availability` block are hardcoded — `_check_model_availability()` (`src/api/services/masr_routing_service.py:1023`) returns `{deepseek: True, llama: True, gemini: True}` regardless of runtime flags. The **default runtime is Gemini-only** (`GEMINI_DEFAULT_MODEL=gemini-pro`); `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, and `MULTI_PROVIDER_ROUTING_ENABLED` all default `False`. Do not read this endpoint as live provider health. The `deepseek-v3` / `llama-3.3-70b` entries shown here are illustrative and not active by default.
 
 **Response:**
 ```json
@@ -304,10 +315,9 @@ Get available models and their tier classifications.
   ],
   "tiers": {
     "premium": ["deepseek-v3"],
-    "standard": ["llama-3.3-70b", "gemini-pro"],
-    "budget": ["llama-3.1-8b"]
+    "standard": ["llama-3.3-70b", "gemini-pro"]
   },
-  "total_count": 5,
+  "total_count": 3,
   "providers": ["deepseek", "llama", "gemini"]
 }
 ```
@@ -317,6 +327,8 @@ Get available models and their tier classifications.
 **GET** `/status`
 
 Get MASR router health and performance status.
+
+> **Partially live, partially placeholder.** The `model_availability` map is hardcoded (see `/models` note), and the `learning_metrics` block is a fixed placeholder — the service returns exactly `{"total_feedback": 0, "learning_cycles": 0}` (`src/api/services/masr_routing_service.py:555-556`); closed-loop learning is not implemented (see `/feedback`). By contrast, `total_routes`, `average_latency_ms`, `success_rate`, and the per-strategy `performance_metrics` are computed live from in-process counters (`masr_routing_service.py:516-547`) — they are real but reset on restart and are not persisted production metrics. The specific numbers shown below are illustrative.
 
 **Response:**
 ```json
@@ -342,43 +354,15 @@ Get MASR router health and performance status.
     "gemini": true
   },
   "learning_metrics": {
-    "total_feedback": 8934,
-    "cost_prediction_accuracy": 0.89,
-    "quality_prediction_accuracy": 0.91,
-    "last_model_update": "2025-09-08T12:00:00Z"
+    "total_feedback": 0,
+    "learning_cycles": 0
   }
 }
 ```
 
 ## WebSocket Events
 
-Connect to real-time routing events via WebSocket:
-
-```javascript
-const ws = new WebSocket('wss://api.cerebro.ai/api/v1/masr/ws');
-
-ws.on('message', (event) => {
-  const data = JSON.parse(event);
-  
-  switch(data.event_type) {
-    case 'routing_started':
-      console.log('Routing initiated:', data.routing_id);
-      break;
-      
-    case 'cost_update':
-      console.log('Cost optimized:', data.cost_reduction_percent);
-      break;
-      
-    case 'strategy_change':
-      console.log('Strategy updated:', data.current_best);
-      break;
-      
-    case 'routing_complete':
-      console.log('Routing complete:', data.final_decision);
-      break;
-  }
-});
-```
+**Not yet implemented.** There is no MASR WebSocket endpoint. The route is commented out in the source (`src/api/routes/masr_api.py:340-341`, marked "future enhancement"). Real-time routing events over WebSocket are a planned feature, not a live capability — use the REST endpoints above. (WebSocket support does exist elsewhere in Cerebro, e.g. under `/ws` and the supervisor/talkhier routers, but not for MASR routing.)
 
 ## Error Handling
 
@@ -390,7 +374,7 @@ All endpoints return structured error responses:
   "error_code": "INVALID_REQUEST",
   "details": {
     "provided_strategy": "ultra_fast",
-    "valid_strategies": ["cost_efficient", "balanced", "quality_focused", "speed_optimized"]
+    "valid_strategies": ["speed_first", "cost_efficient", "quality_focused", "balanced", "adaptive"]
   },
   "suggestions": [
     "Check query format",
@@ -401,9 +385,7 @@ All endpoints return structured error responses:
 
 ## Rate Limiting
 
-- **Standard tier**: 100 requests per minute
-- **Premium tier**: 1000 requests per minute
-- **Enterprise tier**: Unlimited
+A single **global** limiter applies across the application: **100 requests per minute** (`MAX_REQUESTS_PER_MINUTE=100`, `ENABLE_RATE_LIMITING=True`). There are no tiers, no burst allowance, and no per-endpoint configuration.
 
 Rate limit information is returned in response headers:
 ```
@@ -419,7 +401,7 @@ X-RateLimit-Reset: 1694184000
 - Use `cost_efficient` for high-volume, non-critical queries
 - Use `quality_focused` for research and critical analysis
 - Use `balanced` as default for most production workloads
-- Use `speed_optimized` for real-time user interactions
+- Use `speed_first` for real-time user interactions
 
 ### 2. Cost Optimization
 
@@ -453,7 +435,8 @@ import asyncio
 class MASRClient:
     def __init__(self, api_key: str):
         self.client = httpx.AsyncClient(
-            base_url="https://api.cerebro.ai/api/v1/masr",
+            base_url="http://localhost:8000/api/v1/masr",
+            # Bearer header is optional today — MASR routes are unauthenticated
             headers={"Authorization": f"Bearer {api_key}"}
         )
     
@@ -502,7 +485,8 @@ const axios = require('axios');
 class MASRClient {
   constructor(apiKey) {
     this.client = axios.create({
-      baseURL: 'https://api.cerebro.ai/api/v1/masr',
+      baseURL: 'http://localhost:8000/api/v1/masr',
+      // Bearer header is optional today — MASR routes are unauthenticated
       headers: { 'Authorization': `Bearer ${apiKey}` }
     });
   }
@@ -547,7 +531,7 @@ For users migrating from direct agent APIs:
 ### Before (Direct Agent Access)
 ```python
 # Direct agent execution - no optimization
-response = await api.post("/agents/research/execute", {
+response = await api.post("/agents/literature-review/execute", {
     "query": query,
     "agent_config": {...}
 })
@@ -560,21 +544,26 @@ response = await api.post("/masr/route", {
     "query": query,
     "strategy": "balanced"
 })
-# 50-60% cost reduction with maintained quality
+# Design goal: 50-60% cost reduction with maintained quality (research-paper
+# target, not a Cerebro-measured result)
 ```
 
 ## Support
 
-For questions and support:
-- Documentation: https://docs.cerebro.ai/masr
-- API Status: https://status.cerebro.ai
-- Support: support@cerebro.ai
+The `docs.cerebro.ai`, `status.cerebro.ai`, and `support@cerebro.ai` endpoints below are **aspirational and do not exist today**. For now, refer to the in-repo docs under `docs/` and the OpenAPI schema at `http://localhost:8000/docs` (served only when `DEBUG=True`).
+
+- Documentation (aspirational): https://docs.cerebro.ai/masr
+- API Status (aspirational): https://status.cerebro.ai
+- Support (aspirational): support@cerebro.ai
 
 ## Changelog
 
+> The dates and version tag below are historical and may be stale relative to the current code.
+
 ### v2.0.0 (September 2025)
 - Initial release of MASR Dynamic Routing API
-- 8 production endpoints with full routing intelligence
-- WebSocket support for real-time events
-- Comprehensive analytics and learning integration
-- Research-validated implementation achieving 50-60% cost reduction
+- 8 REST endpoints
+- Analytics and feedback endpoints (closed-loop learning is a design goal, not yet implemented)
+- Research-informed implementation; the 50-60% cost-reduction figure is a research-paper design goal, not a measured result
+
+> Note: a MASR WebSocket endpoint was planned for this release but is not implemented (commented out in source).

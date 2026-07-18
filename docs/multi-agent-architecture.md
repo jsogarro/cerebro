@@ -2,66 +2,59 @@
 
 ## Overview
 
-The Multi-Agent Research Platform orchestrates 5 specialized AI agents working together to conduct comprehensive research. This document details the agent architecture, implementation patterns, and orchestration mechanisms.
+Cerebro orchestrates 17 specialized AI agents across 4 domains (research, content, analytics, finance) working together to conduct comprehensive research. This document details the agent architecture, implementation patterns, and orchestration mechanisms.
 
-**Architecture Update (2026-07-03)**: All 17 agents across all domains (research, content, analytics, finance) now share `LLMWorkerAgentBase` as their common base class, providing uniform infrastructure for multi-provider routing, memory-informed prompts, and tool registry support. Research agents maintain their complex multi-step execution workflows while inheriting these shared capabilities. Both plain-text generation (via `_generate_with_routing`) and structured output generation (via `_generate_structured_with_routing`) now route through the multi-provider layer when `MULTI_PROVIDER_ROUTING_ENABLED=True`, using OpenRouter's OpenAI-compatible JSON mode with schema-embedded prompts. Structured calls gracefully fall back to `GeminiService` on any routing failure, preserving current reliability.
+**Architecture Update (2026-07-03)**: 16 of the 17 registered agents (all LLM-reasoning workers across research, content, analytics, and finance, plus the cross-cutting verification agent) now share `LLMWorkerAgentBase` as their common base class, providing uniform infrastructure for multi-provider routing, memory-informed prompts, and tool registry support. The sole exception is `FinancialCalculatorAgent`, a fully deterministic tool wrapper that subclasses `BaseAgent` directly (see the Agent Base Architecture section below). Research agents maintain their complex multi-step execution workflows while inheriting these shared capabilities. Both plain-text generation (via `_generate_with_routing`) and structured output generation (via `_generate_structured_with_routing`) now route through the multi-provider layer when `MULTI_PROVIDER_ROUTING_ENABLED=True`, using OpenRouter's OpenAI-compatible JSON mode with schema-embedded prompts. Structured calls gracefully fall back to `GeminiService` on any routing failure, preserving current reliability.
 
 ## Architecture Diagram
 
 ```mermaid
 graph TB
-    subgraph "Research Platform"
-        subgraph "Orchestration Layer"
-            ORC[Research Orchestrator]
-            TMP[Temporal Workflows]
-            LG[LangGraph Coordination]
+    subgraph "Cerebro"
+        API["FastAPI (Research Platform API)"]
+        DES["DirectExecutionService (asyncio)"]
+        MASR["MASRouter (in-process)"]
+        BRIDGE["MASRSupervisorBridge"]
+
+        subgraph "Domain Supervisors (each runs an internal LangGraph StateGraph)"
+            RS["Research Supervisor"]
+            CS["Content Supervisor"]
+            AS["Analytics Supervisor"]
+            FS["Finance Supervisor"]
         end
-        
-        subgraph "Agent Layer"
-            LRA[Literature Review Agent]
-            CAA[Comparative Analysis Agent]
-            MA[Methodology Agent]
-            SA[Synthesis Agent]
-            CA[Citation Agent]
+
+        subgraph "Workers (LLMWorkerAgentBase)"
+            RW["Research workers x5"]
+            CW["Content workers x4"]
+            AW["Analytics workers x3"]
+            FW["Finance workers x3"]
         end
-        
-        subgraph "Service Layer"
-            GS[Gemini Service]
-            MCP[MCP Tools]
-            DP[Data Persistence]
-        end
-        
-        subgraph "External Systems"
-            AD[Academic Databases]
-            WEB[Web Sources]
-            APIs[External APIs]
-        end
+
+        ROUTE["_generate_with_routing"]
+        GEM["Gemini (default provider)"]
+        OR["OpenRouter (flag-gated: MULTI_PROVIDER_ROUTING_ENABLED + OPENROUTER_API_KEY)"]
     end
-    
-    ORC --> TMP
-    ORC --> LG
-    TMP --> LRA
-    TMP --> CAA
-    TMP --> MA
-    TMP --> SA
-    TMP --> CA
-    
-    LRA --> GS
-    CAA --> GS
-    MA --> GS
-    SA --> GS
-    CA --> GS
-    
-    GS --> MCP
-    MCP --> AD
-    MCP --> WEB
-    MCP --> APIs
-    
-    LRA --> DP
-    CAA --> DP
-    MA --> DP
-    SA --> DP
-    CA --> DP
+
+    API --> DES
+    DES --> MASR
+    MASR --> BRIDGE
+    BRIDGE --> RS
+    BRIDGE --> CS
+    BRIDGE --> AS
+    BRIDGE --> FS
+
+    RS --> RW
+    CS --> CW
+    AS --> AW
+    FS --> FW
+
+    RW --> ROUTE
+    CW --> ROUTE
+    AW --> ROUTE
+    FW --> ROUTE
+
+    ROUTE --> GEM
+    ROUTE -.flag-gated.-> OR
 ```
 
 ## Agent Specifications
@@ -218,7 +211,7 @@ class MethodologyAgent(LLMWorkerAgentBase):
 
 **Implementation**:
 ```python
-class SynthesisAgent(BaseAgent):
+class SynthesisAgent(LLMWorkerAgentBase):
     async def execute(self, task: AgentTask) -> AgentResult:
         # Collect all agent outputs
         agent_outputs = task.input_data.get("agent_outputs", {})
@@ -265,7 +258,7 @@ class SynthesisAgent(BaseAgent):
 
 **Implementation**:
 ```python
-class CitationAgent(BaseAgent):
+class CitationAgent(LLMWorkerAgentBase):
     async def execute(self, task: AgentTask) -> AgentResult:
         # Extract citations from content
         citations = await self._extract_citations(task.input_data)
@@ -301,7 +294,12 @@ class CitationAgent(BaseAgent):
 
 ### BaseAgent Abstract Class
 
-All agents inherit from the `BaseAgent` abstract base class:
+`BaseAgent` is the root abstract base class. Domain **workers** inherit
+`LLMWorkerAgentBase` (itself built on the shared worker scaffold); only
+`FinancialCalculatorAgent` (a fully deterministic tool wrapper) and
+`BaseSupervisor` subclass `BaseAgent` directly. `LLMWorkerAgentBase` provides
+multi-provider routing via `_generate_with_routing()`, memory-informed prompts,
+and tool-registry support:
 
 ```python
 from abc import ABC, abstractmethod
@@ -366,25 +364,46 @@ class AgentResult(BaseModel):
 
 ## Agent Factory Pattern
 
-The `AgentFactory` manages agent instantiation and registration:
+The `AgentFactory` is the authoritative catalog of every agent type. Its
+`_agent_registry` holds all **17** agents across the four domains plus the two
+cross-cutting agents. Note that the factory is **not the runtime execution
+path** — MASR-routed execution goes through supervisors, which instantiate their
+own workers. The factory serves the bypass agent API (`/api/v1/agents`).
 
 ```python
 class AgentFactory:
-    _agents: Dict[str, Type[BaseAgent]] = {
+    _agent_registry: Dict[str, Type[BaseAgent]] = {
+        # Research (5)
         "literature_review": LiteratureReviewAgent,
         "comparative_analysis": ComparativeAnalysisAgent,
         "methodology": MethodologyAgent,
         "synthesis": SynthesisAgent,
         "citation": CitationAgent,
+        # Content (4)
+        "content_planning": ContentPlanningAgent,
+        "drafting": DraftingAgent,
+        "editing": EditingAgent,
+        "optimization": OptimizationAgent,
+        # Analytics (3)
+        "data_analysis": DataAnalysisAgent,
+        "statistical_modeling": StatisticalModelingAgent,
+        "insight_synthesis": InsightSynthesisAgent,
+        # Finance (3)
+        "financial_analysis": FinancialAnalysisAgent,
+        "valuation": ValuationAgent,
+        "risk_assessment": RiskAssessmentAgent,
+        # Cross-cutting (2)
+        "verification": VerificationAgent,
+        "financial_calculator": FinancialCalculatorAgent,
     }
     
     @classmethod
     def create_agent(cls, agent_type: str, config: AgentConfig) -> BaseAgent:
         """Create an agent instance by type."""
-        if agent_type not in cls._agents:
+        if agent_type not in cls._agent_registry:
             raise ValueError(f"Unknown agent type: {agent_type}")
         
-        agent_class = cls._agents[agent_type]
+        agent_class = cls._agent_registry[agent_type]
         return agent_class(config)
     
     @classmethod
@@ -393,7 +412,7 @@ class AgentFactory:
         if not issubclass(agent_class, BaseAgent):
             raise ValueError(f"{agent_class} must inherit from BaseAgent")
         
-        cls._agents[agent_type] = agent_class
+        cls._agent_registry[agent_type] = agent_class
 ```
 
 ## Orchestration Patterns
@@ -461,106 +480,89 @@ async def parallel_research_workflow(project_data: Dict) -> Dict:
     return compile_final_result(synth_result, cite_result)
 ```
 
-### LangGraph Integration
+### LangGraph Integration (per-supervisor)
 
-LangGraph provides advanced coordination capabilities:
+LangGraph is used **only inside supervisors**. There is no top-level research
+graph: the old top-level `src/orchestration/` subsystem (~8,961 lines) was
+deleted (PR #50). LangGraph itself remains a hard dependency
+(`langgraph>=0.2.0`) — it simply moved down a layer. Each domain supervisor
+builds and compiles its **own** internal `StateGraph` workflow and drives it via
+`workflow_graph.ainvoke(...)`:
 
 ```python
-from langgraph import StateGraph, END
-from src.orchestration.state import ResearchState
+from langgraph.graph import StateGraph, END
 
-def build_research_graph() -> StateGraph:
-    """Build LangGraph workflow."""
+# Inside BaseSupervisor / each domain supervisor (e.g. research_supervisor.py)
+def _build_workflow_graph(self) -> StateGraph:
+    """Build this supervisor's internal LangGraph workflow."""
     
-    workflow = StateGraph(ResearchState)
+    workflow = StateGraph(self.SupervisionState)
     
-    # Add nodes
-    workflow.add_node("query_analysis", query_analysis_node)
-    workflow.add_node("plan_generation", plan_generation_node)
-    workflow.add_node("literature_review", agent_dispatch_node("literature_review"))
-    workflow.add_node("methodology", agent_dispatch_node("methodology"))
-    workflow.add_node("comparative_analysis", agent_dispatch_node("comparative_analysis"))
-    workflow.add_node("synthesis", agent_dispatch_node("synthesis"))
-    workflow.add_node("citation", agent_dispatch_node("citation"))
-    workflow.add_node("quality_check", quality_check_node)
-    workflow.add_node("report_generation", report_generation_node)
+    # Nodes coordinate this supervisor's own worker team + QA gate
+    workflow.add_node("plan", self._plan_node)
+    workflow.add_node("execute_workers", self._execute_workers_node)
+    workflow.add_node("verification", self._verification_node)
+    workflow.add_node("aggregate", self._aggregate_node)
     
-    # Add edges
-    workflow.add_edge("query_analysis", "plan_generation")
-    workflow.add_edge("plan_generation", "literature_review")
-    workflow.add_edge("plan_generation", "methodology")
-    workflow.add_edge(["literature_review", "methodology"], "comparative_analysis")
-    workflow.add_edge(["literature_review", "comparative_analysis", "methodology"], "synthesis")
-    workflow.add_edge("synthesis", "citation")
-    workflow.add_edge(["synthesis", "citation"], "quality_check")
-    workflow.add_conditional_edges(
-        "quality_check",
-        quality_gate,
-        {
-            "continue": "report_generation",
-            "retry": "synthesis",
-            "fail": END
-        }
-    )
-    workflow.add_edge("report_generation", END)
+    workflow.add_edge("plan", "execute_workers")
+    workflow.add_edge("execute_workers", "verification")
+    workflow.add_edge("verification", "aggregate")
+    workflow.add_edge("aggregate", END)
     
-    # Set entry point
-    workflow.set_entry_point("query_analysis")
+    workflow.set_entry_point("plan")
     
     return workflow.compile()
 ```
 
-### Verification Revision Loop (PR #53)
+Cross-supervisor coordination is handled above this layer by the MASR router and
+the `MASRSupervisorBridge`, not by a shared LangGraph.
 
-Supervisor verifiers now implement a **bounded revision loop** for quality assurance:
+### Verification QA Gate
+
+The verification gate that actually runs in **production is single-shot**:
+`BaseSupervisor._run_verification` is called **once** per task by each
+supervisor's verification phase (`round_num` is always 1). It returns a verdict
+(`pass` / `revise`) plus a report and issues; a terminal `revise` results in a
+×0.85 quality penalty applied downstream. There is no re-prompt or retry on the
+production path.
 
 ```python
 # In src/agents/supervisors/base_supervisor.py
-MAX_VERIFICATION_REVISION_ROUNDS = 2  # Initial + 1 revision
+MAX_VERIFICATION_REVISION_ROUNDS = 2  # constant used by the (non-wired) revision loop
 
-async def verify_with_revision(
-    self, worker_type: str, worker_response: Any
-) -> dict[str, Any]:
-    """Execute worker with bounded verification-revision loop."""
-    
-    for round_num in range(1, MAX_VERIFICATION_REVISION_ROUNDS + 1):
-        # Execute worker
-        worker_response = await self.send_talkhier_message(
-            worker_type, message_type, content, context
-        )
-        
-        # Run verification
-        verification_result = await self._run_verification(worker_response)
-        
-        # PASS → accept and break
-        if verification_result["verdict"] == "pass":
-            break
-        
-        # REVISE on final round → apply penalty and break
-        if round_num >= MAX_VERIFICATION_REVISION_ROUNDS:
-            # Terminal REVISE: apply 0.85 quality penalty
-            verification_result["quality_penalty"] = 0.85
-            break
-        
-        # REVISE with rounds remaining → append feedback and retry
-        feedback_text = f"\n\nREVISION FEEDBACK (Round {round_num}):\n"
-        feedback_text += str(verification_result["report"])
-        content = content + feedback_text  # Feed issues back to worker
-    
-    return verification_result
+async def _run_verification(self, content: str) -> dict[str, Any]:
+    """Single-shot QA gate — the production verification path."""
+    # Create a VerificationAgent via AgentFactory and run it on the
+    # aggregated worker content, then parse its report.
+    verification_agent = AgentFactory.create_agent("verification", {...})
+    verification_result = await verification_agent.execute(verification_task)
+    report_text = verification_result.output.get("content", "")
+    verdict = "revise" if "REVISE" in report_text.upper() else "pass"
+    issues = self._extract_issues_from_report(report_text)
+    mast_labels, mast_confidence = self._label_qa_gate(verdict, issues, content)
+    return {
+        "verdict": verdict,          # "pass" | "revise"
+        "report": report_text,
+        "issues": issues,
+        "mast_labels": mast_labels,
+        "mast_confidence": mast_confidence,
+    }
 ```
 
-**Key behaviors**:
-- **Initial attempt + bounded revisions**: Default `MAX_VERIFICATION_REVISION_ROUNDS=2` means 1 initial + 1 revision
-- **PASS verdict**: Worker output accepted immediately, loop terminates
-- **REVISE verdict (rounds remaining)**: Append verification issues to worker prompt and re-run
-- **REVISE verdict (final round)**: Accept output with ×0.85 quality penalty (prevents infinite loops)
-- **Graceful degradation**: If worker returns no response, neutral fallback (`pass`)
+A **bounded revision loop** (`_run_worker_with_verification_loop`, gated by the
+`MAX_VERIFICATION_REVISION_ROUNDS=2` constant → 1 initial + 1 revision) also exists and
+re-prompts a worker with delimited verification feedback, applying a ×0.85
+penalty on a terminal `revise`. However, it is **not currently wired into
+production supervisors** (tracked in issue #74). This matches the note in the
+MAST Failure Labeling section below: only the single-shot gate runs in
+production, so `verification_rounds` is `0` and `revision_history` is empty
+unless that loop is explicitly invoked.
 
-**Benefits**:
-- Iterative quality improvement without manual intervention
-- Bounded execution prevents runaway loops
-- Maintains supervisor QA gate while allowing refinement
+**Key behaviors (single-shot gate)**:
+- **PASS verdict**: Worker output accepted as-is
+- **REVISE verdict**: Downstream ×0.85 quality penalty; no re-prompt on the production path
+- **Graceful degradation**: If the worker returns no response, a neutral `pass` fallback is used
+- **MAST labeling**: The verdict/issues are labeled on every path (see below)
 
 ### MAST Failure Labeling (PR #71)
 
@@ -693,11 +695,11 @@ Multi-domain queries are now decomposed and executed **concurrently with bounded
 # In src/api/services/direct_execution_service.py
 self.max_domain_parallelism = 4  # Bounded concurrency
 
-async def execute_multi_domain(
-    self, decomposition: QueryDecomposition, ...
-) -> dict[str, Any]:
-    """Execute per-domain sub-queries concurrently with bounded parallelism."""
-    
+# Multi-domain dispatch is inline within _execute_research_workflow
+# (there is no separate execute_multi_domain method). When the
+# decomposition detects multiple domains, that method runs the
+# following bounded-concurrency block:
+
     # Create semaphore for bounded concurrency
     semaphore = asyncio.Semaphore(self.max_domain_parallelism)
     
@@ -817,7 +819,7 @@ async def _merge_domain_results(self, domain_results: list[dict]) -> dict:
 - Preserves single-domain performance
 - Optional LLM synthesis for coherent cross-domain answers
 
-### Parallel Worker Execution Within Supervisors (PR #10)
+### Parallel Worker Execution Within Supervisors (PR #60)
 
 Supervisors can now execute allocated workers **in true parallel** when operating in `SupervisionMode.PARALLEL`:
 
@@ -1223,33 +1225,26 @@ async def test_agent_workflow_integration():
 
 ### Agent Configuration
 
+There is no dedicated `AgentConfig` settings class. Agents are constructed by
+`AgentFactory.create_agent(agent_type, config)`, where `config` is a plain
+`dict[str, Any] | None` (e.g. `{"gemini_service": ..., "cache_client": ...}`)
+rather than a typed Pydantic model. Application-wide settings live on the
+`Settings` (`BaseSettings`) class in `src/core/config.py`.
+
 ```python
-class AgentConfig(BaseModel):
-    gemini_config: GeminiConfig
-    mcp_config: MCPConfig
-    cache_config: CacheConfig
-    retry_config: RetryConfig
-    
-    class Config:
-        env_prefix = "AGENT_"
+# src/core/config.py
+class Settings(BaseSettings):
+    GEMINI_API_KEY: str | None = None
+    GEMINI_DEFAULT_MODEL: str = "gemini-pro"
+    # ... additional settings
 ```
 
 ### Environment Variables
 
 ```bash
-# Agent Configuration
-AGENT_MAX_RETRIES=3
-AGENT_TIMEOUT_SECONDS=300
-AGENT_CACHE_TTL=3600
-
-# Gemini Configuration
+# Gemini Configuration (loaded by Settings in src/core/config.py)
 GEMINI_API_KEY=your-api-key
-GEMINI_MODEL=gemini-1.5-pro
-GEMINI_MAX_TOKENS=4096
-
-# MCP Configuration
-MCP_ACADEMIC_SEARCH_ENDPOINT=http://localhost:8001
-MCP_CITATION_TOOL_ENDPOINT=http://localhost:8002
+GEMINI_DEFAULT_MODEL=gemini-pro
 ```
 
 ## Future Enhancements
@@ -1399,7 +1394,7 @@ All neutralization events are logged with `structlog` for security monitoring.
 ### Implementation
 
 - **Provenance**: `src/agents/communication/talkhier_message.py` (`ProvenanceType` enum, `source_type` field)
-- **Delimiters**: `src/agents/supervisors/base_supervisor.py:885-915`, `src/agents/supervisors/research_supervisor.py:375-410`
+- **Delimiters**: `src/agents/supervisors/base_supervisor.py:1146-1165` (REVISION_FEEDBACK block in `_run_worker_with_verification_loop`), `src/agents/supervisors/research_supervisor.py:402-417` (WORKER_OUTPUT blocks)
 - **Sanitization**: `src/security/content_sanitizer.py`, `src/agents/integrations/mcp_integration.py:_sanitize_academic_sources`
 - **Tests**: `tests/security/test_content_sanitizer.py`, `tests/agents/communication/test_talkhier_provenance.py`
 - **Red-team probe**: `scripts/red_team_security_probe.py` (validates all three defenses)

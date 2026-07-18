@@ -1,5 +1,7 @@
 # CLI Usage Guide
 
+> *OUTDATED — superseded by [CLI.md](./CLI.md), the canonical CLI reference. Large parts of this guide describe features that were never built: there is no `auth` command group (token is supplied via config/env), no TOML config (real config is a flat dotenv at ~/.research-cli.env with RESEARCH_API_URL / RESEARCH_AUTH_TOKEN), no `config get/reset/edit` (only show|set|save with flat keys like api_url), no profiles, no cache/logging/concurrency config, no `pip install research-platform-cli` PyPI package, no Docker CLI image, and no `--detailed`/`--timeout`/`--version-check`/`--benchmark` flags. The valid content (global options and the `projects` command group) is covered in CLI.md.*
+
 ## Overview
 
 The Research Platform CLI (`research-cli`) provides a comprehensive command-line interface for managing research projects, monitoring progress, and generating reports. The CLI supports both interactive and batch operations with rich terminal output and real-time progress streaming.

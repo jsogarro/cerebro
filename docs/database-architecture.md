@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Multi-Agent Research Platform uses a sophisticated database layer built with SQLAlchemy 2.0+ and PostgreSQL, implementing modern patterns for scalability, maintainability, and performance. The architecture follows Domain-Driven Design (DDD) principles with a clean separation between the domain models, database models, and data access layers.
+Cerebro uses a sophisticated database layer built with SQLAlchemy 2.0+ and PostgreSQL, implementing modern patterns for scalability, maintainability, and performance. The architecture follows Domain-Driven Design (DDD) principles with a clean separation between the domain models, database models, and data access layers.
 
 ## Key Design Decisions
 
@@ -43,8 +43,9 @@ Central entity representing a research investigation:
 - domains: JSON (list of research domains)
 - status: Enum (draft, in_progress, completed, failed, cancelled) (indexed)
 - quality_score: Float (0.0 to 1.0)
-- user_id: UUID (foreign key to users.id) (indexed)
-- workflow_id: String(255) (Temporal/LangGraph workflow ID) (indexed)
+- user_id: String(255) (plain string identifier, not a foreign key) (indexed)
+- organization_id: UUID (tenant organization boundary identifier) (indexed)
+- workflow_id: String(255) (LangGraph/DirectExecutionService workflow ID) (indexed)
 - project_metadata: JSON (additional project metadata)
 - timestamps: created_at, updated_at, deleted_at (from BaseModel)
 ```
@@ -60,9 +61,12 @@ Individual tasks assigned to AI agents:
 - output_data: JSON (output data from the agent)
 - error_message: Text (error message if task failed)
 - retry_count: Integer (number of retry attempts)
-- execution_start: DateTime (when task execution started)
-- execution_end: DateTime (when task execution finished)
-- task_metadata: JSON (additional task metadata)
+- started_at: DateTime (timezone aware) (indexed) (when task execution started)
+- completed_at: DateTime (timezone aware) (when task execution finished)
+- execution_time_ms: Integer (execution time in milliseconds)
+- priority: Integer (task priority, higher = more important)
+- depends_on: JSON (list of task IDs this task depends on)
+- organization_id: UUID (tenant organization boundary identifier) (indexed)
 - timestamps: created_at, updated_at, deleted_at (from BaseModel)
 ```
 
@@ -108,7 +112,6 @@ System users with authentication:
 ```
 
 **Relationships:**
-- research_projects: One-to-Many with ResearchProject
 - api_keys: One-to-Many with APIKey
 - password_history: One-to-Many with PasswordHistory
 - sessions: One-to-Many with UserSession
@@ -119,7 +122,7 @@ System users with authentication:
 State snapshots for workflow recovery:
 ```python
 - id: UUID (primary key)
-- workflow_id: String(255) (indexed) (Temporal or LangGraph workflow ID)
+- workflow_id: String(255) (indexed) (LangGraph/DirectExecutionService workflow ID)
 - project_id: UUID (foreign key to research_projects.id) (indexed)
 - checkpoint_data: JSON (serialized workflow state)
 - phase: String(100) (indexed) (workflow phase at checkpoint)
@@ -146,17 +149,19 @@ Generated research reports:
 - project_id: UUID (foreign key to research_projects.id) (indexed)
 - title: String(500)
 - report_type: String(50) (comprehensive, executive_summary, etc.)
-- format_type: String(50) (html, pdf, markdown, etc.)
-- content: Text (report content)
+- formats_generated: JSON (list of formats generated, e.g. html, pdf, markdown)
+- executive_summary: Text (executive summary of the report)
+- content_preview: Text (preview of report content for search and display)
 - generation_status: String(50) (generating, completed, failed)
 - word_count: Integer
 - page_count: Integer
 - quality_score: Float (0.0 to 1.0)
 - confidence_score: Float (0.0 to 1.0)
 - generation_time_seconds: Float
-- report_metadata: JSON (additional metadata)
 - timestamps: created_at, updated_at, deleted_at (from BaseModel)
 ```
+
+Per-format artifacts (with `format_type: String(20)` and content stored in `content_text` / `content_binary`) live in a separate child `ReportFormat` table, not on `GeneratedReport` itself.
 
 **Relationships:**
 - project: Many-to-One with ResearchProject
@@ -180,14 +185,13 @@ Secure API key management:
 
 ```mermaid
 graph TD
-    User -->|1:N| ResearchProject
     User -->|1:N| APIKey
     ResearchProject -->|1:N| AgentTask
     ResearchProject -->|1:N| ResearchResult
     ResearchProject -->|1:N| WorkflowCheckpoint
-    AgentTask -->|1:N| ResearchResult
-    AgentTask -->|M:N| AgentTask[Dependencies]
 ```
+
+Note: `ResearchProject.user_id` is a plain string identifier, so there is no database-level foreign key from `User` to `ResearchProject`. `AgentTask` records intra-project ordering via a `depends_on` JSON list of task IDs (not an association table), and `ResearchResult` links only to `ResearchProject` (no `AgentTask` foreign key).
 
 ## Repository Layer
 
@@ -215,9 +219,9 @@ Each domain entity has a specialized repository with domain-specific operations:
 #### ResearchRepository
 ```python
 - get_by_user(user_id, status, limit, offset)
-- get_active_projects(limit)
+- get_in_progress(limit)
 - update_status(project_id, status, updated_by)
-- get_with_tasks(project_id)
+- get_with_results(project_id)
 - search_projects(query, domains, status)
 - get_statistics(project_id)
 ```
@@ -227,8 +231,8 @@ Each domain entity has a specialized repository with domain-specific operations:
 - get_pending_tasks(agent_type, limit)
 - get_by_project(project_id, agent_type, status)
 - get_dependencies(task_id)
-- update_status(task_id, status, output_data, error)
-- retry_task(task_id)
+- update_task_status(task_id, status, output_data, error)
+- mark_for_retry(task_id)
 - get_task_metrics(project_id)
 ```
 
@@ -311,7 +315,7 @@ alembic current
 ## Performance Optimizations
 
 ### 1. Indexes
-The database includes 47 carefully designed indexes for optimal query performance:
+The database includes numerous carefully designed indexes for optimal query performance — across the 17 model modules there are 67 composite `Index()` definitions plus 73 single-column `index=True` fields:
 
 - **Primary indexes**: UUID primary keys on all tables
 - **Foreign key indexes**: All foreign key relationships
@@ -463,7 +467,7 @@ async def postgres_db():
     # Start PostgreSQL container
     async with AsyncDockerClient() as docker:
         container = await docker.containers.run(
-            "postgres:15",
+            "postgres:16",
             environment={"POSTGRES_PASSWORD": "test"},
             detach=True
         )
@@ -514,16 +518,13 @@ async def test_bulk_insert_performance():
 
 ### Setting Up the Database
 
-1. **Install PostgreSQL**:
+1. **Start PostgreSQL**:
 ```bash
-docker-compose up -d db
+docker-compose up -d postgres
 ```
 
-2. **Create database and user**:
-```bash
-docker exec db psql -U postgres -c "CREATE USER research WITH PASSWORD 'research123';"
-docker exec db psql -U postgres -c "CREATE DATABASE research_db OWNER research;"
-```
+2. **Database and user**:
+The `postgres` service (container `research-postgres`) auto-creates the `research` user and `research_db` database from its `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` environment variables plus `docker/init.sql`, so no manual `CREATE USER` / `CREATE DATABASE` step is required.
 
 3. **Run migrations**:
 ```bash
@@ -577,7 +578,7 @@ alembic upgrade head
 
 1. **Read Replicas**: Distribute read queries across replicas
 2. **Partitioning**: Partition large tables by date/project
-3. **Caching Layer**: Implement Redis caching for hot data
+3. **Expanded Caching**: Extend the existing Redis caching (already used for rate limiting and idempotency; note that MASR routing decisions are cached in an in-process dict, not Redis) to cover additional hot database reads
 4. **Event Sourcing**: Track all state changes as events
 5. **Graph Database**: Neo4j for knowledge graph storage
 6. **Time-series Data**: TimescaleDB for metrics

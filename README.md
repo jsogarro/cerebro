@@ -8,14 +8,14 @@ Cerebro began as a graduate-level research platform; research is now one domain 
 
 - **Financial research agents** — financial analysis, valuation, and risk assessment workers backed by a deterministic finance-math tool (pure functions for the arithmetic, LLMs only for narrative)
 - **MASR intelligent routing** — cost/quality/latency-optimized query routing with strategy selection (`cost_efficient`, `quality_focused`, `balanced`) and per-query cost estimation
-- **17 specialized agents across 4 domains** — Finance, Research (literature review, comparative analysis, methodology, synthesis, citation), Analytics (data analysis, statistical modeling, insight synthesis), and Content, plus cross-cutting verification and financial-calculator agents
-- **Direct execution architecture** — `API → MASR → Supervisor → Workers → Response`, with hierarchical supervisors coordinating parallel workers via the TalkHier multi-round refinement protocol
+- **17 agents total** — 15 domain workers across four domains (Finance 3, Research 5 — literature review, comparative analysis, methodology, synthesis, citation; Analytics 3 — data analysis, statistical modeling, insight synthesis; Content 4) plus two cross-cutting agents: verification (QA gate) and financial-calculator (deterministic tool)
+- **Direct execution architecture** — `API → DirectExecutionService → MASR → Supervisors → Workers → Response`, where each domain supervisor coordinates its workers through an internal LangGraph `StateGraph`. (TalkHier multi-round refinement is a separate API subsystem at `/api/v1/talkhier`, not the supervisor coordination mechanism.)
 - **Verifier QA gate** — every supervisor result passes through a verification agent (PASS keeps the score; REVISE triggers bounded revision)
-- **Multi-provider LLMs** — OpenRouter integration routes simple queries to cost-efficient models (e.g., DeepSeek) and complex ones to frontier models (e.g., Claude), with Gemini support and multi-provider fallback
+- **Gemini-first, with flag-gated multi-provider routing** — the default runtime is Gemini-only (`GEMINI_DEFAULT_MODEL=gemini-pro`; `MULTI_PROVIDER_ROUTING_ENABLED` and `OPENROUTER_ENABLED` both default `false`). Setting `MULTI_PROVIDER_ROUTING_ENABLED=true` **and** `OPENROUTER_API_KEY` activates OpenRouter routing, sending simple queries to cost-efficient models (DeepSeek) and complex ones to frontier models (Claude Sonnet)
 - **Observability** — optional Langfuse tracing for routing decisions, plus Prometheus metrics and structured logging
-- **Comprehensive CLI** — `research-cli` mirrors the API 1:1 with table/JSON/YAML/CSV output
+- **CLI** — `research-cli` covers the core agent and research-project workflows (health, config, completion, an `agents` group for query/route/estimate/execute/chain/status, and a `projects` group) with table/JSON/YAML/CSV output. It is not a full 1:1 mirror of the API — talkhier, reports, auth/users, and some MASR endpoints have no CLI command.
 - **Real-time progress** — WebSocket updates for long-running research sessions
-- **Docker & Kubernetes ready** — Docker Compose for local development, K8s manifests and Helm charts for deployment
+- **Docker & Kubernetes ready** — Docker Compose for local development, Kustomize-based K8s manifests (`k8s/`) for deployment
 
 ## Table of Contents
 
@@ -77,7 +77,7 @@ research-cli health
 ./scripts/smoke_test.sh
 ```
 
-The smoke test boots the API against SQLite with ephemeral RSA keys, exercises 9 endpoint checks (health, research project CRUD, query), and reports pass/fail. Requires tmux, jq, curl, and openssl.
+The smoke test boots the API against SQLite with ephemeral RSA keys, exercises 9 endpoint checks (health, research project CRUD, query), and reports pass/fail. The only external prerequisite is `tmux`; HTTP calls, JWT minting, and RSA key generation all run through the project's `.venv` Python (httpx, python-jose, cryptography).
 
 ## CLI Documentation
 
@@ -145,7 +145,7 @@ The API is two-tier:
 | `/api/v1/research/projects/{id}/refine` | POST | Refine project scope |
 | `/api/v1/research/projects/{id}/results` | GET | Get project results |
 
-Additional routes cover TalkHier refinement sessions (`/api/v1/talkhier/*`), reports, users/auth, and WebSocket progress updates. Interactive docs are at `http://localhost:8000/docs`.
+Additional routes cover TalkHier refinement sessions (`/api/v1/talkhier/*`), reports, users/auth, and WebSocket progress updates. Interactive docs (`/docs`, `/redoc`) are served only when `DEBUG=true` (default `false`).
 
 ### Request/Response Examples
 
@@ -198,7 +198,8 @@ graph TB
 
     subgraph Execution["Direct Execution"]
         DES["DirectExecutionService"]
-        Supervisors["Hierarchical Supervisors<br/>(TalkHier protocol)"]
+        Factory["AgentFactory<br/>(bypass catalog)"]
+        Supervisors["Hierarchical Supervisors<br/>(LangGraph StateGraph)"]
         Verifier["Verifier QA Gate<br/>(PASS / REVISE)"]
     end
 
@@ -211,14 +212,13 @@ graph TB
     end
 
     subgraph Providers["LLM Providers"]
-        OpenRouter["OpenRouter<br/>(DeepSeek, Claude, ...)"]
-        Gemini["Google Gemini"]
+        Gemini["Google Gemini<br/>(default runtime)"]
+        OpenRouter["OpenRouter (flag-gated)<br/>DeepSeek simple / Claude complex"]
     end
 
     subgraph Data["Data Layer"]
         PG[("PostgreSQL")]
         Redis[("Redis")]
-        VectorDB[("Vector DB")]
     end
 
     Obs["Langfuse tracing +<br/>Prometheus metrics"]
@@ -226,31 +226,31 @@ graph TB
     CLI --> Primary
     Web --> Primary
     WS --> WSS
-    Primary --> MASR
-    Bypass --> DES
+    Primary --> DES
+    Bypass --> Factory
     MASRAPI --> MASR
-    TalkHierAPI --> Supervisors
 
+    DES --> MASR
     MASR --> CostOpt
-    MASR --> DES
-    DES --> Supervisors
+    MASR --> Supervisors
     Supervisors --> Verifier
 
     Supervisors --> Finance
     Supervisors --> Research
     Supervisors --> Analytics
     Supervisors --> Content
+    Factory --> Research
+    Factory --> Finance
     Finance --> FinMath
 
-    Finance --> OpenRouter
-    Research --> OpenRouter
-    Analytics --> OpenRouter
-    Content --> OpenRouter
+    Finance --> Gemini
     Research --> Gemini
+    Analytics --> Gemini
+    Content --> Gemini
+    Gemini -.->|"MULTI_PROVIDER_ROUTING_ENABLED + OPENROUTER_API_KEY"| OpenRouter
 
     DES --> PG
     DES --> Redis
-    Research --> VectorDB
     MASR -.-> Obs
 ```
 
@@ -271,8 +271,7 @@ graph LR
     subgraph Supervisor["Hierarchical Supervisor"]
         Plan["Plan Execution"]
         Assign["Assign Workers<br/>(parallel)"]
-        Refine["TalkHier Refinement"]
-        Consensus["Build Consensus"]
+        Aggregate["Aggregate Worker Output"]
     end
 
     subgraph QA["Verifier QA Gate"]
@@ -285,9 +284,9 @@ graph LR
     end
 
     Query --> Classify --> Strategy --> CostEst --> Plan
-    Plan --> Assign --> Refine --> Consensus --> Verify
+    Plan --> Assign --> Aggregate --> Verify
     Verify -->|PASS| Result
-    Verify -->|REVISE| Refine
+    Verify -->|"REVISE (bounded loop)"| Assign
     Result --> Feedback --> Classify
 ```
 
@@ -305,11 +304,11 @@ More diagrams: [system architecture](docs/system-architecture-diagrams.md), [dat
 - **Language**: Python 3.11+
 - **API Framework**: FastAPI (with WebSocket support)
 - **CLI Framework**: Click + Rich
-- **LLM Providers**: OpenRouter (DeepSeek, Claude, and others), Google Gemini
-- **Database**: PostgreSQL + Redis + vector embeddings
+- **LLM Providers**: Google Gemini (default runtime); OpenRouter (DeepSeek, Claude Sonnet) behind `MULTI_PROVIDER_ROUTING_ENABLED` + `OPENROUTER_API_KEY`
+- **Database**: PostgreSQL + Redis
 - **Observability**: Langfuse (optional), Prometheus, structlog
 - **Container**: Docker / Docker Compose
-- **Deployment**: Kubernetes (GKE), Helm
+- **Deployment**: Kubernetes (GKE) via Kustomize (`k8s/`)
 - **Package Management**: uv
 
 ## Development
@@ -326,18 +325,24 @@ cerebro/
 │   ├── benchmarks/       # Replication & benchmark classes
 │   ├── cli/              # CLI implementation
 │   ├── core/             # Core business logic & configuration
-│   ├── costs/            # Cost tracking & optimization
-│   ├── improvement/      # Self-improvement & feedback loops
+│   ├── costs/            # Cost tracking (stub / scaffolding — not implemented)
+│   ├── improvement/      # Self-improvement loops (stub / scaffolding — not implemented)
 │   ├── mcp/              # MCP protocol servers
-│   ├── memory/           # Multi-tier memory & context management
+│   ├── memory/           # Multi-tier memory config only (stub — src/memory returns empties)
+│   ├── middleware/       # ASGI middleware
 │   ├── models/           # Data models
-│   ├── qa/               # Quality assurance & evaluation
+│   ├── prompts/          # Agent prompt templates
+│   ├── qa/               # QA (stub, except the wired src/qa/mast.py failure labeler)
+│   ├── reliability/      # Retry / fallback helpers
 │   ├── repositories/     # Repository-pattern data access
-│   └── services/         # Service layer
+│   ├── research_platform/ # Legacy research-platform package
+│   ├── security/         # Security utilities
+│   ├── services/         # Service layer
+│   ├── templates/        # Template assets
+│   └── utils/            # Shared utilities
 ├── tests/                # Test files
 ├── docker/               # Docker configurations
-├── k8s/                  # Kubernetes manifests
-├── helm/                 # Helm charts
+├── k8s/                  # Kubernetes (Kustomize) manifests
 ├── examples/             # Example files
 └── docs/                 # Documentation
 ```
@@ -387,10 +392,11 @@ docker-compose up
 
 4. **Access services:**
 - API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
-- MASR Router: http://localhost:9100
+- API Docs: http://localhost:8000/docs (served only when `DEBUG=true`)
 - MCP Server: http://localhost:9000
 - pgAdmin: http://localhost:5050 (with `--profile dev-tools`)
+
+> The `masr-router` container (port 9100) in `docker-compose.yml` is a legacy standalone service and is **not** on the query path — the query pipeline uses the in-process `MASRouter` (`MASR_SERVICE_URL` is never read in `src/`).
 
 ## Deployment
 
@@ -408,15 +414,15 @@ docker-compose logs -f api
 
 ```bash
 # Build and push images
+# NOTE: the k8s manifests expect the legacy "research-platform" infra identity —
+# k8s/kustomization.yaml and k8s/deployment-api.yaml reference
+# gcr.io/PROJECT_ID/research-platform-api, not cerebro-api.
 export PROJECT_ID=your-gcp-project
-docker build -t gcr.io/$PROJECT_ID/cerebro-api:latest .
-docker push gcr.io/$PROJECT_ID/cerebro-api:latest
+docker build -t gcr.io/$PROJECT_ID/research-platform-api:latest .
+docker push gcr.io/$PROJECT_ID/research-platform-api:latest
 
 # Apply manifests
 kubectl apply -k k8s/
-
-# Or use Helm
-helm install cerebro helm/research-platform/
 ```
 
 ### Environment Variables
@@ -429,8 +435,9 @@ Key configuration variables:
 | `REDIS_URL` | Redis connection string | Required |
 | `SECRET_KEY` | Application secret key | Required |
 | `GEMINI_API_KEY` | Google Gemini API key | Required |
-| `OPENROUTER_ENABLED` | Enable multi-provider routing via OpenRouter | `false` |
-| `OPENROUTER_API_KEY` | OpenRouter API key | Required if enabled |
+| `MULTI_PROVIDER_ROUTING_ENABLED` | Enable multi-provider routing (with `OPENROUTER_API_KEY`, this is what actually activates OpenRouter routing on the live worker/fast path) | `false` |
+| `OPENROUTER_API_KEY` | OpenRouter API key; required for multi-provider routing | Required if enabled |
+| `OPENROUTER_ENABLED` | Marks OpenRouter as an available provider config (does **not** by itself enable multi-provider routing) | `false` |
 | `LANGFUSE_ENABLED` | Enable Langfuse routing observability | `false` |
 | `ENVIRONMENT` | Deployment environment | `development` |
 | `LOG_LEVEL` | Logging level | `INFO` |
@@ -454,7 +461,7 @@ See [docs/configuration-reference.md](docs/configuration-reference.md) for the f
 
 - Follow PEP 8 style guide with type hints
 - Write docstrings for all public functions
-- Maintain test coverage (target: 80%, enforced in CI)
+- CI enforces a coverage floor of `coverage report --fail-under=25` (`.github/workflows/ci.yml:128`; integration tests use `--cov-fail-under=25` in `integration-tests.yml:89`)
 - Use semantic commit messages (`feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`)
 
 ## Support

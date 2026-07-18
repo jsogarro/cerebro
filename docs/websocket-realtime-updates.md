@@ -85,7 +85,7 @@ GET /ws/health
 ### Agent Lifecycle Events
 ```json
 {
-  "type": "agent_started",
+  "type": "agent.started",
   "project_id": "uuid",
   "timestamp": "2025-08-17T17:55:48Z",
   "data": {
@@ -99,7 +99,7 @@ GET /ws/health
 ### Project Events
 ```json
 {
-  "type": "project_completed",
+  "type": "project.completed",
   "project_id": "uuid",
   "timestamp": "2025-08-17T17:55:48Z",
   "data": {
@@ -120,7 +120,7 @@ Replace polling with real-time WebSocket streaming:
 research-cli projects progress <project-id> --stream
 
 # Stream with verbose logging
-research-cli projects progress <project-id> --stream --verbose
+research-cli --verbose projects progress <project-id> --stream
 ```
 
 ### Polling Mode (Legacy)
@@ -146,18 +146,21 @@ WebSocket connections use JWT token authentication:
 
 1. **Token-based Authentication**
    - Pass JWT token as query parameter: `?token=<jwt_token>`
-   - Token validated using same system as REST API
-   - Automatic token refresh for long-running connections
+   - Token validated via the shared `JWTService` (RS256), the same system as the REST API
 
-2. **Client Type Detection**
+2. **Development-mode bypass**
+   - When `ENVIRONMENT == "development"`, anonymous connections are allowed: a missing token returns `None` instead of raising (`src/api/websocket/auth.py:44-50`)
+   - In development, `verify_project_access` returns `True` for all projects (`src/api/websocket/auth.py:103-105`)
+   - So both token validation and project-access checks are effectively skipped in development; outside development a token is required and project access is enforced
+
+3. **Client Type Detection**
    - User-Agent header used to identify client type
-   - CLI clients identified by `research-cli/` prefix
+   - CLI clients identified by a case-insensitive `research-cli` substring match in the User-Agent (`src/api/websocket/auth.py:128`)
    - Different message formatting based on client type
 
-3. **Project Access Control**
-   - Users can only subscribe to projects they have access to
-   - Project permissions validated before subscription
-   - Real-time permission revocation support
+4. **Project Access Control**
+   - `verify_project_access` is only invoked at connect time on the project/CLI endpoints; the general `/ws` endpoint routes `subscribe` messages straight to `handle_subscription_request`, which performs no access check
+   - Outside development the check is a placeholder that returns `True` for any authenticated user (`user_id is not None`, with a TODO to implement real user-project checks; `src/api/websocket/auth.py:103-110`) — per-project permission enforcement is not yet implemented
 
 ## Scalability Features
 
@@ -169,12 +172,10 @@ WebSocket connections use JWT token authentication:
 ### Connection Management
 - Efficient connection pooling and cleanup
 - Heartbeat mechanism for connection health
-- Automatic reconnection logic in CLI client
+- On connection loss the CLI client reports "Reconnecting..." and disconnects; automatic retry is not yet implemented (`src/cli/websocket_client.py:312-315`)
 
 ### Performance Optimization
-- Message batching for high-frequency updates
 - Selective subscription to reduce bandwidth
-- Connection limits and rate limiting
 
 ## Error Handling
 
@@ -190,27 +191,16 @@ except ConnectionError:
 
 ### Authentication Errors
 - Clear error messages for token issues
-- Automatic token refresh attempts
 - Graceful degradation to read-only mode
 
 ### Network Issues
 - Connection health monitoring
-- Automatic reconnection attempts
-- Buffering of missed events
+- Connection loss is surfaced to the user (no automatic reconnection or event buffering is implemented)
 
 ## Monitoring and Observability
 
 ### Prometheus Metrics
-```python
-# Connection metrics
-websocket_active_connections{client_type="cli"}
-websocket_messages_sent_total{message_type="progress"}
-websocket_connection_duration_seconds
-
-# Error metrics
-websocket_connection_errors_total{error_type="auth_failed"}
-websocket_reconnection_attempts_total
-```
+There is currently **no WebSocket-specific Prometheus instrumentation**. Prometheus metrics are exposed at `/metrics` and cover LLM calls only — the `llm_*` series defined in `src/core/observability.py` (`llm_call_duration_seconds`, `llm_tokens_total`, `llm_cost_usd_total`, `llm_request_cost_drift_ratio`, `llm_cost_drift_events_total`). Connection counts, messages-sent totals, and connection-duration/error metrics for WebSockets are not emitted.
 
 ### Health Checks
 ```bash
@@ -227,6 +217,8 @@ curl http://localhost:8000/ws/health
   }
 }
 ```
+
+> Note: the `timestamp` field returned by `GET /ws/health` is currently a hardcoded placeholder (`"2024-01-01T00:00:00Z"`) pending a TODO in `src/api/routes/websocket.py:447`.
 
 ### Logging
 - Structured logging with correlation IDs
@@ -249,7 +241,7 @@ uvicorn src.api.main:app --reload --port 8000
 ### Testing WebSocket Connections
 ```bash
 # Test CLI WebSocket client
-research-cli projects progress <project-id> --stream --verbose
+research-cli --verbose projects progress <project-id> --stream
 
 # Test WebSocket endpoint directly
 wscat -c "ws://localhost:8000/ws/cli/<project-id>?token=<token>"
@@ -274,7 +266,7 @@ await event_publisher.publish_progress_update(project_id, progress)
 
 ### Token Security
 - JWT tokens transmitted over WebSocket connection
-- Token validation on every subscription request
+- Token validated once at connection time (subscription requests handled after connect are not re-validated; `handle_subscription_request` in `src/api/websocket/connection_manager.py:241-281` performs no token or project-access check)
 - Automatic token expiration handling
 
 ### Input Validation
@@ -282,10 +274,7 @@ await event_publisher.publish_progress_update(project_id, progress)
 - Sanitization of user-provided data
 - Protection against message injection attacks
 
-### Rate Limiting
-- Connection limits per user/IP
-- Message rate limiting
-- Subscription limits per connection
+> Note: connection-count limits, message rate limiting, and per-connection subscription limits are **not currently implemented** anywhere in the WebSocket stack.
 
 ## Troubleshooting
 
@@ -302,40 +291,27 @@ await event_publisher.publish_progress_update(project_id, progress)
 
 2. **Authentication Failed**
    ```bash
-   # Verify token validity
-   research-cli auth verify
-   
-   # Refresh token if needed
-   research-cli auth refresh
+   # Confirm the API is reachable and the token is accepted
+   research-cli health
+
+   # Re-run a command with a fresh token via the CLI config or env
+   research-cli --verbose projects get <project-id>
    ```
 
 3. **Messages Not Received**
    ```bash
    # Check subscription status
-   research-cli projects progress <project-id> --stream --verbose
+   research-cli --verbose projects progress <project-id> --stream
    
-   # Verify project permissions
-   research-cli projects show <project-id>
+   # Verify project details and access
+   research-cli projects get <project-id>
    ```
 
 ### Debug Mode
 ```bash
-# Enable verbose WebSocket logging
-export DEBUG_WEBSOCKET=true
-research-cli projects progress <project-id> --stream --verbose
+# Enable verbose WebSocket logging via the CLI flag
+research-cli --verbose projects progress <project-id> --stream
 ```
-
-## Performance Benchmarks
-
-### Connection Capacity
-- **Concurrent Connections**: 1,000+ per instance
-- **Message Throughput**: 10,000+ messages/second
-- **Latency**: <50ms average message delivery
-
-### Resource Usage
-- **Memory**: ~1MB per 100 active connections
-- **CPU**: <5% for 500 concurrent connections
-- **Network**: Minimal overhead with message compression
 
 ## Future Enhancements
 
@@ -386,7 +362,6 @@ class WSMessage(BaseModel):
     project_id: UUID | None = None
     timestamp: datetime
     data: dict[str, Any]
-    correlation_id: str | None = None
 ```
 
 ### CLI Integration Functions

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Multi-Agent Research Platform implements a comprehensive testing strategy with integration tests, end-to-end tests, and performance testing to ensure system reliability and quality.
+Cerebro implements a comprehensive testing strategy with integration tests, end-to-end tests, and performance testing to ensure system reliability and quality.
 
 ## Testing Architecture
 
@@ -23,59 +23,66 @@ The Multi-Agent Research Platform implements a comprehensive testing strategy wi
 
 ### Docker-Based Test Environment
 
-The testing infrastructure uses Docker Compose to create isolated test environments with real services:
+The testing infrastructure uses Docker Compose (`tests/integration/docker-compose.test.yml`) to create isolated test environments with real services:
 
-- **PostgreSQL**: Full database with migrations
-- **Redis**: Caching and session storage
-- **Temporal**: Workflow orchestration
-- **MinIO**: S3-compatible object storage
+- **PostgreSQL** (`postgres:16-alpine`): Full database with migrations
+- **Redis** (`redis:7-alpine`): Caching and session storage
+
+These are the only two services in the test compose file. Execution is in-process (`DirectExecutionService`, asyncio) — there is no external workflow engine or object store to stand up.
 
 ### Test Factories
 
-Located in `tests/factories/`, these provide consistent test data generation:
+Located in `tests/factories/`, these provide consistent test data generation.
+These are synchronous `factory_boy` factories — build objects directly, do not `await` them.
 
 #### User Factory
 ```python
-from tests.factories.user_factory import UserFactory
+from tests.factories.user_factory import UserFactory, APIKeyFactory
 
-# Create test user
-user = await UserFactory.create(
-    role="researcher",
-    is_verified=True
-)
+# Create test user (factory_boy build/create is synchronous)
+user = UserFactory(role="researcher", is_verified=True)
 
-# Create admin user
-admin = await UserFactory.create_admin()
+# Role helpers
+admin = UserFactory.create_admin()
+researcher = UserFactory.create_researcher()
+viewer = UserFactory.create_viewer()
 
-# Create user with API key
-user_with_key = await UserFactory.create_with_api_key()
+# API keys are a separate factory, not a UserFactory method
+api_key = APIKeyFactory(user_id=user.id)
 ```
 
 #### Project Factory
 ```python
-from tests.factories.project_factory import ProjectFactory
+from tests.factories.project_factory import (
+    ResearchProjectFactory,
+    ResearchResultFactory,
+)
 
 # Create research project
-project = await ProjectFactory.create(
-    user_id=user.id,
-    status="in_progress"
-)
+project = ResearchProjectFactory(user_id=user.id, status="in_progress")
 
-# Create with mock results
-project = await ProjectFactory.create_with_results()
+# Create a result attached to a project
+result = ResearchResultFactory(project_id=project.id)
 ```
 
-#### Agent Factory
+#### Agent Response Factories
 ```python
-from tests.factories.agent_factory import AgentFactory
+from tests.factories.agent_factory import (
+    MockAgentResponseFactory,
+    MockGeminiResponseFactory,
+    MockMCPToolFactory,
+)
 
-# Create mock agent
-agent = AgentFactory.create_mock_agent("literature_review")
+# Build a canned agent response payload
+agent_response = MockAgentResponseFactory.create_literature_review_response()
 
-# Mock Gemini response
-response = AgentFactory.mock_gemini_response(
+# Mock a Gemini response
+response = MockGeminiResponseFactory.create_response(
     "Analyze this research query..."
 )
+
+# Mock an MCP tool response
+tool_response = MockMCPToolFactory.create_academic_search_response()
 ```
 
 ## Integration Tests
@@ -84,24 +91,30 @@ response = AgentFactory.mock_gemini_response(
 
 Located in `tests/integration/test_api_integration.py`:
 
+Test names in this module include `test_user_registration_flow`,
+`test_token_refresh_flow`, `test_password_reset_flow`, and
+`test_complete_research_workflow`. Note: the module's own docstring flags that its
+research tests POST to `/api/v1/projects/...` while the real research router is
+mounted at `/api/v1/research/projects/...`, so those tests hit 404s and are skipped.
+
 #### Authentication Flow Testing
 ```python
-async def test_complete_auth_flow(client):
+async def test_user_registration_flow(async_client):
     # Registration
-    response = await client.post("/auth/register", json={
+    response = await client.post("/api/v1/auth/register", json={
         "email": "test@example.com",
         "password": "SecurePass123!",
         "username": "testuser"
     })
     assert response.status_code == 201
     
-    # Email verification
+    # Email verification (token passed as a query parameter)
     token = extract_verification_token(response)
-    response = await client.get(f"/auth/verify-email?token={token}")
+    response = await client.get(f"/api/v1/auth/verify-email?token={token}")
     assert response.status_code == 200
     
     # Login
-    response = await client.post("/auth/login", json={
+    response = await client.post("/api/v1/auth/login", json={
         "email": "test@example.com",
         "password": "SecurePass123!"
     })
@@ -111,24 +124,22 @@ async def test_complete_auth_flow(client):
 
 #### Research Workflow Testing
 ```python
-async def test_research_workflow(auth_client):
-    # Create project
-    project = await auth_client.post("/api/v1/research/projects", json={
+async def test_complete_research_workflow(authenticated_client):
+    # NOTE: the real research router is mounted at /api/v1/research/projects/...;
+    # use that prefix. Creation kicks off execution — there is no separate /start
+    # endpoint on the research router — the DirectExecutionService background task
+    # is spawned when the project is created.
+    project = await authenticated_client.post("/api/v1/research/projects", json={
         "title": "AI Research",
         "query": "Impact of AI on employment",
         "domains": ["AI", "Economics"]
     })
     
-    # Start research
-    response = await auth_client.post(
-        f"/api/v1/research/projects/{project['id']}/start"
+    # Monitor project-level progress
+    progress = await authenticated_client.get(
+        f"/api/v1/research/projects/{project['id']}/progress"
     )
-    
-    # Monitor progress
-    status = await auth_client.get(
-        f"/api/v1/research/projects/{project['id']}/status"
-    )
-    assert status["phase"] in ["planning", "execution", "synthesis"]
+    assert progress["progress_percentage"] >= 0
 ```
 
 ### Database Integration Tests
@@ -165,90 +176,77 @@ async def test_complex_query(db_session):
     assert len(project.tasks) > 0
 ```
 
-### Workflow Integration Tests
+### Execution Workflow Integration Tests
 
-Testing Temporal and LangGraph workflows:
+Execution runs in-process via `DirectExecutionService` (asyncio background task) — there is
+no Temporal engine, and there is no top-level LangGraph orchestrator (`src/orchestration/` was
+removed; LangGraph now lives only inside the domain supervisors). Integration tests exercise the
+real flow by submitting a query and polling the execution status endpoint until it completes:
 
 ```python
-async def test_temporal_workflow():
-    # Start workflow
-    workflow_id = await temporal_client.start_workflow(
-        "research_workflow",
-        project_data
-    )
-    
-    # Wait for completion
-    result = await temporal_client.get_workflow_result(workflow_id)
-    assert result["status"] == "completed"
-    
-async def test_langgraph_orchestration():
-    # Build graph
-    graph = ResearchGraphBuilder().build()
-    
-    # Execute
-    result = await graph.invoke({
-        "query": "Test research query"
+async def test_research_execution_workflow(client):
+    # Submit a MASR-routed research query. The immediate response returns
+    # placeholder routing fields plus an execution/project id; real routing
+    # data becomes available later via the status endpoint.
+    submit = await client.post("/api/v1/query/research", json={
+        "query": "Impact of AI on employment",
+        "domains": ["ai", "economics"]
     })
-    assert "research_plan" in result
+    assert submit.status_code == 200
+    execution_id = submit.json()["execution_id"]
+
+    # Poll execution status until the background task finishes.
+    for _ in range(30):
+        status = await client.get(
+            f"/api/v1/query/execution/{execution_id}/status"
+        )
+        assert status.status_code == 200
+        if status.json()["status"] in ("completed", "failed"):
+            break
+        await asyncio.sleep(1)
+
+    assert status.json()["status"] == "completed"
+
+    # Final results (including real routing metadata) are on the results endpoint.
+    results = await client.get(
+        f"/api/v1/query/execution/{execution_id}/results"
+    )
+    assert results.status_code == 200
 ```
 
 ## End-to-End Tests
 
-### Playwright Setup
+### Python E2E Tests (API-level, no browser)
 
-E2E tests use Playwright for browser automation:
+The Python E2E suite in `tests/e2e/` does **not** use Playwright or a browser.
+`tests/e2e/conftest.py` is effectively empty (no Playwright fixture), and the tests are
+plain `httpx` API tests exercising the live docker-compose stack over
+`http://localhost:8000`. The files are:
 
-```python
-# tests/e2e/conftest.py
-import pytest
-from playwright.async_api import async_playwright
+- `test_auth_e2e.py` — full authentication lifecycle (register, login, refresh, logout)
+- `test_research_project_e2e.py` — research project API flows
+- `test_tenant_isolation_e2e.py` — multi-tenant isolation
+- `test_websocket_e2e.py` — WebSocket endpoints
 
-@pytest.fixture
-async def browser():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        yield browser
-        await browser.close()
-```
-
-### User Journey Tests
-
-Located in `tests/e2e/test_user_journeys.py`:
+They require docker-compose running (`docker compose up -d`) and are run with, e.g.,
+`pytest tests/e2e/ --no-cov -v`. A representative shape:
 
 ```python
-async def test_new_user_journey(page):
-    # Navigate to homepage
-    await page.goto("http://localhost:3000")
-    
-    # Click register
-    await page.click("text=Sign Up")
-    
-    # Fill registration form
-    await page.fill("input[name=email]", "newuser@example.com")
-    await page.fill("input[name=password]", "SecurePass123!")
-    await page.fill("input[name=username]", "newuser")
-    
-    # Submit
-    await page.click("button[type=submit]")
-    
-    # Verify success
-    await page.wait_for_selector("text=Verify your email")
+async def test_auth_e2e(async_client):
+    # Register + login against the running API (no browser involved)
+    resp = await async_client.post("/api/v1/auth/register", json={
+        "email": "newuser@example.com",
+        "password": "SecurePass123!",
+        "username": "newuser",
+    })
+    assert resp.status_code in (200, 201)
 ```
 
-### Cross-Browser Testing
+### Browser E2E (JavaScript / Playwright)
 
-```python
-@pytest.mark.parametrize("browser_name", ["chromium", "firefox", "webkit"])
-async def test_cross_browser(browser_name, playwright):
-    browser = await getattr(playwright, browser_name).launch()
-    page = await browser.new_page()
-    
-    # Run tests
-    await page.goto("http://localhost:3000")
-    assert await page.title() == "Research Platform"
-    
-    await browser.close()
-```
+The only Playwright specs live on the web frontend as JS specs under
+`cerebro/web/tests/e2e/` and are executed with `npx playwright test` (not pytest).
+See the note in `.github/workflows/e2e-tests.yml` for the current status of that job.
 
 ## Performance Testing
 
@@ -285,19 +283,22 @@ async def test_bulk_insert_performance(benchmark, db_session):
 
 Located in `tests/load/locustfile.py`:
 
+The file defines `ResearchPlatformUser` (and `AdminUser`), whose tasks hit
+`/api/v1/projects`, `/api/v1/projects/{id}/status|/start|/results`, and `/api/v1/admin/*`:
+
 ```python
 from locust import HttpUser, task, between
 
-class ResearchUser(HttpUser):
+class ResearchPlatformUser(HttpUser):
     wait_time = between(1, 3)
     
     @task(3)
     def list_projects(self):
-        self.client.get("/api/v1/research/projects")
+        self.client.get("/api/v1/projects")
     
     @task(1)
     def create_project(self):
-        self.client.post("/api/v1/research/projects", json={
+        self.client.post("/api/v1/projects", json={
             "title": f"Load Test {uuid4()}",
             "query": "Test query"
         })
@@ -323,123 +324,161 @@ locust -f tests/load/locustfile.py \
 ### GitHub Actions Workflows
 
 #### Integration Tests
-`.github/workflows/integration-tests.yml`:
+`.github/workflows/integration-tests.yml` runs `pytest tests/integration/` directly
+(it does **not** invoke `scripts/run_integration_tests.sh`) against service containers
+`postgres:16-alpine` and `redis:7-alpine`, enforcing `--cov-fail-under=25` in CI:
 ```yaml
 name: Integration Tests
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  test:
+  integration-tests:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:15
+        image: postgres:16-alpine
       redis:
-        image: redis:7
+        image: redis:7-alpine
     
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Run Integration Tests
-        run: ./scripts/run_integration_tests.sh
+        run: |
+          pytest tests/integration/ \
+            --cov=src --cov-fail-under=25 -v
 ```
 
 #### E2E Tests
-`.github/workflows/e2e-tests.yml`:
+`.github/workflows/e2e-tests.yml` — the browser-matrix job (`matrix.browser: [chromium, firefox]`,
+no webkit) is currently **disabled** via `if: false` because no pytest-playwright tests exist;
+when enabled it runs `pytest tests/e2e/ --browser=...` directly, not `scripts/run_e2e_tests.sh`.
+The job that actually runs is the browserless `e2e-python` job (httpx API tests):
 ```yaml
 name: E2E Tests
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  test:
+  e2e-tests:
     runs-on: ubuntu-latest
+    # Disabled: no pytest-playwright tests exist yet.
+    if: false
     strategy:
       matrix:
-        browser: [chromium, firefox, webkit]
+        browser: [chromium, firefox]
     
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Playwright
-        run: |
-          pip install playwright
-          playwright install ${{ matrix.browser }}
+      - uses: actions/checkout@v4
+      - name: Install Playwright browsers
+        run: playwright install --with-deps ${{ matrix.browser }}
       - name: Run E2E Tests
-        run: ./scripts/run_e2e_tests.sh --browser=${{ matrix.browser }}
+        run: pytest tests/e2e/ --browser=${{ matrix.browser }}
 ```
 
 ## Test Scripts
 
 ### Integration Test Runner
-`scripts/run_integration_tests.sh`:
+`scripts/run_integration_tests.sh` starts the compose stack, inlines its own readiness
+loops (`pg_isready`, `redis-cli ping`, plus a wait for a Temporal container that no longer
+exists in the compose file), then runs pytest with a **local** `--cov-fail-under=80`
+(higher than the CI gate of 25). There is no `wait-for-services.sh` helper:
 ```bash
 #!/bin/bash
-# Start services
-docker-compose -f docker-compose.test.yml up -d
+set -e
+COMPOSE_FILE="tests/integration/docker-compose.test.yml"
 
-# Wait for services
-./scripts/wait-for-services.sh
+# Start services
+docker-compose -f "$COMPOSE_FILE" up -d
+
+# Wait for PostgreSQL / Redis with inline loops
+for i in {1..30}; do
+    docker-compose -f "$COMPOSE_FILE" exec -T postgres \
+        pg_isready -U test_user -d test_research_db && break
+    sleep 1
+done
+# (a similar redis-cli ping loop and a legacy Temporal wait loop follow)
 
 # Run migrations
-alembic upgrade head
+alembic upgrade head || echo "Migrations skipped (may not exist)"
 
-# Run tests
-pytest tests/integration -v --cov=src --cov-report=html
+# Run tests (local threshold is 80%)
+pytest "$COMPOSE_FILE"/../ --cov=src --cov-fail-under=80 -v
 
-# Cleanup
-docker-compose -f docker-compose.test.yml down
+# Cleanup via an EXIT trap: docker-compose -f "$COMPOSE_FILE" down -v
 ```
 
 ### E2E Test Runner
-`scripts/run_e2e_tests.sh`:
+`scripts/run_e2e_tests.sh` starts docker-compose, inlines a `curl /health` readiness loop
+(no `wait-for-app.sh` helper), and loops over chromium + firefox:
 ```bash
 #!/bin/bash
+set -e
+BASE_URL="http://localhost:8000"
+BROWSERS="chromium firefox"
+
 # Start application
 docker-compose up -d
 
-# Wait for app
-./scripts/wait-for-app.sh
+# Wait for app via inline health-check loop
+for i in {1..30}; do
+    curl -s "$BASE_URL/health" > /dev/null 2>&1 && break
+    sleep 2
+done
 
-# Run E2E tests
-pytest tests/e2e -v --video=on --screenshot=on
+# Run E2E tests per browser
+for BROWSER in $BROWSERS; do
+    pytest tests/e2e --browser=$BROWSER --video=on --screenshot=on -v || true
+done
 
-# Stop application
-docker-compose down
+# Cleanup via an EXIT trap: docker-compose down
 ```
 
 ## Test Data Management
 
 ### Fixtures
-Located in `tests/fixtures/`:
-- `users.json`: Test user accounts
-- `projects.json`: Sample research projects
-- `agents.json`: Agent configurations
+`tests/fixtures/` contains a single file, `golden_dataset.json`. There are no
+`users.json`/`projects.json`/`agents.json` files; test data is generated in code via the
+factories above and the fixtures in `tests/integration/conftest.py`.
+
+`tests/integration/conftest.py` provides the container and session fixtures — including
+`docker_compose`, `postgres_container`, `redis_container`, `test_engine`, `db_session`,
+`redis_client`, `jwt_service`, and `authenticated_client` (there is no `seeded_db` fixture;
+in-code seeding is done by `seed_test_data`).
 
 ### Database Seeding
 ```python
-# tests/integration/conftest.py
-@pytest.fixture
-async def seeded_db(db_session):
-    # Load fixtures
-    with open("tests/fixtures/users.json") as f:
-        users = json.load(f)
-    
-    # Seed database
-    for user_data in users:
-        await user_repo.create(**user_data)
-    
+# tests/integration/conftest.py — seeding is done in code, not from JSON files
+@pytest_asyncio.fixture
+async def seed_test_data(db_session):
+    # Build rows with the factories, persist them, then hand back the session
+    user = UserFactory(role="researcher")
+    db_session.add(user)
+    await db_session.commit()
+
     yield db_session
-    
-    # Cleanup
-    await db_session.rollback()
 ```
 
 ## Coverage Goals
 
-- **Unit Tests**: 90% coverage
-- **Integration Tests**: 85% coverage
-- **E2E Tests**: Critical paths 100%
-- **Overall**: 85% minimum
+**Enforced CI gate**: `coverage report --fail-under=25` (`.github/workflows/ci.yml`). A build fails
+only when total coverage drops below **25%**. That is the actual gate — do not assume a higher
+threshold is enforced.
+
+The figures below are **aspirational targets**, not enforced thresholds:
+
+- **Unit Tests**: 90% coverage (aspirational)
+- **Integration Tests**: 85% coverage (aspirational)
+- **E2E Tests**: Critical paths 100% (aspirational)
+- **Overall**: 85% (aspirational)
 
 ### Checking Coverage
 
@@ -537,4 +576,4 @@ Set up alerts for:
 5. **Add security testing** (OWASP ZAP)
 6. **Implement contract testing** for microservices
 
-The testing infrastructure provides comprehensive validation of the Multi-Agent Research Platform, ensuring reliability and quality across all components.
+The testing infrastructure provides comprehensive validation of Cerebro, ensuring reliability and quality across all components.

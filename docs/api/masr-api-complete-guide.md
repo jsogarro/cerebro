@@ -1,3 +1,5 @@
+*Historical document — 'Week 2 complete' milestone-era guide, superseded by [masr-api-guide.md](./masr-api-guide.md) (canonical). Known inaccuracies: the /api/v1/masr WebSocket endpoint is commented out in source (no WS surface exists); example responses cite fictional models (gpt-4-turbo, gemini-ultra, an 'openai' provider — real providers are deepseek/llama/gemini/openrouter with Gemini-only default runtime); learning metrics in /status are hardcoded placeholders; 50-60% cost-reduction and 20-25% quality figures are research-paper targets, not measurements; the Migration Guide's advice to replace /api/v1/agents/{type}/execute with /masr/route is wrong — the bypass API is a permanent second surface and /masr/route returns a routing decision, not results.*
+
 # MASR Dynamic Routing API - Complete Guide
 
 ## Overview

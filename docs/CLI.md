@@ -1,5 +1,7 @@
 ## 📚 CLI Documentation
 
+> **Product note:** The product is **Cerebro** (current focus: financial research on US equities). `research-cli` / `research-platform` and the "Research Platform CLI" help string are the CLI's legacy `research-platform` infra identity — accurate to the code, so command output examples below are left verbatim. There is no `cerebro-cli` entrypoint and no PyPI package.
+
 The Research Platform CLI (`research-cli`) provides a comprehensive command-line interface for interacting with the Research Platform API. It supports multiple output formats, interactive modes, and batch operations.
 
 ### Installation & Configuration
@@ -33,13 +35,15 @@ research-cli --api-url http://localhost:8000 --format json --verbose
 # Show current configuration
 research-cli config show
 
-# Set configuration value
+# Set a configuration value (in-memory only — see note below)
 research-cli config set api_url http://localhost:8000
 research-cli config set output_format json
 
-# Save configuration to file
+# Save the current configuration to ~/.research-cli.env
 research-cli config save
 ```
+
+> **Important — `config set` does not persist.** Each `research-cli` invocation rebuilds its configuration from environment variables and the config file, so `config set` only mutates the config of that single process and then exits; the next command starts fresh and is unaffected. `config set` is therefore not a way to change configuration for later commands — use environment variables or the config file (methods 1 and 2 above) for that. Note also that `config save` writes the values derived from the current environment/config file, **not** values you passed to `config set` in a separate invocation.
 
 ### Global Options
 
@@ -71,7 +75,103 @@ research-cli --verbose health
 Output shows:
 - API health status
 - Service readiness
-- Component status (database, redis, temporal)
+- A `checks` block with `database`, `redis`, and `temporal` fields
+
+> All three `/ready` check values (`database`, `redis`, `temporal`) are currently hardcoded to `ok` behind TODOs in `health.py` — none of them actually probe the underlying service yet. In particular, the `temporal: ok` field is vestigial: Temporal has been removed from the runtime (`DirectExecutionService` replaced it), so that field is not evidence Temporal is in use.
+
+#### 🤖 Agent Framework
+
+The `agents` group exposes the intelligent-routing (MASR) and direct-agent surfaces of the API.
+
+##### Intelligent Query (MASR-routed)
+
+Execute a query through the MASR router:
+
+```bash
+# Default research query
+research-cli agents query "How will AI affect job markets?"
+
+# Scope to domains and pick a query type
+research-cli agents query "Analyze inflation impact on equities" \
+  --domains finance --domains economics \
+  --type analyze
+```
+
+> Under the `agents` group, `--domains` is a repeatable option — pass it once per domain (`--domains finance --domains economics`). It does **not** split on commas, so `--domains "finance,economics"` is sent to the API as a single domain named `finance,economics`. (Comma-separated domains are only supported by `projects create`.)
+
+**Options:**
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--domains` | `-d` | Research domains (repeatable) | - |
+| `--type` | `-t` | Query type (research/analyze/synthesize) | `research` |
+
+##### Get Routing Decision
+
+Compute a MASR routing decision with cost optimization (no execution):
+
+```bash
+research-cli agents route "Value a DCF for a SaaS company" --strategy quality_focused
+```
+
+**Options:**
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--strategy` | `-s` | Routing strategy (cost_efficient/quality_focused/balanced) | `balanced` |
+
+##### Estimate Cost
+
+Estimate execution cost with a component breakdown:
+
+```bash
+research-cli agents estimate "Comprehensive research on AI ethics" \
+  --domains ai --domains ethics --domains philosophy
+```
+
+> As with `agents query`, `--domains` here is repeatable and is **not** comma-split — pass one `--domains` per domain.
+
+**Options:**
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--domains` | `-d` | Research domains (repeatable) |
+
+##### Direct Agent Execution (bypass)
+
+Execute a single agent directly, bypassing MASR routing:
+
+```bash
+research-cli agents execute literature-review "Find papers on machine learning" \
+  --max-sources 25
+```
+
+**Arguments/Options:**
+| Argument/Option | Description |
+|-----------------|-------------|
+| `AGENT_TYPE` | Bypass agent type (e.g. `literature-review`, `synthesis`, `financial-analysis`) |
+| `QUERY_TEXT` | Query text |
+| `--max-sources` | Maximum sources (for `literature-review`) |
+
+##### Chain-of-Agents
+
+Run an ordered Chain-of-Agents workflow:
+
+```bash
+research-cli agents chain "Analyze AI impact" \
+  --agents literature-review \
+  --agents synthesis
+```
+
+**Options:**
+| Option | Short | Description | Required |
+|--------|-------|-------------|----------|
+| `--agents` | `-a` | Agent chain, in order (repeatable) | Yes |
+
+##### Router Status
+
+Show MASR router health and performance metrics:
+
+```bash
+research-cli agents status
+```
 
 #### 📝 Project Management
 
@@ -271,14 +371,16 @@ Human-readable tables with colors and formatting:
 research-cli projects list
 ```
 ```
-                          Research Projects
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
-┃ ID                         ┃ Title         ┃ Status   ┃ Created           ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
-│ 550e8400-e29b-41d4-a716... │ AI Research   │ pending  │ 2024-01-15 10:30  │
-│ 6ba7b810-9dad-11d1-80b4... │ Climate Study │ progress │ 2024-01-15 11:45  │
-└────────────────────────────┴───────────────┴──────────┴───────────────────┘
+                                        Research Projects
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ ID                                   ┃ Title         ┃ Status      ┃ Created             ┃ User            ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ 550e8400-e29b-41d4-a716-446655440000 │ AI Research   │ pending     │ 2024-01-15 10:30    │ researcher-001  │
+│ 6ba7b810-9dad-11d1-80b4-00c04fd430c8 │ Climate Study │ in_progress │ 2024-01-15 11:45    │ researcher-002  │
+└──────────────────────────────────────┴───────────────┴─────────────┴─────────────────────┴─────────────────┘
 ```
+
+The list table has five columns — `ID` (full 36-character UUID, not truncated), `Title`, `Status`, `Created`, and `User` — and status values are the raw enum values (`pending`, `in_progress`, `completed`, `failed`).
 
 #### JSON Format
 Machine-readable JSON for scripting and automation:
@@ -377,14 +479,18 @@ research-cli --format json projects list --status completed | \
 
 If the API is running in Docker:
 ```bash
-# Default Docker Compose setup
+# Default Docker Compose setup — the API publishes port 8000 to the host,
+# so a CLI installed locally can reach it directly.
 research-cli --api-url http://localhost:8000 health
 
-# Custom Docker network
-docker run --network research-network \
-  -v $(pwd):/app \
-  research-platform \
-  research-cli --api-url http://api:8000 projects list
+# Run the CLI inside the running API container instead. The Compose `api`
+# service is built (no standalone `research-platform` image is published),
+# its container is named `research-api`, and the `research-cli` entry point
+# ships inside it. From within that container the API is on localhost:8000.
+docker compose exec api research-cli --api-url http://localhost:8000 projects list
+
+# Equivalent using the container name directly:
+docker exec research-api research-cli --api-url http://localhost:8000 projects list
 ```
 
 ### Troubleshooting
@@ -399,26 +505,31 @@ curl http://localhost:8000/health
 # Verify API URL configuration
 research-cli config show | grep api_url
 
-# Set correct API URL
-research-cli config set api_url http://localhost:8001
+# Point the CLI at the correct API URL. `config set` only affects the current
+# process, so use one of these persistent methods instead:
+#   - per-command flag:  research-cli --api-url http://localhost:8001 health
+#   - environment var:   export RESEARCH_API_URL=http://localhost:8001
+#   - config file:       set RESEARCH_API_URL in ~/.research-cli.env (or run
+#                        `research-cli config save` after exporting the env var)
 ```
 
 **Authentication Errors (Future):**
 ```bash
-# Set API key
+# Set API key (environment variable — persists for subsequent commands)
 export RESEARCH_API_KEY=your-api-key
 
-# Or in config
-research-cli config set api_key your-api-key
+# Or persist it to the config file (config set alone does NOT persist):
+#   export RESEARCH_API_KEY=your-api-key && research-cli config save
 ```
 
 **Timeout Issues:**
 ```bash
-# Increase timeout for long operations
-research-cli config set api_timeout 60
-
-# Or per command
+# Increase timeout for long operations. `config set` does not persist, so set
+# it via the environment (per command or exported for the session):
 RESEARCH_API_TIMEOUT=60 research-cli projects create --file large-batch.yaml
+
+# Or persist it to the config file:
+#   export RESEARCH_API_TIMEOUT=60 && research-cli config save
 ```
 
 **Format Issues:**
@@ -438,11 +549,14 @@ research-cli projects create \
 research-cli health
 
 # 2. Create a research project
+#    NOTE: `projects create` prints a human-readable "✓ Created project: ..."
+#    line to stdout *before* the JSON body, so piping straight into `jq` fails.
+#    Strip that leading line first (it is a single line) before parsing.
 PROJECT_ID=$(research-cli --format json projects create \
   --title "AI Safety Research" \
   --query "What are the key challenges in AI alignment?" \
   --domains "AI,Safety,Ethics" \
-  --depth exhaustive | jq -r '.id')
+  --depth exhaustive | tail -n +2 | jq -r '.id')
 
 echo "Created project: $PROJECT_ID"
 

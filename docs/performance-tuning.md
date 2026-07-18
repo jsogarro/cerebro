@@ -1,6 +1,6 @@
 # Performance Tuning Guide
 
-This guide provides comprehensive strategies and techniques for optimizing the performance of the Multi-Agent Research Platform.
+This guide provides comprehensive strategies and techniques for optimizing the performance of Cerebro.
 
 ## Table of Contents
 - [Performance Overview](#performance-overview)
@@ -45,7 +45,7 @@ docker stats --no-stream | grep api
 
 # Agent Performance
 research-cli projects create --title "Performance Test" \
-  --query "Quick test" --domains "Test" --benchmark
+  --query "Quick test" --domains "Test"
 ```
 
 ## Database Optimization
@@ -54,13 +54,16 @@ research-cli projects create --title "Performance Test" \
 
 #### Connection Pool Optimization
 
+Pool settings are passed to `create_engine()` in `src/models/db/session.py`
+(defaults shown below). Adjust these parameters to tune the connection pool:
+
 ```python
-# src/core/config.py
-DATABASE_POOL_SIZE = 20  # Increase from default 10
-DATABASE_MAX_OVERFLOW = 30  # Allow overflow connections
-DATABASE_POOL_TIMEOUT = 60  # Connection timeout in seconds
-DATABASE_POOL_RECYCLE = 3600  # Recycle connections hourly
-DATABASE_POOL_PRE_PING = True  # Validate connections before use
+# src/models/db/session.py — create_engine()
+pool_size = 20          # Base connection pool size
+max_overflow = 10       # Additional overflow connections
+pool_timeout = 30       # Wait for a connection, in seconds
+pool_recycle = 3600     # Recycle connections hourly
+pool_pre_ping = True    # Validate connections before use
 ```
 
 #### Query Optimization
@@ -232,6 +235,9 @@ async def get_user_statistics(user_id: str) -> dict:
 ```
 
 **3. Gemini Response Caching:**
+
+Gemini is the default (and, with default flags, the only) runtime provider. An OpenRouter multi-provider layer (DeepSeek for simple tiers, Claude Sonnet for complex) exists but is gated OFF behind `MULTI_PROVIDER_ROUTING_ENABLED=True` **and** a set `OPENROUTER_API_KEY`; when enabled, apply the same caching approach per provider.
+
 ```python
 # Cache Gemini API responses to reduce costs
 class GeminiCacheService:
@@ -263,34 +269,50 @@ class GeminiCacheService:
 
 ### Cache Warming Strategies
 
+There is no task-queue worker in the stack. Warm the cache with an in-process
+asyncio background task started from the FastAPI lifespan (the same in-process
+model `DirectExecutionService` uses for query execution):
+
 ```python
-# Background cache warming
+# Background cache warming — in-process asyncio, no external task queue
 import asyncio
-from celery import Celery
+import contextlib
 
-app = Celery('cache_warmer')
-
-@app.task
-async def warm_project_cache():
-    """Warm cache for frequently accessed projects"""
-    # Get most active projects
+async def warm_project_cache() -> None:
+    """Warm cache for frequently accessed projects."""
     active_projects = await get_active_projects(limit=100)
-    
+
     for project in active_projects:
-        # Pre-load project details
+        # Pre-load project details, statistics, and related data
         await get_project_details(project.id)
-        
-        # Pre-load project statistics
         await get_project_statistics(project.id)
-        
-        # Pre-load related data
         await get_project_results(project.id)
 
-# Schedule cache warming
-@app.on_after_configure.connect
-def setup_periodic_tasks(sender, **kwargs):
-    # Warm cache every hour
-    sender.add_periodic_task(3600.0, warm_project_cache.s())
+async def cache_warming_loop(interval_seconds: float = 3600.0) -> None:
+    """Re-warm the cache on a fixed interval until cancelled."""
+    while True:
+        try:
+            await warm_project_cache()
+        except Exception:  # never let a warming failure kill the loop
+            logger.exception("cache warming failed")
+        await asyncio.sleep(interval_seconds)
+
+# Start/stop the loop with the app lifespan (src/api/main.py)
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    warm_task = asyncio.create_task(cache_warming_loop())
+    try:
+        yield
+    finally:
+        warm_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await warm_task
+
+# For a one-off warm-up tied to a request, use FastAPI BackgroundTasks:
+#   background_tasks.add_task(warm_project_cache)
 ```
 
 ## API Performance
@@ -579,103 +601,97 @@ class OptimizedGeminiService:
 
 ## Workflow Performance
 
-### Temporal Workflow Optimization
+### In-Process Execution Optimization
 
+Cerebro has **no external workflow engine** — Temporal was removed and replaced by
+`DirectExecutionService` (`src/api/services/direct_execution_service.py`), an
+in-process asyncio engine. A query request returns immediately after the service
+spawns an asyncio background task (`_execute_research_workflow`); MASR routing,
+supervisor coordination, and worker execution all run inside that task. Tune the
+in-process engine, not a task queue.
+
+**1. Cap concurrent executions:**
 ```python
-# Optimize Temporal workflows
-from temporalio import workflow, activity
-from datetime import timedelta
-
-@workflow.defn
-class OptimizedResearchWorkflow:
-    @workflow.run
-    async def run(self, project_data: dict) -> dict:
-        # Use parallel execution for independent activities
-        literature_task = workflow.execute_activity(
-            literature_review_activity,
-            project_data,
-            start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=workflow.RetryPolicy(
-                initial_interval=timedelta(seconds=1),
-                maximum_interval=timedelta(seconds=10),
-                maximum_attempts=3,
-                non_retryable_error_types=["ValidationError"]
-            )
-        )
-        
-        methodology_task = workflow.execute_activity(
-            methodology_activity,
-            project_data,
-            start_to_close_timeout=timedelta(minutes=5)
-        )
-        
-        # Wait for parallel activities
-        literature_result, methodology_result = await asyncio.gather(
-            literature_task,
-            methodology_task
-        )
-        
-        # Sequential activities that depend on results
-        combined_data = {
-            **project_data,
-            "literature": literature_result,
-            "methodology": methodology_result
-        }
-        
-        comparative_result = await workflow.execute_activity(
-            comparative_analysis_activity,
-            combined_data,
-            start_to_close_timeout=timedelta(minutes=8)
-        )
-        
-        # Final synthesis
-        final_data = {**combined_data, "comparative": comparative_result}
-        synthesis_result = await workflow.execute_activity(
-            synthesis_activity,
-            final_data,
-            start_to_close_timeout=timedelta(minutes=15)
-        )
-        
-        return synthesis_result
+# src/api/services/direct_execution_service.py
+# The service refuses new work past max_concurrent_executions (raises RuntimeError
+# at capacity) so the event loop is not oversubscribed. Size it to the LLM
+# provider's rate limit and available memory rather than raising it blindly.
+if len(self.active_executions) >= self.max_concurrent_executions:
+    raise RuntimeError("Execution capacity reached")
 ```
 
-### Activity Optimization
+**2. Bound domain parallelism with a semaphore:**
+```python
+# Multi-domain queries fan out per-domain subqueries concurrently, but are bounded
+# by asyncio.Semaphore(self.max_domain_parallelism) (default 4) and gathered with
+# return_exceptions=True so one failed domain does not abort the others.
+semaphore = asyncio.Semaphore(self.max_domain_parallelism)
+
+async def run_domain(subquery):
+    async with semaphore:
+        return await self._execute_domain_supervisor(subquery, context)
+
+domain_results = await asyncio.gather(
+    *(run_domain(sq) for sq in subqueries),
+    return_exceptions=True,  # partial success: keep succeeding domains
+)
+```
+Raising `max_domain_parallelism` increases throughput for wide multi-domain
+queries but multiplies concurrent LLM calls — keep it under the provider quota.
+
+**3. Retry with tenacity / `src/reliability`, not workflow retry policies:**
+```python
+# Transient failures are handled in-process. Simple cases use tenacity decorators;
+# richer policies live in src/reliability/retry_strategies.py
+# (RetryPolicy, ExponentialBackoff, CircuitBreaker, with_retry, with_circuit_breaker).
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+)
+async def call_provider(request):
+    return await provider.generate(request)
+```
+Wrap flaky downstream calls with `with_circuit_breaker` from
+`src/reliability/retry_strategies.py` to shed load fast when a provider is
+degraded instead of retrying into a rate-limit wall.
+
+**Caution — retry scope:** decorate the narrowest failing call (a single provider
+request), never the whole background workflow. A historical bug placed
+`@retry(stop_after_attempt(3))` on `_execute_research_workflow` and a
+naive/aware datetime subtraction in its `finally` block tripped the retry,
+re-running the entire pipeline three times (fixed with `datetime.now(UTC)`).
+
+### Parallel Worker Optimization
 
 ```python
-@activity.defn
-async def optimized_literature_review_activity(project_data: dict) -> dict:
-    """Optimized literature review with parallel searches"""
-    
-    query = project_data["query"]
-    domains = project_data["domains"]
-    
-    # Parallel search across different databases
+# Inside a supervisor, run independent workers concurrently and tolerate partial
+# failure. This is plain asyncio — no workflow-engine activities.
+async def parallel_literature_search(query: str, domains: list[str]) -> dict:
+    """Optimized literature search with parallel sources."""
+
     search_tasks = [
         search_google_scholar(query, domains),
         search_pubmed(query, domains),
-        search_arxiv(query, domains)
+        search_arxiv(query, domains),
     ]
-    
-    # Execute searches in parallel with timeout
-    results = await asyncio.gather(
-        *search_tasks,
-        return_exceptions=True  # Don't fail if one search fails
-    )
-    
-    # Filter out exceptions and combine valid results
+
+    # Execute searches in parallel; don't fail if one source fails
+    results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
     valid_results = [r for r in results if not isinstance(r, Exception)]
-    
-    # Deduplicate and rank results
+
     combined_results = deduplicate_papers(valid_results)
     ranked_results = rank_papers_by_relevance(combined_results, query)
-    
+
     return {
         "papers": ranked_results[:50],  # Limit to top 50
         "search_stats": {
             "total_sources": len(valid_results),
             "total_papers": len(combined_results),
-            "top_papers": len(ranked_results)
-        }
+            "top_papers": len(ranked_results),
+        },
     }
 ```
 
@@ -1079,14 +1095,14 @@ class ResearchPlatformUser(HttpUser):
     @task(3)
     def get_projects(self):
         """Get user projects - most common operation"""
-        self.client.get("/api/v1/projects", headers=self.headers)
+        self.client.get("/api/v1/research/projects", headers=self.headers)
     
     @task(2)
     def get_project_details(self):
         """Get specific project details"""
         # Use a known project ID for testing
         project_id = "test-project-id"
-        self.client.get(f"/api/v1/projects/{project_id}", headers=self.headers)
+        self.client.get(f"/api/v1/research/projects/{project_id}", headers=self.headers)
     
     @task(1)
     def create_project(self):
@@ -1102,7 +1118,7 @@ class ResearchPlatformUser(HttpUser):
         }
         
         self.client.post(
-            "/api/v1/projects",
+            "/api/v1/research/projects",
             json=project_data,
             headers=self.headers
         )
@@ -1169,7 +1185,7 @@ class PerformanceReporter:
         """Test API response times"""
         endpoints = [
             "/health",
-            "/api/v1/projects",
+            "/api/v1/research/projects",
             "/metrics"
         ]
         
@@ -1232,4 +1248,4 @@ if __name__ == "__main__":
     reporter.generate_report()
 ```
 
-This comprehensive performance tuning guide provides strategies for optimizing every layer of the Multi-Agent Research Platform, from database queries to API responses to agent execution. Regular monitoring and benchmarking ensure that performance improvements are effective and sustainable.
+This comprehensive performance tuning guide provides strategies for optimizing every layer of Cerebro, from database queries to API responses to agent execution. Regular monitoring and benchmarking ensure that performance improvements are effective and sustainable.

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Report Generation System is a comprehensive, production-ready solution for generating multi-format research reports from the Multi-Agent Research Platform. It supports multiple output formats, customizable templates, advanced visualizations, and a complete REST API for management.
+The Report Generation System is a comprehensive solution for generating multi-format research reports from Cerebro. It supports multiple output formats, customizable templates, advanced visualizations, and a complete REST API for management.
 
 ## Architecture
 
@@ -50,46 +50,56 @@ The system supports generating reports in multiple formats:
 
 ### 2. Report Types
 
-Four pre-configured report types with customizable templates:
+Six pre-configured report types with customizable templates (the
+`ReportType` enum values are shown in parentheses):
 
-#### Comprehensive Report
+#### Comprehensive Report (`comprehensive`)
 - Full research analysis with all sections
 - Detailed methodology and findings
 - Extensive citations and references
 - Suitable for academic or professional use
 
-#### Executive Summary
+#### Executive Summary (`executive_summary`)
 - Concise overview of key findings
 - Strategic insights and recommendations
 - Minimal technical details
 - Ideal for decision-makers
 
-#### Academic Paper
+#### Academic Paper (`academic`)
 - Formal academic formatting
 - Abstract and introduction
 - Literature review section
 - Proper citation formatting
 - LaTeX export support
 
-#### Technical Analysis
-- Detailed technical findings
-- Code examples and algorithms
-- Performance metrics
-- Implementation recommendations
+#### Literature Review (`literature_review`)
+- Focused survey of existing sources
+- Thematic organization of prior work
+- Extensive citations and references
+
+#### Methodology Report (`methodology`)
+- Emphasis on research methods and design
+- Rationale for methodological choices
+- Bias and limitation discussion
+
+#### Synthesis Report (`synthesis`)
+- Integration of findings into a coherent narrative
+- Cross-source consolidation of insights
+- Concluding recommendations
 
 ### 3. Visualization Generation
 
 Comprehensive visualization support using Plotly and NetworkX:
 
 #### Chart Types
-- Bar charts and histograms
-- Line and area charts
-- Pie and donut charts
-- Scatter plots and bubble charts
-- Heatmaps and contour plots
-- Box plots and violin plots
+- Bar charts
+- Histograms
+- Line charts
+- Pie and donut charts (donut via the `hole` config option)
+- Scatter plots
+- Heatmaps
+- Box plots
 - Radar/spider charts
-- Sankey diagrams
 - Network graphs
 - Word clouds
 
@@ -122,7 +132,7 @@ Features:
 Jinja2-based template system with:
 
 - Template inheritance
-- Custom filters (markdown, truncate, format_number)
+- Custom filters (`markdown`, `truncate_words`, `format_number`, `strip_markdown`)
 - Conditional sections
 - Loop constructs
 - Macro support
@@ -133,15 +143,32 @@ Jinja2-based template system with:
 Robust storage system with:
 
 - File-based storage with directory structure
-- Database tracking for metadata
 - Integrity verification with checksums
-- Compression support
 - Cleanup utilities
 - Access statistics
+
+> **Note:** Database-backed metadata tracking is implemented in the storage
+> layer but is **not currently wired up through the API**.
+> `get_report_services()` hardcodes `session = None`
+> (`src/api/routes/reports.py:175`), so the report/format repositories and the
+> storage service are always `None`. Files are written to disk as raw
+> bytes/text — there is **no compression**.
 
 ## API Reference
 
 ### Endpoints
+
+> **Important — retrieval endpoints are currently non-functional.** Because
+> `get_report_services()` hardcodes `session = None`
+> (`src/api/routes/reports.py:175`), the storage service is always `None`, so
+> every retrieval endpoint below (Get Report, Download, List, Search,
+> Statistics, Delete, Verify Integrity) unconditionally returns
+> `503 Report storage service not available`. In addition, `POST /generate`
+> returns a placeholder response with an all-zeros UUID
+> (`00000000-0000-0000-0000-000000000000`), so the returned `id` is not
+> resolvable and the poll-then-download workflow shown in the examples below
+> cannot succeed as currently wired. The request/response shapes are documented
+> here as the intended contract.
 
 #### Generate Report
 ```http
@@ -328,15 +355,9 @@ DEFAULT_CITATION_STYLE=APA
 
 # PDF generation
 ENABLE_PDF_GENERATION=true
-PDF_PAGE_SIZE=A4
-PDF_MARGIN_TOP=2cm
-PDF_MARGIN_BOTTOM=2cm
-PDF_FONT_FAMILY=Arial
 
 # LaTeX generation
 ENABLE_LATEX_GENERATION=true
-LATEX_COMPILER=pdflatex
-LATEX_DOCUMENT_CLASS=article
 
 # Visualization
 ENABLE_VISUALIZATIONS=true
@@ -344,6 +365,12 @@ MAX_VISUALIZATIONS_PER_REPORT=20
 DEFAULT_CHART_WIDTH=800
 DEFAULT_CHART_HEIGHT=600
 ```
+
+> **Note:** PDF/LaTeX detail settings (page size, margins, font family,
+> document class, compiler) are **not** environment-configurable. They are
+> hardcoded default-dict keys of `ReportConfiguration.pdf_settings` and
+> `latex_settings` (`src/models/report.py:253-270`), not fields on
+> `ReportSettings`.
 
 ### Python Configuration
 
@@ -358,51 +385,71 @@ settings = ReportSettings(
     max_report_size_mb=50,
     default_format=ReportFormat.HTML,
     default_citation_style=CitationStyle.APA,
+)
+```
+
+PDF/LaTeX detail settings are **not** part of `ReportSettings`. They live on the
+per-report `ReportConfiguration` model (`src/models/report.py`) via its
+`pdf_settings` / `latex_settings` fields:
+
+```python
+from src.models.report import ReportConfiguration
+
+config = ReportConfiguration(
     pdf_settings={
         "page_size": "A4",
         "margin_top": "2cm",
-        "font_family": "Arial"
+        "font_family": "Arial",
     }
 )
 ```
 
-## Integration with LangGraph
+## How Generation Is Invoked
 
-The Report Generation System is fully integrated with the LangGraph orchestration workflow:
+Reports are generated through the REST API, not through the query-execution
+pipeline. There is no report-generation graph node — the top-level
+`src/orchestration/` subsystem was removed (PR #50), and no `ResearchState`
+type or `report_generation_node` exists.
+
+`POST /api/v1/reports/generate` accepts a `CreateReportRequest`, builds a
+`ReportConfiguration` and `ReportGenerationRequest`, schedules the actual
+generation via FastAPI `BackgroundTasks` (`_generate_report_task`), and returns
+`202 Accepted` immediately with a placeholder `ReportResponse`
+(`generation_status="generating"`, empty `formats_generated`). The background
+task runs `ReportGenerator.generate_report(...)` off the request path
+(`src/api/routes/reports.py:189-282`).
 
 ```python
-# In report_generation_node.py
-async def report_generation_node(state: ResearchState) -> ResearchState:
-    """Generate the final research report."""
-    
-    # Build configuration from state
-    config = _build_report_configuration(state)
-    
-    # Prepare workflow data
-    workflow_data = _prepare_workflow_data(state)
-    
-    # Create generation request
-    request = ReportGenerationRequest(
-        workflow_data=workflow_data,
+@router.post("/generate", status_code=status.HTTP_202_ACCEPTED)
+async def generate_report(
+    request: CreateReportRequest, background_tasks: BackgroundTasks
+) -> ReportResponse:
+    generator, storage_service, _report_repo, _format_repo = get_report_services()
+
+    config = ReportConfiguration(...)
+    gen_request = ReportGenerationRequest(
+        project_id=request.project_id,
+        workflow_data={"title": request.title, "query": request.query, ...},
         configuration=config,
-        formats=[ReportFormat.HTML, ReportFormat.PDF],
-        save_to_storage=True
+        formats=request.formats,
+        save_to_storage=request.save_to_storage,
     )
-    
-    # Generate report
-    generator = ReportGenerator(settings)
-    response = await generator.generate_report(request)
-    
-    # Store results in state
-    state.context["final_report_response"] = {
-        "report_id": response.report_id,
-        "status": response.status,
-        "formats_generated": response.formats_generated,
-        "download_urls": response.download_urls
-    }
-    
-    return state
+
+    # Generation happens off the request path.
+    background_tasks.add_task(
+        _generate_report_task, generator, storage_service, gen_request,
+        request.user_id, request.project_id,
+    )
+
+    # Immediate placeholder response; poll GET /api/v1/reports/{id} for status.
+    return ReportResponse(generation_status="generating", formats_generated=[], ...)
 ```
+
+Callers pass any upstream research output through `workflow_data` in the request
+body. The intended follow-up is to poll `GET /api/v1/reports/{report_id}` for
+completion, but note that the placeholder response uses an all-zeros UUID and
+the retrieval endpoints currently return `503` (see the caveat under **API
+Reference → Endpoints**), so this polling workflow is not yet operational.
 
 ## Performance Considerations
 
@@ -411,8 +458,7 @@ async def report_generation_node(state: ResearchState) -> ResearchState:
 1. **Async Generation**: Reports are generated asynchronously using background tasks
 2. **Caching**: Template compilation is cached for performance
 3. **Streaming**: Large reports are streamed to avoid memory issues
-4. **Compression**: Files are compressed for storage efficiency
-5. **Lazy Loading**: Visualizations are generated on-demand
+4. **Lazy Loading**: Visualizations are generated on-demand
 
 ### Benchmarks
 
@@ -428,20 +474,25 @@ async def report_generation_node(state: ResearchState) -> ResearchState:
 The system implements comprehensive error handling:
 
 ```python
+from src.services.report_generator import ReportGenerationError
+from src.services.template_renderer import TemplateRenderingError
+from src.services.exporters import (
+    PDFExportError,
+    LaTeXExportError,
+    DOCXExportError,
+)
+
 try:
     response = await generator.generate_report(request)
 except ReportGenerationError as e:
     # Handle generation errors
     logger.error(f"Report generation failed: {e}")
-except TemplateError as e:
+except TemplateRenderingError as e:
     # Handle template errors
     logger.error(f"Template rendering failed: {e}")
-except ExportError as e:
-    # Handle export errors
+except (PDFExportError, LaTeXExportError, DOCXExportError) as e:
+    # Handle format-specific export errors
     logger.error(f"Export failed: {e}")
-except StorageError as e:
-    # Handle storage errors
-    logger.error(f"Storage failed: {e}")
 ```
 
 ### Fallback Mechanisms
@@ -465,19 +516,20 @@ pytest tests/test_api_reports.py -v
 pytest --cov=src.services.report_generator \
        --cov=src.services.visualization_generator \
        --cov=src.api.routes.reports
-
-# Integration tests
-pytest tests/test_report_integration.py -v
 ```
 
 ## Security Considerations
 
 1. **Input Validation**: All inputs are validated with Pydantic
-2. **Template Sandboxing**: Jinja2 templates are sandboxed
+2. **Template Autoescaping**: The Jinja2 `Environment` is configured with
+   `select_autoescape` (`src/services/template_renderer.py`), which HTML-escapes
+   rendered variables. Note this is autoescaping, **not** sandboxing — the
+   renderer does not use `jinja2.sandbox.SandboxedEnvironment`, so templates are
+   not restricted from executing arbitrary attribute/method access.
 3. **File Path Validation**: Prevents directory traversal attacks
 4. **Size Limits**: Maximum report size enforced
-5. **Rate Limiting**: API endpoints are rate-limited
-6. **Authentication**: JWT authentication for API access
+5. **Rate Limiting**: A single global limiter (100 requests/minute) applies to all endpoints
+6. **Authentication (known gap)**: The `/api/v1/reports/*` endpoints are **effectively unauthenticated**. `reports.py` declares no auth dependencies, and `AuthMiddleware` is a no-op (it sets `request.state.user = None` and validates nothing). Cerebro's JWT stack (RS256) is enforced only on endpoints that explicitly declare `Depends(get_current_user/require_*)` — the report routes do not. Add per-endpoint auth dependencies before exposing this API in an untrusted environment.
 7. **Sanitization**: HTML content is sanitized
 
 ## Monitoring
@@ -553,10 +605,11 @@ Planned improvements:
 For issues or questions:
 
 1. Check the [API Documentation](http://localhost:8000/docs)
-2. Review error logs in `/var/log/reports/`
+2. Review the application logs (structured logging via `structlog` is written to
+   stdout)
 3. Open an issue on GitHub
 4. Contact the development team
 
 ## License
 
-This system is part of the Multi-Agent Research Platform and follows the same licensing terms.
+This system is part of Cerebro and follows the same licensing terms.

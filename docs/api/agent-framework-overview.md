@@ -16,7 +16,7 @@ Our API design is built on rigorous academic research from leading institutions:
 
 2. **"MasRouter: Learning to Route LLMs for Multi-Agent Systems"** (2025)
    - **Influence**: Primary routing strategy prioritizing MASR intelligence over direct access
-   - **Implementation**: 50-60% cost reduction through intelligent model selection and routing
+   - **Implementation**: MASR-routed model selection. The paper's 50-60% cost-reduction figure is a research-paper target, not a Cerebro measurement — multi-provider model selection is disabled by default (`MULTI_PROVIDER_ROUTING_ENABLED=False`), so the default runtime is Gemini-only.
 
 3. **"Talk Structurally, Act Hierarchically: A Collaborative Framework for LLM Multi-Agent Systems"** (2025)
    - **Influence**: Hierarchical coordination and structured communication patterns
@@ -45,10 +45,10 @@ Based on extensive research analysis, we implemented a **hybrid approach** that 
 /api/v1/query/*    # MASR-routed for optimal agent selection and cost efficiency
 ```
 
-- **Routes through MASR**: Every request benefits from intelligent routing and cost optimization
-- **Leverages Full Intelligence**: Uses hierarchical supervisors and TalkHier protocol
-- **Learning Enabled**: Each request improves routing decisions for future queries
-- **Cost Optimized**: 50-60% cost reduction through smart model selection
+- **Routes through MASR**: Every request is routed through MASR for supervisor selection. Note that a query classified as `FAST_PATH` makes a single LLM call that bypasses supervisors (and TalkHier) entirely — not every Primary request receives supervisor/TalkHier coordination.
+- **Leverages Full Intelligence**: Non-fast-path requests use hierarchical supervisors and the TalkHier protocol
+- **No runtime learning by default**: Adaptive and memory-informed routing are flag-gated OFF (`ADAPTIVE_ROUTING_ENABLED=False`, `MEMORY_INFORMED_ROUTING_ENABLED=False`); in the default runtime no learning occurs and requests do not update future routing.
+- **Cost target (not measured)**: The MasRouter paper's 50-60% cost reduction is a cited research target. Multi-provider model selection is OFF by default (`MULTI_PROVIDER_ROUTING_ENABLED=False`); the default runtime is Gemini-only.
 
 #### Bypass API (10% of usage) - Direct Access
 ```
@@ -65,9 +65,9 @@ Based on extensive research analysis, we implemented a **hybrid approach** that 
 #### 1. Intelligence-First Architecture
 Following "MasRouter" research showing significant cost and performance benefits, we designed the Primary API to **always route through MASR** intelligence:
 
-- **Cost Optimization**: MASR learns optimal model selection reducing costs by 50-60%
+- **Cost Optimization**: MASR selects a routing strategy per query. The 50-60% cost-reduction figure is a MasRouter-paper target, not a Cerebro measurement — multi-provider model selection is OFF by default and the runtime is Gemini-only.
 - **Quality Assurance**: Hierarchical supervisors ensure structured coordination
-- **Performance Learning**: Every request improves future routing decisions
+- **No runtime learning by default**: Adaptive and memory-informed routing are flag-gated OFF; in the default runtime routing does not improve from request history.
 - **Resource Efficiency**: Intelligent allocation prevents over-provisioning
 
 #### 2. Pattern-Based Execution
@@ -76,7 +76,7 @@ Implementing "LLMs Working in Harmony" research patterns:
 - **Chain-of-Agents**: Sequential execution where agents build on previous results
 - **Mixture-of-Agents**: Parallel execution with intelligent result aggregation
 - **Dynamic Selection**: MASR automatically chooses optimal patterns based on query analysis
-- **Quality Enhancement**: 20-25% improvement through coordinated multi-agent execution
+- **Quality Enhancement**: The 20-25% improvement figure is a research-paper result, not a Cerebro measurement — worker confidence scores are hardcoded heuristics (e.g. 0.85 on success, `llm_worker_base.py:252`), not a measured quality gain
 
 #### 3. Structured Communication
 Following "Talk Structurally, Act Hierarchically" research:
@@ -95,8 +95,9 @@ Following "Talk Structurally, Act Hierarchically" research:
 POST /api/v1/query/research
 ```
 - **Purpose**: General research queries with MASR intelligent routing
-- **Benefits**: Automatic agent selection, cost optimization, quality assurance
+- **Benefits**: Automatic agent selection, quality assurance
 - **Use Cases**: Academic research, literature analysis, comprehensive investigation
+- **Response note**: The immediate HTTP response returns hardcoded placeholders (`selected_agents=[]`, `estimated_cost=0.015`, `estimated_quality=0.85`, `confidence=0.85`, `routing_time_ms=50.0`) — the request executes asynchronously, and real routing data is available via `GET /api/v1/query/execution/{id}/status` and `/results`.
 
 **Analysis-Focused Endpoint**:
 ```http
@@ -120,7 +121,8 @@ POST /api/v1/query/synthesize
 ```http
 POST /api/v1/agents/{agent_type}/execute
 ```
-- **Agent Types**: `literature-review`, `citation`, `methodology`, `comparative-analysis`, `synthesis`
+- **Agent Types** (10 bypass-callable values): `literature-review`, `citation`, `methodology`, `comparative-analysis`, `synthesis`, `financial-analysis`, `valuation`, `risk-assessment`, `financial-calculator`, `verification`
+- **Not bypass-reachable**: Content workers (content-planning, drafting, editing, optimization) and Analytics workers (data-analysis, statistical-modeling, insight-synthesis) are not exposed through the bypass agent API
 - **Use Cases**: Direct agent testing, specialized workflows, debugging
 
 **Chain-of-Agents Pattern**:
@@ -161,8 +163,8 @@ GET /api/v1/agents/{agent_type}/health
 GET /api/v1/query/routing/recommend
 GET /api/v1/query/routing/strategies
 ```
-- **Purpose**: Expose MASR routing intelligence and strategy options
-- **Benefits**: Cost estimation, strategy optimization, transparency
+- **Purpose**: Expose routing strategy options
+- **Note**: `GET /routing/recommend` returns static, canned recommendations keyed by query length (`query_api.py:625-653`) — it does not run a live MASR routing computation.
 
 ## Integration Architecture
 
@@ -189,10 +191,10 @@ Real-time capabilities are built into both API tiers:
 ### Performance Characteristics
 
 #### Primary API Benefits
-- **Cost Reduction**: 50-60% through intelligent routing (MasRouter research)
-- **Quality Improvement**: 20-25% through coordinated execution (LLMs Working in Harmony)
-- **Learning**: Continuous improvement from routing decision feedback
-- **Optimization**: Automatic resource allocation and model selection
+- **Cost Reduction**: 50-60% is a MasRouter research-paper target, not a Cerebro measurement — multi-provider model selection is OFF by default (Gemini-only runtime)
+- **Quality Improvement**: 20-25% is a "LLMs Working in Harmony" research-paper figure, not a measured Cerebro gain
+- **Learning**: No runtime learning by default — adaptive and memory-informed routing are flag-gated OFF
+- **Optimization**: Automatic resource allocation and supervisor selection
 
 #### Bypass API Benefits
 - **Direct Control**: Manual specification of execution patterns
@@ -211,8 +213,6 @@ Real-time capabilities are built into both API tiers:
 ✅ **Cost Optimization**: When budget efficiency is important
 
 ✅ **Quality Critical**: When highest quality results are required
-
-✅ **Learning Systems**: When the system should improve from usage patterns
 
 ### When to Use Bypass API (Specialized use cases)
 

@@ -12,9 +12,9 @@ Cerebro's Agent Framework APIs implement a **research-informed routing strategy*
 
 **Implementation in Cerebro**:
 - Primary API always routes through MASR (Multi-Agent System Router)
-- Every request contributes to routing intelligence and cost optimization
-- Learned patterns improve future routing decisions automatically
-- Cost-quality trade-offs optimized based on query characteristics and user preferences
+- Every request runs a multi-dimensional complexity analysis and cost-optimization pass
+- Cost-quality trade-offs are chosen per request from query characteristics and the selected routing strategy
+- Memory-informed and adaptive (Thompson-sampling bandit) routing enhancements exist but are **flag-gated OFF by default** (`MEMORY_INFORMED_ROUTING_ENABLED=False`, `ADAPTIVE_ROUTING_ENABLED=False`); routing does not currently learn across requests unless these flags are enabled
 
 ### "LLMs Working in Harmony" (2025)
 
@@ -39,17 +39,21 @@ Cerebro's Agent Framework APIs implement a **research-informed routing strategy*
 
 ## Routing Strategy Architecture
 
-### Primary API: Intelligence-First Routing (90% usage)
+### Primary API: Intelligence-First Routing (design-target ~90% of traffic)
 
 ```
-User Request → MASR Analysis → Supervisor Selection → Agent Coordination → Response
+User Request → MASR Analysis → (FAST_PATH single LLM call) or (Supervisor Selection → Agent Coordination) → Response
 ```
 
-#### Benefits:
-- ✅ **Cost Optimization**: 50-60% cost reduction through intelligent model selection
-- ✅ **Quality Assurance**: 20-25% quality improvement through coordinated execution
-- ✅ **Learning**: Continuous improvement from routing decision feedback
-- ✅ **Scalability**: Centralized optimization enables system-wide improvements
+> The ~90% Primary / ~10% Bypass split is an **aspirational design target, not a measured usage figure.**
+
+MASR may select a `FAST_PATH` collaboration mode, which makes a **single LLM call that bypasses supervisors entirely**. If the fast-path response fails a minimal quality gate, it silently escalates: the routing decision's mode is mutated to `DIRECT` and the request falls through to full supervisor execution — so one request can incur both a fast-path call and a supervisor run.
+
+#### Benefits (design goals):
+- ✅ **Cost Optimization**: intelligent model selection targeting the **50-60% cost reduction** reported in the cited routing research (a research-paper target, not a Cerebro measurement)
+- ✅ **Quality Assurance**: coordinated multi-agent execution targeting the **20-25% quality improvement** reported in the cited collaboration research (a research-paper target, not a Cerebro measurement)
+- ✅ **Optional Learning**: memory-informed and adaptive routing feedback loops available behind feature flags (OFF by default)
+- ✅ **Scalability**: centralized routing enables system-wide optimization
 
 #### When to Use:
 - **Production workloads** requiring cost efficiency and reliability
@@ -57,7 +61,7 @@ User Request → MASR Analysis → Supervisor Selection → Agent Coordination �
 - **Learning systems** that should improve from usage patterns
 - **Enterprise deployment** requiring predictable performance and costs
 
-### Bypass API: Direct Access (10% usage)
+### Bypass API: Direct Access (design-target ~10% of traffic)
 
 ```
 User Request → Direct Agent Execution → Response
@@ -102,6 +106,12 @@ class ComplexityFactors:
 5. **Performance Prediction**: Estimate cost, quality, and execution time
 
 ### Collaboration Modes
+
+The `CollaborationMode` taxonomy is: `FAST_PATH`, `DIRECT`, `PARALLEL`, `HIERARCHICAL`, `DEBATE`, `ENSEMBLE`.
+
+**Fast-Path Mode**: Single LLM call that bypasses supervisors entirely for the simplest queries
+- **Use Case**: Trivial, well-scoped questions where full coordination is unnecessary
+- **Benefits**: Lowest latency and cost; falls back to `DIRECT` supervisor execution if the response fails a minimal quality gate
 
 **Direct Mode**: Single agent handles simple, well-defined queries
 - **Use Case**: Basic questions, simple analysis tasks
@@ -186,19 +196,19 @@ POST /api/v1/agents/mixture
 
 ## Performance Characteristics
 
-### Primary API Performance
+> Cerebro does not yet publish benchmarked latency, cost, or concurrency figures for either API tier. The two tiers differ structurally as described below; concrete numbers should come from a measured evaluation, not this document.
 
-- **Latency**: 2.4s average (includes routing and coordination)
-- **Cost**: 50-60% lower than direct model access
-- **Quality**: 20-25% improvement over single-agent approaches
-- **Scalability**: Linear scaling up to 250 concurrent users
+### Primary API
 
-### Bypass API Performance
+- **Cost**: intended to be lower than naive direct model access via MASR model selection (see the cited-research targets above)
+- **Quality**: coordinated multi-agent execution and a verification QA gate
+- **Overhead**: adds routing, supervisor coordination, and (for multi-domain queries) concurrent supervisor fan-out
 
-- **Latency**: 1.2s average (no routing overhead)
-- **Cost**: Variable based on direct model selection
-- **Quality**: Depends on manual agent selection
-- **Scalability**: Higher throughput but less optimization
+### Bypass API
+
+- **Cost**: variable, determined by the agent/model the caller selects
+- **Quality**: depends on manual agent selection
+- **Overhead**: no MASR routing; direct agent execution
 
 ### WebSocket Real-Time Updates
 
@@ -215,28 +225,30 @@ Both API tiers support real-time progress tracking:
 
 The Agent Framework APIs build on Cerebro's existing MASR-Hierarchical Communication Integration:
 
-- **MASR Router**: Provides intelligent routing decisions for Primary API
-- **Supervisor Factory**: Creates appropriate supervisors for hierarchical coordination
-- **TalkHier Protocol**: Ensures quality through structured communication
-- **Multi-Supervisor Orchestrator**: Handles cross-domain queries requiring multiple supervisors
+- **MASRouter**: The in-process `MASRouter` class provides intelligent routing decisions for the Primary API
+- **MASRSupervisorBridge**: Maps MASR routing decisions to the appropriate domain supervisor (Research, Content, Analytics, Finance)
+- **Domain Supervisors**: Each runs an internal LangGraph `StateGraph` to coordinate its worker team; LangGraph exists only inside supervisors
+- **Multi-domain execution**: There is no dedicated "orchestrator" class — cross-domain queries fan out **inline** in `DirectExecutionService._execute_research_workflow`, running per-domain supervisor calls concurrently under an `asyncio.Semaphore`
 
 ### Memory System Integration
 
-All API executions benefit from Cerebro's four-tier memory system:
+Cerebro's configuration defines a four-tier memory design (working / episodic / semantic / procedural), but this is currently **config-only and not implemented**. `src/memory` is a stub: `WorkingMemoryManager` stores to a plain in-process dict, `EpisodicMemoryService.get_recent_context` returns an empty list, and the semantic/procedural services return empties. The backing stores implied by config (Redis / Postgres / Qdrant / JSON) are not wired up.
 
-- **Working Memory**: Short-term context and conversation state
-- **Episodic Memory**: Historical interaction patterns and performance data
-- **Semantic Memory**: Domain knowledge and learned information
-- **Procedural Memory**: Successful workflow patterns and optimizations
+- **Working Memory** (design): short-term context and conversation state — currently a plain dict
+- **Episodic Memory** (design): historical interaction patterns — currently returns empty
+- **Semantic Memory** (design): domain knowledge and embeddings — not implemented
+- **Procedural Memory** (design): successful workflow patterns — not implemented
+
+Do not rely on cross-request memory in the default build.
 
 ### Foundation Model Integration
 
-The APIs leverage Cerebro's multi-provider foundation model integration:
+**Default runtime is Gemini-only** (`GEMINI_DEFAULT_MODEL=gemini-pro`). `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, and `OPENROUTER_ENABLED` all default to `False`.
 
-- **Dynamic Model Selection**: MASR chooses optimal models based on cost-quality analysis
-- **Multi-Provider Support**: DeepSeek-V3, Llama 3.3 70B, Gemini Pro, and extensible providers
-- **Fallback Strategies**: Automatic failover and graceful degradation
-- **Cost Optimization**: Real-time cost tracking and optimization
+- **Multi-Provider Support (flag-gated OFF)**: A multi-provider routing layer exists but is gated behind the master switch `MULTI_PROVIDER_ROUTING_ENABLED=False`, which additionally requires `OPENROUTER_API_KEY` to be set. When enabled, requests route through **OpenRouter** to tier-mapped models — simple queries to a DeepSeek tier and more complex queries to a Claude Sonnet tier — not to a DeepSeek/Llama/Gemini trio.
+- **Dynamic Model Selection**: With the flag on, MASR maps a query's complexity tier to a provider/model; with the flag off, all calls go to Gemini.
+- **Fallback Strategies**: Provider fallback is available within the multi-provider layer when enabled.
+- **Cost Tracking**: `LLMCostDriftMiddleware` compares estimated vs. actual provider cost and emits Prometheus drift metrics.
 
 ## Developer Experience
 
@@ -291,9 +303,11 @@ chain_response = await httpx.post(
 
 ### WebSocket Real-Time Interaction
 
+The live WebSocket routes are `/ws`, `/ws/projects/{project_id}`, and `/ws/cli/{project_id}`. Interactive refinement is served over `/api/v1/talkhier/interactive`. (There is no `/ws/query/interactive` route.)
+
 ```javascript
-// Connect to agent execution stream
-const ws = new WebSocket('ws://localhost:8000/ws/query/interactive');
+// Connect to a project's execution stream
+const ws = new WebSocket('ws://localhost:8000/ws/projects/' + projectId);
 
 ws.onmessage = (event) => {
     const update = JSON.parse(event.data);
@@ -307,15 +321,15 @@ ws.onmessage = (event) => {
 
 ### Research-Validated Approach
 
-- **Academic Foundation**: Every design decision backed by peer-reviewed research
-- **Performance Proven**: Demonstrated improvements in cost, quality, and efficiency
-- **Production Ready**: Follows proven patterns from industry deployment experience
+- **Academic Foundation**: Design decisions grounded in the cited routing and collaboration research
+- **Research Targets**: Aims for the improvements those papers report — not yet independently benchmarked in Cerebro
+- **Production-Oriented**: Follows established multi-agent orchestration patterns
 
 ### Cost and Performance Optimization
 
-- **Intelligent Routing**: 50-60% cost reduction through MASR optimization
-- **Quality Enhancement**: 20-25% improvement through coordinated execution
-- **Scalable Design**: Linear scaling with graceful degradation under load
+- **Intelligent Routing**: MASR model selection targeting the **50-60% cost reduction** cited in the routing research (a research-paper target, not a Cerebro measurement)
+- **Quality Enhancement**: Coordinated execution targeting the **20-25% improvement** cited in the collaboration research (a research-paper target, not a Cerebro measurement)
+- **Design Intent**: Graceful degradation and provider fallback (fallback active only when multi-provider routing is enabled)
 
 ### Developer and Enterprise Benefits
 

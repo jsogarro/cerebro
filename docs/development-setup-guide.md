@@ -2,7 +2,11 @@
 
 ## Overview
 
-This guide provides comprehensive instructions for setting up a development environment, understanding the codebase structure, and contributing to the Multi-Agent Research Platform. The platform uses modern Python development practices with async/await, dependency injection, and functional programming principles.
+This guide covers setting up a development environment, understanding the codebase structure, and contributing to **Cerebro** — a multi-agent LLM research platform whose current focus is **financial research (US equities)**. Cerebro is a FastAPI application that routes natural-language queries through a Multi-Agent System Router (MASR) to hierarchical domain supervisors, which coordinate specialist LLM worker agents. Execution is in-process via `DirectExecutionService`.
+
+> **Naming note:** the product is **Cerebro**, but the pre-rebrand infra identity **"research-platform"** is still used verbatim in deployment artifacts — the FastAPI title (`Research Platform API`), the k8s namespace and image names (`research-platform-api`), the default database (`research_db`), and the CLI entrypoints (`research-platform`, `research-cli`). Keep those infra names as-is; use "Cerebro" for the product.
+
+The platform uses modern async Python: `async`/`await` throughout, dependency injection via FastAPI, and an async SQLAlchemy repository layer.
 
 ## Prerequisites
 
@@ -34,8 +38,8 @@ sudo apt-get install git pre-commit redis postgresql  # Ubuntu
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/your-org/multi-agent-research-platform.git
-cd multi-agent-research-platform
+git clone https://github.com/your-org/cerebro.git
+cd cerebro
 ```
 
 ### 2. Environment Setup
@@ -54,26 +58,28 @@ pre-commit install
 
 ### 3. Configure Environment
 
-Edit `.env` with your configuration:
+Edit `.env` with your configuration. Cerebro runs **Gemini-only by default**; the OpenRouter multi-provider tier is flag-gated off (see [LLM Providers](#llm-providers)).
 
 ```bash
 # API Configuration
 GEMINI_API_KEY=your-gemini-api-key-here
 DATABASE_URL=postgresql+asyncpg://research:research123@localhost:5432/research_db
 REDIS_URL=redis://localhost:6379/0
-TEMPORAL_HOST=localhost:7233
 
 # Development Settings
 ENVIRONMENT=development
-DEBUG=true
+DEBUG=true            # enables /docs and /redoc (both OFF in production)
 LOG_LEVEL=INFO
 
-# Security
-SECRET_KEY=your-secret-key-here-must-be-32-chars-or-longer
-JWT_PRIVATE_KEY_PATH=/path/to/jwt_private.pem  # Optional: auto-generates if not provided
-JWT_PUBLIC_KEY_PATH=/path/to/jwt_public.pem     # Optional: auto-generates if not provided
+# Security (JWT is RS256 with PEM key files — see the Auth section)
+JWT_PRIVATE_KEY_PATH=/secrets/jwt_private.pem
+JWT_PUBLIC_KEY_PATH=/secrets/jwt_public.pem
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# Optional: enable OpenRouter multi-provider routing (both required)
+# MULTI_PROVIDER_ROUTING_ENABLED=true
+# OPENROUTER_API_KEY=your-openrouter-key
 ```
 
 ### 4. Start Services
@@ -82,7 +88,7 @@ JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 # Start all services with Docker Compose
 docker-compose up -d
 
-# Or start with development tools
+# Or start with development tools (pgAdmin, Redis Commander)
 docker-compose --profile dev-tools up -d
 
 # Verify services are running
@@ -94,204 +100,205 @@ docker-compose ps
 ```bash
 # Run database migrations
 alembic upgrade head
-
-# Create test data (optional)
-python scripts/create_test_data.py
 ```
 
 ### 6. Verify Installation
 
 ```bash
 # Run health checks
-python -m src.cli.main health
+research-cli health
 
-# Run basic tests
-pytest tests/test_health.py -v
+# Run basic tests (health-endpoint tests live in tests/test_api.py)
+pytest tests/test_api.py::TestHealthEndpoints -v
 
 # Start API server
 uvicorn src.api.main:app --reload --port 8000
 ```
+
+When `DEBUG=true`, interactive API docs are served at `http://localhost:8000/docs` (Swagger) and `/redoc`. Both are disabled when `DEBUG=false` (the production default).
 
 ## Development Environment
 
 ### Directory Structure
 
 ```
-multi-agent-research-platform/
+cerebro/
 ├── .github/                    # GitHub workflows and templates
 ├── docs/                       # Documentation
-├── scripts/                    # Development and deployment scripts
+├── scripts/                    # Development and ops scripts
 ├── src/                        # Main source code
-│   ├── agents/                 # AI agent implementations
-│   │   ├── base.py            # Base agent class
-│   │   ├── factory.py         # Agent factory
+│   ├── agents/                 # Agent implementations + 17-type registry
+│   │   ├── base.py            # BaseAgent abstract class
+│   │   ├── factory.py         # AgentFactory (catalog for the bypass API)
+│   │   ├── llm_worker_base.py # LLMWorkerAgentBase — shared worker scaffold
 │   │   ├── models.py          # Agent data models
-│   │   ├── integrations/      # External integrations
-│   │   ├── literature_review_agent.py
+│   │   ├── literature_review_agent.py     # Research (5)
 │   │   ├── comparative_analysis_agent.py
 │   │   ├── methodology_agent.py
 │   │   ├── synthesis_agent.py
-│   │   └── citation_agent.py
+│   │   ├── citation_agent.py
+│   │   ├── content_agents.py              # Content (4)
+│   │   ├── analytics_agents.py            # Analytics (3)
+│   │   ├── finance_agents.py              # Finance (3)
+│   │   ├── financial_calculator_agent.py  # deterministic tool agent
+│   │   ├── verification_agent.py          # cross-cutting QA gate
+│   │   ├── schemas/           # Structured Pydantic schemas (research)
+│   │   ├── supervisors/       # Domain supervisors (Research/Content/Analytics/Finance)
+│   │   ├── tools/             # finance_math.py + deterministic tool registry
+│   │   └── integrations/      # External integrations
+│   ├── ai_brain/               # Routing and intelligence
+│   │   ├── router/            # MASRouter (masr.py), query_analyzer,
+│   │   │                      #   query_decomposer, cost_optimizer
+│   │   ├── compaction/        # Context compaction
+│   │   ├── config/            # Model/provider configuration
+│   │   ├── experimentation/   # A/B experimentation (routers unmounted)
+│   │   ├── integration/       # Integration glue
+│   │   ├── learning/          # Adaptive/episodic routing (flag-gated OFF)
+│   │   ├── memory/            # Memory-informed routing hooks
+│   │   └── providers/         # LLM provider clients
 │   ├── api/                    # FastAPI application
-│   │   ├── main.py            # API entry point
-│   │   ├── auth/              # Authentication
-│   │   ├── routes/            # API endpoints
-│   │   ├── services/          # Business logic services
-│   │   └── websocket/         # WebSocket handlers
-│   ├── cli/                    # Command-line interface
-│   │   ├── main.py            # CLI entry point
-│   │   ├── commands/          # CLI commands
-│   │   ├── formatters.py      # Output formatters
+│   │   ├── main.py            # App entry point, router mounting, middleware
+│   │   ├── routes/            # API endpoints (only some are mounted)
+│   │   ├── services/          # direct_execution_service.py + supervisor/talkhier services
+│   │   ├── middleware/        # Rate limiting, cost-drift, idempotency
+│   │   └── websocket/         # WebSocket handlers + auth
+│   ├── cli/                    # Command-line interface (research-cli)
+│   │   ├── main.py            # CLI entry point (click)
+│   │   ├── commands/          # CLI command groups
+│   │   ├── formatters.py      # table/json/yaml/csv output
 │   │   └── websocket_client.py
-│   ├── core/                   # Core utilities
-│   │   ├── config.py          # Configuration management
-│   │   ├── logging.py         # Logging setup
-│   │   └── security.py        # Security utilities
-│   ├── models/                 # Data models
-│   │   ├── research_project.py
-│   │   ├── report.py
-│   │   └── websocket_messages.py
-│   ├── ai_brain/               # AI routing and intelligence
-│   │   ├── router/             # MASR routing system
-│   │   │   ├── masr.py
-│   │   │   ├── query_analyzer.py
-│   │   │   ├── query_decomposer.py
-│   │   │   └── cost_optimizer.py
-│   │   └── supervisors/        # Hierarchical supervisors
-│   ├── repositories/           # Data access layer
-│   │   ├── base.py
-│   │   ├── research_repository.py
-│   │   └── report_repository.py
-│   ├── services/               # Business services
-│   │   ├── report_generator.py
-│   │   ├── gemini_service.py
-│   │   ├── direct_execution_service.py
-│   │   └── prompts/
-│   ├── temporal/               # Temporal workflows
-│   │   ├── client.py
-│   │   ├── worker.py
-│   │   ├── workflows/
-│   │   └── activities/
+│   ├── core/                   # config.py, observability.py, tracing.py, telemetry.py, pii_redactor.py
+│   ├── auth/                    # JWT service + auth helpers
+│   ├── middleware/             # Auth (no-op), rate limiting, cost-drift, idempotency
+│   ├── models/                 # API/Pydantic models + db/ (SQLAlchemy models)
+│   ├── repositories/           # Async SQLAlchemy repository layer
+│   ├── memory/                 # Multi-tier memory system
+│   ├── mcp/                    # MCP tool servers/clients
+│   ├── services/               # Cross-cutting services (e.g. report generation)
+│   ├── prompts/                # PromptManager + YAML templates
+│   ├── templates/             # Prompt/report templates
+│   ├── costs/                  # Cost accounting/optimization
+│   ├── improvement/           # Self-improvement / adaptive-eval harness
+│   ├── benchmarks/            # Benchmark harnesses
+│   ├── research_platform/     # Pre-rebrand research-platform modules
+│   ├── qa/                     # MAST failure labeler (mast.py is the only wired piece)
+│   ├── reliability/            # Circuit breaker, retry, service registry
+│   ├── security/               # ContentSanitizer (only wired export)
 │   └── utils/                  # Utility functions
 ├── tests/                      # Test suite
-│   ├── conftest.py            # Test configuration
-│   ├── test_agents.py
-│   ├── test_api.py
-│   ├── test_models.py
-│   ├── test_orchestration.py
-│   ├── test_temporal_workflows.py
-│   └── integration/           # Integration tests
-├── docker/                     # Docker configurations
+├── docker/                     # Docker configs (Dockerfile.masr, entrypoint.sh, init.sql, nginx/)
 ├── alembic/                    # Database migrations
-├── requirements.txt            # Python dependencies
-├── pyproject.toml             # Project configuration
+├── pyproject.toml             # Project configuration + [project.scripts]
 ├── docker-compose.yml         # Service definitions
 └── README.md
 ```
 
+> There is no `src/temporal/` package and no top-level `src/orchestration/` subsystem. Cerebro's execution engine is the in-process `DirectExecutionService`; the earlier Temporal-based orchestrator was removed. LangGraph still exists, but **only inside domain supervisors** (each builds an internal `StateGraph`), not as a top-level orchestrator.
+
 ### Key Architectural Patterns
 
-#### 1. Repository Pattern
+#### Request Flow
 
-Data access is abstracted through repositories:
+```
+Client -> FastAPI -> DirectExecutionService (asyncio background task)
+       -> MASRouter -> MASRSupervisorBridge
+       -> domain supervisors -> workers -> verification QA gate
+```
+
+`POST /api/v1/query/research` hands off to `DirectExecutionService`, which spawns an asyncio background task and returns immediately. The immediate HTTP response contains **hardcoded placeholders** (`selected_agents=[]`, `estimated_cost=0.015`, `estimated_quality=0.85`, `confidence=0.85`, `routing_time_ms=50.0`) — real routing data is only available afterward via the execution status/results endpoints (see [Execution Status](#execution-status-endpoints)).
+
+- **MASRouter** (`src/ai_brain/router/masr.py`) — the in-process `MASRouter` class performs routing, complexity analysis, and cost optimization. (A standalone `masr-router` container on port 9100 exists in compose but is legacy and **not** on the query path; `MASR_SERVICE_URL` is not read anywhere in `src/`.)
+- **MASRSupervisorBridge** maps MASR routing decisions to supervisors.
+- **Domain supervisors** — Research, Content, Analytics, Finance. Each runs an internal LangGraph `StateGraph`.
+
+#### Repository Pattern
+
+Data access is abstracted through async SQLAlchemy repositories over the DB models in `src/models/db/`:
 
 ```python
 # src/repositories/base.py
-class BaseRepository[T]:
-    """Base repository with common CRUD operations."""
-    
-    def __init__(self, session: AsyncSession, model_class: type[T]):
+class BaseRepository(Generic[ModelType]):
+    """Base repository with generic CRUD operations."""
+
+    def __init__(self, model: type[ModelType], session: AsyncSession):
+        self.model = model
         self.session = session
-        self.model_class = model_class
-    
-    async def create(self, **kwargs) -> T:
-        """Create new entity."""
-        entity = self.model_class(**kwargs)
+
+    async def create(self, **kwargs) -> ModelType:
+        entity = self.model(**kwargs)
         self.session.add(entity)
-        await self.session.commit()
+        # Note: create() flushes and refreshes — it does NOT commit;
+        # the caller (or the request session) owns the transaction.
+        await self.session.flush()
+        await self.session.refresh(entity)
         return entity
-    
-    async def get_by_id(self, entity_id: str) -> T | None:
-        """Get entity by ID."""
-        result = await self.session.execute(
-            select(self.model_class).where(self.model_class.id == entity_id)
-        )
+
+    async def get(self, id: str | UUID) -> ModelType | None:
+        query = select(self.model).where(self.model.id == id)
+        result = await self.session.execute(query)
         return result.scalar_one_or_none()
 ```
 
-#### 2. Dependency Injection
+Concrete repositories include `ResearchRepository`, `ReportRepository`, `UserRepository`, `CheckpointRepository` (`WorkflowCheckpoint`), `ResultRepository` (`ResearchResult`), and `TaskRepository`. **`TaskRepository` wraps the `AgentTask` DB model** — it is ordinary agent-task persistence, not workflow-engine task management.
 
-Services are injected through FastAPI's dependency system:
+#### Dependency Injection
+
+Services and repositories are injected through FastAPI's dependency system:
 
 ```python
-# src/api/dependencies.py
 async def get_database_session():
-    """Get database session."""
     async with AsyncSessionLocal() as session:
         yield session
 
 async def get_research_repository(session: AsyncSession = Depends(get_database_session)):
-    """Get research repository."""
     return ResearchRepository(session)
 
-# Usage in routes
 @router.post("/projects")
 async def create_project(
     request: CreateProjectRequest,
-    repo: ResearchRepository = Depends(get_research_repository)
+    repo: ResearchRepository = Depends(get_research_repository),
 ):
     return await repo.create(**request.dict())
 ```
 
-#### 3. Async/Await Throughout
+#### Agent Scaffold
 
-All I/O operations use async/await:
+All domain workers subclass **`LLMWorkerAgentBase`** (`src/agents/llm_worker_base.py`). Agents are **LLM-reasoning (prompt-driven)**, not coded decision engines. Note that reported confidence scores are hardcoded heuristics (`0.85` on success, `0.3` on empty output, `0.8` on the fast path) — not real quality signals.
 
 ```python
-# Example: Agent execution
-class BaseAgent(ABC):
-    @abstractmethod
-    async def execute(self, task: AgentTask) -> AgentResult:
-        """Execute agent task asynchronously."""
-        pass
+class LiteratureReviewAgent(LLMWorkerAgentBase):
+    agent_type = "literature_review"
 
-# Example: Database operations
-class ResearchRepository:
-    async def create_project(self, **kwargs) -> ResearchProject:
-        """Create project asynchronously."""
-        pass
+    def _build_prompt(self, task: AgentTask) -> str:
+        ...
 ```
 
 ### Configuration Management
 
-#### Environment-Based Configuration
+Configuration is a single Pydantic `Settings(BaseSettings)` in `src/core/config.py`, loaded from `.env` (`case_sensitive=True`, `extra='ignore'`), exposed as the module singleton `settings` and via `get_settings()`.
 
 ```python
-# src/core/config.py
+# src/core/config.py (abridged — see docs/configuration-reference.md for the full list)
 class Settings(BaseSettings):
     """Application settings from environment variables."""
-    
-    # API Configuration
-    APP_NAME: str = "Research Platform"
-    VERSION: str = "1.0.0"
-    DEBUG: bool = False
-    
-    # Database
-    DATABASE_URL: str
-    
-    # External Services
-    GEMINI_API_KEY: str
+
+    DEBUG: bool = False  # /docs and /redoc served only when True
+
+    DATABASE_URL: str = "postgresql+asyncpg://research:research123@localhost:5432/research_db"
     REDIS_URL: str = "redis://localhost:6379/0"
-    TEMPORAL_HOST: str = "localhost:7233"
-    
-    # Security
-    SECRET_KEY: str
-    JWT_SECRET_KEY: str
-    JWT_EXPIRE_MINUTES: int = 30
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    GEMINI_API_KEY: str | None = None
+    GEMINI_DEFAULT_MODEL: str = "gemini-pro"
+
+    # Multi-provider routing (OpenRouter) — OFF by default
+    MULTI_PROVIDER_ROUTING_ENABLED: bool = False
+    OPENROUTER_API_KEY: str | None = None
+
+    # Auth — RS256 with PEM key files
+    JWT_ALGORITHM: str = "RS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
 settings = Settings()
 ```
@@ -315,20 +322,24 @@ DEBUG=false
 DATABASE_URL=postgresql+asyncpg://prod_user:secure_pass@db.example.com:5432/research_prod_db
 ```
 
+In production, `config.py` validators enforce `SECRET_KEY` length (≥32 chars) and reject default DB credentials.
+
+### LLM Providers
+
+- **Default runtime is Gemini only** (`GEMINI_ENABLED=True`, `GEMINI_DEFAULT_MODEL='gemini-pro'`).
+- **OpenRouter multi-provider routing** (DeepSeek for the `simple` tier / Claude Sonnet for the `complex` tier) is **flag-gated OFF**. It activates only when **both** `MULTI_PROVIDER_ROUTING_ENABLED=True` **and** `OPENROUTER_API_KEY` are set.
+- `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, and `OPENROUTER_ENABLED` all default to `False`. Do not assume DeepSeek or Llama are active out of the box.
+
 ## Development Workflow
 
 ### Code Quality Standards
 
+Formatting and linting are handled by **Ruff**; type checking by **mypy**. CI runs `ruff check`, `ruff format --check`, and `mypy`.
+
 #### 1. Code Formatting
 
 ```bash
-# Format code with Ruff
-ruff format src tests
-
-# Sort imports (handled by ruff format)
-# No separate step needed
-
-# Run all formatting
+# Format code (ruff format also sorts imports — no separate isort step)
 ruff format src tests
 ```
 
@@ -340,9 +351,6 @@ ruff check src tests
 
 # Fix auto-fixable issues
 ruff check --fix src tests
-
-# Run specific rules
-ruff check --select E,W,F src tests
 ```
 
 #### 3. Type Checking
@@ -350,12 +358,6 @@ ruff check --select E,W,F src tests
 ```bash
 # Type check with mypy
 mypy src
-
-# Strict type checking
-mypy --strict src
-
-# Generate type coverage report
-mypy --html-report mypy-report src
 ```
 
 ### Testing Strategy
@@ -366,21 +368,11 @@ mypy --html-report mypy-report src
 tests/
 ├── conftest.py              # Shared test configuration
 ├── unit/                    # Unit tests
-│   ├── test_agents.py
-│   ├── test_models.py
-│   ├── test_services.py
-│   └── test_utils.py
-├── integration/             # Integration tests
-│   ├── test_api_endpoints.py
-│   ├── test_database.py
-│   ├── test_temporal_workflows.py
-│   └── test_agent_integration.py
+├── integration/             # Integration tests (postgres + redis)
 ├── e2e/                     # End-to-end tests
-│   ├── test_complete_workflows.py
-│   └── test_cli_commands.py
+├── security/                # Security tests
+├── regression/             # Golden-dataset regression
 └── fixtures/                # Test data
-    ├── test_projects.json
-    └── mock_responses.json
 ```
 
 #### Running Tests
@@ -392,19 +384,20 @@ pytest
 # Run with coverage
 pytest --cov=src --cov-report=html
 
-# Run specific test file
-pytest tests/test_agents.py -v
+# Run a specific test file
+pytest tests/test_literature_review_agent.py -v
 
-# Run specific test
-pytest tests/test_agents.py::TestLiteratureReviewAgent::test_execute_success -v
+# Run a specific test
+pytest tests/test_literature_review_agent.py::TestLiteratureReviewAgent::test_execute_literature_review -v
 
-# Run tests matching pattern
+# Run tests matching a pattern
 pytest -k "test_agent" -v
 
 # Run tests with specific markers
 pytest -m "integration" -v
-pytest -m "slow" -v
 ```
+
+> **CI coverage gate:** CI enforces `coverage report --fail-under=25`. Do not assume a higher enforced floor — 25% is the actual gate.
 
 #### Test Configuration
 
@@ -417,115 +410,111 @@ from src.api.main import app
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """Create event loop for async tests."""
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
 
 @pytest.fixture
 async def async_client():
-    """Create async HTTP client for API testing."""
     async with AsyncClient(app=app, base_url="http://test") as client:
         yield client
 
 @pytest.fixture
-async def test_project():
-    """Create test research project."""
+def sample_research_project():
+    """Provide a sample research project for testing."""
     return {
-        "title": "Test Research Project",
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "title": "AGI and Society Research",
+        "user_id": "test-user-123",
+        "status": "pending",
         "query": {
-            "text": "How does AI impact healthcare?",
-            "domains": ["AI", "Healthcare"]
+            "text": "What are the implications of artificial general intelligence on society?",
+            "domains": ["AI", "Ethics", "Sociology"],
+            "depth_level": "comprehensive",
         },
-        "user_id": "test-user"
     }
 ```
 
 #### Example Tests
 
 ```python
-# tests/unit/test_agents.py
+# tests/test_literature_review_agent.py
 @pytest.mark.asyncio
 async def test_literature_review_agent():
     """Test literature review agent execution."""
-    
-    # Create agent
     config = AgentConfig(gemini_config=mock_gemini_config)
     agent = LiteratureReviewAgent(config)
-    
-    # Create test task
+
     task = AgentTask(
         id=uuid4(),
         agent_type="literature_review",
         task_type="research",
-        research_query="AI in healthcare",
-        input_data={}
+        research_query="US equity risk factors",
+        input_data={},
     )
-    
-    # Mock external dependencies
-    with patch.object(agent.gemini_service, 'generate_content') as mock_gemini:
+
+    with patch.object(agent.gemini_service, "generate_content") as mock_gemini:
         mock_gemini.return_value = {"content": "Mocked response"}
-        
-        # Execute agent
         result = await agent.execute(task)
-        
-        # Assertions
+
         assert result.agent_type == "literature_review"
         assert result.status == "completed"
         assert result.confidence_score > 0.0
 
-# tests/integration/test_api_endpoints.py
+# tests/integration/test_api_integration.py
 @pytest.mark.asyncio
-async def test_create_research_project(async_client, test_project):
+async def test_create_research_project(async_client, sample_research_project):
     """Test research project creation API."""
-    
-    response = await async_client.post("/research/projects", json=test_project)
-    
+    response = await async_client.post("/api/v1/research/projects", json=sample_research_project)
+
     assert response.status_code == 201
     data = response.json()
-    assert data["title"] == test_project["title"]
+    assert data["title"] == sample_research_project["title"]
     assert data["status"] == "pending"
     assert "id" in data
 ```
 
+### Mocking External Services
+
+External LLM calls should be mocked in unit tests. Cerebro's runtime provider is Gemini, so mock the Gemini service:
+
+```python
+# Define mocks inline per test module (conftest.py also provides a `mock_gemini_client` fixture)
+class MockGeminiService:
+    """Mock Gemini service for testing."""
+
+    async def generate_content(self, prompt: str, **kwargs) -> dict:
+        return {
+            "content": f"Mocked response for: {prompt[:50]}...",
+            "confidence": 0.95,
+            "metadata": {"tokens_used": 100},
+        }
+```
+
 ### Pre-commit Hooks
 
-Pre-commit hooks ensure code quality before commits:
+Pre-commit hooks run **Ruff** (lint + format) plus the standard hygiene hooks (do not add `black` or `isort` — `ruff format` supersedes both). **mypy is not a pre-commit hook** — it runs only in CI (`.github/workflows/ci.yml`), so run `mypy src` yourself before pushing:
 
 ```yaml
 # .pre-commit-config.yaml
 repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.0
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+        args: [--maxkb=500]
       - id: check-merge-conflict
-
-  - repo: https://github.com/psf/black
-    rev: 23.1.0
-    hooks:
-      - id: black
-        language_version: python3.11
-
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-
-  - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.0.254
-    hooks:
-      - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.0.1
-    hooks:
-      - id: mypy
-        additional_dependencies: [types-all]
+      - id: detect-private-key
 ```
 
 ### Git Workflow
@@ -533,22 +522,10 @@ repos:
 #### Branch Naming Convention
 
 ```bash
-# Feature branches
 feature/agent-improvements
-feature/api-authentication
-feature/websocket-streaming
-
-# Bug fixes
-bugfix/memory-leak-fix
 bugfix/timeout-handling
-
-# Documentation
-docs/api-documentation
 docs/setup-guide
-
-# Refactoring
 refactor/repository-pattern
-refactor/async-improvements
 ```
 
 #### Commit Message Format
@@ -561,32 +538,22 @@ Longer description if needed
 - Details about changes
 - Breaking changes noted
 - Issue references (#123)
-
-Co-authored-by: Name <email@example.com>
 ```
 
 Examples:
+
 ```bash
-feat(agents): add comparative analysis agent
+feat(agents): add valuation agent precompute for DCF
 
-Implement new agent for comparing research approaches
-with parallel execution support.
-
-- Add ComparativeAnalysisAgent class
-- Integrate with agent factory
-- Add comprehensive tests
-- Update documentation
+Wire the deterministic finance-math tool into ValuationAgent so exact
+DCF figures are injected into the LLM prompt.
 
 Closes #123
 
-fix(api): resolve timeout handling in project creation
+fix(query): stop returning placeholder routing metrics as live data
 
-Increase timeout for long-running project initialization
-and add proper error handling for timeout scenarios.
-
-- Increase timeout from 30s to 60s
-- Add timeout-specific error responses
-- Add retry logic for transient failures
+Document that the immediate /research response fields are placeholders;
+surface real routing via the execution status endpoint.
 
 Fixes #456
 ```
@@ -602,51 +569,25 @@ createdb research_test_db
 # Set test environment
 export DATABASE_URL=postgresql+asyncpg://test:test123@localhost:5432/research_test_db
 
-# Run migrations on test database
-alembic -c alembic.test.ini upgrade head
-```
-
-### Mocking External Services
-
-```python
-# tests/mocks.py
-class MockGeminiService:
-    """Mock Gemini API service for testing."""
-    
-    async def generate_content(self, prompt: str, **kwargs) -> dict:
-        return {
-            "content": f"Mocked response for: {prompt[:50]}...",
-            "confidence": 0.95,
-            "metadata": {"tokens_used": 100}
-        }
-
-class MockTemporalClient:
-    """Mock Temporal client for testing."""
-    
-    async def start_workflow(self, workflow_type, input_data, **kwargs):
-        return MockWorkflowHandle(f"test-workflow-{uuid4()}")
+# Run migrations on the test database
+alembic upgrade head
 ```
 
 ### Performance Testing
 
 ```python
-# tests/performance/test_agent_performance.py
+# Illustrative pytest perf test — the repo's load tests live in tests/load/locustfile.py (Locust)
 @pytest.mark.performance
 async def test_agent_execution_performance():
     """Test agent execution performance under load."""
-    
     agent = LiteratureReviewAgent(test_config)
     tasks = [create_test_task() for _ in range(10)]
-    
+
     start_time = time.time()
-    
-    # Execute tasks concurrently
     results = await asyncio.gather(*[agent.execute(task) for task in tasks])
-    
     execution_time = time.time() - start_time
-    
-    # Performance assertions
-    assert execution_time < 30.0  # Should complete within 30 seconds
+
+    assert execution_time < 30.0
     assert all(result.status == "completed" for result in results)
     assert len(results) == 10
 ```
@@ -666,15 +607,13 @@ async def test_agent_execution_performance():
 
 ### Development Process
 
-#### 1. Setting Up for Contribution
-
 ```bash
 # Fork and clone
-git clone https://github.com/your-username/multi-agent-research-platform.git
-cd multi-agent-research-platform
+git clone https://github.com/your-username/cerebro.git
+cd cerebro
 
 # Add upstream remote
-git remote add upstream https://github.com/original-org/multi-agent-research-platform.git
+git remote add upstream https://github.com/original-org/cerebro.git
 
 # Create feature branch
 git checkout -b feature/your-feature-name
@@ -682,38 +621,17 @@ git checkout -b feature/your-feature-name
 # Install development dependencies
 uv pip install -e ".[dev]"
 pre-commit install
-```
 
-#### 2. Making Changes
-
-```bash
-# Make your changes
-# ... edit files ...
-
-# Run tests frequently
-pytest tests/relevant_test.py
-
-# Check code quality
-black src tests
+# Make changes, then run quality checks
+ruff format src tests
 ruff check src tests
 mypy src
+pytest
 
-# Commit changes
+# Commit and push
 git add .
 git commit -m "feat(component): add new feature"
-```
-
-#### 3. Submitting Changes
-
-```bash
-# Sync with upstream
-git fetch upstream
-git rebase upstream/main
-
-# Push to your fork
 git push origin feature/your-feature-name
-
-# Create pull request on GitHub
 ```
 
 ### Code Review Process
@@ -721,68 +639,19 @@ git push origin feature/your-feature-name
 #### Pull Request Requirements
 
 1. **Clear description** of changes and motivation
-2. **All tests passing** in CI/CD pipeline
-3. **Code coverage** maintained or improved
-4. **Documentation updated** for new features
-5. **No merge conflicts** with main branch
-6. **Approved by maintainer** or core contributor
+2. **All tests passing** in CI/CD pipeline (lint, mypy, test matrix, `--fail-under=25` coverage gate)
+3. **Documentation updated** for new features
+4. **No merge conflicts** with main branch
+5. **Approved by a maintainer** or core contributor
 
 #### Review Checklist
 
-- [ ] Code follows project style guidelines
+- [ ] Code follows project style guidelines (ruff format + ruff check + mypy)
 - [ ] Tests are comprehensive and meaningful
 - [ ] Documentation is clear and complete
 - [ ] Breaking changes are clearly marked
 - [ ] Performance impact is considered
 - [ ] Security implications are addressed
-
-### Issue Guidelines
-
-#### Bug Reports
-
-```markdown
-## Bug Report
-
-**Description**
-Clear description of the bug
-
-**Steps to Reproduce**
-1. Step one
-2. Step two
-3. Step three
-
-**Expected Behavior**
-What should happen
-
-**Actual Behavior**
-What actually happens
-
-**Environment**
-- OS: [e.g. macOS 13.0]
-- Python: [e.g. 3.11.2]
-- Version: [e.g. 1.0.0]
-
-**Additional Context**
-Screenshots, logs, etc.
-```
-
-#### Feature Requests
-
-```markdown
-## Feature Request
-
-**Problem Statement**
-What problem does this solve?
-
-**Proposed Solution**
-How should this be implemented?
-
-**Alternatives Considered**
-Other approaches considered
-
-**Additional Context**
-Use cases, examples, etc.
-```
 
 ## Debugging and Troubleshooting
 
@@ -813,41 +682,25 @@ brew services restart redis  # macOS
 sudo systemctl restart redis  # Linux
 ```
 
-#### 3. Temporal Connection Issues
+#### 3. Execution Appears Stuck
+
+Because `DirectExecutionService` runs the pipeline as an asyncio background task, the immediate `/research` response is not the result. Poll the execution status endpoint to see real progress and routing:
 
 ```bash
-# Check Temporal server
-temporal operator list
-
-# Restart Temporal
-docker-compose restart temporal
+curl "http://localhost:8000/api/v1/query/execution/{execution_id}/status"
 ```
+
+If executions never leave `pending`, check that the Gemini API key is set and that Postgres/Redis are reachable — the background task fails silently to the caller and records its error in the execution status.
 
 ### Debugging Tools
 
 #### 1. Logging Configuration
 
+Cerebro uses **structlog** directly — there is no central `configure_logging()` function or `src/core/logging.py` module. Modules obtain a logger via `structlog.get_logger()` and log with bound key/value context:
+
 ```python
-# src/core/logging.py
 import structlog
 
-def configure_logging(level: str = "INFO"):
-    """Configure structured logging."""
-    structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer()
-        ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_on_first_use=True,
-    )
-
-# Usage in modules
 logger = structlog.get_logger(__name__)
 logger.info("Processing request", project_id="123", user_id="user456")
 ```
@@ -855,7 +708,7 @@ logger.info("Processing request", project_id="123", user_id="user456")
 #### 2. Debug Mode
 
 ```bash
-# Enable debug mode
+# Enable debug mode (also serves /docs and /redoc)
 export DEBUG=true
 export LOG_LEVEL=DEBUG
 
@@ -869,144 +722,82 @@ research-cli --verbose projects list
 #### 3. Database Debugging
 
 ```python
-# Enable SQL logging
 import logging
-logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 
-# Database query debugging
 from sqlalchemy import text
 result = await session.execute(text("SELECT version()"))
 print(result.scalar())
 ```
 
-### Performance Profiling
+### Observability
 
-#### 1. API Performance
+- **Prometheus metrics** are exposed at `/metrics` (`src/core/observability.py`): `llm_call_duration_seconds`, `llm_tokens_total`, `llm_cost_usd_total`, `llm_request_cost_drift_ratio`, `llm_cost_drift_events_total`.
+- **Structured logging** via structlog throughout.
+- **Langfuse tracing** is opt-in (`LANGFUSE_ENABLED`, default `False`). There is no OpenTelemetry backbone and no Grafana/Loki/Jaeger/Sentry wiring.
 
-```python
-# Add timing middleware
-from time import time
-from fastapi import Request
+## Execution Status Endpoints
 
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    start_time = time()
-    response = await call_next(request)
-    process_time = time() - start_time
-    response.headers["X-Process-Time"] = str(process_time)
-    return response
-```
-
-#### 2. Memory Profiling
+Because query execution is asynchronous, use these endpoints to observe and control a run:
 
 ```bash
-# Install memory profiler
-pip install memory-profiler
+# Real routing/result status (poll this after POST /research)
+curl "http://localhost:8000/api/v1/query/execution/{execution_id}/status"
 
-# Profile memory usage
-@profile
-def memory_intensive_function():
-    # Function code here
-    pass
+# Final results
+curl "http://localhost:8000/api/v1/query/execution/{execution_id}/results"
 
-# Run with profiling
-python -m memory_profiler script.py
-```
-
-#### 3. Async Profiling
-
-```python
-# Profile async operations
-import asyncio
-import cProfile
-
-async def profile_async_function():
-    # Async function to profile
-    pass
-
-# Profile execution
-cProfile.run('asyncio.run(profile_async_function())')
+# Resume a checkpointed execution — the path param is the PROJECT id, not the execution_id.
+# The route (POST /execution/{project_id}/resume) parses this as a project UUID and loads
+# that project's latest recoverable checkpoint; passing an execution_id here returns
+# 404 "No recoverable checkpoint found".
+curl -X POST "http://localhost:8000/api/v1/query/execution/{project_id}/resume"
 ```
 
 ## Documentation Standards
 
 ### Code Documentation
 
-#### Docstring Format
-
 ```python
 async def create_research_project(
     title: str,
     query: ResearchQuery,
     user_id: str,
-    scope: ResearchScope | None = None
+    scope: ResearchScope | None = None,
 ) -> ResearchProject:
     """
-    Create a new research project.
-    
-    This function initializes a new research project with the provided
-    parameters and starts the associated workflow.
-    
+    Create a new research project and start its asynchronous execution.
+
     Args:
-        title: Project title (max 200 characters)
-        query: Research query with domains and parameters
-        user_id: ID of the user creating the project
-        scope: Optional research scope parameters
-        
+        title: Project title (max 200 characters).
+        query: Research query with domains and parameters.
+        user_id: ID of the user creating the project.
+        scope: Optional research scope parameters.
+
     Returns:
-        Created research project with assigned ID and initial status
-        
+        Created research project with assigned ID and initial status.
+
     Raises:
-        ValidationError: If project parameters are invalid
-        WorkflowError: If workflow initialization fails
-        
+        ValidationError: If project parameters are invalid.
+
     Example:
         >>> query = ResearchQuery(
-        ...     text="How does AI impact healthcare?",
-        ...     domains=["AI", "Healthcare"]
+        ...     text="DCF valuation for a large-cap software company",
+        ...     domains=["finance"],
         ... )
         >>> project = await create_research_project(
-        ...     title="AI Healthcare Study",
+        ...     title="Equity Valuation Study",
         ...     query=query,
-        ...     user_id="researcher-001"
+        ...     user_id="researcher-001",
         ... )
         >>> print(project.id)
         'proj-550e8400-e29b-41d4-a716-446655440000'
     """
 ```
 
-#### Type Hints
-
-```python
-from typing import Any, Dict, List, Optional, Union
-from datetime import datetime
-from uuid import UUID
-
-# Use specific types
-def process_results(
-    results: dict[str, Any],
-    timestamp: datetime,
-    project_id: UUID
-) -> list[str]:
-    """Process results with proper type hints."""
-    pass
-
-# Use generic types appropriately
-from typing import TypeVar, Generic
-
-T = TypeVar('T')
-
-class Repository(Generic[T]):
-    """Generic repository pattern."""
-    
-    async def get_by_id(self, entity_id: str) -> T | None:
-        """Get entity by ID."""
-        pass
-```
-
 ### API Documentation
 
-API endpoints are automatically documented using FastAPI's built-in OpenAPI:
+Endpoints are auto-documented via FastAPI's OpenAPI schema, served at `/docs` and `/redoc` **only when `DEBUG=True`**:
 
 ```python
 @router.post(
@@ -1014,12 +805,12 @@ API endpoints are automatically documented using FastAPI's built-in OpenAPI:
     response_model=ResearchProject,
     status_code=status.HTTP_201_CREATED,
     summary="Create research project",
-    description="Create a new research project and start the associated workflow",
+    description="Create a new research project and start its execution.",
     responses={
         201: {"description": "Project created successfully"},
         400: {"description": "Invalid project parameters"},
-        500: {"description": "Internal server error"}
-    }
+        500: {"description": "Internal server error"},
+    },
 )
 async def create_research_project(
     request: CreateResearchProjectRequest,
@@ -1032,53 +823,55 @@ async def create_research_project(
 ### Environment Variables
 
 ```bash
-# Never commit sensitive data
-# Use .env files (added to .gitignore)
+# Never commit sensitive data. Use .env files (added to .gitignore).
 GEMINI_API_KEY=your-secret-key
 DATABASE_PASSWORD=secure-password
-JWT_SECRET_KEY=your-jwt-secret
 ```
 
 ### Input Validation
 
 ```python
-from pydantic import BaseModel, validator, Field
+from pydantic import BaseModel, field_validator, Field
 
 class CreateProjectRequest(BaseModel):
     """Request model with validation."""
-    
+
     title: str = Field(..., min_length=1, max_length=200)
     query: str = Field(..., min_length=10, max_length=1000)
-    domains: list[str] = Field(..., min_items=1, max_items=10)
-    
-    @validator('domains')
+    domains: list[str] = Field(..., min_length=1, max_length=10)
+
+    @field_validator("domains")
+    @classmethod
     def validate_domains(cls, v):
-        """Validate domain names."""
-        allowed_domains = {'AI', 'Healthcare', 'Finance', 'Education'}
+        allowed = {"research", "content", "analytics", "finance"}
         for domain in v:
-            if domain not in allowed_domains:
-                raise ValueError(f'Invalid domain: {domain}')
+            if domain not in allowed:
+                raise ValueError(f"Invalid domain: {domain}")
         return v
 ```
 
 ### Authentication
 
+Cerebro uses **JWT with RS256** (asymmetric), backed by PEM key files — not a shared HMAC secret. Access tokens expire in **15 minutes**, refresh tokens in **7 days**. Passwords are hashed with bcrypt (12 rounds) and must be at least 12 characters.
+
 ```python
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer
+from fastapi import Depends, HTTPException
 
-security = HTTPBearer()
-
-async def get_current_user(token: str = Depends(security)):
-    """Get current authenticated user."""
-    try:
-        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=["HS256"])
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return user_id
-    except JWTError:
+async def get_current_token(token: str = Depends(bearer_scheme)):
+    """Validate a JWT using the RS256 public key."""
+    payload = jwt_service.validate_token(token.credentials)  # RS256, /secrets/jwt_public.pem
+    user_id = payload.get("sub")
+    if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
 ```
 
-This comprehensive development setup guide provides everything needed to contribute effectively to the Multi-Agent Research Platform, from initial setup through advanced debugging and security considerations.
+> **Auth reality check:** the request-level `AuthMiddleware` is a no-op — it sets `request.state.user = None` and validates nothing. Real authentication is enforced per-endpoint via `Depends(...)`. As a consequence, `/api/v1/query/*`, `/api/v1/agents/*`, and `/api/v1/masr/*` are effectively unauthenticated in the current build. Do not describe the whole API as JWT-gated. The middleware stack order is: CORS → Idempotency → RateLimit → LLMCostDriftMiddleware → Auth (no-op).
+
+### Rate Limiting
+
+A single global rate limiter is applied (`MAX_REQUESTS_PER_MINUTE=100`, `ENABLE_RATE_LIMITING=True`). There are no per-tier, per-endpoint, or burst configurations.
+
+---
+
+This guide provides what you need to develop against **Cerebro** — from initial setup through debugging, observability, and security. For the exhaustive settings list, see `docs/configuration-reference.md`; for the agent domains and registry, see `docs/agent-domains.md`.
