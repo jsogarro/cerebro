@@ -219,7 +219,7 @@ jobs:
           done
       
       - name: Build API image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -231,7 +231,7 @@ jobs:
       
       - name: Build Worker image
         if: ${{ hashFiles('docker/Dockerfile.worker') != '' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./docker/Dockerfile.worker
@@ -241,7 +241,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build Web image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./cerebro/web
           file: ./cerebro/web/Dockerfile
