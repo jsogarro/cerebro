@@ -84,7 +84,7 @@ jobs:
       
       - name: Build and push API image
         id: build-api
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -102,7 +102,7 @@ jobs:
       
       - name: Build and push Worker image
         id: build-worker
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./docker/Dockerfile.worker
@@ -208,7 +208,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
       
       - name: Load API image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -228,7 +228,7 @@ jobs:
             python -m pytest tests/test_api.py
       
       - name: Load Worker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./docker/Dockerfile.worker
