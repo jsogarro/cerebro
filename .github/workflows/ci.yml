@@ -179,7 +179,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          uv pip install --system bandit[toml] pip-audit
+          uv pip install --system bandit[toml] pip-audit "setuptools>=83.0.0"
       
       - name: Run bandit
         run: |
