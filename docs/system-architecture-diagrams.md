@@ -223,13 +223,13 @@ graph LR
 ```mermaid
 graph TB
     subgraph "API Endpoints"
-        HEALTH[/health]
-        PROJECTS[/api/v1/projects]
-        TASKS[/api/v1/tasks]
-        RESULTS[/api/v1/results]
-        REPORTS[/api/v1/reports]
-        USERS[/api/v1/users]
-        WS_EP[/ws]
+        HEALTH["/health"]
+        PROJECTS["/api/v1/projects"]
+        TASKS["/api/v1/tasks"]
+        RESULTS["/api/v1/results"]
+        REPORTS["/api/v1/reports"]
+        USERS["/api/v1/users"]
+        WS_EP["/ws"]
     end
     
     subgraph "Middleware Stack"
