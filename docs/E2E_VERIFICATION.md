@@ -1,3 +1,5 @@
+*Historical document — E2E verification snapshot from 2026-06-29, based on actual execution at that time. Kept as a record; do not treat status claims as current. Notes: the external masr-router container it flags as a blocker is legacy/standalone and NOT on the query path — the query path uses the in-process MASRouter (MASR_SERVICE_URL is never read in src/), so 'MASR router broken' does not block query flow; the described connection_pools ModuleNotFoundError crash signature is outdated (connection_pools is now disabled in src/reliability/__init__.py and the masr-router entrypoint imports only .masr); the in-process DirectExecutionService pipeline is the real, working execution path. See README.md and docs/system-architecture-diagrams.md for current architecture.*
+
 # End-to-End Verification Runbook
 
 This document describes the working procedure to run Cerebro end-to-end, based on actual execution as of 2026-06-29.
@@ -22,7 +24,7 @@ This document describes the working procedure to run Cerebro end-to-end, based o
 - Python 3.11+
 - Node.js 18+ and npm
 - Docker and Docker Compose
-- Working directory: `/Users/ogarro/work/apps/cerebro`
+- Working directory: repository root
 - Virtual environment at `.venv/` (created via `./scripts/setup-python-env.sh`)
 
 ## Environment Setup
@@ -30,7 +32,7 @@ This document describes the working procedure to run Cerebro end-to-end, based o
 1. **Ensure `.env` file exists with required secrets:**
 
 ```bash
-cd /Users/ogarro/work/apps/cerebro
+cd <repo-root>
 cat > .env << 'EOF'
 GEMINI_API_KEY=<your-key-here>
 GEMINI_API_URL=https://api.gemini.com
@@ -57,7 +59,7 @@ openssl rand -hex 32  # Use output for JWT_SECRET_KEY
 ### Option A: Smoke Test (Fastest, SQLite-backed, No Docker)
 
 ```bash
-cd /Users/ogarro/work/apps/cerebro
+cd <repo-root>
 ./scripts/smoke_test.sh
 ```
 
@@ -108,7 +110,7 @@ The Alembic migration system requires manual setup that is not documented. The s
 **3. Start API:**
 
 ```bash
-cd /Users/ogarro/work/apps/cerebro
+cd <repo-root>
 tmux new-session -d -s cerebro-api \
   ".venv/bin/uvicorn src.api.main:app --host 0.0.0.0 --port 8000 2>&1 | tee /tmp/cerebro-api.log"
 
@@ -137,7 +139,7 @@ Open http://localhost:8000/docs in a browser to see the OpenAPI Swagger UI.
 ### Option C: Full docker-compose (BROKEN)
 
 ```bash
-cd /Users/ogarro/work/apps/cerebro
+cd <repo-root>
 docker-compose up -d
 ```
 
@@ -153,7 +155,7 @@ See gaps document for detailed failure analysis.
 **Start dev server:**
 
 ```bash
-cd /Users/ogarro/work/apps/cerebro/cerebro/web
+cd cerebro/web
 npm install  # First time only
 npm run dev
 ```
@@ -251,7 +253,7 @@ tmux kill-session -t cerebro-api
 docker rm -f cerebro-postgres cerebro-redis
 
 # If using docker-compose
-cd /Users/ogarro/work/apps/cerebro
+cd <repo-root>
 docker-compose down -v
 
 # Stop frontend
@@ -303,4 +305,4 @@ pkill -f "vite"
 
 ## Next Steps
 
-For a production-ready E2E experience, see `/Users/ogarro/work/apps/cerebro/ai/plans/2026-06-29-e2e-gaps.md` (or wherever the gaps plan is located).
+For a production-ready E2E experience, see the internal E2E gaps plan.

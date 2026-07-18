@@ -1,496 +1,454 @@
 # Workflow Sequence Diagrams
 
-This document contains detailed sequence diagrams for key workflows in the Multi-Agent Research Platform.
+This document contains sequence diagrams for the key workflows in **Cerebro** — a
+multi-agent LLM research platform (current focus: financial research, US equities).
+
+These diagrams describe the **real, verified request path**: a FastAPI application
+that hands work to the in-process `DirectExecutionService` (an asyncio execution
+engine that replaced Temporal), which routes queries through the `MASRouter`, the
+`MASRSupervisorBridge`, and hierarchical **domain supervisors**. LangGraph lives
+only *inside* each supervisor (as an internal `StateGraph`); there is no top-level
+orchestrator and no external worker/queue tier. Agents are LLM-reasoning
+(prompt-driven) workers backed by Gemini (default provider) with flag-gated
+OpenRouter multi-provider routing.
+
+> Naming note: the deployment artifacts (FastAPI title "Research Platform API",
+> the `research-platform` Kubernetes namespace, `research_db`, `research-cli`) keep
+> the pre-rebrand **research-platform** identity. Those are infra names; the product
+> is Cerebro.
 
 ## Table of Contents
-- [Research Project Creation Workflow](#research-project-creation-workflow)
-- [Agent Orchestration Workflow](#agent-orchestration-workflow)
-- [Literature Review Process](#literature-review-process)
-- [Report Generation Workflow](#report-generation-workflow)
+- [Query Creation and Execution](#query-creation-and-execution)
+- [Domain Supervisor and Worker Coordination](#domain-supervisor-and-worker-coordination)
+- [Domain Worker LLM Reasoning](#domain-worker-llm-reasoning)
+- [Multi-Domain Parallel Execution](#multi-domain-parallel-execution)
 - [Real-time Progress Updates](#real-time-progress-updates)
-- [Error Handling and Retry Workflow](#error-handling-and-retry-workflow)
+- [Retry and Error Handling](#retry-and-error-handling)
 - [Authentication Flow](#authentication-flow)
-- [Caching Strategy](#caching-strategy)
+- [Report Generation Workflow](#report-generation-workflow)
+- [MASR Routing Cache](#masr-routing-cache)
+- [Observability](#observability)
 
-## Research Project Creation Workflow
+## Query Creation and Execution
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant CLI
-    participant API
-    participant Auth
-    participant Validator
-    participant DB
-    participant Temporal
-    participant Queue
-    participant Worker
-    
-    User->>CLI: research-cli projects create
-    CLI->>CLI: Parse arguments
-    CLI->>API: POST /api/v1/projects
-    API->>Auth: Verify JWT token
-    Auth-->>API: Token valid
-    API->>Validator: Validate request
-    Validator-->>API: Validation passed
-    
-    API->>DB: Create project record
-    DB-->>API: Project ID
-    
-    API->>Temporal: Start ResearchWorkflow
-    Temporal->>Queue: Queue workflow
-    Queue-->>Temporal: Workflow queued
-    
-    Temporal->>Worker: Assign to worker
-    Worker-->>Temporal: Accepted
-    
-    API-->>CLI: Project created (ID, status)
-    CLI-->>User: Display project details
-    
-    Note over Worker: Workflow begins execution
-    Worker->>DB: Update project status
-    Worker->>Temporal: Report progress
-```
-
-## Agent Orchestration Workflow
+The primary entry point is `POST /api/v1/query/research`. The handler starts an
+asyncio background task and returns immediately with **hardcoded placeholder**
+metadata (`selected_agents=[]`, `estimated_cost=0.015`, `estimated_quality=0.85`,
+`confidence=0.85`, `routing_time_ms=50.0`). Real routing output is only available
+later via the execution status/results endpoints.
 
 ```mermaid
 sequenceDiagram
-    participant Temporal
-    participant LangGraph
-    participant Factory
-    participant LitAgent as Literature Agent
-    participant CompAgent as Comparative Agent
-    participant MethAgent as Methodology Agent
-    participant SynthAgent as Synthesis Agent
-    participant CitAgent as Citation Agent
+    participant Client
+    participant API as FastAPI
+    participant DES as DirectExecutionService
+    participant MASR as MASRouter
+    participant Bridge as MASRSupervisorBridge
+    participant Sup as Domain Supervisor
     participant Gemini
-    participant Cache
-    participant DB
-    
-    Temporal->>LangGraph: Execute workflow
-    LangGraph->>Factory: Create agent: Literature
-    Factory-->>LangGraph: LitAgent instance
-    
-    LangGraph->>LitAgent: Execute with context
-    LitAgent->>Cache: Check cache
-    Cache-->>LitAgent: Cache miss
-    LitAgent->>Gemini: Generate search queries
-    Gemini-->>LitAgent: Search queries
-    LitAgent->>DB: Store intermediate results
-    
-    LangGraph->>Factory: Create agent: Comparative
-    Factory-->>LangGraph: CompAgent instance
-    LangGraph->>CompAgent: Execute with lit results
-    CompAgent->>Gemini: Analyze comparisons
-    Gemini-->>CompAgent: Comparison matrix
-    CompAgent->>Cache: Store in cache
-    
-    LangGraph->>Factory: Create agent: Methodology
-    Factory-->>LangGraph: MethAgent instance
-    LangGraph->>MethAgent: Execute with context
-    MethAgent->>Gemini: Recommend methods
-    Gemini-->>MethAgent: Methodology recommendations
-    
-    LangGraph->>Factory: Create agent: Synthesis
-    Factory-->>LangGraph: SynthAgent instance
-    LangGraph->>SynthAgent: Execute with all results
-    SynthAgent->>Gemini: Synthesize findings
-    Gemini-->>SynthAgent: Unified narrative
-    
-    LangGraph->>Factory: Create agent: Citation
-    Factory-->>LangGraph: CitAgent instance
-    LangGraph->>CitAgent: Execute with references
-    CitAgent->>Gemini: Format citations
-    Gemini-->>CitAgent: Formatted citations
-    
-    LangGraph->>DB: Store final results
-    LangGraph-->>Temporal: Workflow complete
+    participant DB as Postgres
+
+    Client->>API: POST /api/v1/query/research
+    API->>DES: start_research_execution(project, context)
+    DES->>DES: spawn asyncio task _execute_research_workflow
+    DES-->>API: accepted (placeholder metadata only)
+    API-->>Client: 200 execution_id + placeholders
+
+    Note over DES: background task runs (no HTTP request held open)
+
+    DES->>MASR: route(query, context)
+    MASR-->>DES: RoutingDecision (supervisor_type, collaboration_mode)
+    DES->>DB: checkpoint phase=masr_routing
+
+    alt collaboration_mode == FAST_PATH
+        DES->>Gemini: single LLM call (bypasses supervisors)
+        Gemini-->>DES: response
+        DES->>DES: quality gate (>= 50 chars, not Error/refusal)
+        Note over DES: on gate fail, mutate mode to DIRECT and fall through
+    else supervisor path (DIRECT / PARALLEL / HIERARCHICAL / ...)
+        DES->>Bridge: execute_routing_decision(decision, task, registry)
+        Bridge->>Sup: run selected supervisor (internal LangGraph StateGraph)
+        Sup-->>Bridge: aggregated worker output + verification labels
+        Bridge-->>DES: supervisor result
+    end
+
+    DES->>DB: checkpoint phase=completed + persist result
+    Note over DES,DB: retrieve via GET /api/v1/query/execution/{id}/status and /results
 ```
 
-## Literature Review Process
+The supervisor registry is a local dict literal
+(`{research, content, analytics, finance}`); the bridge defaults unknown
+supervisor types to `research`. A single request can incur **two** LLM executions:
+a rejected fast-path call followed by a full supervisor run.
+
+## Domain Supervisor and Worker Coordination
+
+Each domain supervisor builds and runs its **own internal LangGraph `StateGraph`**.
+It instantiates workers lazily from its own `WorkerDefinition` table — not from
+`AgentFactory` at runtime (the factory is a catalog that backs the bypass agent
+API, not the routed execution path). After workers finish, the supervisor invokes a
+cross-cutting **verification QA gate** (`base_supervisor._run_verification`,
+`MAX_VERIFICATION_REVISION_ROUNDS = 2`, i.e. initial + 1 revision). The example below uses
+the Research domain (5 workers).
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Literature Agent
-    participant Prompt as Prompt Manager
+    participant Bridge as MASRSupervisorBridge
+    participant Sup as ResearchSupervisor
+    participant Lit as LiteratureReviewAgent
+    participant Comp as ComparativeAnalysisAgent
+    participant Meth as MethodologyAgent
+    participant Synth as SynthesisAgent
+    participant Cit as CitationAgent
+    participant Verify as Verification QA
     participant Gemini
-    participant Scholar as Google Scholar
-    participant PubMed
-    participant arXiv
-    participant CrossRef
-    participant Embedder
-    participant VectorDB
-    participant Validator
-    
-    Agent->>Prompt: Get literature review prompt
-    Prompt-->>Agent: Formatted prompt
-    
-    Agent->>Gemini: Generate search strategies
-    Gemini-->>Agent: Search queries & keywords
-    
-    par Search Academic Sources
-        Agent->>Scholar: Search papers
-        Scholar-->>Agent: Paper list
-    and
-        Agent->>PubMed: Search medical literature
-        PubMed-->>Agent: Medical papers
-    and
-        Agent->>arXiv: Search preprints
-        arXiv-->>Agent: Preprint papers
-    end
-    
-    Agent->>CrossRef: Verify citations
-    CrossRef-->>Agent: Citation metadata
-    
-    Agent->>Gemini: Extract key findings
-    Gemini-->>Agent: Extracted findings
-    
-    Agent->>Embedder: Generate embeddings
-    Embedder-->>Agent: Document embeddings
-    
-    Agent->>VectorDB: Store embeddings
-    VectorDB-->>Agent: Storage confirmed
-    
-    Agent->>Validator: Validate results
-    Validator-->>Agent: Validation passed
-    
-    Agent-->>Agent: Compile literature review
+
+    Bridge->>Sup: execute(task, coordination_style)
+    Sup->>Sup: build StateGraph + select workers from WorkerDefinition table
+
+    Sup->>Lit: execute(context)
+    Lit->>Gemini: generate (LLM reasoning)
+    Gemini-->>Lit: content (confidence heuristic 0.85)
+    Lit-->>Sup: WorkerResult
+
+    Sup->>Comp: execute(context + prior results)
+    Comp->>Gemini: generate
+    Gemini-->>Comp: content
+    Comp-->>Sup: WorkerResult
+
+    Sup->>Meth: execute(context)
+    Meth->>Gemini: generate
+    Gemini-->>Meth: content
+    Meth-->>Sup: WorkerResult
+
+    Sup->>Synth: execute(all worker results)
+    Synth->>Gemini: synthesize
+    Gemini-->>Synth: unified narrative
+    Synth-->>Sup: WorkerResult
+
+    Sup->>Cit: execute(references)
+    Cit->>Gemini: format citations
+    Gemini-->>Cit: citations
+    Cit-->>Sup: WorkerResult
+
+    Sup->>Verify: QA gate on aggregated output
+    Verify-->>Sup: MAST failure labels / pass (max 2 attempts)
+    Sup-->>Bridge: aggregated result + supervision metadata
 ```
 
-## Report Generation Workflow
+`verification` is excluded from normal worker aggregation and is not a member of
+any supervisor's worker team. Coordination style is derived from the collaboration
+mode (DIRECT to sequential, PARALLEL to parallel, HIERARCHICAL to hybrid, etc.).
+Confidence values are **hardcoded heuristics** (0.85 success / 0.3 empty), not real
+quality signals.
+
+## Domain Worker LLM Reasoning
+
+Domain workers subclass `LLMWorkerAgentBase` and are purely prompt-driven. There is
+**no integration with external academic databases** (no Google Scholar / PubMed /
+arXiv / CrossRef) and **no embedder or vector store** on the execution path
+(`src/memory` is a stub returning empties; `src/qa` fact-check stubs return empty
+results). A worker's `execute()` optionally precomputes exact values (finance
+workers only), builds its prompt via `_build_prompt`, which each agent overrides
+using an agent-specific prompt function from `src/services/prompts/agent_prompts.py`
+(e.g. `generate_literature_agent_prompt`) — not the `PromptManager` YAML templates,
+which are used only by the supervisor layer for refinement prompts. It then appends
+procedural-memory context and a tool-availability JSON block, then calls the model.
 
 ```mermaid
 sequenceDiagram
-    participant Worker
-    participant ReportGen as Report Generator
-    participant Template as Template Engine
-    participant DataAgg as Data Aggregator
-    participant Formatter
-    participant Storage as S3 Storage
-    participant DB
-    participant Notifier
-    participant User
-    
-    Worker->>ReportGen: Generate report request
-    ReportGen->>DB: Fetch project data
-    DB-->>ReportGen: Project details
-    
-    ReportGen->>DB: Fetch all results
-    DB-->>ReportGen: Research results
-    
-    ReportGen->>DataAgg: Aggregate data
-    DataAgg->>DataAgg: Combine agent outputs
-    DataAgg->>DataAgg: Resolve conflicts
-    DataAgg-->>ReportGen: Aggregated data
-    
-    ReportGen->>Template: Select template
-    Template-->>ReportGen: Report template
-    
-    ReportGen->>Formatter: Format report
-    
-    alt PDF Format
-        Formatter->>Formatter: Generate PDF
-    else Markdown Format
-        Formatter->>Formatter: Generate Markdown
-    else HTML Format
-        Formatter->>Formatter: Generate HTML
+    participant Sup as Domain Supervisor
+    participant Worker as LLMWorkerAgentBase subclass
+    participant Prompt as agent_prompts fn
+    participant Gemini
+    participant OR as OpenRouterProvider
+
+    Sup->>Worker: execute(context)
+    Worker->>Worker: _precompute() exact values (finance workers only)
+    Worker->>Prompt: _build_prompt (agent-specific prompt fn)
+    Prompt-->>Worker: formatted prompt string
+    Worker->>Worker: append procedural-memory context + tool-availability JSON
+
+    alt MULTI_PROVIDER_ROUTING_ENABLED and OPENROUTER_API_KEY set
+        Worker->>OR: _generate_with_routing (tiered model)
+        OR-->>Worker: content
+    else default runtime (Gemini only)
+        Worker->>Gemini: _generate_with_gemini
+        Gemini-->>Worker: content
     end
-    
-    Formatter-->>ReportGen: Formatted report
-    
-    ReportGen->>Storage: Upload report
-    Storage-->>ReportGen: Storage URL
-    
-    ReportGen->>DB: Save report metadata
-    DB-->>ReportGen: Saved
-    
-    ReportGen->>Notifier: Send notification
-    Notifier->>User: Report ready email/webhook
+
+    Worker->>Worker: parse into Pydantic schema (structured workers)
+    Worker-->>Sup: WorkerResult (confidence heuristic)
+```
+
+Multi-provider routing is **flag-gated OFF** by default: it requires both
+`MULTI_PROVIDER_ROUTING_ENABLED=True` and a set `OPENROUTER_API_KEY`. Otherwise
+every worker call goes to Gemini (`GEMINI_DEFAULT_MODEL=gemini-pro`).
+
+## Multi-Domain Parallel Execution
+
+When the query decomposer flags a query as multi-domain
+(`decomposition.is_multi_domain`), domain subqueries run **concurrently** under an
+`asyncio.Semaphore(max_domain_parallelism)` (default 4), gathered with
+`return_exceptions=True`. Results are combined by `_merge_domain_results` using
+`MULTI_DOMAIN_MERGE_STRATEGY` (default `concat`; `llm` uses the `SynthesisAgent`),
+with each domain's output truncated to
+`MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` (4000 chars). This is a **merge/concat
+step, not a confidence-based conflict resolver** — the confidence numbers are
+hardcoded heuristics.
+
+```mermaid
+sequenceDiagram
+    participant DES as DirectExecutionService
+    participant Sem as asyncio Semaphore
+    participant D1 as Research domain
+    participant D2 as Finance domain
+    participant Merge as _merge_domain_results
+
+    DES->>DES: decomposition.is_multi_domain == true
+    Note over Sem: max_domain_parallelism default 4
+    DES->>Sem: gather(subqueries, return_exceptions=True)
+
+    par concurrent, bounded by semaphore
+        Sem->>D1: _execute_domain_supervisor (re-route + supervisor run)
+        D1-->>Sem: domain result
+    and
+        Sem->>D2: _execute_domain_supervisor (re-route + supervisor run)
+        D2-->>Sem: domain result or Exception
+    end
+
+    Sem-->>DES: list of results and/or exceptions
+    DES->>Merge: combine (strategy=concat or llm)
+    Merge->>Merge: truncate each domain to 4000 chars, append warnings for failures
+    Merge-->>DES: merged output
+
+    Note over DES: partial success - status stays 'completed' if any domain succeeds
 ```
 
 ## Real-time Progress Updates
 
+`DirectExecutionService` publishes progress through `EventPublisher`, which writes
+to **Redis pub/sub**; the WebSocket layer broadcasts to subscribers of
+`/ws/projects/{project_id}`. Clients may alternatively poll
+`GET /api/v1/query/execution/{execution_id}/status`. There is no worker or Temporal
+tier emitting progress — the background asyncio task publishes directly.
+
 ```mermaid
 sequenceDiagram
     participant Client
-    participant WebSocket
-    participant API
+    participant WS as WebSocket
     participant Redis as Redis PubSub
-    participant Worker
-    participant Temporal
-    
-    Client->>API: Connect WebSocket
-    API->>WebSocket: Establish connection
-    WebSocket-->>Client: Connected
-    
-    Client->>WebSocket: Subscribe to project
-    WebSocket->>Redis: Subscribe to channel
-    Redis-->>WebSocket: Subscribed
-    
-    loop Workflow Execution
-        Worker->>Temporal: Update progress
-        Temporal->>Worker: Progress saved
-        Worker->>Redis: Publish update
-        Redis->>WebSocket: Broadcast update
-        WebSocket->>Client: Progress message
-        Client->>Client: Update UI
+    participant DES as DirectExecutionService
+
+    Client->>WS: connect /ws/projects/{id} (anonymous allowed in development)
+    WS->>Redis: subscribe project channel
+    Redis-->>WS: subscribed
+
+    loop background execution
+        DES->>DES: update ExecutionStatus (phase, progress)
+        DES->>Redis: EventPublisher.publish_progress_update
+        Redis->>WS: broadcast
+        WS->>Client: progress message
     end
-    
-    Worker->>Redis: Publish completion
-    Redis->>WebSocket: Broadcast completion
-    WebSocket->>Client: Completion message
-    
-    Client->>WebSocket: Unsubscribe
-    WebSocket->>Redis: Unsubscribe
-    WebSocket->>Client: Close connection
+
+    DES->>Redis: publish completion (or failure)
+    Redis->>WS: broadcast
+    WS->>Client: terminal message
+
+    Note over Client: polling alternative - GET /api/v1/query/execution/{id}/status
 ```
 
-## Error Handling and Retry Workflow
+## Retry and Error Handling
+
+Reliability is in-process. Individual operations use tenacity `@retry` decorators
+plus the primitives in `src/reliability/retry_strategies.py`
+(`CircuitBreaker`, `ExponentialBackoff`, `RetryPolicy`, `BulkheadExecutor`). There
+is **no dead-letter queue**: an unrecoverable failure surfaces as execution status
+`failed`, and multi-domain runs degrade gracefully via `return_exceptions=True`
+(partial success stays `completed` with warnings).
 
 ```mermaid
 sequenceDiagram
-    participant Worker
-    participant Activity
-    participant ErrorHandler
-    participant RetryPolicy
-    participant DeadLetter
-    participant Monitor
-    participant Alert
-    participant Admin
-    
-    Worker->>Activity: Execute activity
-    Activity->>Activity: Process fails
-    Activity-->>Worker: Error thrown
-    
-    Worker->>ErrorHandler: Handle error
-    ErrorHandler->>ErrorHandler: Classify error
-    
-    alt Retryable Error
-        ErrorHandler->>RetryPolicy: Check retry policy
-        RetryPolicy->>RetryPolicy: Calculate backoff
-        RetryPolicy-->>ErrorHandler: Wait duration
-        
-        loop Retry Attempts
-            ErrorHandler->>Activity: Retry execution
-            alt Success
-                Activity-->>Worker: Success result
-                Worker->>Monitor: Log recovery
-            else Failure
-                Activity-->>ErrorHandler: Error
-                ErrorHandler->>RetryPolicy: Increment attempts
+    participant DES as DirectExecutionService
+    participant Op as async operation
+    participant Retry as tenacity retry + RetryPolicy
+    participant CB as CircuitBreaker
+    participant DB as Postgres
+
+    DES->>Op: invoke
+    Op-->>DES: raises exception
+
+    alt retryable
+        DES->>Retry: apply policy
+        Retry->>CB: check breaker state
+        loop bounded attempts (ExponentialBackoff)
+            Retry->>Op: retry
+            alt success
+                Op-->>DES: result
+            else still failing
+                Op-->>Retry: exception (increment attempts)
             end
         end
-        
-        alt Max Retries Exceeded
-            ErrorHandler->>DeadLetter: Move to DLQ
-            DeadLetter->>Monitor: Log failure
-            Monitor->>Alert: Trigger alert
-            Alert->>Admin: Send notification
+        alt attempts exhausted
+            DES->>DB: checkpoint status=failed
         end
-    else Non-Retryable Error
-        ErrorHandler->>Worker: Fail workflow
-        Worker->>Monitor: Log critical error
-        Monitor->>Alert: Immediate alert
-        Alert->>Admin: Urgent notification
+    else non-retryable
+        DES->>DB: checkpoint status=failed
     end
+
+    Note over DES: multi-domain uses gather(return_exceptions=True) - one domain failing does not abort the run
 ```
+
+The historical bug where `@retry` re-ran the entire `_execute_research_workflow`
+(caused by a naive/aware datetime subtraction in a `finally` block) is fixed with
+`datetime.now(UTC)`.
 
 ## Authentication Flow
 
+Auth is enforced **per-endpoint** via `Depends(get_current_token)` calling
+`jwt_service.validate_token` (RS256). The registered `AuthMiddleware` is a
+**no-op** (it sets request state to `None` and validates nothing), so
+`/api/v1/query/*`, `/api/v1/agents/*`, and `/api/v1/masr/*` are effectively
+unauthenticated; only endpoints that declare an auth dependency are protected —
+namely the auth router (`src/api/auth/auth_router.py`) and the research endpoints,
+which pull `get_tenant_context` (`Depends(get_current_token)`). The users GDPR
+endpoint and the reports endpoints declare no auth dependency and are **not**
+protected. Access tokens live 15 minutes, refresh tokens 7 days.
+
 ```mermaid
 sequenceDiagram
-    participant User
     participant Client
-    participant API
-    participant AuthService
-    participant TokenValidator
-    participant Cache
-    participant DB
-    participant RefreshService
-    
-    User->>Client: Enter credentials
-    Client->>API: POST /auth/login
-    API->>AuthService: Authenticate user
-    
-    AuthService->>DB: Verify credentials
-    DB-->>AuthService: User record
-    
-    AuthService->>AuthService: Hash comparison
-    
-    alt Valid Credentials
-        AuthService->>AuthService: Generate JWT
-        AuthService->>AuthService: Generate refresh token
-        AuthService->>Cache: Store refresh token
-        AuthService-->>API: Tokens
-        API-->>Client: Access & refresh tokens
-        Client->>Client: Store tokens
-    else Invalid Credentials
-        AuthService-->>API: Authentication failed
+    participant API as FastAPI
+    participant JWT as jwt_service RS256
+    participant DB as Postgres
+
+    Client->>API: POST /api/v1/auth/login (credentials)
+    API->>DB: fetch user
+    DB-->>API: user record
+    API->>API: bcrypt verify (12 rounds)
+
+    alt valid
+        API->>JWT: issue access (15 min) + refresh (7 day)
+        JWT-->>API: token pair
+        API-->>Client: access + refresh tokens
+    else invalid
         API-->>Client: 401 Unauthorized
     end
-    
-    Note over Client: Subsequent requests
-    
-    Client->>API: Request with JWT
-    API->>TokenValidator: Validate token
-    
-    alt Token Valid
-        TokenValidator->>Cache: Check blacklist
-        Cache-->>TokenValidator: Not blacklisted
-        TokenValidator-->>API: Valid
-        API->>API: Process request
-    else Token Expired
-        TokenValidator-->>API: Token expired
-        API-->>Client: 401 Token Expired
-        
-        Client->>API: POST /auth/refresh
-        API->>RefreshService: Refresh tokens
-        RefreshService->>Cache: Validate refresh token
-        Cache-->>RefreshService: Valid
-        RefreshService->>RefreshService: Generate new JWT
-        RefreshService-->>API: New tokens
-        API-->>Client: New access token
+
+    Note over Client: subsequent protected request
+
+    Client->>API: request with Bearer access token
+    API->>JWT: Depends(get_current_token) validate_token
+    alt valid
+        JWT-->>API: token payload
+        API-->>Client: 200 (handler runs)
+    else expired
+        JWT-->>API: invalid/expired
+        API-->>Client: 401
+        Client->>API: POST /api/v1/auth/refresh
+        API->>JWT: validate refresh + issue new access
+        JWT-->>API: new access token
+        API-->>Client: new access token
     end
 ```
 
-## Caching Strategy
+## Report Generation Workflow
+
+`POST /api/v1/reports/generate` accepts the request, schedules generation on
+FastAPI `BackgroundTasks`, and returns `202 Accepted` with a report ID. The
+background job runs the exporters, writes the rendered files to the **local
+filesystem**, and persists report metadata to Postgres. Reports are retrieved via
+`GET /api/v1/reports/{report_id}/download/{format}`. There is **no S3 upload and no
+notification subsystem** (no email/webhook).
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant API
-    participant CacheManager
-    participant Redis
-    participant DB
-    participant Invalidator
-    
-    Client->>API: GET /api/v1/projects/{id}
-    API->>CacheManager: Check cache
-    CacheManager->>Redis: GET project:{id}
-    
-    alt Cache Hit
-        Redis-->>CacheManager: Cached data
-        CacheManager->>CacheManager: Check TTL
-        alt TTL Valid
-            CacheManager-->>API: Return cached data
-            API-->>Client: Project data (from cache)
-        else TTL Expired
-            CacheManager->>DB: Fetch fresh data
-            DB-->>CacheManager: Project data
-            CacheManager->>Redis: SET with new TTL
-            CacheManager-->>API: Return fresh data
-            API-->>Client: Project data (refreshed)
-        end
-    else Cache Miss
-        CacheManager->>DB: Fetch from database
-        DB-->>CacheManager: Project data
-        CacheManager->>Redis: SET with TTL
-        CacheManager-->>API: Return data
-        API-->>Client: Project data (from DB)
+    participant API as FastAPI
+    participant BG as BackgroundTasks
+    participant Gen as Report generator + exporters
+    participant FS as Local filesystem
+    participant DB as Postgres
+
+    Client->>API: POST /api/v1/reports/generate
+    API->>DB: create report record (status pending)
+    API->>BG: schedule generation
+    API-->>Client: 202 Accepted (report_id)
+
+    Note over BG: runs after response is sent
+
+    BG->>Gen: generate report(s)
+    alt format
+        Gen->>Gen: render HTML / Markdown / PDF
     end
-    
-    Note over Client: Update operation
-    
-    Client->>API: PUT /api/v1/projects/{id}
-    API->>DB: Update project
-    DB-->>API: Updated
-    API->>Invalidator: Invalidate cache
-    Invalidator->>Redis: DEL project:{id}
-    Invalidator->>Redis: DEL related keys
-    Redis-->>Invalidator: Deleted
-    API-->>Client: Update successful
+    Gen->>FS: write rendered file(s)
+    FS-->>Gen: file paths
+    Gen->>DB: update metadata (status ready, integrity hash)
+
+    Client->>API: GET /api/v1/reports/{report_id}/download/{format}
+    API->>FS: read rendered file
+    FS-->>API: file bytes
+    API-->>Client: report file
 ```
 
-## Parallel Agent Execution
+## MASR Routing Cache
+
+The only cache on the query path is the MASR **routing-decision cache**
+(`RoutingCacheManager`), enabled by `MASR_ENABLE_CACHING=True`. It is an
+**in-process dict** with LRU-style eviction (`max_size` 1000) — not Redis, and with
+no TTL. On a cache hit, `MASRouter.route` returns the cached `RoutingDecision` and
+skips complexity analysis and cost optimization. (Redis is used elsewhere — for the
+idempotency and rate-limit middleware and for `EventPublisher` pub/sub — but not for
+routing decisions. Research-project reads go straight to Postgres via the repository
+layer; there is no read-through project cache.)
 
 ```mermaid
 sequenceDiagram
-    participant Workflow
-    participant Scheduler
-    participant Pool as Worker Pool
-    participant Agent1 as Literature Agent
-    participant Agent2 as Comparative Agent
-    participant Agent3 as Methodology Agent
-    participant Aggregator
-    participant Conflict as Conflict Resolver
-    
-    Workflow->>Scheduler: Schedule parallel tasks
-    
-    Scheduler->>Pool: Request workers
-    Pool-->>Scheduler: Workers available
-    
-    par Parallel Execution
-        Scheduler->>Agent1: Execute literature review
-        Agent1->>Agent1: Process
-        Agent1-->>Scheduler: Literature results
-    and
-        Scheduler->>Agent2: Execute comparison
-        Agent2->>Agent2: Process
-        Agent2-->>Scheduler: Comparison results
-    and
-        Scheduler->>Agent3: Execute methodology
-        Agent3->>Agent3: Process
-        Agent3-->>Scheduler: Methodology results
+    participant DES as DirectExecutionService
+    participant MASR as MASRouter
+    participant Cache as RoutingCacheManager
+
+    DES->>MASR: route(query, context, strategy, constraints)
+    MASR->>Cache: check_cache(key = query + context + strategy + constraints)
+
+    alt cache hit
+        Cache-->>MASR: cached RoutingDecision
+        MASR-->>DES: decision (skips complexity + cost optimization)
+    else cache miss
+        MASR->>MASR: complexity analysis -> strategy select -> cost optimize -> collaboration mode
+        MASR->>Cache: cache_decision (LRU evict if > max_size)
+        MASR-->>DES: fresh RoutingDecision
     end
-    
-    Scheduler->>Aggregator: Combine results
-    Aggregator->>Conflict: Check conflicts
-    
-    alt Conflicts Found
-        Conflict->>Conflict: Apply resolution rules
-        Conflict->>Conflict: Prioritize by confidence
-        Conflict-->>Aggregator: Resolved data
-    else No Conflicts
-        Conflict-->>Aggregator: Pass through
-    end
-    
-    Aggregator-->>Workflow: Combined results
 ```
 
-## Monitoring and Alerting Flow
+## Observability
+
+There is no OpenTelemetry backbone and no Grafana / Loki / Jaeger / AlertManager /
+PagerDuty pipeline. Real observability is **Prometheus metrics + structlog**, with
+**optional Langfuse tracing** (off by default). The `LLMCostDriftMiddleware`
+compares MASR-estimated vs actual provider cost and emits drift metrics.
 
 ```mermaid
 sequenceDiagram
-    participant Service
-    participant OTel as OpenTelemetry
-    participant Prometheus
-    participant Loki
-    participant Grafana
-    participant AlertManager
-    participant PagerDuty
-    participant Slack
-    participant Ops as Ops Team
-    
-    Service->>OTel: Send metrics
-    Service->>OTel: Send traces
-    Service->>OTel: Send logs
-    
-    OTel->>Prometheus: Export metrics
-    OTel->>Loki: Export logs
-    
-    Prometheus->>Prometheus: Evaluate rules
-    
-    alt Alert Triggered
-        Prometheus->>AlertManager: Send alert
-        AlertManager->>AlertManager: Check severity
-        
-        alt Critical Alert
-            AlertManager->>PagerDuty: Page on-call
-            PagerDuty->>Ops: Wake up engineer
-            AlertManager->>Slack: Post to #incidents
-        else Warning Alert
-            AlertManager->>Slack: Post to #alerts
-        else Info Alert
-            AlertManager->>Slack: Post to #monitoring
-        end
+    participant Svc as Cerebro service
+    participant Obs as observability.record_llm_call
+    participant Prom as Prometheus metrics
+    participant Log as structlog
+    participant LF as Langfuse opt-in
+    participant Scrape as Prometheus scraper
+
+    Svc->>Obs: record_llm_call(duration, tokens, cost)
+    Obs->>Prom: increment counters/histograms
+    Note over Prom: llm_call_duration_seconds, llm_tokens_total, llm_cost_usd_total, llm_cost_drift_events_total
+    Obs->>Log: structured log line
+
+    opt LANGFUSE_ENABLED
+        Svc->>LF: trace_masr_routing / trace_provider_call (PII-redacted)
     end
-    
-    Grafana->>Prometheus: Query metrics
-    Grafana->>Loki: Query logs
-    Grafana->>Grafana: Render dashboards
-    
-    Ops->>Grafana: View dashboards
-    Ops->>Loki: Search logs
-    Ops->>Service: Apply fix
+
+    Scrape->>Prom: GET /metrics
+    Prom-->>Scrape: current metric values
 ```
+
+`ENABLE_TRACING` in config is a separate, unrelated flag — it does **not** enable
+Langfuse (that is `LANGFUSE_ENABLED`, default `False`).

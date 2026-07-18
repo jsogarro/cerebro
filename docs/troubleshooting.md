@@ -1,6 +1,12 @@
 # Troubleshooting Guide
 
-This comprehensive guide helps you diagnose and resolve common issues with the Multi-Agent Research Platform.
+This guide helps you diagnose and resolve common issues with **Cerebro**, the multi-agent
+LLM research platform (current focus: financial research on US equities).
+
+> **Naming note.** The product is **Cerebro**, but the deployment artifacts still carry the
+> pre-rebrand **`research-platform`** identity: the FastAPI app is titled "Research Platform API",
+> the database is `research_db`, the CLI is `research-cli`, and the API container is `research-api`.
+> Those infra names are intentional and referenced verbatim below.
 
 ## Table of Contents
 - [Quick Diagnostics](#quick-diagnostics)
@@ -9,7 +15,7 @@ This comprehensive guide helps you diagnose and resolve common issues with the M
   - [Authentication Errors](#authentication-errors)
   - [Database Problems](#database-problems)
   - [Agent Failures](#agent-failures)
-  - [Workflow Issues](#workflow-issues)
+  - [Execution Issues](#execution-issues)
   - [Performance Problems](#performance-problems)
 - [Service-Specific Issues](#service-specific-issues)
 - [Debug Logging](#debug-logging)
@@ -23,7 +29,7 @@ Run these commands to quickly diagnose system health:
 
 ```bash
 # Check overall system health
-research-cli health --verbose
+research-cli health
 
 # Check API connectivity
 curl -v http://localhost:8000/health
@@ -32,17 +38,19 @@ curl -v http://localhost:8000/health
 docker-compose ps
 
 # View recent logs
-docker-compose logs --tail=50 api worker
+docker-compose logs --tail=50 api
 
 # Check database connectivity
 docker-compose exec postgres pg_isready
 
 # Check Redis connectivity
 docker-compose exec redis redis-cli ping
-
-# Check Temporal status
-curl http://localhost:8080/health
 ```
+
+The dev `docker-compose.yml` defines these services: `api`, `mcp-server`, `masr-router`,
+`postgres`, `redis`, `nginx`, `web`, plus the `dev-tools` profile services `pgadmin` and
+`redis-commander`. There is **no worker service** — execution runs in-process inside the `api`
+container via the `DirectExecutionService` (Temporal has been removed).
 
 ## Common Issues
 
@@ -77,15 +85,15 @@ Error: Connection refused to http://localhost:8000
    ```bash
    # macOS
    sudo pfctl -s rules | grep 8000
-   
+
    # Linux
    sudo iptables -L -n | grep 8000
    ```
 
 5. Try alternative connection:
    ```bash
-   # Use Docker network IP
-   docker inspect research-platform_api_1 | grep IPAddress
+   # Use Docker network IP (container is named research-api)
+   docker inspect research-api | grep IPAddress
    research-cli --api-url http://<container-ip>:8000 health
    ```
 
@@ -96,7 +104,9 @@ WebSocket connection to 'ws://localhost:8000/ws' failed
 ```
 
 **Solutions:**
-1. Check WebSocket endpoint:
+1. Check the WebSocket endpoint. The live WS routes are `/ws`, `/ws/projects/{project_id}`,
+   `/ws/cli/{project_id}`, and `GET /ws/health`, plus the supervisor and TalkHier WS routes
+   under `/api/v1/supervisors/*` and `/api/v1/talkhier/*`:
    ```bash
    curl -i -N -H "Connection: Upgrade" \
         -H "Upgrade: websocket" \
@@ -105,41 +115,63 @@ WebSocket connection to 'ws://localhost:8000/ws' failed
         http://localhost:8000/ws
    ```
 
-2. Verify CORS settings in API:
+2. Check plain WS liveness:
+   ```bash
+   curl http://localhost:8000/ws/health
+   ```
+
+3. Verify CORS settings in the API:
    ```bash
    grep -r "allow_origins" src/api/main.py
    ```
 
-3. Check proxy/reverse proxy configuration if applicable
+4. In `development` (`ENVIRONMENT=development`) anonymous WS connections are allowed. In other
+   environments the connection must present a valid JWT (RS256).
 
 ### Authentication Errors
 
-#### Problem: "401 Unauthorized" errors
+Cerebro uses **per-endpoint JWT authentication** (RS256), applied via FastAPI `Depends(...)` on
+the endpoints that need it (the `/api/v1/auth/*` routes and `/api/v1/research`, which resolves a
+tenant context through `get_tenant_context` -> `get_current_token`). The users GDPR endpoint and
+the `/api/v1/reports` routes carry **no** auth dependency and are effectively unauthenticated. The
+`AuthMiddleware` is a **no-op** — it sets
+`request.state.user = None` and validates nothing. As a result the primary
+**`/api/v1/query/*`, `/api/v1/agents/*`, and `/api/v1/masr/*` routes are effectively
+unauthenticated**; a 401 from those routes almost always means something other than a missing token.
+
+Tokens are minted by `POST /api/v1/auth/login` (15-minute access token, 7-day refresh token). The
+RS256 keys live at `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem`; passwords are bcrypt
+(12 rounds), `PASSWORD_MIN_LENGTH=12`.
+
+#### Problem: "401 Unauthorized" on an authenticated endpoint
 **Symptoms:**
 ```
 Error: Authentication failed - 401 Unauthorized
 ```
 
 **Solutions:**
-1. Verify API key is set:
+1. Obtain a fresh access token:
    ```bash
-   echo $RESEARCH_API_KEY
+   curl -X POST http://localhost:8000/api/v1/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"email": "<user-email>", "password": "<password>"}'
    ```
 
-2. Check API key in database:
+2. Call the endpoint with the bearer token:
    ```bash
-   docker-compose exec postgres psql -U research -d research_db \
-     -c "SELECT * FROM api_keys WHERE key_hash='<your-key-hash>';"
+   curl -H "Authorization: Bearer <access-token>" \
+     http://localhost:8000/api/v1/auth/me
    ```
 
-3. Regenerate API key:
+3. If the token is rejected, verify the JWT public/private key pair is mounted and readable:
    ```bash
-   research-cli auth generate-key --user-id <user-id>
+   docker-compose exec api ls -l /secrets/jwt_private.pem /secrets/jwt_public.pem
    ```
 
-4. Clear authentication cache:
+4. For the CLI, set the token in `~/.research-cli.env` (dotenv keys `RESEARCH_API_URL`,
+   `RESEARCH_AUTH_TOKEN`) or export it:
    ```bash
-   docker-compose exec redis redis-cli FLUSHDB
+   export RESEARCH_AUTH_TOKEN="<access-token>"
    ```
 
 #### Problem: JWT token expired
@@ -149,46 +181,42 @@ Error: Token has expired
 ```
 
 **Solutions:**
-1. Refresh token:
+1. Exchange the refresh token for a new access token:
    ```bash
-   research-cli auth refresh
+   curl -X POST http://localhost:8000/api/v1/auth/refresh \
+     -H "Content-Type: application/json" \
+     -d '{"refresh_token": "<refresh-token>"}'
    ```
 
-2. Re-authenticate:
-   ```bash
-   research-cli auth login --username <username> --password <password>
-   ```
+2. If the refresh token has also expired (7 days), log in again with `POST /api/v1/auth/login`.
 
 ### Database Problems
 
 #### Problem: Database connection pool exhausted
 **Symptoms:**
 ```
-sqlalchemy.exc.TimeoutError: QueuePool limit of size 10 overflow 10 reached
+sqlalchemy.exc.TimeoutError: QueuePool limit of size ... overflow ... reached
 ```
 
 **Solutions:**
-1. Increase pool size in configuration:
+1. Check for connection leaks:
    ```bash
-   # In .env file
-   DATABASE_POOL_SIZE=20
-   DATABASE_MAX_OVERFLOW=20
-   ```
-
-2. Check for connection leaks:
-   ```bash
-   docker-compose exec postgres psql -U research -c \
+   docker-compose exec postgres psql -U research -d research_db -c \
      "SELECT pid, usename, application_name, state \
       FROM pg_stat_activity WHERE datname='research_db';"
    ```
 
-3. Kill idle connections:
+2. Kill idle connections:
    ```bash
-   docker-compose exec postgres psql -U research -c \
+   docker-compose exec postgres psql -U research -d research_db -c \
      "SELECT pg_terminate_backend(pid) \
       FROM pg_stat_activity \
       WHERE state = 'idle' AND state_change < now() - interval '10 minutes';"
    ```
+
+3. The async engine (`create_async_engine` / `async_sessionmaker`) is constructed from
+   `DATABASE_URL` (default `postgresql+asyncpg://research:research123@localhost:5432/research_db`).
+   Reduce concurrent load or restart the API container if the pool stays saturated.
 
 #### Problem: Migration failures
 **Symptoms:**
@@ -202,7 +230,7 @@ alembic.util.exc.CommandError: Can't locate revision identified by 'xxx'
    docker-compose exec api alembic current
    ```
 
-2. Reset to specific revision:
+2. Reset to a specific revision:
    ```bash
    docker-compose exec api alembic downgrade <revision>
    docker-compose exec api alembic upgrade head
@@ -217,32 +245,38 @@ alembic.util.exc.CommandError: Can't locate revision identified by 'xxx'
 
 ### Agent Failures
 
-#### Problem: Agent timeout errors
+Agents are LLM-reasoning workers (prompt-driven) built on `LLMWorkerAgentBase`. By default the
+runtime is **Gemini-only** (`GEMINI_DEFAULT_MODEL=gemini-pro`). OpenRouter multi-provider routing
+(DeepSeek for simple tiers, Claude Sonnet for complex tiers) is flag-gated **off** and requires
+both `MULTI_PROVIDER_ROUTING_ENABLED=True` and `OPENROUTER_API_KEY` to be set.
+
+> Confidence scores reported by agents are hardcoded heuristics (0.85 on success, 0.3 on empty
+> output), not real quality signals — don't treat them as a health metric. The fast path emits a
+> fixed `quality_score` of 0.8 rather than a confidence score, and it is equally hardcoded.
+
+#### Problem: Agent produces empty or low-quality output
 **Symptoms:**
 ```
-Agent 'LiteratureReviewAgent' timed out after 300 seconds
+Agent 'LiteratureReviewAgent' returned empty result
 ```
 
 **Solutions:**
-1. Increase agent timeout:
+1. Inspect the execution status and results (see [Execution Issues](#execution-issues)):
    ```bash
-   # In .env
-   AGENT_TIMEOUT_SECONDS=600
+   curl http://localhost:8000/api/v1/query/execution/<execution-id>/status
+   curl http://localhost:8000/api/v1/query/execution/<execution-id>/results
    ```
 
-2. Check Gemini API rate limits:
+2. Check bypass-agent status/health for a specific agent type:
    ```bash
-   research-cli metrics gemini-usage
+   research-cli agents status
+   # or directly:
+   curl http://localhost:8000/api/v1/agents/literature-review/health
    ```
 
-3. Verify agent health:
+3. Check the API logs for the underlying LLM error:
    ```bash
-   research-cli agents health --agent-type literature_review
-   ```
-
-4. Restart failed agent task:
-   ```bash
-   research-cli projects retry-task <project-id> <task-id>
+   docker-compose logs api | grep -i "gemini\|llm\|agent"
    ```
 
 #### Problem: Gemini API errors
@@ -252,90 +286,107 @@ google.api_core.exceptions.ResourceExhausted: 429 Quota exceeded
 ```
 
 **Solutions:**
-1. Check API quota:
+1. Confirm the key is set:
    ```bash
-   research-cli metrics gemini-quota
+   docker-compose exec api printenv GEMINI_API_KEY | sed 's/./*/g'
    ```
 
-2. Implement rate limiting:
+2. Cerebro applies a single global rate limiter (`MAX_REQUESTS_PER_MINUTE=100`,
+   `ENABLE_RATE_LIMITING=True`) plus a Gemini-specific limiter (`src/services/gemini_limiter.py`).
+   There are no per-endpoint or per-tier rate settings — reduce request volume or wait for the
+   provider quota to reset.
+
+3. Watch LLM call volume and cost via Prometheus metrics:
    ```bash
-   # In .env
-   GEMINI_RATE_LIMIT=10  # requests per minute
-   GEMINI_RETRY_MAX=5
-   GEMINI_RETRY_BACKOFF=2.0
+   curl -s http://localhost:8000/metrics | grep -E "llm_call_duration_seconds|llm_tokens_total|llm_cost_usd_total"
    ```
 
-3. Use caching for repeated queries:
-   ```bash
-   # Enable Redis caching
-   ENABLE_GEMINI_CACHE=true
-   GEMINI_CACHE_TTL=3600
-   ```
+### Execution Issues
 
-### Workflow Issues
+Query execution runs through the in-process **`DirectExecutionService`**
+(`src/api/services/direct_execution_service.py`), which replaced Temporal. The request flow is:
 
-#### Problem: Temporal workflow stuck
+```
+Client -> FastAPI -> DirectExecutionService (asyncio background task)
+       -> MASRouter -> MASRSupervisorBridge -> domain supervisors -> workers -> verification QA gate
+```
+
+> The immediate response from `POST /api/v1/query/research` contains **hardcoded placeholders**
+> (`selected_agents=[]`, `estimated_cost=0.015`, `estimated_quality=0.85`, `confidence=0.85`,
+> `routing_time_ms=50.0`). It is **not** the routing result. Real routing data and output only
+> appear later via the execution status/results endpoints below.
+
+#### Problem: Execution appears stuck at "running"
 **Symptoms:**
 ```
-Workflow 'ResearchWorkflow' status: Running for > 1 hour
+Execution status: running for an unusually long time
 ```
 
 **Solutions:**
-1. Check workflow status:
+1. Poll the execution status. The response carries the real `supervisor_type` and progress:
    ```bash
-   docker-compose exec temporal tctl workflow describe \
-     --workflow-id <workflow-id>
+   curl http://localhost:8000/api/v1/query/execution/<execution-id>/status
    ```
 
-2. View workflow history:
+2. Fetch results once the status reports `completed`:
    ```bash
-   docker-compose exec temporal tctl workflow show \
-     --workflow-id <workflow-id>
+   curl http://localhost:8000/api/v1/query/execution/<execution-id>/results
    ```
 
-3. Terminate stuck workflow:
+3. Check the API logs for the background task. Executions run as asyncio tasks inside the `api`
+   container:
    ```bash
-   docker-compose exec temporal tctl workflow terminate \
-     --workflow-id <workflow-id> \
-     --reason "Stuck workflow"
+   docker-compose logs api | grep "<execution-id>"
    ```
 
-4. Restart workflow:
-   ```bash
-   research-cli projects restart <project-id>
-   ```
+4. If the app was restarted mid-flight, resume from the last checkpoint (see below).
 
-#### Problem: Activity retries exhausted
+> **Historical bug (FIXED).** A `@retry` decorator on the execution workflow previously re-ran the
+> whole workflow up to 3× because a naive/aware `datetime` subtraction in the `finally` block
+> raised inside the retry scope. This is fixed (timestamps now use `datetime.now(UTC)`); repeated
+> re-runs of a single query are no longer expected.
+
+#### Problem: "Execution capacity reached"
 **Symptoms:**
 ```
-Activity 'LiteratureReviewActivity' failed after 3 retries
+RuntimeError: maximum concurrent executions reached
 ```
 
 **Solutions:**
-1. Check activity logs:
+1. `DirectExecutionService` tracks live work in an in-memory `active_executions` dict guarded by a
+   `max_concurrent_executions` cap; it raises when the cap is hit. Wait for in-flight executions to
+   finish, or check what is currently active:
    ```bash
-   docker-compose logs worker | grep <activity-id>
+   curl http://localhost:8000/api/v1/agents/executions/active
    ```
 
-2. Increase retry attempts:
-   ```python
-   # In workflow configuration
-   ACTIVITY_RETRY_POLICY = {
-       "maximum_attempts": 5,
-       "initial_interval": timedelta(seconds=1),
-       "maximum_interval": timedelta(seconds=30),
-       "backoff_coefficient": 2.0,
-   }
+2. Because `active_executions` is in-memory, restarting the `api` container clears it (and drops
+   in-flight work) — resume any interrupted execution from its checkpoint afterward.
+
+#### Problem: Resuming an interrupted execution
+**Solutions:**
+1. Execution progress is checkpointed to the `workflow_checkpoints` table (via
+   `CheckpointRepository`) at the `masr_routing`, `supervisor_execution`, `completed`, and
+   `fast_path_completed` phases.
+
+2. Resume from the latest checkpoint:
+   ```bash
+   curl -X POST http://localhost:8000/api/v1/query/execution/<project-id>/resume
    ```
 
-3. Manual retry:
+3. Verify the checkpoint exists before resuming:
    ```bash
-   research-cli workflows retry-activity \
-     --workflow-id <workflow-id> \
-     --activity-id <activity-id>
+   docker-compose exec postgres psql -U research -d research_db -c \
+     "SELECT project_id, phase, created_at FROM workflow_checkpoints \
+      WHERE project_id='<project-id>' ORDER BY created_at DESC LIMIT 5;"
    ```
 
 ### Performance Problems
+
+Parallelism is **in-process**, not horizontal: multi-domain queries fan out under an
+`asyncio.Semaphore`, and each domain supervisor coordinates its worker team internally
+(hierarchical supervisors + LangGraph state graphs, one per supervisor). There is no worker fleet
+to scale — tune concurrency and the LLM path instead.
 
 #### Problem: Slow API response times
 **Symptoms:**
@@ -352,23 +403,15 @@ API requests taking > 5 seconds
       ORDER BY mean_exec_time DESC LIMIT 10;"
    ```
 
-2. Enable query optimization:
+2. Most latency is LLM-bound. Inspect call duration and cost:
    ```bash
-   # Add indexes
-   docker-compose exec api python -m src.scripts.optimize_db
+   curl -s http://localhost:8000/metrics | grep -E "llm_call_duration_seconds|llm_cost_usd_total"
    ```
 
-3. Increase worker processes:
+3. Increase the API worker process count (production image runs `uvicorn ... --workers 4`):
    ```bash
-   # In docker-compose.yml
+   # In docker-compose.yml (api service)
    command: uvicorn src.api.main:app --workers 4
-   ```
-
-4. Enable response caching:
-   ```bash
-   # In .env
-   ENABLE_API_CACHE=true
-   API_CACHE_TTL=300
    ```
 
 #### Problem: High memory usage
@@ -392,12 +435,7 @@ Container using > 2GB RAM
        memswap_limit: 2g
    ```
 
-3. Profile memory usage:
-   ```bash
-   docker-compose exec api python -m memory_profiler src.api.main
-   ```
-
-4. Clear caches:
+3. Clear Redis caches (idempotency + rate-limit state live in Redis):
    ```bash
    docker-compose exec redis redis-cli FLUSHALL
    ```
@@ -405,6 +443,8 @@ Container using > 2GB RAM
 ## Service-Specific Issues
 
 ### PostgreSQL Issues
+
+Postgres runs from `postgres:16-alpine`.
 
 #### Problem: "FATAL: too many connections"
 **Solutions:**
@@ -429,6 +469,8 @@ docker-compose exec postgres psql -U research -d research_db -c \
 
 ### Redis Issues
 
+Redis runs from `redis:7-alpine`.
+
 #### Problem: "OOM command not allowed"
 **Solutions:**
 ```bash
@@ -440,51 +482,30 @@ docker-compose exec redis redis-cli CONFIG SET maxmemory 1gb
 docker-compose exec redis redis-cli CONFIG SET maxmemory-policy allkeys-lru
 ```
 
-### Temporal Issues
+### MASR Router Note
 
-#### Problem: Worker not picking up tasks
-**Solutions:**
-```bash
-# Check worker registration
-docker-compose exec temporal tctl taskqueue describe \
-  --taskqueue research-queue
-
-# Restart worker
-docker-compose restart worker
-
-# Check worker logs
-docker-compose logs --tail=100 worker
-```
+The dev compose includes a standalone `masr-router` container (port 9100), but the **verified query
+path uses the in-process `MASRouter` Python object**, not the external service (`MASR_SERVICE_URL`
+is not read anywhere in `src/`). Treat the standalone container as legacy; do not chase query-path
+issues there.
 
 ## Debug Logging
 
 ### Enable Debug Mode
 
-1. **API Debug Logging:**
-   ```bash
-   # In .env
-   LOG_LEVEL=DEBUG
-   FASTAPI_DEBUG=true
-   ```
+The single debug gate is the `DEBUG` setting (default `False`). Turning it on also enables the
+`/docs` and `/redoc` Swagger pages. Log verbosity is controlled by `LOG_LEVEL`.
 
-2. **Database Query Logging:**
-   ```bash
-   # In .env
-   SQLALCHEMY_ECHO=true
-   ```
+```bash
+# In .env
+DEBUG=true
+LOG_LEVEL=DEBUG
+```
 
-3. **Temporal Debug Logging:**
-   ```bash
-   # In .env
-   TEMPORAL_LOG_LEVEL=DEBUG
-   ```
-
-4. **Agent Debug Logging:**
-   ```bash
-   # In .env
-   AGENT_DEBUG=true
-   GEMINI_DEBUG=true
-   ```
+A single `DEBUG` + `LOG_LEVEL` pair governs runtime verbosity, and logging is emitted through
+structlog. Per-subsystem flags (`DEV_ENABLE_AI_BRAIN_DEBUG`, `DEV_ENABLE_MEMORY_DEBUG`,
+`DEV_ENABLE_ROUTING_DEBUG`) are declared in `src/core/config.py` but are read nowhere in `src/`, so
+they are currently inert and have no effect.
 
 ### View Logs
 
@@ -501,8 +522,8 @@ docker-compose logs api | grep ERROR
 # Save logs to file
 docker-compose logs > debug.log 2>&1
 
-# Structured log parsing
-docker-compose logs api | jq '.level == "ERROR"'
+# Structured (JSON) log parsing
+docker-compose logs api | jq 'select(.level == "error")'
 ```
 
 ## Health Checks
@@ -527,14 +548,6 @@ docker-compose exec -T postgres pg_isready > /dev/null 2>&1 && echo "UP" || echo
 echo -n "Redis: "
 docker-compose exec -T redis redis-cli ping > /dev/null 2>&1 && echo "UP" || echo "DOWN"
 
-# Temporal
-echo -n "Temporal: "
-curl -s http://localhost:8080/health | grep -q "OK" && echo "UP" || echo "DOWN"
-
-# Worker
-echo -n "Worker: "
-docker-compose ps worker | grep -q "Up" && echo "UP" || echo "DOWN"
-
 # Disk Space
 echo -n "Disk Space: "
 df -h / | awk 'NR==2 {print $5 " used"}'
@@ -550,19 +563,30 @@ docker system df
 
 ### Monitoring Endpoints
 
-```bash
-# Prometheus metrics
-curl http://localhost:8000/metrics
+The app exposes three top-level health endpoints (`/health`, `/ready`, `/live`) plus Prometheus
+metrics, alongside a WebSocket health check at `/ws/health` and per-agent endpoints
+(`/api/v1/agents/{agent_type}/health` and `/api/v1/agents/health/summary`). There are no
+`/api/v1/health/agents` or `/health/workflows` endpoints.
 
-# Detailed health with dependencies
+```bash
+# Overall health
+curl http://localhost:8000/health
+
+# Kubernetes readiness probe
 curl http://localhost:8000/ready
 
-# Liveness probe
+# Kubernetes liveness probe
 curl http://localhost:8000/live
 
-# Custom health checks
-curl http://localhost:8000/api/v1/health/agents
-curl http://localhost:8000/api/v1/health/workflows
+# Prometheus metrics (LLM duration, tokens, cost, cost-drift)
+curl http://localhost:8000/metrics
+```
+
+For per-agent health via the bypass API:
+
+```bash
+curl http://localhost:8000/api/v1/agents/<agent-type>/health
+curl http://localhost:8000/api/v1/agents/health/summary
 ```
 
 ## Recovery Procedures
@@ -592,10 +616,13 @@ echo "Running migrations..."
 docker-compose exec api alembic upgrade head
 
 echo "Verifying health..."
-research-cli health --verbose
+research-cli health
 
 echo "System restart complete!"
 ```
+
+> Restarting the API clears the in-memory `active_executions` state. Resume any interrupted work
+> from its `workflow_checkpoint` (see [Execution Issues](#execution-issues)).
 
 ### Database Recovery
 
@@ -614,11 +641,8 @@ docker-compose exec postgres psql -U research -d research_db -c \
 ### Clear All Caches
 
 ```bash
-# Redis cache
+# Redis cache (idempotency + rate-limit state)
 docker-compose exec redis redis-cli FLUSHALL
-
-# Application cache
-rm -rf /tmp/research_platform_cache/*
 
 # Python cache
 find . -type d -name __pycache__ -exec rm -rf {} +
@@ -646,63 +670,69 @@ docker-compose ps > $DIAG_DIR/service_status.txt
 docker-compose logs --tail=1000 > $DIAG_DIR/logs.txt 2>&1
 
 # Configuration (sanitized)
-grep -v PASSWORD .env > $DIAG_DIR/config.txt
+grep -v -i "password\|secret\|api_key\|token" .env > $DIAG_DIR/config.txt
 
 # Database status
 docker-compose exec postgres psql -U research -d research_db \
   -c "SELECT version();" > $DIAG_DIR/db_info.txt 2>&1
 
-# Health checks
-research-cli health --verbose > $DIAG_DIR/health.txt 2>&1
+# Health check
+research-cli health > $DIAG_DIR/health.txt 2>&1
 
 # Create archive
 tar -czf $DIAG_DIR.tar.gz $DIAG_DIR
 echo "Diagnostics collected in $DIAG_DIR.tar.gz"
 ```
 
-### Support Channels
+### CLI Reference
 
-1. **GitHub Issues**: [Report bugs](https://github.com/your-org/research-platform/issues)
-2. **Documentation**: Check [full documentation](./README.md)
-3. **Community Discord**: Join discussions
-4. **Email Support**: support@research-platform.ai
+The `research-cli` command tree (entrypoints `research-platform` and `research-cli`):
+
+- Top level: `config` (`show` | `set` | `save`), `health`, `completion`
+- `agents`: `query`, `route`, `estimate`, `execute`, `chain`, `status`
+- `projects`: `create`, `get`, `list`, `progress`, `cancel`, `results`, `refine`
+
+Configuration is read from `~/.research-cli.env` (dotenv keys `RESEARCH_API_URL`,
+`RESEARCH_AUTH_TOKEN`). Global flags include `--api-url`, `--format` (table/json/yaml/csv),
+`--verbose`, and `--no-color`.
 
 ### Before Reporting Issues
 
 1. Check this troubleshooting guide
-2. Search existing GitHub issues
-3. Collect diagnostic information
-4. Try recovery procedures
+2. Search existing issues in the project tracker
+3. Collect diagnostic information (script above)
+4. Try the recovery procedures
 5. Include:
    - Error messages
    - Steps to reproduce
-   - System configuration
+   - System configuration (sanitized)
    - Diagnostic archive
 
 ## Common Error Codes
 
-| Code | Description | Solution |
+API errors are returned in a standard envelope whose `code` field is a string, mapped from the HTTP
+status by `src/api/middleware/error_envelope.py` (individual routes may set more specific codes).
+The base codes are:
+
+| Code | HTTP status | Solution |
 |------|-------------|----------|
-| E001 | Database connection failed | Check PostgreSQL status and credentials |
-| E002 | Redis connection failed | Check Redis status and configuration |
-| E003 | Temporal connection failed | Check Temporal server status |
-| E004 | Gemini API quota exceeded | Wait for quota reset or upgrade plan |
-| E005 | Authentication failed | Verify API key or credentials |
-| E006 | Workflow timeout | Increase timeout or check workflow status |
-| E007 | Agent execution failed | Check agent logs and retry |
-| E008 | Validation error | Check input parameters |
-| E009 | Resource not found | Verify resource ID exists |
-| E010 | Permission denied | Check user permissions |
+| `BAD_REQUEST` | 400 | Check the request payload and parameters |
+| `AUTHENTICATION_REQUIRED` | 401 | Verify JWT token or credentials |
+| `FORBIDDEN` | 403 | Check user/tenant permissions |
+| `NOT_FOUND` | 404 | Verify the resource ID exists |
+| `CONFLICT` | 409 | Resolve the conflicting state and retry |
+| `VALIDATION_ERROR` | 422 | Check input parameters against the schema |
+| `RATE_LIMIT_EXCEEDED` | 429 | Wait for the rate-limit window to reset or reduce request volume |
+| `INTERNAL_SERVER_ERROR` | 500 | Check server logs; retry or resume from checkpoint |
 
 ## Performance Optimization Tips
 
-1. **Enable connection pooling** for database
-2. **Use Redis caching** for frequently accessed data
-3. **Implement rate limiting** for external APIs
-4. **Use async operations** where possible
-5. **Monitor resource usage** with Prometheus
+1. **Reduce LLM round-trips** — the fast path is a single LLM call that bypasses supervisors
+2. **Use Redis caching** for idempotency and rate-limit state
+3. **Respect the global rate limit** (`MAX_REQUESTS_PER_MINUTE=100`)
+4. **Use async operations** — the entire request path is asyncio-based
+5. **Monitor LLM cost and latency** via Prometheus `/metrics`
 6. **Optimize database queries** with indexes
-7. **Scale workers horizontally** for parallel processing
-8. **Use CDN** for static assets
-9. **Enable compression** for API responses
-10. **Implement circuit breakers** for external services
+7. **Tune in-process concurrency** — multi-domain fan-out is bounded by an `asyncio.Semaphore`
+8. **Enable compression** for API responses
+9. **Implement circuit breakers** for external services (see `src/reliability/retry_strategies.py`)

@@ -1,6 +1,22 @@
 # Configuration Reference
 
-This document provides a comprehensive reference for all configuration options available in the Multi-Agent Research Platform.
+This document is the reference for the configuration options exposed by **Cerebro** — a multi-agent
+LLM research platform (current focus: financial research, US equities). All runtime settings are
+declared on the single `Settings(BaseSettings)` class in `src/core/config.py`; environment variables
+are loaded from `.env` (`env_file=".env"`, `case_sensitive=True`).
+
+> **Unknown variables are silently discarded.** `Settings` is configured with `extra="ignore"`
+> (`src/core/config.py:22`). Any environment variable that does not correspond to a field defined on
+> `Settings` is **accepted and ignored** at startup — no error, no warning. A typo'd or obsolete
+> variable therefore has **no effect** and will not be caught for you. Only the variables documented
+> below (i.e. the fields actually declared in `config.py`) change behavior.
+
+> **Infra naming caveat.** The product is **Cerebro**, but the deployment artifacts still carry the
+> pre-rebrand **`research-platform`** identity: the FastAPI title is `Research Platform API`, the
+> Kubernetes namespace is `research-platform`, container images are
+> `gcr.io/PROJECT_ID/research-platform-api`, the default database is `research_db`, and the CLI
+> entrypoints are `research-platform` / `research-cli`. These names are kept verbatim in infra
+> artifacts throughout this document; they are not the product name.
 
 ## Table of Contents
 - [Environment Variables](#environment-variables)
@@ -17,46 +33,45 @@ This document provides a comprehensive reference for all configuration options a
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `ENVIRONMENT` | string | `development` | Deployment environment (development/staging/production) | No |
-| `DEBUG` | boolean | `false` | Enable debug mode | No |
+| `ENVIRONMENT` | string | `development` | Deployment environment (development/staging/production). Gates production validators and WebSocket anonymous access. (`/docs` exposure is gated by `DEBUG`, not `ENVIRONMENT`.) | No |
+| `DEBUG` | boolean | `false` | Enable debug mode. `/docs` and `/redoc` are served only when `DEBUG=true`. | No |
 | `LOG_LEVEL` | string | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL) | No |
-| `HOST` | string | `0.0.0.0` | Server host binding | No |
-| `PORT` | integer | `8000` | Server port | No |
-| `WORKERS` | integer | `1` | Number of worker processes | No |
+| `API_HOST` | string | `0.0.0.0` | Server host binding | No |
+| `API_PORT` | integer | `8000` | Server port | No |
+| `API_WORKERS` | integer | `4` | Declared on `Settings` but **unconsumed** — nothing reads it. The production image hardcodes the uvicorn worker count (`--workers 4` in the `Dockerfile` CMD), so setting `API_WORKERS` has no effect. | No |
+| `SECRET_KEY` | string | `MUST_SET_IN_ENV` | Application signing secret. Validated at startup: must be set (not the placeholder) in production **and** at least 32 characters in every environment. | Yes (production) |
+| `WORKER_CONCURRENCY` | integer | `10` | In-process task concurrency | No |
+| `TASK_TIMEOUT_SECONDS` | integer | `300` | Per-task timeout (seconds) | No |
+| `MCP_PORT` | integer | `9000` | MCP tool-server port | No |
+| `MCP_TOOLS_ENABLED` | boolean | `true` | Enable MCP tool servers | No |
+
+> There are no `HOST`, `PORT`, or `WORKERS` settings — the real field names are `API_HOST`,
+> `API_PORT`, and `API_WORKERS`. Setting the former names has no effect (`extra="ignore"`).
 
 ### Database Configuration
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `DATABASE_URL` | string | - | PostgreSQL connection string | Yes |
-| `DATABASE_POOL_SIZE` | integer | `10` | Database connection pool size | No |
-| `DATABASE_MAX_OVERFLOW` | integer | `10` | Maximum overflow connections | No |
-| `DATABASE_POOL_TIMEOUT` | integer | `30` | Connection timeout (seconds) | No |
-| `DATABASE_POOL_RECYCLE` | integer | `3600` | Connection recycle time (seconds) | No |
-| `DATABASE_ECHO` | boolean | `false` | Log SQL queries | No |
-| `DATABASE_ECHO_POOL` | boolean | `false` | Log connection pool events | No |
+| `DATABASE_URL` | string | `postgresql+asyncpg://research:research123@localhost:5432/research_db` | Async PostgreSQL connection string. In `production`, a startup validator **rejects** default/dangerous credentials (`research:research123`, `postgres:postgres`, `:password@`). | No (has default) |
 
 **Database URL Format:**
 ```bash
-# Standard format
+# Standard async format (asyncpg driver required)
 DATABASE_URL=postgresql+asyncpg://username:password@host:port/database
 
 # With SSL
 DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db?ssl=require
-
-# Connection parameters
-DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db?pool_size=20&max_overflow=30
 ```
+
+> There is a single database setting. Pool sizing, overflow, timeout, recycle, and SQL-echo knobs
+> (`DATABASE_POOL_SIZE`, `DATABASE_ECHO`, etc.) are **not** defined on `Settings` and are ignored if
+> set. The async engine is created from `DATABASE_URL` alone (`src/models/db/session.py`).
 
 ### Redis Configuration
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `REDIS_URL` | string | `redis://localhost:6379/0` | Redis connection string | No |
-| `REDIS_MAX_CONNECTIONS` | integer | `10` | Maximum Redis connections | No |
-| `REDIS_RETRY_ON_TIMEOUT` | boolean | `true` | Retry on timeout | No |
-| `REDIS_DECODE_RESPONSES` | boolean | `true` | Decode responses to strings | No |
-| `REDIS_HEALTH_CHECK_INTERVAL` | integer | `30` | Health check interval (seconds) | No |
+| `REDIS_URL` | string | `redis://localhost:6379/0` | Redis connection string (used by working memory, the idempotency store, and the rate limiter) | No |
 
 **Redis URL Format:**
 ```bash
@@ -65,41 +80,25 @@ REDIS_URL=redis://localhost:6379/0
 
 # With authentication
 REDIS_URL=redis://username:password@host:6379/0
-
-# Redis Sentinel
-REDIS_URL=redis+sentinel://host:26379/mymaster
-
-# Redis Cluster
-REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 ```
 
-### Temporal Configuration
-
-| Variable | Type | Default | Description | Required |
-|----------|------|---------|-------------|----------|
-| `TEMPORAL_HOST` | string | `localhost:7233` | Temporal server address | No |
-| `TEMPORAL_NAMESPACE` | string | `default` | Temporal namespace | No |
-| `TEMPORAL_TASK_QUEUE` | string | `research-queue` | Default task queue name | No |
-| `TEMPORAL_CLIENT_TIMEOUT` | integer | `30` | Client timeout (seconds) | No |
-| `TEMPORAL_WORKFLOW_TIMEOUT` | integer | `3600` | Default workflow timeout (seconds) | No |
-| `TEMPORAL_ACTIVITY_TIMEOUT` | integer | `300` | Default activity timeout (seconds) | No |
-| `TEMPORAL_RETRY_POLICY_MAX_ATTEMPTS` | integer | `3` | Maximum retry attempts | No |
-| `TEMPORAL_RETRY_POLICY_BACKOFF` | float | `2.0` | Retry backoff coefficient | No |
+> As with the database, there is a single Redis setting. `REDIS_MAX_CONNECTIONS`,
+> `REDIS_DECODE_RESPONSES`, and similar knobs are not defined on `Settings` and are ignored.
 
 ### AI Service Configuration (Gemini)
 
+Gemini is the **default (and, with default flags, the only) runtime provider**. Multi-provider
+routing through OpenRouter is flag-gated OFF — see [Multi-Provider Routing (PR #56)](#multi-provider-routing-pr-56).
+
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `GEMINI_API_KEY` | string | - | Google Gemini API key | Yes |
-| `GEMINI_MODEL` | string | `gemini-1.5-flash` | Gemini model name | No |
-| `GEMINI_TEMPERATURE` | float | `0.7` | Response temperature | No |
-| `GEMINI_MAX_TOKENS` | integer | `8192` | Maximum tokens per request | No |
-| `GEMINI_RATE_LIMIT` | integer | `60` | Requests per minute | No |
-| `GEMINI_TIMEOUT` | integer | `30` | Request timeout (seconds) | No |
-| `GEMINI_RETRY_MAX` | integer | `3` | Maximum retries | No |
-| `GEMINI_RETRY_BACKOFF` | float | `2.0` | Retry backoff coefficient | No |
-| `GEMINI_CACHE_ENABLED` | boolean | `true` | Enable response caching | No |
-| `GEMINI_CACHE_TTL` | integer | `3600` | Cache TTL (seconds) | No |
+| `GEMINI_API_KEY` | string | `null` | Google Gemini API key | Yes (for any LLM call) |
+| `GEMINI_ENABLED` | boolean | `true` | Keep Gemini as the default provider | No |
+| `GEMINI_DEFAULT_MODEL` | string | `gemini-pro` | Gemini model name | No |
+
+> Only these three Gemini fields exist. Temperature, max-tokens, rate-limit, retry, and caching knobs
+> (`GEMINI_MODEL`, `GEMINI_TEMPERATURE`, `GEMINI_MAX_TOKENS`, `GEMINI_RATE_LIMIT`, `GEMINI_TIMEOUT`,
+> `GEMINI_RETRY_*`, `GEMINI_CACHE_*`) are **not** defined on `Settings` and are ignored if set.
 
 ### AI Brain Platform Configuration
 
@@ -146,7 +145,7 @@ REDIS_URL=redis://host1:6379,host2:6379,host3:6379/0
 
 **Model slug validation**: When `OPENROUTER_VALIDATE_SLUGS_ON_STARTUP` is enabled (default), the provider fetches the live model catalog from OpenRouter at initialization and validates that every slug in `OPENROUTER_TIER_MAPPING` exists in the catalog. If stale slugs are detected (models no longer available), an **ERROR-level** log event is emitted naming each invalid tier→slug pair, and the provider's health status is marked as `degraded` to surface the issue in monitoring. This prevents silent fallback failures when model slugs change (e.g., `anthropic/claude-3.5-sonnet` → `anthropic/claude-sonnet-4.6`). The validation is non-blocking — network failures skip validation with a warning, and stale slugs do not crash the provider (runtime fallback still handles failures). Set to `false` to skip validation entirely (e.g., air-gapped dev environments).
 
-**How to enable**: Set `OPENROUTER_API_KEY` in environment, then set `MULTI_PROVIDER_ROUTING_ENABLED=true`. When disabled or API key is absent, all requests fall back to `GeminiService` with byte-for-byte prior behavior preserved.
+**How to enable**: Set `OPENROUTER_API_KEY` in environment, then set `MULTI_PROVIDER_ROUTING_ENABLED=true`. When disabled or API key is absent, all requests fall back to `GeminiService` with byte-for-byte prior behavior preserved. The gate is checked in both the fast path (`direct_execution_service.py`) and the workers (`llm_worker_base.py`): OpenRouter is used only when `MULTI_PROVIDER_ROUTING_ENABLED` **and** `OPENROUTER_API_KEY` are both truthy. Note that `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, and `OPENROUTER_ENABLED` all default `false`.
 
 #### Memory-Informed Routing (PR #55)
 
@@ -230,6 +229,9 @@ the `langfuse` package is not imported, and all tracing calls are no-ops. If
 both keys are absent while enabled, tracing degrades to a no-op with a logged
 warning rather than failing.
 
+> `LANGFUSE_ENABLED` is the tracing switch; it is **unrelated** to the `ENABLE_TRACING`
+> flag in [Monitoring and Observability](#monitoring-and-observability).
+
 #### Multi-Domain Execution (PR #54)
 
 | Variable | Type | Default | Description | Required |
@@ -241,7 +243,7 @@ warning rather than failing.
 **Behavior**: When a query spans multiple domains, the system:
 1. Decomposes the query into per-domain sub-queries
 2. Dispatches up to `MAX_DOMAIN_PARALLELISM` domain supervisors concurrently (via `asyncio.Semaphore`)
-3. Merges results with `_merge_domain_results()` (labeled concatenation; future: LLM synthesis)
+3. Merges results with `_merge_domain_results()` (labeled concatenation by default, or LLM synthesis when `MULTI_DOMAIN_MERGE_STRATEGY=llm` — see [Multi-Domain Merge Configuration](#multi-domain-merge-configuration))
 4. Returns partial results if some domains fail (resilient to partial failure)
 
 Single-domain queries bypass this path entirely (zero overhead).
@@ -325,95 +327,72 @@ Phase L (6-8 weeks) will add:
 
 ### Authentication Configuration
 
+Authentication uses **JWT signed with RS256** (asymmetric) — signed with a private PEM key and
+verified with a public PEM key. There is no symmetric JWT secret; the application signing secret is
+`SECRET_KEY` (see [Core Application Settings](#core-application-settings)).
+
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `JWT_SECRET_KEY` | string | - | JWT signing secret | Yes |
-| `JWT_ALGORITHM` | string | `HS256` | JWT signing algorithm | No |
-| `JWT_ACCESS_TOKEN_EXPIRE` | integer | `1440` | Access token expiry (minutes) | No |
-| `JWT_REFRESH_TOKEN_EXPIRE` | integer | `10080` | Refresh token expiry (minutes) | No |
-| `PASSWORD_MIN_LENGTH` | integer | `8` | Minimum password length | No |
-| `PASSWORD_REQUIRE_UPPERCASE` | boolean | `true` | Require uppercase letters | No |
-| `PASSWORD_REQUIRE_LOWERCASE` | boolean | `true` | Require lowercase letters | No |
-| `PASSWORD_REQUIRE_DIGITS` | boolean | `true` | Require digits | No |
-| `PASSWORD_REQUIRE_SPECIAL` | boolean | `true` | Require special characters | No |
-| `API_KEY_LENGTH` | integer | `32` | API key length | No |
-| `API_KEY_PREFIX` | string | `rp_` | API key prefix | No |
+| `JWT_ALGORITHM` | string | `RS256` | JWT signing algorithm (asymmetric) | No |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | integer | `15` | Access token expiry (minutes) | No |
+| `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | integer | `7` | Refresh token expiry (days) | No |
+| `JWT_PRIVATE_KEY_PATH` | string | `/secrets/jwt_private.pem` | Path to the RS256 private signing key (PEM) | No |
+| `JWT_PUBLIC_KEY_PATH` | string | `/secrets/jwt_public.pem` | Path to the RS256 public verification key (PEM) | No |
+| `BCRYPT_ROUNDS` | integer | `12` | bcrypt cost factor for password hashing | No |
+| `PASSWORD_MIN_LENGTH` | integer | `12` | Minimum password length | No |
+| `PASSWORD_HISTORY_LIMIT` | integer | `5` | Number of previous password hashes retained to block reuse | No |
+| `CHECK_PASSWORD_BREACHES` | boolean | `true` | Check new passwords against a breach corpus | No |
+| `SESSION_SECRET_KEY` | string | `null` | Optional session signing secret | No |
+| `SESSION_EXPIRE_HOURS` | integer | `24` | Session lifetime (hours) | No |
+| `MAX_SESSIONS_PER_USER` | integer | `5` | Maximum concurrent sessions per user | No |
+| `ENABLE_MFA` | boolean | `false` | Enable multi-factor authentication | No |
+| `MFA_ISSUER` | string | `ResearchPlatform` | TOTP issuer label | No |
+
+> There is **no** `JWT_SECRET_KEY` and no `PASSWORD_REQUIRE_*` composition flags. The real password
+> policy is length (`PASSWORD_MIN_LENGTH=12`) + bcrypt cost + history + breach check. `API_KEY_LENGTH`
+> and `API_KEY_PREFIX` are also not defined on `Settings`.
+
+> **Enforcement caveat.** The application-level `AuthMiddleware` is effectively a no-op — it does not
+> validate tokens. Authentication is enforced **per endpoint** via `Depends(...)`. Endpoints that do
+> not declare an auth dependency (notably `/api/v1/query/*`, `/api/v1/agents/*`, `/api/v1/masr/*`) are
+> effectively unauthenticated.
 
 ### Rate Limiting Configuration
 
-| Variable | Type | Default | Description | Required |
-|----------|------|---------|-------------|----------|
-| `RATE_LIMIT_ENABLED` | boolean | `true` | Enable rate limiting | No |
-| `RATE_LIMIT_REQUESTS` | integer | `100` | Requests per window | No |
-| `RATE_LIMIT_WINDOW` | integer | `60` | Time window (seconds) | No |
-| `RATE_LIMIT_STORAGE` | string | `redis` | Storage backend (memory/redis) | No |
-| `RATE_LIMIT_KEY_FUNC` | string | `ip` | Rate limit key function (ip/user/api_key) | No |
-
-### Caching Configuration
+A single global limiter is applied via middleware (backed by Redis).
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `CACHE_ENABLED` | boolean | `true` | Enable application caching | No |
-| `CACHE_BACKEND` | string | `redis` | Cache backend (memory/redis) | No |
-| `CACHE_DEFAULT_TTL` | integer | `300` | Default cache TTL (seconds) | No |
-| `CACHE_KEY_PREFIX` | string | `rp:` | Cache key prefix | No |
-| `CACHE_COMPRESSION` | boolean | `true` | Enable cache compression | No |
-| `CACHE_MAX_CONNECTIONS` | integer | `50` | Maximum cache connections | No |
+| `ENABLE_RATE_LIMITING` | boolean | `true` | Enable the global rate limiter | No |
+| `MAX_REQUESTS_PER_MINUTE` | integer | `100` | Global request budget per minute | No |
 
-### File Storage Configuration
+> The active limiter reads `ENABLE_RATE_LIMITING` and `MAX_REQUESTS_PER_MINUTE`. There are no tiers,
+> no burst allowance, and no per-endpoint configuration. Variables like `RATE_LIMIT_ENABLED`,
+> `RATE_LIMIT_WINDOW`, `RATE_LIMIT_STORAGE`, and `RATE_LIMIT_KEY_FUNC` are not part of the effective
+> configuration.
+
+### Monitoring and Observability
+
+The real LLM observability surface is **Prometheus** (exposed at `GET /metrics`) plus **structlog**
+structured logging. Prometheus series include `llm_call_duration_seconds`, `llm_tokens_total`,
+`llm_cost_usd_total`, `llm_request_cost_drift_ratio`, and `llm_cost_drift_events_total`.
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `STORAGE_BACKEND` | string | `local` | Storage backend (local/s3/gcs) | No |
-| `STORAGE_LOCAL_PATH` | string | `/tmp/uploads` | Local storage path | No |
-| `STORAGE_S3_BUCKET` | string | - | S3 bucket name | No |
-| `STORAGE_S3_REGION` | string | `us-east-1` | S3 region | No |
-| `STORAGE_S3_ACCESS_KEY` | string | - | S3 access key | No |
-| `STORAGE_S3_SECRET_KEY` | string | - | S3 secret key | No |
-| `STORAGE_S3_ENDPOINT` | string | - | Custom S3 endpoint | No |
-| `STORAGE_GCS_BUCKET` | string | - | GCS bucket name | No |
-| `STORAGE_GCS_CREDENTIALS` | string | - | GCS credentials JSON | No |
+| `ENABLE_METRICS` | boolean | `true` | Enable Prometheus metrics collection (`/metrics` endpoint) | No |
+| `ENABLE_TRACING` | boolean | `true` | Enable in-app tracing hooks. **Distinct from Langfuse** — this is not the Langfuse switch. | No |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | string | `http://localhost:4317` | OTLP exporter endpoint (consumed only where OTel export is wired) | No |
+
+> The field names are `ENABLE_METRICS` / `ENABLE_TRACING` — not `METRICS_ENABLED` / `TRACING_ENABLED`.
+> There are no `METRICS_PATH`, `TRACING_ENDPOINT`, `TRACING_SERVICE_NAME`, or `HEALTH_CHECK_INTERVAL`
+> settings. There is no Grafana/Loki/Jaeger/CloudWatch/Sentry backbone; distributed tracing beyond
+> Prometheus + structlog is the opt-in Langfuse integration documented above.
 
 ### Context Compaction Telemetry
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
 | `ENABLE_CONTEXT_COMPACTION_TELEMETRY` | boolean | `false` | Enable INFO-level token telemetry at 4 context hotspots (working memory truncation, multi-tier memory recall, supervisor worker results, domain output synthesis). When `false`, no per-request tiktoken encoding occurs (zero runtime overhead); the tiktoken dependency is imported at process startup regardless. Set to `true` to observe token counts at each measurement point. | No |
-
-### Monitoring and Observability
-
-| Variable | Type | Default | Description | Required |
-|----------|------|---------|-------------|----------|
-| `METRICS_ENABLED` | boolean | `true` | Enable Prometheus metrics | No |
-| `METRICS_PATH` | string | `/metrics` | Metrics endpoint path | No |
-| `TRACING_ENABLED` | boolean | `false` | Enable OpenTelemetry tracing | No |
-| `TRACING_ENDPOINT` | string | - | Tracing collector endpoint | No |
-| `TRACING_SERVICE_NAME` | string | `research-platform` | Service name for tracing | No |
-| `HEALTH_CHECK_INTERVAL` | integer | `30` | Health check interval (seconds) | No |
-
-### Email Configuration
-
-| Variable | Type | Default | Description | Required |
-|----------|------|---------|-------------|----------|
-| `EMAIL_ENABLED` | boolean | `false` | Enable email notifications | No |
-| `EMAIL_SMTP_HOST` | string | - | SMTP server host | No |
-| `EMAIL_SMTP_PORT` | integer | `587` | SMTP server port | No |
-| `EMAIL_SMTP_USERNAME` | string | - | SMTP username | No |
-| `EMAIL_SMTP_PASSWORD` | string | - | SMTP password | No |
-| `EMAIL_SMTP_TLS` | boolean | `true` | Use TLS encryption | No |
-| `EMAIL_FROM_ADDRESS` | string | - | Default sender address | No |
-| `EMAIL_FROM_NAME` | string | `Research Platform` | Default sender name | No |
-
-### WebSocket Configuration
-
-| Variable | Type | Default | Description | Required |
-|----------|------|---------|-------------|----------|
-| `WEBSOCKET_ENABLED` | boolean | `true` | Enable WebSocket support | No |
-| `WEBSOCKET_PATH` | string | `/ws` | WebSocket endpoint path | No |
-| `WEBSOCKET_MAX_CONNECTIONS` | integer | `100` | Maximum concurrent connections | No |
-| `WEBSOCKET_PING_INTERVAL` | integer | `20` | Ping interval (seconds) | No |
-| `WEBSOCKET_PING_TIMEOUT` | integer | `10` | Ping timeout (seconds) | No |
-| `WEBSOCKET_MESSAGE_MAX_SIZE` | integer | `1048576` | Maximum message size (bytes) | No |
 
 ### Multi-Domain Merge Configuration
 
@@ -441,51 +420,34 @@ MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT=4000
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `CORS_ENABLED` | boolean | `true` | Enable CORS | No |
-| `CORS_ALLOW_ORIGINS` | list | `["*"]` | Allowed origins (comma-separated) | No |
-| `CORS_ALLOW_METHODS` | list | `["*"]` | Allowed methods (comma-separated) | No |
-| `CORS_ALLOW_HEADERS` | list | `["*"]` | Allowed headers (comma-separated) | No |
-| `CSRF_ENABLED` | boolean | `false` | Enable CSRF protection | No |
-| `CSRF_SECRET_KEY` | string | - | CSRF secret key | No |
-| `SECURITY_HEADERS_ENABLED` | boolean | `true` | Enable security headers | No |
-| `HTTPS_ONLY` | boolean | `false` | Force HTTPS only | No |
+| `CORS_ORIGINS` | list | `["http://localhost:3000","http://localhost:8000"]` | Allowed CORS origins. Env formats: JSON array or comma-separated. | No |
 
-### CLI Configuration
+> `CORS_ORIGINS` is the only security knob under this heading that actually changes CORS behavior.
+> `Settings` also declares `RATE_LIMIT_REQUESTS` (100) and `RATE_LIMIT_PERIOD` (60) under its
+> `# Security Settings` comment, but they are **unconsumed** — the live limiter reads
+> `ENABLE_RATE_LIMITING` / `MAX_REQUESTS_PER_MINUTE` (see [Rate Limiting Configuration](#rate-limiting-configuration)).
+> There are no `CORS_ALLOW_METHODS` / `CORS_ALLOW_HEADERS`, no `CSRF_*`, no `SECURITY_HEADERS_ENABLED`,
+> and no `HTTPS_ONLY` settings — those variables are ignored if set.
 
-| Variable | Type | Default | Description | Required |
-|----------|------|---------|-------------|----------|
-| `RESEARCH_API_URL` | string | `http://localhost:8000` | API base URL | No |
-| `RESEARCH_API_KEY` | string | - | API key for authentication | No |
-| `RESEARCH_API_TIMEOUT` | integer | `30` | Request timeout (seconds) | No |
-| `RESEARCH_OUTPUT_FORMAT` | string | `table` | Default output format | No |
-| `RESEARCH_VERBOSE` | boolean | `false` | Enable verbose output | No |
-| `RESEARCH_COLOR` | boolean | `true` | Enable colored output | No |
-| `RESEARCH_MAX_RETRIES` | integer | `3` | Maximum request retries | No |
+### Legacy / vestigial settings
+
+| Variable | Type | Default | Status |
+|----------|------|---------|--------|
+| `TEMPORAL_HOST` | string | `localhost:7233` | **Dead.** Temporal has been removed; the in-process `DirectExecutionService` replaced it. This field still exists on `Settings` (`config.py:47`) but nothing on the query path reads it. |
+| `TEMPORAL_NAMESPACE` | string | `default` | **Dead.** Same as above (`config.py:48`). |
+
+> Temporal was removed from the live code (no `temporalio` dependency; execution now runs in-process
+> via `DirectExecutionService`). Only `TEMPORAL_HOST` and `TEMPORAL_NAMESPACE` survive as vestigial
+> settings; the former richer set of `TEMPORAL_*` variables (task queue, timeouts, retry policy) does
+> **not** exist on `Settings` and has no effect.
 
 ## Configuration Files
 
 ### Application Configuration
 
-**Location:** `config/`
-
-```python
-# config/base.py
-class Settings:
-    # Core settings
-    environment: str = "development"
-    debug: bool = False
-    
-    # Database settings
-    database_url: str
-    database_pool_size: int = 10
-    
-    # Redis settings
-    redis_url: str = "redis://localhost:6379/0"
-    
-    # API settings
-    api_host: str = "0.0.0.0"
-    api_port: int = 8000
-```
+All settings live on the single `Settings(BaseSettings)` class in `src/core/config.py`. There is no
+`config/` package of layered setting classes — environment selection is driven by the `ENVIRONMENT`
+variable, which gates production validators and debug behavior at runtime.
 
 ### Docker Environment File
 
@@ -496,112 +458,115 @@ class Settings:
 ENVIRONMENT=development
 DEBUG=false
 LOG_LEVEL=INFO
+SECRET_KEY=change-me-to-a-32+-char-random-string
 
 # Database
 DATABASE_URL=postgresql+asyncpg://research:research123@localhost:5432/research_db
-DATABASE_POOL_SIZE=10
-DATABASE_MAX_OVERFLOW=10
 
 # Redis
 REDIS_URL=redis://localhost:6379/0
-REDIS_MAX_CONNECTIONS=10
 
-# Temporal
-TEMPORAL_HOST=localhost:7233
-TEMPORAL_NAMESPACE=default
-TEMPORAL_TASK_QUEUE=research-queue
-
-# Gemini AI
+# Gemini AI (default provider)
 GEMINI_API_KEY=your-gemini-api-key-here
-GEMINI_MODEL=gemini-1.5-flash
-GEMINI_TEMPERATURE=0.7
-GEMINI_RATE_LIMIT=60
+GEMINI_DEFAULT_MODEL=gemini-pro
 
-# Authentication
-JWT_SECRET_KEY=your-super-secret-jwt-key-here
-JWT_ACCESS_TOKEN_EXPIRE=1440
-
-# Storage
-STORAGE_BACKEND=local
-STORAGE_LOCAL_PATH=/tmp/uploads
+# JWT (RS256 — keys are PEM files, not a shared secret)
+JWT_PRIVATE_KEY_PATH=/secrets/jwt_private.pem
+JWT_PUBLIC_KEY_PATH=/secrets/jwt_public.pem
 
 # Monitoring
-METRICS_ENABLED=true
-TRACING_ENABLED=false
+ENABLE_METRICS=true
+ENABLE_TRACING=true
 
-# Security
-CORS_ENABLED=true
-CORS_ALLOW_ORIGINS=http://localhost:3000,http://localhost:8080
+# Rate limiting
+ENABLE_RATE_LIMITING=true
+MAX_REQUESTS_PER_MINUTE=100
+
+# CORS
+CORS_ORIGINS=["http://localhost:3000","http://localhost:8000"]
 ```
 
 ### CLI Configuration File
 
-**Location:** `~/.research-cli.env` or `.env.cli`
+**Location:** `~/.research-cli.env`
 
 ```bash
-# CLI Configuration
+# CLI Configuration (written by `research-cli config save`)
 RESEARCH_API_URL=http://localhost:8000
-RESEARCH_API_KEY=your-api-key-here
 RESEARCH_API_TIMEOUT=30
 RESEARCH_OUTPUT_FORMAT=table
 RESEARCH_VERBOSE=false
 RESEARCH_COLOR=true
 RESEARCH_MAX_RETRIES=3
-
-# Authentication
-RESEARCH_USERNAME=your-username
-RESEARCH_PASSWORD=your-password
-
-# Output Settings
-RESEARCH_PAGER=less
-RESEARCH_EDITOR=vim
+# RESEARCH_API_KEY and RESEARCH_AUTH_TOKEN are written only when set
+RESEARCH_AUTH_TOKEN=your-auth-token-here
 ```
 
+> `CLIConfig.from_env` (`src/cli/config.py`) reads eight variables from this dotenv file:
+> `RESEARCH_API_URL`, `RESEARCH_API_TIMEOUT`, `RESEARCH_OUTPUT_FORMAT`, `RESEARCH_VERBOSE`,
+> `RESEARCH_COLOR`, `RESEARCH_MAX_RETRIES`, `RESEARCH_API_KEY`, and `RESEARCH_AUTH_TOKEN`.
+> `config save` always writes the first six and adds `RESEARCH_API_KEY` / `RESEARCH_AUTH_TOKEN`
+> only when they are set.
+
 ## CLI Configuration
+
+The packaged entrypoints are `research-platform` and `research-cli` (defined in
+`pyproject.toml [project.scripts]`). There is no `cerebro-cli` command and no PyPI package.
 
 ### Configuration Commands
 
 ```bash
-# Show current configuration
+# Show all configuration (or a single key)
 research-cli config show
+research-cli config show api_url
 
-# Set configuration values
+# Set a configuration value
 research-cli config set api_url http://localhost:8000
 research-cli config set output_format json
 research-cli config set verbose true
 
-# Reset configuration
-research-cli config reset
-
-# Save current configuration
+# Save current configuration to ~/.research-cli.env
 research-cli config save
-
-# Load configuration from file
-research-cli config load ~/.research-cli-backup.env
 ```
+
+> `config` supports `show`, `set`, and `save`. There is no `config reset` or `config load` subcommand.
 
 ### Global CLI Options
 
 | Option | Environment Variable | Default | Description |
 |--------|---------------------|---------|-------------|
 | `--api-url` | `RESEARCH_API_URL` | `http://localhost:8000` | API base URL |
-| `--api-key` | `RESEARCH_API_KEY` | - | API authentication key |
-| `--format` | `RESEARCH_OUTPUT_FORMAT` | `table` | Output format |
-| `--verbose` | `RESEARCH_VERBOSE` | `false` | Verbose output |
-| `--no-color` | `RESEARCH_COLOR=false` | `false` | Disable colors |
-| `--timeout` | `RESEARCH_API_TIMEOUT` | `30` | Request timeout |
+| `--format` | - | `table` | Output format (`table` / `json` / `yaml` / `csv`) |
+| `--verbose` | - | `false` | Verbose output |
+| `--no-color` | - | `false` | Disable colored output |
+
+> These four are the only global options on the `research-cli` group. There is no `--api-key` or
+> `--timeout` group option.
+
+### Command Tree
+
+- `research-cli config <show|set|save>`
+- `research-cli health` — checks `/health` and `/ready`
+- `research-cli completion <bash|zsh|fish>`
+- `research-cli agents <query|route|estimate|execute|chain|status>`
+- `research-cli projects <create|get|list|progress|cancel|results|refine>`
 
 ## Docker Configuration
 
 ### Docker Compose Environment
 
-```yaml
-# docker-compose.yml
-version: '3.8'
+The development `docker-compose.yml` runs the API against Postgres 16 and Redis 7. There is **no
+worker service** (`docker/Dockerfile.worker` does not exist) and **no Temporal services** —
+execution is in-process. A standalone `masr-router` container exists in compose but is **legacy /
+standalone**: it is not on the verified query path, which uses the in-process `MASRouter` object.
 
+```yaml
+# docker-compose.yml (trimmed to the query-path essentials)
 services:
   api:
-    build: .
+    build:
+      context: .
+      target: development
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - DATABASE_URL=${DATABASE_URL}
@@ -614,48 +579,64 @@ services:
     depends_on:
       - postgres
       - redis
-      - temporal
 
-  worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
-    environment:
-      - ENVIRONMENT=${ENVIRONMENT:-development}
-      - DATABASE_URL=${DATABASE_URL}
-      - TEMPORAL_HOST=${TEMPORAL_HOST}
-    env_file:
-      - .env
-    depends_on:
-      - postgres
-      - temporal
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
 ```
 
 ### Container Configuration
 
+The real `Dockerfile` is **multi-stage** (`base` → `development` → `builder` → `production`), built
+with `uv`, with base and runtime images **pinned by digest**. Production runs as a non-root `app`
+user with `--workers 4`, exposes a `HEALTHCHECK` against `/health`, and uses an entrypoint that runs
+database migrations before starting the server.
+
 ```dockerfile
-# Dockerfile
-FROM python:3.11-slim
+# Dockerfile (abridged — real file is multi-stage)
 
-# Environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PATH="/app/.venv/bin:$PATH"
-
-# Application configuration
-ENV HOST=0.0.0.0
-ENV PORT=8000
-ENV WORKERS=1
-
+# Stage 1: base — digest-pinned python:3.11-slim + uv
+FROM python:3.11-slim@sha256:<digest> as base
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UV_SYSTEM_PYTHON=1
+COPY --from=ghcr.io/astral-sh/uv:latest@sha256:<digest> /uv /usr/local/bin/uv
 WORKDIR /app
-COPY . .
-RUN pip install -e ".[dev]"
 
+# Stage 2: development — installs .[dev], runs migrations then uvicorn --reload
+FROM base as development
+RUN uv pip install -e ".[dev]"
+COPY src/ ./src/
+COPY docker/entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]   # runs `alembic` migrations, then exec's CMD
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# Stage 3: builder — installs production deps only
+FROM base as builder
+RUN uv pip install -e .
+COPY src/ ./src/
+
+# Stage 4: production — non-root user, health check, 4 workers
+FROM python:3.11-slim@sha256:<digest> as production
+RUN groupadd -r app && useradd -r -g app app
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /app/src ./src
+USER app
 EXPOSE 8000
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
 ```
 
 ## Kubernetes Configuration
+
+The Kubernetes manifests live under `k8s/` in the `research-platform` namespace. Remember that
+unknown environment keys are silently ignored (`extra="ignore"`), so a ConfigMap should set only
+fields that actually exist on `Settings`.
 
 ### ConfigMap
 
@@ -669,33 +650,60 @@ metadata:
 data:
   ENVIRONMENT: "production"
   LOG_LEVEL: "INFO"
-  HOST: "0.0.0.0"
-  PORT: "8000"
-  DATABASE_POOL_SIZE: "20"
-  REDIS_MAX_CONNECTIONS: "20"
-  TEMPORAL_NAMESPACE: "production"
-  GEMINI_MODEL: "gemini-1.5-flash"
-  METRICS_ENABLED: "true"
-  CACHE_ENABLED: "true"
-  RATE_LIMIT_ENABLED: "true"
+  ENABLE_METRICS: "true"
+  ENABLE_RATE_LIMITING: "true"
+  MAX_REQUESTS_PER_MINUTE: "100"
+  # NOTE: The shipped configmap still sets TEMPORAL_NAMESPACE — this is a
+  # vestige of the removed Temporal era and has no effect. Do not rely on it.
+  # (Full key set in k8s/configmap.yaml also includes API_HOST, API_PORT,
+  # API_WORKERS, WORKER_CONCURRENCY, TASK_TIMEOUT_SECONDS, MCP_PORT,
+  # MCP_TOOLS_ENABLED, ENABLE_TRACING, ENABLE_CACHE, and OTEL_EXPORTER_OTLP_ENDPOINT.)
 ```
 
 ### Secrets
 
+There is **no committed `k8s/secrets.yaml`**. Secrets are declared in `k8s/external-secrets.yaml` as
+an `ExternalSecret` (External Secrets Operator), which materializes the `research-platform-secrets`
+Secret from a cloud secret store via the `research-platform-secret-store` `ClusterSecretStore`. It
+replaces the previously committed `k8s/secrets.yaml`.
+
 ```yaml
-# k8s/secrets.yaml
-apiVersion: v1
-kind: Secret
+# k8s/external-secrets.yaml (abridged)
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: research-platform-secrets
   namespace: research-platform
-type: Opaque
-data:
-  DATABASE_URL: <base64-encoded-database-url>
-  GEMINI_API_KEY: <base64-encoded-gemini-key>
-  JWT_SECRET_KEY: <base64-encoded-jwt-secret>
-  REDIS_URL: <base64-encoded-redis-url>
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: research-platform-secret-store
+    kind: ClusterSecretStore
+  target:
+    name: research-platform-secrets
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: GEMINI_API_KEY
+      remoteRef: { key: research-platform/gemini-api-key }
+    - secretKey: SECRET_KEY
+      remoteRef: { key: research-platform/secret-key }
+    - secretKey: JWT_SECRET_KEY
+      remoteRef: { key: research-platform/jwt-secret-key }
+    - secretKey: DATABASE_URL
+      remoteRef: { key: research-platform/database-url }
+    - secretKey: REDIS_URL
+      remoteRef: { key: research-platform/redis-url }
+    - secretKey: TEMPORAL_HOST
+      remoteRef: { key: research-platform/temporal-host }
 ```
+
+> The materialized `research-platform-secrets` key set is `GEMINI_API_KEY`, `SECRET_KEY`,
+> `JWT_SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, and `TEMPORAL_HOST`. Note that `JWT_SECRET_KEY` is
+> **vestigial**: `Settings` has no such field, so the value is silently ignored (`extra="ignore"`).
+> Actual JWT signing uses PEM files mounted at `/secrets/jwt_private.pem` and
+> `/secrets/jwt_public.pem` (see the Authentication section). `TEMPORAL_HOST` is likewise a vestige
+> of the removed Temporal era.
 
 ### Deployment Configuration
 
@@ -718,7 +726,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: research-platform:latest
+        image: gcr.io/PROJECT_ID/research-platform-api:latest
         envFrom:
         - configMapRef:
             name: research-platform-config
@@ -727,11 +735,15 @@ spec:
         resources:
           requests:
             memory: "512Mi"
-            cpu: "500m"
+            cpu: "250m"
           limits:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "1000m"
 ```
+
+> The manifests also include a `research-worker` deployment. It is a **vestige of the removed
+> Temporal era** — there is no worker entrypoint module — and should not be treated as an active
+> component of the query path.
 
 ## Configuration Examples
 
@@ -742,19 +754,18 @@ spec:
 ENVIRONMENT=development
 DEBUG=true
 LOG_LEVEL=DEBUG
+SECRET_KEY=dev-only-secret-at-least-32-characters-long
 
 DATABASE_URL=postgresql+asyncpg://research:research123@localhost:5432/research_db
-DATABASE_ECHO=true
-
 REDIS_URL=redis://localhost:6379/0
 
 GEMINI_API_KEY=your-dev-api-key
-GEMINI_RATE_LIMIT=30
+GEMINI_DEFAULT_MODEL=gemini-pro
 
-CORS_ALLOW_ORIGINS=http://localhost:3000,http://localhost:8080
+CORS_ORIGINS=["http://localhost:3000","http://localhost:8000"]
 
-METRICS_ENABLED=true
-TRACING_ENABLED=true
+ENABLE_METRICS=true
+ENABLE_TRACING=true
 ```
 
 ### Staging Environment
@@ -764,22 +775,18 @@ TRACING_ENABLED=true
 ENVIRONMENT=staging
 DEBUG=false
 LOG_LEVEL=INFO
+SECRET_KEY=staging-secret-at-least-32-characters-long
 
 DATABASE_URL=postgresql+asyncpg://user:pass@staging-db:5432/research_db
-DATABASE_POOL_SIZE=15
-
 REDIS_URL=redis://staging-redis:6379/0
 
 GEMINI_API_KEY=your-staging-api-key
-GEMINI_RATE_LIMIT=45
+GEMINI_DEFAULT_MODEL=gemini-pro
 
-CORS_ALLOW_ORIGINS=https://staging.research-platform.ai
+CORS_ORIGINS=["https://staging.research-platform.ai"]
 
-STORAGE_BACKEND=s3
-STORAGE_S3_BUCKET=research-platform-staging
-
-METRICS_ENABLED=true
-TRACING_ENABLED=true
+ENABLE_METRICS=true
+ENABLE_TRACING=true
 ```
 
 ### Production Environment
@@ -789,29 +796,23 @@ TRACING_ENABLED=true
 ENVIRONMENT=production
 DEBUG=false
 LOG_LEVEL=WARNING
+# In production the SECRET_KEY validator requires a real (non-placeholder),
+# 32+ character value, and DATABASE_URL must not use default credentials.
+SECRET_KEY=<32+ char secret from a secrets manager>
 
 DATABASE_URL=postgresql+asyncpg://user:pass@prod-db:5432/research_db
-DATABASE_POOL_SIZE=25
-DATABASE_MAX_OVERFLOW=50
-
 REDIS_URL=redis://prod-redis:6379/0
-REDIS_MAX_CONNECTIONS=30
 
 GEMINI_API_KEY=your-production-api-key
-GEMINI_RATE_LIMIT=100
+GEMINI_DEFAULT_MODEL=gemini-pro
 
-CORS_ALLOW_ORIGINS=https://research-platform.ai
+CORS_ORIGINS=["https://research-platform.ai"]
 
-STORAGE_BACKEND=s3
-STORAGE_S3_BUCKET=research-platform-production
+ENABLE_RATE_LIMITING=true
+MAX_REQUESTS_PER_MINUTE=100
 
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_REQUESTS=1000
-RATE_LIMIT_WINDOW=3600
-
-METRICS_ENABLED=true
-TRACING_ENABLED=true
-HTTPS_ONLY=true
+ENABLE_METRICS=true
+ENABLE_TRACING=true
 ```
 
 ## Security Considerations
@@ -820,11 +821,22 @@ HTTPS_ONLY=true
 
 **Never commit these to version control:**
 - `GEMINI_API_KEY`
-- `JWT_SECRET_KEY`
+- `SECRET_KEY`
+- `OPENROUTER_API_KEY` (only relevant if multi-provider routing is enabled)
 - `DATABASE_URL` (with credentials)
 - `REDIS_URL` (with password)
-- Email credentials
-- Storage access keys
+- JWT private key (`/secrets/jwt_private.pem`)
+
+### Startup Validation
+
+`Settings` enforces two production guardrails at startup (`src/core/config.py`):
+
+- **`SECRET_KEY`**: must not be the `MUST_SET_IN_ENV` placeholder in production, and must be at least
+  32 characters in every environment.
+- **`DATABASE_URL`**: in production, rejects known default credential patterns
+  (`research:research123`, `postgres:postgres`, `:password@`).
+- **`CONSTRAINT_TYPES`**: every element must be one of `routing`, `qa`, `format`, `security`;
+  an unrecognised value fails startup.
 
 ### Best Practices
 
@@ -835,97 +847,20 @@ HTTPS_ONLY=true
    .env.production   # Production settings (use secrets management)
    ```
 
-2. **Secrets Management:**
+2. **Secrets Management** — Kubernetes Secrets, AWS Secrets Manager, HashiCorp Vault, or an external
+   secrets operator. In `k8s/`, secrets are sourced into `research-platform-secrets`.
+
+3. **Generate a strong `SECRET_KEY`:**
    ```bash
-   # Use secret management tools
-   - Kubernetes Secrets
-   - AWS Secrets Manager
-   - HashiCorp Vault
-   - Azure Key Vault
+   python -c 'import secrets; print(secrets.token_urlsafe(32))'
    ```
 
-3. **Environment Variable Validation:**
-   ```python
-   from pydantic import validator
-   
-   class Settings:
-       gemini_api_key: str
-       
-       @validator('gemini_api_key')
-       def validate_api_key(cls, v):
-           if not v or v == 'your-api-key-here':
-               raise ValueError('Invalid Gemini API key')
-           return v
-   ```
-
-4. **Configuration Encryption:**
+4. **Access Control:**
    ```bash
-   # Encrypt sensitive configuration files
-   gpg --cipher-algo AES256 --compress-algo 1 --symmetric .env.production
+   # Restrict permissions on env files and PEM keys
+   chmod 600 .env* /secrets/jwt_*.pem
    ```
 
-5. **Access Control:**
-   ```bash
-   # Set proper file permissions
-   chmod 600 .env*
-   chown app:app .env*
-   ```
-
-### Configuration Validation
-
-Create a validation script:
-
-```python
-#!/usr/bin/env python3
-# scripts/validate_config.py
-
-import os
-import sys
-from urllib.parse import urlparse
-
-def validate_database_url(url):
-    parsed = urlparse(url)
-    if not all([parsed.scheme, parsed.hostname, parsed.username]):
-        raise ValueError(f"Invalid database URL: {url}")
-
-def validate_redis_url(url):
-    parsed = urlparse(url)
-    if not parsed.scheme.startswith('redis'):
-        raise ValueError(f"Invalid Redis URL: {url}")
-
-def validate_config():
-    errors = []
-    
-    # Required variables
-    required_vars = [
-        'DATABASE_URL',
-        'GEMINI_API_KEY',
-        'JWT_SECRET_KEY'
-    ]
-    
-    for var in required_vars:
-        if not os.getenv(var):
-            errors.append(f"Missing required variable: {var}")
-    
-    # Validate URLs
-    try:
-        validate_database_url(os.getenv('DATABASE_URL', ''))
-    except ValueError as e:
-        errors.append(str(e))
-    
-    try:
-        validate_redis_url(os.getenv('REDIS_URL', ''))
-    except ValueError as e:
-        errors.append(str(e))
-    
-    if errors:
-        print("Configuration validation failed:")
-        for error in errors:
-            print(f"  - {error}")
-        sys.exit(1)
-    else:
-        print("Configuration validation passed!")
-
-if __name__ == "__main__":
-    validate_config()
-```
+> Remember: because `Settings` uses `extra="ignore"`, a misspelled or obsolete security variable will
+> be **silently discarded** rather than rejected. Verify every variable name against the fields in
+> `src/core/config.py`.

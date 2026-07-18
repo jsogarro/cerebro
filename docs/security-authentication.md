@@ -1,550 +1,227 @@
-# Security and Authentication Documentation
+# Security and Authentication (Cerebro)
 
-## Overview
+> **Canonical security document.** `docs/security-implementation.md` is superseded by this file; consult this document for the authoritative account of what Cerebro's security and authentication layer actually does.
 
-The Multi-Agent Research Platform implements enterprise-grade security and authentication with multiple layers of protection, comprehensive audit logging, and compliance support for GDPR, HIPAA, and SOC 2.
+Cerebro is a multi-agent LLM research platform (current focus: financial research, US equities). Its infrastructure identity is still the pre-rebrand **"research-platform"** — FastAPI title `Research Platform API`, DB `research_db`, and the `research-platform` k8s namespace/images. Those legacy names are kept verbatim in infra artifacts; the product is **Cerebro**.
 
-## Architecture
+This document is split into two clearly separated parts:
 
-### Security Layers
+- **Part 1 — Implemented** — verified against the codebase and safe to rely on.
+- **Part 2 — Not implemented / aspirational** — DB models or dead modules exist, but the runtime behavior does **not**. Do not describe these as live security controls.
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   Edge Layer                        │
-│  Rate Limiting | DDoS Protection | IP Filtering     │
-├─────────────────────────────────────────────────────┤
-│                  API Gateway                        │
-│  Authentication | Authorization | Request Routing   │
-├─────────────────────────────────────────────────────┤
-│                Application Layer                    │
-│  Business Logic | Input Validation | RBAC          │
-├─────────────────────────────────────────────────────┤
-│                   Data Layer                        │
-│  Encryption | Access Control | Data Masking        │
-├─────────────────────────────────────────────────────┤
-│                  Audit Layer                        │
-│  Logging | Monitoring | Compliance Reporting       │
-└─────────────────────────────────────────────────────┘
-```
+---
 
-## Authentication System
+# Part 1 — Implemented (verified)
 
-### JWT Authentication
+## 1.1 JWT authentication
 
-The platform uses JWT tokens with **RS256 (RSA signature with SHA-256)** for secure authentication. Tokens are signed using RSA private/public key pairs loaded from PEM files (or auto-generated if not provided):
+Cerebro authenticates with JWT tokens signed using **RS256** (RSA + SHA-256).
 
-- **Access Token**: Short-lived (15 minutes default), contains user claims
-- **Refresh Token**: Long-lived (7 days default), used to obtain new access tokens
-- **Token Rotation**: Automatic rotation on refresh for enhanced security
-- **Blacklisting**: Redis-based token blacklist for immediate revocation
-- **Key Files**: `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH` environment variables point to PEM-encoded RSA keys
+- **Algorithm**: `JWT_ALGORITHM = "RS256"` (`src/core/config.py:88`).
+- **Access token**: 15 minutes (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 15`, `config.py:89`).
+- **Refresh token**: 7 days (`JWT_REFRESH_TOKEN_EXPIRE_DAYS = 7`, `config.py:90`).
+- **Keys**: PEM files at `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem` (`JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH`, `config.py:91-92`). If the key path is unset or does not exist, `JWTService` **auto-generates a fresh RSA-2048 key pair** at startup (`src/auth/jwt_service.py:63,88`). When the parent directory is not writable (e.g. the production `/secrets/` mount on a dev machine), it logs a loud WARNING and falls back to an ephemeral in-memory key.
+- **Revocation**: a **Redis-based token blacklist** keyed on the token `jti` (`blacklist:token:` prefix, `jwt_service.py:67`) is checked on every validation (`jwt_service.py:295`). Logout and revoke-all add tokens to the blacklist for immediate invalidation.
 
-#### Token Structure
+### Token payload (representative)
 
 ```json
 {
   "sub": "user_uuid",
   "email": "user@example.com",
-  "roles": ["researcher", "admin"],
-  "permissions": ["read:projects", "write:projects"],
+  "roles": ["user"],
+  "permissions": [],
+  "organization_id": "org_uuid",
+  "token_type": "access",
   "device_id": "device_fingerprint",
-  "session_id": "session_uuid",
   "iat": 1634567890,
   "exp": 1634568790,
   "jti": "unique_token_id"
 }
 ```
 
-### OAuth2 Integration
+The base payload (`src/auth/jwt_service.py:193-202`) carries `roles` and `permissions` lists: login populates `roles=[user.role]` (or `["user"]`) plus `"admin"` for superusers, and `permissions=["*"]` for superusers (`src/api/auth/auth_router.py:200-206`). There is **no** `session_id` claim. Note, however, that runtime enforcement **ignores** these lists — no live route calls `require_roles`/`require_permissions` — so authorization still reduces to the single `is_superuser` flag; see §1.6.
 
-> **TODO (needs verification):** OAuth2 provider integrations listed below are planned but not currently implemented in production. The codebase currently supports only JWT-based email/password authentication.
+## 1.2 Password security
 
-Planned support for OAuth providers:
+- **Hashing**: bcrypt with **12 rounds** (`BCRYPT_ROUNDS = 12`, `config.py:95`).
+- **Minimum length**: **12 characters** (`PASSWORD_MIN_LENGTH = 12`, `config.py:96`).
+- **Complexity**: both registration **and login** enforce the same policy. `LoginRequest.password` is `min_length=12` and runs a validator requiring uppercase, lowercase, digit, and special character (`src/auth/models.py:75-82`) — identical to `RegisterRequest`. There is no separate, weaker 8-character login path.
+- **Password history**: `PASSWORD_HISTORY_LIMIT = 5` (`config.py:97`), enforced via **Redis lists** — `PasswordService.add_to_password_history` / `check_password_history` (`src/auth/password_service.py:254-300`) use `lpush`/`ltrim`/`lrange` with a 1-year TTL, called from `auth_router.py:136/355/372/419/436`. The `PasswordHistory` DB model (`src/models/db/password_history.py`) exists but is **never read or written** by any service.
+- **Breach checks**: `CHECK_PASSWORD_BREACHES = True` (`config.py:98`).
 
-- **Google**: Google OAuth 2.0 with OpenID Connect
-- **GitHub**: GitHub OAuth with organization verification
-- **Microsoft**: Azure AD and personal accounts
-- **Facebook**: Facebook Login
-- **Twitter**: Twitter OAuth 2.0
-- **LinkedIn**: LinkedIn OAuth 2.0
-- **Apple**: Sign in with Apple
-- **Discord**: Discord OAuth2
-- **Slack**: Slack OAuth with workspace integration
-- **GitLab**: GitLab OAuth2
-- **Bitbucket**: Bitbucket OAuth2
+## 1.3 Session management (partial — see caveats)
 
-### Multi-Factor Authentication (MFA)
+- **Storage**: Redis-backed session records under the `refresh:token:*` keys, governed by the **7-day refresh-token TTL**.
+- **Revoke-all**: revoking all of a user's sessions/tokens in one call **is** implemented (see §1.7).
+- **Concurrent session limit — NOT enforced**: `MAX_SESSIONS_PER_USER = 5` and `SESSION_EXPIRE_HOURS = 24` are **dead config** — defined only at `config.py:102-103` and referenced nowhere else in `src/` or tests. No 5-session limit and no 24-hour session expiry is enforced; session records instead expire with the 7-day refresh TTL.
+- **Per-`device_id` termination — NOT enforced**: `DELETE /sessions/{device_id}` is a **stub** (`src/api/auth/auth_router.py:500-518`). It finds the matching session, assigns an unused `_jti`, logs `"Session revoked"`, and returns **without revoking anything** (in-code comment: `# Would need to revoke associated tokens`). Only revoke-all actually revokes tokens.
 
-> **TODO (needs verification):** MFA is not currently implemented in production. The features listed below are planned.
+## 1.4 Per-endpoint authentication (not a gateway)
 
-Planned MFA methods:
+Authentication is enforced **per endpoint** via FastAPI dependencies — `Depends(get_current_user)` / `Depends(get_current_token)` — which validate the JWT through `JWTService.validate_token` (RS256 signature + blacklist check).
 
-1. **TOTP**: Time-based One-Time Passwords (Google Authenticator, Authy)
-2. **SMS**: Text message verification
-3. **Email**: Email verification codes
-4. **Backup Codes**: One-time use recovery codes
-5. **WebAuthn**: Hardware security keys (YubiKey, etc.)
-6. **Push Notifications**: Mobile app push notifications
+There is **no blanket API-gateway auth**. See §2.1 for the known gap this creates.
 
-## Authorization System
+## 1.5 Middleware stack
 
-### Role-Based Access Control (RBAC)
+Middleware is added in `src/api/main.py:181-204` in this order:
 
-Predefined roles with specific permissions:
-
-- **Superuser**: Full system access
-- **Admin**: Administrative functions
-- **Researcher**: Create and manage research projects
-- **Viewer**: Read-only access
-- **Guest**: Limited public access
-
-### Permission System
-
-Fine-grained permissions:
-
-```python
-# Resource:Action format
-permissions = [
-    "projects:read",
-    "projects:write",
-    "projects:delete",
-    "users:manage",
-    "api_keys:create",
-    "settings:modify"
-]
+```
+CORS → Idempotency → RateLimit → LLMCostDriftMiddleware → Auth (no-op)
 ```
 
-## Security Features
+- **CORS** (`config.CORS_ORIGINS`, credentials allowed).
+- **Idempotency** — Redis-backed (`ResilientIdempotencyStore` over `RedisIdempotencyStore`), dedupes replayed requests.
+- **Rate limiting** — Redis-backed flat limiter: **100 requests/minute** (`MAX_REQUESTS_PER_MINUTE = 100`, `ENABLE_RATE_LIMITING = True`). Implemented in `src/api/middleware/rate_limiter.py`. A single global limiter — **no tiers, no burst, no per-endpoint configuration.**
+- **LLMCostDriftMiddleware** — cost-drift observability, not a security control.
+- **AuthMiddleware** — **a no-op** (see §2.1).
 
-### Rate Limiting
+## 1.6 Authorization: single `is_superuser` flag
 
-Multiple rate limiting strategies:
+Authorization is a **single boolean**, `is_superuser` (`src/auth/models.py:323`). There is **no `Role` enum** and no role/permission matrix in the runtime. The multi-role catalog previously documented is aspirational — see §2.4.
 
-1. **Token Bucket**: Burst capacity with sustained rate
-2. **Sliding Window**: Smooth rate limiting
-3. **Fixed Window**: Simple time-based limits
-4. **Leaky Bucket**: Queue-based rate limiting
+## 1.7 Authentication endpoints (live)
 
-Configuration per endpoint:
+All auth routes are mounted under the `/api/v1/auth` prefix.
 
-```python
-@rate_limit(
-    strategy="token_bucket",
-    requests_per_minute=100,
-    burst_size=20,
-    scope="user"  # user, ip, api_key
-)
-async def sensitive_endpoint():
-    pass
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/auth/register` | User registration |
+| POST | `/api/v1/auth/login` | User login |
+| POST | `/api/v1/auth/refresh` | Refresh access token |
+| POST | `/api/v1/auth/logout` | Logout and revoke token |
+| POST | `/api/v1/auth/forgot-password` | Request password reset |
+| POST | `/api/v1/auth/reset-password` | Complete password reset |
+| POST | `/api/v1/auth/change-password` | Change password |
+| GET  | `/api/v1/auth/verify-email` | Verify email address |
+| GET  | `/api/v1/auth/sessions` | List active sessions |
+| DELETE | `/api/v1/auth/sessions/{device_id}` | Terminate a session by device |
+| POST | `/api/v1/auth/revoke-all` | Revoke all sessions/tokens for the user |
+| GET  | `/api/v1/auth/me` | Get current user |
 
-### Security Headers
+(Source: `src/api/auth/auth_router.py` — router prefix `/auth`, mounted under `/api/v1`.)
 
-Comprehensive security headers:
+## 1.8 GDPR data deletion (the only compliance endpoint)
 
-- **Content-Security-Policy**: Prevents XSS attacks
-- **X-Frame-Options**: Prevents clickjacking
-- **X-Content-Type-Options**: Prevents MIME sniffing
-- **Strict-Transport-Security**: Enforces HTTPS
-- **X-XSS-Protection**: Additional XSS protection
-- **Referrer-Policy**: Controls referrer information
-- **Permissions-Policy**: Controls browser features
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| DELETE | `/api/v1/users/{user_id}/gdpr` | GDPR "right to erasure" — delete a user's data |
 
-### Input Validation
+(`src/api/routes/users.py:30`.) This single delete endpoint is the **only** implemented compliance feature — see §2.9.
 
-Multiple layers of input validation:
-
-1. **SQL Injection Prevention**: Parameterized queries, input sanitization
-2. **XSS Prevention**: HTML escaping, content validation
-3. **Path Traversal Prevention**: Path normalization, whitelist validation
-4. **Command Injection Prevention**: Command sanitization, subprocess safety
-5. **File Upload Validation**: Type checking, size limits, content scanning
-
-### Password Security
-
-Strong password requirements:
-
-- **Login Minimum Length**: 8 characters (production default)
-- **Registration Minimum Length**: 12 characters with complexity (uppercase, lowercase, digit, special character)
-- **History**: Prevents reuse of last 5 passwords (planned)
-- **Expiration**: Optional password expiration policy (planned)
-- **Breach Detection**: Checks against known breached passwords (planned)
-
-> **TODO (needs verification):** PR #20 (open, not merged) proposes bumping login min_length to 12 with full complexity enforcement. Current production /login requires only min_length=8.
-
-Password hashing using bcrypt with 12 rounds.
-
-## Session Management
-
-### Session Security
-
-- **Device Fingerprinting**: Tracks device characteristics
-- **Geolocation Tracking**: Monitors login locations
-- **Concurrent Session Limits**: Maximum 5 sessions per user
-- **Automatic Expiration**: 24-hour timeout
-- **Session Revocation**: Immediate termination capability
-
-### Session Storage
-
-Redis-based session storage with:
-
-- High-performance access
-- Distributed session sharing
-- Automatic cleanup
-- Encryption at rest
-
-## Audit Logging
-
-### Event Types
-
-40+ security event types tracked:
-
-- Authentication events (login, logout, failed attempts)
-- Authorization events (permission changes, role assignments)
-- Data access events (read, write, delete operations)
-- Configuration changes
-- Security alerts
-- Compliance events
-
-### Audit Log Structure
-
-```json
-{
-  "id": "uuid",
-  "timestamp": "2024-01-01T00:00:00Z",
-  "event_type": "user_login",
-  "severity": "info",
-  "user_id": "user_uuid",
-  "resource_type": "auth",
-  "resource_id": "session_uuid",
-  "details": {
-    "ip_address": "192.168.1.1",
-    "user_agent": "Mozilla/5.0...",
-    "geolocation": "San Francisco, CA"
-  },
-  "risk_score": 0.1
-}
-```
-
-### Compliance Reporting
-
-Built-in compliance reports for:
-
-- **GDPR**: Data access logs, consent tracking, deletion records
-- **HIPAA**: Access controls, audit trails, encryption status
-- **SOC 2**: Security controls, incident reports, access reviews
-- **PCI DSS**: Payment data access, security scans
-
-## Security Alerts
-
-### Alert Types
-
-26 security alert types:
-
-- Suspicious login attempts
-- Brute force attacks
-- Account takeover attempts
-- Privilege escalation
-- Data exfiltration
-- Configuration tampering
-- API abuse
-- Session hijacking
-
-### Alert Response
-
-Automatic remediation actions:
-
-1. **Account Lockout**: Temporary or permanent suspension
-2. **Password Reset**: Force password change
-3. **Session Termination**: Kill all active sessions
-4. **IP Blocking**: Add to blacklist
-5. **Rate Limit Reduction**: Decrease allowed requests
-6. **MFA Enforcement**: Require additional verification
-
-## API Security
-
-### API Key Management
-
-- **Secure Generation**: Cryptographically random keys
-- **Scoped Permissions**: Limited access per key
-- **Usage Tracking**: Monitor API key usage
-- **Rotation Policy**: Regular key rotation
-- **Revocation**: Immediate key termination
-
-### Request Security
-
-- **HTTPS Only**: TLS 1.3 enforcement
-- **Certificate Pinning**: Prevent MITM attacks
-- **Request Signing**: HMAC signature validation
-- **Replay Prevention**: Nonce and timestamp validation
-
-## Database Security
-
-### Encryption
-
-- **At Rest**: AES-256 encryption for sensitive data
-- **In Transit**: TLS for all database connections
-- **Field-Level**: Encryption for PII and sensitive fields
-
-### Access Control
-
-- **Row-Level Security**: User-specific data access
-- **Column-Level Security**: Field access restrictions
-- **Query Auditing**: Log all database queries
-- **Connection Limits**: Prevent connection exhaustion
-
-## Email Security
-
-### Email Verification
-
-- **Double Opt-In**: Confirmation required
-- **Token Expiration**: 24-hour validity
-- **Rate Limiting**: Prevent email bombing
-- **SPF/DKIM/DMARC**: Email authentication
-
-### Password Reset
-
-- **Secure Tokens**: Cryptographically random
-- **Single Use**: Tokens invalidated after use
-- **Time Limited**: 1-hour expiration
-- **Account Verification**: Additional security questions
-
-## Implementation Guide
-
-### Environment Variables
+## 1.9 Environment variables (implemented defaults)
 
 ```env
-# JWT Configuration
+# JWT
 JWT_ALGORITHM=RS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
-JWT_PRIVATE_KEY_PATH=/path/to/jwt_private.pem  # Auto-generated if missing
-JWT_PUBLIC_KEY_PATH=/path/to/jwt_public.pem    # Auto-generated if missing
+JWT_PRIVATE_KEY_PATH=/secrets/jwt_private.pem   # auto-generated if missing
+JWT_PUBLIC_KEY_PATH=/secrets/jwt_public.pem     # auto-generated if missing
 
-# Security Settings
+# Password security
 BCRYPT_ROUNDS=12
-PASSWORD_MIN_LENGTH=8  # Production default for login; RegisterRequest requires 12+ with complexity
-PASSWORD_HISTORY_LIMIT=5  # Planned
-CHECK_PASSWORD_BREACHES=false  # Planned
+PASSWORD_MIN_LENGTH=12
+PASSWORD_HISTORY_LIMIT=5
+CHECK_PASSWORD_BREACHES=true
 
-# Rate Limiting
-RATE_LIMIT_REQUESTS=100
-RATE_LIMIT_PERIOD=60
-RATE_LIMIT_STRATEGY=token_bucket
-
-# Session Configuration
-SESSION_SECRET_KEY=your-secret-key
+# Sessions (defined in config but NOT enforced at runtime — see §1.3)
 SESSION_EXPIRE_HOURS=24
 MAX_SESSIONS_PER_USER=5
 
-# OAuth Providers
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-GITHUB_CLIENT_ID=your-github-client-id
-GITHUB_CLIENT_SECRET=your-github-client-secret
+# Rate limiting (flat, global)
+MAX_REQUESTS_PER_MINUTE=100
+ENABLE_RATE_LIMITING=true
 
-# MFA Settings
-MFA_ISSUER=ResearchPlatform
-ENABLE_MFA=true
+# MFA (scaffolding only — see Part 2)
+ENABLE_MFA=false
 ```
 
-### RSA Key Generation
-
-Generate RSA keys for JWT signing:
+### RSA key generation (optional — keys auto-generate if absent)
 
 ```bash
-# Create keys directory
-mkdir -p keys
-
-# Generate private key
-openssl genrsa -out keys/jwt_private.pem 2048
-
-# Extract public key
-openssl rsa -in keys/jwt_private.pem -pubout -out keys/jwt_public.pem
-
-# Set proper permissions
-chmod 600 keys/jwt_private.pem
-chmod 644 keys/jwt_public.pem
+mkdir -p secrets
+openssl genrsa -out secrets/jwt_private.pem 2048
+openssl rsa -in secrets/jwt_private.pem -pubout -out secrets/jwt_public.pem
+chmod 600 secrets/jwt_private.pem
+chmod 644 secrets/jwt_public.pem
 ```
 
-### Database Migration
+---
 
-Run the security tables migration:
+# Part 2 — Not implemented / aspirational
 
-```bash
-# Apply migration
-alembic upgrade head
+Everything below exists only as **DB-model scaffolding, dead/test-only code, or design intent**. None of it is wired into the request path. Do not represent it as a live security control.
 
-# Verify tables created
-psql -U research -d research_db -c "\dt"
-```
+## 2.1 No API-gateway authentication (known gap)
 
-## API Endpoints
+`AuthMiddleware` (`src/middleware/auth_middleware.py`) is **effectively a no-op**: it initializes `request.state.user/token_payload/organization_id = None` and validates nothing; its `exclude_paths` list is unused. Because auth is enforced only where an endpoint declares `Depends(get_current_*)`, the primary product routes are **effectively unauthenticated**:
 
-### Authentication Endpoints
+- `/api/v1/query/*`
+- `/api/v1/agents/*`
+- `/api/v1/masr/*`
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | /auth/register | User registration |
-| POST | /auth/login | User login |
-| POST | /auth/refresh | Refresh access token |
-| POST | /auth/logout | Logout and revoke tokens |
-| GET | /auth/me | Get current user |
-| POST | /auth/change-password | Change password |
-| POST | /auth/forgot-password | Request password reset |
-| POST | /auth/reset-password | Complete password reset |
-| GET | /auth/verify-email | Verify email address |
-| GET | /auth/sessions | List active sessions |
-| DELETE | /auth/sessions/{id} | Terminate session |
+Only the auth routes and the research routes declare auth dependencies — research is protected via `get_tenant_context` → `get_current_token` (`src/middleware/tenant_context.py:56-58`). Notably, the GDPR delete endpoint is **also unauthenticated**: `delete_user_gdpr` (`src/api/routes/users.py:30-35`) declares only `Depends(get_session)` and `Depends(get_memory_system)` — no `get_current_user`/token — so anyone can delete any user's data. `reports.py` has **zero** auth dependencies (it does not even import `Depends`, `src/api/routes/reports.py:12`). **This is a known gap, not a designed public API.**
 
-### OAuth2 Endpoints
+## 2.2 OAuth2 — scaffolding only
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | /auth/oauth2/{provider}/login | Initiate OAuth flow |
-| GET | /auth/oauth2/{provider}/callback | OAuth callback |
-| POST | /auth/oauth2/{provider}/link | Link OAuth account |
-| DELETE | /auth/oauth2/{provider}/unlink | Unlink OAuth account |
+There are **no OAuth2 routes mounted anywhere.** An `oauth_account` DB model exists as scaffolding, but no provider-login, callback, link, or unlink endpoints are served. Google/GitHub/Microsoft/etc. OAuth is **planned, not implemented**.
 
-### MFA Endpoints
+## 2.3 Multi-Factor Authentication (MFA) — scaffolding only
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | /auth/mfa/enable | Enable MFA |
-| POST | /auth/mfa/disable | Disable MFA |
-| POST | /auth/mfa/verify | Verify MFA code |
-| GET | /auth/mfa/backup-codes | Get backup codes |
-| POST | /auth/mfa/backup-codes/regenerate | Regenerate backup codes |
+`ENABLE_MFA` defaults to **False** (`config.py:114`). An `mfa_settings` DB model exists, but **no MFA endpoints are mounted** and no TOTP/SMS/WebAuthn/backup-code flow is wired. MFA is **planned, not implemented**.
 
-## Security Best Practices
+## 2.4 Role-based access control — not implemented
 
-### For Developers
+The catalog of roles (Superuser / Admin / Researcher / Viewer / Guest) and a resource:action permission matrix is **aspirational**. The runtime has **no `Role` enum** and no permission engine — authorization is the single `is_superuser` boolean (§1.6).
 
-1. **Never commit secrets**: Use environment variables
-2. **Validate all inputs**: Use the provided validators
-3. **Use parameterized queries**: Prevent SQL injection
-4. **Implement proper error handling**: Don't leak sensitive info
-5. **Follow least privilege**: Grant minimum required permissions
-6. **Keep dependencies updated**: Regular security updates
-7. **Use secure defaults**: Fail closed, not open
+## 2.5 Security headers (CSP / HSTS / X-Frame-Options) — not applied
 
-### For Administrators
+**No security-headers middleware is in the application stack** (`src/api/main.py` adds only CORS, Idempotency, RateLimit, CostDrift, Auth). `src/security/headers.py` exists but is **test-only dead code** — it is not in any request path. Content-Security-Policy, Strict-Transport-Security, X-Frame-Options, X-Content-Type-Options, etc. are **not set** on responses.
 
-1. **Regular security audits**: Review logs and alerts
-2. **Update security patches**: Keep system current
-3. **Monitor suspicious activity**: Set up alerting
-4. **Backup security keys**: Store securely offline
-5. **Review access regularly**: Remove unused accounts
-6. **Test incident response**: Regular drills
-7. **Document security procedures**: Keep runbooks updated
+## 2.6 Four-strategy rate-limiting engine — dead code
 
-### For Users
+Production rate limiting is the flat global limiter in §1.5 (`src/api/middleware/rate_limiter.py`, 100/min). The multi-strategy engine (token bucket / sliding window / fixed window / leaky bucket) in `src/security/rate_limiter.py` is **dead code** — not wired into the app. There are no per-endpoint or burst rate-limit configurations.
 
-1. **Use strong passwords**: Follow complexity requirements
-2. **Enable MFA**: Use authenticator apps
-3. **Review active sessions**: Terminate unknown sessions
-4. **Report suspicious activity**: Contact administrators
-5. **Keep contact info updated**: For security alerts
-6. **Don't share credentials**: Each user needs own account
-7. **Use API keys properly**: Don't embed in code
+## 2.7 Input-validation layer — dead code
 
-## Incident Response
+`src/security/validators.py` (SQL-injection / XSS / path-traversal / command-injection / file-upload validators) is **dead code, not in the request path.** (Cerebro does rely on SQLAlchemy parameterized queries and Pydantic request-model validation, but the dedicated `validators.py` layer is not invoked.)
 
-### Security Incident Procedure
+## 2.8 Audit logging — models only, subsystem not wired
 
-1. **Detection**: Automated alerts or user reports
-2. **Assessment**: Determine severity and scope
-3. **Containment**: Isolate affected systems
-4. **Investigation**: Analyze logs and evidence
-5. **Remediation**: Fix vulnerabilities
-6. **Recovery**: Restore normal operations
-7. **Post-Mortem**: Document lessons learned
+An `audit_log` DB model exists, but the "40+ event types" audit subsystem is **not wired**. `src/security/audit_logger.py` is test-only dead code. Likewise the Security Alerts subsystem ("26 alert types with automatic remediation") has a `security_alert` DB model but **no live detection or remediation engine**.
 
-### Contact Information
+## 2.9 Compliance reporting — not implemented
 
-- **Security Team**: security@researchplatform.com
-- **Emergency Hotline**: +1-xxx-xxx-xxxx
-- **Bug Bounty Program**: security.researchplatform.com/bugbounty
+The **only** compliance feature that exists is the single GDPR delete endpoint (§1.8). GDPR access/consent reporting, HIPAA, SOC 2, and PCI DSS controls and reports are **not implemented**.
 
-## Compliance
+## 2.10 Database security claims — unsubstantiated
 
-### GDPR Compliance
+There is **no evidence** in the codebase of field-level, row-level, or column-level encryption, query auditing, or "Redis session encryption at rest." These claims are **unsubstantiated** and should not be represented as implemented. Database connections use TLS where the deployment provides it; application-layer encryption of PII fields is not present.
 
-- Right to access data
-- Right to rectification
-- Right to erasure
-- Right to data portability
-- Consent management
-- Privacy by design
+---
 
-### HIPAA Compliance
+## Summary matrix
 
-- Access controls
-- Audit controls
-- Integrity controls
-- Transmission security
-- Business associate agreements
-
-### SOC 2 Controls
-
-- CC1: Control environment
-- CC2: Communication and information
-- CC3: Risk assessment
-- CC4: Monitoring activities
-- CC5: Control activities
-- CC6: Logical and physical access
-- CC7: System operations
-- CC8: Change management
-- CC9: Risk mitigation
-
-## Testing
-
-### Security Testing
-
-Run the security test suite:
-
-```bash
-# Run all security tests
-pytest tests/test_security.py -v
-
-# Run specific test categories
-pytest tests/test_security.py::TestRateLimiter -v
-pytest tests/test_security.py::TestSecurityHeaders -v
-pytest tests/test_security.py::TestInputValidators -v
-pytest tests/test_security.py::TestAuditLogger -v
-
-# Run with coverage
-pytest tests/test_security.py --cov=src/security --cov-report=html
-```
-
-### Penetration Testing
-
-Regular penetration testing schedule:
-
-- **Quarterly**: Automated vulnerability scanning
-- **Bi-Annually**: Manual penetration testing
-- **Annually**: Full security audit
-
-## Maintenance
-
-### Regular Tasks
-
-- **Daily**: Review security alerts and audit logs
-- **Weekly**: Check failed login attempts
-- **Monthly**: Review user permissions and roles
-- **Quarterly**: Update security documentation
-- **Annually**: Complete security audit
-
-### Security Updates
-
-Subscribe to security advisories:
-
-- Python Security: python.org/security
-- OWASP: owasp.org
-- CVE Database: cve.mitre.org
-
-## Conclusion
-
-The Multi-Agent Research Platform's security implementation provides comprehensive protection against modern threats while maintaining usability and performance. The layered security approach ensures defense in depth, while extensive audit logging and compliance features meet regulatory requirements.
-
-For additional security questions or concerns, please contact the security team.
+| Area | Status |
+|---|---|
+| JWT RS256, 15-min / 7-day, Redis blacklist revocation | Implemented |
+| bcrypt 12 rounds | Implemented |
+| Password min-length 12 + complexity (login and register) | Implemented |
+| Password history (limit 5), breach checks | Implemented |
+| Session revoke-all | Implemented |
+| Session limit 5 / 24h expiry, per-`device_id` termination | **Not implemented** (dead config; per-device delete is a stub) |
+| Per-endpoint `Depends` auth | Implemented |
+| CORS + Idempotency + flat Redis rate limit (100/min) | Implemented |
+| GDPR delete endpoint | Implemented |
+| API-gateway auth (query/agents/masr protected) | **Not implemented** (no-op middleware) |
+| OAuth2 login | **Not implemented** (model scaffolding) |
+| MFA | **Not implemented** (model scaffolding, default off) |
+| RBAC / role catalog | **Not implemented** (`is_superuser` only) |
+| Security headers (CSP/HSTS/etc.) | **Not implemented** (dead code) |
+| Multi-strategy rate limiter | **Not implemented** (dead code) |
+| Input-validation layer | **Not implemented** (dead code) |
+| Audit logging / security alerts | **Not implemented** (models only) |
+| HIPAA / SOC 2 / PCI reporting | **Not implemented** |
+| Field/row/column encryption | **Unsubstantiated** |

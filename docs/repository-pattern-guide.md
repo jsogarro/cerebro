@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide documents the repository pattern implementation in the Multi-Agent Research Platform, providing examples and best practices for data access operations.
+This guide documents the repository pattern implementation in Cerebro, providing examples and best practices for data access operations.
 
 ## Repository Pattern Benefits
 
@@ -24,8 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 ModelType = TypeVar("ModelType")
 
 class BaseRepository(Generic[ModelType]):
-    def __init__(self, model_class: Type[ModelType], session: AsyncSession):
-        self.model_class = model_class
+    def __init__(self, model: Type[ModelType], session: AsyncSession):
+        self.model = model
         self.session = session
 ```
 
@@ -34,31 +34,31 @@ class BaseRepository(Generic[ModelType]):
 #### Create
 ```python
 async def create_research_project():
-    async with get_session() as session:
+    async with get_transaction() as session:
         repo = ResearchRepository(session)
         
         project = await repo.create(
             title="AI Impact on Employment",
-            research_query="How will AI affect job markets?",
+            query="How will AI affect job markets?",
             domains=["AI", "Economics"],
-            created_by=user_id
+            user_id=user_id
         )
         
-        await session.commit()
+        # get_transaction() commits automatically on context exit
         return project
 ```
 
 #### Read
 ```python
 async def get_project_details(project_id: UUID):
-    async with get_session() as session:
+    async with get_transaction() as session:
         repo = ResearchRepository(session)
         
         # Get single record
         project = await repo.get(project_id)
         
         # Get with related data
-        project_with_tasks = await repo.get_with_tasks(project_id)
+        project_with_results = await repo.get_with_results(project_id)
         
         # Get multiple with filters
         user_projects = await repo.get_by_user(
@@ -71,7 +71,7 @@ async def get_project_details(project_id: UUID):
 #### Update
 ```python
 async def update_project_status(project_id: UUID, new_status: str):
-    async with get_session() as session:
+    async with get_transaction() as session:
         repo = ResearchRepository(session)
         
         # Simple update
@@ -88,13 +88,13 @@ async def update_project_status(project_id: UUID, new_status: str):
             updated_by=current_user.id
         )
         
-        await session.commit()
+        # get_transaction() commits automatically on context exit
 ```
 
 #### Delete
 ```python
 async def delete_project(project_id: UUID):
-    async with get_session() as session:
+    async with get_transaction() as session:
         repo = ResearchRepository(session)
         
         # Soft delete (default)
@@ -103,7 +103,7 @@ async def delete_project(project_id: UUID):
         # Hard delete
         success = await repo.delete(project_id, soft=False)
         
-        await session.commit()
+        # get_transaction() commits automatically on context exit
 ```
 
 ## Specialized Repository Examples
@@ -119,59 +119,90 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         self,
         query: str,
         domains: Optional[List[str]] = None,
-        status: Optional[str] = None
+        status: Optional[List[ProjectStatus]] = None
     ) -> List[ResearchProject]:
         """Full-text search across projects."""
         
         stmt = select(ResearchProject)
         
-        # Text search
+        # Text search (case-insensitive contains on title and query)
         if query:
             stmt = stmt.where(
                 or_(
-                    ResearchProject.title.ilike(f"%{query}%"),
-                    ResearchProject.research_query.ilike(f"%{query}%")
+                    func.lower(ResearchProject.title).contains(query.lower()),
+                    func.lower(ResearchProject.query).contains(query.lower())
                 )
             )
         
-        # Domain filter
+        # Domain filter (JSON containment, one clause per domain)
         if domains:
-            stmt = stmt.where(
-                ResearchProject.domains.overlap(domains)
-            )
+            for domain in domains:
+                stmt = stmt.where(ResearchProject.domains.contains([domain]))
         
         # Status filter
         if status:
-            stmt = stmt.where(ResearchProject.status == status)
+            stmt = stmt.where(ResearchProject.status.in_(status))
         
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
     
-    async def get_statistics(self, project_id: UUID) -> Dict[str, Any]:
-        """Get comprehensive project statistics."""
+    async def get_statistics(
+        self,
+        user_id: Optional[UUID] = None,
+        days: int = 30,
+        organization_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Aggregate project statistics across the reporting window."""
         
-        # Get task statistics
-        task_stats = await self.session.execute(
-            select(
-                AgentTask.status,
-                func.count(AgentTask.id).label("count")
+        since = datetime.now(UTC) - timedelta(days=days)
+        
+        base = select(ResearchProject).where(
+            and_(
+                ResearchProject.deleted_at.is_(None),
+                ResearchProject.created_at >= since,
             )
-            .where(AgentTask.project_id == project_id)
-            .group_by(AgentTask.status)
         )
+        if user_id:
+            base = base.where(ResearchProject.user_id == user_id)
         
-        # Get result statistics
-        result_stats = await self.session.execute(
-            select(
-                func.count(ResearchResult.id).label("total"),
-                func.avg(ResearchResult.confidence_score).label("avg_confidence")
+        # Counts by status
+        status_counts = {}
+        for status in ProjectStatus:
+            count_query = select(func.count(ResearchProject.id)).where(
+                and_(
+                    ResearchProject.deleted_at.is_(None),
+                    ResearchProject.status == status,
+                    ResearchProject.created_at >= since,
+                )
             )
-            .where(ResearchResult.project_id == project_id)
+            result = await self.session.execute(count_query)
+            status_counts[status.value] = result.scalar() or 0
+        
+        # Average quality score and total count
+        avg_result = await self.session.execute(
+            select(func.avg(ResearchProject.quality_score)).where(
+                and_(
+                    ResearchProject.deleted_at.is_(None),
+                    ResearchProject.quality_score.isnot(None),
+                    ResearchProject.created_at >= since,
+                )
+            )
+        )
+        total_result = await self.session.execute(
+            select(func.count(ResearchProject.id)).where(
+                and_(
+                    ResearchProject.deleted_at.is_(None),
+                    ResearchProject.created_at >= since,
+                )
+            )
         )
         
         return {
-            "tasks": {row.status: row.count for row in task_stats},
-            "results": result_stats.one()._asdict()
+            "total_projects": total_result.scalar() or 0,
+            "status_distribution": status_counts,
+            "average_quality_score": float(avg_result.scalar() or 0.0),
+            "period_days": days,
+            "since": since.isoformat(),
         }
 ```
 
@@ -182,58 +213,44 @@ class TaskRepository(BaseRepository[AgentTask]):
     
     async def get_pending_tasks(
         self,
-        agent_type: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
+        agent_type: Optional[str] = None
     ) -> List[AgentTask]:
-        """Get tasks ready for execution."""
+        """Get pending tasks ready for execution.
+
+        Dependency gating is a separate concern handled by
+        ``get_ready_tasks(project_id)`` (which uses ``task.can_start``);
+        this method only selects unstarted tasks by status.
+        """
         
         query = self.build_query().where(
-            AgentTask.status == "pending"
+            AgentTask.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED])
         )
         
         if agent_type:
             query = query.where(AgentTask.agent_type == agent_type)
         
-        # Check dependencies
-        subquery = select(AgentTask.id).where(
-            and_(
-                AgentTask.id.in_(select(unnest(AgentTask.dependencies))),
-                AgentTask.status != "completed"
-            )
-        )
-        
-        query = query.where(
-            ~exists(subquery)  # No incomplete dependencies
-        )
-        
         query = query.order_by(
             AgentTask.priority.desc(),
-            AgentTask.created_at
+            AgentTask.created_at.asc()
         ).limit(limit)
         
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def retry_task(self, task_id: UUID) -> Optional[AgentTask]:
-        """Retry a failed task."""
+    async def mark_for_retry(self, task_id: UUID) -> Optional[AgentTask]:
+        """Mark a failed task for retry."""
         
         task = await self.get(task_id)
         
-        if not task or task.status != "failed":
+        if not task or task.status != TaskStatus.FAILED:
             return None
         
-        # Check retry limit
-        if task.retry_count >= 3:
-            task.status = "permanently_failed"
-        else:
-            task.status = "pending"
-            task.retry_count += 1
-            task.error_details = None
-            task.scheduled_at = datetime.now(UTC) + timedelta(
-                minutes=2 ** task.retry_count  # Exponential backoff
-            )
-        
+        # task.retry() sets status to RETRYING, increments retry_count,
+        # and clears error_message/output_data/timestamps.
+        task.retry()
         await self.session.flush()
+        await self.session.refresh(task)
         return task
 ```
 
@@ -254,53 +271,40 @@ class ResultRepository(BaseRepository[ResearchResult]):
         result = await self.session.execute(stmt)
         created_results = list(result.scalars().all())
         
-        # Update project statistics
-        if created_results:
-            project_id = created_results[0].project_id
-            await self._update_project_stats(project_id)
-        
+        await self.session.flush()
         return created_results
     
     async def merge_duplicates(self, project_id: UUID) -> int:
-        """Intelligently merge duplicate results."""
+        """Merge duplicate results based on (source_id, result_type)."""
         
-        # Group by source and content similarity
         results = await self.get_by_project(project_id)
         
+        # Group by source_id + result_type; results with no source_id are skipped
         duplicates = defaultdict(list)
         for result in results:
-            # Create signature for deduplication
-            signature = self._create_signature(result)
-            duplicates[signature].append(result)
+            if result.source_id:
+                key = (result.source_id, result.result_type)
+                duplicates[key].append(result)
         
         merged_count = 0
-        for signature, group in duplicates.items():
+        for _key, group in duplicates.items():
             if len(group) > 1:
                 # Keep highest confidence result
                 group.sort(key=lambda x: x.confidence_score or 0, reverse=True)
                 keep = group[0]
                 
-                # Merge metadata from duplicates
+                # Record provenance and soft-delete each duplicate
                 for duplicate in group[1:]:
-                    keep.result_metadata = {
-                        **keep.result_metadata,
-                        **duplicate.result_metadata,
-                        "merged_from": [*keep.result_metadata.get("merged_from", []), str(duplicate.id)]
-                    }
+                    if duplicate.result_metadata:
+                        keep.add_metadata("merged_from", str(duplicate.id))
                     
-                    await self.delete(duplicate.id)
+                    await self.delete(duplicate.id, soft=True)
                     merged_count += 1
         
+        if merged_count > 0:
+            await self.session.flush()
+        
         return merged_count
-    
-    def _create_signature(self, result: ResearchResult) -> str:
-        """Create unique signature for deduplication."""
-        components = [
-            result.result_type,
-            result.source_id or "",
-            str(result.content.get("title", ""))[:100] if result.content else ""
-        ]
-        return "|".join(components)
 ```
 
 ### APIKeyRepository
@@ -313,13 +317,15 @@ class APIKeyRepository(BaseRepository[APIKey]):
         user_id: UUID,
         name: str,
         permissions: List[str],
-        expires_in_days: Optional[int] = None
+        expires_in_days: Optional[int] = None,
+        description: Optional[str] = None,
+        rate_limit: Optional[int] = None,
+        allowed_ips: Optional[List[str]] = None
     ) -> Tuple[APIKey, str]:
         """Create API key and return it with raw key (shown once)."""
         
-        # Generate secure key
-        raw_key = f"gar_{secrets.token_urlsafe(32)}"
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        # Generate secure key and its hash (raw_key, key_hash)
+        raw_key, key_hash = generate_api_key()
         
         # Calculate expiration
         expires_at = None
@@ -331,15 +337,12 @@ class APIKeyRepository(BaseRepository[APIKey]):
             key_hash=key_hash,
             user_id=user_id,
             name=name,
+            description=description,
             permissions=permissions,
-            expires_at=expires_at
-        )
-        
-        # Log key creation
-        await self._audit_log(
-            action="api_key_created",
-            user_id=user_id,
-            details={"key_id": str(api_key.id), "name": name}
+            rate_limit=rate_limit,
+            allowed_ips=allowed_ips,
+            expires_at=expires_at,
+            is_active=True
         )
         
         return api_key, raw_key  # Return raw key only once
@@ -350,19 +353,19 @@ class APIKeyRepository(BaseRepository[APIKey]):
         required_permission: Optional[str] = None,
         ip_address: Optional[str] = None
     ) -> Optional[APIKey]:
-        """Validate API key with permission and IP checks."""
+        """Validate API key with permission and IP checks.
+
+        Every failure path returns None silently; the repository does
+        not emit audit logs.
+        """
         
         # Hash the provided key
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        key_hash = APIKey.hash_key(raw_key)
         
         # Find key by hash
         api_key = await self.get_by_key_hash(key_hash)
         
         if not api_key:
-            await self._audit_log(
-                action="invalid_api_key",
-                details={"ip": ip_address}
-            )
             return None
         
         # Validate key status
@@ -371,25 +374,14 @@ class APIKeyRepository(BaseRepository[APIKey]):
         
         # Check permission
         if required_permission and not api_key.has_permission(required_permission):
-            await self._audit_log(
-                action="permission_denied",
-                user_id=api_key.user_id,
-                details={"permission": required_permission}
-            )
             return None
         
         # Check IP restrictions
         if ip_address and not api_key.is_valid_ip(ip_address):
-            await self._audit_log(
-                action="ip_denied",
-                user_id=api_key.user_id,
-                details={"ip": ip_address}
-            )
             return None
         
         # Record usage
-        api_key.record_use(ip_address)
-        await self.session.flush()
+        await self.record_usage(api_key.id, ip_address)
         
         return api_key
 ```
@@ -402,50 +394,51 @@ class APIKeyRepository(BaseRepository[APIKey]):
 async def complex_operation(project_id: UUID):
     """Example of transaction management."""
     
-    async with get_session() as session:
-        async with session.begin():  # Start transaction
-            research_repo = ResearchRepository(session)
-            task_repo = TaskRepository(session)
-            result_repo = ResultRepository(session)
+    # get_transaction() opens a transaction for the whole block:
+    # it commits on clean exit and rolls back on any exception.
+    async with get_transaction() as session:
+        research_repo = ResearchRepository(session)
+        task_repo = TaskRepository(session)
+        result_repo = ResultRepository(session)
+        
+        try:
+            # Multiple operations in single transaction
+            project = await research_repo.get(project_id)
             
-            try:
-                # Multiple operations in single transaction
-                project = await research_repo.get(project_id)
-                
-                # Create tasks
-                tasks = []
-                for agent_type in ["literature", "synthesis", "citation"]:
-                    task = await task_repo.create(
-                        project_id=project_id,
-                        agent_type=agent_type,
-                        task_type="research",
-                        priority=1
-                    )
-                    tasks.append(task)
-                
-                # Update project status
-                await research_repo.update_status(
-                    project_id,
-                    "in_progress"
+            # Create tasks
+            tasks = []
+            for agent_type in ["literature", "synthesis", "citation"]:
+                task = await task_repo.create(
+                    project_id=project_id,
+                    agent_type=agent_type,
+                    task_type="research",
+                    priority=1
                 )
-                
-                # Create initial results
-                await result_repo.bulk_create([
-                    {
-                        "project_id": project_id,
-                        "task_id": task.id,
-                        "result_type": "initial",
-                        "content": {}
-                    }
-                    for task in tasks
-                ])
-                
-                # Transaction commits here if no exception
-                
-            except Exception as e:
-                # Transaction automatically rolls back
-                logger.error(f"Transaction failed: {e}")
-                raise
+                tasks.append(task)
+            
+            # Update project status
+            await research_repo.update_status(
+                project_id,
+                ProjectStatus.IN_PROGRESS
+            )
+            
+            # Create initial results
+            await result_repo.bulk_create([
+                {
+                    "project_id": project_id,
+                    "task_id": task.id,
+                    "result_type": "initial",
+                    "content": {}
+                }
+                for task in tasks
+            ])
+            
+            # Transaction commits here if no exception
+            
+        except Exception as e:
+            # Transaction automatically rolls back
+            logger.error(f"Transaction failed: {e}")
+            raise
 ```
 
 ### Query Optimization
@@ -498,15 +491,15 @@ class OptimizedRepository(BaseRepository):
 ```python
 class CachedRepository(BaseRepository):
     
-    def __init__(self, model_class, session, cache):
-        super().__init__(model_class, session)
+    def __init__(self, model, session, cache):
+        super().__init__(model, session)
         self.cache = cache
     
     async def get(self, id: UUID) -> Optional[ModelType]:
         """Get with caching."""
         
         # Check cache first
-        cache_key = f"{self.model_class.__name__}:{id}"
+        cache_key = f"{self.model.__name__}:{id}"
         cached = await self.cache.get(cache_key)
         
         if cached:
@@ -532,7 +525,7 @@ class CachedRepository(BaseRepository):
         
         if result:
             # Invalidate cache
-            cache_key = f"{self.model_class.__name__}:{id}"
+            cache_key = f"{self.model.__name__}:{id}"
             await self.cache.delete(cache_key)
         
         return result
@@ -553,9 +546,9 @@ async def test_research_repository(test_db):
         # Test create
         project = await repo.create(
             title="Test Project",
-            research_query="Test query",
+            query="Test query",
             domains=["Test"],
-            created_by=uuid.uuid4()
+            user_id=str(uuid.uuid4())
         )
         assert project.id is not None
         assert project.title == "Test Project"
@@ -592,11 +585,12 @@ async def test_complex_workflow(postgres_db):
         task_repo = TaskRepository(session)
         result_repo = ResultRepository(session)
         
-        # Create project
+        # Create project (user_id is required — ResearchProject.user_id is NOT NULL)
         project = await research_repo.create(
             title="Integration Test",
-            research_query="Test query",
-            domains=["Test"]
+            query="Test query",
+            domains=["Test"],
+            user_id=str(uuid.uuid4())
         )
         
         # Create tasks
@@ -620,14 +614,16 @@ async def test_complex_workflow(postgres_db):
             for i, task in enumerate(tasks)
         ])
         
-        # Verify statistics
-        stats = await research_repo.get_statistics(project.id)
-        assert stats["results"]["total"] == 5
+        # Verify statistics — per-project result stats live on ResultRepository
+        stats = await result_repo.get_statistics(project.id)
+        assert stats["total_results"] == 5
         
-        # Test cleanup
-        await research_repo.delete(project.id)
+        # Test cleanup — a HARD delete is required to cascade to child rows;
+        # the default soft delete only sets deleted_at on the project row,
+        # leaving AgentTask/ResearchResult children in place.
+        await research_repo.delete(project.id, soft=False)
         
-        # Verify cascade delete
+        # Verify cascade delete (delete-orphan fires on ORM hard delete)
         remaining_tasks = await task_repo.get_by_project(project.id)
         assert len(remaining_tasks) == 0
 ```
@@ -643,7 +639,7 @@ async def test_complex_workflow(postgres_db):
 ```python
 async def safe_operation():
     try:
-        async with get_session() as session:
+        async with get_transaction() as session:
             repo = ResearchRepository(session)
             return await repo.create(...)
     except IntegrityError as e:
@@ -657,7 +653,7 @@ async def safe_operation():
 ### 3. Pagination
 ```python
 async def paginated_results(page: int = 1, per_page: int = 20):
-    async with get_session() as session:
+    async with get_transaction() as session:
         repo = ResearchRepository(session)
         
         offset = (page - 1) * per_page
@@ -720,7 +716,7 @@ class AuditedRepository(BaseRepository):
 ### Upsert Pattern
 ```python
 async def upsert_result(project_id: UUID, source_id: str, content: Dict):
-    async with get_session() as session:
+    async with get_transaction() as session:
         repo = ResultRepository(session)
         
         # Try to find existing
@@ -744,7 +740,7 @@ async def upsert_result(project_id: UUID, source_id: str, content: Dict):
 ### Batch Processing
 ```python
 async def process_batch(items: List[Dict], batch_size: int = 100):
-    async with get_session() as session:
+    async with get_transaction() as session:
         repo = ResultRepository(session)
         
         results = []
@@ -755,8 +751,8 @@ async def process_batch(items: List[Dict], batch_size: int = 100):
             batch_results = await repo.bulk_create(batch)
             results.extend(batch_results)
             
-            # Commit periodically
-            await session.commit()
+            # Flush periodically (get_transaction() commits once on exit)
+            await session.flush()
         
         return results
 ```

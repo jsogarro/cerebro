@@ -2,7 +2,12 @@
 
 ## Overview
 
-This guide covers deployment strategies, infrastructure setup, monitoring, and operational procedures for the Multi-Agent Research Platform. The platform is designed for cloud-native deployment with support for multiple environments and scaling strategies.
+This guide covers deployment strategies, infrastructure setup, monitoring, and operational procedures for **Cerebro** — a multi-agent LLM research platform whose current focus is financial research (US equities). Cerebro is a FastAPI application that routes natural-language queries through the in-process Multi-Agent System Router (MASR) to hierarchical domain supervisors.
+
+Two identity notes matter for operators:
+
+- **Product vs. infra naming.** The product is **Cerebro**, but the deployment artifacts still carry the pre-rebrand **`research-platform`** identity: the FastAPI title is `Research Platform API`, the Kubernetes namespace is `research-platform`, images are published under `gcr.io/PROJECT_ID/research-platform-api`, the database is `research_db`, and the CLI is `research-cli`. These infra names are accurate and are preserved verbatim in the manifests below. Do not rename them.
+- **No worker tier.** Query execution runs **in-process** via `DirectExecutionService` (`src/api/services/direct_execution_service.py`), an asyncio engine that spawns a background task per request. It replaced Temporal, which has been removed from the codebase. There is no separate worker deployment, no workflow engine, and no `temporalio` dependency. Any leftover `TEMPORAL_HOST` / `TEMPORAL_NAMESPACE` settings are dead vestiges and are not required to run the service.
 
 ## Architecture Overview
 
@@ -10,76 +15,64 @@ This guide covers deployment strategies, infrastructure setup, monitoring, and o
 
 ```mermaid
 graph TB
-    subgraph "Load Balancer"
+    subgraph "Edge"
         LB[Load Balancer]
         CDN[CDN]
     end
-    
+
     subgraph "Application Layer"
         API1[API Instance 1]
         API2[API Instance 2]
         API3[API Instance 3]
-        WORKER1[Temporal Worker 1]
-        WORKER2[Temporal Worker 2]
-        WORKER3[Temporal Worker 3]
     end
-    
+
     subgraph "Data Layer"
-        PG[(PostgreSQL Cluster)]
-        REDIS[(Redis Cluster)]
-        TEMPORAL[(Temporal Cluster)]
+        PG[(PostgreSQL)]
+        REDIS[(Redis)]
     end
-    
+
     subgraph "External Services"
         GEMINI[Google Gemini API]
         MCP[MCP Tool Servers]
         STORAGE[Object Storage]
     end
-    
+
     subgraph "Monitoring"
         PROMETHEUS[Prometheus]
         GRAFANA[Grafana]
-        LOGS[Log Aggregation]
         ALERTS[Alerting]
     end
-    
+
     CDN --> LB
     LB --> API1
     LB --> API2
     LB --> API3
-    
+
     API1 --> PG
     API2 --> PG
     API3 --> PG
-    
+
     API1 --> REDIS
     API2 --> REDIS
     API3 --> REDIS
-    
-    WORKER1 --> TEMPORAL
-    WORKER2 --> TEMPORAL
-    WORKER3 --> TEMPORAL
-    
+
     API1 --> GEMINI
     API2 --> GEMINI
     API3 --> GEMINI
-    
-    WORKER1 --> MCP
-    WORKER2 --> MCP
-    WORKER3 --> MCP
-    
-    TEMPORAL --> PG
-    
+
+    API1 --> MCP
+    API2 --> MCP
+    API3 --> MCP
+
     API1 --> PROMETHEUS
     API2 --> PROMETHEUS
     API3 --> PROMETHEUS
-    WORKER1 --> PROMETHEUS
-    WORKER2 --> PROMETHEUS
-    WORKER3 --> PROMETHEUS
-    
+
     PROMETHEUS --> GRAFANA
     PROMETHEUS --> ALERTS
 ```
+
+Each API instance runs `DirectExecutionService` internally, so scaling the API tier scales execution capacity — there is no separate pool of workers to scale independently.
 
 ## Deployment Strategies
 
@@ -87,12 +80,14 @@ graph TB
 
 #### Production Docker Compose
 
+There is a single service tier: the API. The repo's `docker-compose.production.yml` still defines a build-only `worker` service (a Temporal-era vestige) with no `image:` key, but it cannot be built — its `docker/Dockerfile.worker` does not exist in the repo — and there is no Temporal server. The Compose file below therefore omits it.
+
 ```yaml
 # docker-compose.prod.yml
 version: '3.8'
 
 services:
-  # API Services
+  # API Services (run DirectExecutionService in-process)
   api:
     image: research-platform/api:${VERSION}
     deploy:
@@ -108,44 +103,18 @@ services:
       - ENVIRONMENT=production
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
-      - TEMPORAL_HOST=${TEMPORAL_HOST}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     networks:
       - app-network
     depends_on:
       - postgres
       - redis
-      - temporal
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  # Temporal Workers
-  temporal-worker:
-    image: research-platform/worker:${VERSION}
-    deploy:
-      replicas: 3
-      resources:
-        limits:
-          memory: 4G
-          cpus: '2.0'
-        reservations:
-          memory: 2G
-          cpus: '1.0'
-    environment:
-      - ENVIRONMENT=production
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - TEMPORAL_HOST=${TEMPORAL_HOST}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-    networks:
-      - app-network
-    depends_on:
-      - temporal
-      - postgres
 
   # Load Balancer
   nginx:
@@ -163,7 +132,7 @@ services:
 
   # Database
   postgres:
-    image: postgres:15
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: research_db
       POSTGRES_USER: research
@@ -192,20 +161,6 @@ services:
         limits:
           memory: 1G
           cpus: '0.5'
-
-  # Temporal
-  temporal:
-    image: temporalio/auto-setup:latest
-    environment:
-      - DB=postgresql
-      - DB_PORT=5432
-      - POSTGRES_USER=temporal
-      - POSTGRES_PWD=${TEMPORAL_DB_PASSWORD}
-      - POSTGRES_SEEDS=postgres
-    networks:
-      - app-network
-    depends_on:
-      - postgres
 
   # Monitoring
   prometheus:
@@ -255,51 +210,50 @@ http {
         least_conn;
         server api:8000 max_fails=3 fail_timeout=30s;
     }
-    
+
     # Rate limiting
     limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
-    limit_req_zone $binary_remote_addr zone=uploads:10m rate=1r/s;
-    
+
     server {
         listen 80;
         server_name api.researchplatform.com;
-        
+
         # Redirect HTTP to HTTPS
         return 301 https://$server_name$request_uri;
     }
-    
+
     server {
         listen 443 ssl http2;
         server_name api.researchplatform.com;
-        
+
         # SSL Configuration
         ssl_certificate /etc/nginx/ssl/cert.pem;
         ssl_certificate_key /etc/nginx/ssl/key.pem;
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
-        
+
         # Security Headers
         add_header X-Frame-Options DENY;
         add_header X-Content-Type-Options nosniff;
         add_header X-XSS-Protection "1; mode=block";
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
-        
+
         # API Routes
         location /api/ {
             limit_req zone=api burst=20 nodelay;
-            
+
             proxy_pass http://api_backend;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            
+
             # Timeouts
             proxy_connect_timeout 30s;
             proxy_send_timeout 30s;
             proxy_read_timeout 60s;
         }
-        
+
         # WebSocket Support
         location /ws/ {
             proxy_pass http://api_backend;
@@ -310,26 +264,12 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            
+
             # WebSocket timeouts
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
         }
-        
-        # File Uploads
-        location /api/v1/reports/upload {
-            limit_req zone=uploads burst=5 nodelay;
-            client_max_body_size 50M;
-            
-            proxy_pass http://api_backend;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            
-            proxy_request_buffering off;
-        }
-        
+
         # Health Checks
         location /health {
             access_log off;
@@ -340,6 +280,8 @@ http {
 ```
 
 ### 2. Kubernetes Deployment
+
+The k8s manifests deploy a single application workload: the API. (A `research-platform-worker` Deployment still exists in the repo's `k8s/` directory, but it is a Temporal-era vestige — it has no worker entrypoint module, no command override, and its liveness probe is just `python -c 'import sys; sys.exit(0)'`. Do not treat it as an execution tier; it is not documented here.)
 
 #### Namespace and Resources
 
@@ -365,7 +307,6 @@ metadata:
 data:
   ENVIRONMENT: "production"
   LOG_LEVEL: "INFO"
-  TEMPORAL_HOST: "temporal.research-platform.svc.cluster.local:7233"
   REDIS_URL: "redis://redis.research-platform.svc.cluster.local:6379"
 
 ---
@@ -381,6 +322,8 @@ data:
   JWT_SECRET_KEY: <base64-encoded-jwt-secret>
   REDIS_PASSWORD: <base64-encoded-redis-password>
 ```
+
+> The repo's checked-in ConfigMap still sets `TEMPORAL_NAMESPACE`. That value is inert — nothing in `src/` reads it on the query path — so it is omitted here and can be dropped from your ConfigMap.
 
 #### API Deployment
 
@@ -405,7 +348,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: research-platform/api:latest
+        image: gcr.io/PROJECT_ID/research-platform-api:latest
         ports:
         - containerPort: 8000
         env:
@@ -461,61 +404,6 @@ spec:
   type: ClusterIP
 ```
 
-#### Temporal Worker Deployment
-
-```yaml
-# k8s/worker-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: research-platform-worker
-  namespace: research-platform
-  labels:
-    app: research-platform-worker
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: research-platform-worker
-  template:
-    metadata:
-      labels:
-        app: research-platform-worker
-    spec:
-      containers:
-      - name: worker
-        image: research-platform/worker:latest
-        env:
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: research-platform-secrets
-              key: DATABASE_URL
-        - name: GEMINI_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: research-platform-secrets
-              key: GEMINI_API_KEY
-        envFrom:
-        - configMapRef:
-            name: research-platform-config
-        resources:
-          requests:
-            memory: "2Gi"
-            cpu: "1"
-          limits:
-            memory: "4Gi"
-            cpu: "2"
-        livenessProbe:
-          exec:
-            command:
-            - /bin/sh
-            - -c
-            - "pgrep -f 'temporal.*worker' || exit 1"
-          initialDelaySeconds: 60
-          periodSeconds: 30
-```
-
 #### Ingress Configuration
 
 ```yaml
@@ -551,6 +439,8 @@ spec:
 ```
 
 #### Horizontal Pod Autoscaler
+
+Because execution is in-process, the API HPA is the only autoscaler you need — scaling API replicas scales concurrent query execution.
 
 ```yaml
 # k8s/hpa.yaml
@@ -693,6 +583,8 @@ spec:
 
 ### Environment Configuration
 
+Only three infrastructure dependencies are required: Postgres, Redis, and a Gemini API key. There is no Temporal endpoint to configure.
+
 #### Development
 
 ```bash
@@ -702,7 +594,6 @@ DEBUG=true
 LOG_LEVEL=DEBUG
 DATABASE_URL=postgresql+asyncpg://research:research123@localhost:5432/research_db
 REDIS_URL=redis://localhost:6379/0
-TEMPORAL_HOST=localhost:7233
 ```
 
 #### Staging
@@ -714,7 +605,6 @@ DEBUG=false
 LOG_LEVEL=INFO
 DATABASE_URL=postgresql+asyncpg://research:password@staging-db.example.com:5432/research_staging_db
 REDIS_URL=redis://staging-redis.example.com:6379/0
-TEMPORAL_HOST=staging-temporal.example.com:7233
 ```
 
 #### Production
@@ -726,8 +616,9 @@ DEBUG=false
 LOG_LEVEL=WARNING
 DATABASE_URL=postgresql+asyncpg://research:secure_password@prod-db.example.com:5432/research_prod_db
 REDIS_URL=redis://prod-redis.example.com:6379/0
-TEMPORAL_HOST=prod-temporal.example.com:7233
 ```
+
+> `DEBUG` defaults to `false`; interactive `/docs` and `/redoc` are served only when `DEBUG=true`, so they are off in production.
 
 ### Infrastructure as Code
 
@@ -751,10 +642,10 @@ provider "aws" {
 # VPC and Networking
 module "vpc" {
   source = "./modules/vpc"
-  
+
   cidr_block = "10.0.0.0/16"
   availability_zones = var.availability_zones
-  
+
   tags = {
     Project     = "research-platform"
     Environment = var.environment
@@ -764,22 +655,22 @@ module "vpc" {
 # RDS Database
 module "database" {
   source = "./modules/rds"
-  
+
   vpc_id             = module.vpc.vpc_id
   subnet_ids         = module.vpc.private_subnet_ids
   security_group_ids = [module.security_groups.database_sg_id]
-  
-  engine_version     = "15.3"
+
+  engine_version     = "16.3"
   instance_class     = var.db_instance_class
   allocated_storage  = var.db_allocated_storage
-  
+
   database_name = "research_db"
   username      = "research"
-  
+
   backup_retention_period = 7
   backup_window          = "03:00-04:00"
   maintenance_window     = "sun:04:00-sun:05:00"
-  
+
   tags = {
     Project     = "research-platform"
     Environment = var.environment
@@ -789,15 +680,15 @@ module "database" {
 # ElastiCache Redis
 module "redis" {
   source = "./modules/elasticache"
-  
+
   vpc_id             = module.vpc.vpc_id
   subnet_ids         = module.vpc.private_subnet_ids
   security_group_ids = [module.security_groups.redis_sg_id]
-  
+
   node_type          = var.redis_node_type
   num_cache_nodes    = var.redis_num_nodes
   parameter_group    = "default.redis7"
-  
+
   tags = {
     Project     = "research-platform"
     Environment = var.environment
@@ -807,9 +698,9 @@ module "redis" {
 # ECS Cluster
 module "ecs" {
   source = "./modules/ecs"
-  
+
   cluster_name = "research-platform-${var.environment}"
-  
+
   tags = {
     Project     = "research-platform"
     Environment = var.environment
@@ -819,13 +710,13 @@ module "ecs" {
 # Application Load Balancer
 module "alb" {
   source = "./modules/alb"
-  
+
   vpc_id             = module.vpc.vpc_id
   subnet_ids         = module.vpc.public_subnet_ids
   security_group_ids = [module.security_groups.alb_sg_id]
-  
+
   certificate_arn = var.ssl_certificate_arn
-  
+
   tags = {
     Project     = "research-platform"
     Environment = var.environment
@@ -839,7 +730,7 @@ module "alb" {
 # helm/research-platform/Chart.yaml
 apiVersion: v2
 name: research-platform
-description: Multi-Agent Research Platform
+description: Cerebro multi-agent research platform
 type: application
 version: 1.0.0
 appVersion: "1.0.0"
@@ -847,7 +738,6 @@ appVersion: "1.0.0"
 # helm/research-platform/values.yaml
 replicaCount:
   api: 3
-  worker: 3
 
 image:
   repository: research-platform
@@ -882,13 +772,6 @@ resources:
     requests:
       cpu: 500m
       memory: 1Gi
-  worker:
-    limits:
-      cpu: 2000m
-      memory: 4Gi
-    requests:
-      cpu: 1000m
-      memory: 2Gi
 
 autoscaling:
   enabled: true
@@ -905,17 +788,31 @@ database:
 redis:
   host: redis.research-platform.svc.cluster.local
   port: 6379
-
-temporal:
-  host: temporal.research-platform.svc.cluster.local
-  port: 7233
 ```
 
 ## Monitoring and Observability
 
+### What the application actually exposes
+
+The application ships a Prometheus scrape endpoint at **`/metrics`** (a Prometheus ASGI app mounted in `src/api/main.py`). The metrics themselves are defined in `src/core/observability.py` and are LLM-centric:
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `llm_call_duration_seconds` | Histogram | `model`, `provider` | LLM provider call latency in seconds |
+| `llm_tokens_total` | Counter | `model`, `provider`, `type` | Total LLM tokens used (prompt/completion) |
+| `llm_cost_usd_total` | Counter | `model`, `provider` | Total estimated LLM call cost in USD |
+| `llm_request_cost_drift_ratio` | Histogram | `method`, `route` | Absolute ratio between MASR-estimated and actual per-request cost |
+| `llm_cost_drift_events_total` | Counter | `method`, `route`, `direction` | Count of cost-drift events beyond the alert threshold |
+
+`record_llm_call()` in `observability.py` both increments these Prometheus series and emits a structured log line via structlog. `LLMCostDriftMiddleware` (part of the request middleware stack) compares the MASR cost estimate against the actual provider cost and feeds the two drift metrics, warning when drift exceeds `0.2`.
+
+Optional distributed tracing is available via **Langfuse**, opt-in behind `LANGFUSE_ENABLED` (default `false`). There is no built-in OpenTelemetry backbone, Grafana Loki, Jaeger, CloudWatch, or Sentry integration — provision those separately if you need them.
+
 ### Metrics Collection
 
 #### Prometheus Configuration
+
+The API is the only application target — there is no worker to scrape.
 
 ```yaml
 # monitoring/prometheus.yml
@@ -933,17 +830,10 @@ alerting:
           - alertmanager:9093
 
 scrape_configs:
-  # API Metrics
+  # Cerebro API metrics (LLM observability from src/core/observability.py)
   - job_name: 'research-platform-api'
     static_configs:
       - targets: ['api:8000']
-    metrics_path: '/metrics'
-    scrape_interval: 15s
-
-  # Worker Metrics
-  - job_name: 'research-platform-worker'
-    static_configs:
-      - targets: ['worker:8000']
     metrics_path: '/metrics'
     scrape_interval: 15s
 
@@ -963,185 +853,52 @@ scrape_configs:
       - targets: ['node-exporter:9100']
 ```
 
-#### Application Metrics
-
-```python
-# src/monitoring/metrics.py
-from prometheus_client import Counter, Histogram, Gauge, Info
-
-# API Metrics
-api_requests_total = Counter(
-    'api_requests_total',
-    'Total API requests',
-    ['method', 'endpoint', 'status_code']
-)
-
-api_request_duration = Histogram(
-    'api_request_duration_seconds',
-    'API request duration',
-    ['method', 'endpoint']
-)
-
-api_active_connections = Gauge(
-    'api_active_connections',
-    'Active API connections'
-)
-
-# Research Project Metrics
-research_projects_total = Counter(
-    'research_projects_total',
-    'Total research projects created',
-    ['user_id', 'status']
-)
-
-research_project_duration = Histogram(
-    'research_project_duration_seconds',
-    'Research project completion time',
-    ['depth_level']
-)
-
-research_project_quality = Histogram(
-    'research_project_quality_score',
-    'Research project quality scores'
-)
-
-# Agent Metrics
-agent_executions_total = Counter(
-    'agent_executions_total',
-    'Total agent executions',
-    ['agent_type', 'status']
-)
-
-agent_execution_duration = Histogram(
-    'agent_execution_duration_seconds',
-    'Agent execution duration',
-    ['agent_type']
-)
-
-agent_confidence_scores = Histogram(
-    'agent_confidence_scores',
-    'Agent confidence scores',
-    ['agent_type']
-)
-
-# Temporal Metrics
-temporal_workflow_executions = Counter(
-    'temporal_workflow_executions_total',
-    'Total Temporal workflow executions',
-    ['workflow_type', 'status']
-)
-
-temporal_activity_executions = Counter(
-    'temporal_activity_executions_total',
-    'Total Temporal activity executions',
-    ['activity_name', 'status']
-)
-
-# System Info
-app_info = Info(
-    'research_platform_app',
-    'Research Platform application info'
-)
-
-# Initialize app info
-app_info.info({
-    'version': '1.0.0',
-    'environment': 'production',
-    'build_date': '2024-01-01'
-})
-```
-
-#### Metrics Middleware
-
-```python
-# src/middleware/metrics_middleware.py
-import time
-from fastapi import Request, Response
-from src.monitoring.metrics import api_requests_total, api_request_duration
-
-async def metrics_middleware(request: Request, call_next):
-    """Middleware to collect API metrics."""
-    
-    start_time = time.time()
-    
-    # Extract route information
-    method = request.method
-    path = request.url.path
-    
-    # Process request
-    response = await call_next(request)
-    
-    # Calculate duration
-    duration = time.time() - start_time
-    
-    # Record metrics
-    api_requests_total.labels(
-        method=method,
-        endpoint=path,
-        status_code=response.status_code
-    ).inc()
-    
-    api_request_duration.labels(
-        method=method,
-        endpoint=path
-    ).observe(duration)
-    
-    # Add metrics to response headers
-    response.headers["X-Response-Time"] = str(duration)
-    
-    return response
-```
-
 ### Grafana Dashboards
 
-#### Research Platform Overview Dashboard
+Build panels from the metrics the app actually exports.
 
 ```json
 {
   "dashboard": {
-    "title": "Research Platform Overview",
+    "title": "Cerebro LLM Overview",
     "panels": [
       {
-        "title": "API Request Rate",
+        "title": "LLM Call Rate by Provider",
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(api_requests_total[5m])",
-            "legendFormat": "{{method}} {{endpoint}}"
+            "expr": "sum by (provider, model) (rate(llm_call_duration_seconds_count[5m]))",
+            "legendFormat": "{{provider}} {{model}}"
           }
         ]
       },
       {
-        "title": "API Response Times",
+        "title": "LLM Call Latency (p95)",
         "type": "graph",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m]))",
-            "legendFormat": "95th percentile"
-          },
-          {
-            "expr": "histogram_quantile(0.50, rate(api_request_duration_seconds_bucket[5m]))",
-            "legendFormat": "50th percentile"
+            "expr": "histogram_quantile(0.95, sum by (le, provider) (rate(llm_call_duration_seconds_bucket[5m])))",
+            "legendFormat": "{{provider}} p95"
           }
         ]
       },
       {
-        "title": "Active Research Projects",
+        "title": "Cumulative LLM Cost (USD)",
         "type": "stat",
         "targets": [
           {
-            "expr": "sum(research_projects_active)",
-            "legendFormat": "Active Projects"
+            "expr": "sum(llm_cost_usd_total)",
+            "legendFormat": "Total cost"
           }
         ]
       },
       {
-        "title": "Agent Success Rate",
+        "title": "Cost Drift Events",
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(agent_executions_total{status=\"success\"}[5m]) / rate(agent_executions_total[5m])",
-            "legendFormat": "{{agent_type}}"
+            "expr": "sum by (direction) (rate(llm_cost_drift_events_total[10m]))",
+            "legendFormat": "{{direction}}"
           }
         ]
       }
@@ -1152,32 +909,32 @@ async def metrics_middleware(request: Request, call_next):
 
 ### Alerting
 
-#### Alert Rules
+Alert on the metrics the app exports plus your infrastructure exporters. (There is no workflow-failure alert because there is no workflow engine.)
 
 ```yaml
 # monitoring/alerts.yml
 groups:
-  - name: research_platform_alerts
+  - name: cerebro_alerts
     rules:
-      # High Error Rate
-      - alert: HighErrorRate
-        expr: rate(api_requests_total{status_code=~"5.."}[5m]) > 0.1
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "High error rate detected"
-          description: "API error rate is {{ $value }} requests/second"
-
-      # High Response Time
-      - alert: HighResponseTime
-        expr: histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m])) > 2
+      # Slow LLM Calls
+      - alert: HighLLMLatency
+        expr: histogram_quantile(0.95, sum by (le, provider) (rate(llm_call_duration_seconds_bucket[5m]))) > 30
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High API response time"
-          description: "95th percentile response time is {{ $value }} seconds"
+          summary: "High LLM provider latency"
+          description: "95th percentile LLM call latency for {{ $labels.provider }} is {{ $value }} seconds"
+
+      # Sustained Cost Drift
+      - alert: HighCostDrift
+        expr: sum(rate(llm_cost_drift_events_total[10m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MASR cost estimates drifting from actuals"
+          description: "Cost drift event rate is {{ $value }} events/second"
 
       # Database Connection Issues
       - alert: DatabaseConnectionFailure
@@ -1198,16 +955,6 @@ groups:
         annotations:
           summary: "Redis connection failure"
           description: "Redis cache is down"
-
-      # Temporal Workflow Failures
-      - alert: HighWorkflowFailureRate
-        expr: rate(temporal_workflow_executions{status="failed"}[10m]) > 0.05
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High workflow failure rate"
-          description: "Temporal workflow failure rate is {{ $value }} failures/second"
 
       # Memory Usage
       - alert: HighMemoryUsage
@@ -1287,22 +1034,27 @@ receivers:
 
 #### Structured Logging Configuration
 
+Cerebro uses `structlog` throughout — modules obtain a logger via `structlog.get_logger()` (for example in `src/core/observability.py`, `src/api/middleware/`, `src/auth/`, and `src/security/`). Note one important gap, however: the codebase **never calls `structlog.configure()`** — there is no central logging-setup module. As a result structlog falls back to its **default console renderer in every environment, including production**, so production logs are human-readable console lines, not JSON.
+
+If you want JSON output for log aggregation, you must add a startup configuration step that selects `structlog.processors.JSONRenderer` in production. The block below is a **template you would need to add** — it does **not** exist in the repo today (there is no `src/core/logging.py`).
+
 ```python
-# src/core/logging.py
+# Example logging-setup module you could add (NOT present in the repo)
+import sys
 import structlog
 import logging
 from src.core.config import settings
 
 def configure_logging():
     """Configure structured logging."""
-    
+
     # Configure standard library logging
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
         level=getattr(logging, settings.LOG_LEVEL.upper())
     )
-    
+
     # Configure structlog
     structlog.configure(
         processors=[
@@ -1314,7 +1066,7 @@ def configure_logging():
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
-            structlog.processors.JSONRenderer() if settings.ENVIRONMENT == "production" 
+            structlog.processors.JSONRenderer() if settings.ENVIRONMENT == "production"
             else structlog.dev.ConsoleRenderer(colors=True)
         ],
         context_class=dict,
@@ -1328,7 +1080,7 @@ logger = structlog.get_logger(__name__)
 
 # Contextual logging
 logger.info(
-    "Processing research project",
+    "Processing research query",
     project_id="proj-123",
     user_id="user-456",
     agent_type="literature_review",
@@ -1337,6 +1089,8 @@ logger.info(
 ```
 
 #### Log Aggregation with ELK Stack
+
+If you want centralized log search, ship the logs to an ELK (or equivalent) stack. This is an optional add-on, not a built-in dependency. Note the caveat above: until you add JSON log configuration, structlog emits console-formatted lines rather than JSON, so wire up `JSONRenderer` first if your pipeline expects structured JSON.
 
 ```yaml
 # monitoring/elasticsearch.yml
@@ -1376,71 +1130,51 @@ volumes:
 
 ### Health Checks
 
-#### Application Health Checks
+The application exposes three health endpoints from `src/api/routes/health.py`:
+
+- **`GET /health`** — basic liveness for load balancers; returns `{"status": "healthy", "service": "research-platform-api"}`.
+- **`GET /ready`** — Kubernetes readiness.
+- **`GET /live`** — Kubernetes liveness; returns `{"status": "alive"}`.
+
+**Important operational caveat:** `/ready` currently returns a **static, always-`ok` payload** — its dependency checks are not yet implemented (they are `TODO`s in the source). It does not actually probe Postgres or Redis, and the `"temporal": "ok"` entry is a leftover string, not evidence that any Temporal service exists. Treat `/ready` as "the process is up and serving", not as a real dependency check. If you need genuine readiness gating, implement the checks before relying on them.
 
 ```python
-# src/api/routes/health.py
-from fastapi import APIRouter, Depends, HTTPException
-from src.dependencies import get_database_session, get_redis_client
+# src/api/routes/health.py (as shipped)
+from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
-@router.get("/health")
-async def health_check():
-    """Basic health check."""
-    return {"status": "healthy", "service": "research-platform-api"}
-
-@router.get("/ready")
-async def readiness_check(
-    db_session = Depends(get_database_session),
-    redis_client = Depends(get_redis_client)
-):
-    """Comprehensive readiness check."""
-    
-    checks = {
-        "database": "unknown",
-        "redis": "unknown",
-        "temporal": "unknown"
-    }
-    
-    # Database check
-    try:
-        await db_session.execute(text("SELECT 1"))
-        checks["database"] = "ok"
-    except Exception as e:
-        checks["database"] = f"error: {str(e)}"
-    
-    # Redis check
-    try:
-        await redis_client.ping()
-        checks["redis"] = "ok"
-    except Exception as e:
-        checks["redis"] = f"error: {str(e)}"
-    
-    # Temporal check
-    try:
-        from src.temporal.client import temporal_client
-        await temporal_client.service_client.health()
-        checks["temporal"] = "ok"
-    except Exception as e:
-        checks["temporal"] = f"error: {str(e)}"
-    
-    # Determine overall status
-    all_healthy = all(status == "ok" for status in checks.values())
-    status_code = 200 if all_healthy else 503
-    
+@router.get("/health", status_code=status.HTTP_200_OK)
+async def health_check() -> JSONResponse:
+    """Basic health check endpoint."""
     return JSONResponse(
-        status_code=status_code,
+        content={"status": "healthy", "service": "research-platform-api"}
+    )
+
+@router.get("/ready", status_code=status.HTTP_200_OK)
+async def readiness_check() -> JSONResponse:
+    """Readiness check endpoint for Kubernetes."""
+    # TODO: Check database connection
+    # TODO: Check Redis connection
+    # TODO: Check Temporal connection
+
+    return JSONResponse(
         content={
-            "status": "ready" if all_healthy else "not ready",
-            "checks": checks
+            "status": "ready",
+            "service": "research-platform-api",
+            "checks": {
+                "database": "ok",
+                "redis": "ok",
+                "temporal": "ok",
+            },
         }
     )
 
-@router.get("/live")
-async def liveness_check():
-    """Liveness check for container orchestration."""
-    return {"status": "alive"}
+@router.get("/live", status_code=status.HTTP_200_OK)
+async def liveness_check() -> JSONResponse:
+    """Liveness check endpoint for Kubernetes."""
+    return JSONResponse(content={"status": "alive"})
 ```
 
 ## Security
@@ -1466,6 +1200,12 @@ spec:
         ingress:
           class: nginx
 ```
+
+### Application Auth & Rate Limiting
+
+- **JWT:** RS256, 15-minute access tokens / 7-day refresh tokens, keys mounted at `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem`, bcrypt with 12 rounds, `PASSWORD_MIN_LENGTH=12`. Authentication is enforced **per-endpoint** via FastAPI `Depends`, not by a global middleware — the `AuthMiddleware` in the stack is a no-op. As a result `/api/v1/query`, `/api/v1/agents`, and `/api/v1/masr` are effectively unauthenticated; only the auth, GDPR, and parts of the research/reports routers require a token. Put an authenticating gateway in front if you need blanket protection.
+- **Rate limiting:** a single global limiter, `MAX_REQUESTS_PER_MINUTE=100` with `ENABLE_RATE_LIMITING=True`. There are no tiers, no burst config, and no per-endpoint overrides at the application layer — use the Nginx/Ingress rate limits above for finer control.
+- **Middleware order (outermost first at request time):** Auth (no-op) → LLMCostDrift → RateLimit → Idempotency → CORS → application.
 
 ### Network Security
 
@@ -1536,6 +1276,8 @@ resource "aws_security_group" "database" {
 
 ## Backup and Disaster Recovery
 
+All durable state lives in Postgres and Redis. There is no separate workflow-engine state to back up — execution state is held in-memory by `DirectExecutionService` (with optional checkpoints persisted to the `workflow_checkpoints` table in Postgres), so a Postgres backup captures it.
+
 ### Database Backups
 
 #### Automated Backups
@@ -1575,56 +1317,32 @@ echo "Database backup completed: ${BACKUP_FILE}.gz"
 
 ```python
 # scripts/backup-monitor.py
-import boto3
 import datetime
-from src.monitoring.metrics import backup_success, backup_duration
+import boto3
 
-def monitor_backup_status():
-    """Monitor backup status and update metrics."""
-    
+def check_todays_backup() -> bool:
+    """Return True if a database backup exists for today."""
     s3 = boto3.client('s3')
     bucket = 'research-platform-backups'
-    
-    # Check for today's backup
     today = datetime.datetime.now().strftime('%Y%m%d')
-    
+
     try:
         response = s3.list_objects_v2(
             Bucket=bucket,
             Prefix=f'database/research_db_backup_{today}'
         )
-        
-        if 'Contents' in response:
-            backup_success.labels(type='database').set(1)
-            latest_backup = max(response['Contents'], key=lambda x: x['LastModified'])
-            
-            # Calculate backup age
-            backup_age = datetime.datetime.now(tz=datetime.timezone.utc) - latest_backup['LastModified']
-            backup_duration.labels(type='database').set(backup_age.total_seconds())
-        else:
-            backup_success.labels(type='database').set(0)
-            
+        return 'Contents' in response
     except Exception as e:
-        backup_success.labels(type='database').set(0)
         print(f"Backup monitoring failed: {e}")
+        return False
+
+
+if __name__ == "__main__":
+    ok = check_todays_backup()
+    print("backup_present" if ok else "backup_missing")
 ```
 
-### Application State Backups
-
-#### Temporal Workflow State
-
-```bash
-#!/bin/bash
-# scripts/backup-temporal.sh
-
-# Export workflow definitions
-tctl --namespace research-platform workflow list --query 'WorkflowType="ResearchWorkflow"' \
-    --output json > temporal_workflows_backup.json
-
-# Upload to S3
-aws s3 cp temporal_workflows_backup.json \
-    s3://research-platform-backups/temporal/workflows_$(date +%Y%m%d).json
-```
+Wire the exit status of this check into whatever your platform uses for scheduled-job alerting (for example, a CloudWatch alarm on the job's exit code, or a Prometheus Pushgateway push if you run it as a cron job).
 
 ## Performance Optimization
 
@@ -1632,20 +1350,22 @@ aws s3 cp temporal_workflows_backup.json \
 
 #### Redis Caching
 
+The actual cache layer lives in the **`src/services/cache/`** package: `CacheManager` (`cache_manager.py`) plus the pluggable strategies in `cache_strategies.py` (`TTLStrategy`, `LRUStrategy`, `DependencyStrategy`, `HybridStrategy`, `VersionedCacheStrategy`). The snippet below is an illustrative sketch of the get/set/delete pattern, not a verbatim copy of that module.
+
 ```python
-# src/services/cache_service.py
+# Illustrative Redis cache wrapper (see src/services/cache/ for the real CacheManager)
 import json
 import hashlib
 from typing import Any, Optional
 from redis.asyncio import Redis
 
 class CacheService:
-    """Redis-based caching service."""
-    
+    """Redis-based caching service (illustrative)."""
+
     def __init__(self, redis_client: Redis):
         self.redis = redis_client
         self.default_ttl = 3600  # 1 hour
-    
+
     async def get(self, key: str) -> Optional[Any]:
         """Get value from cache."""
         try:
@@ -1655,21 +1375,21 @@ class CacheService:
         except Exception as e:
             logger.warning(f"Cache get failed: {e}")
         return None
-    
+
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Set value in cache."""
         try:
             serialized = json.dumps(value, default=str)
             await self.redis.setex(
-                key, 
-                ttl or self.default_ttl, 
+                key,
+                ttl or self.default_ttl,
                 serialized
             )
             return True
         except Exception as e:
             logger.warning(f"Cache set failed: {e}")
             return False
-    
+
     async def delete(self, key: str) -> bool:
         """Delete value from cache."""
         try:
@@ -1678,7 +1398,7 @@ class CacheService:
         except Exception as e:
             logger.warning(f"Cache delete failed: {e}")
             return False
-    
+
     def generate_key(self, prefix: str, *args) -> str:
         """Generate cache key."""
         key_data = f"{prefix}:{'|'.join(str(arg) for arg in args)}"
@@ -1687,80 +1407,62 @@ class CacheService:
 
 ### Database Optimization
 
+The async SQLAlchemy engine and session factory live in **`src/models/db/session.py`** (`create_async_engine` + `async_sessionmaker`), reading the URL from `settings.DATABASE_URL`. Data access is organized under the repository pattern in **`src/repositories/`** (`BaseRepository[ModelType]` plus `ResearchRepository`, `ResultRepository`, `TaskRepository`, `CheckpointRepository`, `ReportRepository`, `UserRepository`, `APIKeyRepository`).
+
 #### Connection Pooling
 
+Tune pool settings on the engine created in `src/models/db/session.py`:
+
 ```python
-# src/database/connection.py
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+# src/models/db/session.py (pool tuning)
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from src.core.config import settings
 
-# Create engine with optimized pool settings
 engine = create_async_engine(
     settings.DATABASE_URL,
-    pool_size=20,  # Number of connections to maintain
-    max_overflow=30,  # Additional connections above pool_size
-    pool_pre_ping=True,  # Validate connections before use
-    pool_recycle=3600,  # Recycle connections after 1 hour
-    echo=settings.DEBUG,  # Log SQL in debug mode
+    pool_size=20,        # connections to maintain
+    max_overflow=30,     # additional connections above pool_size
+    pool_pre_ping=True,  # validate connections before use
+    pool_recycle=3600,   # recycle connections after 1 hour
+    echo=settings.DEBUG, # log SQL in debug mode
 )
 
-AsyncSessionLocal = sessionmaker(
+async_session = async_sessionmaker(
     engine,
     class_=AsyncSession,
-    expire_on_commit=False
+    expire_on_commit=False,
 )
 ```
 
 #### Query Optimization
 
+Keep read-heavy queries inside the repository layer and use eager loading to avoid N+1 access. The following is an illustrative extension of `ResearchRepository` in `src/repositories/`:
+
 ```python
-# src/repositories/optimized_queries.py
-from sqlalchemy import select, func, and_
+# Illustrative eager-loading query within src/repositories/
+from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload, joinedload
 
-class OptimizedResearchRepository:
-    """Repository with optimized queries."""
-    
-    async def get_projects_with_results(self, user_id: str) -> list[ResearchProject]:
-        """Get projects with eager loading of related data."""
-        
-        query = (
-            select(ResearchProject)
-            .options(
-                selectinload(ResearchProject.agent_tasks),
-                joinedload(ResearchProject.generated_reports)
-            )
-            .where(
-                and_(
-                    ResearchProject.user_id == user_id,
-                    ResearchProject.status == 'completed'
-                )
-            )
-            .order_by(ResearchProject.created_at.desc())
+async def get_projects_with_results(self, user_id: str) -> list[ResearchProject]:
+    """Get projects with eager loading of related data."""
+    query = (
+        select(ResearchProject)
+        .options(
+            selectinload(ResearchProject.agent_tasks),
+            joinedload(ResearchProject.generated_reports),
         )
-        
-        result = await self.session.execute(query)
-        return result.scalars().all()
-    
-    async def get_project_statistics(self) -> dict:
-        """Get aggregated project statistics."""
-        
-        query = (
-            select(
-                func.count(ResearchProject.id).label('total_projects'),
-                func.avg(ResearchProject.quality_score).label('avg_quality'),
-                func.count(
-                    case(
-                        (ResearchProject.status == 'completed', 1),
-                        else_=None
-                    )
-                ).label('completed_projects')
+        .where(
+            and_(
+                ResearchProject.user_id == user_id,
+                ResearchProject.status == 'completed',
             )
         )
-        
-        result = await self.session.execute(query)
-        return result.first()._asdict()
+        .order_by(ResearchProject.created_at.desc())
+    )
+    result = await self.session.execute(query)
+    return result.scalars().all()
 ```
 
-This comprehensive deployment and monitoring guide provides the foundation for successfully operating the Multi-Agent Research Platform in production environments with proper observability, security, and reliability practices.
+---
+
+This guide reflects Cerebro's actual deployment shape: a single stateless API tier running in-process asyncio execution (`DirectExecutionService`), backed by Postgres and Redis, observed through the LLM-centric Prometheus metrics in `src/core/observability.py`. There is no worker tier and no workflow engine to operate.

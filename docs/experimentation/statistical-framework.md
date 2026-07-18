@@ -2,7 +2,27 @@
 
 ## Overview
 
-This document details the rigorous statistical framework powering Cerebro's Enhanced A/B Testing System. We employ state-of-the-art statistical methods including Bayesian inference, multi-armed bandits, and advanced hypothesis testing to ensure valid, efficient, and actionable experimental results.
+This document details the statistical framework underlying Cerebro's experimentation subsystem. It describes the methods the framework is designed around — Bayesian inference, multi-armed bandits, and classical hypothesis testing — and maps each to the actual implementation.
+
+The implementation lives in `src/ai_brain/experimentation/statistical/`:
+
+- **`enhanced_statistical_engine.py`** — the primary engine. It defines `EnhancedStatisticalEngine` (the orchestrating façade) plus three analyzers: `FrequentistAnalyzer` (t-tests, proportion tests, power analysis), `BayesianAnalyzer` (Bayesian A/B testing), and `MultiBanditOptimizer` (epsilon-greedy, Thompson sampling, UCB, and contextual bandits under a single `BanditAlgorithm` enum).
+- **`bayesian_experiment_design.py`** — `BayesianExperimentDesigner` for Bayesian-optimization-based experiment design.
+- **`multi_variate_analysis.py`** — `MultiVariateAnalyzer` for multi-metric / Pareto analysis.
+
+> **Class names in older drafts of this doc did not exist in the codebase.** The classes `BayesianABTest`, `ThompsonSampling`, `ContextualBandit`, `UCB`, `MultipleComparisonCorrection`, `PowerAnalysis`, `SequentialTesting`, and `EffectSizeCalculator` are not defined anywhere in `src/`. The corresponding functionality is provided by the classes listed above. The code blocks in this document are **illustrative** — they show the statistical technique, not the exact runtime API. Read the source files above for the real signatures.
+
+### Dependency reality (important)
+
+The framework is written defensively around optional dependencies. Only one of them is an actual project dependency:
+
+- **scipy** — the only statistics library declared in `pyproject.toml` (`scipy>=1.13.0`). Core frequentist tests rely on it.
+- **statsmodels** — *optional*. `enhanced_statistical_engine.py` guards the import (`STATSMODELS_AVAILABLE`); when it is missing, power analysis falls back to a hardcoded `power = 0.8` assumption and proportion tests fall back to a manual z-test computation.
+- **PyMC / ArviZ** — *not installed* and not in `pyproject.toml`. `BayesianAnalyzer.__init__` raises `ImportError("PyMC required for Bayesian analysis - install with: pip install pymc")` when constructed without them (`enhanced_statistical_engine.py:503`). **Bayesian A/B testing is therefore non-functional out of the box**; `EnhancedStatisticalEngine` sets `self.bayesian = None` and routes Bayesian requests to the frequentist analyzer instead.
+- **scikit-learn** — *not a dependency at all*. Any snippet below that imports `sklearn` (e.g. the contextual-bandit example) cannot run as written; the real contextual-bandit path is inside `MultiBanditOptimizer`.
+- **mabwiser** — *optional* (`MAB_AVAILABLE` guard); absent by default.
+
+`EnhancedStatisticalEngine.get_engine_stats()` reports which of these capabilities are actually available at runtime.
 
 ## Core Statistical Principles
 
@@ -19,14 +39,18 @@ We use a hybrid approach leveraging strengths of both paradigms:
 
 ## Bayesian A/B Testing with PyMC
 
-### Implementation Architecture
+> **Real class: `BayesianAnalyzer` (`enhanced_statistical_engine.py:489`), method `analyze_bayesian_ab_test`.** It requires PyMC + ArviZ, neither of which is installed by default, so this path is **non-functional out of the box** and callers are transparently downgraded to `FrequentistAnalyzer`. The block below is **illustrative** — it shows the PyMC model the analyzer is designed around, not the shipped API.
+
+### Illustrative model architecture
 
 ```python
+# ILLUSTRATIVE — requires `pip install pymc arviz` (not project dependencies).
+# The shipped implementation is BayesianAnalyzer in enhanced_statistical_engine.py.
 import pymc as pm
 import arviz as az
 from typing import Tuple, Dict, Any
 
-class BayesianABTest:
+class BayesianABTest:  # illustrative; real class is BayesianAnalyzer
     """
     Bayesian A/B testing with early stopping using PyMC.
     """
@@ -86,7 +110,10 @@ class BayesianABTest:
 
 ### Early Stopping with ROPE (Region of Practical Equivalence)
 
+The ROPE-based early-stopping logic in the shipped engine lives in `EnhancedStatisticalEngine.early_stopping_analysis` (`enhanced_statistical_engine.py:967`). The snippet below is **illustrative** of the ROPE calculation.
+
 ```python
+# ILLUSTRATIVE
 def _calculate_rope(self, trace, rope_width: float = 0.01) -> float:
     """
     Calculate probability that effect is within ROPE.
@@ -110,13 +137,16 @@ def _check_early_stopping(self, trace, threshold: float = 0.95) -> bool:
 
 ## Multi-Armed Bandit Algorithms
 
-### Thompson Sampling Implementation
+> **Real class: `MultiBanditOptimizer` (`enhanced_statistical_engine.py:631`).** A single optimizer implements all four strategies selected by the `BanditAlgorithm` enum — `EPSILON_GREEDY`, `THOMPSON_SAMPLING`, `UPPER_CONFIDENCE_BOUND` (UCB), and `CONTEXTUAL_BANDIT` — via `initialize_bandit`, `select_arm`, and `update_bandit`. There are no separate `ThompsonSampling`, `UCB`, or `ContextualBandit` classes. The blocks below are **illustrative** of each algorithm.
+
+### Thompson Sampling (illustrative)
 
 ```python
+# ILLUSTRATIVE — real path: MultiBanditOptimizer with BanditAlgorithm.THOMPSON_SAMPLING
 import numpy as np
 from scipy import stats
 
-class ThompsonSampling:
+class ThompsonSampling:  # illustrative
     """
     Thompson Sampling for multi-armed bandit optimization.
     Particularly effective for MASR routing decisions.
@@ -159,11 +189,14 @@ class ThompsonSampling:
 
 ### Contextual Bandits for Personalization
 
+> **scikit-learn is NOT a project dependency**, so the `sklearn`-based example below cannot run as written — it is purely illustrative. The shipped contextual-bandit path is the `CONTEXTUAL_BANDIT` branch of `MultiBanditOptimizer`, which does not depend on scikit-learn.
+
 ```python
+# ILLUSTRATIVE — sklearn is not installed; real path: MultiBanditOptimizer (CONTEXTUAL_BANDIT)
 from sklearn.linear_model import SGDClassifier
 import numpy as np
 
-class ContextualBandit:
+class ContextualBandit:  # illustrative; sklearn unavailable in this project
     """
     Contextual bandit using online learning.
     Adapts routing based on query features.
@@ -219,10 +252,11 @@ class ContextualBandit:
             )
 ```
 
-### Upper Confidence Bound (UCB) Algorithm
+### Upper Confidence Bound (UCB) Algorithm (illustrative)
 
 ```python
-class UCB:
+# ILLUSTRATIVE — real path: MultiBanditOptimizer with BanditAlgorithm.UPPER_CONFIDENCE_BOUND
+class UCB:  # illustrative
     """
     Upper Confidence Bound algorithm for exploration/exploitation.
     """
@@ -265,11 +299,15 @@ class UCB:
 
 ### Multiple Comparison Corrections
 
+> **Real implementation: `EnhancedStatisticalEngine._bonferroni_correction` (`:1075`) and `._fdr_correction` (`:1080`)**, selected by the `multiple_comparison` argument to `comprehensive_analysis`. The engine ships Bonferroni and FDR (Benjamini–Hochberg); there is no `MultipleComparisonCorrection` class and no dedicated Holm method. Because **statsmodels is optional**, the shipped corrections are computed directly rather than always via `multipletests`. The block below is **illustrative** of the statsmodels-backed variants.
+
 ```python
+# ILLUSTRATIVE — statsmodels is an OPTIONAL dependency (may be absent).
+# Real methods: EnhancedStatisticalEngine._bonferroni_correction / ._fdr_correction
 from statsmodels.stats.multitest import multipletests
 import numpy as np
 
-class MultipleComparisonCorrection:
+class MultipleComparisonCorrection:  # illustrative
     """
     Handle multiple comparison problem in experiments.
     """
@@ -316,11 +354,15 @@ class MultipleComparisonCorrection:
 
 ## Power Analysis and Sample Size Determination
 
+> **Real implementation: `FrequentistAnalyzer.power_analysis` (`enhanced_statistical_engine.py:357`).** It uses statsmodels' power solvers **when available**; when statsmodels is absent it falls back to a hardcoded `power = 0.8` assumption and an approximate sample-size calculation (`STATSMODELS_AVAILABLE` guards at `:245`, `:257`, `:383`). There is no standalone `PowerAnalysis` class. The block below is **illustrative** of the statsmodels-backed computation.
+
 ```python
+# ILLUSTRATIVE — statsmodels optional; real path: FrequentistAnalyzer.power_analysis
+# (falls back to power=0.8 when statsmodels is unavailable)
 from statsmodels.stats.power import TTestPower, NormalIndPower
 import numpy as np
 
-class PowerAnalysis:
+class PowerAnalysis:  # illustrative
     """
     Determine required sample sizes for experiments.
     """
@@ -378,8 +420,11 @@ class PowerAnalysis:
 
 ## Sequential Testing with Alpha Spending
 
+> **Illustrative.** There is no `SequentialTesting` class in `src/`. The engine exposes early-stopping via `EnhancedStatisticalEngine.early_stopping_analysis` (`:967`) and a `SEQUENTIAL_PROBABILITY_RATIO` value in the `StatisticalMethod` enum; the alpha-spending functions below document the intended approach rather than shipped code.
+
 ```python
-class SequentialTesting:
+# ILLUSTRATIVE — no SequentialTesting class exists; see early_stopping_analysis.
+class SequentialTesting:  # illustrative
     """
     Sequential testing with alpha spending functions.
     Allows for continuous monitoring without inflating Type I error.
@@ -427,11 +472,14 @@ class SequentialTesting:
 
 ## Effect Size Calculations
 
+> **Illustrative.** There is no `EffectSizeCalculator` class. In the shipped engine, effect sizes (e.g. Cohen's d / Cohen's h) are computed inline within `FrequentistAnalyzer`'s metric analyzers and reported on `StatisticalTestResult`. The standalone helpers below are reference formulas.
+
 ```python
+# ILLUSTRATIVE — no EffectSizeCalculator class; effect sizes are computed inside FrequentistAnalyzer.
 import numpy as np
 from scipy import stats
 
-class EffectSizeCalculator:
+class EffectSizeCalculator:  # illustrative
     """
     Calculate various effect size metrics.
     """
@@ -487,45 +535,46 @@ class EffectSizeCalculator:
 
 ### MASR Router Integration
 
+> **Real class: `MASRExperimentalRouter(MASRouter)` in `integration/masr_experiment_integration.py:89`.** It subclasses the in-process `MASRouter` (MASR = Multi-Agent System Router) to add A/B-testing over routing strategies, driven by an `AdaptiveAllocationEngine` (`core/adaptive_allocation_engine.py`). There is no `MASRExperimentIntegration` class and it does not construct standalone `ThompsonSampling` / `ContextualBandit` objects.
+
+Key facts about the real integration:
+
+- **Variants** are `control`, `cost_efficient`, `quality_focused`, `adaptive` — mapped to `RoutingStrategy` values (`masr_experiment_integration.py:118-121`).
+- **Default allocation strategy is `epsilon_greedy`**, not Thompson sampling (`MASRExperimentConfig.allocation_strategy = "epsilon_greedy"`, `:69`). Allocation runs through `AdaptiveAllocationEngine`.
+- **Adaptive Thompson-sampling routing on the production MASR path is flag-gated OFF**: `ADAPTIVE_ROUTING_ENABLED = False` (`src/core/config.py:236`). The bandit-driven allocation in this experimental router is not active on the default query path.
+
+The block below is **illustrative** of the strategy-selection concept; see the source for the real signatures.
+
 ```python
-class MASRExperimentIntegration:
+# ILLUSTRATIVE — real class is MASRExperimentalRouter(MASRouter) using AdaptiveAllocationEngine
+# (default allocation_strategy="epsilon_greedy"; adaptive/Thompson routing is flag-gated OFF).
+class MASRExperimentIntegration:  # illustrative
     """
     Statistical framework integration with MASR routing.
     """
-    
+
     def __init__(self):
-        self.routing_bandit = ThompsonSampling(n_arms=4)  # 4 routing strategies
-        self.contextual_bandit = ContextualBandit(n_actions=4, n_features=10)
-        
+        # Real router delegates allocation to AdaptiveAllocationEngine over
+        # variants: control / cost_efficient / quality_focused / adaptive.
+        self.optimizer = MultiBanditOptimizer()  # single optimizer, algorithm chosen via BanditAlgorithm
+
     def select_routing_strategy(self, query_features: np.ndarray = None) -> str:
         """
-        Select routing strategy using bandit algorithms.
+        Select routing strategy using bandit allocation.
         """
-        strategies = ['cost_efficient', 'quality_focused', 'balanced', 'adaptive']
-        
-        if query_features is not None:
-            # Use contextual bandit
-            arm = self.contextual_bandit.select_action(query_features)
-        else:
-            # Use simple Thompson Sampling
-            arm = self.routing_bandit.select_arm()
-            
-        return strategies[arm]
-    
-    def update_routing_performance(self, 
-                                  strategy: str, 
+        strategies = ['control', 'cost_efficient', 'quality_focused', 'adaptive']
+        # Real path: AdaptiveAllocationEngine.allocate(...) with epsilon-greedy by default.
+        ...
+
+    def update_routing_performance(self,
+                                  strategy: str,
                                   performance_score: float,
                                   query_features: np.ndarray = None):
         """
-        Update bandit based on observed performance.
+        Update allocation based on observed performance.
         """
-        strategies = ['cost_efficient', 'quality_focused', 'balanced', 'adaptive']
-        arm = strategies.index(strategy)
-        
-        if query_features is not None:
-            self.contextual_bandit.update(query_features, arm, performance_score)
-        else:
-            self.routing_bandit.update(arm, performance_score)
+        # Real path: MultiBanditOptimizer.update_bandit(arm, reward)
+        ...
 ```
 
 ## Best Practices
@@ -554,12 +603,17 @@ class MASRExperimentIntegration:
 - Monitor exploration/exploitation balance
 - Implement safety constraints when needed
 
-### 5. Production Deployment
-- Use gradual rollout with statistical monitoring
-- Implement automatic rollback on degradation
-- Log all decisions for offline analysis
-- Maintain experiment history for learning
+### 5. Deployment status (not yet a live surface)
+
+The experimentation subsystem is a **library**, not a running service. The REST routers that would expose it — `src/api/routes/experiments.py` and `src/api/routes/experiment_agent_api.py` — are **never mounted** (`main.py` does not `include_router` them), so there are **no live HTTP experiment endpoints** and no `/ws/experiments` WebSocket. The statistical engine and `MASRExperimentalRouter` are importable and unit-testable in-process, but the following operational guidance is **aspirational** until those routers are wired up:
+
+- gradual rollout with statistical monitoring
+- automatic rollback on degradation
+- decision logging for offline analysis
+- experiment-history retention for learning
 
 ## Conclusion
 
-This statistical framework provides the mathematical rigor necessary for Cerebro's self-improving intelligence system. By combining Bayesian inference, multi-armed bandits, and classical hypothesis testing, we ensure that every optimization decision is data-driven, statistically valid, and practically significant.
+This statistical framework provides mathematically sound building blocks — frequentist hypothesis testing (fully functional on scipy), multi-armed bandit optimization, and a Bayesian analysis path (dependent on PyMC, which is not installed by default) — for evaluating routing and agent-configuration variants.
+
+A note on scope: these are analysis primitives, not a closed-loop optimizer. Cerebro does **not** currently self-improve from them. The `src/improvement` subsystem is a stub — `RewardModel.predict_quality` returns a constant `0.5` (`src/improvement/__init__.py:53`), and `RLTrainer`, `PromptOptimizer`, and `MetaLearner` are no-ops. Adaptive/bandit routing is flag-gated OFF (`ADAPTIVE_ROUTING_ENABLED=False`), and the experiment REST surface is unmounted. The framework is the statistical foundation an offline or future closed-loop optimization process could build on; today it is used for analysis, not automated decision-making.

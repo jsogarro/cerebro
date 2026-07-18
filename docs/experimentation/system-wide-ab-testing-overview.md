@@ -1,3 +1,5 @@
+*Historical document — aspirational A/B-testing roadmap (5 phases, Weeks 1-10). Partially scaffolded, NOT wired: the experiments API routers are never mounted in main.py, nothing is integrated into the live DirectExecutionService query path, src/memory is a stub (no working 4-tier memory to experiment on), and src/improvement is stub code — so the 'self-improving intelligence engine' and continuous-learning loop do not run. Expected-outcome figures (40% perf, 50-60% cost, 25% quality, 30% convergence) and the 90/10 Primary/Bypass split are projections, not measurements. The module tree is partly fictional (memory_experiments.py, talkhier_experiments.py, experiment_visualization.py don't exist; real dirs optimization/ and eval/ are unlisted). See docs/experimentation/statistical-framework.md for what actually exists.*
+
 # System-Wide A/B Testing Overview
 
 ## Executive Summary

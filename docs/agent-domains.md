@@ -2,10 +2,17 @@
 
 Cerebro's agent framework is organized into **domains**, each a hierarchical
 supervisor coordinating a team of specialized worker agents. MASR routes a query
-to the appropriate domain supervisor; individual worker agents are also callable
-directly via the Bypass API.
+to the appropriate domain supervisor. A subset of workers is also callable
+directly via the Bypass API — only the 10 `AgentType` enum values (the Research
+and Finance workers plus `verification` and `financial-calculator`). The 4
+Content workers (`content_planning`, `drafting`, `editing`, `optimization`) and
+the 3 Analytics workers (`data_analysis`, `statistical_modeling`,
+`insight_synthesis`) are **not** exposed on `/api/v1/agents`.
 
-All worker agents are LLM-reasoning agents backed by the shared Gemini service.
+All worker agents are LLM-reasoning agents. Gemini is the default provider; a
+flag-gated OpenRouter multi-provider path also exists (active only when both
+`MULTI_PROVIDER_ROUTING_ENABLED` and `OPENROUTER_API_KEY` are set — both default
+off).
 They reason over the query text (and any prior-stage context passed by their
 supervisor) — the Content, Analytics, and Finance domains require **no external
 data feeds, API keys, or datasets**; supply figures/assumptions/text in the query.
@@ -57,8 +64,9 @@ curl -X POST "http://localhost:8000/api/v1/agents/valuation/execute" \
 
 Available Bypass agent types: `literature-review`, `citation`, `methodology`,
 `comparative-analysis`, `synthesis`, `financial-analysis`, `valuation`,
-`risk-assessment`. Chain-of-Agents (`/agents/chain`) and Mixture-of-Agents
-(`/agents/mixture`) compose multiple agents.
+`risk-assessment`, `financial-calculator`, `verification`. Chain-of-Agents
+(`/agents/chain`) and Mixture-of-Agents (`/agents/mixture`) compose multiple
+agents.
 
 ## Adding a new domain
 

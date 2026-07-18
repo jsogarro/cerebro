@@ -1,13 +1,14 @@
 # Backup and Recovery Guide
 
-This guide provides comprehensive procedures for backing up and recovering data in the Multi-Agent Research Platform.
+This guide provides procedures for backing up and recovering data in Cerebro (financial research, US equities). Its persistent stores are PostgreSQL (`research_db`), Redis, file storage, and configuration. Infrastructure artifact names below (`research_db`, the `research` DB user, the `research-platform-backups` bucket) match the deployment's legacy `research-platform` identity and are intentionally kept verbatim.
+
+> **Status: proposed operational procedure, not deployed automation.** The scripts, paths (`/var/backups`, `/opt/research-platform`, `/etc/crontab`), and schedules in this guide describe a recommended backup/recovery design. They are not verified as installed in any running environment — treat them as a starting point to adapt, and validate every path and command against your actual deployment before relying on them.
 
 ## Table of Contents
 - [Backup Strategy Overview](#backup-strategy-overview)
 - [Database Backup](#database-backup)
 - [File Storage Backup](#file-storage-backup)
 - [Configuration Backup](#configuration-backup)
-- [Application State Backup](#application-state-backup)
 - [Recovery Procedures](#recovery-procedures)
 - [Disaster Recovery](#disaster-recovery)
 - [Monitoring and Testing](#monitoring-and-testing)
@@ -33,7 +34,9 @@ This guide provides comprehensive procedures for backing up and recovering data 
 | **API Service** | < 10 minutes | < 5 minutes | High |
 | **File Storage** | < 1 hour | < 1 hour | Medium |
 | **Cache** | < 5 minutes | Acceptable loss | Low |
-| **Workflows** | < 15 minutes | < 15 minutes | High |
+| **Workflow state** | < 30 minutes | < 15 minutes | High |
+
+> **Workflow state note.** Query execution runs in-process as asyncio background tasks in `DirectExecutionService` (in-memory `active_executions`); that live state is *not* separately backed up and is lost on restart. Only durable checkpoint/resume state is persisted — written by `CheckpointRepository` to the Postgres `workflow_checkpoints` table — so workflow recovery is covered by the database backup, not a dedicated workflow-store backup. There is no external workflow engine to snapshot.
 
 ### Backup Architecture
 
@@ -76,6 +79,8 @@ graph TB
 ## Database Backup
 
 ### PostgreSQL Backup
+
+A single `pg_dump` of `research_db` captures all durable state, including workflow checkpoint/resume rows written by `CheckpointRepository` to the `workflow_checkpoints` table. No separate workflow-state backup is required — the database dump is the workflow backup.
 
 #### Automated Daily Backup
 
@@ -586,12 +591,10 @@ tar -czf "$CONFIG_ARCHIVE" \\
     --exclude="*password*" \\
     --exclude="*key*" \\
     docker-compose.yml \\
-    docker-compose.override.yml \\
-    nginx.conf \\
+    docker/nginx/nginx.conf \\
     alembic.ini \\
     pyproject.toml \\
     k8s/ \\
-    helm/ \\
     config/ \\
     scripts/
 
@@ -605,7 +608,6 @@ LOG_LEVEL=INFO
 
 # Database (update with actual values)
 DATABASE_URL=postgresql+asyncpg://user:password@host:port/db
-DATABASE_POOL_SIZE=20
 
 # Redis (update with actual values)  
 REDIS_URL=redis://host:port/0
@@ -616,12 +618,8 @@ GEMINI_API_KEY=your-gemini-api-key
 # Authentication (generate new secrets)
 JWT_SECRET_KEY=generate-new-secret-key
 
-# Storage
-STORAGE_BACKEND=s3
-STORAGE_S3_BUCKET=your-bucket-name
-
 # Monitoring
-METRICS_ENABLED=true
+ENABLE_METRICS=true
 EOF
 
 # Create deployment checklist
@@ -665,59 +663,6 @@ find "$CONFIG_BACKUP_DIR" -name "config_*.tar.gz" -mtime +90 -delete
 log "Configuration backup completed"
 ```
 
-## Application State Backup
-
-### Temporal Workflow State Backup
-
-```python
-#!/usr/bin/env python3
-# scripts/backup_temporal_state.py
-
-import asyncio
-import json
-import logging
-from datetime import datetime
-from temporalio.client import Client
-from temporalio.service import WorkflowService
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-class TemporalStateBackup:
-    def __init__(self):
-        self.temporal_host = "localhost:7233"
-        self.namespace = "default"
-        self.backup_file = f"/var/backups/temporal/workflows_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    
-    async def backup_workflow_state(self):
-        """Backup all active workflow states"""
-        client = await Client.connect(self.temporal_host)
-        
-        try:
-            # Get all running workflows
-            async for workflow in client.list_workflows():
-                workflow_id = workflow.id
-                workflow_type = workflow.workflow_type
-                
-                logger.info(f"Backing up workflow: {workflow_id}")
-                
-                # Get workflow history
-                async for event in client.get_workflow_history(workflow_id):
-                    # Process and store workflow state
-                    pass
-                    
-            logger.info("Temporal state backup completed")
-            
-        finally:
-            await client.close()
-
-# Additional backup for LangGraph checkpoints
-async def backup_langgraph_state():
-    """Backup LangGraph workflow checkpoints"""
-    # Implementation depends on your checkpoint storage
-    pass
-```
-
 ## Recovery Procedures
 
 ### Database Recovery
@@ -747,7 +692,7 @@ log "Starting database restore from: $BACKUP_FILE"
 
 # Stop application services
 log "Stopping application services..."
-docker-compose stop api worker
+docker-compose stop api
 
 # Create backup of current database
 log "Creating backup of current database..."
@@ -778,7 +723,7 @@ log "Restored database contains $RECORD_COUNT research projects"
 
 # Start services
 log "Starting application services..."
-docker-compose start api worker
+docker-compose start api
 
 # Verify application health
 sleep 10
@@ -1294,4 +1239,4 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-This comprehensive backup and recovery guide ensures that your Multi-Agent Research Platform data is protected and can be quickly restored in case of any failures or disasters. Regular testing of backup and recovery procedures is essential to ensure they work when needed.
+This backup and recovery guide is a proposed design for protecting Cerebro's data and restoring it in case of failures or disasters. Adapt the scripts and schedules to your actual deployment, and test backup and recovery procedures regularly to ensure they work when needed.

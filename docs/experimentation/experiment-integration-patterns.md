@@ -1,751 +1,360 @@
 # Experiment Integration Patterns
 
-## Overview
+## Status: not on the live execution path
 
-This document details how the Enhanced A/B Testing System integrates with Cerebro's core intelligence components. Each integration pattern is designed to enable systematic experimentation while maintaining system stability and performance.
+> **This subsystem is real code but unreachable over HTTP.** The FastAPI router
+> that would expose it — `src/api/routes/experiment_agent_api.py` (whose imports
+> at lines 17-25 pull in `AgentFrameworkExperimentor`, `real_time_dashboard`, and
+> `feedback_loop_optimizer` from `src/ai_brain/experimentation/`) — is **never
+> `include_router`'d in `src/api/main.py`** (the mounted routers are listed at
+> `main.py:211-230`). (A second router, `src/api/routes/experiments.py`, is also
+> unmounted, but it is a **separate, disconnected DB-backed A/B CRUD API** — its
+> imports at lines 17-29 are only ORM models from `src/models/db/experiment`; it
+> imports nothing from `src/ai_brain/experimentation/`, and the experimentation
+> package likewise never imports `src/models/db`, so mounting it would surface
+> none of the classes described here.) One core module of the package **is**
+> flag-gated into the live base router: `MASRouter` imports
+> `AdaptiveAllocationEngine` (`masr.py:36-39`) and, when
+> `adaptive_routing_enabled` is set, constructs it (`masr.py:221-235`) and
+> consults it inside `route()` (`masr.py:367`, via the Thompson-sampling
+> `_get_adaptive_allocation_adjustment` at `masr.py:649+`). That flag defaults
+> **off** (`masr.py:208-210`) and `DirectExecutionService` builds `MASRouter()`
+> with no config (`direct_execution_service.py:103`), so on the live path the
+> engine is dormant and no query served by Cerebro exercises it today. The rest
+> of the classes below exist under `src/ai_brain/experimentation/` and can be
+> imported and unit-tested but are not wired into any live flow. Treat this
+> document as a map of an in-tree, mostly-dormant capability — not of production
+> behavior.
 
-## MASR Routing Strategy Experiments
+This document describes how the experimentation package under
+`src/ai_brain/experimentation/` is intended to hook into Cerebro's routing and
+agent-execution components. Cerebro is a multi-agent LLM platform whose current
+focus is financial research (US equities); its infra artifacts still carry the
+legacy `research-platform` identity (FastAPI title "Research Platform API", the
+`research-platform` k8s namespace, `research_db`), which is unrelated to the
+experimentation code.
 
-### Integration Architecture
+## Package layout (what actually exists)
+
+```
+src/ai_brain/experimentation/
+├── core/
+│   ├── unified_experiment_manager.py    # UnifiedExperimentManager (:199)
+│   ├── system_experiment_registry.py    # SystemExperimentRegistry (:64)
+│   └── adaptive_allocation_engine.py    # AdaptiveAllocationEngine
+├── integration/
+│   ├── masr_experiment_integration.py   # MASRExperimentalRouter (:89)
+│   ├── api_pattern_experiments.py       # APIPatternExperimentor (:82)
+│   └── agent_framework_integration.py   # AgentFrameworkExperimentor (:147)
+├── statistical/
+│   ├── bayesian_experiment_design.py    # BayesianExperimentDesigner (:114)
+│   ├── enhanced_statistical_engine.py
+│   └── multi_variate_analysis.py
+├── optimization/
+│   └── feedback_loop_optimizer.py
+├── monitoring/
+│   └── real_time_dashboard.py
+└── eval/
+    └── adaptive_routing_eval.py
+```
+
+There is **no** `execution_pattern_experiments.py`, `memory_experiments.py`, or
+`talkhier_experiments.py`, and no `ExperimentLifecycleManager`,
+`ExperimentAnalyzer`, `ExperimentDashboard`, or `ExperimentSafetyMonitor`.
+Earlier drafts of this document referenced those files and classes; they do not
+exist in the tree.
+
+## MASR routing-strategy experiments
+
+### Integration approach: subclass, not composition
+
+`MASRExperimentalRouter` (`integration/masr_experiment_integration.py:89`)
+**subclasses** the real `MASRouter` (`src/ai_brain/router/masr.py:107`, single
+`R` — there is no `MASRRouter`). It is not a composition wrapper that holds a
+router plus a manager; it *is* a MASRouter with experimentation state attached in
+`__init__`:
 
 ```python
 # src/ai_brain/experimentation/integration/masr_experiment_integration.py
 
-from typing import Dict, Any, Optional
-from src.ai_brain.router.masr import MASRRouter, RoutingStrategy
-from src.ai_brain.experimentation.core.unified_experiment_manager import ExperimentManager
+from src.ai_brain.router.masr import MASRouter
+from src.ai_brain.experimentation.core.unified_experiment_manager import (
+    UnifiedExperimentManager,
+)
+from src.ai_brain.experimentation.core.adaptive_allocation_engine import (
+    AdaptiveAllocationEngine,
+)
+from src.ai_brain.experimentation.core.system_experiment_registry import (
+    SystemExperimentRegistry,
+)
 
-class MASRExperimentIntegration:
-    """
-    Enables experimentation with MASR routing strategies.
-    """
-    
-    def __init__(self, masr_router: MASRRouter, experiment_manager: ExperimentManager):
-        self.masr = masr_router
-        self.exp_manager = experiment_manager
-        self.active_experiments = {}
-        
-    async def route_with_experiment(self, 
-                                   query: str, 
-                                   user_id: str,
-                                   context: Dict[str, Any]) -> RoutingDecision:
-        """
-        Route query with experimental strategy selection.
-        """
-        # Check for active routing experiments
-        experiment = self.exp_manager.get_active_experiment('masr_routing')
-        
-        if experiment:
-            # Assign user to variant
-            variant = experiment.get_variant_for_user(user_id)
-            
-            # Apply experimental routing strategy
-            strategy = self._get_experimental_strategy(variant)
-            
-            # Track assignment
-            self.exp_manager.track_assignment(
-                experiment_id=experiment.id,
-                user_id=user_id,
-                variant=variant,
-                context={'query': query, 'strategy': strategy}
-            )
-            
-            # Execute routing with experimental strategy
-            decision = await self.masr.route(query, strategy=strategy)
-            
-            # Track metrics
-            await self._track_routing_metrics(experiment.id, decision)
-            
-            return decision
-        else:
-            # Default routing behavior
-            return await self.masr.route(query)
-    
-    def _get_experimental_strategy(self, variant: str) -> RoutingStrategy:
-        """Map experiment variant to routing strategy."""
-        strategy_map = {
-            'control': RoutingStrategy.BALANCED,
-            'cost_efficient': RoutingStrategy.COST_EFFICIENT,
-            'quality_focused': RoutingStrategy.QUALITY_FOCUSED,
-            'adaptive': RoutingStrategy.ADAPTIVE,
-            'ml_optimized': RoutingStrategy.ML_OPTIMIZED
-        }
-        return strategy_map.get(variant, RoutingStrategy.BALANCED)
+
+class MASRExperimentalRouter(MASRouter):
+    """Extended MASR router with integrated experimentation capabilities."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)  # inherits the full MASRouter pipeline
+        self.experiment_manager = UnifiedExperimentManager()
+        self.allocation_engine = AdaptiveAllocationEngine()
+        self.registry = SystemExperimentRegistry()
+        self.active_experiments: dict[str, MASRExperimentConfig] = {}
+        self.results_buffer: list[MASRExperimentResult] = []
 ```
 
-### Experiment Configuration
-
-```yaml
-# experiments/masr_routing_experiment.yaml
-
-experiment:
-  id: masr_routing_optimization_v1
-  name: "MASR Routing Strategy Optimization"
-  description: "Test different routing strategies for cost/quality optimization"
-  type: multi_armed_bandit
-  
-  variants:
-    - id: control
-      name: "Balanced (Control)"
-      allocation: 0.2
-      config:
-        strategy: balanced
-        cost_weight: 0.5
-        quality_weight: 0.5
-        
-    - id: cost_efficient
-      name: "Cost Efficient"
-      allocation: 0.2
-      config:
-        strategy: cost_efficient
-        cost_weight: 0.8
-        quality_weight: 0.2
-        
-    - id: quality_focused
-      name: "Quality Focused"  
-      allocation: 0.2
-      config:
-        strategy: quality_focused
-        cost_weight: 0.2
-        quality_weight: 0.8
-        
-    - id: adaptive
-      name: "Adaptive"
-      allocation: 0.2
-      config:
-        strategy: adaptive
-        learning_rate: 0.1
-        exploration_rate: 0.15
-        
-    - id: ml_optimized
-      name: "ML Optimized"
-      allocation: 0.2
-      config:
-        strategy: ml_optimized
-        model: thompson_sampling
-        prior_alpha: 1.0
-        prior_beta: 1.0
-  
-  metrics:
-    primary:
-      - name: cost_per_query
-        type: continuous
-        optimization: minimize
-      - name: response_quality_score
-        type: continuous
-        optimization: maximize
-        
-    secondary:
-      - name: latency_p95
-        type: continuous
-        optimization: minimize
-      - name: user_satisfaction
-        type: ordinal
-        optimization: maximize
-        
-  success_criteria:
-    - metric: cost_per_query
-      improvement: 0.3  # 30% reduction
-      confidence: 0.95
-    - metric: response_quality_score
-      improvement: 0.1  # 10% improvement
-      confidence: 0.95
-      
-  duration:
-    min_samples: 10000
-    max_duration_days: 14
-    early_stopping: true
-```
-
-## Agent API Pattern Experiments
-
-### Primary vs Bypass API Testing
+Because it inherits from `MASRouter`, it can call the base `route()` directly.
+The base `MASRouter.route()` accepts a `strategy=` keyword
+(`masr.py:252-258`):
 
 ```python
-# src/ai_brain/experimentation/integration/api_pattern_experiments.py
-
-class APIPatternExperiment:
-    """
-    Experiment with Primary (MASR-routed) vs Bypass (direct) API usage.
-    """
-    
-    def __init__(self, experiment_manager: ExperimentManager):
-        self.exp_manager = experiment_manager
-        self.routing_threshold = 0.9  # Default 90% Primary
-        
-    async def determine_api_route(self, 
-                                 request: APIRequest,
-                                 user_context: UserContext) -> APIRoute:
-        """
-        Determine whether to use Primary or Bypass API.
-        """
-        experiment = self.exp_manager.get_active_experiment('api_pattern')
-        
-        if experiment:
-            variant = experiment.get_variant_for_context(user_context)
-            
-            # Get routing threshold for this variant
-            threshold = self._get_routing_threshold(variant)
-            
-            # Make routing decision
-            use_primary = random.random() < threshold
-            
-            # Track the decision
-            self.exp_manager.track_event(
-                experiment_id=experiment.id,
-                event_type='api_route_decision',
-                properties={
-                    'variant': variant,
-                    'route': 'primary' if use_primary else 'bypass',
-                    'query_complexity': request.complexity_score,
-                    'user_type': user_context.user_type
-                }
-            )
-            
-            return APIRoute.PRIMARY if use_primary else APIRoute.BYPASS
-        
-        # Default behavior
-        return APIRoute.PRIMARY if random.random() < 0.9 else APIRoute.BYPASS
-    
-    def _get_routing_threshold(self, variant: str) -> float:
-        """Get Primary API usage threshold for variant."""
-        thresholds = {
-            'control': 0.90,      # 90% Primary (baseline)
-            'high_primary': 0.95, # 95% Primary
-            'balanced': 0.85,     # 85% Primary
-            'adaptive': None      # Dynamic based on context
-        }
-        
-        if variant == 'adaptive':
-            return self._calculate_adaptive_threshold()
-        
-        return thresholds.get(variant, 0.90)
+async def route(
+    self,
+    query: str,
+    context: dict[str, Any] | None = None,
+    strategy: RoutingStrategy | None = None,
+    constraints: dict[str, Any] | None = None,
+) -> RoutingDecision: ...
 ```
 
-### Chain-of-Agents vs Mixture-of-Agents Experiments
+### The experimental route method
+
+`route_with_experiment(query, context)`
+(`masr_experiment_integration.py:248`) is the experiment-aware entry point. It
+analyzes complexity, asks `AdaptiveAllocationEngine` for a variant, applies the
+variant's `RoutingStrategy`, then falls back to the inherited
+`self.route(query, context)` when no experimental decision is produced:
 
 ```python
-# src/ai_brain/experimentation/integration/execution_pattern_experiments.py
+async def route_with_experiment(
+    self, query: str, context: dict[str, Any] | None = None
+) -> RoutingDecision:
+    context = context or {}
+    complexity_analysis = await self.complexity_analyzer.analyze(query, context)
 
-from enum import Enum
-from typing import List, Dict, Any
+    routing_decision = None
+    variant_used = "control"
 
-class ExecutionPattern(Enum):
-    CHAIN = "chain_of_agents"
-    MIXTURE = "mixture_of_agents"
-    HYBRID = "hybrid"
-    ADAPTIVE = "adaptive"
-
-class ExecutionPatternExperiment:
-    """
-    Test different agent execution patterns.
-    """
-    
-    def __init__(self, experiment_manager: ExperimentManager):
-        self.exp_manager = experiment_manager
-        
-    async def select_execution_pattern(self,
-                                      task: AgentTask,
-                                      available_agents: List[Agent]) -> ExecutionPattern:
-        """
-        Select execution pattern based on experiment.
-        """
-        experiment = self.exp_manager.get_active_experiment('execution_pattern')
-        
-        if experiment:
-            # Get variant based on task characteristics
-            features = self._extract_task_features(task)
-            variant = experiment.get_variant_for_features(features)
-            
-            pattern = self._variant_to_pattern(variant)
-            
-            # Track selection
-            self.exp_manager.track_event(
-                experiment_id=experiment.id,
-                event_type='pattern_selection',
-                properties={
-                    'variant': variant,
-                    'pattern': pattern.value,
-                    'task_type': task.type,
-                    'task_complexity': task.complexity,
-                    'agent_count': len(available_agents)
-                }
-            )
-            
-            return pattern
-        
-        # Default: Choose based on task complexity
-        return self._default_pattern_selection(task)
-    
-    def _extract_task_features(self, task: AgentTask) -> np.ndarray:
-        """Extract features for contextual bandit."""
-        return np.array([
-            task.complexity,
-            len(task.subtasks),
-            task.estimated_duration,
-            task.priority,
-            1 if task.requires_consensus else 0,
-            1 if task.is_exploratory else 0
-        ])
-    
-    async def execute_with_pattern(self,
-                                  pattern: ExecutionPattern,
-                                  agents: List[Agent],
-                                  task: AgentTask) -> ExecutionResult:
-        """
-        Execute task with selected pattern.
-        """
-        if pattern == ExecutionPattern.CHAIN:
-            return await self._execute_chain(agents, task)
-        elif pattern == ExecutionPattern.MIXTURE:
-            return await self._execute_mixture(agents, task)
-        elif pattern == ExecutionPattern.HYBRID:
-            return await self._execute_hybrid(agents, task)
-        else:  # ADAPTIVE
-            return await self._execute_adaptive(agents, task)
-```
-
-## Memory System Optimization Experiments
-
-### Memory Tier Access Patterns
-
-```python
-# src/ai_brain/experimentation/integration/memory_experiments.py
-
-class MemoryOptimizationExperiment:
-    """
-    Optimize memory tier usage and retrieval patterns.
-    """
-    
-    def __init__(self, 
-                 memory_system: MultiTierMemory,
-                 experiment_manager: ExperimentManager):
-        self.memory = memory_system
-        self.exp_manager = experiment_manager
-        
-    async def retrieve_with_experiment(self,
-                                      query: str,
-                                      context: QueryContext) -> MemoryResult:
-        """
-        Retrieve from memory with experimental tier strategy.
-        """
-        experiment = self.exp_manager.get_active_experiment('memory_optimization')
-        
-        if experiment:
-            variant = experiment.get_variant_for_query(query)
-            strategy = self._get_memory_strategy(variant)
-            
-            # Track retrieval attempt
-            start_time = time.time()
-            
-            # Apply experimental strategy
-            result = await self._retrieve_with_strategy(query, strategy)
-            
-            # Track metrics
-            self.exp_manager.track_metrics(
-                experiment_id=experiment.id,
-                metrics={
-                    'retrieval_latency': time.time() - start_time,
-                    'cache_hit': result.cache_hit,
-                    'tiers_accessed': len(result.tiers_accessed),
-                    'relevance_score': result.relevance_score,
-                    'variant': variant
-                }
-            )
-            
-            return result
-        
-        # Default retrieval
-        return await self.memory.retrieve(query)
-    
-    def _get_memory_strategy(self, variant: str) -> MemoryStrategy:
-        """Map variant to memory retrieval strategy."""
-        strategies = {
-            'control': MemoryStrategy.HIERARCHICAL,
-            'aggressive_cache': MemoryStrategy.CACHE_FIRST,
-            'semantic_priority': MemoryStrategy.SEMANTIC_FIRST,
-            'parallel_retrieval': MemoryStrategy.PARALLEL_ALL,
-            'adaptive': MemoryStrategy.ML_OPTIMIZED
-        }
-        return strategies.get(variant, MemoryStrategy.HIERARCHICAL)
-```
-
-### Cross-Tier Integration Testing
-
-```python
-class CrossTierIntegrationExperiment:
-    """
-    Test different cross-tier memory integration strategies.
-    """
-    
-    async def integrate_memories_with_experiment(self,
-                                                memories: List[Memory],
-                                                integration_context: IntegrationContext):
-        """
-        Integrate memories across tiers with experimental strategies.
-        """
-        experiment = self.exp_manager.get_active_experiment('cross_tier_integration')
-        
-        if experiment:
-            variant = experiment.get_variant()
-            
-            if variant == 'weighted_merge':
-                return await self._weighted_merge_integration(memories)
-            elif variant == 'semantic_clustering':
-                return await self._semantic_clustering_integration(memories)
-            elif variant == 'temporal_priority':
-                return await self._temporal_priority_integration(memories)
-            elif variant == 'ml_fusion':
-                return await self._ml_fusion_integration(memories)
-            else:  # control
-                return await self._default_integration(memories)
-```
-
-## TalkHier Protocol Parameter Tuning
-
-### Multi-Round Refinement Experiments
-
-```python
-# src/ai_brain/experimentation/integration/talkhier_experiments.py
-
-class TalkHierExperiment:
-    """
-    Optimize TalkHier protocol parameters.
-    """
-    
-    def __init__(self,
-                 talkhier_protocol: TalkHierProtocol,
-                 experiment_manager: ExperimentManager):
-        self.protocol = talkhier_protocol
-        self.exp_manager = experiment_manager
-        
-    async def configure_refinement_with_experiment(self,
-                                                  task: SupervisorTask) -> RefinementConfig:
-        """
-        Configure refinement rounds based on experiment.
-        """
-        experiment = self.exp_manager.get_active_experiment('talkhier_refinement')
-        
-        if experiment:
-            variant = experiment.get_variant()
-            
-            config = RefinementConfig()
-            
-            if variant == 'minimal':
-                config.max_rounds = 2
-                config.consensus_threshold = 0.7
-                config.early_stopping = True
-                
-            elif variant == 'balanced':
-                config.max_rounds = 3
-                config.consensus_threshold = 0.8
-                config.early_stopping = True
-                
-            elif variant == 'quality_focused':
-                config.max_rounds = 5
-                config.consensus_threshold = 0.9
-                config.early_stopping = False
-                
-            elif variant == 'adaptive':
-                # Dynamically determine based on task complexity
-                config = self._adaptive_refinement_config(task)
-            
-            else:  # control
-                config.max_rounds = 3
-                config.consensus_threshold = 0.85
-                config.early_stopping = True
-            
-            # Track configuration
-            self.exp_manager.track_event(
-                experiment_id=experiment.id,
-                event_type='refinement_config',
-                properties={
-                    'variant': variant,
-                    'max_rounds': config.max_rounds,
-                    'consensus_threshold': config.consensus_threshold,
-                    'task_complexity': task.complexity
-                }
-            )
-            
-            return config
-        
-        # Default configuration
-        return self.protocol.default_config()
-```
-
-### Consensus Building Strategies
-
-```python
-class ConsensusExperiment:
-    """
-    Test different consensus building strategies.
-    """
-    
-    async def build_consensus_with_experiment(self,
-                                             worker_responses: List[WorkerResponse]) -> Consensus:
-        """
-        Build consensus using experimental strategies.
-        """
-        experiment = self.exp_manager.get_active_experiment('consensus_strategy')
-        
-        if experiment:
-            variant = experiment.get_variant()
-            
-            strategies = {
-                'majority_vote': self._majority_vote_consensus,
-                'weighted_vote': self._weighted_vote_consensus,
-                'quality_weighted': self._quality_weighted_consensus,
-                'debate_resolution': self._debate_resolution_consensus,
-                'ml_aggregation': self._ml_aggregation_consensus
-            }
-            
-            strategy_func = strategies.get(variant, self._majority_vote_consensus)
-            
-            # Execute strategy
-            start_time = time.time()
-            consensus = await strategy_func(worker_responses)
-            duration = time.time() - start_time
-            
-            # Track metrics
-            self.exp_manager.track_metrics(
-                experiment_id=experiment.id,
-                metrics={
-                    'consensus_quality': consensus.quality_score,
-                    'agreement_level': consensus.agreement_level,
-                    'rounds_to_consensus': consensus.rounds_taken,
-                    'consensus_duration': duration,
-                    'variant': variant
-                }
-            )
-            
-            return consensus
-```
-
-## Experiment Lifecycle Integration
-
-### Experiment Creation and Deployment
-
-```python
-class ExperimentLifecycleManager:
-    """
-    Manage experiment lifecycle from creation to conclusion.
-    """
-    
-    async def create_system_experiment(self,
-                                      experiment_config: ExperimentConfig) -> Experiment:
-        """
-        Create and deploy a system-wide experiment.
-        """
-        # Validate configuration
-        self._validate_config(experiment_config)
-        
-        # Create experiment
-        experiment = Experiment(
-            id=str(uuid.uuid4()),
-            name=experiment_config.name,
-            type=experiment_config.type,
-            status=ExperimentStatus.CREATED
+    if "routing_strategy_test" in self.active_experiments:
+        allocation = await self.allocation_engine.allocate_variant(
+            experiment_id="routing_strategy_test",
+            user_context={
+                "complexity": complexity_analysis.level.value,
+                "query_length": len(query),
+                "has_context": bool(context),
+            },
         )
-        
-        # Register with appropriate systems
-        if experiment_config.affects_masr:
-            await self._register_masr_experiment(experiment)
-        
-        if experiment_config.affects_memory:
-            await self._register_memory_experiment(experiment)
-            
-        if experiment_config.affects_agents:
-            await self._register_agent_experiment(experiment)
-            
-        if experiment_config.affects_talkhier:
-            await self._register_talkhier_experiment(experiment)
-        
-        # Initialize tracking
-        await self._initialize_tracking(experiment)
-        
-        # Start experiment
-        experiment.status = ExperimentStatus.RUNNING
-        await self._persist_experiment(experiment)
-        
-        return experiment
-```
-
-### Automated Analysis and Decision Making
-
-```python
-class ExperimentAnalyzer:
-    """
-    Automated analysis and decision making for experiments.
-    """
-    
-    async def analyze_and_decide(self, experiment_id: str) -> ExperimentDecision:
-        """
-        Analyze experiment results and make deployment decision.
-        """
-        experiment = await self._load_experiment(experiment_id)
-        metrics = await self._load_metrics(experiment_id)
-        
-        # Statistical analysis
-        analysis_results = await self._perform_statistical_analysis(metrics)
-        
-        # Check success criteria
-        criteria_met = self._check_success_criteria(
-            experiment.success_criteria,
-            analysis_results
-        )
-        
-        # Make decision
-        if criteria_met:
-            decision = ExperimentDecision.PROMOTE_WINNER
-            winning_variant = self._identify_winner(analysis_results)
-            
-            # Prepare for production deployment
-            deployment_config = await self._prepare_deployment(
-                experiment,
-                winning_variant
+        variant_used = allocation.variant_id
+        config = self.active_experiments["routing_strategy_test"]
+        if variant_used in config.variants:
+            strategy = config.variants[variant_used]["strategy"]
+            routing_decision = await self._route_with_strategy(
+                query, context, complexity_analysis, strategy
             )
-            
-            # Schedule gradual rollout
-            await self._schedule_rollout(deployment_config)
-            
-        elif self._should_continue(analysis_results):
-            decision = ExperimentDecision.CONTINUE
-            
-            # Adjust allocation if using bandits
-            if experiment.type == ExperimentType.MULTI_ARMED_BANDIT:
-                await self._update_bandit_allocation(experiment, metrics)
-                
-        else:
-            decision = ExperimentDecision.STOP
-            
-            # Revert to control
-            await self._revert_to_control(experiment)
-        
-        # Record decision
-        await self._record_decision(experiment_id, decision, analysis_results)
-        
-        return decision
+
+    # A second experiment can override the collaboration mode in place.
+    if "collaboration_mode_test" in self.active_experiments and routing_decision:
+        ...
+        routing_decision.collaboration_mode = mode
+
+    if not routing_decision:
+        routing_decision = await self.route(query, context)  # base MASRouter
+
+    return routing_decision
 ```
 
-## Monitoring and Observability
+### Valid routing-strategy variants
 
-### Real-Time Experiment Dashboard
+The `RoutingStrategy` enum (`src/ai_brain/router/routing_types.py:23-32`) has
+exactly five members:
+
+| Member | Value |
+|---|---|
+| `SPEED_FIRST` | `"speed_first"` |
+| `COST_EFFICIENT` | `"cost_efficient"` |
+| `QUALITY_FOCUSED` | `"quality_focused"` |
+| `BALANCED` | `"balanced"` |
+| `ADAPTIVE` | `"adaptive"` |
+
+There is **no `ML_OPTIMIZED` member** — referencing `RoutingStrategy.ML_OPTIMIZED`
+raises `AttributeError`. The default MASR-experiment seed
+(`initialize_experiments`, `masr_experiment_integration.py:112`) uses only
+`BALANCED` (control), `COST_EFFICIENT`, `QUALITY_FOCUSED`, and `ADAPTIVE`:
 
 ```python
-class ExperimentDashboard:
-    """
-    Real-time monitoring of all active experiments.
-    """
-    
-    async def get_dashboard_data(self) -> DashboardData:
-        """
-        Aggregate data for experiment dashboard.
-        """
-        active_experiments = await self._get_active_experiments()
-        
-        dashboard_data = DashboardData()
-        
-        for experiment in active_experiments:
-            # Get current metrics
-            metrics = await self._get_current_metrics(experiment.id)
-            
-            # Calculate statistical significance
-            significance = await self._calculate_significance(metrics)
-            
-            # Get variant performance
-            variant_performance = await self._get_variant_performance(
-                experiment.id,
-                metrics
-            )
-            
-            # Add to dashboard
-            dashboard_data.add_experiment({
-                'id': experiment.id,
-                'name': experiment.name,
-                'status': experiment.status,
-                'duration': experiment.duration_days,
-                'sample_size': metrics.total_samples,
-                'significance': significance,
-                'variant_performance': variant_performance,
-                'projected_winner': self._project_winner(variant_performance),
-                'estimated_improvement': self._estimate_improvement(variant_performance)
-            })
-        
-        return dashboard_data
+routing_experiment = MASRExperimentConfig(
+    experiment_type=MASRExperimentType.ROUTING_STRATEGY,
+    variants={
+        "control":         {"strategy": RoutingStrategy.BALANCED},
+        "cost_efficient":  {"strategy": RoutingStrategy.COST_EFFICIENT},
+        "quality_focused": {"strategy": RoutingStrategy.QUALITY_FOCUSED},
+        "adaptive":        {"strategy": RoutingStrategy.ADAPTIVE},
+    },
+)
 ```
 
-## Safety and Rollback Mechanisms
+### Collaboration-mode experiments
 
-### Automatic Rollback on Degradation
+`MASRExperimentType.COLLABORATION_MODE` overrides
+`routing_decision.collaboration_mode` from the `CollaborationMode` enum, whose
+members are `FAST_PATH`, `DIRECT`, `PARALLEL`, `HIERARCHICAL`, `DEBATE`, and
+`ENSEMBLE`. `FAST_PATH` is a single LLM call that bypasses supervisors entirely;
+the seed collaboration experiment exercises `HIERARCHICAL`, `PARALLEL`,
+`ENSEMBLE`, and `DEBATE`. Note that live MASR never selects Chain-of-Agents or
+Mixture-of-Agents — those exist only as bypass endpoints
+(`POST /api/v1/agents/chain`, `POST /api/v1/agents/mixture`).
+
+## UnifiedExperimentManager
+
+`UnifiedExperimentManager` (`core/unified_experiment_manager.py:199`) — not
+`ExperimentManager` — owns experiment lifecycle and variant assignment. It is
+constructed with an optional prompt-version manager and an optional allocation
+strategy (defaulting to a deterministic hash-based allocator):
 
 ```python
-class ExperimentSafetyMonitor:
-    """
-    Monitor experiments for safety and trigger rollbacks.
-    """
-    
-    async def monitor_experiment_safety(self, experiment_id: str):
-        """
-        Continuously monitor experiment for degradation.
-        """
-        experiment = await self._load_experiment(experiment_id)
-        baseline_metrics = await self._get_baseline_metrics()
-        
-        while experiment.status == ExperimentStatus.RUNNING:
-            current_metrics = await self._get_current_metrics(experiment_id)
-            
-            # Check for significant degradation
-            degradation = self._check_degradation(baseline_metrics, current_metrics)
-            
-            if degradation.is_significant:
-                # Trigger immediate rollback
-                await self._trigger_rollback(experiment_id, degradation)
-                
-                # Alert relevant teams
-                await self._send_alerts(experiment_id, degradation)
-                
-                # Stop experiment
-                experiment.status = ExperimentStatus.STOPPED_SAFETY
-                await self._persist_experiment(experiment)
-                
-                break
-            
-            # Wait before next check
-            await asyncio.sleep(60)  # Check every minute
+# core/unified_experiment_manager.py:205
+def __init__(
+    self,
+    prompt_manager: PromptVersionManager | None = None,
+    allocation_strategy: ExperimentAllocationStrategy | None = None,
+):
+    self.allocation_strategy = allocation_strategy or DeterministicAllocationStrategy()
+    self.active_experiments: dict[str, SystemExperiment] = {}
+    self.experiment_history: list[SystemExperiment] = []
+    self.assignment_cache: dict[str, dict[str, ExperimentVariant]] = {}
 ```
 
-## Best Practices
+Key async methods:
 
-### 1. Integration Design
-- Keep experiments isolated from core business logic
-- Use feature flags for easy enable/disable
-- Implement gradual rollout capabilities
-- Maintain backward compatibility
+| Method | Purpose |
+|---|---|
+| `create_experiment(experiment_config)` (:225) | Parse variants/metrics/statistical config into a `SystemExperiment`, validate, register |
+| `start_experiment(experiment_id)` (:266) | Mark running and initialize component tracking |
+| `get_variant_for_context(experiment_id, context)` (:278) | Deterministic, cache-backed variant assignment via the allocation strategy |
+| `track_assignment(...)` (:314) / `track_metric(...)` (:328) | Record assignment and metric events |
+| `check_experiment_status(experiment_id)` (:347) | Return `ExperimentStatus` |
+| `stop_experiment(...)` (:366) / `promote_winner(experiment_id, winning_variant_id)` (:390) | Conclude an experiment |
 
-### 2. Metric Collection
-- Instrument all relevant touch points
-- Use consistent metric naming conventions
-- Collect both business and technical metrics
-- Ensure data quality and validation
+Variant assignment is deterministic and cached per `(experiment_id, context)`
+key, so the same context returns the same variant across calls.
 
-### 3. Experiment Isolation
-- Prevent experiment interference
-- Use proper randomization
-- Control for confounding variables
-- Implement clean experiment boundaries
+## Agent-API pattern experiments
 
-### 4. Production Safety
-- Always have rollback mechanisms
-- Monitor for degradation continuously
-- Set conservative safety thresholds
-- Maintain audit logs of all changes
+`APIPatternExperimentor` (`integration/api_pattern_experiments.py:82`) — not
+`APIPatternExperiment` — tests Primary (MASR-routed) vs Bypass (direct) API usage
+and different agent-coordination modes. Its enums live in the same module:
 
-### 5. Performance Impact
-- Minimize overhead of experimentation code
-- Use async operations where possible
-- Cache experiment configurations
-- Profile and optimize hot paths
+- `APIPattern` (:24): `PRIMARY_API`, `BYPASS_API`, `HYBRID`, `PARALLEL`.
+- `ExecutionMode` (:33): `CHAIN`, `MIXTURE`, `PARALLEL`, `HIERARCHICAL`.
 
-## Conclusion
+The public entry point is `execute_with_experiment(query, query_type, context)`
+(:170), which selects an experiment by `query_type`, allocates a variant through
+`AdaptiveAllocationEngine`, and dispatches to the matching pattern/mode handler
+(`_execute_primary_api` :313, `_execute_bypass_api` :335, `_execute_hybrid`
+:360, `_execute_parallel_apis` :397, `_execute_chain_mode` :426,
+`_execute_mixture_mode` :450, `_execute_hierarchical_mode` :495), falling back to
+`_execute_default` (:522) when no experiment applies:
 
-These integration patterns enable Cerebro to experiment with every aspect of its intelligence system while maintaining stability and performance. By deeply integrating experimentation into core components, we create a platform that continuously evolves and improves based on empirical evidence.
+```python
+# api_pattern_experiments.py:170
+async def execute_with_experiment(
+    self, query: str, query_type: str, context: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    context = context or {}
+    experiment_config = None
+    for _exp_id, config in self.active_experiments.items():
+        if query_type in config.query_types:
+            experiment_config = config
+            break
+    if not experiment_config:
+        return await self._execute_default(query, query_type, context)
+
+    allocation = await self.allocation_engine.allocate_variant(
+        experiment_id=experiment_config.experiment_id,
+        ...
+    )
+    ...
+```
+
+The "90% Primary / 10% Bypass" split that these experiments probe is a **design
+target, not a measured value**.
+
+## Cross-component orchestration
+
+`AgentFrameworkExperimentor`
+(`integration/agent_framework_integration.py:147`) coordinates experiments across
+the agent framework. It exposes creation helpers
+(`create_routing_experiment` :195, `create_api_pattern_experiment` :251,
+`create_talkhier_optimization_experiment` :305) and a single
+`execute_with_experiment(...)` (:348) dispatcher, and runs background flush/
+allocation-update tasks (`_flush_results` :590, `_update_allocations` :643).
+`SystemExperimentRegistry` (`core/system_experiment_registry.py:64`) is the
+shared registry: it tracks component registrations, experiment lifecycle
+(`register_experiment` :111, `start_experiment` :146,
+`update_experiment_allocation` :185, `stop_experiment` :206, `promote_winner`
+:246), variant-assignment and metric recording, per-component health checks
+(:287), and an event log.
+
+## Statistical design
+
+`BayesianExperimentDesigner`
+(`statistical/bayesian_experiment_design.py:114`) provides Gaussian-process-based
+Bayesian optimization over experiment parameters: acquisition functions
+(`AcquisitionFunction` :30), parameter priors (`ParameterPrior` :52 with
+`.sample()`), GP model construction (`_create_gp_model` :161), acquisition
+optimization (`_optimize_acquisition` :309), convergence checks
+(`_check_convergence` :404), posterior updates (`update_posterior` :492), and
+uncertainty-region reporting (`get_uncertainty_regions` :516). It depends on
+NumPy and scikit-learn Gaussian-process models. Additional statistical machinery
+lives in `enhanced_statistical_engine.py` and `multi_variate_analysis.py`.
+
+## Wiring diagram (intended, not live)
+
+```mermaid
+flowchart TD
+    subgraph unmounted["experimentation package (NOT mounted in main.py)"]
+        MER["MASRExperimentalRouter (subclass of MASRouter)"]
+        API["APIPatternExperimentor"]
+        AFE["AgentFrameworkExperimentor"]
+        UEM["UnifiedExperimentManager"]
+        REG["SystemExperimentRegistry"]
+        BAY["BayesianExperimentDesigner"]
+    end
+
+    MER -->|"route_with_experiment()"| UEM
+    API -->|"execute_with_experiment()"| UEM
+    AFE --> UEM
+    UEM --> REG
+    UEM --> BAY
+
+    subgraph live["live query path"]
+        DES["DirectExecutionService"]
+        MASR["MASRouter (base; AdaptiveAllocationEngine flag-gated, OFF by default)"]
+        BRIDGE["MASRSupervisorBridge"]
+        SUP["Domain supervisors (Research, Content, Analytics, Finance)"]
+    end
+
+    DES --> MASR --> BRIDGE --> SUP
+
+    MER -.->|"subclasses, but never instantiated on the live path"| MASR
+```
+
+The dashed edge is the whole point: `MASRExperimentalRouter` extends the same
+`MASRouter` the live path uses, but `DirectExecutionService`
+(`src/api/services/direct_execution_service.py`) constructs a plain `MASRouter`,
+never the experimental subclass, and no router mounts the experiment endpoints.
+
+## What it would take to make this live
+
+1. `include_router` the experiment router in `src/api/main.py` — the unmounted
+   module `experiment_agent_api.py`, which imports the experimentation package's
+   `AgentFrameworkExperimentor`, dashboard, and feedback-optimizer entry points.
+   (`experiments.py` is also unmounted, but mounting it would not surface this
+   subsystem: it is a separate DB-backed A/B CRUD API over `src/models/db` and
+   imports nothing from `src/ai_brain/experimentation/`.)
+2. Have `DirectExecutionService` construct `MASRExperimentalRouter` in place of
+   `MASRouter`, and call `route_with_experiment()` instead of `route()`.
+3. Provide real metric sinks — the manager tracks assignments and metrics, but
+   Cerebro's live quality/confidence numbers are hardcoded heuristics
+   (`0.85` success, `0.3` empty, `0.8` fast-path), not measured signals, so any
+   experiment optimizing "quality" today would be optimizing a constant.
+
+Until those steps land, everything above is dormant in-tree code.

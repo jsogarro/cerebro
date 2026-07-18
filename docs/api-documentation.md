@@ -1,8 +1,27 @@
-# API Documentation
+# Cerebro API Documentation
 
-## Overview
+Canonical top-level inventory of Cerebro's HTTP and WebSocket surface.
 
-The Multi-Agent Research Platform provides a comprehensive REST API for managing research projects, generating reports, and monitoring system health. The API follows RESTful principles and includes real-time WebSocket support for progress updates.
+Cerebro is a multi-agent LLM intelligence platform. Its current product focus is
+**financial research (US equities)**. Natural-language queries are routed through
+the in-process **MASR** (Multi-Agent System Router) to hierarchical domain
+supervisors — Research, Content, Analytics, Finance — which coordinate specialist
+LLM worker agents.
+
+> **Infra naming.** The deployment identity is still the pre-rebrand
+> `research-platform`: the FastAPI application title is `Research Platform API`,
+> the health service field is `research-platform-api`, images are
+> `research-platform-api`, the database is `research_db`, and the CLI entrypoints
+> are `research-platform` / `research-cli`. These literal names are kept verbatim
+> below where they are the actual infra artifact; the product name is Cerebro.
+
+This page is an inventory and links out to the deep-dive references rather than
+duplicating them:
+
+- **Agent (bypass) API** — `docs/api/agent-api-reference.md`
+- **MASR routing API** — `docs/api/masr-api-guide.md`
+
+---
 
 ## Base URL
 
@@ -10,101 +29,155 @@ The Multi-Agent Research Platform provides a comprehensive REST API for managing
 http://localhost:8000/api/v1
 ```
 
-Production:
+There is no hosted production endpoint. All examples target the local server.
+`/docs` (Swagger) and `/redoc` are served only when `DEBUG=True`, which is off by
+default.
+
+## Request flow
+
 ```
-https://api.researchplatform.com/v1
+Client -> FastAPI -> DirectExecutionService (asyncio background task)
+       -> MASRouter -> MASRSupervisorBridge -> domain supervisors
+       -> workers -> verification QA gate
 ```
+
+Execution is fully in-process. `DirectExecutionService`
+(`src/api/services/direct_execution_service.py`) spawns an asyncio background task
+per query and persists progress via workflow checkpoints. It replaced the earlier
+Temporal-based engine — Temporal is removed (no `temporalio` dependency; there are
+no workflow IDs).
 
 ## Authentication
 
-The API uses JWT (JSON Web Token) authentication with bearer tokens:
+Cerebro uses JWT bearer tokens signed with **RS256** (RSA), validated per endpoint:
 
-```bash
+```
 Authorization: Bearer <jwt_token>
 ```
 
-### Getting a Token
+- Access tokens expire in **15 minutes**; refresh tokens in **7 days**.
+- Keys are PEM files at `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem`.
+- Passwords are bcrypt-hashed (12 rounds), minimum length **12** characters.
+
+> **Authorization is not global.** `AuthMiddleware` is a no-op — it sets request
+> state to `None` and validates nothing. Only endpoints that explicitly declare
+> an auth dependency are protected: the `auth` router, and `research` (via
+> `get_tenant_context` → `Depends(get_current_token)`). The `reports` and `users`
+> routers — including `DELETE /api/v1/users/{user_id}/gdpr` — declare **no** auth
+> dependency and are unauthenticated. As a result
+> **`/api/v1/query/*`, `/api/v1/agents/*`, and `/api/v1/masr/*` are effectively
+> unauthenticated.** Do not assume a token is required unless the specific
+> endpoint's reference says so.
+
+### Getting a token
 
 ```bash
-# Login to get access token
-curl -X POST "/auth/login" \
+curl -X POST "http://localhost:8000/api/v1/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
-    "password": "your_password_8_chars_min"
+    "password": "correct horse battery"
   }'
 
-# Response
+# Response (AuthResponse — user + nested tokens)
 {
-  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
-  "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
-  "token_type": "bearer",
-  "expires_in": 900
+  "user": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "email": "user@example.com",
+    "username": "username"
+  },
+  "tokens": {
+    "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
+    "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
+    "token_type": "Bearer",
+    "expires_in": 900
+  }
 }
-
-# Note: Tokens are signed with RS256 (RSA) using PEM key files
 ```
 
-## Content Types
+WebSocket connections allow anonymous access when `ENVIRONMENT=development`;
+otherwise the `token` query parameter is validated with the same RS256 key.
 
-All API endpoints accept and return JSON unless otherwise specified:
+## Content types
+
+All endpoints accept and return JSON unless otherwise specified:
 
 ```
 Content-Type: application/json
 Accept: application/json
 ```
 
-## Error Handling
+## Error handling
 
-The API uses standard HTTP status codes and returns error details in the response body:
+Standard HTTP status codes; error details are returned in a nested `error`
+envelope:
 
 ```json
 {
-  "detail": "Error description",
-  "type": "error_type",
-  "code": "ERROR_CODE"
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Error description",
+    "details": {}
+  }
 }
 ```
 
-### Common Status Codes
+The `code` is derived from the HTTP status (see `ERROR_CODES_BY_STATUS`):
+`BAD_REQUEST` (400), `AUTHENTICATION_REQUIRED` (401), `FORBIDDEN` (403),
+`NOT_FOUND` (404), `CONFLICT` (409), `VALIDATION_ERROR` (422),
+`RATE_LIMIT_EXCEEDED` (429), `INTERNAL_SERVER_ERROR` (500).
 
-- `200` - Success
-- `201` - Created
-- `202` - Accepted (Async operation started)
-- `204` - No Content
-- `400` - Bad Request
-- `401` - Unauthorized
-- `403` - Forbidden
-- `404` - Not Found
-- `422` - Validation Error
-- `500` - Internal Server Error
-- `503` - Service Unavailable
+Common codes: `200` Success, `201` Created, `202` Accepted (async started),
+`204` No Content, `400` Bad Request, `401` Unauthorized, `403` Forbidden,
+`404` Not Found, `422` Validation Error, `500` Internal Server Error,
+`503` Service Unavailable.
 
-## Rate Limiting
+## Rate limiting
 
-API endpoints are rate-limited per user:
+A single global rate limiter applies to all endpoints: **100 requests/minute**
+(`MAX_REQUESTS_PER_MINUTE=100`, `ENABLE_RATE_LIMITING=True`). There are no tiers,
+no per-endpoint limits, no burst allowances, and no account quotas.
 
-- **Standard endpoints**: 100 requests/minute
-- **Compute-intensive endpoints**: 10 requests/hour
-- **Authentication endpoints**: 5 requests/5 minutes
-
-Rate limit headers are included in responses:
+Responses include:
 
 ```
 X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1640995200
+X-RateLimit-Reset: 42
 ```
 
-## API Endpoints
+`X-RateLimit-Reset` is the number of **seconds until** the window resets (the same
+value is sent as `Retry-After` on a 429), not an absolute epoch timestamp.
 
-### Health Endpoints
+---
 
-#### GET /health
+## Endpoint inventory
 
-Basic health check endpoint.
+Mounted routers and their effective prefixes. Endpoint counts reflect the live
+`include_router` list; unmounted route modules (qa, costs, benchmarks,
+improvement, memory, experiments) are not part of the API.
 
-**Response:**
+| Router | Prefix | Summary |
+|---|---|---|
+| health | (none) | `GET /health`, `/ready`, `/live` |
+| query (primary/MASR) | `/api/v1/query` | NL query entry + execution status/results |
+| agents (bypass) | `/api/v1/agents` | Direct agent execution, chain/mixture, metrics |
+| masr | `/api/v1/masr` | Routing decisions, cost estimates, feedback |
+| research | `/api/v1/research` | Research project CRUD + progress/refine/results |
+| reports | `/api/v1/reports` | Report generation, download, search, integrity |
+| supervisors | `/api/v1/supervisors` | Supervisor coordination (+ WebSocket) |
+| talkhier | `/api/v1/talkhier` | Multi-round refinement sessions (+ WebSocket) |
+| auth | `/api/v1/auth` | Registration, login, sessions, password flows |
+| users | `/api/v1/users` | `DELETE /{user_id}/gdpr` (single endpoint) |
+| websocket | `/ws*` | Real-time project/CLI event streams |
+| metrics | `/metrics` | Prometheus exposition |
+
+---
+
+## Health endpoints
+
+### GET /health
+
 ```json
 {
   "status": "healthy",
@@ -112,11 +185,10 @@ Basic health check endpoint.
 }
 ```
 
-#### GET /ready
+### GET /ready
 
 Readiness check for Kubernetes deployments.
 
-**Response:**
 ```json
 {
   "status": "ready",
@@ -129,30 +201,129 @@ Readiness check for Kubernetes deployments.
 }
 ```
 
-#### GET /live
+> These checks are hardcoded `"ok"` values, not live probes. The `temporal` entry
+> is a vestigial literal — Temporal is removed from the runtime.
 
-Liveness check for Kubernetes deployments.
+### GET /live
 
-**Response:**
 ```json
 {
   "status": "alive"
 }
 ```
 
-### Research Project Endpoints
+---
 
-#### POST /research/projects
+## Primary query API (`/api/v1/query`)
 
-Create a new research project.
+The intelligence-first surface. Each query is routed by MASR and executed
+asynchronously; the request returns immediately with an execution handle, and the
+real routing/result data is fetched from the execution endpoints.
 
-**Request Body:**
+| Method & path | Purpose |
+|---|---|
+| `POST /api/v1/query/research` | General NL research query (MASR-routed) |
+| `POST /api/v1/query/analyze` | Analysis-focused wrapper |
+| `POST /api/v1/query/synthesize` | Synthesis-focused wrapper |
+| `POST /api/v1/query/literature` | Literature-review wrapper |
+| `POST /api/v1/query/methodology` | Methodology wrapper |
+| `POST /api/v1/query/comparison` | Comparative-analysis wrapper |
+| `GET /api/v1/query/execution/{execution_id}/status` | Live execution status + real routing metadata |
+| `GET /api/v1/query/execution/{execution_id}/results` | Final aggregated results |
+| `POST /api/v1/query/execution/{project_id}/resume` | Resume a checkpointed execution |
+| `GET /api/v1/query/routing/strategies` | List available routing strategies |
+| `GET /api/v1/query/routing/recommend` | Static routing recommendation for a query |
+
+The `/analyze`, `/synthesize`, `/literature`, `/methodology`, and `/comparison`
+paths are thin wrappers that build the same internal request and call the same
+handler as `/research`.
+
+**Example**
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/query/research" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Value US regional banks after rate cuts", "domains": ["finance"]}'
+```
+
+> **Immediate response is a placeholder.** The synchronous response to
+> `POST /api/v1/query/research` contains hardcoded fields — `selected_agents=[]`,
+> `estimated_cost=0.015`, `estimated_quality=0.85`, `confidence=0.85`,
+> `routing_time_ms=50.0` — not the real MASR decision. Poll
+> `GET /api/v1/query/execution/{execution_id}/status` and `/results` for the actual
+> selected agents, routing, and output. `GET /routing/recommend` likewise returns
+> canned recommendations keyed by query length.
+
+---
+
+## Agent (bypass) API (`/api/v1/agents`)
+
+Direct, MASR-bypassing access to individual agents — used for testing and
+low-latency single-agent calls. Full request/response schemas:
+**`docs/api/agent-api-reference.md`**.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/v1/agents` | List callable agent types |
+| `GET /api/v1/agents/{agent_type}` | Agent capability descriptor |
+| `POST /api/v1/agents/{agent_type}/execute` | Direct single-agent execution |
+| `POST /api/v1/agents/chain` | Chain-of-Agents (sequential) |
+| `POST /api/v1/agents/mixture` | Mixture-of-Agents (parallel + aggregate) |
+| `POST /api/v1/agents/{agent_type}/validate` | Validate a proposed agent request |
+| `GET /api/v1/agents/{agent_type}/metrics` | Per-agent metrics |
+| `GET /api/v1/agents/{agent_type}/health` | Per-agent health |
+| `GET /api/v1/agents/system/stats` | Aggregate agent-system stats |
+| `GET /api/v1/agents/executions/active` | In-flight bypass executions |
+| `POST /api/v1/agents/literature-review/search` | Literature-review convenience route |
+| `POST /api/v1/agents/citation/format` | Citation-formatting convenience route |
+| `POST /api/v1/agents/synthesis/combine` | Synthesis convenience route |
+| `GET /api/v1/agents/health/summary` | Aggregate agent-health summary |
+| `GET /api/v1/agents/performance/comparison` | Cross-agent performance comparison |
+| `POST /api/v1/agents/{workflow}` | Prebuilt workflows (e.g. `workflows/literature-analysis`) |
+
+The bypass surface exposes **10** agent types: `literature-review`, `citation`,
+`methodology`, `comparative-analysis`, `synthesis`, `financial-analysis`,
+`valuation`, `risk-assessment`, `financial-calculator`, `verification`. The four
+Content and three Analytics workers are reachable only through the MASR-routed
+query API, not here. Chain-of-Agents and Mixture-of-Agents exist **only** as these
+bypass endpoints — MASR itself never selects them.
+
+---
+
+## MASR routing API (`/api/v1/masr`)
+
+Inspect and influence routing decisions without executing a query. Full guide:
+**`docs/api/masr-api-guide.md`**.
+
+| Method & path | Purpose |
+|---|---|
+| `POST /api/v1/masr/route` | Return a routing decision for a query |
+| `POST /api/v1/masr/estimate-cost` | Estimated execution cost breakdown |
+| `POST /api/v1/masr/evaluate-strategies` | Compare routing strategies |
+| `POST /api/v1/masr/analyze-complexity` | Analyze query complexity |
+| `GET /api/v1/masr/strategies` | List available routing strategies |
+| `GET /api/v1/masr/models` | List available models |
+| `POST /api/v1/masr/feedback` | Submit post-hoc cost/quality feedback |
+| `GET /api/v1/masr/status` | Router health and performance metrics |
+
+MASR runs **in-process** (the `MASRouter` class). The standalone `masr-router`
+container (`:9100`) in the compose file is legacy and is not on the query path.
+
+---
+
+## Research project endpoints (`/api/v1/research`)
+
+Project-oriented interface backed by Postgres. Distinct from the `/api/v1/query`
+surface: projects persist and expose progress/refine/results lifecycles.
+
+### POST /api/v1/research/projects
+
 ```json
 {
-  "title": "AI Impact on Healthcare",
+  "title": "US Regional Bank Valuation",
   "query": {
-    "text": "How does artificial intelligence impact healthcare outcomes?",
-    "domains": ["AI", "Healthcare", "Medicine"],
+    "text": "How do rate cuts affect US regional bank valuations?",
+    "domains": ["finance", "economics"],
     "timeframe": "last_5_years",
     "language": "en"
   },
@@ -167,20 +338,15 @@ Create a new research project.
 ```
 
 **Response (201):**
+
 ```json
 {
   "id": "proj-550e8400-e29b-41d4-a716-446655440000",
-  "title": "AI Impact on Healthcare",
-  "query": {
-    "text": "How does artificial intelligence impact healthcare outcomes?",
-    "domains": ["AI", "Healthcare", "Medicine"],
-    "timeframe": "last_5_years",
-    "language": "en"
-  },
+  "title": "US Regional Bank Valuation",
   "user_id": "user-123",
   "status": "pending",
-  "created_at": "2024-01-01T12:00:00Z",
-  "updated_at": "2024-01-01T12:00:00Z",
+  "created_at": "2026-01-01T12:00:00Z",
+  "updated_at": "2026-01-01T12:00:00Z",
   "scope": {
     "research_depth": "comprehensive",
     "paper_limit": 100,
@@ -190,68 +356,42 @@ Create a new research project.
 }
 ```
 
-#### GET /research/projects/{project_id}
+### GET /api/v1/research/projects/{project_id}
 
-Get a research project by ID.
-
-**Response (200):**
 ```json
 {
   "id": "proj-550e8400-e29b-41d4-a716-446655440000",
-  "title": "AI Impact on Healthcare",
-  "query": {
-    "text": "How does artificial intelligence impact healthcare outcomes?",
-    "domains": ["AI", "Healthcare", "Medicine"]
-  },
+  "title": "US Regional Bank Valuation",
   "user_id": "user-123",
   "status": "in_progress",
-  "created_at": "2024-01-01T12:00:00Z",
-  "updated_at": "2024-01-01T12:05:00Z",
-  "completion_estimate": "2024-01-01T12:30:00Z",
-  "workflow_id": "wf-abc123"
+  "created_at": "2026-01-01T12:00:00Z",
+  "updated_at": "2026-01-01T12:05:00Z",
+  "completion_estimate": "2026-01-01T12:30:00Z"
 }
 ```
 
-#### GET /research/projects
+### GET /api/v1/research/projects
 
-List research projects with filtering.
+List with filtering.
 
-**Query Parameters:**
-- `user_id` (string, optional) - Filter by user ID
-- `status` (string, optional) - Filter by status (`pending`, `in_progress`, `completed`, `failed`, `cancelled`)
-- `limit` (integer, default: 10, max: 100) - Number of results to return
-- `offset` (integer, default: 0) - Number of results to skip
+**Query parameters:** `user_id` (optional), `status` (`pending`, `planning`,
+`in_progress`, `completed`, `failed`, `cancelled`), `limit` (default 10, max 100),
+`offset` (default 0).
 
-**Example:**
-```bash
-GET /research/projects?user_id=user-123&status=in_progress&limit=20
-```
-
-**Response (200):**
 ```json
 [
   {
     "id": "proj-550e8400-e29b-41d4-a716-446655440000",
-    "title": "AI Impact on Healthcare",
+    "title": "US Regional Bank Valuation",
     "status": "in_progress",
-    "created_at": "2024-01-01T12:00:00Z",
+    "created_at": "2026-01-01T12:00:00Z",
     "progress_percentage": 65.0
-  },
-  {
-    "id": "proj-550e8400-e29b-41d4-a716-446655440001",
-    "title": "Machine Learning in Finance",
-    "status": "completed",
-    "created_at": "2024-01-01T10:00:00Z",
-    "progress_percentage": 100.0
   }
 ]
 ```
 
-#### GET /research/projects/{project_id}/progress
+### GET /api/v1/research/projects/{project_id}/progress
 
-Get real-time progress of a research project.
-
-**Response (200):**
 ```json
 {
   "project_id": "proj-550e8400-e29b-41d4-a716-446655440000",
@@ -262,10 +402,10 @@ Get real-time progress of a research project.
   "progress_percentage": 60.0,
   "current_agent": "synthesis_agent",
   "current_phase": "analysis",
-  "estimated_completion": "2024-01-01T12:30:00Z",
+  "estimated_completion": "2026-01-01T12:30:00Z",
   "agent_progress": {
-    "literature_review": {"status": "completed", "confidence": 0.92},
-    "comparative_analysis": {"status": "completed", "confidence": 0.88},
+    "literature_review": {"status": "completed", "confidence": 0.85},
+    "comparative_analysis": {"status": "completed", "confidence": 0.85},
     "methodology": {"status": "completed", "confidence": 0.85},
     "synthesis": {"status": "in_progress", "progress": 0.4},
     "citation": {"status": "pending"}
@@ -273,98 +413,68 @@ Get real-time progress of a research project.
 }
 ```
 
-#### POST /research/projects/{project_id}/cancel
+> Agent `confidence` values are hardcoded heuristics (0.85 on success, 0.3 on empty
+> output, 0.8 on the fast path), not model-reported quality signals.
 
-Cancel a research project.
+### POST /api/v1/research/projects/{project_id}/refine
 
-**Response (204):** No content
+> **Not implemented.** This endpoint is declared but unconditionally raises
+> **HTTP 501 Not Implemented** (`detail: "Scope refinement not yet implemented"`).
+> It accepts a `ResearchScope` body but never applies it and returns no updated
+> project.
 
-#### POST /research/projects/{project_id}/refine
+**Response (501):**
 
-Refine the scope of an existing research project.
-
-**Request Body:**
 ```json
 {
-  "research_depth": "focused",
-  "paper_limit": 50,
-  "additional_domains": ["Ethics"],
-  "exclude_preprints": true
+  "error": {
+    "code": "API_ERROR",
+    "message": "Scope refinement not yet implemented",
+    "details": {}
+  }
 }
 ```
 
-**Response (200):**
-```json
-{
-  "id": "proj-550e8400-e29b-41d4-a716-446655440000",
-  "scope": {
-    "research_depth": "focused",
-    "paper_limit": 50,
-    "include_preprints": false,
-    "additional_domains": ["Ethics"]
-  },
-  "status": "scope_updated"
-}
-```
+### POST /api/v1/research/projects/{project_id}/cancel
 
-#### GET /research/projects/{project_id}/results
+**Response (204):** No content.
 
-Get the results of a completed research project.
+### GET /api/v1/research/projects/{project_id}/results
 
-**Response (200):**
 ```json
 {
   "project_id": "proj-550e8400-e29b-41d4-a716-446655440000",
   "status": "completed",
-  "completion_time": "2024-01-01T12:28:00Z",
+  "completion_time": "2026-01-01T12:28:00Z",
   "results": {
-    "literature_review": {
-      "papers_found": 147,
-      "papers_analyzed": 89,
-      "key_findings": [
-        "AI diagnostic tools show 15% improvement in accuracy",
-        "Cost reduction of 23% in diagnostic workflows"
-      ],
-      "trends": ["Increased adoption in radiology", "Growing use in pathology"]
-    },
-    "comparative_analysis": {
-      "approaches_compared": 8,
-      "effectiveness_ranking": [
-        {"approach": "Deep Learning", "score": 0.89},
-        {"approach": "Traditional ML", "score": 0.72}
-      ]
-    },
     "synthesis": {
-      "main_conclusions": "AI demonstrates significant potential...",
-      "confidence_score": 0.87,
-      "research_gaps": ["Long-term outcome studies", "Cost-effectiveness analysis"]
-    },
-    "citations": {
-      "total_sources": 89,
-      "primary_sources": 67,
-      "peer_reviewed": 82
+      "main_conclusions": "Rate cuts widen net interest margins for...",
+      "confidence_score": 0.85,
+      "research_gaps": ["Long-horizon deposit-beta studies"]
     }
   },
   "quality_metrics": {
-    "overall_confidence": 0.87,
-    "source_reliability": 0.92,
+    "overall_confidence": 0.85,
+    "source_reliability": 0.85,
     "methodology_rigor": 0.84
   }
 }
 ```
 
-### Report Generation Endpoints
+---
 
-#### POST /reports/generate
+## Report generation endpoints (`/api/v1/reports`)
 
-Generate a new report asynchronously.
+### POST /api/v1/reports/generate
 
-**Request Body:**
+Generate a report asynchronously. (There is no `POST /api/v1/reports`; the only
+bare-path route on this router is `GET /api/v1/reports`, the list endpoint below.)
+
 ```json
 {
-  "title": "AI in Healthcare: Comprehensive Analysis",
-  "query": "Impact of AI on healthcare outcomes",
-  "domains": ["AI", "Healthcare"],
+  "title": "US Regional Banks: Comprehensive Analysis",
+  "query": "Impact of rate cuts on regional bank valuations",
+  "domains": ["finance"],
   "project_id": "proj-550e8400-e29b-41d4-a716-446655440000",
   "user_id": "user-123",
   "report_type": "comprehensive",
@@ -372,249 +482,254 @@ Generate a new report asynchronously.
   "formats": ["html", "pdf", "markdown"],
   "include_toc": true,
   "include_executive_summary": true,
-  "include_visualizations": true,
   "include_citations": true,
-  "include_methodology": true,
-  "workflow_data": {
-    "aggregated_results": {
-      "literature_findings": "...",
-      "analysis_results": "..."
-    }
-  },
-  "save_to_storage": true,
-  "notify_completion": false
+  "save_to_storage": true
 }
 ```
 
 **Response (202):**
+
 ```json
 {
   "id": "rpt-550e8400-e29b-41d4-a716-446655440000",
-  "title": "AI in Healthcare: Comprehensive Analysis",
-  "query": "Impact of AI on healthcare outcomes",
+  "title": "US Regional Banks: Comprehensive Analysis",
   "report_type": "comprehensive",
   "generation_status": "generating",
   "formats_generated": [],
   "word_count": 0,
-  "page_count": 0,
   "quality_score": 0.0,
-  "confidence_score": 0.0,
-  "created_at": "2024-01-01T12:30:00Z",
-  "generation_time_seconds": null,
+  "created_at": "2026-01-01T12:30:00Z",
   "download_urls": {}
 }
 ```
 
-#### GET /reports/{report_id}
+### GET /api/v1/reports/{report_id}
 
-Get report details by ID.
-
-**Response (200):**
 ```json
 {
   "id": "rpt-550e8400-e29b-41d4-a716-446655440000",
-  "title": "AI in Healthcare: Comprehensive Analysis",
-  "query": "Impact of AI on healthcare outcomes",
-  "report_type": "comprehensive",
+  "title": "US Regional Banks: Comprehensive Analysis",
   "generation_status": "completed",
   "formats_generated": ["html", "pdf", "markdown"],
   "word_count": 8547,
   "page_count": 23,
   "quality_score": 0.91,
-  "confidence_score": 0.87,
-  "created_at": "2024-01-01T12:30:00Z",
+  "created_at": "2026-01-01T12:30:00Z",
   "generation_time_seconds": 127.5,
   "download_urls": {
-    "html": "/reports/rpt-550e8400-e29b-41d4-a716-446655440000/download/html",
-    "pdf": "/reports/rpt-550e8400-e29b-41d4-a716-446655440000/download/pdf",
-    "markdown": "/reports/rpt-550e8400-e29b-41d4-a716-446655440000/download/markdown"
+    "html": "/api/v1/reports/rpt-550e8400-e29b-41d4-a716-446655440000/download/html",
+    "pdf": "/api/v1/reports/rpt-550e8400-e29b-41d4-a716-446655440000/download/pdf"
   }
 }
 ```
 
-#### GET /reports/{report_id}/download/{format_type}
+### GET /api/v1/reports/{report_id}/download/{format_type}
 
-Download report in specific format.
+Download a report. `format_type` is one of `html`, `pdf`, `latex`, `docx`,
+`markdown`, `json`. Returns a file with the appropriate MIME type.
 
-**Parameters:**
-- `format_type` - One of: `html`, `pdf`, `latex`, `docx`, `markdown`, `json`
+### GET /api/v1/reports
 
-**Response:** File download with appropriate MIME type
+List with filtering and pagination. Query parameters: `user_id`, `status_filter`,
+`report_type`, `page` (default 1), `page_size` (default 20, max 100).
 
-**Example:**
-```bash
-curl -o report.pdf \
-  -H "Authorization: Bearer <token>" \
-  "http://localhost:8000/api/v1/reports/rpt-123/download/pdf"
-```
+### POST /api/v1/reports/search
 
-#### GET /reports
+Search by term and filters (`search_term`, `user_id`, `report_type`,
+`min_quality_score`, `limit`, `offset`).
 
-List reports with filtering and pagination.
+### GET /api/v1/reports/statistics
 
-**Query Parameters:**
-- `user_id` (UUID, optional) - Filter by user ID
-- `status_filter` (string, optional) - Filter by status
-- `report_type` (string, optional) - Filter by report type
-- `page` (integer, default: 1) - Page number
-- `page_size` (integer, default: 20, max: 100) - Results per page
+Aggregate generation statistics. Query parameters: `user_id`, `days`
+(default 30, max 365).
 
-**Response (200):**
-```json
-{
-  "reports": [
-    {
-      "id": "rpt-550e8400-e29b-41d4-a716-446655440000",
-      "title": "AI in Healthcare: Comprehensive Analysis",
-      "generation_status": "completed",
-      "quality_score": 0.91,
-      "created_at": "2024-01-01T12:30:00Z"
-    }
-  ],
-  "total_count": 1,
-  "page": 1,
-  "page_size": 20,
-  "has_more": false
-}
-```
+### DELETE /api/v1/reports/{report_id}
 
-#### POST /reports/search
+Delete a report. Query parameter `delete_files` (default true).
+**Response (204):** No content.
 
-Search reports by text and filters.
+### GET /api/v1/reports/{report_id}/integrity
 
-**Request Body:**
-```json
-{
-  "search_term": "artificial intelligence healthcare",
-  "user_id": "user-123",
-  "report_type": "comprehensive",
-  "min_quality_score": 0.8,
-  "limit": 20,
-  "offset": 0
-}
-```
+Verify report and file checksums.
 
-**Response (200):**
-```json
-{
-  "reports": [
-    {
-      "id": "rpt-550e8400-e29b-41d4-a716-446655440000",
-      "title": "AI in Healthcare: Comprehensive Analysis",
-      "generation_status": "completed",
-      "quality_score": 0.91
-    }
-  ],
-  "total_count": 1,
-  "page": 1,
-  "page_size": 20,
-  "has_more": false
-}
-```
-
-#### GET /reports/statistics
-
-Get report generation statistics.
-
-**Query Parameters:**
-- `user_id` (UUID, optional) - Filter by user ID
-- `days` (integer, default: 30, max: 365) - Days to look back
-
-**Response (200):**
-```json
-{
-  "total_reports": 157,
-  "status_counts": {
-    "completed": 142,
-    "generating": 8,
-    "failed": 7
-  },
-  "type_counts": {
-    "comprehensive": 89,
-    "executive_summary": 45,
-    "academic_paper": 23
-  },
-  "average_quality_score": 0.87,
-  "average_confidence_score": 0.84,
-  "average_generation_time": 142.7,
-  "average_word_count": 7834,
-  "total_access_count": 2341,
-  "storage_statistics": {
-    "total_storage_mb": 1247,
-    "total_files": 471
-  }
-}
-```
-
-#### DELETE /reports/{report_id}
-
-Delete a report and optionally its files.
-
-**Query Parameters:**
-- `delete_files` (boolean, default: true) - Also delete associated files
-
-**Response (204):** No content
-
-#### GET /reports/{report_id}/integrity
-
-Verify the integrity of a report and its files.
-
-**Response (200):**
 ```json
 {
   "report_id": "rpt-550e8400-e29b-41d4-a716-446655440000",
   "integrity_status": "valid",
   "checksum_verification": {
-    "html": {"expected": "abc123", "actual": "abc123", "valid": true},
-    "pdf": {"expected": "def456", "actual": "def456", "valid": true}
+    "html": {"expected": "abc123", "actual": "abc123", "valid": true}
   },
   "file_verification": {
-    "html": {"exists": true, "size_bytes": 157834},
-    "pdf": {"exists": true, "size_bytes": 2847291}
+    "html": {"exists": true, "size_bytes": 157834}
   },
-  "last_verified": "2024-01-01T13:00:00Z"
+  "last_verified": "2026-01-01T13:00:00Z"
 }
 ```
 
-### WebSocket Endpoints
+---
 
-#### WS /ws
+## Supervisor endpoints (`/api/v1/supervisors`)
 
-General WebSocket connection for system-wide events.
+HTTP + WebSocket access to the domain supervisors (Research, Content, Analytics,
+Finance). Each supervisor runs an internal LangGraph `StateGraph`. WebSocket
+routes:
 
-**Connection:**
-```bash
-ws://localhost:8000/ws?token=<jwt_token>
-```
+- `WS /api/v1/supervisors/coordination/ws` — cross-supervisor coordination stream
+- `WS /api/v1/supervisors/{supervisor_type}/ws` — per-supervisor stream
 
-**Messages Received:**
+---
+
+## TalkHier endpoints (`/api/v1/talkhier`)
+
+Multi-round refinement/consensus sessions. WebSocket routes:
+
+- `WS /api/v1/talkhier/sessions/{id}/live` — live session updates
+- `WS /api/v1/talkhier/interactive` — interactive refinement
+- `WS /api/v1/talkhier/coordination` — coordination stream
+
+---
+
+## Authentication endpoints (`/api/v1/auth`)
+
+| Method & path | Purpose |
+|---|---|
+| `POST /api/v1/auth/register` | Create an account |
+| `POST /api/v1/auth/login` | Authenticate, receive tokens |
+| `POST /api/v1/auth/refresh` | Exchange refresh token for a new access token |
+| `POST /api/v1/auth/logout` | Revoke the current session |
+| `POST /api/v1/auth/forgot-password` | Request a password-reset email |
+| `POST /api/v1/auth/reset-password` | Complete a password reset with a token |
+| `POST /api/v1/auth/change-password` | Change password for the logged-in user |
+| `GET /api/v1/auth/verify-email` | Verify an email address via token |
+| `GET /api/v1/auth/sessions` | List active sessions/devices |
+| `DELETE /api/v1/auth/sessions/{device_id}` | Revoke one session |
+| `POST /api/v1/auth/revoke-all` | Revoke all sessions |
+| `GET /api/v1/auth/me` | Current authenticated user |
+
+### POST /api/v1/auth/register
+
 ```json
 {
-  "type": "project_started",
-  "project_id": "proj-123",
-  "timestamp": "2024-01-01T12:00:00Z",
-  "data": {
-    "title": "AI Research Project",
-    "estimated_duration": 1800
+  "email": "user@example.com",
+  "username": "username",
+  "password": "SecurePass123!@",
+  "confirm_password": "SecurePass123!@",
+  "full_name": "John Doe",
+  "organization": "Research Lab",
+  "accept_terms": true
+}
+```
+
+> Password requirements: minimum **12** characters, with at least one uppercase,
+> one lowercase, one digit, and one special character. `confirm_password` and
+> `accept_terms` are **required** — omitting them fails 422 validation.
+
+**Response (201):** `AuthResponse` — the same nested `{user, tokens}` shape as
+login (see below).
+
+```json
+{
+  "user": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "email": "user@example.com",
+    "username": "username",
+    "full_name": "John Doe"
+  },
+  "tokens": {
+    "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
+    "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
+    "token_type": "Bearer",
+    "expires_in": 900
   }
 }
 ```
 
-#### WS /ws/projects/{project_id}
+### POST /api/v1/auth/login
 
-Project-specific WebSocket connection for filtered updates.
+```json
+{
+  "email": "user@example.com",
+  "password": "SecurePass123!@"
+}
+```
 
-**Connection:**
+> MFA (`mfa_code`) and `remember_me` are not currently implemented
+> (`ENABLE_MFA=False`).
+
+**Response (200):** `AuthResponse` — user and tokens are nested, not flat.
+
+```json
+{
+  "user": {
+    "id": "user-123",
+    "email": "user@example.com",
+    "username": "username",
+    "full_name": "John Doe"
+  },
+  "tokens": {
+    "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
+    "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
+    "token_type": "Bearer",
+    "expires_in": 900
+  }
+}
+```
+
+### POST /api/v1/auth/refresh
+
+```json
+{ "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..." }
+```
+
+Returns a fresh `access_token` / `refresh_token` pair with `expires_in: 900`.
+
+### POST /api/v1/auth/logout
+
+Takes the access token from the `Authorization` header and revokes it. Accepts
+**no** request body.
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Response (204):** No content.
+
+---
+
+## User data endpoints (`/api/v1/users`)
+
+### DELETE /api/v1/users/{user_id}/gdpr
+
+GDPR erasure — deletes a user and associated data. **No authorization is
+required** — this endpoint declares no auth dependency. This is the only endpoint
+under the `users` router.
+
+---
+
+## WebSocket endpoints
+
+These are the only live WebSocket routes. There is no MASR WebSocket, no SSE, and
+no experiments stream. Supervisor and TalkHier WebSockets are listed under their
+respective sections above.
+
+| Route | Purpose |
+|---|---|
+| `WS /ws` | System-wide event stream |
+| `WS /ws/projects/{project_id}` | Project-scoped updates |
+| `WS /ws/cli/{project_id}` | CLI-optimized stream (Rich terminal formatting) |
+| `GET /ws/health` | WebSocket subsystem health |
+
+### WS /ws/projects/{project_id}
+
 ```bash
 ws://localhost:8000/ws/projects/proj-123?token=<jwt_token>
 ```
 
-**Messages Received:**
 ```json
 {
   "type": "progress",
   "project_id": "proj-123",
-  "timestamp": "2024-01-01T12:05:00Z",
+  "timestamp": "2026-01-01T12:05:00Z",
   "data": {
     "progress_percentage": 25.0,
     "completed_tasks": 1,
@@ -625,34 +740,8 @@ ws://localhost:8000/ws/projects/proj-123?token=<jwt_token>
 }
 ```
 
-#### WS /ws/cli/{project_id}
+### GET /ws/health
 
-CLI-optimized WebSocket connection with Rich terminal formatting.
-
-**Connection:**
-```bash
-ws://localhost:8000/ws/cli/proj-123?token=<jwt_token>
-```
-
-**Messages Received:**
-```json
-{
-  "type": "progress",
-  "project_id": "proj-123",
-  "timestamp": "2024-01-01T12:05:00Z",
-  "data": {
-    "progress_percentage": 25.0,
-    "formatted_message": "[green]✓[/green] Literature review completed",
-    "progress_bar": "████████░░░░░░░░░░░░ 25%"
-  }
-}
-```
-
-#### GET /ws/health
-
-WebSocket system health check.
-
-**Response (200):**
 ```json
 {
   "status": "healthy",
@@ -664,107 +753,21 @@ WebSocket system health check.
 }
 ```
 
-## Authentication Endpoints
+---
 
-### POST /auth/register
+## Observability endpoint
 
-Register a new user account.
+### GET /metrics
 
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "username": "username",
-  "password": "SecurePass123!@",
-  "full_name": "John Doe",
-  "organization": "Research Lab"
-}
-```
+Prometheus exposition (mounted as an ASGI app, not under `/api/v1`). LLM metrics
+include `llm_call_duration_seconds`, `llm_tokens_total`, `llm_cost_usd_total`,
+`llm_request_cost_drift_ratio`, and `llm_cost_drift_events_total`. Structured logs
+use structlog; Langfuse tracing is opt-in (`LANGFUSE_ENABLED`, default off). There
+is no OpenTelemetry backbone or Grafana/Loki/Jaeger integration.
 
-> Password requirements for registration: minimum 12 characters with at least one uppercase, one lowercase, one digit, and one special character.
-```
+---
 
-**Response (201):**
-```json
-{
-  "user_id": "user-123",
-  "email": "user@example.com",
-  "username": "username",
-  "verification_required": true,
-  "verification_sent": true
-}
-```
-
-### POST /auth/login
-
-Authenticate user and receive tokens.
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "your_password"
-}
-```
-
-> **Note:** MFA (`mfa_code`) and `remember_me` fields are not currently implemented.
-
-**Response (200):**
-```json
-{
-  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
-  "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
-  "token_type": "bearer",
-  "expires_in": 900,
-  "user": {
-    "id": "user-123",
-    "email": "user@example.com",
-    "username": "username",
-    "full_name": "John Doe"
-  }
-}
-```
-
-### POST /auth/refresh
-
-Refresh access token using refresh token.
-
-**Request Body:**
-```json
-{
-  "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..."
-}
-```
-
-**Response (200):**
-```json
-{
-  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
-  "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
-  "token_type": "bearer",
-  "expires_in": 900
-}
-```
-
-### POST /auth/logout
-
-Logout and revoke tokens.
-
-**Request Body:**
-```json
-{
-  "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..."
-}
-```
-
-**Response (200):**
-```json
-{
-  "message": "Successfully logged out"
-}
-```
-
-## Data Models
+## Data models
 
 ### ResearchProject
 
@@ -779,11 +782,10 @@ Logout and revoke tokens.
     "language": "string"
   },
   "user_id": "string",
-  "status": "pending | in_progress | completed | failed | cancelled",
+  "status": "pending | planning | in_progress | completed | failed | cancelled",
   "created_at": "string (ISO 8601)",
   "updated_at": "string (ISO 8601)",
   "completion_estimate": "string (ISO 8601)",
-  "workflow_id": "string",
   "scope": {
     "research_depth": "comprehensive | focused | quick",
     "paper_limit": "number",
@@ -823,7 +825,7 @@ Logout and revoke tokens.
   "id": "string (UUID)",
   "title": "string",
   "query": "string",
-  "report_type": "comprehensive | executive_summary | academic_paper | technical_analysis",
+  "report_type": "comprehensive | executive_summary | academic | literature_review | methodology | synthesis",
   "generation_status": "generating | completed | failed",
   "formats_generated": ["string"],
   "word_count": "number",
@@ -832,231 +834,90 @@ Logout and revoke tokens.
   "confidence_score": "number (0-1)",
   "created_at": "string (ISO 8601)",
   "generation_time_seconds": "number",
-  "download_urls": {
-    "format": "string (URL)"
-  }
+  "download_urls": { "format": "string (URL)" }
 }
 ```
 
-## SDK and Client Libraries
+---
 
-### Python SDK
+## LLM providers
 
-```python
-from research_platform_sdk import ResearchClient
+The default runtime is **Gemini-only** (`GEMINI_DEFAULT_MODEL=gemini-pro`).
+OpenRouter multi-provider routing (DeepSeek for simple tiers, Claude Sonnet for
+complex) is flag-gated **off** — it requires both
+`MULTI_PROVIDER_ROUTING_ENABLED=True` and `OPENROUTER_API_KEY`.
+`DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, and `OPENROUTER_ENABLED` all default to
+`False`.
 
-# Initialize client
-client = ResearchClient(
-    api_url="http://localhost:8000/api/v1",
-    api_key="your-api-key"
-)
+---
 
-# Create research project
-project = await client.research.create_project(
-    title="AI Impact Study",
-    query="How does AI affect employment?",
-    domains=["AI", "Economics"]
-)
+## CLI
 
-# Monitor progress
-async for progress in client.research.stream_progress(project.id):
-    print(f"Progress: {progress.progress_percentage}%")
+Two entrypoints are installed: `research-platform` and `research-cli`. There is no
+`cerebro-cli` and no published package. Command tree:
 
-# Generate report
-report = await client.reports.generate(
-    project_id=project.id,
-    report_type="comprehensive",
-    formats=["html", "pdf"]
-)
-```
+- `config` — `show` | `set` | `save`
+- `health`
+- `completion`
+- `agents` — `query`, `route`, `estimate`, `execute`, `chain`, `status`
+- `projects` — `create`, `get`, `list`, `progress`, `cancel`, `results`, `refine`
 
-### JavaScript SDK
-
-```javascript
-import { ResearchClient } from '@research-platform/sdk';
-
-// Initialize client
-const client = new ResearchClient({
-  apiUrl: 'http://localhost:8000/api/v1',
-  apiKey: 'your-api-key'
-});
-
-// Create research project
-const project = await client.research.createProject({
-  title: 'AI Impact Study',
-  query: 'How does AI affect employment?',
-  domains: ['AI', 'Economics']
-});
-
-// Monitor progress with WebSocket
-client.research.onProgress(project.id, (progress) => {
-  console.log(`Progress: ${progress.progressPercentage}%`);
-});
-```
-
-## Rate Limiting and Quotas
-
-### Rate Limits by Endpoint Type
-
-| Endpoint Type | Rate Limit | Burst |
-|---------------|------------|-------|
-| Authentication | 5/5min | 10 |
-| Project CRUD | 100/min | 200 |
-| Progress Monitoring | 200/min | 500 |
-| Report Generation | 10/hour | 20 |
-| Report Download | 50/min | 100 |
-| WebSocket Connections | 10/min | 20 |
-
-### Quota Limits
-
-| Resource | Free Tier | Pro Tier | Enterprise |
-|----------|-----------|----------|------------|
-| Projects/month | 10 | 100 | Unlimited |
-| Reports/month | 20 | 200 | Unlimited |
-| Storage (GB) | 1 | 10 | Unlimited |
-| API Calls/day | 1,000 | 10,000 | Unlimited |
-
-## Error Codes
-
-### Research Project Errors
-
-- `PROJECT_NOT_FOUND` - Project does not exist
-- `PROJECT_ACCESS_DENIED` - User lacks access to project
-- `PROJECT_ALREADY_CANCELLED` - Cannot perform operation on cancelled project
-- `WORKFLOW_START_FAILED` - Unable to start research workflow
-- `INVALID_RESEARCH_QUERY` - Research query validation failed
-
-### Report Generation Errors
-
-- `REPORT_NOT_FOUND` - Report does not exist
-- `REPORT_GENERATION_FAILED` - Report generation encountered errors
-- `UNSUPPORTED_FORMAT` - Requested format not supported
-- `STORAGE_FULL` - User storage quota exceeded
-- `TEMPLATE_ERROR` - Report template processing failed
-
-### Authentication Errors
-
-- `INVALID_CREDENTIALS` - Username/password incorrect
-- `TOKEN_EXPIRED` - JWT token has expired
-- `TOKEN_INVALID` - JWT token is malformed or invalid
-- `MFA_REQUIRED` - Multi-factor authentication required
-- `ACCOUNT_LOCKED` - Account temporarily locked due to failed attempts
-
-## Webhooks
-
-### Configuring Webhooks
+Configuration lives in `~/.research-cli.env` (dotenv: `RESEARCH_API_URL`,
+`RESEARCH_AUTH_TOKEN`). Global flags: `--format table|json|yaml|csv`, `--api-url`,
+`--verbose`, `--no-color`.
 
 ```bash
-POST /webhooks/configure
+research-cli health
+research-cli projects create \
+  --title "US Regional Bank Valuation" \
+  --query "How do rate cuts affect regional bank valuations?" \
+  --domains "finance,economics" \
+  --user-id "researcher-001"
 ```
 
-```json
-{
-  "url": "https://your-app.com/webhooks/research-platform",
-  "events": ["project.completed", "report.generated"],
-  "secret": "your-webhook-secret"
-}
-```
+---
 
-### Webhook Events
+## Error codes
 
-#### project.completed
+There are no domain-specific error-code strings. Every error `code` is derived
+from the HTTP status by `ERROR_CODES_BY_STATUS`
+(`src/api/middleware/error_envelope.py`); a handler-supplied `detail.code`
+overrides it when present. The full set is:
 
-Sent when a research project finishes.
+- `BAD_REQUEST` — 400
+- `AUTHENTICATION_REQUIRED` — 401
+- `FORBIDDEN` — 403
+- `NOT_FOUND` — 404
+- `CONFLICT` — 409
+- `VALIDATION_ERROR` — 422
+- `RATE_LIMIT_EXCEEDED` — 429
+- `INTERNAL_SERVER_ERROR` — 500
 
-```json
-{
-  "event": "project.completed",
-  "project_id": "proj-123",
-  "timestamp": "2024-01-01T12:30:00Z",
-  "data": {
-    "status": "completed",
-    "completion_time": "2024-01-01T12:28:00Z",
-    "quality_score": 0.87
-  }
-}
-```
+Any status without a mapping (e.g. 501) falls back to `API_ERROR`.
 
-#### report.generated
-
-Sent when a report is successfully generated.
-
-```json
-{
-  "event": "report.generated",
-  "report_id": "rpt-123",
-  "project_id": "proj-123",
-  "timestamp": "2024-01-01T12:35:00Z",
-  "data": {
-    "formats": ["html", "pdf"],
-    "download_urls": {
-      "html": "https://api.example.com/reports/rpt-123/download/html",
-      "pdf": "https://api.example.com/reports/rpt-123/download/pdf"
-    }
-  }
-}
-```
+---
 
 ## Testing
 
-### Test Environment
-
-Base URL: `http://localhost:8000/api/v1`
-
-Test user credentials:
-- Email: `test@example.com`
-- Password: `TestPassword123!`
-
-### Example cURL Commands
-
 ```bash
-# Get access token
+# Get an access token
 export TOKEN=$(curl -s -X POST "http://localhost:8000/api/v1/auth/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"TestPassword123!"}' \
-  | jq -r '.access_token')
+  | jq -r '.tokens.access_token')
 
-# Create research project
+# Submit a MASR-routed query
+curl -X POST "http://localhost:8000/api/v1/query/research" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Value US regional banks after rate cuts", "domains": ["finance"]}'
+
+# Create a research project
 curl -X POST "http://localhost:8000/api/v1/research/projects" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Test Research Project",
-    "query": {
-      "text": "Impact of AI on education",
-      "domains": ["AI", "Education"]
-    },
+    "query": {"text": "Impact of rate cuts on banks", "domains": ["finance"]},
     "user_id": "test-user"
   }'
-
-# List projects
-curl -X GET "http://localhost:8000/api/v1/research/projects" \
-  -H "Authorization: Bearer $TOKEN"
-
-# Generate report
-curl -X POST "http://localhost:8000/api/v1/reports/generate" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Test Report",
-    "query": "AI impact analysis",
-    "formats": ["html", "pdf"]
-  }'
 ```
-
-## Changelog
-
-### Version 1.0.0 (2024-01-01)
-- Initial API release
-- Research project management
-- Report generation system
-- WebSocket real-time updates
-- JWT authentication
-
-### Version 1.1.0 (TBD)
-- Enhanced search capabilities
-- Bulk operations support
-- Advanced filtering options
-- Performance improvements
-
-This comprehensive API documentation provides all the information needed to integrate with the Multi-Agent Research Platform, including examples, error handling, and best practices for optimal usage.
