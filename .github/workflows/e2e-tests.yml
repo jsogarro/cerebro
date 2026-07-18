@@ -79,7 +79,7 @@ jobs:
     
     - name: Upload test artifacts
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: e2e-artifacts-${{ matrix.browser }}
         path: |
@@ -91,7 +91,7 @@ jobs:
     
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: e2e-results-${{ matrix.browser }}
         path: test-results/${{ matrix.browser }}/results.xml
@@ -153,7 +153,7 @@ jobs:
 
     - name: Upload test artifacts on failure
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: e2e-python-artifacts
         path: test-results/
@@ -168,7 +168,7 @@ jobs:
 
     - name: Upload docker-compose logs
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: e2e-python-docker-logs
         path: docker-compose.log
