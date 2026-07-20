@@ -2,7 +2,7 @@
 
 # Stage 1: Base dependencies
 # Base image pinned by digest for reproducibility (multi-arch index).
-FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as base
+FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 as base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -68,7 +68,7 @@ RUN uv pip install -e .
 COPY src/ ./src/
 
 # Stage 4: Production runtime
-FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as production
+FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 as production
 
 # Create non-root user
 RUN groupadd -r app && useradd -r -g app app
