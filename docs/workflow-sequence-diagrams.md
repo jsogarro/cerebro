@@ -1,7 +1,7 @@
 # Workflow Sequence Diagrams
 
-This document contains sequence diagrams for the key workflows in **Cerebro** — a
-multi-agent LLM research platform (current focus: financial research, US equities).
+This document contains sequence diagrams for the key workflows in **Cerebro**,
+the multi-agent runtime behind the general research-workflow workbench.
 
 These diagrams describe the **real, verified request path**: a FastAPI application
 that hands work to the in-process `DirectExecutionService` (an asyncio execution

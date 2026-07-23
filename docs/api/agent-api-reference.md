@@ -4,11 +4,11 @@ Canonical, detailed reference for Cerebro's Agent Framework APIs: the **Primary 
 (MASR-routed, via `/api/v1/query/*`) and the **Bypass API** (direct agent access, via
 `/api/v1/agents/*`). This is the detailed companion to `docs/api-documentation.md`.
 
-> **Cerebro** is the product; current focus is **financial research (US equities)**. The
-> deployment artifacts still carry the pre-rebrand **`research-platform`** identity (FastAPI
-> title `Research Platform API`, k8s namespace, `research-platform-api` images, `research_db`,
-> the `research-cli`/`research-platform` CLI entrypoints). Those infra names are legacy and are
-> not the product name.
+> **Cerebro** is a general research-workflow workbench. The deployment artifacts
+> still carry the pre-rebrand **`research-platform`** identity (FastAPI title
+> `Research Platform API`, k8s namespace, `research-platform-api` images,
+> `research_db`, and the `research-cli`/`research-platform` entrypoints). Those
+> infra names are legacy and are not the product name.
 
 ## Base URL
 

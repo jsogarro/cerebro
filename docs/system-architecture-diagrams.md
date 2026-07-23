@@ -1,8 +1,8 @@
 # System Architecture Diagrams
 
-Canonical architecture-diagram reference for **Cerebro** — the multi-agent LLM
-research platform (current focus: financial research, US equities). Diagrams use
-Mermaid and are drawn from the live code, not aspirational design.
+Canonical architecture-diagram reference for **Cerebro**, the multi-agent
+runtime behind the general research-workflow workbench. Diagrams use Mermaid
+and are drawn from the live code, not aspirational design.
 
 > **Product vs. infra naming.** The product is **Cerebro**. The deployment
 > artifacts still carry the pre-rebrand **"research-platform"** identity verbatim

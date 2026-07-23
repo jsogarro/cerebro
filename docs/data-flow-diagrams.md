@@ -1,7 +1,7 @@
 # Data Flow Diagrams
 
-This document shows how data moves through **Cerebro**, the multi-agent LLM research
-platform (current focus: financial research, US equities). Each diagram is drawn from the
+This document shows how data moves through **Cerebro**, the multi-agent runtime
+behind the general research-workflow workbench. Each diagram is drawn from the
 actual code paths; it deliberately omits infrastructure Cerebro does not run.
 
 > Naming note: the deployment artifacts still carry the pre-rebrand **research-platform**

@@ -2,7 +2,12 @@
 
 ## Overview
 
-This guide covers setting up a development environment, understanding the codebase structure, and contributing to **Cerebro** — a multi-agent LLM research platform whose current focus is **financial research (US equities)**. Cerebro is a FastAPI application that routes natural-language queries through a Multi-Agent System Router (MASR) to hierarchical domain supervisors, which coordinate specialist LLM worker agents. Execution is in-process via `DirectExecutionService`.
+This guide covers setting up a development environment, understanding the
+codebase structure, and contributing to **Cerebro**, a general
+research-workflow workbench backed by a multi-agent LLM runtime. Cerebro routes
+natural-language queries through a Multi-Agent System Router (MASR) to
+hierarchical domain supervisors, which coordinate specialist LLM workers.
+Execution is in process through `DirectExecutionService`.
 
 > **Naming note:** the product is **Cerebro**, but the pre-rebrand infra identity **"research-platform"** is still used verbatim in deployment artifacts — the FastAPI title (`Research Platform API`), the k8s namespace and image names (`research-platform-api`), the default database (`research_db`), and the CLI entrypoints (`research-platform`, `research-cli`). Keep those infra names as-is; use "Cerebro" for the product.
 

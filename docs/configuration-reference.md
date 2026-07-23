@@ -1,8 +1,9 @@
 # Configuration Reference
 
-This document is the reference for the configuration options exposed by **Cerebro** — a multi-agent
-LLM research platform (current focus: financial research, US equities). All runtime settings are
-declared on the single `Settings(BaseSettings)` class in `src/core/config.py`; environment variables
+This document is the reference for the configuration options exposed by
+**Cerebro**, the multi-agent runtime behind the general research-workflow
+workbench. All runtime settings are declared on the single
+`Settings(BaseSettings)` class in `src/core/config.py`; environment variables
 are loaded from `.env` (`env_file=".env"`, `case_sensitive=True`).
 
 > **Unknown variables are silently discarded.** `Settings` is configured with `extra="ignore"`

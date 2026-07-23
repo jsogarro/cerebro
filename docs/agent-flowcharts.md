@@ -1,7 +1,8 @@
 # Agent Coordination & Roles
 
 This document describes how Cerebro coordinates its agents and what each agent
-actually does. Current product focus: **financial research (US equities)**.
+actually does. The runtime supports multiple domains; Finance is one example,
+not the current product boundary.
 
 > Earlier versions of this file drew per-agent branch-node state machines and a
 > dependency-graph scheduler. Those diagrams described an aspirational design

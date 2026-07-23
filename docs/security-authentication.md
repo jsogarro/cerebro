@@ -2,7 +2,11 @@
 
 > **Canonical security document.** `docs/security-implementation.md` is superseded by this file; consult this document for the authoritative account of what Cerebro's security and authentication layer actually does.
 
-Cerebro is a multi-agent LLM research platform (current focus: financial research, US equities). Its infrastructure identity is still the pre-rebrand **"research-platform"** — FastAPI title `Research Platform API`, DB `research_db`, and the `research-platform` k8s namespace/images. Those legacy names are kept verbatim in infra artifacts; the product is **Cerebro**.
+Cerebro is a general research-workflow workbench backed by a multi-agent LLM
+runtime. Its infrastructure identity is still the pre-rebrand
+**"research-platform"**: FastAPI title `Research Platform API`, DB
+`research_db`, and the `research-platform` k8s namespace/images. Those legacy
+names are kept verbatim in infra artifacts; the product is **Cerebro**.
 
 This document is split into two clearly separated parts:
 
