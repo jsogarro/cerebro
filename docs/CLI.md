@@ -1,6 +1,10 @@
 ## 📚 CLI Documentation
 
-> **Product note:** The product is **Cerebro** (current focus: financial research on US equities). `research-cli` / `research-platform` and the "Research Platform CLI" help string are the CLI's legacy `research-platform` infra identity — accurate to the code, so command output examples below are left verbatim. There is no `cerebro-cli` entrypoint and no PyPI package.
+> **Product note:** Cerebro is a general research-workflow workbench.
+> `research-cli` / `research-platform` and the "Research Platform CLI" help
+> string are legacy `research-platform` identifiers that remain accurate to the
+> code, so command output examples below are left verbatim. There is no
+> `cerebro-cli` entrypoint and no PyPI package.
 
 The Research Platform CLI (`research-cli`) provides a comprehensive command-line interface for interacting with the Research Platform API. It supports multiple output formats, interactive modes, and batch operations.
 
@@ -610,4 +614,3 @@ Key features:
 - Color-coded output for better readability
 - Comprehensive error handling
 - Support for multiple output formats
-

@@ -1,83 +1,115 @@
 # Agent Domains
 
-Cerebro's agent framework is organized into **domains**, each a hierarchical
-supervisor coordinating a team of specialized worker agents. MASR routes a query
-to the appropriate domain supervisor. A subset of workers is also callable
-directly via the Bypass API — only the 10 `AgentType` enum values (the Research
-and Finance workers plus `verification` and `financial-calculator`). The 4
-Content workers (`content_planning`, `drafting`, `editing`, `optimization`) and
-the 3 Analytics workers (`data_analysis`, `statistical_modeling`,
-`insight_synthesis`) are **not** exposed on `/api/v1/agents`.
+This document catalogs the current runtime implementation. Agent domains are an
+internal execution mechanism; they are not the target product extension
+contract.
 
-All worker agents are LLM-reasoning agents. Gemini is the default provider; a
-flag-gated OpenRouter multi-provider path also exists (active only when both
-`MULTI_PROVIDER_ROUTING_ENABLED` and `OPENROUTER_API_KEY` are set — both default
-off).
-They reason over the query text (and any prior-stage context passed by their
-supervisor) — the Content, Analytics, and Finance domains require **no external
-data feeds, API keys, or datasets**; supply figures/assumptions/text in the query.
+Cerebro currently organizes workers under four hierarchical supervisors. MASR
+classifies a query and routes it to a supervisor, which coordinates its workers
+and sends the result through a verification gate.
 
-## Domains and workers
+Gemini is the default provider. The OpenRouter path is active only when
+multi-provider routing and the required provider configuration are enabled.
 
-| Domain | Supervisor | Worker agents (factory keys) |
-|--------|------------|------------------------------|
+## Current Catalog
+
+| Domain | Supervisor | Worker agents |
+| --- | --- | --- |
 | Research | `ResearchSupervisor` | `literature_review`, `comparative_analysis`, `methodology`, `synthesis`, `citation` |
 | Content | `ContentSupervisor` | `content_planning`, `drafting`, `editing`, `optimization` |
 | Analytics | `AnalyticsSupervisor` | `data_analysis`, `statistical_modeling`, `insight_synthesis` |
 | Finance | `FinanceSupervisor` | `financial_analysis`, `valuation`, `risk_assessment` |
 
-Each supervisor is a `BaseSupervisor` that runs its workers through a LangGraph
-workflow with TalkHier worker messaging. Supervisors are registered in
-`SupervisorFactory` and the direct-execution registry; workers are registered in
-`AgentFactory`.
+The verification agent is cross-cutting. The financial calculator is a
+deterministic tool wrapper rather than an LLM-reasoning worker.
 
-### Finance domain
+Only the agent types represented in the public `AgentType` enum are available
+through the direct-agent API. Content and Analytics workers are currently
+reachable through their supervisors but are not all exposed as direct agent
+types.
 
-LLM-reasoning only — operates on the figures/assumptions/theses in the query:
+## Data and Tool Limitations
 
-- **financial_analysis** — statement/ratio analysis and health assessment.
-- **valuation** — DCF / comparables valuation from provided assumptions.
-- **risk_assessment** — qualitative risk analysis of a thesis or portfolio.
+Content, Analytics, and Finance primarily reason over text, figures, and context
+provided in the request. The current Finance domain does not retrieve live
+prices, filings, news, or transcripts.
 
-## How to reach the agents
+The codebase contains MCP tools and tool registries, but tool availability in a
+prompt should not be interpreted as proof that every worker executes a complete
+autonomous tool loop. Verify the concrete worker path when documenting or
+extending tool behavior.
 
-### Primary API (MASR-routed)
+## Calling the Runtime
 
-MASR detects the query domain and routes to the matching supervisor:
+### Routed Query
 
 ```bash
-# Routes to the finance supervisor
 curl -X POST "http://localhost:8000/api/v1/query/research" \
   -H "Content-Type: application/json" \
-  -d '{"query": "Value a company with a DCF: FCF $100M growing 5%, discount rate 10%", "domains": ["finance"]}'
+  -d '{
+    "query": "Compare the evidence for two approaches to retrieval evaluation",
+    "domains": ["research"]
+  }'
 ```
 
-### Bypass API (direct single agent)
+MASR can use explicit domain hints, but final routing is governed by the current
+query analyzer and domain mappings.
 
-Call a specific worker agent directly (hyphenated `AgentType` values):
+### Direct Worker
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/agents/valuation/execute" \
+curl -X POST "http://localhost:8000/api/v1/agents/synthesis/execute" \
   -H "Content-Type: application/json" \
-  -d '{"query": "DCF: year-1 FCF $50M, growing 4% forever, discount rate 9%. Compute the value."}'
+  -d '{
+    "query": "Synthesize the supplied findings into a concise research brief",
+    "parameters": {}
+  }'
 ```
 
-Available Bypass agent types: `literature-review`, `citation`, `methodology`,
-`comparative-analysis`, `synthesis`, `financial-analysis`, `valuation`,
-`risk-assessment`, `financial-calculator`, `verification`. Chain-of-Agents
-(`/agents/chain`) and Mixture-of-Agents (`/agents/mixture`) compose multiple
-agents.
+Current direct agent types:
 
-## Adding a new domain
+- `literature-review`
+- `citation`
+- `methodology`
+- `comparative-analysis`
+- `synthesis`
+- `financial-analysis`
+- `valuation`
+- `risk-assessment`
+- `financial-calculator`
+- `verification`
 
-1. Add worker agents (subclass `LLMWorkerAgentBase` for prompt-driven LLM
-   workers) and register them in `AgentFactory._agent_registry`.
-2. Add a `BaseSupervisor` subclass that registers the workers as its
-   `worker_definitions` (using the real agent classes) and defines a LangGraph
-   workflow; register it in `SupervisorFactory` and the direct-execution
-   registry.
-3. For MASR auto-routing, add a `QueryDomain` value + detection patterns in
-   `query_analyzer.py` and the domain→supervisor mapping in `masr.py`.
-4. To expose workers on the Bypass API, add `AgentType` enum entries + the
-   factory-key mapping in `agent_execution_service.py`, and list them in
-   `get_agent_list()`.
+The bypass API also exposes Chain-of-Agents and Mixture-of-Agents composition
+for experimentation and testing.
+
+## Finance as an Example Domain
+
+The Finance domain demonstrates how shared agent infrastructure can support
+specialized prompts and deterministic calculations:
+
+- `financial_analysis` interprets user-supplied statements and ratios;
+- `valuation` applies user-supplied assumptions to basic DCF or comparables
+  analysis;
+- `risk_assessment` evaluates qualitative thesis or portfolio risks;
+- `financial-calculator` provides deterministic arithmetic for supported
+  operations.
+
+This is a domain example, not a complete financial research workflow. A credible
+financial workflow would additionally require licensed or public data sources,
+source snapshots, domain artifacts, finance-specific evaluations, and stronger
+calculation models.
+
+## Current Extension Cost
+
+Adding a domain is not yet a single plugin registration. It generally requires:
+
+1. implementing and registering workers in `AgentFactory`;
+2. implementing a `BaseSupervisor` subclass;
+3. registering that supervisor in the supervisor and direct-execution
+   registries;
+4. adding `QueryDomain` detection and routing mappings;
+5. optionally adding public `AgentType` mappings and API catalog entries;
+6. adding routing, execution, fallback, and verification tests.
+
+These integration points are internal implementation details rather than a
+standalone extension contract.

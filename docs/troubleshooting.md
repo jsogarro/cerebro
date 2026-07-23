@@ -1,7 +1,7 @@
 # Troubleshooting Guide
 
-This guide helps you diagnose and resolve common issues with **Cerebro**, the multi-agent
-LLM research platform (current focus: financial research on US equities).
+This guide helps you diagnose and resolve common issues with **Cerebro**, the
+multi-agent runtime behind the general research-workflow workbench.
 
 > **Naming note.** The product is **Cerebro**, but the deployment artifacts still carry the
 > pre-rebrand **`research-platform`** identity: the FastAPI app is titled "Research Platform API",

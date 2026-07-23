@@ -1,6 +1,10 @@
 # Error Code Reference
 
-This document describes error handling in **Cerebro** (the multi-agent LLM research platform; current focus: financial research on US equities). The FastAPI service ships under the legacy infra identity "Research Platform API", so log records, container names, and image tags still say `research-platform` / `research_db` — that is deployment naming, not the product name.
+This document describes error handling in **Cerebro**, the multi-agent runtime
+behind the general research-workflow workbench. The FastAPI service ships under
+the legacy infra identity "Research Platform API", so log records, container
+names, and image tags still say `research-platform` / `research_db`; that is
+deployment naming, not the product name.
 
 ## Framing: what is real vs. what is proposed
 

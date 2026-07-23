@@ -1,8 +1,25 @@
-# Multi-Agent Research Architecture
+# Cerebro Runtime Architecture
+
+## Document Status
+
+This is a detailed implementation reference for the current multi-agent runtime.
+It is not the product specification or public extension contract. Some code
+snippets are illustrative; verify them against the current implementation
+before making changes.
+
+For current product positioning and documentation status, start with the
+[project README](../README.md) and [documentation index](README.md).
 
 ## Overview
 
-Cerebro orchestrates 17 specialized AI agents across 4 domains (research, content, analytics, finance) working together to conduct comprehensive research. This document details the agent architecture, implementation patterns, and orchestration mechanisms.
+Cerebro currently orchestrates specialized workers across Research, Content,
+Analytics, and Finance domains. MASR routes a request to a domain supervisor,
+the supervisor coordinates its workers through an internal LangGraph graph, and
+a verification gate reviews the aggregate result.
+
+The runtime currently uses domain enums, registries, factories, and
+research-specific persistence models. Finance is one of the implemented
+domains, not the product boundary.
 
 **Architecture Update (2026-07-03)**: 16 of the 17 registered agents (all LLM-reasoning workers across research, content, analytics, and finance, plus the cross-cutting verification agent) now share `LLMWorkerAgentBase` as their common base class, providing uniform infrastructure for multi-provider routing, memory-informed prompts, and tool registry support. The sole exception is `FinancialCalculatorAgent`, a fully deterministic tool wrapper that subclasses `BaseAgent` directly (see the Agent Base Architecture section below). Research agents maintain their complex multi-step execution workflows while inheriting these shared capabilities. Both plain-text generation (via `_generate_with_routing`) and structured output generation (via `_generate_structured_with_routing`) now route through the multi-provider layer when `MULTI_PROVIDER_ROUTING_ENABLED=True`, using OpenRouter's OpenAI-compatible JSON mode with schema-embedded prompts. Structured calls gracefully fall back to `GeminiService` on any routing failure, preserving current reliability.
 

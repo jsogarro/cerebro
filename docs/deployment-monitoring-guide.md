@@ -2,7 +2,11 @@
 
 ## Overview
 
-This guide covers deployment strategies, infrastructure setup, monitoring, and operational procedures for **Cerebro** — a multi-agent LLM research platform whose current focus is financial research (US equities). Cerebro is a FastAPI application that routes natural-language queries through the in-process Multi-Agent System Router (MASR) to hierarchical domain supervisors.
+This guide covers deployment strategies, infrastructure setup, monitoring, and
+operational procedures for **Cerebro**, the multi-agent runtime behind the
+general research-workflow workbench. Cerebro is a FastAPI application that
+routes natural-language queries through the in-process Multi-Agent System
+Router (MASR) to hierarchical domain supervisors.
 
 Two identity notes matter for operators:
 

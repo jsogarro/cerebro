@@ -28,11 +28,10 @@
 
 This document describes how the experimentation package under
 `src/ai_brain/experimentation/` is intended to hook into Cerebro's routing and
-agent-execution components. Cerebro is a multi-agent LLM platform whose current
-focus is financial research (US equities); its infra artifacts still carry the
-legacy `research-platform` identity (FastAPI title "Research Platform API", the
-`research-platform` k8s namespace, `research_db`), which is unrelated to the
-experimentation code.
+agent-execution components. Cerebro is a general research-workflow workbench;
+its infra artifacts still carry the legacy `research-platform` identity
+(FastAPI title "Research Platform API", the `research-platform` k8s namespace,
+`research_db`), which is unrelated to the experimentation code.
 
 ## Package layout (what actually exists)
 

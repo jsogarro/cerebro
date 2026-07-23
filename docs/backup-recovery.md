@@ -1,6 +1,11 @@
 # Backup and Recovery Guide
 
-This guide provides procedures for backing up and recovering data in Cerebro (financial research, US equities). Its persistent stores are PostgreSQL (`research_db`), Redis, file storage, and configuration. Infrastructure artifact names below (`research_db`, the `research` DB user, the `research-platform-backups` bucket) match the deployment's legacy `research-platform` identity and are intentionally kept verbatim.
+This guide provides procedures for backing up and recovering Cerebro data. Its
+persistent stores are PostgreSQL (`research_db`), Redis, file storage, and
+configuration. Infrastructure artifact names below (`research_db`, the
+`research` DB user, the `research-platform-backups` bucket) match the
+deployment's legacy `research-platform` identity and are intentionally kept
+verbatim.
 
 > **Status: proposed operational procedure, not deployed automation.** The scripts, paths (`/var/backups`, `/opt/research-platform`, `/etc/crontab`), and schedules in this guide describe a recommended backup/recovery design. They are not verified as installed in any running environment — treat them as a starting point to adapt, and validate every path and command against your actual deployment before relying on them.
 

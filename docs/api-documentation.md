@@ -2,11 +2,11 @@
 
 Canonical top-level inventory of Cerebro's HTTP and WebSocket surface.
 
-Cerebro is a multi-agent LLM intelligence platform. Its current product focus is
-**financial research (US equities)**. Natural-language queries are routed through
-the in-process **MASR** (Multi-Agent System Router) to hierarchical domain
-supervisors — Research, Content, Analytics, Finance — which coordinate specialist
-LLM worker agents.
+Cerebro is a general research-workflow workbench backed by a multi-agent LLM
+runtime. Natural-language queries are routed through the in-process **MASR**
+(Multi-Agent System Router) to hierarchical domain supervisors: Research,
+Content, Analytics, and Finance. Finance is one runtime domain rather than the
+product boundary.
 
 > **Infra naming.** The deployment identity is still the pre-rebrand
 > `research-platform`: the FastAPI application title is `Research Platform API`,

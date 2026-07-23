@@ -1,49 +1,60 @@
-# Cerebro Web (Work in Progress)
+# Cerebro Web
 
-> **Status: WORK IN PROGRESS — not the current development focus.**
->
-> This web frontend is an early scaffold. Active development is currently
-> concentrated on making the **agent framework robust** (multi-provider
-> routing, multi-domain execution, verification loops, adaptive routing,
-> and their evaluation harnesses) before building a full web experience on
-> top of it. Expect incomplete features, unpolished UI, and breaking
-> changes without notice.
+> **Status:** early scaffold; not yet a complete research workbench.
 
-## What this is
+This React, TypeScript, and Vite application is intended to become the visual
+surface for running and inspecting Cerebro research workflows. The existing
+pages include mock-backed and incomplete states and should not be presented as a
+finished product.
 
-A React + TypeScript + Vite single-page app intended to become the UI for
-the Cerebro platform. It talks to the FastAPI backend at `/api/v1`
-(configured via `VITE_API_URL`; see `docker-compose.yml`, which builds and
-serves it on port 3000).
+## Target Experience
 
-## What to rely on instead
+The workbench should make the full research run legible:
 
-The stable, tested surface of Cerebro today is the API and CLI:
+- select a versioned workflow;
+- submit an objective and source material;
+- follow a stable task timeline or graph;
+- inspect evidence linked to report claims;
+- review artifacts and verification results;
+- compare measured cost, latency, and quality across runs.
 
-- **Primary API**: `POST /api/v1/query/{research,analyze,synthesize}` —
-  MASR-routed multi-agent execution.
-- **Bypass API**: `POST /api/v1/agents/{type}/execute` — direct agent
-  access for testing.
-- **CLI**: `cerebro-cli` / `research-cli` (1:1 with the API).
+Agent class names, routing internals, and raw prompts should be available through
+progressive disclosure, not used as the primary navigation model.
 
-See the repository root `README.md` and `docs/` for the backend
-architecture, configuration reference, and agent-domain documentation.
+## Current Backend Surfaces
 
-## Development (at your own risk)
+- Routed queries: `POST /api/v1/query/{research,analyze,synthesize}`
+- Direct agent execution: `POST /api/v1/agents/{type}/execute`
+- Routing inspection: `/api/v1/masr/*`
+- Legacy research projects: `/api/v1/research/projects/*`
+- Progress updates: WebSocket endpoints documented under `docs/`
+
+These surfaces are not yet the target neutral `Workflow` and `Run` contract.
+Frontend work should preserve current compatibility while new view models are
+introduced.
+
+## Development
 
 ```bash
 npm install
-npm run dev        # Vite dev server
-npm run build      # production build (served by nginx in Docker)
+npm run dev
+npm run build
 npm run lint
 ```
 
-Playwright config exists (`playwright.config.ts`) but the E2E suite is
-skipped in CI while the frontend is in this state.
+The backend URL is configured with `VITE_API_URL`. Docker Compose builds and
+serves the application on port 3000.
 
-## Roadmap gate
+Playwright configuration exists, but the current end-to-end suite does not yet
+cover a production-ready golden workflow.
 
-This app graduates from WIP when the agent framework's remaining gated
-items land (adaptive-routing promotion after live A/B, provider
-observability, external tool integrations) and the API surface it depends
-on is declared stable.
+## Graduation Criteria
+
+The web application is ready to serve as the primary demo when:
+
+1. a fixture-backed run can be started without paid credentials;
+2. the run lifecycle uses measured backend state rather than mock values;
+3. tasks, evidence, artifacts, and evaluations have stable API view models;
+4. running, degraded, failed, cancelled, and completed states are implemented;
+5. the golden path passes Playwright checks on desktop and mobile viewports;
+6. screenshots and the root README match the shipped experience.
