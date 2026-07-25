@@ -6,12 +6,40 @@ These tests verify the Gemini integration service functionality.
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from redis import asyncio as aioredis
 
 from src.models.research_project import ResearchDepth, ResearchQuery
+
+
+@pytest.fixture(autouse=True)
+def isolate_dotenv_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import src.core.environment as shared_environment
+
+    monkeypatch.setattr(
+        shared_environment,
+        "PROJECT_ENV_PATH",
+        tmp_path / "fake-project" / ".env",
+    )
+    monkeypatch.setattr(
+        shared_environment,
+        "HOME_ENV_PATH",
+        tmp_path / "fake-home" / ".env",
+    )
+
+
+def test_gemini_config_preserves_exported_environment_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exported key remains authoritative for Gemini configuration."""
+    monkeypatch.setenv("GEMINI_API_KEY", "exported-test-key")
+
+    from src.services.gemini_config import GeminiConfig
+
+    assert GeminiConfig.from_env().api_key == "exported-test-key"
 
 
 class TestGeminiService:

@@ -10,7 +10,11 @@ from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
-from src.api.services.direct_execution_service import get_direct_execution_service
+from src.api.services.direct_execution_service import (
+    DirectExecutionService,
+    get_application_direct_execution_service,
+    get_direct_execution_service,
+)
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.research_project import ProjectStatus
 from src.models.db.session import get_session
@@ -25,6 +29,17 @@ from src.repositories.research_repository import ResearchRepository
 
 logger = get_logger()
 router = APIRouter(prefix="/research")
+_EXECUTION_SERVICE_DEPENDENCY = Depends(get_application_direct_execution_service)
+
+
+def _resolved_execution_service(
+    service: DirectExecutionService,
+) -> DirectExecutionService:
+    """Preserve direct-call compatibility while HTTP uses app-owned state."""
+
+    if service is _EXECUTION_SERVICE_DEPENDENCY:
+        return get_direct_execution_service()
+    return service
 
 
 async def get_research_repo(
@@ -62,6 +77,7 @@ async def create_research_project(
     request: CreateResearchProjectRequest,
     repo: ResearchRepository = Depends(get_research_repo),
     tenant_context: TenantContext = Depends(get_tenant_context),
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> ResearchProject:
     """Create a new research project."""
     try:
@@ -101,7 +117,7 @@ async def create_research_project(
 
         # Start direct execution via MASR
         try:
-            execution_service = get_direct_execution_service()
+            execution_service = _resolved_execution_service(execution_service)
             execution_id = await execution_service.start_research_execution(project)
             await repo.update_status(
                 db_project.id,
@@ -145,6 +161,7 @@ async def get_research_project(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
     tenant_context: TenantContext = Depends(get_tenant_context),
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> ResearchProject:
     """Get a research project by ID."""
     # Fetch from database
@@ -179,7 +196,7 @@ async def get_research_project(
 
     # Update status from direct execution
     try:
-        execution_service = get_direct_execution_service()
+        execution_service = _resolved_execution_service(execution_service)
         # Find execution for this project (simplified for demo)
         for execution in execution_service.active_executions.values():
             if execution.project_id == str(project_id):
@@ -259,6 +276,7 @@ async def get_research_progress(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
     tenant_context: TenantContext = Depends(get_tenant_context),
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> ResearchProgress:
     """Get real-time progress of a research project."""
     # Check project exists
@@ -275,7 +293,7 @@ async def get_research_progress(
 
     # Fetch progress from direct execution service
     try:
-        execution_service = get_direct_execution_service()
+        execution_service = _resolved_execution_service(execution_service)
 
         # Find execution for this project
         execution_status = None
@@ -337,6 +355,7 @@ async def cancel_research_project(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
     tenant_context: TenantContext = Depends(get_tenant_context),
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> None:
     """Cancel a research project."""
     # Check project exists
@@ -354,7 +373,7 @@ async def cancel_research_project(
     # Best-effort cancel of any in-flight execution
     execution_cancelled = False
     try:
-        execution_service = get_direct_execution_service()
+        execution_service = _resolved_execution_service(execution_service)
         for execution in execution_service.active_executions.values():
             if execution.project_id == str(project_id):
                 execution_cancelled = await execution_service.cancel_execution(
@@ -406,6 +425,7 @@ async def get_research_results(
     project_id: UUID,
     repo: ResearchRepository = Depends(get_research_repo),
     tenant_context: TenantContext = Depends(get_tenant_context),
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> dict[str, Any]:
     """Get the results of a completed research project."""
     # Check project exists
@@ -427,7 +447,7 @@ async def get_research_results(
 
     # Fall back to in-memory execution results
     try:
-        execution_service = get_direct_execution_service()
+        execution_service = _resolved_execution_service(execution_service)
         for execution in execution_service.active_executions.values():
             if (
                 execution.project_id == str(project_id)

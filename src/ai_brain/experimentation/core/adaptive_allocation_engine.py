@@ -59,6 +59,8 @@ class AllocationConfig:
     enable_guardrails: bool = True
     performance_threshold: float = 0.95  # Minimum performance vs control
     safety_sample_size: int = 100  # Minimum samples before adaptation
+    min_samples_per_arm: int = 1
+    control_variant_id: str = "0"
 
     # Context features for contextual bandits
     context_features: list[str] = field(default_factory=list)
@@ -70,7 +72,7 @@ class AllocationDecision:
 
     experiment_id: str
     variant_id: str
-    allocation_probability: float
+    allocation_probability: float | None
     allocation_strategy: AllocationStrategy
 
     # Decision context
@@ -88,6 +90,7 @@ class AllocationDecision:
     # Metadata
     timestamp: datetime = field(default_factory=datetime.now)
     allocation_reason: str = ""
+    proposed_variant_id: str | None = None
 
 
 class AdaptiveAllocationEngine:
@@ -119,6 +122,7 @@ class AdaptiveAllocationEngine:
         self.enable_safety = self.config.get("enable_safety", True)
         self.global_min_allocation = self.config.get("global_min_allocation", 0.05)
         self.global_max_allocation = self.config.get("global_max_allocation", 0.70)
+        self.rng = self.config.get("rng", np.random)
 
         # Update scheduling
         self.update_task: asyncio.Task[None] | None = None
@@ -169,6 +173,7 @@ class AdaptiveAllocationEngine:
                     "posterior_temp_factor": self.config.get(
                         "posterior_temp_factor", 3.0
                     ),
+                    "rng": self.rng,
                 }
             )
             await bandit.initialize_bandit(
@@ -202,8 +207,19 @@ class AdaptiveAllocationEngine:
         config = self.active_experiments[experiment_id]
         context = user_context or {}
 
-        # Choose allocation method based on strategy
-        if config.strategy == AllocationStrategy.FIXED_RANDOM:
+        ready, readiness_reason = self.is_experiment_ready(experiment_id)
+        if (
+            config.strategy == AllocationStrategy.ADAPTIVE_BANDIT
+            and config.enable_guardrails
+            and not ready
+        ):
+            decision = self._control_decision(
+                experiment_id,
+                config,
+                context,
+                reason=readiness_reason or "eligible_sample_readiness_failed",
+            )
+        elif config.strategy == AllocationStrategy.FIXED_RANDOM:
             decision = await self._fixed_random_allocation(
                 experiment_id, config, context
             )
@@ -229,6 +245,9 @@ class AdaptiveAllocationEngine:
         if self.enable_safety:
             decision = await self._apply_safety_checks(decision, config)
 
+        if not decision.safety_check_passed:
+            decision = self._fallback_to_control(decision, config)
+
         # Record allocation
         self.allocation_history.append(decision)
         self.allocation_stats["total_allocations"] += 1
@@ -250,7 +269,7 @@ class AdaptiveAllocationEngine:
         variants = list(config.initial_allocation.keys())
         probabilities = list(config.initial_allocation.values())
 
-        selected_variant = np.random.choice(variants, p=probabilities)
+        selected_variant = self.rng.choice(variants, p=probabilities)
         allocation_prob = config.initial_allocation[selected_variant]
 
         return AllocationDecision(
@@ -261,6 +280,7 @@ class AdaptiveAllocationEngine:
             context=context,
             confidence=0.8,  # High confidence for fixed allocation
             allocation_reason="Fixed random allocation based on initial configuration",
+            proposed_variant_id=str(selected_variant),
         )
 
     async def _adaptive_bandit_allocation(
@@ -283,15 +303,14 @@ class AdaptiveAllocationEngine:
         return AllocationDecision(
             experiment_id=experiment_id,
             variant_id=selected_variant,
-            allocation_probability=bandit_result.arm_probabilities[
-                bandit_result.selected_arm
-            ],
+            allocation_probability=bandit_result.selection_probability,
             allocation_strategy=config.strategy,
             context=context,
             confidence=bandit_result.confidence,
             expected_reward=bandit_result.expected_reward,
             exploration_bonus=bandit_result.exploration_rate,
             allocation_reason=f"Multi-armed bandit selection (algorithm: {bandit_result.algorithm.value})",
+            proposed_variant_id=selected_variant,
         )
 
     async def _contextual_bandit_allocation(
@@ -319,14 +338,13 @@ class AdaptiveAllocationEngine:
             return AllocationDecision(
                 experiment_id=experiment_id,
                 variant_id=selected_variant,
-                allocation_probability=bandit_result.arm_probabilities[
-                    bandit_result.selected_arm
-                ],
+                allocation_probability=bandit_result.selection_probability,
                 allocation_strategy=config.strategy,
                 context=context,
                 confidence=bandit_result.confidence,
                 expected_reward=bandit_result.expected_reward,
                 allocation_reason=f"Contextual bandit selection using features: {config.context_features}",
+                proposed_variant_id=selected_variant,
             )
 
         # Fallback to adaptive bandit
@@ -338,14 +356,8 @@ class AdaptiveAllocationEngine:
         """Safety-constrained allocation with gradual rollout."""
 
         # Check if we have enough safety samples
-        total_samples = sum(
-            len(rewards)
-            for rewards in getattr(
-                self.bandit_optimizers.get(experiment_id, MultiBanditOptimizer()),
-                "arm_rewards",
-                [],
-            )
-        )
+        bandit = self.bandit_optimizers.get(experiment_id)
+        total_samples = sum(bandit.arm_counts) if bandit else 0
 
         if total_samples < config.safety_sample_size:
             # Use conservative fixed allocation during safety period
@@ -357,13 +369,19 @@ class AdaptiveAllocationEngine:
         )
 
         # Apply safety constraints
-        if decision.allocation_probability < config.min_allocation:
+        if (
+            decision.allocation_probability is not None
+            and decision.allocation_probability < config.min_allocation
+        ):
             decision.allocation_probability = config.min_allocation
             decision.safety_warnings.append(
                 "Increased allocation to meet minimum safety threshold"
             )
 
-        if decision.allocation_probability > config.max_allocation:
+        if (
+            decision.allocation_probability is not None
+            and decision.allocation_probability > config.max_allocation
+        ):
             decision.allocation_probability = config.max_allocation
             decision.safety_warnings.append(
                 "Reduced allocation to meet maximum safety threshold"
@@ -382,12 +400,18 @@ class AdaptiveAllocationEngine:
             return decision
 
         # Check global allocation bounds
-        if decision.allocation_probability < self.global_min_allocation:
+        if (
+            decision.allocation_probability is not None
+            and decision.allocation_probability < self.global_min_allocation
+        ):
             decision.allocation_probability = self.global_min_allocation
             decision.safety_warnings.append("Applied global minimum allocation limit")
             decision.safety_check_passed = False
 
-        if decision.allocation_probability > self.global_max_allocation:
+        if (
+            decision.allocation_probability is not None
+            and decision.allocation_probability > self.global_max_allocation
+        ):
             decision.allocation_probability = self.global_max_allocation
             decision.safety_warnings.append("Applied global maximum allocation limit")
             decision.safety_check_passed = False
@@ -395,12 +419,12 @@ class AdaptiveAllocationEngine:
         # Check performance threshold (if we have historical data)
         bandit = self.bandit_optimizers.get(decision.experiment_id)
         if bandit and hasattr(bandit, "arm_values"):
-            # Find control variant (usually first)
-            control_performance = bandit.arm_values[0] if bandit.arm_values else 0.5
-
-            # Get selected variant performance
             variants = list(config.initial_allocation.keys())
             try:
+                control_arm_index = variants.index(config.control_variant_id)
+                control_performance = (
+                    bandit.arm_values[control_arm_index] if bandit.arm_values else 0.5
+                )
                 selected_arm_index = variants.index(decision.variant_id)
                 variant_performance = (
                     bandit.arm_values[selected_arm_index] if bandit.arm_values else 0.5
@@ -417,9 +441,69 @@ class AdaptiveAllocationEngine:
                     )
                     decision.safety_check_passed = False
             except (ValueError, IndexError):
-                # Variant not found in list
-                decision.safety_warnings.append("Variant not found in bandit arms")
+                decision.safety_warnings.append(
+                    "Control or selected variant not found in bandit arms"
+                )
+                decision.safety_check_passed = False
 
+        return decision
+
+    def is_experiment_ready(self, experiment_id: str) -> tuple[bool, str | None]:
+        """Check global and per-arm eligible sample readiness."""
+
+        config = self.active_experiments.get(experiment_id)
+        bandit = self.bandit_optimizers.get(experiment_id)
+        if config is None or bandit is None:
+            return False, "experiment_unavailable"
+        total_samples = sum(bandit.arm_counts)
+        if total_samples < config.safety_sample_size:
+            return False, "global_eligible_samples_below_minimum"
+        if any(count < config.min_samples_per_arm for count in bandit.arm_counts):
+            return False, "per_arm_eligible_samples_below_minimum"
+        return True, None
+
+    def _control_decision(
+        self,
+        experiment_id: str,
+        config: AllocationConfig,
+        context: dict[str, Any],
+        *,
+        reason: str,
+    ) -> AllocationDecision:
+        variants = list(config.initial_allocation)
+        if config.control_variant_id not in variants:
+            raise ValueError("adaptive allocation requires an explicit control arm")
+        return AllocationDecision(
+            experiment_id=experiment_id,
+            variant_id=config.control_variant_id,
+            proposed_variant_id=config.control_variant_id,
+            allocation_probability=config.initial_allocation[config.control_variant_id],
+            allocation_strategy=config.strategy,
+            context=context,
+            confidence=1.0,
+            safety_check_passed=False,
+            safety_warnings=[reason],
+            allocation_reason=f"Control allocation: {reason}",
+        )
+
+    def _fallback_to_control(
+        self, decision: AllocationDecision, config: AllocationConfig
+    ) -> AllocationDecision:
+        """Replace an unsafe proposal with the explicit no-change arm."""
+
+        proposed_variant = decision.proposed_variant_id or decision.variant_id
+        if config.control_variant_id not in config.initial_allocation:
+            raise ValueError("adaptive allocation requires an explicit control arm")
+        if decision.variant_id != config.control_variant_id:
+            self.allocation_stats["safety_interventions"] += 1
+        decision.proposed_variant_id = proposed_variant
+        decision.variant_id = config.control_variant_id
+        decision.allocation_probability = config.initial_allocation[
+            config.control_variant_id
+        ]
+        decision.allocation_reason = (
+            f"{decision.allocation_reason}; executed control after guardrail failure"
+        )
         return decision
 
     async def record_outcome(
@@ -468,6 +552,60 @@ class AdaptiveAllocationEngine:
             self.allocation_stats["successful_adaptations"] += 1
 
         logger.debug(f"Recorded outcome for {experiment_id}: {variant_id} = {reward}")
+
+    def export_experiment_state(self) -> list[dict[str, Any]]:
+        """Export strict sufficient statistics without request-level data."""
+
+        exported = []
+        for experiment_id in sorted(self.bandit_optimizers):
+            bandit = self.bandit_optimizers[experiment_id]
+            config = self.active_experiments[experiment_id]
+            exported.append(
+                {
+                    "experiment_id": experiment_id,
+                    "ordered_arms": [
+                        int(variant) for variant in config.initial_allocation
+                    ],
+                    "arm_counts": bandit.arm_counts.copy(),
+                    "arm_reward_sums": bandit.arm_reward_sums.copy(),
+                    "arm_values": bandit.arm_values.copy(),
+                    "alpha_params": bandit.alpha_params.copy(),
+                    "beta_params": bandit.beta_params.copy(),
+                }
+            )
+        return exported
+
+    def restore_experiment_state(
+        self, experiment_id: str, state: dict[str, Any]
+    ) -> None:
+        """Restore one already-registered experiment from validated state."""
+
+        config = self.active_experiments.get(experiment_id)
+        bandit = self.bandit_optimizers.get(experiment_id)
+        if config is None or bandit is None:
+            raise ValueError(f"Experiment {experiment_id} must be registered first")
+        ordered_arms = [int(variant) for variant in config.initial_allocation]
+        if state["ordered_arms"] != ordered_arms:
+            raise ValueError("snapshot arm order is incompatible")
+
+        counts = [int(value) for value in state["arm_counts"]]
+        reward_sums = [float(value) for value in state["arm_reward_sums"]]
+        values = [float(value) for value in state["arm_values"]]
+        alpha = [float(value) for value in state["alpha_params"]]
+        beta = [float(value) for value in state["beta_params"]]
+        width = len(ordered_arms)
+        if any(
+            len(vector) != width
+            for vector in (counts, reward_sums, values, alpha, beta)
+        ):
+            raise ValueError("snapshot vector widths are incompatible")
+
+        bandit.arm_counts = counts
+        bandit.arm_reward_sums = reward_sums
+        bandit.arm_values = values
+        bandit.alpha_params = alpha
+        bandit.beta_params = beta
+        bandit.arm_rewards = [[] for _ in counts]
 
     async def update_allocations(self) -> list[str]:
         """Update all active experiment allocations based on performance."""

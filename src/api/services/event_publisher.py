@@ -44,6 +44,13 @@ class EventPublisher:
 
     async def initialize(self) -> None:
         """Initialize Redis connections and start subscription."""
+        # The module-level compatibility instance may cross sequential app
+        # lifespans in tests and reloads. Reset terminal state and discard only
+        # already-closed references before acquiring fresh clients.
+        self._shutdown = False
+        self.subscription_task = None
+        self.redis_client = None
+        self.redis_subscriber = None
         try:
             # Initialize Redis clients
             self.redis_client = redis.from_url(settings.REDIS_URL)
@@ -63,23 +70,39 @@ class EventPublisher:
                 "Failed to initialize Redis for event publishing, using local-only mode",
                 error=str(e),
             )
+            if self.redis_client:
+                with contextlib.suppress(Exception):
+                    await self.redis_client.close()
+            if self.redis_subscriber:
+                with contextlib.suppress(Exception):
+                    await self.redis_subscriber.close()
             self.redis_client = None
             self.redis_subscriber = None
+            self.subscription_task = None
 
     async def shutdown(self) -> None:
         """Shutdown the event publisher."""
         self._shutdown = True
 
         # Cancel subscription task
-        if self.subscription_task:
-            self.subscription_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.subscription_task
+        subscription_task = self.subscription_task
+        redis_client = self.redis_client
+        redis_subscriber = self.redis_subscriber
+        self.subscription_task = None
+        self.redis_client = None
+        self.redis_subscriber = None
 
-        if self.redis_client:
-            await self.redis_client.close()
-        if self.redis_subscriber:
-            await self.redis_subscriber.close()
+        if subscription_task:
+            subscription_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await subscription_task
+
+        if redis_client:
+            with contextlib.suppress(Exception):
+                await redis_client.close()
+        if redis_subscriber:
+            with contextlib.suppress(Exception):
+                await redis_subscriber.close()
 
         logger.info("Event publisher shutdown complete")
 

@@ -3,7 +3,7 @@ Main FastAPI application for Research Platform.
 """
 
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import cast
 
 from fastapi import FastAPI, HTTPException, Request
@@ -14,6 +14,7 @@ from prometheus_client import make_asgi_app
 from starlette.responses import Response
 from structlog import get_logger
 
+from src.ai_brain.router.factory import MASRRuntime
 from src.api.auth import router as auth_router
 from src.api.middleware.cost_drift import LLMCostDriftMiddleware
 from src.api.middleware.error_envelope import (
@@ -51,120 +52,208 @@ from src.middleware.auth_middleware import AuthMiddleware
 logger = get_logger()
 
 
+async def _close_lifespan_resource(
+    resource_name: str,
+    close: Callable[[], Awaitable[None]],
+) -> None:
+    """Close one lifespan-owned resource without blocking later cleanup."""
+
+    try:
+        await close()
+    except Exception as exc:
+        logger.warning(
+            "lifespan_resource_shutdown_failed",
+            resource=resource_name,
+            error=type(exc).__name__,
+        )
+
+
+def _remove_app_state_if_owned(app: FastAPI, name: str, owned: object) -> None:
+    """Remove state only when it still references this lifespan's instance."""
+
+    if getattr(app.state, name, None) is owned:
+        delattr(app.state, name)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifecycle."""
     # Startup
     logger.info("Starting Research Platform API", environment=settings.ENVIRONMENT)
 
-    # Initialize WebSocket services
-    try:
-        await event_publisher.initialize()
-        logger.info("Event publisher initialized")
-    except Exception as e:
-        logger.warning(f"Failed to initialize event publisher: {e}")
+    async with AsyncExitStack() as resources:
+        masr_runtime = await MASRRuntime.create(settings)
+        resources.push_async_callback(
+            _close_lifespan_resource,
+            "masr_runtime",
+            masr_runtime.close,
+        )
+        app.state.masr_runtime = masr_runtime
+        resources.callback(
+            _remove_app_state_if_owned,
+            app,
+            "masr_runtime",
+            masr_runtime,
+        )
 
-    # Initialize database
-    from src.models.db.session import init_db
-
-    try:
-        await init_db()
-        logger.info("Database initialized")
-
-        # Create tables if using SQLite (development)
-        if "sqlite" in settings.DATABASE_URL:
-            from src.models.db.agent_task import AgentTask
-            from src.models.db.base import Base
-            from src.models.db.research_project import ResearchProject as DBProject
-            from src.models.db.research_result import ResearchResult
-            from src.models.db.session import _engine
-            from src.models.db.workflow_checkpoint import WorkflowCheckpoint
-
-            tables = [
-                Base.metadata.tables[t.__tablename__]
-                for t in [DBProject, ResearchResult, AgentTask, WorkflowCheckpoint]
-                if t.__tablename__ in Base.metadata.tables
-            ]
-            if _engine is not None and tables:
-                async with _engine.begin() as conn:
-                    await conn.run_sync(Base.metadata.create_all, tables=tables)
-                logger.info("Database tables created")
-    except Exception as e:
-        logger.warning(f"Database initialization failed: {e}")
-
-    # Initialize Gemini service
-    gemini_service = None
-    if settings.GEMINI_API_KEY:
+        # Initialize WebSocket services
         try:
-            from src.services.gemini_service import GeminiService
-
-            gemini_service = GeminiService(api_key=settings.GEMINI_API_KEY)
-            logger.info("Gemini service initialized", model=gemini_service.model_name)
+            await event_publisher.initialize()
+            logger.info("Event publisher initialized")
         except Exception as e:
-            logger.warning(f"Gemini service initialization failed: {e}")
-    else:
-        logger.warning("GEMINI_API_KEY not set — agents will use fallback responses")
+            logger.warning(f"Failed to initialize event publisher: {e}")
+        resources.push_async_callback(
+            _close_lifespan_resource,
+            "event_publisher",
+            event_publisher.shutdown,
+        )
 
-    # Pre-initialize the DirectExecutionService with Gemini
-    from src.api.services.direct_execution_service import get_direct_execution_service
+        # Initialize database
+        from src.models.db.session import init_db
 
-    get_direct_execution_service(gemini_service=gemini_service)
-
-    # FIX 4: Eagerly initialize the Langfuse client at startup (when enabled) so
-    # the first real request does not pay the SDK-import + client-construction cost
-    # synchronously on the event loop.  Guarded: a failure here logs a warning and
-    # never prevents the app from starting.
-    if settings.LANGFUSE_ENABLED:
         try:
-            import asyncio as _asyncio
+            await init_db()
+            logger.info("Database initialized")
 
-            from src.core.tracing import get_langfuse_client as _get_lf_client
+            # Create tables if using SQLite (development)
+            if "sqlite" in settings.DATABASE_URL:
+                from src.models.db.agent_task import AgentTask
+                from src.models.db.base import Base
+                from src.models.db.research_project import ResearchProject as DBProject
+                from src.models.db.research_result import ResearchResult
+                from src.models.db.session import _engine
+                from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
-            await _asyncio.to_thread(_get_lf_client)
-            logger.info("Langfuse client pre-initialized")
-        except Exception as _lf_init_err:
+                tables = [
+                    Base.metadata.tables[t.__tablename__]
+                    for t in [DBProject, ResearchResult, AgentTask, WorkflowCheckpoint]
+                    if t.__tablename__ in Base.metadata.tables
+                ]
+                if _engine is not None and tables:
+                    async with _engine.begin() as conn:
+                        await conn.run_sync(Base.metadata.create_all, tables=tables)
+                    logger.info("Database tables created")
+        except Exception as e:
+            logger.warning(f"Database initialization failed: {e}")
+
+        # Initialize Gemini service
+        gemini_service = None
+        if settings.GEMINI_API_KEY:
+            try:
+                from src.services.gemini_service import GeminiService
+
+                gemini_service = GeminiService(api_key=settings.GEMINI_API_KEY)
+                logger.info(
+                    "Gemini service initialized", model=gemini_service.model_name
+                )
+            except Exception as e:
+                logger.warning(f"Gemini service initialization failed: {e}")
+        else:
             logger.warning(
-                f"Langfuse pre-initialization failed (non-fatal): {_lf_init_err}"
+                "GEMINI_API_KEY not set — agents will use fallback responses"
             )
 
-    yield
-
-    # Shutdown
-    logger.info("Shutting down Research Platform API")
-
-    # Shutdown WebSocket services
-    try:
-        await event_publisher.shutdown()
-        await websocket_manager.shutdown()
-        logger.info("WebSocket services shut down")
-    except Exception as e:
-        logger.warning(f"Error shutting down WebSocket services: {e}")
-
-    # Flush + stop Langfuse background export threads (no-op when disabled).
-    # Run off the event loop since the SDK shutdown is blocking.  A 5-second
-    # timeout prevents a hung/unreachable Langfuse endpoint from blocking SIGTERM
-    # indefinitely (FIX 2).  Both TimeoutError and any other exception are caught
-    # so a tracing failure can never block a clean application shutdown.
-    try:
-        import asyncio
-
-        from src.core.tracing import shutdown_langfuse
-
-        await asyncio.wait_for(
-            asyncio.to_thread(shutdown_langfuse),
-            timeout=5.0,
+        # Initialize all active MASR consumers from the application-owned runtime.
+        from src.api.services.direct_execution_service import (
+            configure_direct_execution_service,
         )
-        logger.info("Langfuse tracing shut down")
-    except TimeoutError:
-        logger.warning(
-            "Langfuse shutdown timed out after 5 s — background export threads may still be running"
-        )
-    except Exception as e:
-        logger.warning(f"Error shutting down Langfuse: {e}")
+        from src.api.services.masr_routing_service import MASRRoutingService
+        from src.api.services.talkhier_session_service import TalkHierSessionService
 
-    # await close_database()
-    # await close_redis()
-    # await close_temporal()
+        direct_execution_service = configure_direct_execution_service(
+            gemini_service=gemini_service,
+            masr_router=masr_runtime.router,
+        )
+        resources.push_async_callback(
+            _close_lifespan_resource,
+            "direct_execution_service",
+            direct_execution_service.close,
+        )
+        app.state.direct_execution_service = direct_execution_service
+        resources.callback(
+            _remove_app_state_if_owned,
+            app,
+            "direct_execution_service",
+            direct_execution_service,
+        )
+
+        masr_routing_service = MASRRoutingService(router=masr_runtime.router)
+        resources.push_async_callback(
+            _close_lifespan_resource,
+            "masr_routing_service",
+            masr_routing_service.close,
+        )
+        app.state.masr_routing_service = masr_routing_service
+        resources.callback(
+            _remove_app_state_if_owned,
+            app,
+            "masr_routing_service",
+            masr_routing_service,
+        )
+
+        talkhier_session_service = TalkHierSessionService(
+            masr_router=masr_runtime.router
+        )
+        resources.push_async_callback(
+            _close_lifespan_resource,
+            "talkhier_session_service",
+            talkhier_session_service.close,
+        )
+        app.state.talkhier_session_service = talkhier_session_service
+        resources.callback(
+            _remove_app_state_if_owned,
+            app,
+            "talkhier_session_service",
+            talkhier_session_service,
+        )
+
+        # FIX 4: Eagerly initialize the Langfuse client at startup (when enabled) so
+        # the first real request does not pay the SDK-import + client-construction cost
+        # synchronously on the event loop.
+        if settings.LANGFUSE_ENABLED:
+            try:
+                import asyncio as _asyncio
+
+                from src.core.tracing import get_langfuse_client as _get_lf_client
+
+                await _asyncio.to_thread(_get_lf_client)
+                logger.info("Langfuse client pre-initialized")
+            except Exception as _lf_init_err:
+                logger.warning(
+                    f"Langfuse pre-initialization failed (non-fatal): {_lf_init_err}"
+                )
+
+        try:
+            yield
+        finally:
+            logger.info("Shutting down Research Platform API")
+
+            await _close_lifespan_resource(
+                "websocket_manager",
+                websocket_manager.shutdown,
+            )
+
+            # Flush + stop Langfuse background export threads (no-op when disabled).
+            try:
+                import asyncio
+
+                from src.core.tracing import shutdown_langfuse
+
+                await asyncio.wait_for(
+                    asyncio.to_thread(shutdown_langfuse),
+                    timeout=5.0,
+                )
+                logger.info("Langfuse tracing shut down")
+            except TimeoutError:
+                logger.warning(
+                    "Langfuse shutdown timed out after 5 s — background export threads may still be running"
+                )
+            except Exception as e:
+                logger.warning(f"Error shutting down Langfuse: {e}")
+
+            # await close_database()
+            # await close_redis()
+            # await close_temporal()
 
 
 # Create FastAPI application

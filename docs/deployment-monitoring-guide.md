@@ -78,6 +78,42 @@ graph TB
 
 Each API instance runs `DirectExecutionService` internally, so scaling the API tier scales execution capacity — there is no separate pool of workers to scale independently.
 
+### Adaptive-routing deployment boundary
+
+Thompson allocation ships dark with `ADAPTIVE_ROUTING_ENABLED=false`. The
+FastAPI lifespan owns the authoritative in-process router; the standalone
+port-9100 service is available only through the `legacy-masr-service` Compose
+profile and forces Thompson allocation off. Fixture execution also forces
+adaptive and memory routing off and does not access the adaptive Redis store.
+
+Monitor the MASR `/status` `learning_metrics` state
+(`disabled`, `fixture_off`, `cold`, `degraded`, or `active`), store health,
+state revision, outcome application counts, and per-arm readiness. Cost and
+quality remain unavailable unless measured; do not substitute estimates.
+
+Before any operator considers activation, run the fixed-seed promotion gate
+against approved, version-compatible criteria and a representative neutral
+evaluator corpus:
+
+```bash
+python scripts/evaluate_adaptive_routing_promotion.py \
+  --criteria /path/to/approved-criteria.json \
+  --corpus /path/to/versioned-evaluator-corpus.json \
+  --output /absolute/private/path/adaptive-routing-promotion.json
+```
+
+The output path is mandatory, must be outside the repository, and must not
+already exist. Confirm the report's target-policy snapshot and SHA-256 match
+the intended diagnostic inputs, and confirm every required mode and arm meets
+its training and held-out thresholds. The report currently marks exact
+deployed-policy replay unsupported, which forces `insufficient_evidence`;
+operators must not treat the diagnostic snapshot as deployment equivalence.
+Synthetic evidence is always non-promotional. A complete policy replay, neutral
+product evaluator, and durable outcome outbox are still blockers. The rollback
+is to set
+`ADAPTIVE_ROUTING_ENABLED=false` and restart API instances; arm `0` remains the
+safe control during cold, incompatible, or degraded state.
+
 ## Deployment Strategies
 
 ### 1. Docker Deployment
@@ -323,7 +359,6 @@ type: Opaque
 data:
   DATABASE_URL: <base64-encoded-database-url>
   GEMINI_API_KEY: <base64-encoded-gemini-key>
-  JWT_SECRET_KEY: <base64-encoded-jwt-secret>
   REDIS_PASSWORD: <base64-encoded-redis-password>
 ```
 

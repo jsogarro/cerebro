@@ -116,16 +116,57 @@ cp .env.example .env
 cp .env.cli.example .env.cli
 ```
 
-`GEMINI_API_KEY` enables live model-backed execution. The API can start without
-it, but agent results may use limited fallback behavior.
+Python processes load optional dotenv values with this precedence:
+an already-exported process variable, then `~/.env`, then the repository
+`.env`, then the application default. Exported empty values are preserved.
+Dotenv files are parsed as data and are not shell-sourced. Keep them
+uncommitted and restrict secret-bearing files (for example, `chmod 600 ~/.env`).
+
+`GEMINI_API_KEY` enables live model-backed execution and can be exported,
+stored in `~/.env`, or stored in the project `.env`. Provider keys are optional
+for API startup; calls that need an unavailable provider use the documented
+fallback behavior.
 
 ### Run
 
 Start the supporting services:
 
 ```bash
-docker-compose up -d
+./scripts/compose.sh up -d
 ```
+
+The wrapper passes the project `.env` and then `~/.env` to Docker Compose with
+absolute paths; exported shell variables remain highest priority. Plain
+`docker compose` remains supported, but it does not load `~/.env` automatically.
+The default stack uses the FastAPI-owned in-process MASR runtime. The standalone
+port-9100 diagnostics service is legacy-only:
+
+```bash
+./scripts/compose.sh --profile legacy-masr-service up -d masr-router
+```
+
+Adaptive Thompson routing remains off by default. Fixture execution is
+deterministic and does not read or write the adaptive store. Operators can
+generate a non-activating, machine-readable promotion report from explicitly
+versioned criteria and a chronological evaluator corpus:
+
+```bash
+python scripts/evaluate_adaptive_routing_promotion.py \
+  --criteria config/adaptive_routing_promotion_criteria.example.json \
+  --corpus /path/to/versioned-evaluator-corpus.json \
+  --output /absolute/private/path/adaptive-routing-promotion.json
+```
+
+The checked-in criteria file is intentionally **unapproved**, so it always
+returns `insufficient_evidence`. Reports require an explicit output outside the
+repository; the output must not already exist. Criteria bind the replay to a
+versioned diagnostic policy snapshot and required collaboration modes/arms.
+Reports include the snapshot and its SHA-256 digest. The gate currently marks
+exact deployed-policy replay as unsupported, so every report remains
+`insufficient_evidence` and never changes `ADAPTIVE_ROUTING_ENABLED`. A complete
+runtime-policy replay, real neutral product evaluator, evaluator-qualified
+corpus, durable outcome outbox, approved thresholds, and separate operator
+decision are still required before activation.
 
 Or run the API directly:
 

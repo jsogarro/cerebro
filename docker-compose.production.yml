@@ -14,15 +14,15 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      # Direct execution via MASR
-      - MASR_SERVICE_URL=http://masr-router:9100
+      # Direct execution uses the FastAPI-owned in-process MASR runtime.
       - ENABLE_DIRECT_EXECUTION=true
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
       - SECRET_KEY=${SECRET_KEY}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - CORS_ORIGINS=${CORS_ORIGINS}
+      - JWT_PRIVATE_KEY_PATH=/run/secrets/jwt_private.pem
+      - JWT_PUBLIC_KEY_PATH=/run/secrets/jwt_public.pem
       
       # MASR Configuration
       - MASR_ENABLE_ROUTING=true
@@ -42,8 +42,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      masr-router:
-        condition: service_healthy
     networks:
       - cerebro-prod
     healthcheck:
@@ -62,6 +60,11 @@ services:
           cpus: "0.5"
     security_opt:
       - no-new-privileges:true
+    secrets:
+      - source: jwt_private_key
+        target: jwt_private.pem
+      - source: jwt_public_key
+        target: jwt_public.pem
     read_only: true
     tmpfs:
       - /tmp
@@ -76,10 +79,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      # Direct execution via MASR
-      - MASR_SERVICE_URL=http://masr-router:9100
       - ENABLE_DIRECT_EXECUTION=true
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
       - WORKER_CONCURRENCY=20
@@ -94,8 +95,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      masr-router:
         condition: service_healthy
     networks:
       - cerebro-prod
@@ -119,8 +118,9 @@ services:
     tmpfs:
       - /tmp
 
-  # MASR Router Service (Production)
+  # Legacy standalone MASR diagnostics service (non-authoritative).
   masr-router:
+    profiles: ["legacy-masr-service"]
     build:
       context: .
       dockerfile: docker/Dockerfile.masr
@@ -137,13 +137,14 @@ services:
       # MASR Configuration
       - MASR_DEFAULT_STRATEGY=balanced
       - MASR_ENABLE_ADAPTIVE=true
+      - ADAPTIVE_ROUTING_ENABLED=false
       - MASR_ENABLE_CACHING=true
       - MASR_LEARNING_INTERVAL_HOURS=6
       - MASR_MAX_AGENTS=15
       - MASR_QUALITY_THRESHOLD=0.85
       
       # Model configuration
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - MODEL_CONFIG_MANAGER_ENABLED=true
       
     depends_on:
@@ -313,7 +314,6 @@ services:
     depends_on:
       - api
       - web
-      - masr-router
       - mcp-server
     networks:
       - cerebro-prod
@@ -423,11 +423,13 @@ volumes:
 
 # Production secrets (should be managed externally)
 secrets:
+  jwt_private_key:
+    file: ${JWT_PRIVATE_KEY_FILE:?JWT_PRIVATE_KEY_FILE must point to the production RSA private PEM}
+  jwt_public_key:
+    file: ${JWT_PUBLIC_KEY_FILE:?JWT_PUBLIC_KEY_FILE must point to the matching production RSA public PEM}
   db_password:
     file: ./secrets/db_password.txt
   redis_password:
     file: ./secrets/redis_password.txt
-  jwt_secret:
-    file: ./secrets/jwt_secret.txt
   gemini_api_key:
     file: ./secrets/gemini_api_key.txt

@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from src.core.environment import load_environment
 from src.models.report import CitationStyle, ReportFormat, ReportType
 
 
@@ -138,10 +139,14 @@ class ReportSettings(BaseSettings):
     )
 
     model_config = {
-        "env_file": ".env",
         "env_prefix": "RESEARCH_",
         "populate_by_name": True,
     }
+
+    def __init__(self, **data: Any) -> None:
+        """Load shared dotenv fallbacks before reading setting fields."""
+        load_environment()
+        super().__init__(**data)
 
 
 class ReportTemplateConfig:

@@ -42,7 +42,6 @@ ENVIRONMENT=development
 DEBUG=true
 LOG_LEVEL=DEBUG
 SECRET_KEY=<generate-with-openssl-rand-hex-32>
-JWT_SECRET_KEY=<generate-with-openssl-rand-hex-32>
 DATABASE_URL=postgresql+asyncpg://research:research123@localhost:5432/research_db
 REDIS_URL=redis://localhost:6379/0
 EOF
@@ -51,7 +50,6 @@ EOF
 **Generate secrets:**
 ```bash
 openssl rand -hex 32  # Use output for SECRET_KEY
-openssl rand -hex 32  # Use output for JWT_SECRET_KEY
 ```
 
 ## Boot Stack (Minimal Working Path)
@@ -146,7 +144,7 @@ docker-compose up -d
 **This does NOT work today** because:
 1. MASR router service crashes on startup (`ModuleNotFoundError: No module named 'config'`)
 2. API service depends on MASR router health check
-3. Docker compose does not pass `SECRET_KEY` or `JWT_SECRET_KEY` to the API container (hardcoded fallback is too short)
+3. Docker compose does not pass a sufficiently long `SECRET_KEY` to the API container
 
 See gaps document for detailed failure analysis.
 
@@ -277,7 +275,7 @@ pkill -f "vite"
 
 **Root cause:** `.env` file missing or docker-compose not passing SECRET_KEY to container.
 
-**Fix:** Ensure `.env` has valid `SECRET_KEY` and `JWT_SECRET_KEY` (see Environment Setup above).
+**Fix:** Ensure `.env` has a valid `SECRET_KEY` (see Environment Setup above).
 
 ### "ModuleNotFoundError: No module named 'config'"
 

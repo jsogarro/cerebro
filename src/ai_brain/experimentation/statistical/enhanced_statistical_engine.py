@@ -147,8 +147,11 @@ class BanditResult:
     expected_reward: float
     confidence: float
 
-    # Bandit state
-    arm_probabilities: list[float]
+    # Bandit state. Reward estimates are scores, not traffic propensities.
+    # One-draw Thompson sampling does not expose an exact selection probability
+    # without a separate estimation pass, so propensity is explicitly optional.
+    arm_reward_estimates: list[float]
+    selection_probability: float | None
     arm_rewards: list[float]
     arm_counts: list[int]
 
@@ -641,10 +644,12 @@ class MultiBanditOptimizer:
         self.posterior_temp_enabled = self.config.get("posterior_temp_enabled", False)
         self.posterior_temp_threshold = self.config.get("posterior_temp_threshold", 150)
         self.posterior_temp_factor = self.config.get("posterior_temp_factor", 3.0)
+        self.rng = self.config.get("rng", np.random)
 
         # Bandit state
         self.arm_counts: list[int] = []
         self.arm_rewards: list[list[float]] = []
+        self.arm_reward_sums: list[float] = []
         self.arm_values: list[float] = []
 
     async def initialize_bandit(
@@ -662,6 +667,7 @@ class MultiBanditOptimizer:
         # Initialize arm statistics
         self.arm_counts = [0] * num_arms
         self.arm_rewards = [[] for _ in range(num_arms)]
+        self.arm_reward_sums = [0.0] * num_arms
         self.arm_values = [0.0] * num_arms
 
         # Algorithm-specific initialization
@@ -695,9 +701,12 @@ class MultiBanditOptimizer:
     async def _epsilon_greedy_selection(self) -> BanditResult:
         """Epsilon-greedy arm selection."""
 
-        if np.random.random() < self.epsilon or sum(self.arm_counts) == 0:
+        if self.rng.random() < self.epsilon or sum(self.arm_counts) == 0:
             # Exploration: random selection
-            selected_arm = np.random.randint(0, self.num_arms)
+            if hasattr(self.rng, "integers"):
+                selected_arm = int(self.rng.integers(0, self.num_arms))
+            else:
+                selected_arm = int(self.rng.randint(0, self.num_arms))
             confidence = 0.5  # Low confidence for exploration
         else:
             # Exploitation: best known arm
@@ -713,11 +722,12 @@ class MultiBanditOptimizer:
             selected_arm=selected_arm,
             expected_reward=expected_reward,
             confidence=confidence,
-            arm_probabilities=self._calculate_arm_probabilities(),
+            arm_reward_estimates=self.arm_values.copy(),
+            selection_probability=None,
             arm_rewards=self.arm_values.copy(),
             arm_counts=self.arm_counts.copy(),
             regret=self._calculate_regret(),
-            cumulative_reward=sum(sum(rewards) for rewards in self.arm_rewards),
+            cumulative_reward=sum(self.arm_reward_sums),
             exploration_rate=self.epsilon,
         )
 
@@ -742,7 +752,7 @@ class MultiBanditOptimizer:
                 alpha = alpha * self.posterior_temp_factor
                 beta = beta * self.posterior_temp_factor
 
-            sample = np.random.beta(alpha, beta)
+            sample = self.rng.beta(alpha, beta)
             arm_samples.append(sample)
 
         selected_arm = int(np.argmax(arm_samples))
@@ -760,14 +770,15 @@ class MultiBanditOptimizer:
             selected_arm=selected_arm,
             expected_reward=expected_reward,
             confidence=confidence,
-            arm_probabilities=[
+            arm_reward_estimates=[
                 a / (a + b)
                 for a, b in zip(self.alpha_params, self.beta_params, strict=True)
             ],
+            selection_probability=None,
             arm_rewards=self.arm_values.copy(),
             arm_counts=self.arm_counts.copy(),
             regret=self._calculate_regret(),
-            cumulative_reward=sum(sum(rewards) for rewards in self.arm_rewards),
+            cumulative_reward=sum(self.arm_reward_sums),
             exploration_rate=1.0 / max(1, sum(self.arm_counts)),
         )
 
@@ -803,11 +814,12 @@ class MultiBanditOptimizer:
             selected_arm=selected_arm,
             expected_reward=expected_reward,
             confidence=confidence,
-            arm_probabilities=self._calculate_arm_probabilities(),
+            arm_reward_estimates=self.arm_values.copy(),
+            selection_probability=None,
             arm_rewards=self.arm_values.copy(),
             arm_counts=self.arm_counts.copy(),
             regret=self._calculate_regret(),
-            cumulative_reward=sum(sum(rewards) for rewards in self.arm_rewards),
+            cumulative_reward=sum(self.arm_reward_sums),
             exploration_rate=np.sqrt(np.log(total_counts) / max(1, total_counts)),
         )
 
@@ -815,10 +827,10 @@ class MultiBanditOptimizer:
         """Update bandit with observed reward."""
 
         self.arm_counts[arm] += 1
-        self.arm_rewards[arm].append(reward)
+        self.arm_reward_sums[arm] += reward
 
         # Update arm value (running average)
-        self.arm_values[arm] = float(np.mean(self.arm_rewards[arm]))
+        self.arm_values[arm] = self.arm_reward_sums[arm] / self.arm_counts[arm]
 
         # Algorithm-specific updates
         if self.algorithm == BanditAlgorithm.THOMPSON_SAMPLING:
@@ -851,9 +863,10 @@ class MultiBanditOptimizer:
         best_arm_value = max(self.arm_values)
         total_regret = 0.0
 
-        for _arm_idx, rewards in enumerate(self.arm_rewards):
-            arm_regret = sum(best_arm_value - reward for reward in rewards)
-            total_regret += arm_regret
+        for count, reward_sum in zip(
+            self.arm_counts, self.arm_reward_sums, strict=True
+        ):
+            total_regret += best_arm_value * count - reward_sum
 
         return total_regret
 

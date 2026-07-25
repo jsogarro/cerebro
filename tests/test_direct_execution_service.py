@@ -13,9 +13,12 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from src.ai_brain.router.masr import MASRouter
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
+    close_direct_execution_service,
+    configure_direct_execution_service,
     get_direct_execution_service,
 )
 from src.models.research_project import (
@@ -71,8 +74,10 @@ def execution_service():
     """
     masr_router = AsyncMock()
     masr_router.route.return_value = _FakeRoutingDecision()
+    masr_router.health_check.return_value = {"status": "healthy"}
 
     bridge = AsyncMock()
+    bridge.health_check.return_value = {"status": "healthy"}
     result = Mock()
     result.execution_id = "supervisor-exec-123"
     result.supervisor_type = "research"
@@ -97,10 +102,13 @@ def execution_service():
     publisher = AsyncMock()
     publisher.publish_project_event.return_value = None
 
+    supervisor_factory = Mock()
+    supervisor_factory.health_check = AsyncMock(return_value={"status": "healthy"})
+
     return DirectExecutionService(
         masr_router=masr_router,
         supervisor_bridge=bridge,
-        supervisor_factory=Mock(),
+        supervisor_factory=supervisor_factory,
         event_publisher=publisher,
     )
 
@@ -336,6 +344,39 @@ class TestDirectExecutionService:
 
         assert service1 is service2
         assert isinstance(service1, DirectExecutionService)
+
+
+@pytest.mark.asyncio
+async def test_application_owned_services_close_only_the_exact_instance() -> None:
+    first = configure_direct_execution_service(masr_router=MASRouter())
+    second = configure_direct_execution_service(masr_router=MASRouter())
+    first_task = asyncio.create_task(asyncio.Event().wait())
+    second_task = asyncio.create_task(asyncio.Event().wait())
+    first._background_tasks.add(first_task)
+    second._background_tasks.add(second_task)
+
+    await close_direct_execution_service(first)
+
+    assert first_task.cancelled()
+    assert not second_task.done()
+    assert second._background_tasks == {second_task}
+
+    await close_direct_execution_service(second)
+    assert second_task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_close_releases_lazy_fast_path_provider_exactly_once(
+    execution_service: DirectExecutionService,
+) -> None:
+    provider = AsyncMock()
+    execution_service._fast_path_provider = provider
+
+    await execution_service.close()
+    await execution_service.close()
+
+    provider.close.assert_awaited_once()
+    assert execution_service._fast_path_provider is None
 
 
 class TestExecutionStatus:
