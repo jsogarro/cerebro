@@ -410,8 +410,10 @@ no SSE.
 | `/api/v1/talkhier/interactive` | Interactive TalkHier channel |
 | `/api/v1/talkhier/coordination` | TalkHier coordination channel |
 
-WebSocket auth allows anonymous connections when `ENVIRONMENT=='development'`; otherwise the
-token is validated with the shared RS256 `JWTService`.
+WebSocket auth requires a token by default in every environment. Anonymous
+connections require both `ENVIRONMENT=development` and the explicit local-only
+`DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true` opt-in; production ignores that opt-in.
+Authenticated connections are validated with the shared RS256 key material.
 
 **Example** (project updates):
 ```javascript

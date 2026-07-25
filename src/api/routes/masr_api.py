@@ -5,9 +5,9 @@ REST API endpoints for MASR routing intelligence, following
 "MasRouter: Learning to Route LLMs" research patterns.
 """
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from src.api.services.masr_routing_service import MASRRoutingService
 from src.models.masr_api_models import (
@@ -36,8 +36,23 @@ router = APIRouter(
     },
 )
 
-# Service instance (in production, use dependency injection)
-routing_service = MASRRoutingService()
+
+def get_masr_routing_service(request: Request) -> MASRRoutingService:
+    """Resolve the service built from the FastAPI-owned MASR runtime."""
+
+    service = getattr(request.app.state, "masr_routing_service", None)
+    if not isinstance(service, MASRRoutingService):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MASR runtime is unavailable",
+        )
+    return service
+
+
+MASRServiceDependency = Annotated[
+    MASRRoutingService,
+    Depends(get_masr_routing_service),
+]
 
 
 @router.post(
@@ -56,7 +71,10 @@ routing_service = MASRRoutingService()
         400: {"description": "Invalid request", "model": MASRErrorResponse},
     },
 )
-async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionResponse:
+async def get_routing_decision(
+    request: RoutingRequest,
+    routing_service: MASRServiceDependency,
+) -> RoutingDecisionResponse:
     """
     Get intelligent routing decision for a query.
 
@@ -72,9 +90,9 @@ async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionRespon
             detail=MASRErrorResponse(
                 error=str(e),
                 error_code="INVALID_REQUEST",
-                details={"request": request.dict()},
+                details={"request": request.model_dump(mode="json")},
                 suggestions=["Check query format", "Verify strategy is valid"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
     except Exception as e:
         raise HTTPException(
@@ -84,7 +102,7 @@ async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionRespon
                 error_code="ROUTING_ERROR",
                 details={"error": str(e)},
                 suggestions=["Retry request", "Contact support if issue persists"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
 
 
@@ -97,7 +115,10 @@ async def get_routing_decision(request: RoutingRequest) -> RoutingDecisionRespon
         "Includes model costs, coordination overhead, and confidence intervals."
     ),
 )
-async def estimate_cost(request: CostEstimationRequest) -> CostEstimationResponse:
+async def estimate_cost(
+    request: CostEstimationRequest,
+    routing_service: MASRServiceDependency,
+) -> CostEstimationResponse:
     """
     Estimate execution cost with breakdown.
 
@@ -119,7 +140,7 @@ async def estimate_cost(request: CostEstimationRequest) -> CostEstimationRespons
                 error_code="ESTIMATION_ERROR",
                 details={"error": str(e)},
                 suggestions=["Try simpler query", "Check strategy selection"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
 
 
@@ -134,6 +155,7 @@ async def estimate_cost(request: CostEstimationRequest) -> CostEstimationRespons
 )
 async def evaluate_strategies(
     request: StrategyEvaluationRequest,
+    routing_service: MASRServiceDependency,
 ) -> StrategyEvaluationResponse:
     """
     Evaluate and compare routing strategies.
@@ -155,7 +177,7 @@ async def evaluate_strategies(
                 error_code="EVALUATION_ERROR",
                 details={"error": str(e)},
                 suggestions=["Reduce number of strategies", "Simplify query"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
 
 
@@ -170,6 +192,7 @@ async def evaluate_strategies(
 )
 async def analyze_complexity(
     request: ComplexityAnalysisRequest,
+    routing_service: MASRServiceDependency,
 ) -> ComplexityAnalysisResponse:
     """
     Analyze query complexity with features.
@@ -191,7 +214,7 @@ async def analyze_complexity(
                 error_code="ANALYSIS_ERROR",
                 details={"error": str(e)},
                 suggestions=["Simplify query", "Break into sub-queries"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
 
 
@@ -201,7 +224,9 @@ async def analyze_complexity(
     summary="List available strategies",
     description="Get list of available routing strategies with their characteristics.",
 )
-async def get_strategies() -> StrategiesListResponse:
+async def get_strategies(
+    routing_service: MASRServiceDependency,
+) -> StrategiesListResponse:
     """
     Get available routing strategies.
 
@@ -222,7 +247,7 @@ async def get_strategies() -> StrategiesListResponse:
                 error_code="STRATEGY_LIST_ERROR",
                 details={"error": str(e)},
                 suggestions=["Retry request"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
 
 
@@ -232,7 +257,7 @@ async def get_strategies() -> StrategiesListResponse:
     summary="List available models",
     description="Get list of available models and their tier classifications.",
 )
-async def get_models() -> ModelsListResponse:
+async def get_models(routing_service: MASRServiceDependency) -> ModelsListResponse:
     """
     Get available models and tiers.
 
@@ -253,7 +278,7 @@ async def get_models() -> ModelsListResponse:
                 error_code="MODEL_LIST_ERROR",
                 details={"error": str(e)},
                 suggestions=["Retry request"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
 
 
@@ -266,7 +291,10 @@ async def get_models() -> ModelsListResponse:
         "Used for continuous learning and optimization."
     ),
 )
-async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
+async def submit_feedback(
+    feedback: RoutingFeedback,
+    routing_service: MASRServiceDependency,
+) -> dict[str, Any]:
     """
     Submit feedback for routing learning.
 
@@ -285,9 +313,9 @@ async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
             detail=MASRErrorResponse(
                 error=str(e),
                 error_code="INVALID_FEEDBACK",
-                details={"feedback": feedback.dict()},
+                details={"feedback": feedback.model_dump(mode="json")},
                 suggestions=["Verify routing_id exists", "Check feedback format"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
     except Exception as e:
         raise HTTPException(
@@ -297,7 +325,7 @@ async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
                 error_code="FEEDBACK_ERROR",
                 details={"error": str(e)},
                 suggestions=["Retry submission"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
 
 
@@ -310,7 +338,7 @@ async def submit_feedback(feedback: RoutingFeedback) -> dict[str, Any]:
         "Includes metrics, model availability, and learning statistics."
     ),
 )
-async def get_status() -> RouterStatus:
+async def get_status(routing_service: MASRServiceDependency) -> RouterStatus:
     """
     Get router health and performance.
 
@@ -332,7 +360,7 @@ async def get_status() -> RouterStatus:
                 error_code="STATUS_ERROR",
                 details={"error": str(e)},
                 suggestions=["Check service health"],
-            ).dict(),
+            ).model_dump(mode="json"),
         ) from e
 
 

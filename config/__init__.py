@@ -10,11 +10,15 @@ import os
 from collections.abc import Callable
 from functools import lru_cache
 
-from config.base import BaseConfig
-from config.development import DevelopmentConfig
-from config.production import ProductionConfig
-from config.staging import StagingConfig
-from config.testing import TestingConfig
+from src.core.environment import load_environment
+
+load_environment()
+
+from config.base import BaseConfig  # noqa: E402
+from config.development import DevelopmentConfig  # noqa: E402
+from config.production import ProductionConfig  # noqa: E402
+from config.staging import StagingConfig  # noqa: E402
+from config.testing import TestingConfig  # noqa: E402
 
 # Configuration class mapping
 CONFIG_CLASSES: dict[str, Callable[[], BaseConfig]] = {

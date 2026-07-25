@@ -11,6 +11,7 @@ Core responsibilities:
 - Integration with existing TalkHier protocol
 """
 
+import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -105,7 +106,7 @@ class TalkHierSessionService:
     TalkHier protocol, enabling multi-round refinement with consensus building.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, masr_router: MASRouter | None = None) -> None:
         self.state_manager = TalkHierStateManager()
         self.round_executor = TalkHierRoundExecutor()
         self.consensus_evaluator = TalkHierConsensusEvaluator()
@@ -113,7 +114,7 @@ class TalkHierSessionService:
         self.consensus_builder = self.consensus_evaluator.consensus_builder
         self.supervisor_factory = SupervisorFactory()
         self.masr_bridge = MASRSupervisorBridge()
-        self.masr_router = MASRouter()
+        self.masr_router = masr_router or MASRouter()
         self.session_coordinator = TalkHierSessionCoordinator(
             self.supervisor_factory,
             self.masr_bridge,
@@ -128,6 +129,20 @@ class TalkHierSessionService:
 
         # Background tasks
         self.cleanup_task = None
+        self.closed = False
+
+    async def close(self) -> None:
+        """Cancel local cleanup work and release application-owned session state."""
+
+        if self.closed:
+            return
+        if self.cleanup_task is not None:
+            self.cleanup_task.cancel()
+            await asyncio.gather(self.cleanup_task, return_exceptions=True)
+            self.cleanup_task = None
+        self.sessions.clear()
+        self.session_metrics.clear()
+        self.closed = True
 
     def _initialize_protocol_configs(self) -> dict[ProtocolType, dict[str, Any]]:
         """Initialize protocol configurations"""

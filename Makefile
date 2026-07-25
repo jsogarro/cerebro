@@ -1,7 +1,7 @@
 # Cerebro AI Brain Platform - Developer Makefile
 # Provides convenient commands for development, testing, and deployment
 
-.PHONY: help install dev test lint type-check format clean docker-dev docker-prod k8s-deploy
+.PHONY: help install dev test lint type-check format clean docker-dev docker-prod k8s-deploy legacy-masr
 
 # Default target
 help: ## Show this help message
@@ -20,56 +20,59 @@ install-pip: ## Create .venv and install dependencies with pip
 	./scripts/setup-python-env.sh
 
 dev: ## Start development environment
-	docker-compose up -d
+	./scripts/compose.sh up -d
 
 dev-build: ## Build and start development environment
-	docker-compose up -d --build
+	./scripts/compose.sh up -d --build
 
 dev-logs: ## Show development logs
-	docker-compose logs -f
+	./scripts/compose.sh logs -f
 
 dev-stop: ## Stop development environment
-	docker-compose down
+	./scripts/compose.sh down
 
 dev-clean: ## Clean development environment (removes volumes)
-	docker-compose down -v --remove-orphans
+	./scripts/compose.sh down -v --remove-orphans
 	docker system prune -f
+
+legacy-masr: ## Start the non-authoritative standalone MASR diagnostics service
+	./scripts/compose.sh --profile legacy-masr-service up -d masr-router
 
 ## Production Environment
 prod-build: ## Build production images
-	docker-compose -f docker-compose.production.yml build
+	./scripts/compose.sh -f docker-compose.production.yml build
 
 prod-up: ## Start production environment
-	docker-compose -f docker-compose.production.yml up -d
+	./scripts/compose.sh -f docker-compose.production.yml up -d
 
 prod-down: ## Stop production environment
-	docker-compose -f docker-compose.production.yml down
+	./scripts/compose.sh -f docker-compose.production.yml down
 
 prod-logs: ## Show production logs
-	docker-compose -f docker-compose.production.yml logs -f
+	./scripts/compose.sh -f docker-compose.production.yml logs -f
 
 ## Database Management
 db-init: ## Initialize database with migrations
-	docker-compose exec api alembic upgrade head
+	./scripts/compose.sh exec api alembic upgrade head
 
 db-migrate: ## Create new database migration
 	@read -p "Migration message: " msg; \
-	docker-compose exec api alembic revision --autogenerate -m "$$msg"
+	./scripts/compose.sh exec api alembic revision --autogenerate -m "$$msg"
 
 db-reset: ## Reset database (WARNING: destroys all data)
-	docker-compose down postgres
+	./scripts/compose.sh down postgres
 	docker volume rm cerebro_postgres_data
-	docker-compose up -d postgres
+	./scripts/compose.sh up -d postgres
 	sleep 10
 	make db-init
 
 db-backup: ## Backup database
 	@mkdir -p backups
-	docker-compose exec postgres pg_dump -U research research_db > backups/backup_$$(date +%Y%m%d_%H%M%S).sql
+	./scripts/compose.sh exec postgres pg_dump -U research research_db > backups/backup_$$(date +%Y%m%d_%H%M%S).sql
 	@echo "Database backup created in backups/ directory"
 
 db-shell: ## Connect to database shell
-	docker-compose exec postgres psql -U research -d research_db
+	./scripts/compose.sh exec postgres psql -U research -d research_db
 
 ## Testing
 test: ## Run all tests
@@ -168,16 +171,16 @@ k8s-clean: ## Clean Kubernetes deployment
 
 ## Monitoring
 logs-api: ## Follow API logs
-	docker-compose logs -f api
+	./scripts/compose.sh logs -f api
 
 logs-worker: ## Follow worker logs
-	docker-compose logs -f worker
+	./scripts/compose.sh logs -f worker
 
 logs-masr: ## Follow MASR logs
-	docker-compose logs -f masr-router
+	./scripts/compose.sh --profile legacy-masr-service logs -f masr-router
 
 logs-all: ## Follow all service logs
-	docker-compose logs -f
+	./scripts/compose.sh logs -f
 
 metrics: ## Show system metrics
 	docker-compose exec prometheus curl -s localhost:9090/api/v1/query?query=up
@@ -276,16 +279,21 @@ env-help: ## Show required environment variables
 	@echo "  REDIS_URL=redis://localhost:6379/0"
 	@echo "  TEMPORAL_HOST=localhost:7233"
 	@echo ""
-	@echo "Production (.env.production):"
+	@echo "Production (exported environment, project .env, or ~/.env):"
 	@echo "  DB_PASSWORD=secure-db-password"
 	@echo "  REDIS_PASSWORD=secure-redis-password"
 	@echo "  SECRET_KEY=secure-app-secret"
-	@echo "  JWT_SECRET_KEY=secure-jwt-secret"
+	@echo "  JWT_PRIVATE_KEY_FILE=/absolute/host/path/jwt_private.pem"
+	@echo "  JWT_PUBLIC_KEY_FILE=/absolute/host/path/jwt_public.pem"
 	@echo "  GEMINI_API_KEY=production-gemini-key"
 	@echo "  GRAFANA_PASSWORD=secure-grafana-password"
 	@echo "  CORS_ORIGINS=https://your-domain.com"
 	@echo ""
-	@echo "See .env.example and .env.production.example for complete templates"
+	@echo "Generate one matching RSA pair before prod-up:"
+	@echo "  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /secure/path/jwt_private.pem"
+	@echo "  openssl pkey -in /secure/path/jwt_private.pem -pubout -out /secure/path/jwt_public.pem"
+	@echo ""
+	@echo "See .env.example and docs/configuration-reference.md for the complete contract"
 
 # Version information
 version: ## Show version information

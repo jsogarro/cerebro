@@ -9,13 +9,15 @@ consensus building, and real-time communication capabilities.
 """
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import (
     APIRouter,
+    Depends,
     HTTPException,
     Path,
     Query,
+    Request,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -54,11 +56,32 @@ router = APIRouter(
     prefix="/api/v1/talkhier", tags=["TalkHier Protocol", "Agent Framework APIs"]
 )
 
-# Initialize services
-session_service = TalkHierSessionService()
+# Initialize non-routing services
 session_manager = TalkHierSessionManager()
 websocket_handler = TalkHierWebSocketHandler()
 connection_manager = ConnectionManager()
+
+
+def _talkhier_service_from_app(app: Any) -> TalkHierSessionService:
+    service = getattr(app.state, "talkhier_session_service", None)
+    if not isinstance(service, TalkHierSessionService):
+        raise RuntimeError("TalkHier MASR runtime is unavailable")
+    return service
+
+
+def get_talkhier_session_service(request: Request) -> TalkHierSessionService:
+    """Resolve the TalkHier service built by FastAPI lifespan."""
+
+    try:
+        return _talkhier_service_from_app(request.app)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+TalkHierServiceDependency = Annotated[
+    TalkHierSessionService,
+    Depends(get_talkhier_session_service),
+]
 
 
 # ================================
@@ -69,6 +92,7 @@ connection_manager = ConnectionManager()
 @router.post("/sessions", response_model=TalkHierSessionResponse)
 async def create_refinement_session(
     request: TalkHierSessionRequest,
+    talkhier_service: TalkHierServiceDependency,
 ) -> TalkHierSessionResponse:
     """
     Start a new TalkHier refinement session
@@ -107,7 +131,7 @@ async def create_refinement_session(
         )
 
         # Create session through service
-        session_response = await session_service.create_session(request)
+        session_response = await talkhier_service.create_session(request)
 
         # Register with session manager for monitoring
         await session_manager.register_session(
@@ -140,6 +164,7 @@ async def create_refinement_session(
 
 @router.get("/sessions/{session_id}", response_model=SessionStatusResponse)
 async def get_session_status(
+    talkhier_service: TalkHierServiceDependency,
     session_id: str = Path(..., description="Session identifier"),
 ) -> SessionStatusResponse:
     """
@@ -161,7 +186,7 @@ async def get_session_status(
         ```
     """
     try:
-        status_response = await session_service.get_session_status(session_id)
+        status_response = await talkhier_service.get_session_status(session_id)
 
         # Log access
         await _log_session_analytics(
@@ -185,7 +210,9 @@ async def get_session_status(
 
 @router.post("/sessions/{session_id}/round", response_model=RefinementRoundResponse)
 async def execute_refinement_round(
-    session_id: str, request: RefinementRoundRequest
+    session_id: str,
+    request: RefinementRoundRequest,
+    talkhier_service: TalkHierServiceDependency,
 ) -> RefinementRoundResponse:
     """
     Execute a refinement round in an active session
@@ -222,7 +249,7 @@ async def execute_refinement_round(
         )
 
         # Execute round
-        round_response = await session_service.execute_refinement_round(
+        round_response = await talkhier_service.execute_refinement_round(
             session_id, request
         )
 
@@ -268,7 +295,9 @@ async def execute_refinement_round(
 
 @router.post("/sessions/{session_id}/consensus", response_model=ConsensusResult)
 async def check_consensus_status(
-    session_id: str, request: ConsensusCheckRequest
+    session_id: str,
+    request: ConsensusCheckRequest,
+    talkhier_service: TalkHierServiceDependency,
 ) -> ConsensusResult:
     """
     Check consensus status among session participants
@@ -298,7 +327,7 @@ async def check_consensus_status(
         ```
     """
     try:
-        consensus_result = await session_service.check_consensus(session_id, request)
+        consensus_result = await talkhier_service.check_consensus(session_id, request)
 
         # Broadcast consensus update via WebSocket
         await websocket_handler.broadcast_consensus_update(session_id, consensus_result)
@@ -330,6 +359,7 @@ async def check_consensus_status(
 @router.post("/sessions/{session_id}/close", response_model=SessionCloseResponse)
 async def close_session(
     session_id: str,
+    talkhier_service: TalkHierServiceDependency,
     request: SessionCloseRequest = SessionCloseRequest(
         reason=None, save_transcript=True, generate_summary=True
     ),
@@ -359,7 +389,7 @@ async def close_session(
         ```
     """
     try:
-        close_response = await session_service.close_session(session_id, request)
+        close_response = await talkhier_service.close_session(session_id, request)
 
         # Unregister from session manager
         await session_manager.unregister_session(session_id)
@@ -489,6 +519,7 @@ async def list_available_protocols() -> ProtocolListResponse:
 @router.post("/validate", response_model=ValidationResponse)
 async def validate_communication_structure(
     request: ProtocolValidationRequest,
+    talkhier_service: TalkHierServiceDependency,
 ) -> ValidationResponse:
     """
     Validate TalkHier communication structure
@@ -512,7 +543,7 @@ async def validate_communication_structure(
         ```
     """
     try:
-        validation_response = await session_service.validate_protocol(request)
+        validation_response = await talkhier_service.validate_protocol(request)
 
         # Log validation
         logger.info(
@@ -616,13 +647,16 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
         };
         ```
     """
+    session_service = _talkhier_service_from_app(websocket.app)
     connection_id = await connection_manager.connect(websocket)
+    registered = False
 
     try:
         # Register connection for session
         await websocket_handler.register_session_connection(
             session_id, connection_id, websocket
         )
+        registered = True
 
         # Send initial session status
         status = await session_service.get_session_status(session_id)
@@ -654,8 +688,7 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
                 )
 
     except WebSocketDisconnect:
-        await websocket_handler.unregister_session_connection(session_id, connection_id)
-        await connection_manager.disconnect(connection_id)
+        pass
     except Exception as e:
         logger.error(
             "talkhier_session_websocket_error",
@@ -663,6 +696,14 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
             error=str(e),
         )
         await websocket.close(code=1011, reason=str(e))
+    finally:
+        try:
+            if registered:
+                await websocket_handler.unregister_session_connection(
+                    session_id, connection_id
+                )
+        finally:
+            await connection_manager.disconnect(connection_id)
 
 
 @router.websocket("/interactive")
@@ -692,8 +733,10 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
         }));
         ```
     """
+    session_service = _talkhier_service_from_app(websocket.app)
     connection_id = await connection_manager.connect(websocket)
     session_id: str | None = None
+    registered = False
 
     try:
         # Wait for session initialization
@@ -707,6 +750,7 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                 await websocket_handler.join_interactive_session(
                     session_id, connection_id, websocket
                 )
+                registered = True
             else:
                 # Create new interactive session
                 request = TalkHierSessionRequest(**init_data.get("config", {}))
@@ -716,6 +760,7 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                 await websocket_handler.register_interactive_session(
                     session_id, connection_id, websocket
                 )
+                registered = True
 
             # Send confirmation
             await websocket.send_json(
@@ -743,9 +788,7 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                     )
 
     except WebSocketDisconnect:
-        if session_id:
-            await websocket_handler.leave_interactive_session(session_id, connection_id)
-        await connection_manager.disconnect(connection_id)
+        pass
     except Exception as e:
         logger.error(
             "talkhier_interactive_session_error",
@@ -753,6 +796,14 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
             error=str(e),
         )
         await websocket.close(code=1011, reason=str(e))
+    finally:
+        try:
+            if registered and session_id is not None:
+                await websocket_handler.leave_interactive_session(
+                    session_id, connection_id
+                )
+        finally:
+            await connection_manager.disconnect(connection_id)
 
 
 @router.websocket("/coordination")
@@ -780,6 +831,7 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
     """
     connection_id = await connection_manager.connect(websocket)
     coordination_id: str | None = None
+    registered = False
 
     try:
         # Wait for coordination monitoring request
@@ -792,6 +844,7 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             await websocket_handler.register_coordination_monitor(
                 coordination_id, connection_id, websocket
             )
+            registered = True
 
             # Send initial status
             if coordination_id is not None:
@@ -813,11 +866,7 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
                 )
 
     except WebSocketDisconnect:
-        if coordination_id:
-            await websocket_handler.unregister_coordination_monitor(
-                coordination_id, connection_id
-            )
-        await connection_manager.disconnect(connection_id)
+        pass
     except Exception as e:
         logger.error(
             "talkhier_coordination_monitoring_error",
@@ -825,6 +874,14 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             error=str(e),
         )
         await websocket.close(code=1011, reason=str(e))
+    finally:
+        try:
+            if registered and coordination_id is not None:
+                await websocket_handler.unregister_coordination_monitor(
+                    coordination_id, connection_id
+                )
+        finally:
+            await connection_manager.disconnect(connection_id)
 
 
 # ================================
@@ -943,7 +1000,9 @@ async def _get_protocol_insights(
 
 
 @router.get("/health")
-async def talkhier_health_check() -> dict[str, Any]:
+async def talkhier_health_check(
+    talkhier_service: TalkHierServiceDependency,
+) -> dict[str, Any]:
     """
     Health check for TalkHier Protocol API
 
@@ -951,7 +1010,7 @@ async def talkhier_health_check() -> dict[str, Any]:
         Service health status
     """
     try:
-        active_sessions = len(session_service.sessions)
+        active_sessions = len(talkhier_service.sessions)
         manager_status = await session_manager.get_health_status()
 
         return {

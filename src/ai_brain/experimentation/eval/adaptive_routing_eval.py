@@ -189,16 +189,32 @@ class AdaptiveRoutingEvaluator:
     async def run_adaptive(self, corpus: list[SyntheticQuery]) -> dict[str, Any]:
         """Run adaptive allocation on corpus with REAL bandit learning."""
         from src.ai_brain.router.masr import MASRouter
+        from src.ai_brain.router.routing_outcome import (
+            ADAPTIVE_POLICY_VERSION,
+            EvaluatorEligibilityPolicy,
+            MetricAvailability,
+            OutcomeSource,
+            RoutingOutcome,
+        )
 
         # Create MASR instance with adaptive routing enabled
         config = {
             "adaptive_routing_enabled": True,
-            "adaptive_routing_min_history": 10,  # Lower for faster eval learning
+            "adaptive_routing_min_history": 0,
+            "adaptive_routing_min_samples_per_arm": 0,
+            "adaptive_routing_performance_threshold": 0.0,
             "adaptive_routing_max_worker_adjust": 2,
+            "adaptive_routing_rng": np.random.default_rng(self.seed),
             "max_parallel": 5,
             "max_agents": 10,
         }
-        router = MASRouter(config=config)
+        eligibility_policy = EvaluatorEligibilityPolicy(
+            allowed_evaluators={"adaptive-routing-eval": frozenset({"1"})}
+        )
+        router = MASRouter(
+            config=config,
+            outcome_eligibility_policy=eligibility_policy,
+        )
 
         allocations: list[int] = []
         worker_dist: dict[int, int] = {}
@@ -207,14 +223,6 @@ class AdaptiveRoutingEvaluator:
         reward_failures = 0
         cumulative_regret = 0.0
 
-        # Warm the router's cold-start guard: it only checks history LENGTH,
-        # so seed sentinel entries (documented synthetic-eval shortcut).
-        min_history = config["adaptive_routing_min_history"]
-        router.metrics_collector.routing_history.extend(
-            SimpleNamespace(sentinel=True)  # type: ignore[misc]
-            for _ in range(min_history)
-        )
-
         def _analysis_for(query: SyntheticQuery) -> SimpleNamespace:
             # Lightweight stand-in exposing the two fields the router's
             # baseline inference reads (domains, subtask_count).
@@ -222,9 +230,10 @@ class AdaptiveRoutingEvaluator:
             return SimpleNamespace(
                 domains=[f"domain_{i}" for i in range(max(1, n - 1))],
                 subtask_count=n,
+                reasoning_types=[],
             )
 
-        for query in corpus:
+        for outcome_index, query in enumerate(corpus):
             # Get baseline (what static would use)
             baseline = query.analytic_worker_count
             analysis = _analysis_for(query)
@@ -237,13 +246,19 @@ class AdaptiveRoutingEvaluator:
             )
 
             if recommended is not None:
-                allocated = recommended
-                if allocated != baseline:
+                allocation, attribution = router._allocate_agents_with_attribution(
+                    complexity_analysis=analysis,  # type: ignore[arg-type]
+                    collaboration_mode=query.collaboration_mode,
+                    adaptive_recommendation=recommended,
+                )
+                allocated = allocation.worker_count
+                if attribution.applied_arm != 0:
                     adaptation_count += 1
-                if abs(allocated - baseline) == 2:
+                if abs(attribution.applied_arm) == 2:
                     bound_hit_count += 1
             else:
                 allocated = baseline
+                attribution = None
 
             allocations.append(allocated)
             worker_dist[allocated] = worker_dist.get(allocated, 0) + 1
@@ -251,17 +266,33 @@ class AdaptiveRoutingEvaluator:
             # Simulate outcome and feed the reward through the REAL
             # record_routing_outcome path (delta -> variant -> bandit reward).
             outcome = self.simulate_outcome(query, allocated)
-            decision_stub = SimpleNamespace(
+            typed_outcome = RoutingOutcome(
+                outcome_id=f"synthetic-eval-{outcome_index}",
+                routing_id=f"synthetic-route-{outcome_index}",
+                policy_version=ADAPTIVE_POLICY_VERSION,
+                source=OutcomeSource.EVALUATOR,
                 collaboration_mode=query.collaboration_mode,
-                complexity_analysis=analysis,
-                agent_allocation=SimpleNamespace(worker_count=allocated),
+                proposed_arm=attribution.proposed_arm if attribution else 0,
+                applied_arm=attribution.applied_arm if attribution else 0,
+                final_worker_count=allocated,
+                execution_status="completed",
+                latency_ms=outcome.latency_ms,
+                measured_cost=outcome.cost,
+                cost_availability=MetricAvailability.MEASURED,
+                quality_score=outcome.quality_score,
+                quality_availability=MetricAvailability.MEASURED,
+                evaluator_name="adaptive-routing-eval",
+                evaluator_version="1",
             )
             try:
-                await router.record_routing_outcome(
-                    decision=decision_stub,  # type: ignore[arg-type]
-                    quality_score=outcome.quality_score,
-                    actual_cost=outcome.cost,
-                )
+                application = await router.record_routing_outcome(typed_outcome)
+                if not application.learning_updated:
+                    reward_failures += 1
+                    logger.warning(
+                        "reward recording was not applied",
+                        status=application.status.value,
+                        reason=application.reason,
+                    )
             except Exception as e:
                 reward_failures += 1
                 logger.warning(f"reward recording failed: {e}")

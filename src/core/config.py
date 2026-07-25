@@ -8,16 +8,18 @@ foundation model providers, and hierarchical agent management.
 
 from typing import Any
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from src.core.environment import load_environment
+
+load_environment()
 
 
 class Settings(BaseSettings):
     """Application settings."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",  # Ignore extra environment variables
     )
@@ -128,6 +130,10 @@ class Settings(BaseSettings):
         "balanced"  # cost_efficient, quality_focused, speed_first, balanced, adaptive
     )
     MASR_ENABLE_CACHING: bool = True
+    MASR_CACHE_MAX_SIZE: int = 1000
+    MASR_CACHE_EVICTION_BATCH_SIZE: int = 100
+    # Deprecated compatibility alias for the older history-based heuristic.
+    # This flag never enables the Thompson-sampling bandit.
     MASR_ENABLE_ADAPTIVE: bool = True
     MASR_FAST_PATH_ENABLED: bool = True  # Bypass orchestration for trivial queries
     MASR_COMPLEXITY_WEIGHTS: dict[str, float] = {
@@ -248,6 +254,11 @@ class Settings(BaseSettings):
     ADAPTIVE_ROUTING_POSTERIOR_TEMP_ENABLED: bool = True
     ADAPTIVE_ROUTING_POSTERIOR_TEMP_THRESHOLD: int = 150
     ADAPTIVE_ROUTING_POSTERIOR_TEMP_FACTOR: float = 3.0
+    ADAPTIVE_ROUTING_SCHEMA_VERSION: str = "1"
+    ADAPTIVE_ROUTING_POLICY_VERSION: str = "masr-adaptive-v1"
+    ADAPTIVE_ROUTING_ALLOWED_EVALUATORS: dict[str, list[str]] = Field(
+        default_factory=dict
+    )
 
     # Agent System Configuration
     AGENTS_MAX_CONCURRENT: int = 20
@@ -310,6 +321,7 @@ class Settings(BaseSettings):
     DEV_ENABLE_AI_BRAIN_DEBUG: bool = False
     DEV_ENABLE_MEMORY_DEBUG: bool = False
     DEV_ENABLE_ROUTING_DEBUG: bool = False
+    DEV_ALLOW_ANONYMOUS_WEBSOCKETS: bool = False
     DEV_MOCK_PROVIDERS: bool = False
     DEV_MOCK_MEMORY: bool = False
 
@@ -410,7 +422,8 @@ class Settings(BaseSettings):
                 "enabled": self.MASR_ENABLED,
                 "default_strategy": self.MASR_DEFAULT_STRATEGY,
                 "enable_caching": self.MASR_ENABLE_CACHING,
-                "enable_adaptive": self.MASR_ENABLE_ADAPTIVE,
+                "adaptive_strategy_enabled": self.MASR_ENABLE_ADAPTIVE,
+                "adaptive_routing_enabled": self.ADAPTIVE_ROUTING_ENABLED,
                 "complexity_weights": self.MASR_COMPLEXITY_WEIGHTS,
                 "complexity_thresholds": self.MASR_COMPLEXITY_THRESHOLDS,
             },

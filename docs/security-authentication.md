@@ -24,7 +24,7 @@ Cerebro authenticates with JWT tokens signed using **RS256** (RSA + SHA-256).
 - **Algorithm**: `JWT_ALGORITHM = "RS256"` (`src/core/config.py:88`).
 - **Access token**: 15 minutes (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 15`, `config.py:89`).
 - **Refresh token**: 7 days (`JWT_REFRESH_TOKEN_EXPIRE_DAYS = 7`, `config.py:90`).
-- **Keys**: PEM files at `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem` (`JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH`, `config.py:91-92`). If the key path is unset or does not exist, `JWTService` **auto-generates a fresh RSA-2048 key pair** at startup (`src/auth/jwt_service.py:63,88`). When the parent directory is not writable (e.g. the production `/secrets/` mount on a dev machine), it logs a loud WARNING and falls back to an ephemeral in-memory key.
+- **Keys**: PEM files selected by `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH`. Development and tests may auto-generate an ephemeral RSA-2048 pair when files are absent. Production fails closed when either PEM is missing, unreadable, invalid, or mismatched. `docker-compose.production.yml` requires one host keypair through `JWT_PRIVATE_KEY_FILE` / `JWT_PUBLIC_KEY_FILE` and mounts it read-only for every API worker at `/run/secrets/jwt_private.pem` and `/run/secrets/jwt_public.pem`.
 - **Revocation**: a **Redis-based token blacklist** keyed on the token `jti` (`blacklist:token:` prefix, `jwt_service.py:67`) is checked on every validation (`jwt_service.py:295`). Logout and revoke-all add tokens to the blacklist for immediate invalidation.
 
 ### Token payload (representative)
@@ -121,8 +121,9 @@ All auth routes are mounted under the `/api/v1/auth` prefix.
 JWT_ALGORITHM=RS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
-JWT_PRIVATE_KEY_PATH=/secrets/jwt_private.pem   # auto-generated if missing
-JWT_PUBLIC_KEY_PATH=/secrets/jwt_public.pem     # auto-generated if missing
+JWT_PRIVATE_KEY_PATH=/secrets/jwt_private.pem   # dev/test may generate if missing
+JWT_PUBLIC_KEY_PATH=/secrets/jwt_public.pem     # production requires a matching PEM
+DEV_ALLOW_ANONYMOUS_WEBSOCKETS=false            # explicit local-only opt-in
 
 # Password security
 BCRYPT_ROUNDS=12

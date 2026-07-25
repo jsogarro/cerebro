@@ -14,11 +14,15 @@ Key Features:
 """
 
 import asyncio
+import copy
+import math
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from fastapi import HTTPException, Request, status
 from structlog import get_logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -35,10 +39,22 @@ from ...agents.supervisors.research_supervisor import ResearchSupervisor
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.masr import MASRouter
-from ...ai_brain.router.routing_types import CollaborationMode
+from ...ai_brain.router.outcome_recorder import (
+    ExecutedAllocationOutcome,
+    RoutingOutcomeRecorder,
+    derive_opaque_identifier,
+)
+from ...ai_brain.router.routing_outcome import MetricAvailability, OutcomeSource
+from ...ai_brain.router.routing_types import (
+    CollaborationMode,
+    RoutingExecutionPolicy,
+)
 from ...models.research_project import ResearchProject
 from ...models.websocket_messages import ProgressUpdate
 from .event_publisher import EventPublisher
+
+if TYPE_CHECKING:
+    from ...ai_brain.providers.openrouter_provider import OpenRouterProvider
 
 logger = get_logger()
 
@@ -65,6 +81,7 @@ class ExecutionStatus:
 
     # MASR routing information
     routing_decision: dict[str, Any] | None = None
+    sub_routing_decisions: dict[str, dict[str, Any]] = field(default_factory=dict)
     supervisor_type: str | None = None
     workers_used: int = 0
 
@@ -72,6 +89,12 @@ class ExecutionStatus:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     retry_count: int = 0
+
+    # Process-local sequence used to distinguish genuine allocation
+    # re-executions from delivery retries of one completed observation. It
+    # survives Tenacity re-entry because the same ExecutionStatus instance is
+    # reused, but is deliberately excluded from persisted/product contracts.
+    _allocation_attempt_sequence: int = field(default=0, repr=False)
 
 
 class DirectExecutionService:
@@ -95,12 +118,16 @@ class DirectExecutionService:
         event_publisher: EventPublisher | None = None,
         gemini_service: Any | None = None,
         session_factory: Any | None = None,
+        outcome_recorder: RoutingOutcomeRecorder | None = None,
     ):
         """Initialize direct execution service."""
 
         # Initialize components (would be injected in production)
         self.gemini_service = gemini_service
         self.masr_router = masr_router or MASRouter()
+        self.outcome_recorder = outcome_recorder or RoutingOutcomeRecorder(
+            self.masr_router
+        )
         self.supervisor_bridge = supervisor_bridge or MASRSupervisorBridge(
             gemini_service=gemini_service,
         )
@@ -120,6 +147,8 @@ class DirectExecutionService:
 
         # Store background task references to prevent GC
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._fast_path_provider: OpenRouterProvider | None = None
+        self.closed = False
 
         # Performance metrics
         self.execution_stats = {
@@ -189,6 +218,7 @@ class DirectExecutionService:
                     "progress_percentage": execution_status.progress_percentage,
                     "current_phase": execution_status.current_phase,
                     "routing_decision": execution_status.routing_decision,
+                    "sub_routing_decisions": execution_status.sub_routing_decisions,
                     "supervisor_type": execution_status.supervisor_type,
                     "agent_results": execution_status.agent_results,
                     "quality_scores": execution_status.quality_scores,
@@ -229,7 +259,12 @@ class DirectExecutionService:
             )
 
     async def start_research_execution(
-        self, project: ResearchProject, context: dict[str, Any] | None = None
+        self,
+        project: ResearchProject,
+        context: dict[str, Any] | None = None,
+        *,
+        execution_policy: RoutingExecutionPolicy | None = None,
+        fixture_result: dict[str, Any] | None = None,
     ) -> str:
         """
         Start direct research execution using MASR routing.
@@ -241,6 +276,8 @@ class DirectExecutionService:
         Returns:
             Execution ID for tracking progress
         """
+        if self.closed:
+            raise RuntimeError("Direct execution service is closed")
 
         execution_id = str(uuid.uuid4())
 
@@ -264,7 +301,13 @@ class DirectExecutionService:
 
         # Start execution asynchronously
         task = asyncio.create_task(
-            self._execute_research_workflow(project, execution_status, context)
+            self._execute_research_workflow(
+                project,
+                execution_status,
+                context,
+                execution_policy,
+                fixture_result,
+            )
         )
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
@@ -286,6 +329,86 @@ class DirectExecutionService:
         if len(stripped) < self._FAST_PATH_MIN_RESPONSE_CHARS:
             return False
         return not stripped.startswith(self._FAST_PATH_FAILURE_PREFIXES)
+
+    @staticmethod
+    def _quality_measurement(
+        value: Any,
+    ) -> tuple[float | None, MetricAvailability]:
+        """Validate an existing score without manufacturing a replacement."""
+
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None, MetricAvailability.UNAVAILABLE
+        score = float(value)
+        if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+            return None, MetricAvailability.MALFORMED
+        return score, MetricAvailability.MEASURED
+
+    @staticmethod
+    def _begin_allocation_attempt(execution_status: ExecutionStatus) -> str:
+        """Assign an opaque identity before one provider/supervisor invocation.
+
+        This sequence is incremented synchronously before an async execution
+        boundary, so concurrent domain tasks cannot reuse an ordinal in the
+        process-local event loop. The token contains no query, domain, or user
+        content.
+        """
+
+        execution_status._allocation_attempt_sequence += 1
+        return derive_opaque_identifier(
+            "routing",
+            execution_status.execution_id,
+            "allocation-attempt",
+            str(execution_status._allocation_attempt_sequence),
+        )
+
+    async def _record_executed_allocation(
+        self,
+        *,
+        decision: Any,
+        execution_status: ExecutionStatus,
+        allocation_key: str,
+        allocation_attempt_id: str,
+        allocation_status: str,
+        started_at: float,
+        source: OutcomeSource,
+        quality_score: Any = None,
+    ) -> None:
+        """Record one allocation after its execution boundary was reached."""
+
+        quality, availability = self._quality_measurement(quality_score)
+        try:
+            await self.outcome_recorder.record(
+                decision,
+                ExecutedAllocationOutcome(
+                    execution_id=execution_status.execution_id,
+                    allocation_key=allocation_key,
+                    allocation_attempt_id=allocation_attempt_id,
+                    execution_status=allocation_status,
+                    latency_ms=max(0, round((time.monotonic() - started_at) * 1000)),
+                    source=source,
+                    measured_cost=None,
+                    cost_availability=MetricAvailability.UNAVAILABLE,
+                    quality_score=quality,
+                    quality_availability=availability,
+                    run_id=execution_status.execution_id,
+                    task_id=derive_opaque_identifier(
+                        "routing",
+                        execution_status.execution_id,
+                        allocation_key,
+                        allocation_attempt_id,
+                        "task",
+                    ),
+                ),
+            )
+        except Exception as exc:
+            # Outcome telemetry cannot make base execution unavailable. Retryable
+            # delivery is handled inside the recorder with the same outcome ID.
+            logger.warning(
+                "masr_outcome_recording_failed",
+                execution_id=execution_status.execution_id,
+                allocation_key=allocation_key,
+                error=type(exc).__name__,
+            )
 
     async def _execute_fast_path(
         self,
@@ -325,7 +448,7 @@ class DirectExecutionService:
                 # startup slug validation (a catalog fetch) on every fast-path
                 # query. NOTE: no await between the hasattr check and the
                 # assignment - safe under asyncio; keep it that way.
-                if not hasattr(self, "_fast_path_provider"):
+                if self._fast_path_provider is None:
                     self._fast_path_provider = OpenRouterProvider(
                         {
                             "enabled": True,
@@ -375,7 +498,6 @@ class DirectExecutionService:
 
             return {
                 "output": response,
-                "quality_score": 0.8,  # Default for fast path
                 "metadata": {
                     "collaboration_mode": "fast_path",
                     "execution_time": execution_time,
@@ -400,6 +522,7 @@ class DirectExecutionService:
         project: ResearchProject,
         routing_context: dict[str, Any],
         supervisor_registry: dict[str, type[Any]],
+        execution_status: ExecutionStatus,
     ) -> dict[str, Any]:
         """
         Execute a single domain's sub-query via its supervisor.
@@ -414,11 +537,15 @@ class DirectExecutionService:
         Returns:
             Domain result dict with output, quality_score, and metadata
         """
+        routing_decision: Any | None = None
         try:
             # Route domain-specific query
             routing_decision = await self.masr_router.route(
-                query=sub_query, context={**routing_context, "domain": domain}
+                query=sub_query,
+                context={**routing_context, "domain": domain},
             )
+            allocation_attempt_id = self._begin_allocation_attempt(execution_status)
+            allocation_started_at = time.monotonic()
 
             # Create task for this domain
             agent_task = AgentTask(
@@ -443,6 +570,22 @@ class DirectExecutionService:
                 task=agent_task,
                 supervisor_registry=supervisor_registry,
             )
+            await self._record_executed_allocation(
+                decision=routing_decision,
+                execution_status=execution_status,
+                allocation_key=f"domain:{domain}",
+                allocation_attempt_id=allocation_attempt_id,
+                allocation_status=supervisor_result.status.value,
+                started_at=allocation_started_at,
+                source=OutcomeSource.HEURISTIC,
+                quality_score=supervisor_result.quality_score,
+            )
+            routing_id = derive_opaque_identifier(
+                "routing",
+                execution_status.execution_id,
+                f"domain:{domain}",
+                allocation_attempt_id,
+            )
 
             # Return structured result
             if (
@@ -457,15 +600,29 @@ class DirectExecutionService:
                     "consensus_score": supervisor_result.consensus_score,
                     "workers_used": supervisor_result.workers_used,
                     "execution_time_seconds": supervisor_result.execution_time_seconds,
+                    "routing_id": routing_id,
+                    "routing_decision": asdict(routing_decision),
                 }
             else:
                 return {
                     "domain": domain,
                     "status": "failed",
                     "errors": supervisor_result.errors,
+                    "routing_id": routing_id,
+                    "routing_decision": asdict(routing_decision),
                 }
 
         except Exception as e:
+            if routing_decision is not None:
+                await self._record_executed_allocation(
+                    decision=routing_decision,
+                    execution_status=execution_status,
+                    allocation_key=f"domain:{domain}",
+                    allocation_attempt_id=allocation_attempt_id,
+                    allocation_status="failed",
+                    started_at=allocation_started_at,
+                    source=OutcomeSource.HEURISTIC,
+                )
             logger.error(f"Domain supervisor execution failed for {domain}: {e}")
             return {"domain": domain, "status": "failed", "errors": [str(e)]}
 
@@ -659,6 +816,8 @@ class DirectExecutionService:
         project: ResearchProject,
         execution_status: ExecutionStatus,
         context: dict[str, Any] | None = None,
+        execution_policy: RoutingExecutionPolicy | None = None,
+        fixture_result: dict[str, Any] | None = None,
     ) -> None:
         """
         Execute research workflow with retry logic.
@@ -678,6 +837,7 @@ class DirectExecutionService:
             # Step 1: MASR Routing
             logger.info(f"Getting MASR routing for project {project.id}")
 
+            execution_policy = execution_policy or RoutingExecutionPolicy()
             routing_context = {
                 "query": project.query.text,
                 "domains": project.query.domains,
@@ -688,9 +848,19 @@ class DirectExecutionService:
             if context:
                 routing_context.update(context)
 
-            routing_decision = await self.masr_router.route(
-                query=project.query.text, context=routing_context
-            )
+            if execution_policy.fixture_mode:
+                routing_decision = await self.masr_router.route(
+                    query=project.query.text,
+                    context=routing_context,
+                    execution_policy=execution_policy,
+                )
+            else:
+                # Preserve the established call shape for injected routers and
+                # existing service integrations.
+                routing_decision = await self.masr_router.route(
+                    query=project.query.text,
+                    context=routing_context,
+                )
 
             execution_status.routing_decision = asdict(routing_decision)
             execution_status.supervisor_type = (
@@ -702,6 +872,27 @@ class DirectExecutionService:
             await self._publish_progress_update(execution_status)
             await self._checkpoint(execution_status, "masr_routing")
 
+            if execution_policy.fixture_mode:
+                if not isinstance(fixture_result, dict):
+                    raise ValueError(
+                        "fixture execution requires an explicit fixture_result object"
+                    )
+                execution_status.final_output = copy.deepcopy(fixture_result)
+                execution_status.agent_results = copy.deepcopy(fixture_result)
+                execution_status.workers_used = 0
+                execution_status.status = "completed"
+                execution_status.current_phase = "completed"
+                execution_status.progress_percentage = 100.0
+                self.execution_stats["successful_executions"] += 1
+                await self._checkpoint(execution_status, "fixture_completed")
+                logger.info(
+                    "fixture_execution_completed",
+                    execution_id=execution_status.execution_id,
+                    adaptive_routing="fixture_off",
+                    memory_routing="fixture_off",
+                )
+                return
+
             # Check for fast path (bypass orchestration entirely)
             if routing_decision.collaboration_mode == CollaborationMode.FAST_PATH:
                 logger.info(
@@ -711,6 +902,10 @@ class DirectExecutionService:
                 )
 
                 try:
+                    allocation_attempt_id = self._begin_allocation_attempt(
+                        execution_status
+                    )
+                    fast_path_started_at = time.monotonic()
                     execution_status.current_phase = "fast_path_execution"
                     execution_status.progress_percentage = 40.0
                     await self._publish_progress_update(execution_status)
@@ -721,12 +916,18 @@ class DirectExecutionService:
                         routing_decision=routing_decision,
                         execution_status=execution_status,
                     )
+                    await self._record_executed_allocation(
+                        decision=routing_decision,
+                        execution_status=execution_status,
+                        allocation_key="fast_path",
+                        allocation_attempt_id=allocation_attempt_id,
+                        allocation_status="completed",
+                        started_at=fast_path_started_at,
+                        source=OutcomeSource.FIXED,
+                    )
 
                     # Fast path succeeded
                     execution_status.final_output = result
-                    execution_status.quality_scores["fast_path"] = result.get(
-                        "quality_score", 0.8
-                    )
                     execution_status.workers_used = 1
                     execution_status.current_phase = "completed"
                     execution_status.progress_percentage = 100.0
@@ -749,6 +950,15 @@ class DirectExecutionService:
                     return
 
                 except RuntimeError as e:
+                    await self._record_executed_allocation(
+                        decision=routing_decision,
+                        execution_status=execution_status,
+                        allocation_key="fast_path",
+                        allocation_attempt_id=allocation_attempt_id,
+                        allocation_status="failed",
+                        started_at=fast_path_started_at,
+                        source=OutcomeSource.FIXED,
+                    )
                     # Fast path quality check failed → escalate to DIRECT mode
                     logger.info(
                         "fast_path_escalating_to_direct",
@@ -800,6 +1010,7 @@ class DirectExecutionService:
                             project=project,
                             routing_context=routing_context,
                             supervisor_registry=supervisor_registry,
+                            execution_status=execution_status,
                         )
 
                 # Dispatch all domain sub-queries concurrently
@@ -832,6 +1043,14 @@ class DirectExecutionService:
                         )
                     else:
                         processed_results.append(domain_result)
+                execution_status.sub_routing_decisions = {
+                    str(result["domain"]): {
+                        "routing_id": result["routing_id"],
+                        "decision": result["routing_decision"],
+                    }
+                    for result in processed_results
+                    if "routing_id" in result and "routing_decision" in result
+                }
 
                 execution_status.progress_percentage = 80.0
                 execution_status.current_phase = "result_merging"
@@ -903,12 +1122,36 @@ class DirectExecutionService:
                 await self._checkpoint(execution_status, "supervisor_execution")
 
                 # Execute via MASR-Supervisor bridge
-                supervisor_result = (
-                    await self.supervisor_bridge.execute_routing_decision(
-                        routing_decision=routing_decision,
-                        task=agent_task,
-                        supervisor_registry=supervisor_registry,
+                allocation_attempt_id = self._begin_allocation_attempt(execution_status)
+                allocation_started_at = time.monotonic()
+                try:
+                    supervisor_result = (
+                        await self.supervisor_bridge.execute_routing_decision(
+                            routing_decision=routing_decision,
+                            task=agent_task,
+                            supervisor_registry=supervisor_registry,
+                        )
                     )
+                except Exception:
+                    await self._record_executed_allocation(
+                        decision=routing_decision,
+                        execution_status=execution_status,
+                        allocation_key="primary",
+                        allocation_attempt_id=allocation_attempt_id,
+                        allocation_status="failed",
+                        started_at=allocation_started_at,
+                        source=OutcomeSource.HEURISTIC,
+                    )
+                    raise
+                await self._record_executed_allocation(
+                    decision=routing_decision,
+                    execution_status=execution_status,
+                    allocation_key="primary",
+                    allocation_attempt_id=allocation_attempt_id,
+                    allocation_status=supervisor_result.status.value,
+                    started_at=allocation_started_at,
+                    source=OutcomeSource.HEURISTIC,
+                    quality_score=supervisor_result.quality_score,
                 )
 
                 execution_status.progress_percentage = 80.0
@@ -1072,6 +1315,9 @@ class DirectExecutionService:
                     progress_percentage=checkpoint_data["progress_percentage"],
                     current_phase=checkpoint_data["current_phase"],
                     routing_decision=checkpoint_data.get("routing_decision"),
+                    sub_routing_decisions=checkpoint_data.get(
+                        "sub_routing_decisions", {}
+                    ),
                     supervisor_type=checkpoint_data.get("supervisor_type"),
                     agent_results=checkpoint_data.get("agent_results", {}),
                     quality_scores=checkpoint_data.get("quality_scores", {}),
@@ -1277,6 +1523,30 @@ class DirectExecutionService:
 
         return health
 
+    async def close(self) -> None:
+        """Cancel background work owned by this exact service instance."""
+
+        if self.closed:
+            return
+        self.closed = True
+        tasks = tuple(self._background_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._background_tasks.clear()
+
+        provider = self._fast_path_provider
+        self._fast_path_provider = None
+        if provider is not None:
+            try:
+                await provider.close()
+            except Exception as exc:
+                logger.warning(
+                    "direct_execution_fast_path_provider_shutdown_failed",
+                    error=type(exc).__name__,
+                )
+
 
 # Legacy compatibility functions for migration
 async def create_research_plan(project_data: dict[str, Any]) -> dict[str, Any]:
@@ -1323,24 +1593,72 @@ _direct_execution_service: DirectExecutionService | None = None
 
 def get_direct_execution_service(
     gemini_service: Any | None = None,
+    masr_router: MASRouter | None = None,
 ) -> DirectExecutionService:
     """Get global direct execution service instance."""
     global _direct_execution_service
 
     if _direct_execution_service is None:
         _direct_execution_service = DirectExecutionService(
-            gemini_service=gemini_service
+            gemini_service=gemini_service,
+            masr_router=masr_router,
         )
 
     return _direct_execution_service
+
+
+def configure_direct_execution_service(
+    *,
+    masr_router: MASRouter,
+    gemini_service: Any | None = None,
+) -> DirectExecutionService:
+    """Create an application-owned service without changing legacy globals."""
+
+    return DirectExecutionService(
+        gemini_service=gemini_service,
+        masr_router=masr_router,
+    )
+
+
+def get_application_direct_execution_service(
+    request: Request,
+) -> DirectExecutionService:
+    """Resolve the service owned by the current FastAPI application."""
+
+    service = getattr(request.app.state, "direct_execution_service", None)
+    if not isinstance(service, DirectExecutionService) or service.closed:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Direct execution runtime is unavailable",
+        )
+    return service
+
+
+async def close_direct_execution_service(
+    service: DirectExecutionService | None = None,
+) -> None:
+    """Close only the supplied owner, or the legacy singleton when omitted."""
+
+    global _direct_execution_service
+    if service is None:
+        service = _direct_execution_service
+        _direct_execution_service = None
+    elif _direct_execution_service is service:
+        _direct_execution_service = None
+    if service is None:
+        return
+    await service.close()
 
 
 __all__ = [
     "DirectExecutionService",
     "ExecutionStatus",
     "aggregate_results",
+    "close_direct_execution_service",
+    "configure_direct_execution_service",
     # Legacy compatibility exports
     "create_research_plan",
     "execute_agent_task",
+    "get_application_direct_execution_service",
     "get_direct_execution_service",
 ]

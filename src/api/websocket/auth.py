@@ -42,10 +42,15 @@ async def verify_websocket_token(
         WebSocketAuthError: If authentication fails
     """
     if not token:
-        # For development/testing, allow anonymous connections
-        if settings.ENVIRONMENT == "development":
+        # Anonymous access is a narrow, explicit local-development opt-in.
+        # ENVIRONMENT alone is not an authorization control, and production
+        # can never enable this bypass even if the opt-in is misconfigured.
+        if (
+            settings.ENVIRONMENT == "development"
+            and settings.DEV_ALLOW_ANONYMOUS_WEBSOCKETS
+        ):
             logger.warning(
-                "Allowing anonymous WebSocket connection in development mode"
+                "Allowing anonymous WebSocket connection by explicit development opt-in"
             )
             return None
 
@@ -100,8 +105,13 @@ async def verify_project_access(user_id: str | None, project_id: str) -> bool:
     Returns:
         True if user has access, False otherwise
     """
-    # For development/testing, allow access to all projects
-    if settings.ENVIRONMENT == "development":
+    # Match the explicit anonymous-development opt-in used by token
+    # verification. Merely selecting the development environment must not
+    # disable project authorization.
+    if (
+        settings.ENVIRONMENT == "development"
+        and settings.DEV_ALLOW_ANONYMOUS_WEBSOCKETS
+    ):
         return True
 
     # TODO: Implement proper project access control

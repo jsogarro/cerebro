@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any
 
 from config import config as app_config
+from config.base import validate_production_jwt_keypair
 
 
 class DeploymentMode(Enum):
@@ -190,13 +191,15 @@ class ProductionValidation:
         """Validate production environment configuration."""
         validations = {}
 
-        # Check required environment variables
+        # Provider credentials and Temporal are intentionally not startup
+        # requirements. Fixture execution is credential-free, and the
+        # canonical runtime executes in process.
         required_vars = [
             "DATABASE_URL",
             "REDIS_URL",
-            "GEMINI_API_KEY",
-            "JWT_SECRET_KEY",
-            "TEMPORAL_HOST",
+            "SECRET_KEY",
+            "JWT_PRIVATE_KEY_PATH",
+            "JWT_PUBLIC_KEY_PATH",
         ]
 
         for var in required_vars:
@@ -205,16 +208,16 @@ class ProductionValidation:
         # Check service connectivity
         validations["database_url_valid"] = bool(app_config.database.url)
         validations["redis_url_valid"] = bool(app_config.redis.url)
-        validations["temporal_target_valid"] = bool(app_config.temporal.target)
 
         # Check security settings
-        from config.base import validate_production_jwt_secret
-
         try:
-            validate_production_jwt_secret(app_config.security.jwt_secret_key)
-            validations["jwt_secret_secure"] = True
+            validate_production_jwt_keypair(
+                os.getenv("JWT_PRIVATE_KEY_PATH"),
+                os.getenv("JWT_PUBLIC_KEY_PATH"),
+            )
+            validations["jwt_key_pair_valid"] = True
         except ValueError:
-            validations["jwt_secret_secure"] = False
+            validations["jwt_key_pair_valid"] = False
         validations["cors_configured"] = bool(app_config.security.cors_origins)
         validations["rate_limiting_enabled"] = app_config.security.rate_limiting_enabled
 

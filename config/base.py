@@ -5,8 +5,11 @@ This module contains the foundational configuration that all environments
 inherit from. Environment-specific configs override these defaults.
 """
 
+from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -45,6 +48,58 @@ def validate_production_jwt_secret(value: str) -> None:
             "Generate a strong secret (e.g., `openssl rand -hex 32`) and set "
             "it via the JWT_SECRET_KEY environment variable."
         )
+
+
+def validate_production_jwt_keypair(
+    private_key_path: str | None,
+    public_key_path: str | None,
+) -> None:
+    """Fail closed unless paths contain a matching unencrypted RSA PEM pair.
+
+    Validation errors identify only the failing contract. Key paths and key
+    material are deliberately excluded from messages so startup diagnostics
+    cannot disclose deployment secret locations or contents.
+    """
+    missing_paths = [
+        name
+        for name, value in (
+            ("JWT_PRIVATE_KEY_PATH", private_key_path),
+            ("JWT_PUBLIC_KEY_PATH", public_key_path),
+        )
+        if not value
+    ]
+    if missing_paths:
+        raise ValueError(
+            f"Missing required environment variables: {', '.join(missing_paths)}"
+        )
+    assert private_key_path is not None
+    assert public_key_path is not None
+
+    try:
+        private_bytes = Path(private_key_path).read_bytes()
+        private_key = serialization.load_pem_private_key(
+            private_bytes,
+            password=None,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "Production JWT private key must be a readable unencrypted RSA PEM file"
+        ) from exc
+    if not isinstance(private_key, rsa.RSAPrivateKey):
+        raise ValueError("Production JWT private key must use RSA")
+
+    try:
+        public_bytes = Path(public_key_path).read_bytes()
+        public_key = serialization.load_pem_public_key(public_bytes)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "Production JWT public key must be a readable RSA PEM file"
+        ) from exc
+    if not isinstance(public_key, rsa.RSAPublicKey):
+        raise ValueError("Production JWT public key must use RSA")
+
+    if private_key.public_key().public_numbers() != public_key.public_numbers():
+        raise ValueError("Production JWT public key does not match private key")
 
 
 def _default_mcp_tools() -> dict[str, dict[str, Any]]:
@@ -338,12 +393,11 @@ class SecurityConfig(BaseModel):
     """Security configuration settings."""
     
     # Authentication
-    # JWT signing secret is a REQUIRED field with no default. The previous
-    # ``"change-me-in-production"`` fallback allowed silent fall-through to a
-    # well-known value when the ``JWT_SECRET_KEY`` env var was unset.
-    # Production startup additionally validates this via
-    # ``validate_production_jwt_secret`` to reject placeholder values.
-    jwt_secret_key: str = Field(..., description="JWT secret key (required)")
+    # HS256 consumers may still provide a shared secret for compatibility.
+    # Production uses the RS256 PEM paths and validates them before startup.
+    jwt_secret_key: str | None = Field(default=None)
+    jwt_private_key_path: str | None = Field(default=None)
+    jwt_public_key_path: str | None = Field(default=None)
     jwt_algorithm: str = Field(default="HS256")
     jwt_expiration_minutes: int = Field(default=60)
     refresh_token_expiration_days: int = Field(default=7)
@@ -377,15 +431,12 @@ class SecurityConfig(BaseModel):
 class BaseConfig(BaseSettings):
     """Base configuration for all environments.
 
-    Subclasses BaseSettings so that values are automatically loaded from a
-    .env file and environment variables. Subclasses (Development /
-    Production / Staging / Testing) override defaults with environment-
-    specific values.
+    Subclasses BaseSettings so that values are loaded from the shared process
+    environment. Subclasses (Development / Production / Staging / Testing)
+    override defaults with environment-specific values.
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
         validate_assignment=True,
@@ -406,9 +457,9 @@ class BaseConfig(BaseSettings):
     # Component configurations.
     #
     # ``database`` and ``security`` have no default factory because their
-    # nested DTOs require credentials (DB password, JWT secret) that have
-    # no safe fallback. Subclasses provide them explicitly — by class-level
-    # assignment, ``model_post_init``, or constructor kwargs.
+    # deployment-specific credentials and key contracts have no safe fallback.
+    # Subclasses provide them explicitly — by class-level assignment,
+    # ``model_post_init``, or constructor kwargs.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     agents: AgentConfig = Field(default_factory=AgentConfig)
     database: DatabaseConfig = Field(...)
@@ -429,3 +480,9 @@ class BaseConfig(BaseSettings):
         "tracing": True,
         "audit_logging": True,
     })
+
+    def __init__(self, **data: Any) -> None:
+        """Keep the explicitly selected subclass above ambient ENVIRONMENT."""
+        declared_environment = type(self).model_fields["environment"].default
+        data.setdefault("environment", declared_environment)
+        super().__init__(**data)

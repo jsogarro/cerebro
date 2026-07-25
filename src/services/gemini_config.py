@@ -8,10 +8,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+from src.core.environment import load_environment
 
 
 @dataclass(frozen=True)
@@ -60,6 +57,7 @@ class GeminiConfig:
 
         This is a pure function that reads environment and returns config.
         """
+        load_environment()
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable is required")

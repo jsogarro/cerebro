@@ -3,12 +3,29 @@
 import os
 import tempfile
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 
 from src.models.report import Report, ReportConfiguration
 from src.services.report_config import ReportSettings
 from src.services.template_renderer import TemplateRenderer
+
+
+@pytest.fixture(autouse=True)
+def isolate_dotenv_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import src.core.environment as shared_environment
+
+    monkeypatch.setattr(
+        shared_environment,
+        "PROJECT_ENV_PATH",
+        tmp_path / "fake-project" / ".env",
+    )
+    monkeypatch.setattr(
+        shared_environment,
+        "HOME_ENV_PATH",
+        tmp_path / "fake-home" / ".env",
+    )
 
 
 class TestTemplateRenderer:
