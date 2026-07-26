@@ -2,11 +2,10 @@
 JWT-secret validator.
 
 Layered contract:
-  - ``SecurityConfig.jwt_secret_key`` is a REQUIRED field with no default
-    (any environment that constructs it must supply a value, including dev
-    and test environments which intentionally pass weak placeholder values).
-  - ``validate_production_jwt_secret`` is a separate guard called by the
-    production config at startup that rejects known weak/default values.
+  - ``SecurityConfig.jwt_secret_key`` remains optional HS256 compatibility.
+  - Production uses required RS256 PEM paths validated by ProductionConfig.
+  - ``validate_production_jwt_secret`` remains available to legacy HS256
+    consumers but is not part of the production startup contract.
 
 Characterization tests (must pass on unmodified code AND after Fix 1) lock in
 behavior that survives the refactor. Specification tests describe the new
@@ -16,7 +15,6 @@ contract introduced by Fix 1.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 
 from config.base import SecurityConfig
 
@@ -59,11 +57,18 @@ class TestSecurityConfigCharacterization:
 
 
 class TestSecurityConfigSpecification:
-    """New SecurityConfig contract introduced by Fix 1: required field."""
+    """Production-compatible SecurityConfig field contract."""
 
-    def test_rejects_missing_jwt_secret_key(self) -> None:
-        with pytest.raises(ValidationError):
-            SecurityConfig()  # type: ignore[call-arg]
+    def test_allows_rs256_paths_without_shared_secret(self) -> None:
+        config = SecurityConfig(
+            jwt_algorithm="RS256",
+            jwt_private_key_path="/synthetic/private.pem",
+            jwt_public_key_path="/synthetic/public.pem",
+        )
+
+        assert config.jwt_secret_key is None
+        assert config.jwt_private_key_path == "/synthetic/private.pem"
+        assert config.jwt_public_key_path == "/synthetic/public.pem"
 
 
 class TestProductionJwtSecretValidator:

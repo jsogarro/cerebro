@@ -24,18 +24,54 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
+def _write_synthetic_keypair(directory: Path) -> tuple[Path, Path]:
+    directory.mkdir(parents=True, exist_ok=True)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_path = directory / "synthetic-private.pem"
+    public_path = directory / "synthetic-public.pem"
+    private_path.write_bytes(
+        private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    public_path.write_bytes(
+        private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    )
+    return private_path, public_path
+
+
 @pytest.fixture
-def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Strip every env var the config package reads, then restore."""
+    import src.core.environment as shared_environment
+
+    monkeypatch.setattr(
+        shared_environment,
+        "PROJECT_ENV_PATH",
+        tmp_path / "fake-project" / ".env",
+    )
+    monkeypatch.setattr(
+        shared_environment,
+        "HOME_ENV_PATH",
+        tmp_path / "fake-home" / ".env",
+    )
     keys_to_clear = [
         "ENVIRONMENT",
         "MCP_SERVER_HOST",
@@ -59,6 +95,8 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "ALERT_WEBHOOK_URL",
         "ALERT_EMAIL",
         "JWT_SECRET_KEY",
+        "JWT_PRIVATE_KEY_PATH",
+        "JWT_PUBLIC_KEY_PATH",
         "CORS_ORIGINS",
         "SECRETS_PROVIDER",
         "VAULT_URL",
@@ -67,6 +105,9 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     ]
     for k in keys_to_clear:
         monkeypatch.delenv(k, raising=False)
+    private_path, public_path = _write_synthetic_keypair(tmp_path)
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(private_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(public_path))
     yield
 
 
@@ -223,8 +264,6 @@ def test_db_host_env_var_overrides_default_in_production(
     del reload_config  # fixture only ensures fresh import
     monkeypatch.setenv("DB_HOST", "custom-db.internal")
     monkeypatch.setenv("DB_PASSWORD", "supersecret")
-    monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     # Reimport because production reads env at class-body in the legacy code.
     for mod in list(sys.modules):
         if mod == "config" or mod.startswith("config."):
@@ -234,7 +273,8 @@ def test_db_host_env_var_overrides_default_in_production(
     prod = cfg_reloaded.ProductionConfig()
     assert prod.database.host == "custom-db.internal"
     assert prod.database.password == "supersecret"
-    assert prod.security.jwt_secret_key == "x" * 32
+    assert prod.security.jwt_secret_key is None
+    assert prod.security.jwt_algorithm == "RS256"
 
 
 def test_db_port_env_var_coerced_to_int(
@@ -242,8 +282,6 @@ def test_db_port_env_var_coerced_to_int(
 ) -> None:
     monkeypatch.setenv("DB_PORT", "6543")
     monkeypatch.setenv("DB_PASSWORD", "supersecret")
-    monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     for mod in list(sys.modules):
         if mod == "config" or mod.startswith("config."):
             del sys.modules[mod]
@@ -259,8 +297,6 @@ def test_cors_origins_env_var_split_into_list(
 ) -> None:
     monkeypatch.setenv("CORS_ORIGINS", "https://a.example,https://b.example")
     monkeypatch.setenv("DB_PASSWORD", "supersecret")
-    monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     for mod in list(sys.modules):
         if mod == "config" or mod.startswith("config."):
             del sys.modules[mod]
@@ -316,6 +352,27 @@ def test_get_config_environment_var_drives_default(
     assert cfg.get_config().environment == "testing"
 
 
+@pytest.mark.parametrize(
+    ("ambient_environment", "config_class", "expected_environment"),
+    [
+        ("production", "DevelopmentConfig", "development"),
+        ("production", "TestingConfig", "testing"),
+        ("development", "StagingConfig", "staging"),
+    ],
+)
+def test_explicit_constructor_selection_beats_ambient_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    reload_config: Any,
+    ambient_environment: str,
+    config_class: str,
+    expected_environment: str,
+) -> None:
+    cfg = reload_config
+    monkeypatch.setenv("ENVIRONMENT", ambient_environment)
+    instance = getattr(cfg, config_class)()
+    assert instance.environment == expected_environment
+
+
 # ---------------------------------------------------------------------------
 # Inheritance / override semantics
 # ---------------------------------------------------------------------------
@@ -346,7 +403,6 @@ def test_staging_uses_debug_log_level(
     monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
     monkeypatch.setenv("DB_PASSWORD", "supersecret")
-    monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     for mod in list(sys.modules):
         if mod == "config" or mod.startswith("config."):
@@ -370,8 +426,6 @@ def test_production_validate_required_env_vars_method_exists(
     this becomes the eager startup check.
     """
     monkeypatch.setenv("DB_PASSWORD", "supersecret")
-    monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     for mod in list(sys.modules):
         if mod == "config" or mod.startswith("config."):
             del sys.modules[mod]
@@ -383,6 +437,23 @@ def test_production_validate_required_env_vars_method_exists(
     prod.validate_required_env_vars()
 
 
+def test_production_allows_missing_optional_provider_key(
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any
+) -> None:
+    del reload_config
+    monkeypatch.setenv("DB_PASSWORD", "supersecret")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    monkeypatch.delenv("TEMPORAL_HOST", raising=False)
+    for mod in list(sys.modules):
+        if mod == "config" or mod.startswith("config."):
+            del sys.modules[mod]
+    import config as cfg_reloaded
+
+    prod = cfg_reloaded.ProductionConfig()
+    assert prod.gemini.api_key is None
+
+
 def test_production_construction_raises_on_empty_password(
     monkeypatch: pytest.MonkeyPatch, reload_config: Any
 ) -> None:
@@ -391,8 +462,6 @@ def test_production_construction_raises_on_empty_password(
     The validator runs eagerly at construction time so production fails
     fast on misconfiguration rather than booting with empty credentials.
     """
-    monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     monkeypatch.delenv("DB_PASSWORD", raising=False)
     for mod in list(sys.modules):
         if mod == "config" or mod.startswith("config."):
@@ -403,19 +472,20 @@ def test_production_construction_raises_on_empty_password(
         cfg_reloaded.ProductionConfig()
 
 
-def test_production_construction_raises_on_dev_default_jwt(
-    monkeypatch: pytest.MonkeyPatch, reload_config: Any
+def test_production_construction_rejects_mismatched_rs256_keypair(
+    monkeypatch: pytest.MonkeyPatch, reload_config: Any, tmp_path: Path
 ) -> None:
-    """ProductionConfig refuses known dev defaults like 'change-me-in-production'."""
+    """ProductionConfig fails closed when public and private PEMs do not match."""
+    del reload_config
     monkeypatch.setenv("DB_PASSWORD", "supersecret")
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
-    monkeypatch.setenv("JWT_SECRET_KEY", "change-me-in-production")
+    _, unrelated_public_path = _write_synthetic_keypair(tmp_path / "unrelated")
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(unrelated_public_path))
     for mod in list(sys.modules):
         if mod == "config" or mod.startswith("config."):
             del sys.modules[mod]
     import config as cfg_reloaded
 
-    with pytest.raises(ValueError, match="match known dev defaults"):
+    with pytest.raises(ValueError, match="does not match"):
         cfg_reloaded.ProductionConfig()
 
 

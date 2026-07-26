@@ -1,0 +1,33 @@
+{
+  "schema_version": "1",
+  "criteria_version": "unapproved-example-v1",
+  "policy_version": "masr-adaptive-v1",
+  "outcome_schema_version": "1",
+  "corpus_schema_version": "1",
+  "evaluator_name": "replace-with-neutral-evaluator",
+  "evaluator_version": "replace-with-version",
+  "policy_snapshot": {
+    "replay_protocol_version": "1",
+    "policy_version": "masr-adaptive-v1",
+    "outcome_schema_version": "1",
+    "ordered_arms": [-2, -1, 0, 1, 2],
+    "minimum_history": 300,
+    "minimum_samples_per_arm": 1,
+    "performance_threshold": 0.95,
+    "maximum_worker_adjust": 2,
+    "maximum_parallel_workers": 5,
+    "maximum_agents_per_query": 10
+  },
+  "required_modes": ["parallel", "hierarchical", "ensemble"],
+  "approved_for_promotion": false,
+  "training_fraction": 0.7,
+  "minimum_total_cases": 600,
+  "minimum_training_cases": 450,
+  "minimum_heldout_cases": 150,
+  "minimum_training_cases_per_mode": 60,
+  "minimum_heldout_cases_per_mode": 30,
+  "minimum_training_outcomes_per_arm": 1,
+  "minimum_mean_quality_delta": null,
+  "maximum_mean_cost_delta": null,
+  "maximum_mean_latency_delta_ms": null
+}

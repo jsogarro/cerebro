@@ -19,7 +19,7 @@ import uuid
 
 import httpx
 import pytest
-from httpx_ws import WebSocketUpgradeError, aconnect_ws
+from httpx_ws import WebSocketDisconnect, WebSocketUpgradeError, aconnect_ws
 
 BASE_URL = "http://localhost:8000"
 WS_BASE_URL = "ws://localhost:8000"
@@ -88,34 +88,44 @@ class TestWebSocketE2E:
 
     async def test_websocket_connect_without_token_in_dev_mode(self):
         """
-        Unauthenticated connection in development mode.
+        Unauthenticated connection with no anonymous-access opt-in.
 
-        In development (ENVIRONMENT=development), anonymous connections
-        should be allowed per src/api/websocket/auth.py:46-50.
+        Anonymous WebSocket access is gated by the explicit
+        `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` setting (default `False`), not by
+        `ENVIRONMENT == "development"` alone — see
+        src/api/websocket/auth.py:42-56 and src/core/config.py:324.
+        `ENVIRONMENT` is not an authorization control, so selecting the dev
+        environment must not silently bypass authentication.
 
-        Production mode should reject with close code 1008 after accept().
+        The server always accepts the WS handshake before evaluating auth
+        (src/api/routes/websocket.py) so it can return a proper close code
+        instead of an HTTP-level rejection. With the opt-in unset (as in
+        this suite's environment), the connection is accepted and then
+        closed with code 1008 ("Authentication token required").
         """
-        async with httpx.AsyncClient() as http_client:
-            try:
-                async with aconnect_ws(
+        # httpx_ws/anyio run the connection in a TaskGroup, so the
+        # WebSocketDisconnect raised by receive_json() surfaces wrapped in a
+        # BaseExceptionGroup rather than directly — catch it with `except*`.
+        disconnect: WebSocketDisconnect | None = None
+        try:
+            async with (
+                httpx.AsyncClient() as http_client,
+                aconnect_ws(
                     f"{WS_BASE_URL}/ws",
                     http_client,
-                ) as ws:
-                    # In dev mode, anonymous connection succeeds
-                    # Verify we can receive welcome message
-                    try:
-                        message = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
-                        # Valid structure expected
-                        assert isinstance(message, dict)
-                    except TimeoutError:
-                        pass
-                    await ws.close()
-            except WebSocketUpgradeError as e:
-                # Production mode would reject before accept (current broken behavior)
-                # or accept then close with 1008 (future correct behavior)
-                assert e.response.status_code in [401, 403], (
-                    f"Expected 401/403, got {e.response.status_code}"
-                )
+                ) as ws,
+            ):
+                await ws.receive_json()
+        except* WebSocketDisconnect as eg:
+            disconnect = eg.exceptions[0]
+
+        assert disconnect is not None, (
+            "Expected the server to accept then close the connection with "
+            "1008 for an anonymous WebSocket when DEV_ALLOW_ANONYMOUS_WEBSOCKETS "
+            "is unset"
+        )
+        assert disconnect.code == 1008
+        assert "token" in (disconnect.reason or "").lower()
 
     async def test_websocket_reconnect_with_same_token(self):
         """

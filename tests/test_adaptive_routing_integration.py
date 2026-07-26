@@ -11,7 +11,7 @@ Tests cover:
 7. Structured logging when adaptation changes allocation
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -113,11 +113,8 @@ class TestAdaptiveRoutingColdStart:
     async def test_cold_history_returns_none(
         self, router_config_flag_on, mock_complexity_analysis
     ):
-        """History < min_history → returns None (grace period)."""
+        """Cold eligible state executes explicit arm-0 control."""
         router = MASRouter(config=router_config_flag_on)
-
-        # Mock metrics collector to return small history
-        router.metrics_collector.get_history_size = MagicMock(return_value=50)
 
         result = await router._get_adaptive_allocation_adjustment(
             complexity_analysis=mock_complexity_analysis,
@@ -125,28 +122,27 @@ class TestAdaptiveRoutingColdStart:
             episodic_prior=None,
         )
 
-        assert result is None
+        assert result is not None
+        assert result.ready is False
+        assert result.proposed_arm == result.applied_arm == 0
+        assert result.control_reason == "global_eligible_samples_below_minimum"
 
     async def test_warm_history_allows_adaptation(
         self, router_config_flag_on, mock_complexity_analysis
     ):
-        """History >= min_history → adaptation returns a recommendation."""
+        """Routing decisions do not count as evaluator-eligible samples."""
         router = MASRouter(config=router_config_flag_on)
+        router.metrics_collector.routing_history.extend([object()] * 150)  # type: ignore[list-item]
 
-        # Mock metrics collector to return sufficient history
-        router.metrics_collector.get_history_size = MagicMock(return_value=150)
-
-        # Warm history should allow adaptation
         result = await router._get_adaptive_allocation_adjustment(
             complexity_analysis=mock_complexity_analysis,
             collaboration_mode=CollaborationMode.PARALLEL,
             episodic_prior=None,
         )
 
-        # Should return a worker_count recommendation (int)
         assert result is not None
-        assert isinstance(result, int)
-        assert result >= 1  # Never below 1
+        assert result.ready is False
+        assert result.applied_arm == 0
 
 
 @pytest.mark.asyncio
@@ -256,24 +252,24 @@ class TestEngineErrorResilience:
     async def test_engine_error_returns_none(
         self, router_config_flag_on, mock_complexity_analysis
     ):
-        """Engine raises → returns None (routing proceeds with memory prior only)."""
+        """Engine failure executes explicit arm-0 control."""
+        router_config_flag_on["adaptive_routing_min_history"] = 0
+        router_config_flag_on["adaptive_routing_min_samples_per_arm"] = 0
         router = MASRouter(config=router_config_flag_on)
-        router.metrics_collector.get_history_size = MagicMock(return_value=150)
 
-        # Mock engine to raise an error
-        router._adaptive_engine = MagicMock()
-        router._adaptive_engine.allocate_variant = AsyncMock(
-            side_effect=RuntimeError("Bandit explosion")
-        )
+        with patch(
+            "src.ai_brain.router.masr.AdaptiveAllocationEngine.allocate_variant",
+            new=AsyncMock(side_effect=RuntimeError("Bandit explosion")),
+        ):
+            result = await router._get_adaptive_allocation_adjustment(
+                complexity_analysis=mock_complexity_analysis,
+                collaboration_mode=CollaborationMode.PARALLEL,
+                episodic_prior=None,
+            )
 
-        result = await router._get_adaptive_allocation_adjustment(
-            complexity_analysis=mock_complexity_analysis,
-            collaboration_mode=CollaborationMode.PARALLEL,
-            episodic_prior=None,
-        )
-
-        # Should return None (graceful fallback)
-        assert result is None
+        assert result is not None
+        assert result.applied_arm == 0
+        assert result.control_reason == "allocation_error"
 
 
 @pytest.mark.asyncio

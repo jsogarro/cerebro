@@ -4,7 +4,11 @@ This document is the reference for the configuration options exposed by
 **Cerebro**, the multi-agent runtime behind the general research-workflow
 workbench. All runtime settings are declared on the single
 `Settings(BaseSettings)` class in `src/core/config.py`; environment variables
-are loaded from `.env` (`env_file=".env"`, `case_sensitive=True`).
+are loaded once through `src/core/environment.py` before the primary Settings
+singleton is created. Precedence is **existing process > `~/.env` >
+repository-root `.env` > defaults**. Explicit empty process values remain
+authoritative, and discovery is independent of the current working directory.
+Dotenv files are parsed with `python-dotenv`; they are never shell-sourced.
 
 > **Unknown variables are silently discarded.** `Settings` is configured with `extra="ignore"`
 > (`src/core/config.py:22`). Any environment variable that does not correspond to a field defined on
@@ -34,7 +38,7 @@ are loaded from `.env` (`env_file=".env"`, `case_sensitive=True`).
 
 | Variable | Type | Default | Description | Required |
 |----------|------|---------|-------------|----------|
-| `ENVIRONMENT` | string | `development` | Deployment environment (development/staging/production). Gates production validators and WebSocket anonymous access. (`/docs` exposure is gated by `DEBUG`, not `ENVIRONMENT`.) | No |
+| `ENVIRONMENT` | string | `development` | Deployment environment (development/staging/production). Gates production validators; it does not by itself bypass WebSocket authentication. (`/docs` exposure is gated by `DEBUG`, not `ENVIRONMENT`.) | No |
 | `DEBUG` | boolean | `false` | Enable debug mode. `/docs` and `/redoc` are served only when `DEBUG=true`. | No |
 | `LOG_LEVEL` | string | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL) | No |
 | `API_HOST` | string | `0.0.0.0` | Server host binding | No |
@@ -156,6 +160,9 @@ routing through OpenRouter is flag-gated OFF — see [Multi-Provider Routing (PR
 | `MEMORY_ROUTING_MAX_WORKER_ADJUST` | integer | `2` | Maximum ±N worker count adjustment from analytic baseline | No |
 | `MEMORY_ROUTING_FRESHNESS_DAYS` | integer | `30` | Decay weight for older routing history (exponential decay) | No |
 | `MEMORY_PROMPT_MAX_PROCEDURES` | integer | `3` | Maximum procedural memory items to inject into worker prompts | No |
+| `MASR_ENABLE_ADAPTIVE` | boolean | `true` | Deprecated compatibility flag for the older history-based strategy heuristic. It does **not** enable Thompson sampling. | No |
+| `MASR_CACHE_MAX_SIZE` | integer | `1000` | Maximum in-process routing-decision cache entries | No |
+| `MASR_CACHE_EVICTION_BATCH_SIZE` | integer | `100` | Entries evicted when the routing cache exceeds its limit | No |
 | `ADAPTIVE_ROUTING_ENABLED` | boolean | `false` | Enable adaptive routing with multi-armed bandit allocation optimization (**ships dark, pending eval**) | No |
 | `ADAPTIVE_ROUTING_MIN_HISTORY` | integer | `300` | Minimum routing history samples required before adaptation begins (Hoeffding bound: ~450 samples across 15 mode-arm contexts for 95% confidence) | No |
 | `ADAPTIVE_ROUTING_MAX_WORKER_ADJUST` | integer | `2` | Maximum ±N worker count adjustment from adaptive engine (from memory-adjusted baseline) | No |
@@ -164,6 +171,9 @@ routing through OpenRouter is flag-gated OFF — see [Multi-Provider Routing (PR
 | `ADAPTIVE_ROUTING_POSTERIOR_TEMP_THRESHOLD` | integer | `150` | Per-experiment sample count after which posterior sharpening activates | No |
 | `MASR_FAST_PATH_ENABLED` | boolean | `true` | Single-agent fast path: classifier-approved trivial queries (SIMPLE, single-domain, one subtask, uncertainty <= 0.3, non-critical) bypass supervisors/TalkHier/verification for one routed simple-tier LLM call, with automatic escalation to DIRECT on quality-gate failure | No |
 | `ADAPTIVE_ROUTING_POSTERIOR_TEMP_FACTOR` | float | `3.0` | Sharpening factor applied to Beta posterior parameters (higher = stronger exploitation) | No |
+| `ADAPTIVE_ROUTING_SCHEMA_VERSION` | string | `1` | Durable adaptive-state schema namespace | No |
+| `ADAPTIVE_ROUTING_POLICY_VERSION` | string | `masr-adaptive-v1` | Allocation/reward policy namespace | No |
+| `ADAPTIVE_ROUTING_ALLOWED_EVALUATORS` | JSON object | `{}` | Evaluator name to allowed-version list. Empty by default, so no outcome is eligible to train. | No |
 
 **Behavior when enabled**:
 - Episodic memory nudges worker allocation based on past similar queries (bounded by `±MAX_WORKER_ADJUST`)
@@ -174,24 +184,72 @@ routing through OpenRouter is flag-gated OFF — see [Multi-Provider Routing (PR
 
 #### Adaptive Routing (PR #63)
 
-**Status**: Ships **DARK** (flag default `false`). Pending offline eval review and A/B test promotion.
+**Status**: Ships **DARK** (flag default `false`). FastAPI owns one configured
+in-process router and injects it into direct execution, the mounted MASR API,
+and active TalkHier sessions. The standalone port-9100 service is
+non-authoritative and forces Thompson allocation off.
 
 **Behavior when enabled**:
 - 5-arm Thompson Sampling bandit recommends worker_count deltas {-2, -1, 0, +1, +2} from memory-adjusted baseline
-- Cold start: No adaptation until `routing_history` ≥ `ADAPTIVE_ROUTING_MIN_HISTORY` (grace period)
+- Cold start: arm `0` control remains active until evaluator-qualified global and per-arm sample readiness is satisfied
 - Bounded: Adaptive adjustment capped to ±`ADAPTIVE_ROUTING_MAX_WORKER_ADJUST` from (memory-adjusted) baseline
 - Sequential composition: Memory prior applied first, then adaptive adjustment (both respect individual bounds + system hard caps)
-- Graceful fallback: Engine error → routing proceeds with memory prior only (zero impact)
-- In-memory state: Bandit state resets per process (no persistence yet)
+- Graceful fallback: unsafe, incompatible, unavailable, or Redis-degraded state executes literal arm `0`
+- Durable state: versioned non-PII sufficient statistics use atomic Redis compare-and-set and opaque outcome idempotency
+- Strict learning: only measured, successful outcomes from an allow-listed evaluator/version and matching schema/policy are eligible
 
 **Behavior when disabled** (default): No adaptive engine calls. Routing uses analytic baseline + optional memory prior (if `MEMORY_INFORMED_ROUTING_ENABLED=true`).
 
-**Reward signal**: `quality_score` from `routing_history` entries (0.0-1.0, higher is better).
+**Current learning limitation**: the typed evaluator outcome and durable-state
+boundary exists, but active product execution does not yet record correlated
+evaluator outcomes. Mounted manual `/feedback` updates only its legacy
+in-process counters and is ineligible for Thompson learning. Therefore the
+default runtime does not self-improve, and merely enabling the flag does not
+create trustworthy training data.
 
 **Notes**:
 - Composes with memory-informed routing (PR #55): memory adjusts first, adaptive sees memory-adjusted baseline
 - All adjustments respect shared hard caps (`max_parallel_workers`, `max_agents_per_query`)
-- Structured log event emitted when adaptation changes allocation (includes deltas, confidence)
+- `MASR_ENABLE_ADAPTIVE` cannot activate the Thompson allocator
+- Promotion remains a separate manual decision after versioned held-out evidence
+
+**Promotion evidence**: `scripts/evaluate_adaptive_routing_promotion.py`
+performs a deterministic, fixed-seed replay with a strict chronological
+train/held-out split. Held-out cases never update the learned state. Inputs and
+reports carry explicit policy, outcome-schema, evaluator, corpus, criteria, and
+report versions. Criteria also identify the currently serialized diagnostic
+guardrails, required collaboration modes, and per-arm evidence minimums. The
+report includes that snapshot and its canonical SHA-256 digest. Not every
+behavior-affecting runtime policy field is serialized yet, so the gate emits
+`exact_policy_replay_supported=insufficient_evidence`; a promotion `pass` is
+intentionally unreachable until that gap is closed.
+
+Each replay case requires an opaque case ID, a timezone-aware observation
+timestamp, a supported collaboration mode, the analytic worker baseline, and
+evaluator-produced measurements for all five arms (`-2` through `+2`). Quality
+is required; cost and latency may be explicitly unavailable. Training cases
+apply every measured arm to build evaluator-qualified per-mode state. Held-out
+cases only select and compare an arm against control and never update state.
+
+Run the gate with an explicit, not-yet-existing private output path outside
+this repository:
+
+```bash
+python scripts/evaluate_adaptive_routing_promotion.py \
+  --criteria config/adaptive_routing_promotion_criteria.example.json \
+  --corpus /path/to/versioned-evaluator-corpus.json \
+  --output /absolute/private/path/adaptive-routing-promotion.json
+```
+
+The example criteria are deliberately unapproved. Missing inputs, unapproved
+criteria, an absent product evaluator, incompatible versions, inadequate
+mode/arm or held-out evidence, and synthetic/fixture corpora cannot promote the
+feature. Malformed inputs produce a sanitized `insufficient_evidence` report.
+The command refuses to overwrite an existing output and only writes a private
+report; it does not mutate settings or enable a flag. The replay is diagnostic,
+not current authorization to seed or activate the deployed allocator.
+Exit status is `0` only for `pass`, `2` for `fail`, and `3` for
+`insufficient_evidence`.
 
 #### Langfuse Observability
 
@@ -337,8 +395,8 @@ verified with a public PEM key. There is no symmetric JWT secret; the applicatio
 | `JWT_ALGORITHM` | string | `RS256` | JWT signing algorithm (asymmetric) | No |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | integer | `15` | Access token expiry (minutes) | No |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | integer | `7` | Refresh token expiry (days) | No |
-| `JWT_PRIVATE_KEY_PATH` | string | `/secrets/jwt_private.pem` | Path to the RS256 private signing key (PEM) | No |
-| `JWT_PUBLIC_KEY_PATH` | string | `/secrets/jwt_public.pem` | Path to the RS256 public verification key (PEM) | No |
+| `JWT_PRIVATE_KEY_PATH` | string | `/secrets/jwt_private.pem` | Runtime path to the RS256 private signing key (PEM). Required and fail-closed in production. | Production |
+| `JWT_PUBLIC_KEY_PATH` | string | `/secrets/jwt_public.pem` | Runtime path to the matching RS256 public verification key (PEM). Required and fail-closed in production. | Production |
 | `BCRYPT_ROUNDS` | integer | `12` | bcrypt cost factor for password hashing | No |
 | `PASSWORD_MIN_LENGTH` | integer | `12` | Minimum password length | No |
 | `PASSWORD_HISTORY_LIMIT` | integer | `5` | Number of previous password hashes retained to block reuse | No |
@@ -348,6 +406,7 @@ verified with a public PEM key. There is no symmetric JWT secret; the applicatio
 | `MAX_SESSIONS_PER_USER` | integer | `5` | Maximum concurrent sessions per user | No |
 | `ENABLE_MFA` | boolean | `false` | Enable multi-factor authentication | No |
 | `MFA_ISSUER` | string | `ResearchPlatform` | TOTP issuer label | No |
+| `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` | boolean | `false` | Explicitly allow anonymous WebSockets in local development only. Ignored outside `ENVIRONMENT=development`. | No |
 
 > There is **no** `JWT_SECRET_KEY` and no `PASSWORD_REQUIRE_*` composition flags. The real password
 > policy is length (`PASSWORD_MIN_LENGTH=12`) + bcrypt cost + history + breach check. `API_KEY_LENGTH`
@@ -474,6 +533,7 @@ GEMINI_DEFAULT_MODEL=gemini-pro
 # JWT (RS256 — keys are PEM files, not a shared secret)
 JWT_PRIVATE_KEY_PATH=/secrets/jwt_private.pem
 JWT_PUBLIC_KEY_PATH=/secrets/jwt_public.pem
+DEV_ALLOW_ANONYMOUS_WEBSOCKETS=false
 
 # Monitoring
 ENABLE_METRICS=true
@@ -558,8 +618,10 @@ research-cli config save
 
 The development `docker-compose.yml` runs the API against Postgres 16 and Redis 7. There is **no
 worker service** (`docker/Dockerfile.worker` does not exist) and **no Temporal services** —
-execution is in-process. A standalone `masr-router` container exists in compose but is **legacy /
-standalone**: it is not on the verified query path, which uses the in-process `MASRouter` object.
+execution is in-process. The API lifespan owns the configured `MASRouter`; the
+default stack does not start or depend on port 9100. The standalone
+`masr-router` is available only through the explicit `legacy-masr-service`
+profile and is non-authoritative.
 
 ```yaml
 # docker-compose.yml (trimmed to the query-path essentials)
@@ -569,17 +631,21 @@ services:
       context: .
       target: development
     environment:
-      - ENVIRONMENT=${ENVIRONMENT:-development}
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-    env_file:
-      - .env
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ADAPTIVE_ROUTING_ENABLED=${ADAPTIVE_ROUTING_ENABLED:-false}
     ports:
       - "8000:8000"
     depends_on:
       - postgres
       - redis
+
+  masr-router:
+    profiles: [legacy-masr-service]
+    ports:
+      - "9100:9100"
 
   postgres:
     image: postgres:16-alpine
@@ -591,6 +657,12 @@ services:
     ports:
       - "6379:6379"
 ```
+
+Use `./scripts/compose.sh` for local development when values may live in
+`~/.env`. The wrapper supplies absolute project-then-home `--env-file`
+arguments; existing shell exports still win. Plain `docker compose` loads its
+normal project environment only. Neither path mounts or copies a dotenv file
+into a container.
 
 ### Container Configuration
 
@@ -689,8 +761,6 @@ spec:
       remoteRef: { key: research-platform/gemini-api-key }
     - secretKey: SECRET_KEY
       remoteRef: { key: research-platform/secret-key }
-    - secretKey: JWT_SECRET_KEY
-      remoteRef: { key: research-platform/jwt-secret-key }
     - secretKey: DATABASE_URL
       remoteRef: { key: research-platform/database-url }
     - secretKey: REDIS_URL
@@ -700,9 +770,8 @@ spec:
 ```
 
 > The materialized `research-platform-secrets` key set is `GEMINI_API_KEY`, `SECRET_KEY`,
-> `JWT_SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, and `TEMPORAL_HOST`. Note that `JWT_SECRET_KEY` is
-> **vestigial**: `Settings` has no such field, so the value is silently ignored (`extra="ignore"`).
-> Actual JWT signing uses PEM files mounted at `/secrets/jwt_private.pem` and
+> `DATABASE_URL`, `REDIS_URL`, and `TEMPORAL_HOST`. Actual JWT signing uses PEM files mounted at
+> `/secrets/jwt_private.pem` and
 > `/secrets/jwt_public.pem` (see the Authentication section). `TEMPORAL_HOST` is likewise a vestige
 > of the removed Temporal era.
 
@@ -793,13 +862,15 @@ ENABLE_TRACING=true
 ### Production Environment
 
 ```bash
-# .env.production
+# Export these values or place them in the project .env / ~/.env.
 ENVIRONMENT=production
 DEBUG=false
 LOG_LEVEL=WARNING
 # In production the SECRET_KEY validator requires a real (non-placeholder),
 # 32+ character value, and DATABASE_URL must not use default credentials.
 SECRET_KEY=<32+ char secret from a secrets manager>
+JWT_PRIVATE_KEY_FILE=/absolute/host/path/jwt_private.pem
+JWT_PUBLIC_KEY_FILE=/absolute/host/path/jwt_public.pem
 
 DATABASE_URL=postgresql+asyncpg://user:pass@prod-db:5432/research_db
 REDIS_URL=redis://prod-redis:6379/0
@@ -814,6 +885,18 @@ MAX_REQUESTS_PER_MINUTE=100
 
 ENABLE_METRICS=true
 ENABLE_TRACING=true
+```
+
+`make prod-up` uses `scripts/compose.sh`, so exported values take precedence,
+then `~/.env`, then the project `.env`. The two `JWT_*_KEY_FILE` values are
+required host paths to one matching RSA keypair. Production Compose mounts that
+pair read-only at `/run/secrets/jwt_private.pem` and
+`/run/secrets/jwt_public.pem` for every API worker. Generate and protect the
+pair before deployment:
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /secure/path/jwt_private.pem
+openssl pkey -in /secure/path/jwt_private.pem -pubout -out /secure/path/jwt_public.pem
 ```
 
 ## Security Considerations

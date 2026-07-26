@@ -121,17 +121,18 @@ Performance benchmarks:
 # tests/load/locustfile.py
 from locust import HttpUser, task, between
 
+
 class ResearchPlatformUser(HttpUser):
     wait_time = between(1, 3)
-    
+
     @task(3)
     def list_projects(self):
         self.client.get("/api/v1/projects")
-    
+
     @task(1)
     def create_project(self):
         self.client.post("/api/v1/projects", json={...})
-    
+
     @task(2)
     def get_project_status(self):
         self.client.get(f"/api/v1/projects/{project_id}/status")

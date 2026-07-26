@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from structlog import get_logger
 
@@ -23,10 +23,25 @@ from ...ai_brain.router.masr import RoutingStrategy
 from ...core.observability import set_llm_request_estimated_cost
 from ...core.pii_redactor import redact_pii
 from ...models.research_project import ResearchDepth, ResearchQuery
-from ..services.direct_execution_service import get_direct_execution_service
+from ..services.direct_execution_service import (
+    DirectExecutionService,
+    get_application_direct_execution_service,
+    get_direct_execution_service,
+)
 
 logger = get_logger()
 router = APIRouter(prefix="/api/v1/query")
+_EXECUTION_SERVICE_DEPENDENCY = Depends(get_application_direct_execution_service)
+
+
+def _resolved_execution_service(
+    service: DirectExecutionService,
+) -> DirectExecutionService:
+    """Preserve direct-call compatibility while HTTP uses app-owned state."""
+
+    if service is _EXECUTION_SERVICE_DEPENDENCY:
+        return get_direct_execution_service()
+    return service
 
 
 # Request Models for Primary Query API
@@ -149,6 +164,7 @@ class IntelligentQueryResponse(BaseModel):
 async def intelligent_research_query(
     request: IntelligentQueryRequest,
     background_tasks: BackgroundTasks,
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> IntelligentQueryResponse:
     """
     Primary research endpoint using MASR intelligent routing.
@@ -168,7 +184,7 @@ async def intelligent_research_query(
         )
 
         # Use direct execution service which integrates MASR routing
-        execution_service = get_direct_execution_service()
+        execution_service = _resolved_execution_service(execution_service)
 
         # Create research project for execution
         from ...models.research_project import ResearchProject, ResearchScope
@@ -251,6 +267,7 @@ async def intelligent_research_query(
 async def intelligent_analysis_query(
     request: AnalysisRequest,
     background_tasks: BackgroundTasks,
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> IntelligentQueryResponse:
     """
     Analysis-focused endpoint using MASR intelligent routing.
@@ -285,7 +302,9 @@ async def intelligent_analysis_query(
             session_id=None,
         )
 
-        return await intelligent_research_query(intelligent_request, background_tasks)
+        return await intelligent_research_query(
+            intelligent_request, background_tasks, execution_service
+        )
 
     except Exception as e:
         logger.error(f"Intelligent analysis query failed: {e}")
@@ -299,6 +318,7 @@ async def intelligent_analysis_query(
 async def intelligent_synthesis_query(
     request: SynthesisRequest,
     background_tasks: BackgroundTasks,
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> IntelligentQueryResponse:
     """
     Synthesis-focused endpoint using MASR intelligent routing.
@@ -330,7 +350,9 @@ async def intelligent_synthesis_query(
             session_id=None,
         )
 
-        return await intelligent_research_query(intelligent_request, background_tasks)
+        return await intelligent_research_query(
+            intelligent_request, background_tasks, execution_service
+        )
 
     except Exception as e:
         logger.error(f"Intelligent synthesis query failed: {e}")
@@ -341,7 +363,10 @@ async def intelligent_synthesis_query(
 
 
 @router.get("/execution/{execution_id}/status")
-async def get_execution_status(execution_id: str) -> dict[str, Any]:
+async def get_execution_status(
+    execution_id: str,
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
+) -> dict[str, Any]:
     """
     Get real-time status of intelligent query execution.
 
@@ -349,7 +374,7 @@ async def get_execution_status(execution_id: str) -> dict[str, Any]:
     to final agent execution and result synthesis.
     """
     try:
-        execution_service = get_direct_execution_service()
+        execution_service = _resolved_execution_service(execution_service)
         exec_status = await execution_service.get_execution_status(execution_id)
 
         if not exec_status:
@@ -382,11 +407,14 @@ async def get_execution_status(execution_id: str) -> dict[str, Any]:
 
 
 @router.get("/execution/{execution_id}/results")
-async def get_execution_results(execution_id: str) -> dict[str, Any]:
+async def get_execution_results(
+    execution_id: str,
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
+) -> dict[str, Any]:
     """Get results from completed intelligent query execution."""
 
     try:
-        execution_service = get_direct_execution_service()
+        execution_service = _resolved_execution_service(execution_service)
         results = await execution_service.get_execution_results(execution_id)
 
         if not results:
@@ -408,7 +436,10 @@ async def get_execution_results(execution_id: str) -> dict[str, Any]:
 
 
 @router.post("/execution/{project_id}/resume")
-async def resume_execution(project_id: str) -> dict[str, Any]:
+async def resume_execution(
+    project_id: str,
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
+) -> dict[str, Any]:
     """
     Resume execution from the latest checkpoint for a project.
 
@@ -416,7 +447,7 @@ async def resume_execution(project_id: str) -> dict[str, Any]:
     and resumes execution from that point. Returns the execution ID if successful.
     """
     try:
-        execution_service = get_direct_execution_service()
+        execution_service = _resolved_execution_service(execution_service)
 
         # Convert project_id string to UUID
         try:
@@ -461,6 +492,7 @@ async def intelligent_literature_query(
     domains: list[str] = Query(default=[]),
     max_sources: int = Query(50, ge=10, le=200),
     depth: ResearchDepth = ResearchDepth.COMPREHENSIVE,
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> IntelligentQueryResponse:
     """
     Literature-focused query with MASR intelligent routing.
@@ -482,7 +514,9 @@ async def intelligent_literature_query(
         session_id=None,
     )
 
-    return await intelligent_research_query(request, BackgroundTasks())
+    return await intelligent_research_query(
+        request, BackgroundTasks(), execution_service
+    )
 
 
 @router.post("/methodology")
@@ -490,6 +524,7 @@ async def intelligent_methodology_query(
     query: str = Query(..., min_length=10),
     research_type: str = Query("mixed", pattern="^(quantitative|qualitative|mixed)$"),
     domains: list[str] = Query(default=[]),
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> IntelligentQueryResponse:
     """
     Methodology-focused query with MASR intelligent routing.
@@ -510,7 +545,9 @@ async def intelligent_methodology_query(
         session_id=None,
     )
 
-    return await intelligent_research_query(request, BackgroundTasks())
+    return await intelligent_research_query(
+        request, BackgroundTasks(), execution_service
+    )
 
 
 @router.post("/comparison")
@@ -520,6 +557,7 @@ async def intelligent_comparison_query(
         "approaches", pattern="^(approaches|theories|methods|findings)$"
     ),
     domains: list[str] = Query(default=[]),
+    execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> IntelligentQueryResponse:
     """
     Comparison-focused query with MASR intelligent routing.
@@ -540,7 +578,9 @@ async def intelligent_comparison_query(
         session_id=None,
     )
 
-    return await intelligent_research_query(request, BackgroundTasks())
+    return await intelligent_research_query(
+        request, BackgroundTasks(), execution_service
+    )
 
 
 # System intelligence endpoints

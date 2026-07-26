@@ -53,13 +53,36 @@ from src.core.constants import (
 )
 from src.reliability.retry_strategies import CircuitBreaker, CircuitBreakerConfig
 
+from .adaptive_state_store import (
+    AdaptiveExperimentSnapshot,
+    AdaptiveStateSnapshot,
+    AdaptiveStateStore,
+    InMemoryAdaptiveStateStore,
+    StateLoadStatus,
+    StateWriteStatus,
+    empty_adaptive_snapshot,
+)
 from .cost_optimizer import CostOptimizer, OptimizationResult, OptimizationStrategy
 from .query_analyzer import ComplexityAnalysis, ComplexityLevel, QueryComplexityAnalyzer
 from .routing_cache import RoutingCacheManager
 from .routing_metrics import RoutingMetricsCollector
+from .routing_observability import observe_effective_state
+from .routing_outcome import (
+    ADAPTIVE_ARMS,
+    ADAPTIVE_OUTCOME_SCHEMA_VERSION,
+    ADAPTIVE_POLICY_VERSION,
+    EvaluatorEligibilityPolicy,
+    OutcomeApplicationResult,
+    OutcomeApplicationStatus,
+    RoutingOutcome,
+)
 from .routing_types import (
+    AdaptiveAllocationProposal,
+    AdaptiveDecisionMetadata,
+    AdaptiveRoutingStatus,
     AgentAllocation,
     CollaborationMode,
+    RoutingExecutionPolicy,
     RoutingMetrics,
     RoutingStrategy,
 )
@@ -102,6 +125,7 @@ class RoutingDecision:
     # Context preservation
     context_requirements: dict[str, Any] = field(default_factory=dict)
     memory_allocation: dict[str, int] = field(default_factory=dict)
+    adaptive_metadata: AdaptiveDecisionMetadata | None = None
 
 
 class MASRouter:
@@ -129,6 +153,8 @@ class MASRouter:
         self,
         config: dict[str, Any] | None = None,
         model_config_manager: ModelConfigManager | None = None,
+        adaptive_state_store: AdaptiveStateStore | None = None,
+        outcome_eligibility_policy: EvaluatorEligibilityPolicy | None = None,
     ):
         """Initialize MASR with configuration."""
         self.config = config or {}
@@ -161,8 +187,13 @@ class MASRouter:
             ),
         )
 
-        # Routing configuration
-        self.enable_adaptive_routing = self.config.get("enable_adaptive", True)
+        # Older history-based strategy adaptation. The compatibility
+        # ``enable_adaptive`` key is deliberately separate from the Thompson
+        # bandit flag below.
+        self.adaptive_strategy_enabled = self.config.get(
+            "adaptive_strategy_enabled",
+            self.config.get("enable_adaptive", True),
+        )
 
         # Performance thresholds
         self.quality_threshold = self.config.get("min_quality", 0.8)
@@ -208,6 +239,7 @@ class MASRouter:
         self.adaptive_routing_enabled = self.config.get(
             "adaptive_routing_enabled", False
         )
+        self.fixture_mode = bool(self.config.get("fixture_mode", False))
         # Min history raised to 300 (from 100) based on sample-complexity analysis:
         # For 3 modes x 5 arms = 15 contexts with delta_mu=0.15, sigma=0.02, Hoeffding bound
         # requires ~14 samples per arm for 95% confidence -> 450 total minimum.
@@ -218,31 +250,58 @@ class MASRouter:
         self.adaptive_routing_max_worker_adjust = self.config.get(
             "adaptive_routing_max_worker_adjust", 2
         )
+        self.adaptive_schema_version = str(
+            self.config.get(
+                "adaptive_routing_schema_version",
+                ADAPTIVE_OUTCOME_SCHEMA_VERSION,
+            )
+        )
+        self.adaptive_policy_version = str(
+            self.config.get(
+                "adaptive_routing_policy_version",
+                ADAPTIVE_POLICY_VERSION,
+            )
+        )
         self._adaptive_engine: AdaptiveAllocationEngine | None = None
         # Per-mode quality baselines for advantage reward computation (EMA)
         self._mode_quality_baselines: dict[CollaborationMode, float] = {}
+        self._adaptive_rng = self.config.get("adaptive_routing_rng", np.random)
+        self._adaptive_state_store = (
+            adaptive_state_store or InMemoryAdaptiveStateStore()
+        )
+        self._adaptive_snapshot = empty_adaptive_snapshot(
+            schema_version=self.adaptive_schema_version,
+            policy_version=self.adaptive_policy_version,
+        )
+        self._adaptive_store_healthy = True
+        self._adaptive_state_status = StateLoadStatus.MISSING
+        self._adaptive_state_lock = asyncio.Lock()
+        self._adaptive_conflict_retries = max(
+            0, int(self.config.get("adaptive_routing_conflict_retries", 2))
+        )
+        self._adaptive_conflict_backoff_seconds = max(
+            0.0,
+            float(self.config.get("adaptive_routing_conflict_backoff_seconds", 0.01)),
+        )
+        self._outcome_eligibility_policy = (
+            outcome_eligibility_policy
+            or EvaluatorEligibilityPolicy(
+                schema_version=self.adaptive_schema_version,
+                policy_version=self.adaptive_policy_version,
+            )
+        )
+        if (
+            self._outcome_eligibility_policy.schema_version
+            != self.adaptive_schema_version
+            or self._outcome_eligibility_policy.policy_version
+            != self.adaptive_policy_version
+        ):
+            raise ValueError("adaptive router and evaluator policy versions must match")
         if self.adaptive_routing_enabled:
             self._adaptive_engine = AdaptiveAllocationEngine(
-                {
-                    "enable_safety": True,
-                    "global_min_allocation": 0.05,
-                    "global_max_allocation": 0.70,
-                    "update_interval_seconds": self.config.get(
-                        "adaptive_routing_update_interval_seconds", 300
-                    ),
-                    # Convergence lever: sharpen Thompson posteriors after
-                    # warm-up so exploitation ramps once arms are estimated.
-                    "posterior_temp_enabled": self.config.get(
-                        "adaptive_routing_posterior_temp_enabled", True
-                    ),
-                    "posterior_temp_threshold": self.config.get(
-                        "adaptive_routing_posterior_temp_threshold", 150
-                    ),
-                    "posterior_temp_factor": self.config.get(
-                        "adaptive_routing_posterior_temp_factor", 3.0
-                    ),
-                }
+                self._adaptive_engine_config()
             )
+        self._observe_adaptive_effective_state()
 
     @property
     def routing_circuit_breaker(self) -> CircuitBreaker:
@@ -255,6 +314,7 @@ class MASRouter:
         context: dict[str, Any] | None = None,
         strategy: RoutingStrategy | None = None,
         constraints: dict[str, Any] | None = None,
+        execution_policy: RoutingExecutionPolicy | None = None,
     ) -> RoutingDecision:
         """
         Route a query through intelligent analysis and optimization.
@@ -270,6 +330,11 @@ class MASRouter:
         """
         start_time = datetime.now()
         query_id = str(uuid.uuid4())
+        effective_policy = execution_policy or (
+            RoutingExecutionPolicy.fixture()
+            if self.fixture_mode
+            else RoutingExecutionPolicy()
+        )
 
         logger.info("Routing query %s: %s...", query_id, redact_pii(query)[:100])
 
@@ -304,8 +369,12 @@ class MASRouter:
                 # Check cache first if enabled. The strategy and constraints are
                 # part of the cache identity — the same query routes differently
                 # under a different strategy or cost/quality constraints.
-                cached_decision = self.cache_manager.check_cache(
-                    query, context, strategy, constraints
+                cached_decision = (
+                    None
+                    if self.adaptive_routing_enabled or effective_policy.fixture_mode
+                    else self.cache_manager.check_cache(
+                        query, context, strategy, constraints
+                    )
                 )
                 if cached_decision:
                     logger.info("routing_cache_hit", query_id=query_id)
@@ -358,8 +427,10 @@ class MASRouter:
                 )
 
                 # Step 3.5: Query episodic memory for routing prior (if enabled)
-                episodic_prior = await self._get_episodic_routing_prior(
-                    complexity_analysis, query
+                episodic_prior = (
+                    await self._get_episodic_routing_prior(complexity_analysis, query)
+                    if effective_policy.memory_routing_allowed
+                    else None
                 )
 
                 # Step 3.6: Query adaptive engine for allocation adjustment (if enabled)
@@ -367,15 +438,24 @@ class MASRouter:
                     await self._get_adaptive_allocation_adjustment(
                         complexity_analysis, collaboration_mode, episodic_prior
                     )
+                    if effective_policy.adaptive_routing_allowed
+                    else None
                 )
 
                 # Step 4: Allocate agents (with optional memory + adaptive adjustment)
-                agent_allocation = self._allocate_agents(
-                    complexity_analysis,
-                    collaboration_mode,
-                    episodic_prior,
-                    adaptive_recommendation,
-                    routing_strategy=routing_strategy,
+                agent_allocation, adaptive_metadata = (
+                    self._allocate_agents_with_attribution(
+                        complexity_analysis,
+                        collaboration_mode,
+                        episodic_prior,
+                        adaptive_recommendation,
+                        routing_strategy=routing_strategy,
+                        adaptive_enabled_override=(
+                            self.adaptive_routing_enabled
+                            and effective_policy.adaptive_routing_allowed
+                        ),
+                        fixture_mode=effective_policy.fixture_mode,
+                    )
                 )
 
                 # Step 5: Calculate performance predictions
@@ -404,12 +484,17 @@ class MASRouter:
                         complexity_analysis, context
                     ),
                     memory_allocation=self._allocate_memory(complexity_analysis),
+                    adaptive_metadata=adaptive_metadata,
                 )
 
                 # Cache decision
-                self.cache_manager.cache_decision(
-                    query, context, decision, strategy, constraints
-                )
+                if (
+                    not self.adaptive_routing_enabled
+                    and not effective_policy.fixture_mode
+                ):
+                    self.cache_manager.cache_decision(
+                        query, context, decision, strategy, constraints
+                    )
 
                 # Update metrics
                 self.metrics_collector.update_metrics(decision)
@@ -417,13 +502,9 @@ class MASRouter:
                 # Store in history for learning
                 self.metrics_collector.add_to_history(decision)
 
-                # Trigger adaptive learning if enabled
-                if self.learning_enabled:
-                    task = asyncio.create_task(
-                        self.metrics_collector.adapt_from_decision(decision)
-                    )
-                    self._background_tasks.add(task)
-                    task.add_done_callback(self._background_tasks.discard)
+                # Decisions alone are not outcomes.  Outcome-free learning is
+                # intentionally quarantined; only record_routing_outcome may
+                # update the evaluator-gated adaptive state.
 
                 processing_time = (datetime.now() - start_time).total_seconds() * 1000
                 logger.info(
@@ -494,7 +575,7 @@ class MASRouter:
 
         # Use adaptive strategy if enabled and we have enough history
         if (
-            self.enable_adaptive_routing
+            self.adaptive_strategy_enabled
             and self.metrics_collector.get_history_size() > 100
         ):
             return self.metrics_collector.get_adaptive_strategy(complexity_analysis)
@@ -651,102 +732,183 @@ class MASRouter:
         complexity_analysis: ComplexityAnalysis,
         collaboration_mode: CollaborationMode,
         episodic_prior: int | None,
-    ) -> int | None:
-        """Query adaptive engine for worker_count adjustment (if enabled and warm).
+    ) -> AdaptiveAllocationProposal | None:
+        """Serialize local state refresh and proposal selection."""
 
-        Uses a 5-arm bandit (deltas: -2, -1, 0, +1, +2 from memory-adjusted baseline)
-        with Thompson Sampling. Reward signal is quality_score from routing_history.
+        if not self.adaptive_routing_enabled or self._adaptive_engine is None:
+            return None
+        async with self._adaptive_state_lock:
+            return await self._get_adaptive_allocation_adjustment_unlocked(
+                complexity_analysis,
+                collaboration_mode,
+                episodic_prior,
+            )
 
-        Args:
-            complexity_analysis: Query complexity analysis
-            collaboration_mode: Determined collaboration mode
-            episodic_prior: Episodic memory prior (may be None)
+    async def _get_adaptive_allocation_adjustment_unlocked(
+        self,
+        complexity_analysis: ComplexityAnalysis,
+        collaboration_mode: CollaborationMode,
+        episodic_prior: int | None,
+    ) -> AdaptiveAllocationProposal | None:
+        """Return an attributable proposal or explicit arm-0 control.
 
-        Returns:
-            Recommended worker_count from adaptive engine, or None if:
-            - Flag is OFF
-            - History too small (cold start)
-            - Engine raises an error (graceful fallback)
+        Readiness is based only on evaluator-eligible samples already present in
+        the bandit snapshot.  Missing, incompatible, corrupt, or unavailable
+        state never affects base routing and always returns the no-change arm.
         """
-        # Guard: flag OFF → no-op (zero overhead)
         if not self.adaptive_routing_enabled or self._adaptive_engine is None:
             return None
 
-        # Guard: cold start → wait for history
-        history_size = self.metrics_collector.get_history_size()
-        if history_size < self.adaptive_routing_min_history:
-            logger.debug(
-                f"adaptive_routing: cold start, history {history_size} < {self.adaptive_routing_min_history}"
+        analytic_baseline = self._infer_baseline_worker_count(
+            complexity_analysis, collaboration_mode
+        )
+        memory_baseline = self._apply_memory_adjustment(
+            analytic_baseline, episodic_prior
+        )
+        experiment_id = f"adaptive_allocation_{collaboration_mode.value}"
+
+        load_status = await self._refresh_adaptive_state()
+        if load_status in {
+            StateLoadStatus.CORRUPT,
+            StateLoadStatus.INCOMPATIBLE,
+            StateLoadStatus.ERROR,
+        }:
+            return self._control_proposal(
+                experiment_id=experiment_id,
+                analytic_baseline=analytic_baseline,
+                memory_baseline=memory_baseline,
+                reason=f"state_{load_status.value}",
             )
-            return None
 
         try:
-            # Derive experiment_id from collaboration_mode
-            experiment_id = f"adaptive_allocation_{collaboration_mode.value}"
-
-            # Register experiment if not already registered (idempotent)
-            if experiment_id not in self._adaptive_engine.active_experiments:
-                # 5-arm bandit: deltas {-2, -1, 0, +1, +2} from memory-adjusted baseline
-                # Arm 0 = -2 workers, Arm 1 = -1, Arm 2 = 0 (no change), Arm 3 = +1, Arm 4 = +2
-                variants = ["-2", "-1", "0", "+1", "+2"]
-                initial_allocation = dict.fromkeys(variants, 0.2)  # Uniform start
-
-                config = AllocationConfig(
-                    strategy=AllocationStrategy.ADAPTIVE_BANDIT,
-                    initial_allocation=initial_allocation,
-                    min_allocation=0.05,
-                    max_allocation=0.70,
-                    exploration_rate=0.1,
-                    confidence_threshold=0.95,
-                    update_frequency_seconds=self.config.get(
-                        "adaptive_routing_update_interval_seconds", 300
-                    ),
-                    enable_guardrails=True,
-                    performance_threshold=0.95,
-                    safety_sample_size=10,  # Low threshold for faster learning in eval
+            await self._ensure_adaptive_experiment(collaboration_mode)
+            ready, readiness_reason = self._adaptive_engine.is_experiment_ready(
+                experiment_id
+            )
+            if not ready:
+                return self._control_proposal(
+                    experiment_id=experiment_id,
+                    analytic_baseline=analytic_baseline,
+                    memory_baseline=memory_baseline,
+                    reason=readiness_reason or "eligible_sample_readiness_failed",
                 )
 
-                await self._adaptive_engine.register_experiment(
-                    experiment_id, variants, config
-                )
-
-                logger.info(
-                    f"adaptive_routing: registered experiment {experiment_id} with 5 arms"
-                )
-
-            # Allocate variant (selects arm via Thompson Sampling)
             decision = await self._adaptive_engine.allocate_variant(
                 experiment_id,
                 user_context={"collaboration_mode": collaboration_mode.value},
             )
-
-            # Map selected variant (delta string) to worker_count adjustment
-            delta_map = {"-2": -2, "-1": -1, "0": 0, "+1": 1, "+2": 2}
-            selected_delta = delta_map[decision.variant_id]
-
-            # Compute baseline (analytic or memory-adjusted)
-            # We don't know the memory-adjusted count here, so we'll return the delta
-            # and let _apply_adaptive_adjustment apply it to the baseline
-            # But we need to return an absolute count, not a delta
-            # So we'll infer the baseline from the collaboration_mode
-            baseline = self._infer_baseline_worker_count(
-                complexity_analysis, collaboration_mode
+            proposed_arm = int(decision.proposed_variant_id or decision.variant_id)
+            applied_arm = int(decision.variant_id)
+            proposed_count = memory_baseline + proposed_arm
+            applied_count = memory_baseline + applied_arm
+            control_reason = (
+                ",".join(decision.safety_warnings)
+                if not decision.safety_check_passed
+                else None
             )
-            recommended_count = max(1, baseline + selected_delta)
-
-            logger.debug(
-                f"adaptive_routing: experiment {experiment_id} selected arm {decision.variant_id} "
-                f"(delta {selected_delta}, baseline {baseline} → {recommended_count})"
+            return AdaptiveAllocationProposal(
+                experiment_id=experiment_id,
+                analytic_baseline_count=analytic_baseline,
+                memory_baseline_count=memory_baseline,
+                proposed_arm=proposed_arm,
+                proposed_worker_count=proposed_count,
+                applied_arm=applied_arm,
+                applied_worker_count=applied_count,
+                allocation_probability=decision.allocation_probability,
+                ready=ready,
+                safety_check_passed=decision.safety_check_passed,
+                control_reason=control_reason,
+                state_revision=self._adaptive_snapshot.revision,
             )
-
-            return recommended_count
-
         except Exception as e:
-            # Resilient: log and return None (routing proceeds with memory prior only)
             logger.warning(
                 f"adaptive_allocation_adjustment failed (graceful fallback): {e}"
             )
-            return None
+            return self._control_proposal(
+                experiment_id=experiment_id,
+                analytic_baseline=analytic_baseline,
+                memory_baseline=memory_baseline,
+                reason="allocation_error",
+            )
+
+    def _adaptive_engine_config(self) -> dict[str, Any]:
+        return {
+            "enable_safety": True,
+            "global_min_allocation": 0.05,
+            "global_max_allocation": 0.70,
+            "update_interval_seconds": self.config.get(
+                "adaptive_routing_update_interval_seconds", 300
+            ),
+            "posterior_temp_enabled": self.config.get(
+                "adaptive_routing_posterior_temp_enabled", True
+            ),
+            "posterior_temp_threshold": self.config.get(
+                "adaptive_routing_posterior_temp_threshold", 150
+            ),
+            "posterior_temp_factor": self.config.get(
+                "adaptive_routing_posterior_temp_factor", 3.0
+            ),
+            "rng": self._adaptive_rng,
+        }
+
+    def _adaptive_allocation_config(self) -> AllocationConfig:
+        variants = [str(arm) if arm <= 0 else f"+{arm}" for arm in ADAPTIVE_ARMS]
+        return AllocationConfig(
+            strategy=AllocationStrategy.ADAPTIVE_BANDIT,
+            initial_allocation=dict.fromkeys(variants, 1.0 / len(variants)),
+            min_allocation=0.05,
+            max_allocation=0.70,
+            exploration_rate=0.1,
+            confidence_threshold=0.95,
+            update_frequency_seconds=self.config.get(
+                "adaptive_routing_update_interval_seconds", 300
+            ),
+            enable_guardrails=True,
+            performance_threshold=float(
+                self.config.get("adaptive_routing_performance_threshold", 0.95)
+            ),
+            safety_sample_size=self.adaptive_routing_min_history,
+            min_samples_per_arm=int(
+                self.config.get("adaptive_routing_min_samples_per_arm", 1)
+            ),
+            control_variant_id="0",
+        )
+
+    async def _ensure_adaptive_experiment(
+        self, collaboration_mode: CollaborationMode
+    ) -> None:
+        if self._adaptive_engine is None:
+            raise RuntimeError("adaptive engine is unavailable")
+        experiment_id = f"adaptive_allocation_{collaboration_mode.value}"
+        if experiment_id in self._adaptive_engine.active_experiments:
+            return
+        config = self._adaptive_allocation_config()
+        await self._adaptive_engine.register_experiment(
+            experiment_id, list(config.initial_allocation), config
+        )
+
+    def _control_proposal(
+        self,
+        *,
+        experiment_id: str,
+        analytic_baseline: int,
+        memory_baseline: int,
+        reason: str,
+    ) -> AdaptiveAllocationProposal:
+        return AdaptiveAllocationProposal(
+            experiment_id=experiment_id,
+            analytic_baseline_count=analytic_baseline,
+            memory_baseline_count=memory_baseline,
+            proposed_arm=0,
+            proposed_worker_count=memory_baseline,
+            applied_arm=0,
+            applied_worker_count=memory_baseline,
+            allocation_probability=1.0,
+            ready=False,
+            safety_check_passed=False,
+            control_reason=reason,
+            state_revision=self._adaptive_snapshot.revision,
+        )
 
     def _infer_baseline_worker_count(
         self,
@@ -758,79 +920,283 @@ class MASRouter:
         This is a heuristic to reconstruct the baseline that _allocate_agents would
         compute, so we can apply bandit deltas on top of it.
         """
-        if collaboration_mode == CollaborationMode.DIRECT:
+        if collaboration_mode in {
+            CollaborationMode.FAST_PATH,
+            CollaborationMode.DIRECT,
+        }:
             return 1
-        elif collaboration_mode == CollaborationMode.PARALLEL:
+        if collaboration_mode == CollaborationMode.PARALLEL:
             return int(
                 min(len(complexity_analysis.domains) + 1, self.max_parallel_workers)
             )
-        elif collaboration_mode == CollaborationMode.HIERARCHICAL:
+        if collaboration_mode == CollaborationMode.HIERARCHICAL:
             return int(
                 min(complexity_analysis.subtask_count, self.max_agents_per_query)
             )
-        elif collaboration_mode == CollaborationMode.DEBATE:
+        if collaboration_mode == CollaborationMode.DEBATE:
             return 3  # Fixed
-        else:  # ENSEMBLE
-            return 5
+        return 5
 
     async def record_routing_outcome(
-        self, decision: RoutingDecision, quality_score: float, actual_cost: float
-    ) -> None:
-        """Record routing outcome for adaptive learning.
+        self, outcome: RoutingOutcome
+    ) -> OutcomeApplicationResult:
+        """Idempotently apply a typed evaluator-qualified outcome."""
 
-        Args:
-            decision: The routing decision that was executed
-            quality_score: Observed quality score (0.0-1.0)
-            actual_cost: Actual cost incurred
-        """
+        eligibility = self._outcome_eligibility_policy.assess(outcome)
+        evaluated = outcome.with_eligibility(eligibility)
         if not self.adaptive_routing_enabled or self._adaptive_engine is None:
+            self._observe_adaptive_effective_state()
+            return OutcomeApplicationResult(
+                status=OutcomeApplicationStatus.INELIGIBLE_RECORDED,
+                outcome=evaluated,
+                learning_updated=False,
+                reason="adaptive_routing_disabled",
+            )
+        async with self._adaptive_state_lock:
+            return await self._record_routing_outcome_unlocked(evaluated)
+
+    async def _record_routing_outcome_unlocked(
+        self, evaluated: RoutingOutcome
+    ) -> OutcomeApplicationResult:
+        """Apply one outcome while holding the process-local state lock."""
+
+        eligibility = evaluated.eligibility
+        for attempt in range(self._adaptive_conflict_retries + 1):
+            load_status = await self._refresh_adaptive_state()
+            if load_status in {
+                StateLoadStatus.CORRUPT,
+                StateLoadStatus.INCOMPATIBLE,
+            }:
+                return OutcomeApplicationResult(
+                    status=OutcomeApplicationStatus.INCOMPATIBLE_STATE,
+                    outcome=evaluated,
+                    learning_updated=False,
+                    reason=f"state_{load_status.value}",
+                )
+            if load_status == StateLoadStatus.ERROR:
+                return OutcomeApplicationResult(
+                    status=OutcomeApplicationStatus.STORE_ERROR,
+                    outcome=evaluated,
+                    learning_updated=False,
+                    retryable=True,
+                    reason="state_store_error",
+                )
+
+            base = self._adaptive_snapshot
+            try:
+                next_snapshot = await self._apply_outcome_to_snapshot(base, evaluated)
+            except Exception as exc:
+                logger.warning(
+                    "adaptive_outcome_application_failed",
+                    error=type(exc).__name__,
+                )
+                await self._restore_snapshot(base)
+                self._observe_adaptive_effective_state()
+                return OutcomeApplicationResult(
+                    status=OutcomeApplicationStatus.INCOMPATIBLE_STATE,
+                    outcome=evaluated,
+                    learning_updated=False,
+                    reason="outcome_application_failed",
+                )
+
+            write = await self._adaptive_state_store.compare_and_set(
+                expected_revision=base.revision,
+                snapshot=next_snapshot,
+                outcome_id=evaluated.outcome_id,
+            )
+            if write.status == StateWriteStatus.APPLIED:
+                self._adaptive_snapshot = next_snapshot
+                self._adaptive_store_healthy = True
+                self._observe_adaptive_effective_state()
+                return OutcomeApplicationResult(
+                    status=(
+                        OutcomeApplicationStatus.APPLIED
+                        if eligibility.eligible
+                        else OutcomeApplicationStatus.INELIGIBLE_RECORDED
+                    ),
+                    outcome=evaluated,
+                    learning_updated=eligibility.eligible,
+                    reason=eligibility.reason.value,
+                )
+            if write.status == StateWriteStatus.DUPLICATE:
+                await self._restore_snapshot(base)
+                self._observe_adaptive_effective_state()
+                return OutcomeApplicationResult(
+                    status=OutcomeApplicationStatus.DUPLICATE,
+                    outcome=evaluated,
+                    learning_updated=False,
+                    duplicate=True,
+                    reason="duplicate_outcome_id",
+                )
+            if write.status == StateWriteStatus.CONFLICT and attempt < (
+                self._adaptive_conflict_retries
+            ):
+                await self._wait_for_adaptive_conflict_retry(attempt)
+                continue
+
+            await self._restore_snapshot(base)
+            self._adaptive_store_healthy = False
+            self._observe_adaptive_effective_state()
+            if write.status == StateWriteStatus.CONFLICT:
+                status = OutcomeApplicationStatus.CONFLICT_EXHAUSTED
+            elif write.status in {
+                StateWriteStatus.CORRUPT,
+                StateWriteStatus.INCOMPATIBLE,
+            }:
+                status = OutcomeApplicationStatus.INCOMPATIBLE_STATE
+            else:
+                status = OutcomeApplicationStatus.STORE_ERROR
+            return OutcomeApplicationResult(
+                status=status,
+                outcome=evaluated,
+                learning_updated=False,
+                retryable=status
+                in {
+                    OutcomeApplicationStatus.CONFLICT_EXHAUSTED,
+                    OutcomeApplicationStatus.STORE_ERROR,
+                },
+                reason=write.reason or write.status.value,
+            )
+
+        raise AssertionError("bounded conflict loop must return")
+
+    async def _wait_for_adaptive_conflict_retry(self, attempt: int) -> None:
+        """Apply bounded exponential jitter before reloading conflicted state."""
+
+        if self._adaptive_conflict_backoff_seconds == 0.0:
             return
+        jitter = 0.5 + float(self._adaptive_rng.random())
+        delay = min(
+            0.25,
+            self._adaptive_conflict_backoff_seconds * (2**attempt) * jitter,
+        )
+        await asyncio.sleep(delay)
 
+    async def _refresh_adaptive_state(self) -> StateLoadStatus:
+        result = await self._adaptive_state_store.load()
+        self._adaptive_state_status = result.status
+        if result.status == StateLoadStatus.MISSING:
+            self._adaptive_engine = AdaptiveAllocationEngine(
+                self._adaptive_engine_config()
+            )
+            self._adaptive_snapshot = empty_adaptive_snapshot(
+                schema_version=self.adaptive_schema_version,
+                policy_version=self.adaptive_policy_version,
+            )
+            self._adaptive_store_healthy = True
+            self._observe_adaptive_effective_state()
+            return result.status
+        if result.status != StateLoadStatus.LOADED or result.snapshot is None:
+            self._adaptive_store_healthy = False
+            self._observe_adaptive_effective_state()
+            return result.status
+        if (
+            result.snapshot.schema_version != self.adaptive_schema_version
+            or result.snapshot.policy_version != self.adaptive_policy_version
+        ):
+            self._adaptive_store_healthy = False
+            self._adaptive_state_status = StateLoadStatus.INCOMPATIBLE
+            self._observe_adaptive_effective_state()
+            return StateLoadStatus.INCOMPATIBLE
         try:
-            experiment_id = f"adaptive_allocation_{decision.collaboration_mode.value}"
+            await self._restore_snapshot(result.snapshot)
+        except (KeyError, TypeError, ValueError):
+            self._adaptive_store_healthy = False
+            self._adaptive_state_status = StateLoadStatus.INCOMPATIBLE
+            self._observe_adaptive_effective_state()
+            return StateLoadStatus.INCOMPATIBLE
+        self._adaptive_store_healthy = True
+        self._observe_adaptive_effective_state()
+        return result.status
 
-            # Map actual worker_count back to arm (delta)
-            baseline = self._infer_baseline_worker_count(
-                decision.complexity_analysis, decision.collaboration_mode
+    async def initialize_adaptive_state(self) -> StateLoadStatus:
+        """Restore durable adaptive state without making base routing depend on it."""
+
+        if not self.adaptive_routing_enabled or self._adaptive_engine is None:
+            return StateLoadStatus.MISSING
+        async with self._adaptive_state_lock:
+            return await self._refresh_adaptive_state()
+
+    async def close(self) -> None:
+        """Release process-local router resources owned by the runtime."""
+
+        tasks = tuple(self._background_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._background_tasks.clear()
+        self.cache_manager.clear()
+
+    async def _restore_snapshot(self, snapshot: AdaptiveStateSnapshot) -> None:
+        self._adaptive_engine = AdaptiveAllocationEngine(self._adaptive_engine_config())
+        for experiment in snapshot.experiments:
+            mode_value = experiment.experiment_id.removeprefix("adaptive_allocation_")
+            mode = CollaborationMode(mode_value)
+            await self._ensure_adaptive_experiment(mode)
+            self._adaptive_engine.restore_experiment_state(
+                experiment.experiment_id,
+                experiment.to_dict(),
             )
-            actual_delta = decision.agent_allocation.worker_count - baseline
+        self._mode_quality_baselines = {
+            CollaborationMode(mode): value
+            for mode, value in snapshot.mode_quality_baselines
+        }
+        self._adaptive_snapshot = snapshot
 
-            # Clamp delta to {-2, -1, 0, +1, +2} (may be clamped by hard caps)
-            clamped_delta = max(-2, min(2, actual_delta))
-            delta_to_variant = {-2: "-2", -1: "-1", 0: "0", 1: "+1", 2: "+2"}
-            variant_id = delta_to_variant.get(clamped_delta, "0")
+    async def _apply_outcome_to_snapshot(
+        self,
+        base: AdaptiveStateSnapshot,
+        outcome: RoutingOutcome,
+    ) -> AdaptiveStateSnapshot:
+        eligible_count = base.eligible_outcome_count
+        ineligible_count = base.ineligible_outcome_count
 
-            # Compute advantage reward (baseline-relative per collaboration_mode).
-            # This isolates the allocation improvement signal from mode-intrinsic
-            # quality differences (e.g., DIRECT queries naturally score higher than
-            # HIERARCHICAL queries due to inherent complexity, not worker_count).
-            mode = decision.collaboration_mode
-            if mode not in self._mode_quality_baselines:
-                # Initialize with midpoint of typical quality range [0.6, 0.9]
-                self._mode_quality_baselines[mode] = 0.75
-
-            quality_baseline = self._mode_quality_baselines[mode]
-            advantage = quality_score - quality_baseline
-
-            # Update baseline with exponential moving average (alpha=0.05 for stability)
-            self._mode_quality_baselines[mode] = float(
-                0.95 * quality_baseline + 0.05 * quality_score
+        if outcome.eligibility.eligible:
+            if outcome.quality_score is None:
+                raise ValueError("eligible outcome must carry measured quality")
+            await self._ensure_adaptive_experiment(outcome.collaboration_mode)
+            engine = self._adaptive_engine
+            if engine is None:
+                raise RuntimeError("adaptive engine is unavailable")
+            experiment_id = f"adaptive_allocation_{outcome.collaboration_mode.value}"
+            quality_baseline = self._mode_quality_baselines.get(
+                outcome.collaboration_mode, 0.75
             )
-
-            # Shift advantage to [0, 1] range for Thompson Sampling Beta update
+            advantage = outcome.quality_score - quality_baseline
+            self._mode_quality_baselines[outcome.collaboration_mode] = float(
+                0.95 * quality_baseline + 0.05 * outcome.quality_score
+            )
             reward = float(np.clip(advantage + 0.5, 0.0, 1.0))
-
-            await self._adaptive_engine.record_outcome(
-                experiment_id, variant_id, reward
+            variant_id = (
+                str(outcome.applied_arm)
+                if outcome.applied_arm <= 0
+                else f"+{outcome.applied_arm}"
             )
+            await engine.record_outcome(experiment_id, variant_id, reward)
+            eligible_count += 1
+        else:
+            ineligible_count += 1
 
-            logger.debug(
-                f"adaptive_routing: recorded outcome for {experiment_id} "
-                f"variant {variant_id} reward {reward:.3f}"
-            )
-
-        except Exception as e:
-            logger.warning(f"Failed to record adaptive routing outcome: {e}")
+        engine = self._adaptive_engine
+        if engine is None:
+            raise RuntimeError("adaptive engine is unavailable")
+        experiments = tuple(
+            AdaptiveExperimentSnapshot.from_dict(item)
+            for item in engine.export_experiment_state()
+        )
+        return base.next_revision(
+            experiments=experiments,
+            mode_quality_baselines=tuple(
+                sorted(
+                    (mode.value, value)
+                    for mode, value in self._mode_quality_baselines.items()
+                )
+            ),
+            eligible_outcome_count=eligible_count,
+            ineligible_outcome_count=ineligible_count,
+            processed_outcome_count=base.processed_outcome_count + 1,
+        )
 
     def _apply_memory_adjustment(
         self, analytic_count: int, episodic_prior: int | None
@@ -952,6 +1318,156 @@ class MASRouter:
 
         strategy_budgets = budgets.get(strategy, budgets[RoutingStrategy.BALANCED])
         return strategy_budgets.get(mode, 10)  # Global max fallback
+
+    def _allocate_agents_with_attribution(
+        self,
+        complexity_analysis: ComplexityAnalysis,
+        collaboration_mode: CollaborationMode,
+        episodic_prior: int | None = None,
+        adaptive_recommendation: AdaptiveAllocationProposal | int | None = None,
+        routing_strategy: RoutingStrategy | None = None,
+        adaptive_enabled_override: bool | None = None,
+        fixture_mode: bool = False,
+    ) -> tuple[AgentAllocation, AdaptiveDecisionMetadata]:
+        """Allocate agents and retain literal proposal/application attribution."""
+
+        strategy = routing_strategy or self.default_strategy
+        analytic_baseline = self._infer_baseline_worker_count(
+            complexity_analysis, collaboration_mode
+        )
+        memory_baseline = self._apply_memory_adjustment(
+            analytic_baseline, episodic_prior
+        )
+        proposal = (
+            adaptive_recommendation
+            if isinstance(adaptive_recommendation, AdaptiveAllocationProposal)
+            else None
+        )
+        budget_cap = self._get_strategy_budget(strategy, collaboration_mode)
+        system_min, system_max = self._allocation_system_bounds(collaboration_mode)
+
+        bounded_proposal_count = memory_baseline
+        if proposal is not None:
+            proposed_delta = proposal.applied_worker_count - memory_baseline
+            bounded_delta = max(
+                -self.adaptive_routing_max_worker_adjust,
+                min(self.adaptive_routing_max_worker_adjust, proposed_delta),
+            )
+            bounded_proposal_count = max(1, memory_baseline + bounded_delta)
+        safety_clamped = proposal is not None and not proposal.safety_check_passed
+        budget_clamped = proposal is not None and bounded_proposal_count > budget_cap
+        system_clamped = (
+            proposal is not None
+            and not system_min <= bounded_proposal_count <= system_max
+        )
+        fixed_mode = collaboration_mode in {
+            CollaborationMode.FAST_PATH,
+            CollaborationMode.DIRECT,
+            CollaborationMode.DEBATE,
+        }
+
+        if proposal is None:
+            recommendation = (
+                adaptive_recommendation
+                if isinstance(adaptive_recommendation, int)
+                else None
+            )
+        elif safety_clamped or budget_clamped or system_clamped or fixed_mode:
+            recommendation = memory_baseline
+        else:
+            recommendation = bounded_proposal_count
+
+        allocation = self._allocate_agents(
+            complexity_analysis,
+            collaboration_mode,
+            episodic_prior,
+            recommendation,
+            routing_strategy=strategy,
+        )
+
+        enabled = (
+            self.adaptive_routing_enabled
+            if adaptive_enabled_override is None
+            else adaptive_enabled_override
+        )
+        proposed_arm = proposal.proposed_arm if proposal else 0
+        proposed_count = proposal.proposed_worker_count if proposal else memory_baseline
+        probability = proposal.allocation_probability if proposal else 1.0
+        ready = proposal.ready if proposal else False
+        state_revision = proposal.state_revision if proposal else 0
+        final_delta = allocation.worker_count - memory_baseline
+        applied_arm = 0
+        if (
+            proposal is not None
+            and not safety_clamped
+            and not budget_clamped
+            and not system_clamped
+            and not fixed_mode
+            and final_delta in ADAPTIVE_ARMS
+        ):
+            # Attribute the arm that actually executed after the configured
+            # adjustment cap, never the pre-cap proposal.
+            applied_arm = final_delta
+
+        control_reason = proposal.control_reason if proposal else None
+        if fixed_mode and enabled:
+            control_reason = "collaboration_mode_uses_fixed_allocation"
+        elif budget_clamped:
+            control_reason = "proposal_exceeds_strategy_budget"
+        elif system_clamped:
+            control_reason = "proposal_exceeds_system_bounds"
+
+        if fixture_mode:
+            status = AdaptiveRoutingStatus.FIXTURE_OFF
+            control_reason = "fixture_policy_forced_off"
+        elif not enabled:
+            status = AdaptiveRoutingStatus.DISABLED
+            control_reason = "adaptive_routing_disabled"
+        elif proposal is None or not proposal.ready:
+            if control_reason and (
+                "state_" in control_reason or "error" in control_reason
+            ):
+                status = AdaptiveRoutingStatus.DEGRADED
+            else:
+                status = AdaptiveRoutingStatus.COLD
+        elif applied_arm == 0:
+            status = AdaptiveRoutingStatus.CONTROL
+        else:
+            status = AdaptiveRoutingStatus.ACTIVE
+
+        metadata = AdaptiveDecisionMetadata(
+            schema_version=self.adaptive_schema_version,
+            policy_version=self.adaptive_policy_version,
+            state_revision=state_revision,
+            status=status,
+            enabled=enabled,
+            ready=ready,
+            analytic_baseline_count=analytic_baseline,
+            memory_baseline_count=memory_baseline,
+            proposed_arm=proposed_arm,
+            proposed_worker_count=proposed_count,
+            proposal_probability=probability,
+            safety_clamped=safety_clamped,
+            budget_clamped=budget_clamped,
+            system_clamped=system_clamped,
+            final_worker_count=allocation.worker_count,
+            applied_arm=applied_arm,
+            control_reason=control_reason,
+        )
+        return allocation, metadata
+
+    def _allocation_system_bounds(
+        self, collaboration_mode: CollaborationMode
+    ) -> tuple[int, int]:
+        if collaboration_mode == CollaborationMode.PARALLEL:
+            return 1, self.max_parallel_workers
+        if collaboration_mode == CollaborationMode.HIERARCHICAL:
+            return 1, self.max_agents_per_query
+        if collaboration_mode == CollaborationMode.ENSEMBLE:
+            return 3, 7
+        if collaboration_mode == CollaborationMode.DEBATE:
+            return 3, 3
+        return 1, 1
 
     def _allocate_agents(
         self,
@@ -1338,6 +1854,95 @@ class MASRouter:
         """Get current routing metrics."""
         return self.metrics_collector.get_metrics()
 
+    def _adaptive_experiment_readiness(self) -> dict[str, bool]:
+        """Return readiness for every experiment observed by this process."""
+
+        experiment_ids = {
+            experiment.experiment_id
+            for experiment in self._adaptive_snapshot.experiments
+        }
+        if self._adaptive_engine is not None:
+            experiment_ids.update(self._adaptive_engine.active_experiments)
+
+        readiness: dict[str, bool] = {}
+        for experiment_id in sorted(experiment_ids):
+            readiness[experiment_id] = (
+                self._adaptive_engine is not None
+                and self._adaptive_engine.is_experiment_ready(experiment_id)[0]
+            )
+        return readiness
+
+    def _adaptive_effective_state(
+        self,
+        experiment_readiness: dict[str, bool] | None = None,
+    ) -> tuple[AdaptiveRoutingStatus, str, bool]:
+        """Calculate the process-local effective state without store I/O."""
+
+        readiness = (
+            experiment_readiness
+            if experiment_readiness is not None
+            else self._adaptive_experiment_readiness()
+        )
+        # A global active claim requires every experiment observed/configured
+        # in this process to be ready. An empty experiment set remains cold.
+        ready = bool(readiness) and all(readiness.values())
+
+        if self.fixture_mode:
+            return AdaptiveRoutingStatus.FIXTURE_OFF, "not_used", False
+        if not self.adaptive_routing_enabled:
+            return AdaptiveRoutingStatus.DISABLED, "not_used", False
+        if not self._adaptive_store_healthy or self._adaptive_state_status in {
+            StateLoadStatus.CORRUPT,
+            StateLoadStatus.ERROR,
+            StateLoadStatus.INCOMPATIBLE,
+        }:
+            return AdaptiveRoutingStatus.DEGRADED, "degraded", False
+        if ready:
+            return AdaptiveRoutingStatus.ACTIVE, "healthy", True
+        return AdaptiveRoutingStatus.COLD, "healthy", False
+
+    def _observe_adaptive_effective_state(self) -> None:
+        """Publish bounded telemetry at a real local state boundary."""
+
+        effective_state, _, _ = self._adaptive_effective_state()
+        observe_effective_state(effective_state.value)
+
+    async def get_adaptive_status(self) -> dict[str, Any]:
+        """Return measured adaptive state without touching the state store."""
+
+        snapshot = self._adaptive_snapshot
+        per_arm_counts = {str(arm): 0 for arm in ADAPTIVE_ARMS}
+        for experiment in snapshot.experiments:
+            for arm, count in zip(
+                experiment.ordered_arms,
+                experiment.arm_counts,
+                strict=True,
+            ):
+                per_arm_counts[str(arm)] += count
+
+        experiment_readiness = self._adaptive_experiment_readiness()
+        effective_state, store_health, ready = self._adaptive_effective_state(
+            experiment_readiness
+        )
+
+        return {
+            "effective_state": effective_state.value,
+            "enabled": self.adaptive_routing_enabled and not self.fixture_mode,
+            "ready": ready,
+            "schema_version": self.adaptive_schema_version,
+            "policy_version": self.adaptive_policy_version,
+            "state_revision": snapshot.revision,
+            "state_load_status": self._adaptive_state_status.value,
+            "store_health": store_health,
+            "eligible_outcome_count": snapshot.eligible_outcome_count,
+            "ineligible_outcome_count": snapshot.ineligible_outcome_count,
+            "duplicate_outcome_count": snapshot.duplicate_outcome_count,
+            "processed_outcome_count": snapshot.processed_outcome_count,
+            "fallback_count": snapshot.fallback_count,
+            "per_arm_counts": per_arm_counts,
+            "experiment_readiness": experiment_readiness,
+        }
+
     async def health_check(self) -> HealthCheckDict:
         """Perform health check on MASR components."""
         metrics = self.metrics_collector.get_metrics()
@@ -1355,6 +1960,7 @@ class MASRouter:
                 "avg_routing_time_ms": "N/A",
             },
         }
+        health["metrics"]["adaptive_routing"] = await self.get_adaptive_status()
 
         return health
 

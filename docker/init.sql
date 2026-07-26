@@ -16,15 +16,31 @@ CREATE SCHEMA IF NOT EXISTS monitoring;
 ALTER DATABASE research_db SET search_path TO public, ai_brain, temporal, monitoring;
 
 -- Create custom types
-CREATE TYPE IF NOT EXISTS complexity_level AS ENUM ('simple', 'moderate', 'complex');
-CREATE TYPE IF NOT EXISTS routing_strategy AS ENUM ('speed_first', 'cost_efficient', 'quality_focused', 'balanced', 'adaptive');
-CREATE TYPE IF NOT EXISTS collaboration_mode AS ENUM ('direct', 'parallel', 'hierarchical', 'debate', 'ensemble');
-CREATE TYPE IF NOT EXISTS supervision_mode AS ENUM ('sequential', 'parallel', 'hybrid', 'adaptive');
+-- PostgreSQL has no `CREATE TYPE IF NOT EXISTS`; guard idempotency manually
+-- so this script is safe to re-run against an already-initialized cluster.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'complexity_level') THEN
+        CREATE TYPE complexity_level AS ENUM ('simple', 'moderate', 'complex');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'routing_strategy') THEN
+        CREATE TYPE routing_strategy AS ENUM ('speed_first', 'cost_efficient', 'quality_focused', 'balanced', 'adaptive');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'collaboration_mode') THEN
+        CREATE TYPE collaboration_mode AS ENUM ('direct', 'parallel', 'hierarchical', 'debate', 'ensemble');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'supervision_mode') THEN
+        CREATE TYPE supervision_mode AS ENUM ('sequential', 'parallel', 'hybrid', 'adaptive');
+    END IF;
+END $$;
 
 -- Performance optimization settings
+-- pg_stat_statements.* are custom GUCs registered by the extension only once
+-- it is present in shared_preload_libraries, which requires a server restart
+-- to take effect. Setting them here (before that restart) fails with
+-- "unrecognized configuration parameter". Only queue the preload-libraries
+-- change; tune pg_stat_statements.track/.max out-of-band after a restart.
 ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements';
-ALTER SYSTEM SET pg_stat_statements.track = 'all';
-ALTER SYSTEM SET pg_stat_statements.max = 10000;
 
 -- Memory and performance tuning for research workloads
 ALTER SYSTEM SET max_connections = 200;
@@ -37,12 +53,13 @@ ALTER SYSTEM SET default_statistics_target = 100;
 ALTER SYSTEM SET random_page_cost = 1.1;
 
 -- Logging configuration for monitoring
+-- Keep logs on stderr (captured by `docker logs`) instead of enabling the
+-- file-based logging_collector: the postgres:16-alpine image has no
+-- /var/log/postgresql directory, so turning on logging_collector with a
+-- log_directory that doesn't exist makes the server FATAL-exit on every
+-- subsequent restart once these settings are persisted to
+-- postgresql.auto.conf.
 ALTER SYSTEM SET log_destination = 'stderr';
-ALTER SYSTEM SET logging_collector = on;
-ALTER SYSTEM SET log_directory = '/var/log/postgresql';
-ALTER SYSTEM SET log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log';
-ALTER SYSTEM SET log_rotation_age = '1d';
-ALTER SYSTEM SET log_rotation_size = '100MB';
 ALTER SYSTEM SET log_min_duration_statement = 1000; -- Log slow queries (>1s)
 ALTER SYSTEM SET log_checkpoints = on;
 ALTER SYSTEM SET log_connections = on;
@@ -267,15 +284,43 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA monitoring TO research;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA monitoring TO research;
 
 -- Set up row-level security (basic setup)
-ALTER TABLE ai_brain.routing_decisions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_brain.supervisor_executions ENABLE ROW LEVEL SECURITY;
+-- ai_brain.routing_decisions / ai_brain.supervisor_executions are only
+-- created by setup_ai_brain_schema(), which this script defines but never
+-- calls (those tables are provisioned later, after Alembic migrations run).
+-- Guard on table existence so this script does not fail against a fresh
+-- cluster, and stays safe to re-run once the tables do exist. PostgreSQL
+-- also has no `CREATE POLICY IF NOT EXISTS`, so idempotency is handled via
+-- pg_policies lookups.
+DO $$
+BEGIN
+    IF to_regclass('ai_brain.routing_decisions') IS NOT NULL THEN
+        ALTER TABLE ai_brain.routing_decisions ENABLE ROW LEVEL SECURITY;
 
--- Create default policies (allow all for research user)
-CREATE POLICY IF NOT EXISTS routing_decisions_policy ON ai_brain.routing_decisions
-FOR ALL TO research USING (true);
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'ai_brain'
+              AND tablename = 'routing_decisions'
+              AND policyname = 'routing_decisions_policy'
+        ) THEN
+            CREATE POLICY routing_decisions_policy ON ai_brain.routing_decisions
+            FOR ALL TO research USING (true);
+        END IF;
+    END IF;
 
-CREATE POLICY IF NOT EXISTS supervisor_executions_policy ON ai_brain.supervisor_executions  
-FOR ALL TO research USING (true);
+    IF to_regclass('ai_brain.supervisor_executions') IS NOT NULL THEN
+        ALTER TABLE ai_brain.supervisor_executions ENABLE ROW LEVEL SECURITY;
+
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'ai_brain'
+              AND tablename = 'supervisor_executions'
+              AND policyname = 'supervisor_executions_policy'
+        ) THEN
+            CREATE POLICY supervisor_executions_policy ON ai_brain.supervisor_executions
+            FOR ALL TO research USING (true);
+        END IF;
+    END IF;
+END $$;
 
 -- Initialize database statistics
 ANALYZE;

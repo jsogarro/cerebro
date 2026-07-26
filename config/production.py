@@ -27,13 +27,11 @@ from config.base import (
     RedisConfig,
     SecurityConfig,
     TemporalConfig,
-    validate_production_jwt_secret,
+    validate_production_jwt_keypair,
 )
 
-# Shared settings config for env-binding helpers.
+# Shared settings config for process-environment binding helpers.
 ENV_SETTINGS_CONFIG = SettingsConfigDict(
-    env_file=".env",
-    env_file_encoding="utf-8",
     case_sensitive=True,
     extra="ignore",
 )
@@ -81,7 +79,14 @@ class _ProductionEnv(BaseSettings):
     ALERT_EMAIL: str | None = None
 
     # Security
-    JWT_SECRET_KEY: str = Field(default="", description="Required in production")
+    JWT_PRIVATE_KEY_PATH: str = Field(
+        default="",
+        description="Required RS256 private PEM path in production",
+    )
+    JWT_PUBLIC_KEY_PATH: str = Field(
+        default="",
+        description="Required RS256 public PEM path in production",
+    )
     CORS_ORIGINS: str = ""
     SECRETS_PROVIDER: str = "vault"
     VAULT_URL: str | None = None
@@ -110,12 +115,12 @@ class ProductionConfig(BaseConfig):
     ) -> None:
         """Build nested DTOs from env bindings before BaseSettings validates.
 
-        Production reads its required secrets (``DB_PASSWORD``, ``JWT_SECRET_KEY``,
-        ``GEMINI_API_KEY``) from environment via :class:`_ProductionEnv`. We
-        construct the ``database`` and ``security`` DTOs eagerly here so that
-        ``BaseConfig``'s required-field validation has the values it needs.
-        Callers can still pass an explicit ``database`` or ``security`` to
-        bypass env binding (mainly used by tests).
+        Production reads its required database credential and RS256 PEM paths,
+        plus optional provider configuration, from :class:`_ProductionEnv`.
+        We construct the ``database`` and ``security`` DTOs eagerly here so
+        that ``BaseConfig``'s required-field validation has the values it
+        needs. Callers can still pass an explicit ``database`` or ``security``
+        to bypass env binding (mainly used by tests).
         """
         env = _ProductionEnv()
         kwargs: dict[str, Any] = dict(data)
@@ -154,7 +159,8 @@ class ProductionConfig(BaseConfig):
         kwargs.setdefault(
             "security",
             SecurityConfig(
-                jwt_secret_key=env.JWT_SECRET_KEY,
+                jwt_private_key_path=env.JWT_PRIVATE_KEY_PATH,
+                jwt_public_key_path=env.JWT_PUBLIC_KEY_PATH,
                 jwt_algorithm="RS256",
                 jwt_expiration_minutes=60,
                 refresh_token_expiration_days=7,
@@ -324,15 +330,15 @@ class ProductionConfig(BaseConfig):
     def validate_required_env_vars(self) -> None:
         """Validate that all required environment variables are set.
 
-        Raises ``ValueError`` if ``DB_PASSWORD``, ``GEMINI_API_KEY``, or
-        ``JWT_SECRET_KEY`` are missing or empty. Also rejects known dev
-        defaults that would otherwise produce a "looks-authenticated"
-        production system with a public secret.
+        Raises ``ValueError`` if ``DB_PASSWORD`` or either RS256 PEM path is
+        missing, if the key material is unreadable/invalid/mismatched, or if
+        the database password is a known development default. Provider
+        credentials remain optional until a live provider is selected.
         """
         required_vars = [
             ("DB_PASSWORD", self.database.password),
-            ("GEMINI_API_KEY", self.gemini.api_key),
-            ("JWT_SECRET_KEY", self.security.jwt_secret_key),
+            ("JWT_PRIVATE_KEY_PATH", self.security.jwt_private_key_path),
+            ("JWT_PUBLIC_KEY_PATH", self.security.jwt_public_key_path),
         ]
 
         missing_vars = [
@@ -348,24 +354,17 @@ class ProductionConfig(BaseConfig):
         # the empty-string check above.
         insecure_defaults = {
             "DB_PASSWORD": {"research123", "postgres", "password"},
-            "JWT_SECRET_KEY": {
-                "change-me-in-production",
-                "dev-secret-key-not-for-production",
-                "staging-secret-key",
-            },
         }
         violations = []
         if self.database.password in insecure_defaults["DB_PASSWORD"]:
             violations.append("DB_PASSWORD")
-        if self.security.jwt_secret_key in insecure_defaults["JWT_SECRET_KEY"]:
-            violations.append("JWT_SECRET_KEY")
-        try:
-            validate_production_jwt_secret(self.security.jwt_secret_key)
-        except ValueError:
-            if "JWT_SECRET_KEY" not in violations:
-                violations.append("JWT_SECRET_KEY")
         if violations:
             raise ValueError(
                 "Production environment variables match known dev defaults: "
                 f"{', '.join(violations)}. Rotate these secrets before deploy."
             )
+
+        validate_production_jwt_keypair(
+            self.security.jwt_private_key_path,
+            self.security.jwt_public_key_path,
+        )

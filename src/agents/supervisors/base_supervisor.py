@@ -1270,7 +1270,7 @@ Task: Revise your previous response addressing the feedback while maintaining yo
                 message_type: MessageType,
                 content: TalkHierContent | str,
                 context: dict[str, Any] | None,
-            ) -> tuple[str, TalkHierMessage | None | Exception]:
+            ) -> tuple[str, TalkHierMessage | Exception | None]:
                 """Execute single worker with semaphore bound."""
                 async with semaphore:
                     try:

@@ -3,6 +3,7 @@
 import os
 import tempfile
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,8 +18,33 @@ from src.services.report_config import ReportSettings
 from src.services.report_generator import ReportGenerator
 
 
+@pytest.fixture(autouse=True)
+def isolate_dotenv_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import src.core.environment as shared_environment
+
+    monkeypatch.setattr(
+        shared_environment,
+        "PROJECT_ENV_PATH",
+        tmp_path / "fake-project" / ".env",
+    )
+    monkeypatch.setattr(
+        shared_environment,
+        "HOME_ENV_PATH",
+        tmp_path / "fake-home" / ".env",
+    )
+
+
 class TestReportGenerator:
     """Test report generator service."""
+
+    def test_explicit_report_setting_beats_ambient_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("REPORT_TEMPLATE_PATH", "/ambient/templates")
+
+        settings = ReportSettings(template_path="/explicit/templates")
+
+        assert settings.template_path == "/explicit/templates"
 
     @pytest.fixture
     def temp_settings(self) -> Generator[ReportSettings]:

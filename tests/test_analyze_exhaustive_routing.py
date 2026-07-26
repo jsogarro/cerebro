@@ -26,7 +26,7 @@ def test_exhaustive_analysis_type_is_accepted() -> None:
 async def test_exhaustive_routes_quality_focused() -> None:
     captured = {}
 
-    async def _capture(intelligent_request, background_tasks):
+    async def _capture(intelligent_request, background_tasks, execution_service=None):
         captured["req"] = intelligent_request
         return AsyncMock()
 
@@ -40,7 +40,7 @@ async def test_exhaustive_routes_quality_focused() -> None:
 async def test_non_exhaustive_defers_routing_to_masr() -> None:
     captured = {}
 
-    async def _capture(intelligent_request, background_tasks):
+    async def _capture(intelligent_request, background_tasks, execution_service=None):
         captured["req"] = intelligent_request
         return AsyncMock()
 

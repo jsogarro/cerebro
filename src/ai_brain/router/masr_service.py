@@ -26,8 +26,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from structlog import get_logger
 
+from src.core.environment import load_environment
 from src.core.pii_redactor import redact_pii
 
+from .factory import settings_to_router_config
 from .masr import MASRouter, RoutingStrategy
 
 logger = get_logger()
@@ -78,6 +80,10 @@ class MASRService:
 
     def __init__(self) -> None:
         """Initialize MASR service."""
+        load_environment()
+        from src.core.config import Settings
+
+        self.settings = Settings()
         self.app = FastAPI(
             title="Cerebro MASR Service",
             description="Multi-Agent System Router for intelligent query routing",
@@ -302,23 +308,17 @@ class MASRService:
 
         try:
             # Initialize Redis client
-            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/1")
+            redis_url = self.settings.REDIS_URL
             self.redis_client = redis.from_url(redis_url)
             await self.redis_client.ping()
             logger.info("Redis connection established")
 
             # Initialize MASR router
-            masr_config = {
-                "default_strategy": os.getenv("MASR_DEFAULT_STRATEGY", "balanced"),
-                "enable_adaptive": os.getenv("MASR_ENABLE_ADAPTIVE", "true").lower()
-                == "true",
-                "enable_caching": os.getenv("MASR_ENABLE_CACHING", "true").lower()
-                == "true",
-                "quality_threshold": float(os.getenv("MASR_QUALITY_THRESHOLD", "0.85")),
-                "max_agents": int(os.getenv("MASR_MAX_AGENTS", "10")),
-                "enable_learning": os.getenv("MASR_ENABLE_LEARNING", "true").lower()
-                == "true",
-            }
+            masr_config = settings_to_router_config(self.settings)
+            # This service is a legacy diagnostics surface, not an adaptive
+            # state authority. Thompson allocation remains dark here even if
+            # an ambient flag is accidentally enabled.
+            masr_config["adaptive_routing_enabled"] = False
 
             self.masr_router = MASRouter(
                 config=masr_config,

@@ -63,7 +63,12 @@ pre-commit install
 
 ### 3. Configure Environment
 
-Edit `.env` with your configuration. Cerebro runs **Gemini-only by default**; the OpenRouter multi-provider tier is flag-gated off (see [LLM Providers](#llm-providers)).
+Edit `.env` with non-secret project configuration, or put shared local secrets
+in `~/.env`. Existing exported variables win over `~/.env`, which wins over the
+repository `.env`, which wins over defaults. Explicit empty exports are kept.
+Cerebro runs **Gemini-only by default**; the OpenRouter multi-provider tier is
+flag-gated off (see [LLM Providers](#llm-providers)). Provider keys are optional
+for startup.
 
 ```bash
 # API Configuration
@@ -75,6 +80,7 @@ REDIS_URL=redis://localhost:6379/0
 ENVIRONMENT=development
 DEBUG=true            # enables /docs and /redoc (both OFF in production)
 LOG_LEVEL=INFO
+DEV_ALLOW_ANONYMOUS_WEBSOCKETS=false  # explicit local-only opt-in
 
 # Security (JWT is RS256 with PEM key files — see the Auth section)
 JWT_PRIVATE_KEY_PATH=/secrets/jwt_private.pem
@@ -90,15 +96,22 @@ JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 ### 4. Start Services
 
 ```bash
-# Start all services with Docker Compose
-docker-compose up -d
+# Start the default services with home/project dotenv support
+./scripts/compose.sh up -d
 
 # Or start with development tools (pgAdmin, Redis Commander)
-docker-compose --profile dev-tools up -d
+./scripts/compose.sh --profile dev-tools up -d
 
 # Verify services are running
-docker-compose ps
+./scripts/compose.sh ps
+
+# Optional legacy standalone MASR diagnostics service (not the query path)
+./scripts/compose.sh --profile legacy-masr-service up -d masr-router
 ```
+
+The wrapper parses neither file itself. It passes absolute project-then-home
+`--env-file` arguments to Compose, and shell exports remain highest priority.
+Plain `docker compose` does not load `~/.env` automatically.
 
 ### 5. Initialize Database
 
@@ -212,7 +225,7 @@ Client -> FastAPI -> DirectExecutionService (asyncio background task)
 
 `POST /api/v1/query/research` hands off to `DirectExecutionService`, which spawns an asyncio background task and returns immediately. The immediate HTTP response contains **hardcoded placeholders** (`selected_agents=[]`, `estimated_cost=0.015`, `estimated_quality=0.85`, `confidence=0.85`, `routing_time_ms=50.0`) — real routing data is only available afterward via the execution status/results endpoints (see [Execution Status](#execution-status-endpoints)).
 
-- **MASRouter** (`src/ai_brain/router/masr.py`) — the in-process `MASRouter` class performs routing, complexity analysis, and cost optimization. (A standalone `masr-router` container on port 9100 exists in compose but is legacy and **not** on the query path; `MASR_SERVICE_URL` is not read anywhere in `src/`.)
+- **MASRouter** (`src/ai_brain/router/masr.py`) — the FastAPI lifespan owns one settings-backed in-process router shared by direct execution, the mounted MASR API, and active TalkHier sessions. The standalone port-9100 container is legacy-only, requires the `legacy-masr-service` profile, and is not on the query path.
 - **MASRSupervisorBridge** maps MASR routing decisions to supervisors.
 - **Domain supervisors** — Research, Content, Analytics, Finance. Each runs an internal LangGraph `StateGraph`.
 
@@ -303,10 +316,14 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
 
 settings = Settings()
 ```
+
+Before `settings` is constructed, `src/core/environment.py` parses the
+repository `.env` and then `~/.env` without executing them. It never replaces a
+key that was already present in the process.
 
 #### Multiple Environment Support
 
