@@ -258,6 +258,14 @@
     color: hsl(var(--status-neutral));
   }
 
+  .workbench-status-informative {
+    color: hsl(var(--primary));
+  }
+
+  .workbench-status-muted {
+    color: hsl(var(--muted-foreground));
+  }
+
   .skip-link {
     position: fixed;
     top: 0.75rem;

@@ -11,6 +11,7 @@ type PageContext = {
 const routeContexts: Array<{ path: string; context: PageContext }> = [
     { path: "/app/workflows", context: { eyebrow: "Research workbench", title: "Workflows" } },
     { path: "/app/runs", context: { eyebrow: "Research workbench", title: "Runs" } },
+    { path: "/app/runs/:id", context: { eyebrow: "Research workbench", title: "Run detail" } },
     { path: "/app/research/:id", context: { eyebrow: "Legacy research", title: "Research project" } },
     { path: "/app/dashboard", context: { eyebrow: "Legacy overview", title: "Dashboard" } },
     { path: "/app/research", context: { eyebrow: "Legacy research", title: "Research" } },
