@@ -7,6 +7,8 @@ import { RouteError } from '@/components/common/RouteError';
 // Lazy load feature pages
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })));
 const Research = lazy(() => import('@/pages/Research').then(m => ({ default: m.Research })));
+const Workflows = lazy(() => import('@/pages/Workflows').then(m => ({ default: m.Workflows })));
+const Runs = lazy(() => import('@/pages/Runs').then(m => ({ default: m.Runs })));
 const Agents = lazy(() => import('@/pages/Agents').then(m => ({ default: m.Agents })));
 const Memory = lazy(() => import('@/pages/Memory').then(m => ({ default: m.Memory })));
 const QA = lazy(() => import('@/pages/QA').then(m => ({ default: m.QA })));
@@ -25,7 +27,9 @@ export const router = createBrowserRouter([
         element: <AppShell />,
         errorElement: <RouteError />,
         children: [
-            { index: true, element: <Navigate to="/app/dashboard" replace /> },
+            { index: true, element: <Navigate to="/app/workflows" replace /> },
+            { path: 'workflows', element: <Workflows /> },
+            { path: 'runs', element: <Runs /> },
             { path: 'dashboard', element: <Dashboard /> },
             { path: 'research', element: <Research /> },
             { path: 'research/:id', element: <Research /> },
