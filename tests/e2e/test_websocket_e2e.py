@@ -108,10 +108,13 @@ class TestWebSocketE2E:
         # BaseExceptionGroup rather than directly — catch it with `except*`.
         disconnect: WebSocketDisconnect | None = None
         try:
-            async with httpx.AsyncClient() as http_client, aconnect_ws(
-                f"{WS_BASE_URL}/ws",
-                http_client,
-            ) as ws:
+            async with (
+                httpx.AsyncClient() as http_client,
+                aconnect_ws(
+                    f"{WS_BASE_URL}/ws",
+                    http_client,
+                ) as ws,
+            ):
                 await ws.receive_json()
         except* WebSocketDisconnect as eg:
             disconnect = eg.exceptions[0]
