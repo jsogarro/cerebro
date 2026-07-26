@@ -25,6 +25,10 @@ from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
 from src.api.main import app
+from src.api.services.direct_execution_service import (
+    get_application_direct_execution_service,
+    get_direct_execution_service,
+)
 from src.auth.jwt_service import JWTService
 from src.auth.password_service import PasswordService
 from src.core.config import Settings
@@ -261,6 +265,18 @@ async def authenticated_client(
             or IntegrationTestConfig.TEST_ORG_ID,
         )
 
+    # Override the lifespan-owned direct execution service dependency. These
+    # tests build `AsyncClient` against `src.api.main.app` via a raw ASGI
+    # transport, which never sends ASGI lifespan events — so
+    # `app.state.direct_execution_service` (populated only by the app's
+    # `lifespan()`) is never set and
+    # `get_application_direct_execution_service` would otherwise raise a 503
+    # on every request. Fall back to the legacy process-wide singleton, which
+    # is how these endpoints resolved the service before it became
+    # lifespan-owned app state.
+    app.dependency_overrides[get_application_direct_execution_service] = lambda: (
+        get_direct_execution_service()
+    )
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[middleware_get_jwt_service] = override_get_jwt_service
     app.dependency_overrides[get_tenant_context] = override_get_tenant_context
@@ -365,6 +381,18 @@ async def admin_client(
             organization_id=IntegrationTestConfig.TEST_ORG_ID,
         )
 
+    # Override the lifespan-owned direct execution service dependency. These
+    # tests build `AsyncClient` against `src.api.main.app` via a raw ASGI
+    # transport, which never sends ASGI lifespan events — so
+    # `app.state.direct_execution_service` (populated only by the app's
+    # `lifespan()`) is never set and
+    # `get_application_direct_execution_service` would otherwise raise a 503
+    # on every request. Fall back to the legacy process-wide singleton, which
+    # is how these endpoints resolved the service before it became
+    # lifespan-owned app state.
+    app.dependency_overrides[get_application_direct_execution_service] = lambda: (
+        get_direct_execution_service()
+    )
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[middleware_get_jwt_service] = override_get_jwt_service
     app.dependency_overrides[get_tenant_context] = override_get_tenant_context

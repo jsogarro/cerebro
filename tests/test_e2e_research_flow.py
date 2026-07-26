@@ -71,10 +71,28 @@ async def client() -> AsyncClient:
             await conn.run_sync(Base.metadata.create_all, tables=tables)
 
     from src.api.main import app
+    from src.api.services.direct_execution_service import (
+        get_application_direct_execution_service,
+        get_direct_execution_service,
+    )
+
+    # This fixture talks to `app` via a raw ASGITransport, which never sends
+    # ASGI lifespan events — so `app.state.direct_execution_service`
+    # (populated only by the app's `lifespan()`) is never set and
+    # `get_application_direct_execution_service` would otherwise raise a 503
+    # on every request. Fall back to the legacy process-wide singleton, which
+    # is how these endpoints resolved the service before it became
+    # lifespan-owned app state.
+    app.dependency_overrides[get_application_direct_execution_service] = lambda: (
+        get_direct_execution_service()
+    )
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_application_direct_execution_service, None)
 
     await close_db()
     pathlib.Path(_TEST_DB_FILE).unlink(missing_ok=True)
