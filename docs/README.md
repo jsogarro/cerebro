@@ -39,6 +39,12 @@ names.
 These documents describe specific subsystems. Verify examples against the
 current code when making changes because some documents contain older snippets.
 
+### Agent-System Architecture
+
+- [Canonical contracts and lifecycle invariants](architecture/agent-system-contracts.md)
+- [Current agent runtime behavior](architecture/agent-system-runtime.md)
+- [Legacy-to-canonical compatibility mapping](architecture/agent-system-compatibility.md)
+
 ### Runtime and Agents
 
 - [Agent flowcharts](agent-flowcharts.md)
@@ -70,21 +76,21 @@ current code when making changes because some documents contain older snippets.
 - [Integration testing](integration-testing-guide.md)
 - [End-to-end verification](E2E_VERIFICATION.md)
 
-## Historical and Research Material
+## Experimental Subsystems
 
-Documents under [`experimentation/`](experimentation/) preserve subsystem
-designs and research history. They do not describe current product behavior.
-Additional local planning and research artifacts may exist in git-ignored files;
-do not add them to the public repository without an explicit documentation
-decision.
+Documents under [`experimentation/`](experimentation/) describe experimental
+subsystems that are not part of the active product path unless the current
+runtime imports them. Keep additional research artifacts outside the public
+repository.
 
 ## Documentation Rules
 
 When updating Cerebro:
 
 1. Describe shipped behavior in the present tense.
-2. Label target behavior as planned or proposed.
-3. Keep private product specs, PRDs, reviews, and implementation plans outside
+2. Keep proposed behavior in private artifacts rather than public
+   implementation references.
+3. Keep private product specs, PRDs, reviews, and internal artifacts outside
    the repository.
 4. Update the project README and this index when the product boundary changes.
 5. Preserve legacy identifiers where they refer to concrete APIs, models,
