@@ -56,12 +56,12 @@ class MASRRoutingService:
     - Learning and feedback integration
     """
 
-    def __init__(self) -> None:
+    def __init__(self, router: MASRouter | None = None) -> None:
         """Initialize MASR routing service with all components"""
         from src.ai_brain.router.cost_optimizer import CostOptimizer
 
         # Core routing components
-        self.router = MASRouter()
+        self.router = router or MASRouter()
         self.bridge = MASRSupervisorBridge()
         base_cost_optimizer = CostOptimizer()
         self.cost_optimizer = HierarchicalCostOptimizer(
@@ -85,6 +85,15 @@ class MASRRoutingService:
 
         # Service start time for uptime tracking
         self.start_time = datetime.now(UTC)
+        self.closed = False
+
+    async def close(self) -> None:
+        """Release state owned by this application-local service."""
+
+        if self.closed:
+            return
+        self.routing_history.clear()
+        self.closed = True
 
     async def get_routing_decision(
         self, request: RoutingRequest
@@ -416,9 +425,11 @@ class MASRRoutingService:
 
         original_decision = self.routing_history[feedback.routing_id]
 
-        # Update performance metrics
-        strategy = original_decision.routing_strategy
-        self._update_performance_from_feedback(strategy, feedback)
+        # A manual submission is not authenticated evaluator output and this
+        # endpoint has no proof that the returned allocation executed. Keep the
+        # legacy acknowledgment fields, but do not convert these values into
+        # learning or measured execution telemetry.
+        del original_decision
 
         # Clean up old history entries (keep last 1000)
         if len(self.routing_history) > 1000:
@@ -430,7 +441,12 @@ class MASRRoutingService:
             "status": "accepted",
             "routing_id": feedback.routing_id,
             "feedback_processed": True,
-            "learning_updated": True,
+            "learning_updated": False,
+            "recorded": False,
+            "eligible": False,
+            "duplicate": False,
+            "source": "manual",
+            "reason": "manual_feedback_has_no_executed_allocation_or_evaluator_proof",
         }
 
     async def get_available_strategies(self) -> StrategiesListResponse:
@@ -552,8 +568,7 @@ class MASRRoutingService:
         else:
             status = "healthy"
 
-        # Get learning metrics (placeholder since method doesn't exist)
-        learning_metrics: dict[str, int] = {"total_feedback": 0, "learning_cycles": 0}
+        learning_metrics = await self.router.get_adaptive_status()
 
         response = RouterStatus(
             status=status,

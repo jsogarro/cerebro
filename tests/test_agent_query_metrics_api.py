@@ -2,8 +2,9 @@
 Tests for agent query, pattern, and metrics API surfaces.
 """
 
+from collections.abc import Iterator
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,17 +21,13 @@ class TestIntelligentQueryAPI:
     """Test suite for intelligent query API (primary interface)."""
 
     @pytest.fixture
-    def client(self) -> TestClient:
-        """Create test client."""
+    def client(self) -> Iterator[TestClient]:
+        """Create a lifespan-backed client with a deterministic execution fake."""
         from src.api.main import app
+        from src.api.services.direct_execution_service import (
+            get_application_direct_execution_service,
+        )
 
-        return TestClient(app)
-
-    @patch("src.api.services.direct_execution_service.get_direct_execution_service")
-    def test_intelligent_research_query(
-        self, mock_get_service: Mock, client: TestClient
-    ) -> None:
-        """Test primary intelligent research endpoint."""
         mock_service = Mock()
         mock_service.start_research_execution = AsyncMock(
             return_value="test-execution-123"
@@ -46,8 +43,20 @@ class TestIntelligentQueryAPI:
                 started_at=datetime.now(),
             )
         )
-        mock_get_service.return_value = mock_service
+        app.dependency_overrides[get_application_direct_execution_service] = lambda: (
+            mock_service
+        )
+        try:
+            with TestClient(app) as client:
+                yield client
+        finally:
+            app.dependency_overrides.pop(
+                get_application_direct_execution_service,
+                None,
+            )
 
+    def test_intelligent_research_query(self, client: TestClient) -> None:
+        """Test primary intelligent research endpoint."""
         request_data = {
             "query": "What are the ethical implications of AI in healthcare?",
             "domains": ["ai", "healthcare", "ethics"],
@@ -99,7 +108,8 @@ class TestIntelligentQueryAPI:
             },
         )
 
-        assert response.status_code in [200, 500]
+        assert response.status_code == 200
+        assert response.json()["execution_id"] == "test-execution-123"
 
 
 class TestResearchPatternImplementation:

@@ -620,8 +620,7 @@ REDIS_URL=redis://host:port/0
 # External APIs (add actual keys)
 GEMINI_API_KEY=your-gemini-api-key
 
-# Authentication (generate new secrets)
-JWT_SECRET_KEY=generate-new-secret-key
+# Authentication uses mounted RS256 PEM keys; see security-authentication.md.
 
 # Monitoring
 ENABLE_METRICS=true

@@ -1,6 +1,10 @@
 # Outstanding Work: Multi-Provider Enablement & Adaptive Learning
 
-This document records the current state of **multi-provider routing** and **adaptive learning** capabilities in the codebase. As of PR #56, multi-provider routing is **built and available behind a feature flag**. Adaptive learning remains experiment-scoped.
+This document records the current state of **multi-provider routing** and
+**adaptive learning** capabilities in the codebase. Multi-provider routing is
+built behind a feature flag. Adaptive decision/state primitives are integrated
+as a dark capability, but product outcome capture and promotion evidence remain
+incomplete.
 
 ## 1. Multi-provider model routing (NOW BUILT — behind flag)
 
@@ -57,9 +61,28 @@ Enable when there is a concrete need for models beyond Gemini (cost optimization
 - Freshness decay: older routing history contributes less weight (linear decay over `MEMORY_ROUTING_FRESHNESS_DAYS`, default 30 days — weight ramps linearly to zero at the horizon)
 
 **Broader adaptive learning** (outcome → feedback → allocation):
-- The Thompson-sampling adaptive bandit (`src/ai_brain/experimentation/core/adaptive_allocation_engine.py`) **IS wired** into `MASRouter.route` behind `ADAPTIVE_ROUTING_ENABLED` (default OFF). It is imported at `masr.py:36` and invoked in Step 3.6 (`masr.py:365-369`; implementation `_get_adaptive_allocation_adjustment` at `masr.py:649`) as a 5-arm bandit rewarded by `quality_score` from `routing_history`.
-- The closed outcome → feedback loop **does not run on live traffic because the flag is off**; the `experiment_agent_api` surface that also uses it is unmounted (`src/api/routes/experiment_agent_api.py` is never `include_router`'d — dead).
-- Memory subsystem (procedural, episodic, semantic, multi-tier) is partially wired but the closed feedback loop does not run on live traffic
+- FastAPI owns one settings-backed `MASRouter` shared by direct execution, the mounted MASR routes, and active TalkHier sessions.
+- The Thompson allocator remains behind `ADAPTIVE_ROUTING_ENABLED=false`.
+  `MASR_ENABLE_ADAPTIVE` is a deprecated compatibility alias for the older
+  history-based strategy heuristic and cannot enable Thompson sampling.
+- Decisions retain literal proposed/applied arms and clamps. Arm `0` is control
+  for cold, unsafe, incompatible, or degraded paths.
+- Enabling the flag against an empty state namespace is intentionally
+  **effectively inactive**: readiness remains `cold`, only arm `0` executes,
+  and ordinary traffic cannot promote the allocator. Live activation requires
+  a separately validated seed snapshot containing evaluator-qualified coverage
+  for every configured arm; Cerebro does not perform unsafe warm-up exploration.
+- Versioned non-PII state can be stored atomically in Redis with opaque outcome
+  idempotency. Only measured, successful outcomes from an allow-listed
+  evaluator/version and matching policy/schema are eligible.
+- Product execution now records allocation-correlated operational outcomes with
+  retry-stable opaque IDs, but no neutral product evaluator currently supplies
+  eligible quality outcomes. Measured latency is retained; cost and quality are
+  explicitly unavailable unless measured. The mounted manual `/feedback`
+  endpoint remains ineligible and does not train the Thompson allocator.
+- Outcome delivery has only bounded same-process retry. There is no durable
+  transactional outbox yet, so a process failure can still lose an outcome.
+- The standalone MASR service is legacy-only and forces Thompson off.
 
 ### Configuration (memory-informed routing only)
 
@@ -70,6 +93,10 @@ MEMORY_ROUTING_MAX_WORKER_ADJUST=2     # Max ±N from analytic baseline
 MEMORY_ROUTING_FRESHNESS_DAYS=30       # Decay weight for older history
 MEMORY_PROMPT_MAX_PROCEDURES=3         # Max procedural context items
 ADAPTIVE_ROUTING_ENABLED=false         # Gate for the Thompson-sampling bandit loop (config.py:236, default False)
+MASR_ENABLE_ADAPTIVE=true              # Older heuristic only; not Thompson
+ADAPTIVE_ROUTING_SCHEMA_VERSION=1
+ADAPTIVE_ROUTING_POLICY_VERSION=masr-adaptive-v1
+ADAPTIVE_ROUTING_ALLOWED_EVALUATORS={} # Empty allow-list: no eligible learning
 ```
 
 **Behavior when enabled**:
@@ -81,15 +108,45 @@ ADAPTIVE_ROUTING_ENABLED=false         # Gate for the Thompson-sampling bandit l
 
 ### What full adaptive learning requires
 
-1. **A product decision** on whether request-path behavior should adapt based on past outcomes at all — this changes reproducibility and makes responses history-dependent (evaluation and support implications)
-2. **Supporting data and evaluation** — offline/experimental demonstration that the full adaptive loop measurably improves outcome quality before promotion to main request path
-3. **Promotion + guardrails** — wiring the validated loop into the main path with clear on/off control, bounded adaptation, and monitoring
+1. **Correlated outcome capture** — record only allocations that actually
+   execute; retain multi-domain sub-decision attribution and retry-stable opaque
+   IDs.
+2. **Truthful observability and fixture isolation** — measured/unavailable
+   cost and quality, no placeholder learning claims, deterministic fixture runs,
+   and zero adaptive-store access in fixture mode.
+3. **Supporting data and evaluation** — the non-activating promotion gate is
+   implemented, but still needs a real neutral evaluator and representative,
+   versioned evaluator-qualified corpus. It rejects unapproved criteria,
+   incompatible versions, insufficient held-out samples, and synthetic
+   evidence as non-promotional.
+4. **Explicit promotion** — an operator decision after a versioned `pass`;
+   synthetic success and `insufficient_evidence` cannot enable the flag.
+
+Run the evidence gate with an explicit output path outside the repository:
+
+```bash
+python scripts/evaluate_adaptive_routing_promotion.py \
+  --criteria config/adaptive_routing_promotion_criteria.example.json \
+  --corpus /path/to/versioned-evaluator-corpus.json \
+  --output /absolute/private/path/adaptive-routing-promotion.json
+```
+
+The example criteria are intentionally unapproved. Criteria bind the currently
+serialized diagnostic guardrails and require evidence for every in-scope
+collaboration mode and arm. Exact deployed-policy replay remains explicitly
+unsupported, so the gate cannot yet return a promotional `pass`. The command
+never mutates runtime configuration, refuses to overwrite an existing output,
+and emits sanitized `insufficient_evidence` for malformed evidence. Promotion
+reports remain private artifacts and should not be committed.
 
 ### Recommendation
 
 **Memory-informed routing** (PR #55) can be enabled when there is a desire for adaptive behavior based on past successful patterns. It is production-ready behind the flag with graceful degradation.
 
-**Full adaptive learning** should remain in the experimentation harness until an experiment demonstrates measurable quality improvement, then promote behind an explicit toggle.
+**Full adaptive learning** should remain disabled until a neutral evaluator,
+durable delivery/outbox boundary, representative corpus, approved criteria,
+and held-out report all pass. Fixture/restart/replica paths validate mechanics
+only. No runtime or evaluation path flips the flag automatically.
 
 ## Summary
 
@@ -97,6 +154,11 @@ ADAPTIVE_ROUTING_ENABLED=false         # Gate for the Thompson-sampling bandit l
 |---|---|---|---|
 | Multi-provider routing (PR #56) | **BUILT — behind flag** | `OPENROUTER_API_KEY` + `MULTI_PROVIDER_ROUTING_ENABLED=true` | Enable when there is a concrete need for models beyond Gemini |
 | Memory-informed routing (PR #55) | **BUILT — behind flag** | `MEMORY_INFORMED_ROUTING_ENABLED=true` | Enable when adaptive behavior based on past patterns is desired |
-| Full adaptive learning loop | Built, experiment-scoped only | Product decision + evaluation | Prove value in experimentation harness, then promote behind a toggle |
+| Adaptive allocation/state core | **Integrated dark; no live evaluator outcomes** | `ADAPTIVE_ROUTING_ENABLED=false` | Add neutral evaluator and durable outcome outbox |
+| Promotion gate | **Built; evidence insufficient** | Versioned representative corpus + approved criteria | Generate a held-out report after evaluator/outbox work |
+| Live adaptive promotion | **Not approved** | Held-out evaluator-qualified `pass` + operator approval | Keep disabled until evidence exists |
 
-**Status update**: Multi-provider routing and memory-informed routing are now production-ready behind feature flags. Full adaptive learning remains experiment-scoped pending evaluation.
+**Status update**: Multi-provider routing and memory-informed routing remain
+flag-gated. Adaptive runtime/state integration and its promotion gate are dark
+and non-promotional; full learning remains incomplete pending a product
+evaluator, durable delivery, representative evidence, and operator approval.

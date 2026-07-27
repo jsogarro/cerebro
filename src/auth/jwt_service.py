@@ -54,14 +54,30 @@ class JWTService:
         """
         self.redis_client = redis_client
         self.algorithm = "RS256"
+        self._production = settings.ENVIRONMENT.lower() == "production"
 
         # Token expiration settings
         self.access_token_expire_minutes = settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
         self.refresh_token_expire_days = settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
 
         # Load or generate RSA keys
-        self.private_key = self._load_or_generate_private_key(private_key_path)
-        self.public_key = self._load_or_generate_public_key(public_key_path)
+        resolved_private_key_path = (
+            private_key_path
+            if private_key_path is not None
+            else settings.JWT_PRIVATE_KEY_PATH
+            if self._production
+            else None
+        )
+        resolved_public_key_path = (
+            public_key_path
+            if public_key_path is not None
+            else settings.JWT_PUBLIC_KEY_PATH
+            if self._production
+            else None
+        )
+        self.private_key = self._load_or_generate_private_key(resolved_private_key_path)
+        self.public_key = self._load_or_generate_public_key(resolved_public_key_path)
+        self._validate_key_pair()
 
         # Token blacklist prefix in Redis
         self.blacklist_prefix = "blacklist:token:"
@@ -72,18 +88,27 @@ class JWTService:
 
         If ``key_path`` is set and exists, load it.
         Otherwise generate a fresh RSA key pair and attempt to persist it
-        to ``key_path``. If the parent directory of ``key_path`` is not
-        writable (e.g., the production-only ``/secrets/`` mount on a dev
-        machine), log a WARNING and fall back to an ephemeral in-memory
-        key. The warning is intentionally loud so a misconfigured
-        production deployment still surfaces the failure in logs.
+        to ``key_path`` in development and test environments. Production
+        requires pre-provisioned key files and fails closed.
         """
-        if key_path and os.path.exists(key_path):
-            with open(key_path, "rb") as f:
-                private_key = serialization.load_pem_private_key(
-                    f.read(), password=None, backend=default_backend()
-                )
+        if key_path and os.path.isfile(key_path):
+            try:
+                with open(key_path, "rb") as f:
+                    private_key = serialization.load_pem_private_key(
+                        f.read(), password=None, backend=default_backend()
+                    )
+            except (OSError, TypeError, ValueError) as exc:
+                if self._production:
+                    raise RuntimeError(
+                        "Production JWT private key could not be loaded"
+                    ) from exc
+                raise
         else:
+            if self._production:
+                raise RuntimeError(
+                    "Production JWT private key file is required and must be readable"
+                )
+
             # Generate new RSA key pair
             private_key = rsa.generate_private_key(
                 public_exponent=65537, key_size=2048, backend=default_backend()
@@ -109,8 +134,7 @@ class JWTService:
                         guidance=(
                             "Falling back to ephemeral in-memory key. "
                             "Tokens will not survive process restart. "
-                            "In production, mount a writable secrets volume or "
-                            "set JWT_PRIVATE_KEY_PATH to a writable path."
+                            "Production requires a pre-provisioned read-only key pair."
                         ),
                     )
 
@@ -122,12 +146,24 @@ class JWTService:
 
     def _load_or_generate_public_key(self, key_path: str | None = None) -> str:
         """Load or generate RSA public key."""
-        if key_path and os.path.exists(key_path):
-            with open(key_path, "rb") as f:
-                public_key = serialization.load_pem_public_key(
-                    f.read(), backend=default_backend()
-                )
+        if key_path and os.path.isfile(key_path):
+            try:
+                with open(key_path, "rb") as f:
+                    public_key = serialization.load_pem_public_key(
+                        f.read(), backend=default_backend()
+                    )
+            except (OSError, TypeError, ValueError) as exc:
+                if self._production:
+                    raise RuntimeError(
+                        "Production JWT public key could not be loaded"
+                    ) from exc
+                raise
         else:
+            if self._production:
+                raise RuntimeError(
+                    "Production JWT public key file is required and must be readable"
+                )
+
             # Extract public key from private key
             private_key_obj = serialization.load_pem_private_key(
                 self.private_key.encode(), password=None, backend=default_backend()
@@ -157,6 +193,36 @@ class JWTService:
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         ).decode()
+
+    def _validate_key_pair(self) -> None:
+        """Reject a public key that does not match the signing key."""
+
+        try:
+            private_key = serialization.load_pem_private_key(
+                self.private_key.encode(),
+                password=None,
+                backend=default_backend(),
+            )
+            public_key = serialization.load_pem_public_key(
+                self.public_key.encode(),
+                backend=default_backend(),
+            )
+            expected_public = private_key.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            actual_public = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            if actual_public != expected_public:
+                raise ValueError("JWT public key does not match private key")
+        except (TypeError, ValueError) as exc:
+            if self._production:
+                raise RuntimeError(
+                    "Production JWT key pair is invalid or mismatched"
+                ) from exc
+            raise
 
     async def generate_token_pair(
         self,

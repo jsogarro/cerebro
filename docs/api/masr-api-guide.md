@@ -8,6 +8,11 @@ The MASR (Multi-Agent System Router) Dynamic Routing API exposes Cerebro's routi
 
 All 8 REST endpoints below (`/route`, `/estimate-cost`, `/evaluate-strategies`, `/analyze-complexity`, `/strategies`, `/models`, `/feedback`, `/status`) are live and mounted at the `/api/v1/masr` prefix.
 
+These endpoints use the same FastAPI-lifespan-owned in-process `MASRouter` as
+direct execution and active TalkHier sessions. The standalone port-9100 service
+is a non-authoritative legacy diagnostics surface available only through the
+`legacy-masr-service` Compose profile.
+
 ## Key Features
 
 - **Intelligent Routing**: Automatic supervisor and model selection based on query analysis
@@ -23,7 +28,9 @@ All 8 REST endpoints below (`/route`, `/estimate-cost`, `/evaluate-strategies`, 
 http://localhost:8000/api/v1/masr
 ```
 
-> No public `api.cerebro.ai` host exists today. Use the local dev server (`uvicorn src.api.main:app --port 8000`, or `docker-compose up`). Any `*.cerebro.ai` URL in this guide is aspirational.
+> No public `api.cerebro.ai` host exists today. Use the local dev server
+> (`uvicorn src.api.main:app --port 8000`, or `./scripts/compose.sh up -d`).
+> Any `*.cerebro.ai` URL in this guide is aspirational.
 
 ## Authentication
 
@@ -235,7 +242,12 @@ Analyze query complexity with detailed feature breakdown.
 
 Submit performance feedback for a completed routing decision.
 
-> **Design-goal caveat.** This endpoint accepts and acknowledges feedback, but there is no closed learning loop behind it today. The `learning_updated: true` field is hardcoded (`src/api/services/masr_routing_service.py:433`) and does not indicate a model was updated. The reward/learning subsystem (`src/improvement`) is stub code — `RewardModel.predict_quality` returns a constant `0.5`. Continuous-learning language elsewhere in this guide describes an intended design, not current behavior.
+> **Learning caveat.** This endpoint accepts feedback but cannot prove that an
+> allocation executed or that quality came from an approved evaluator. It
+> therefore returns `learning_updated: false`, `recorded: false`, and
+> `eligible: false`. The durable adaptive boundary accepts only versioned,
+> measured, evaluator-qualified outcomes. `ADAPTIVE_ROUTING_ENABLED` also
+> defaults to `false`.
 
 **Request Body:**
 ```json
@@ -255,7 +267,12 @@ Submit performance feedback for a completed routing decision.
   "status": "accepted",
   "routing_id": "550e8400-e29b-41d4-a716-446655440000",
   "feedback_processed": true,
-  "learning_updated": true
+  "learning_updated": false,
+  "recorded": false,
+  "eligible": false,
+  "duplicate": false,
+  "source": "manual",
+  "reason": "manual_feedback_has_no_executed_allocation_or_evaluator_proof"
 }
 ```
 
@@ -328,7 +345,13 @@ Get available models and their tier classifications.
 
 Get MASR router health and performance status.
 
-> **Partially live, partially placeholder.** The `model_availability` map is hardcoded (see `/models` note), and the `learning_metrics` block is a fixed placeholder — the service returns exactly `{"total_feedback": 0, "learning_cycles": 0}` (`src/api/services/masr_routing_service.py:555-556`); closed-loop learning is not implemented (see `/feedback`). By contrast, `total_routes`, `average_latency_ms`, `success_rate`, and the per-strategy `performance_metrics` are computed live from in-process counters (`masr_routing_service.py:516-547`) — they are real but reset on restart and are not persisted production metrics. The specific numbers shown below are illustrative.
+> **Partially live, partially placeholder.** The `model_availability` map is
+> hardcoded (see `/models` note). `learning_metrics` is live adaptive state:
+> disabled, fixture-off, cold, degraded, or active status; policy/schema
+> versions; revision/store health; outcome counters; per-arm readiness. It does
+> not claim learning when evaluator evidence is absent. `total_routes`,
+> `average_latency_ms`, `success_rate`, and per-strategy metrics are in-process
+> counters that reset on restart. The specific numbers below are illustrative.
 
 **Response:**
 ```json
@@ -354,11 +377,21 @@ Get MASR router health and performance status.
     "gemini": true
   },
   "learning_metrics": {
-    "total_feedback": 0,
-    "learning_cycles": 0
+    "status": "disabled",
+    "enabled": false,
+    "effective": false,
+    "policy_version": "masr-adaptive-v1",
+    "schema_version": "1",
+    "state_revision": 0,
+    "store_healthy": true
   }
 }
 ```
+
+Fixture-mode execution forces adaptive routing and memory influence off before
+selection and does not access Redis. Promotion is an offline operator workflow,
+not an API endpoint. Use the versioned promotion-gate CLI documented in the
+configuration reference; its report never enables adaptive routing.
 
 ## WebSocket Events
 
@@ -370,18 +403,20 @@ All endpoints return structured error responses:
 
 ```json
 {
-  "error": "Invalid routing strategy",
-  "error_code": "INVALID_REQUEST",
-  "details": {
-    "provided_strategy": "ultra_fast",
-    "valid_strategies": ["speed_first", "cost_efficient", "quality_focused", "balanced", "adaptive"]
-  },
-  "suggestions": [
-    "Check query format",
-    "Verify strategy is valid"
-  ]
+  "error": {
+    "code": "INVALID_REQUEST",
+    "message": "Invalid routing strategy",
+    "details": {
+      "provided_strategy": "ultra_fast",
+      "valid_strategies": ["speed_first", "cost_efficient", "quality_focused", "balanced", "adaptive"]
+    }
+  }
 }
 ```
+
+The application-wide error adapter intentionally exposes the canonical nested
+`error` envelope. Legacy route-local fields such as `suggestions` are not
+included in the mounted HTTP response.
 
 ## Rate Limiting
 

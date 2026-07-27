@@ -5,10 +5,13 @@ Comprehensive tests for TalkHier session management, refinement rounds,
 consensus building, and WebSocket communication.
 """
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from src.api.services.talkhier_consensus_evaluator import TalkHierConsensusEvaluator
@@ -440,11 +443,12 @@ class TestTalkHierAPIIntegration:
     """Integration tests for TalkHier API endpoints"""
 
     @pytest.fixture
-    def client(self) -> TestClient:
+    def client(self) -> Iterator[TestClient]:
         """Create test client"""
         from src.api.main import app
 
-        return TestClient(app)
+        with TestClient(app) as client:
+            yield client
 
     def test_list_protocols(self, client: TestClient) -> None:
         """Test protocol listing endpoint"""
@@ -466,6 +470,204 @@ class TestTalkHierAPIIntegration:
         assert data["status"] in ["healthy", "unhealthy"]
         assert data["service"] == "TalkHier Protocol API"
         assert "timestamp" in data
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_error_always_unregisters_and_disconnects() -> None:
+    from src.api.routes import talkhier_api
+
+    service = TalkHierSessionService()
+    service.get_session_status = AsyncMock(side_effect=ValueError("missing session"))
+    websocket = AsyncMock()
+    websocket.app = SimpleNamespace(
+        state=SimpleNamespace(talkhier_session_service=service)
+    )
+
+    with (
+        patch.object(
+            talkhier_api.connection_manager,
+            "connect",
+            new=AsyncMock(return_value="connection-1"),
+        ),
+        patch.object(
+            talkhier_api.connection_manager,
+            "disconnect",
+            new=AsyncMock(),
+        ) as disconnect,
+        patch.object(
+            talkhier_api.websocket_handler,
+            "register_session_connection",
+            new=AsyncMock(),
+        ),
+        patch.object(
+            talkhier_api.websocket_handler,
+            "unregister_session_connection",
+            new=AsyncMock(),
+        ) as unregister,
+    ):
+        await talkhier_api.websocket_session_updates(websocket, "missing")
+
+    unregister.assert_awaited_once_with("missing", "connection-1")
+    disconnect.assert_awaited_once_with("connection-1")
+    websocket.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_interactive_websocket_disconnect_always_leaves_and_disconnects() -> None:
+    from src.api.routes import talkhier_api
+
+    service = TalkHierSessionService()
+    service.create_session = AsyncMock(
+        return_value=SimpleNamespace(session_id="interactive-1")
+    )
+    websocket = AsyncMock()
+    websocket.app = SimpleNamespace(
+        state=SimpleNamespace(talkhier_session_service=service)
+    )
+    websocket.receive_json.side_effect = [
+        {
+            "type": "init_session",
+            "config": {"query": "Compare two research methods"},
+        },
+        WebSocketDisconnect(),
+    ]
+
+    with (
+        patch.object(
+            talkhier_api.connection_manager,
+            "connect",
+            new=AsyncMock(return_value="connection-2"),
+        ),
+        patch.object(
+            talkhier_api.connection_manager,
+            "disconnect",
+            new=AsyncMock(),
+        ) as disconnect,
+        patch.object(
+            talkhier_api.websocket_handler,
+            "register_interactive_session",
+            new=AsyncMock(),
+        ),
+        patch.object(
+            talkhier_api.websocket_handler,
+            "leave_interactive_session",
+            new=AsyncMock(),
+        ) as leave,
+    ):
+        await talkhier_api.websocket_interactive_session(websocket)
+
+    leave.assert_awaited_once_with("interactive-1", "connection-2")
+    disconnect.assert_awaited_once_with("connection-2")
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_missing_runtime_never_accepts_connection() -> None:
+    from src.api.routes import talkhier_api
+
+    websocket = AsyncMock()
+    websocket.app = SimpleNamespace(state=SimpleNamespace())
+
+    with (
+        patch.object(
+            talkhier_api.connection_manager,
+            "connect",
+            new=AsyncMock(),
+        ) as connect,
+        pytest.raises(RuntimeError, match="runtime is unavailable"),
+    ):
+        await talkhier_api.websocket_session_updates(websocket, "session-1")
+
+    connect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_coordination_websocket_error_always_unregisters_and_disconnects() -> (
+    None
+):
+    from src.api.routes import talkhier_api
+
+    websocket = AsyncMock()
+    websocket.receive_json.return_value = {
+        "type": "monitor",
+        "coordination_id": "coord-missing",
+    }
+
+    with (
+        patch.object(
+            talkhier_api.connection_manager,
+            "connect",
+            new=AsyncMock(return_value="connection-3"),
+        ),
+        patch.object(
+            talkhier_api.connection_manager,
+            "disconnect",
+            new=AsyncMock(),
+        ) as disconnect,
+        patch.object(
+            talkhier_api.websocket_handler,
+            "register_coordination_monitor",
+            new=AsyncMock(),
+        ),
+        patch.object(
+            talkhier_api.websocket_handler,
+            "unregister_coordination_monitor",
+            new=AsyncMock(),
+        ) as unregister,
+        patch.object(
+            talkhier_api.session_manager,
+            "get_coordination_status",
+            new=AsyncMock(side_effect=ValueError("missing coordination")),
+        ),
+    ):
+        await talkhier_api.websocket_coordination_monitoring(websocket)
+
+    unregister.assert_awaited_once_with("coord-missing", "connection-3")
+    disconnect.assert_awaited_once_with("connection-3")
+    websocket.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_coordination_websocket_disconnect_always_unregisters() -> None:
+    from src.api.routes import talkhier_api
+
+    status = SimpleNamespace(dict=lambda: {"coordination_id": "coord-1"})
+    websocket = AsyncMock()
+    websocket.receive_json.side_effect = [
+        {"type": "monitor", "coordination_id": "coord-1"},
+        WebSocketDisconnect(),
+    ]
+
+    with (
+        patch.object(
+            talkhier_api.connection_manager,
+            "connect",
+            new=AsyncMock(return_value="connection-4"),
+        ),
+        patch.object(
+            talkhier_api.connection_manager,
+            "disconnect",
+            new=AsyncMock(),
+        ) as disconnect,
+        patch.object(
+            talkhier_api.websocket_handler,
+            "register_coordination_monitor",
+            new=AsyncMock(),
+        ),
+        patch.object(
+            talkhier_api.websocket_handler,
+            "unregister_coordination_monitor",
+            new=AsyncMock(),
+        ) as unregister,
+        patch.object(
+            talkhier_api.session_manager,
+            "get_coordination_status",
+            new=AsyncMock(return_value=status),
+        ),
+    ):
+        await talkhier_api.websocket_coordination_monitoring(websocket)
+
+    unregister.assert_awaited_once_with("coord-1", "connection-4")
+    disconnect.assert_awaited_once_with("connection-4")
 
 
 # Run tests
