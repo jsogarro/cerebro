@@ -13,6 +13,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+from src.agents.supervisors.content_supervisor import ContentSupervisor
+from src.agents.supervisors.finance_supervisor import FinanceSupervisor
 from src.agents.supervisors.research_supervisor import ResearchSupervisor
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter
@@ -177,6 +180,12 @@ class TestDirectExecutionService:
 
         # Verify supervisor bridge was called
         execution_service.supervisor_bridge.execute_routing_decision.assert_called_once()
+        supervisor_registry = execution_service.supervisor_bridge.execute_routing_decision.call_args.kwargs[
+            "supervisor_registry"
+        ]
+        assert supervisor_registry["content"] is ContentSupervisor
+        assert supervisor_registry["analytics"] is AnalyticsSupervisor
+        assert supervisor_registry["finance"] is FinanceSupervisor
 
         # Check execution status
         execution_status = execution_service.active_executions[execution_id]
@@ -197,13 +206,25 @@ class TestDirectExecutionService:
         class InjectedResearchSupervisor(ResearchSupervisor):
             pass
 
+        class InjectedContentSupervisor(ContentSupervisor):
+            pass
+
+        class InjectedAnalyticsSupervisor(AnalyticsSupervisor):
+            pass
+
+        class InjectedFinanceSupervisor(FinanceSupervisor):
+            pass
+
+        default_registry = build_application_component_registry()
+        replacements = {
+            SUPERVISOR_KEYS["research"]: InjectedResearchSupervisor,
+            SUPERVISOR_KEYS["content"]: InjectedContentSupervisor,
+            SUPERVISOR_KEYS["analytics"]: InjectedAnalyticsSupervisor,
+            SUPERVISOR_KEYS["finance"]: InjectedFinanceSupervisor,
+        }
         injected_registry = TypedRegistry(
-            [
-                RegistryEntry(
-                    SUPERVISOR_KEYS["research"],
-                    InjectedResearchSupervisor,
-                )
-            ]
+            RegistryEntry(entry.key, replacements.get(entry.key, entry.component))
+            for entry in default_registry.entries
         )
         execution_service = DirectExecutionService(
             masr_router=execution_service.masr_router,
@@ -213,13 +234,36 @@ class TestDirectExecutionService:
             supervisor_registry=injected_registry,
         )
 
+        bridge_called = asyncio.Event()
+        bridge_result = (
+            execution_service.supervisor_bridge.execute_routing_decision.return_value
+        )
+
+        async def signal_bridge_call(*args, **kwargs):
+            bridge_called.set()
+            return bridge_result
+
+        execution_service.supervisor_bridge.execute_routing_decision.side_effect = (
+            signal_bridge_call
+        )
+
         await execution_service.start_research_execution(sample_project)
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(bridge_called.wait(), timeout=1)
 
         call = execution_service.supervisor_bridge.execute_routing_decision.call_args
-        assert call.kwargs["supervisor_registry"] == {
-            "research": InjectedResearchSupervisor,
-        }
+        assert (
+            call.kwargs["supervisor_registry"]["research"] is InjectedResearchSupervisor
+        )
+        assert (
+            call.kwargs["supervisor_registry"]["content"] is InjectedContentSupervisor
+        )
+        assert (
+            call.kwargs["supervisor_registry"]["analytics"]
+            is InjectedAnalyticsSupervisor
+        )
+        assert (
+            call.kwargs["supervisor_registry"]["finance"] is InjectedFinanceSupervisor
+        )
 
     @pytest.mark.asyncio
     async def test_get_execution_status(self, execution_service, sample_project):

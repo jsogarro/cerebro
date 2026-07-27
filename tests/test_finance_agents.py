@@ -17,6 +17,8 @@ from src.agents.models import AgentTask
 from src.agents.supervisors.finance_supervisor import FinanceSupervisor
 from src.agents.supervisors.supervisor_factory import SupervisorFactory
 from src.ai_brain.router.masr import MASRouter
+from src.api.services.component_catalog import build_application_component_registry
+from src.core.kernel.component_keys import SUPERVISOR_KEYS
 
 
 class _FakeGemini:
@@ -96,10 +98,7 @@ async def test_masr_routes_finance_queries_to_finance_supervisor() -> None:
     assert risk.agent_allocation.supervisor_type == "finance"
 
 
-def test_direct_execution_registry_includes_finance() -> None:
-    import inspect
+def test_application_catalog_includes_finance_supervisor() -> None:
+    registry = build_application_component_registry()
 
-    from src.api.services import direct_execution_service as des
-
-    source = inspect.getsource(des.DirectExecutionService._execute_research_workflow)
-    assert '"finance": FinanceSupervisor' in source
+    assert registry.resolve(SUPERVISOR_KEYS["finance"]) is FinanceSupervisor

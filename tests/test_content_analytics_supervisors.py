@@ -29,6 +29,8 @@ from src.ai_brain.router.masr import (
     RoutingDecision,
 )
 from src.ai_brain.router.query_analyzer import ComplexityAnalysis, ComplexityLevel
+from src.api.services.component_catalog import build_application_component_registry
+from src.core.kernel.component_keys import SUPERVISOR_KEYS
 
 
 class _ExtensionSupervisor(BaseSupervisor):
@@ -425,14 +427,9 @@ class TestPrimaryPathRouting:
         assert content.agent_allocation.supervisor_type == "content"
         assert analytics.agent_allocation.supervisor_type == "analytics"
 
-    def test_direct_execution_registry_includes_new_domains(self):
-        """The direct-execution supervisor registry must resolve content/analytics."""
-        import inspect
+    def test_application_catalog_includes_new_supervisor_domains(self):
+        """The application catalog must resolve content and analytics supervisors."""
+        registry = build_application_component_registry()
 
-        from src.api.services import direct_execution_service as des
-
-        source = inspect.getsource(
-            des.DirectExecutionService._execute_research_workflow
-        )
-        assert '"content": ContentSupervisor' in source
-        assert '"analytics": AnalyticsSupervisor' in source
+        assert registry.resolve(SUPERVISOR_KEYS["content"]) is ContentSupervisor
+        assert registry.resolve(SUPERVISOR_KEYS["analytics"]) is AnalyticsSupervisor

@@ -1,6 +1,6 @@
 """Tests for VerificationAgent integration into supervisor quality gates."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
 
@@ -10,6 +10,36 @@ from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
 from src.agents.supervisors.base_supervisor import SupervisionState
 from src.agents.supervisors.content_supervisor import ContentSupervisor
 from src.agents.supervisors.finance_supervisor import FinanceSupervisor
+from src.agents.verification_agent import VerificationAgent
+from src.api.services.component_catalog import build_application_component_registry
+from src.core.kernel import RegistryEntry, TypedRegistry
+from src.core.kernel.component_keys import AGENT_KEYS
+
+
+def _registry_with_verification_agent(agent: MagicMock) -> TypedRegistry:
+    registry = build_application_component_registry()
+    agent_factory = create_autospec(
+        VerificationAgent,
+        spec_set=True,
+        return_value=agent,
+    )
+    return TypedRegistry(
+        RegistryEntry(
+            entry.key,
+            agent_factory
+            if entry.key == AGENT_KEYS["verification"]
+            else entry.component,
+        )
+        for entry in registry.entries
+    )
+
+
+def _assert_verified_content(agent: MagicMock, *expected_fragments: str) -> None:
+    agent.execute.assert_awaited_once()
+    task = agent.execute.await_args.args[0]
+    assert task.agent_type == "verification"
+    content = task.input_data["content"]
+    assert all(fragment in content for fragment in expected_fragments)
 
 
 @pytest.fixture
@@ -35,12 +65,6 @@ class TestContentSupervisorVerification:
         self, mock_gemini_service, mock_cache_client
     ):
         """Test that PASS verdict does not reduce quality score."""
-        supervisor = ContentSupervisor(
-            gemini_service=mock_gemini_service,
-            cache_client=mock_cache_client,
-            config={},
-        )
-
         # Mock worker results
         state = SupervisionState(
             task_id="test-123",
@@ -69,22 +93,34 @@ class TestContentSupervisorVerification:
             ),
         }
 
-        # Mock verification agent to return PASS
-        with patch("src.agents.factory.AgentFactory.create_agent") as mock_create_agent:
-            mock_verif_agent = MagicMock()
-            mock_verif_agent.execute = AsyncMock(
-                return_value=AgentResult(
-                    task_id="verif-1",
-                    status="completed",
-                    output={"content": "VERDICT: PASS\nISSUES: None"},
-                    confidence=0.9,
-                    execution_time=1.0,
+        # Inject a verification agent through the authoritative component registry.
+        mock_verif_agent = create_autospec(
+            VerificationAgent, instance=True, spec_set=True
+        )
+        mock_verif_agent.execute.return_value = AgentResult(
+            task_id="verif-1",
+            status="completed",
+            output={"content": "VERDICT: PASS\nISSUES: None"},
+            confidence=0.9,
+            execution_time=1.0,
+        )
+        supervisor = ContentSupervisor(
+            gemini_service=mock_gemini_service,
+            cache_client=mock_cache_client,
+            config={
+                "component_registry": _registry_with_verification_agent(
+                    mock_verif_agent
                 )
-            )
-            mock_create_agent.return_value = mock_verif_agent
+            },
+        )
 
-            # Execute quality evaluation phase
-            result_state = await supervisor._evaluate_quality_phase(langgraph_state)
+        # Execute quality evaluation phase
+        result_state = await supervisor._evaluate_quality_phase(langgraph_state)
+        _assert_verified_content(
+            mock_verif_agent,
+            "Draft content here",
+            "Edited content here",
+        )
 
         state = result_state["supervision_state"]
 
@@ -101,12 +137,6 @@ class TestContentSupervisorVerification:
         self, mock_gemini_service, mock_cache_client
     ):
         """Test that REVISE verdict reduces quality score."""
-        supervisor = ContentSupervisor(
-            gemini_service=mock_gemini_service,
-            cache_client=mock_cache_client,
-            config={},
-        )
-
         state = SupervisionState(
             task_id="test-123",
             original_query="Write a blog post",
@@ -134,23 +164,35 @@ class TestContentSupervisorVerification:
             ),
         }
 
-        # Mock verification agent to return REVISE
-        with patch("src.agents.factory.AgentFactory.create_agent") as mock_create_agent:
-            mock_verif_agent = MagicMock()
-            mock_verif_agent.execute = AsyncMock(
-                return_value=AgentResult(
-                    task_id="verif-1",
-                    status="completed",
-                    output={
-                        "content": "VERDICT: REVISE\nISSUES:\n1. Factual error in paragraph 2"
-                    },
-                    confidence=0.9,
-                    execution_time=1.0,
+        # Inject a verification agent through the authoritative component registry.
+        mock_verif_agent = create_autospec(
+            VerificationAgent, instance=True, spec_set=True
+        )
+        mock_verif_agent.execute.return_value = AgentResult(
+            task_id="verif-1",
+            status="completed",
+            output={
+                "content": "VERDICT: REVISE\nISSUES:\n1. Factual error in paragraph 2"
+            },
+            confidence=0.9,
+            execution_time=1.0,
+        )
+        supervisor = ContentSupervisor(
+            gemini_service=mock_gemini_service,
+            cache_client=mock_cache_client,
+            config={
+                "component_registry": _registry_with_verification_agent(
+                    mock_verif_agent
                 )
-            )
-            mock_create_agent.return_value = mock_verif_agent
+            },
+        )
 
-            result_state = await supervisor._evaluate_quality_phase(langgraph_state)
+        result_state = await supervisor._evaluate_quality_phase(langgraph_state)
+        _assert_verified_content(
+            mock_verif_agent,
+            "Draft with errors",
+            "Edited but still has issues",
+        )
 
         state = result_state["supervision_state"]
 
@@ -206,12 +248,6 @@ class TestAnalyticsSupervisorVerification:
         self, mock_gemini_service, mock_cache_client
     ):
         """Test that PASS verdict does not reduce quality score in analytics."""
-        supervisor = AnalyticsSupervisor(
-            gemini_service=mock_gemini_service,
-            cache_client=mock_cache_client,
-            config={},
-        )
-
         state = SupervisionState(
             task_id="test-456",
             original_query="Analyze sales data",
@@ -239,20 +275,32 @@ class TestAnalyticsSupervisorVerification:
             ),
         }
 
-        with patch("src.agents.factory.AgentFactory.create_agent") as mock_create_agent:
-            mock_verif_agent = MagicMock()
-            mock_verif_agent.execute = AsyncMock(
-                return_value=AgentResult(
-                    task_id="verif-2",
-                    status="completed",
-                    output={"content": "VERDICT: PASS\nISSUES: None"},
-                    confidence=0.9,
-                    execution_time=1.0,
+        mock_verif_agent = create_autospec(
+            VerificationAgent, instance=True, spec_set=True
+        )
+        mock_verif_agent.execute.return_value = AgentResult(
+            task_id="verif-2",
+            status="completed",
+            output={"content": "VERDICT: PASS\nISSUES: None"},
+            confidence=0.9,
+            execution_time=1.0,
+        )
+        supervisor = AnalyticsSupervisor(
+            gemini_service=mock_gemini_service,
+            cache_client=mock_cache_client,
+            config={
+                "component_registry": _registry_with_verification_agent(
+                    mock_verif_agent
                 )
-            )
-            mock_create_agent.return_value = mock_verif_agent
+            },
+        )
 
-            result_state = await supervisor._evaluate_confidence_phase(langgraph_state)
+        result_state = await supervisor._evaluate_confidence_phase(langgraph_state)
+        _assert_verified_content(
+            mock_verif_agent,
+            "Statistical analysis results",
+            "Model results: R²=0.85",
+        )
 
         state = result_state["supervision_state"]
 
@@ -270,12 +318,6 @@ class TestFinanceSupervisorVerification:
         self, mock_gemini_service, mock_cache_client
     ):
         """Test that REVISE verdict reduces quality score in finance."""
-        supervisor = FinanceSupervisor(
-            gemini_service=mock_gemini_service,
-            cache_client=mock_cache_client,
-            config={},
-        )
-
         state = SupervisionState(
             task_id="test-789",
             original_query="Financial analysis",
@@ -303,22 +345,34 @@ class TestFinanceSupervisorVerification:
             ),
         }
 
-        with patch("src.agents.factory.AgentFactory.create_agent") as mock_create_agent:
-            mock_verif_agent = MagicMock()
-            mock_verif_agent.execute = AsyncMock(
-                return_value=AgentResult(
-                    task_id="verif-3",
-                    status="completed",
-                    output={
-                        "content": "VERDICT: REVISE\nISSUES:\n1. Arithmetic mistake in ROE calculation"
-                    },
-                    confidence=0.9,
-                    execution_time=1.0,
+        mock_verif_agent = create_autospec(
+            VerificationAgent, instance=True, spec_set=True
+        )
+        mock_verif_agent.execute.return_value = AgentResult(
+            task_id="verif-3",
+            status="completed",
+            output={
+                "content": "VERDICT: REVISE\nISSUES:\n1. Arithmetic mistake in ROE calculation"
+            },
+            confidence=0.9,
+            execution_time=1.0,
+        )
+        supervisor = FinanceSupervisor(
+            gemini_service=mock_gemini_service,
+            cache_client=mock_cache_client,
+            config={
+                "component_registry": _registry_with_verification_agent(
+                    mock_verif_agent
                 )
-            )
-            mock_create_agent.return_value = mock_verif_agent
+            },
+        )
 
-            result_state = await supervisor._evaluate_quality_phase(langgraph_state)
+        result_state = await supervisor._evaluate_quality_phase(langgraph_state)
+        _assert_verified_content(
+            mock_verif_agent,
+            "Ratio analysis with arithmetic error",
+            "DCF valuation",
+        )
 
         state = result_state["supervision_state"]
 
@@ -336,12 +390,6 @@ class TestVerificationAgentError:
         self, mock_gemini_service, mock_cache_client
     ):
         """Test that verification errors don't break the workflow."""
-        supervisor = ContentSupervisor(
-            gemini_service=mock_gemini_service,
-            cache_client=mock_cache_client,
-            config={},
-        )
-
         state = SupervisionState(
             task_id="test-error",
             original_query="Write content",
@@ -364,16 +412,26 @@ class TestVerificationAgentError:
             ),
         }
 
-        # Mock verification agent to throw an error
-        with patch("src.agents.factory.AgentFactory.create_agent") as mock_create_agent:
-            mock_verif_agent = MagicMock()
-            mock_verif_agent.execute = AsyncMock(
-                side_effect=Exception("Verification service unavailable")
-            )
-            mock_create_agent.return_value = mock_verif_agent
+        # Inject a failing agent through the authoritative component registry.
+        mock_verif_agent = create_autospec(
+            VerificationAgent, instance=True, spec_set=True
+        )
+        mock_verif_agent.execute.side_effect = Exception(
+            "Verification service unavailable"
+        )
+        supervisor = ContentSupervisor(
+            gemini_service=mock_gemini_service,
+            cache_client=mock_cache_client,
+            config={
+                "component_registry": _registry_with_verification_agent(
+                    mock_verif_agent
+                )
+            },
+        )
 
-            # Should not raise exception
-            result_state = await supervisor._evaluate_quality_phase(langgraph_state)
+        # Should not raise exception
+        result_state = await supervisor._evaluate_quality_phase(langgraph_state)
+        _assert_verified_content(mock_verif_agent, "Some content")
 
         state = result_state["supervision_state"]
 
