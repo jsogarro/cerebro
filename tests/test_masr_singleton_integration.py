@@ -30,6 +30,10 @@ def test_lifespan_injects_one_router_across_active_consumers(
     with TestClient(app):
         runtime = app.state.masr_runtime
         assert app.state.direct_execution_service.masr_router is runtime.router
+        assert (
+            app.state.research_kernel.registry
+            is app.state.direct_execution_service.supervisor_registry
+        )
         assert app.state.masr_routing_service.router is runtime.router
         assert app.state.talkhier_session_service.masr_router is runtime.router
         assert app.state.direct_execution_service.gemini_service is None
@@ -41,6 +45,7 @@ def test_lifespan_injects_one_router_across_active_consumers(
         )
 
     assert runtime.closed is True
+    assert not hasattr(app.state, "research_kernel")
     assert direct_execution_service._direct_execution_service is None
 
 
@@ -66,12 +71,14 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     await first_context.__aenter__()
     first_runtime = app.state.masr_runtime
     first_direct = app.state.direct_execution_service
+    first_kernel = app.state.research_kernel
     first_masr_service = app.state.masr_routing_service
     first_talkhier_service = app.state.talkhier_session_service
 
     await second_context.__aenter__()
     second_runtime = app.state.masr_runtime
     second_direct = app.state.direct_execution_service
+    second_kernel = app.state.research_kernel
     second_masr_service = app.state.masr_routing_service
     second_talkhier_service = app.state.talkhier_session_service
 
@@ -84,6 +91,8 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
         assert first_talkhier_service.closed is True
         assert app.state.masr_runtime is second_runtime
         assert app.state.direct_execution_service is second_direct
+        assert app.state.research_kernel is second_kernel
+        assert first_kernel is not second_kernel
         assert app.state.masr_routing_service is second_masr_service
         assert app.state.talkhier_session_service is second_talkhier_service
         assert second_runtime.closed is False
@@ -98,6 +107,7 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     for state_name in (
         "masr_runtime",
         "direct_execution_service",
+        "research_kernel",
         "masr_routing_service",
         "talkhier_session_service",
     ):

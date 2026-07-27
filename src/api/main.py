@@ -158,6 +158,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             configure_direct_execution_service,
         )
         from src.api.services.masr_routing_service import MASRRoutingService
+        from src.api.services.research_kernel import compose_application_research_kernel
         from src.api.services.talkhier_session_service import TalkHierSessionService
 
         direct_execution_service = configure_direct_execution_service(
@@ -175,6 +176,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             app,
             "direct_execution_service",
             direct_execution_service,
+        )
+
+        research_kernel = compose_application_research_kernel(direct_execution_service)
+        app.state.research_kernel = research_kernel
+        resources.callback(
+            _remove_app_state_if_owned,
+            app,
+            "research_kernel",
+            research_kernel,
         )
 
         masr_routing_service = MASRRoutingService(router=masr_runtime.router)
