@@ -5,8 +5,8 @@ export default {
 	theme: {
 		extend: {
 			fontFamily: {
-				sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
-				mono: ['"JetBrains Mono"', '"Fira Code"', 'monospace'],
+				sans: ['"IBM Plex Sans"', '"Hanken Grotesk"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+				mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
 			},
 			boxShadow: {
 				glow: '0 0 20px rgba(13, 148, 136, 0.3)',

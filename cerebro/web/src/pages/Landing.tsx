@@ -1,178 +1,307 @@
-import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
-import { Link } from "react-router-dom";
-import { ChevronRight, Brain, Network, ShieldCheck, Database, Zap, Sparkles } from "lucide-react";
-import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { ArrowRight, Github, Info } from 'lucide-react';
+import { ThemeToggle } from '@/components/layout/ThemeToggle';
 
-const features = [
-    {
-        title: "Multi-Agent System",
-        description: "Deploy specialized agents that collaborate to solve complex technical tasks efficiently.",
-        icon: Network
-    },
-    {
-        title: "Memory & Context",
-        description: "Agents retain long-term memory across sessions, ensuring context is never lost.",
-        icon: Database
-    },
-    {
-        title: "Quality Assurance",
-        description: "Built-in validation and QA agents double-check all results for maximum accuracy.",
-        icon: ShieldCheck
-    },
-    {
-        title: "Real-Time Orchestration",
-        description: "Monitor agent communications and workflows in real-time via the interactive dashboard.",
-        icon: Zap
-    },
-    {
-        title: "Advanced AI Models",
-        description: "Utilizes the latest LLM technologies under the hood, seamlessly switch between providers.",
-        icon: Brain
-    },
-    {
-        title: "Smart Insights",
-        description: "Synthesize large datasets into actionable summaries and data visualizations instantly.",
-        icon: Sparkles
-    }
+const GITHUB_URL = 'https://github.com/jsogarro/cerebro';
+const DOCS_URL = 'https://github.com/jsogarro/cerebro/tree/main/docs';
+
+const primitives = [
+  { num: '01', name: 'Workflow', role: 'versioned procedure' },
+  { num: '02', name: 'Run', role: 'bounded execution' },
+  { num: '03', name: 'Task', role: 'unit of work' },
+  { num: '04', name: 'Evidence', role: 'claim provenance' },
+  { num: '05', name: 'Artifact', role: 'durable output' },
+  { num: '06', name: 'Evaluator', role: 'verification result' },
 ];
 
+// Each command maps 1:1 to a real `research-cli agents` subcommand and its
+// verbatim Click docstring (src/cli/commands/agents.py). Every argument/flag
+// shown is real, so each line is copy-paste runnable.
+const cliLines = [
+  { comment: 'Execute intelligent MASR-routed query.', sub: 'query', arg: null, str: '"Compare two approaches to retrieval evaluation"', flags: null },
+  { comment: 'Get MASR routing decision with cost optimization.', sub: 'route', arg: null, str: '"Summarize the evidence for this claim"', flags: null },
+  { comment: 'Estimate execution cost with detailed breakdown.', sub: 'estimate', arg: null, str: '"Produce a comparative research brief"', flags: null },
+  { comment: 'Direct agent execution (bypass MASR routing).', sub: 'execute', arg: 'literature-review', str: '"Review the literature on retrieval evaluation"', flags: null },
+  { comment: 'Execute Chain-of-Agents workflow.', sub: 'chain', arg: null, str: '"Draft, critique, and revise a summary"', flags: '-a researcher -a critic' },
+  { comment: 'Get MASR router health and performance metrics.', sub: 'status', arg: null, str: null, flags: null },
+];
+
+const capabilities = [
+  {
+    idx: '01',
+    name: 'Workflow',
+    kind: 'versioned definition',
+    body: 'A declarative, versioned description of a research procedure. A run always targets a specific workflow version, so the same definition can be re-run and compared over time.',
+  },
+  {
+    idx: '02',
+    name: 'Run',
+    kind: 'bounded execution',
+    body: 'A single execution of a workflow, bounded by a budget and inspectable from start to finish — its status, timings, and the decisions taken along the way are recorded, not summarized away.',
+  },
+  {
+    idx: '03',
+    name: 'Task',
+    kind: 'unit of work',
+    body: 'The ordered steps that make up a run. Each task and event is logged so the sequence of work can be read back and audited rather than inferred after the fact.',
+  },
+  {
+    idx: '04',
+    name: 'Evidence',
+    kind: 'claim provenance',
+    body: 'The source material a claim rests on: its identity, when it was retrieved, the excerpt used, and its verifier status. Every claim links to the evidence behind it, or is marked as unsupported.',
+  },
+  {
+    idx: '05',
+    name: 'Artifact',
+    kind: 'durable output',
+    body: 'The durable output a run produces — the research artifact together with its claim-and-evidence ledger — retained after the run ends so it can be reopened and inspected later.',
+  },
+  {
+    idx: '06',
+    name: 'Evaluator',
+    kind: 'verification result',
+    body: "Checks that grade a run's output. Each evaluator reports a status, a severity, and its own metrics — surfacing where a result is weak instead of collapsing everything to one pass/fail.",
+  },
+];
+
+const priorities = [
+  { lead: 'Versioned workflows', rest: 'every run is pinned to an exact workflow version, so results stay comparable across changes.' },
+  { lead: 'Inspectable runs and tasks', rest: 'the full ordered sequence of steps and events is recorded and replayable.' },
+  { lead: 'Source evidence and claim provenance', rest: 'each claim traces to its supporting sources, or is labeled unsupported.' },
+  { lead: 'Durable artifacts', rest: 'outputs and their evidence ledgers persist beyond the run that produced them.' },
+  { lead: 'Verification and evaluation results', rest: 'evaluator status, severity, and metrics travel with the artifact.' },
+  { lead: 'Cost, latency, and execution traces', rest: 'reported when measured, and marked unavailable when they are not.' },
+];
+
+function BrandMark() {
+  return (
+    <svg
+      className="lp-brand-mark"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="6" cy="7" r="2" />
+      <circle cx="6" cy="17" r="2" />
+      <circle cx="18" cy="12" r="2" />
+      <path d="M8 7h4a2 2 0 0 1 2 2v1M8 17h4a2 2 0 0 0 2-2v-1" />
+      <path d="M16 12h.01" />
+    </svg>
+  );
+}
+
 export function Landing() {
-    return (
-        <div className="min-h-screen bg-background flex flex-col font-sans relative overflow-x-hidden text-foreground">
-            {/* Nav */}
-            <nav className="w-full flex justify-between items-center p-6 lg:px-12 backdrop-blur-md bg-background/50 fixed top-0 z-50 border-b border-border/40">
-                <div className="flex items-center gap-2">
-                    <Brain className="h-8 w-8 text-primary" />
-                    <span className="text-2xl font-bold tracking-tight text-primary">Cerebro</span>
+  return (
+    <div className="lp-root">
+      <div className="lp-nav-wrap">
+        <nav className="lp-nav" aria-label="Primary">
+          <a className="lp-brand" href="/" aria-label="Cerebro home">
+            <BrandMark />
+            Cerebro
+          </a>
+          <div className="lp-nav-right">
+            <ul className="lp-nav-links">
+              <li>
+                <a href={DOCS_URL} target="_blank" rel="noreferrer">
+                  Documentation
+                </a>
+              </li>
+              <li>
+                <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+                  GitHub
+                </a>
+              </li>
+              <li>
+                <a href="#cli">API reference</a>
+              </li>
+            </ul>
+            <ThemeToggle />
+          </div>
+        </nav>
+      </div>
+
+      <main className="lp-shell">
+        {/* Hero */}
+        <section className="lp-hero" aria-labelledby="lp-hero-title">
+          <div className="lp-hero-lede">
+            <p className="lp-eyebrow">Open-source research workbench</p>
+            <h1 id="lp-hero-title">
+              An open-source workbench for building, running, and evaluating{' '}
+              <span className="lp-accent">source-grounded</span> AI research workflows.
+            </h1>
+            <div className="lp-accent-rule" aria-hidden="true" />
+            <p className="lp-lede">
+              Cerebro treats a workflow, its runs, and every claim's supporting evidence as
+              inspectable, versioned objects — so a result can be traced back to what produced it,
+              not just read at face value.
+            </p>
+            <div className="lp-hero-cta">
+              <a
+                className="lp-btn lp-btn--primary"
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View on GitHub
+                <ArrowRight aria-hidden="true" />
+              </a>
+              <a className="lp-btn lp-btn--secondary" href={DOCS_URL} target="_blank" rel="noreferrer">
+                Read the docs
+              </a>
+            </div>
+            <p className="lp-hero-note">
+              <Info aria-hidden="true" />
+              Cerebro reports what it can measure and marks what it can't. It does not fabricate
+              results, metrics, or sources.
+            </p>
+          </div>
+
+          <aside className="lp-primitives-card" aria-label="Core primitives">
+            <div className="lp-pc-head">
+              <p className="lp-eyebrow">Core primitives</p>
+              <span className="lp-pc-count">6</span>
+            </div>
+            <ul className="lp-primitives-index">
+              {primitives.map((primitive) => (
+                <li key={primitive.num}>
+                  <span className="lp-pi-num">{primitive.num}</span>
+                  <span className="lp-pi-name">{primitive.name}</span>
+                  <span className="lp-pi-role">{primitive.role}</span>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        </section>
+
+        {/* CLI reference */}
+        <section className="lp-section" id="cli" aria-labelledby="lp-cli-title">
+          <div className="lp-section-head">
+            <p className="lp-eyebrow">Command-line interface</p>
+            <h2 id="lp-cli-title">
+              Drive the workbench from <code>research-cli</code>
+            </h2>
+            <p>
+              The documented agent commands, exactly as they appear in the CLI reference. Each one
+              names what it does — no scripted output is shown here.
+            </p>
+          </div>
+          <div className="lp-cli">
+            <div className="lp-cli-bar">
+              <span className="lp-cli-dots" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="lp-cli-title">research-cli — agents</span>
+            </div>
+            <pre className="lp-cli-body">
+              <code>
+                {cliLines.map((line) => (
+                  <span key={line.sub}>
+                    <span className="lp-cli-line lp-cli-cmt"># {line.comment}</span>
+                    <span className="lp-cli-line lp-cli-cmd">
+                      <span className="lp-cli-prompt">$ </span>
+                      <span className="lp-cli-bin">research-cli</span> agents{' '}
+                      <span className="lp-cli-sub">{line.sub}</span>
+                      {line.arg ? ` ${line.arg}` : ''}
+                      {line.str ? (
+                        <>
+                          {' '}
+                          <span className="lp-cli-str">{line.str}</span>
+                        </>
+                      ) : null}
+                      {line.flags ? ` ${line.flags}` : ''}
+                    </span>
+                  </span>
+                ))}
+              </code>
+            </pre>
+          </div>
+        </section>
+
+        {/* Capabilities / primitives */}
+        <section className="lp-section" id="capabilities" aria-labelledby="lp-cap-title">
+          <div className="lp-section-head">
+            <p className="lp-eyebrow">What the workbench models</p>
+            <h2 id="lp-cap-title">Six primitives, each an inspectable object</h2>
+            <p>
+              Cerebro's vocabulary is small and load-bearing. Everything you build, run, and check
+              is expressed in these terms — and each carries its own state, history, and provenance.
+            </p>
+          </div>
+          <div className="lp-cap-grid">
+            {capabilities.map((cap) => (
+              <article className="lp-cap" key={cap.idx}>
+                <div className="lp-cap-top">
+                  <span className="lp-cap-idx">{cap.idx}</span>
+                  <h3 className="lp-cap-name">{cap.name}</h3>
                 </div>
-                <div className="flex items-center gap-4">
-                    <ThemeToggle />
-                    <Link to="/app">
-                        <Button variant="default" className="font-semibold shadow-glow rounded-full px-6">
-                            Dashboard
-                        </Button>
-                    </Link>
-                </div>
-            </nav>
+                <p className="lp-cap-kind">{cap.kind}</p>
+                <p>{cap.body}</p>
+              </article>
+            ))}
+          </div>
+        </section>
 
-            {/* Hero Section */}
-            <main className="flex-1 pt-32 pb-16 px-4 md:px-8 lg:px-16 max-w-7xl mx-auto w-full">
-                <section className="flex flex-col items-center text-center space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-1000">
-                    <div className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary mb-4 transition-all hover:bg-primary/20 cursor-default">
-                        <Sparkles className="mr-2 h-4 w-4" />
-                        v2.0 Beta now available
-                    </div>
-                    <h1 className="text-5xl md:text-7xl lg:text-8xl font-extrabold tracking-tight max-w-5xl leading-[1.1]">
-                        Orchestrate Intelligence. <br className="hidden md:block" />
-                        <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Accelerate Discovery.</span>
-                    </h1>
-                    <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl leading-relaxed">
-                        A modern multi-agent research platform that thinks, collaborates, and delivers actionable insights with unprecedented speed.
-                    </p>
-                    <div className="flex flex-col sm:flex-row gap-4 mt-8 w-full sm:w-auto">
-                        <Link to="/app" className="w-full sm:w-auto">
-                            <Button size="lg" className="w-full text-lg h-14 px-8 shadow-glow rounded-full">
-                                Get Started <ChevronRight className="ml-2 h-5 w-5" />
-                            </Button>
-                        </Link>
-                        <Button size="lg" variant="outline" className="w-full sm:w-auto text-lg h-14 px-8 rounded-full border-border/50 backdrop-blur">
-                            View Demo
-                        </Button>
-                    </div>
-                </section>
+        {/* Priorities */}
+        <section className="lp-section" aria-labelledby="lp-pri-title">
+          <div className="lp-section-head">
+            <p className="lp-eyebrow">What it makes first-class</p>
+            <h2 id="lp-pri-title">Designed around traceability</h2>
+            <p>
+              The properties Cerebro treats as primary — the things it will always show you rather
+              than hide.
+            </p>
+          </div>
+          <div className="lp-priorities">
+            <ul>
+              {priorities.map((item) => (
+                <li key={item.lead}>
+                  <span className="lp-marker" aria-hidden="true">
+                    ●
+                  </span>
+                  <span className="lp-p-text">
+                    <strong>{item.lead}</strong> — {item.rest}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
 
-                {/* Demo Terminal */}
-                <section className="mt-20 md:mt-32 relative mx-auto max-w-4xl">
-                    <div className="absolute -inset-1 rounded-xl bg-gradient-to-r from-primary to-accent opacity-20 blur-xl"></div>
-                    <div className="relative rounded-xl bg-[#0B0F19] border border-slate-800 shadow-2xl overflow-hidden text-left">
-                        <div className="flex items-center px-4 py-3 bg-[#0f172a] border-b border-slate-800">
-                            <div className="flex space-x-2">
-                                <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
-                                <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-                                <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
-                            </div>
-                            <div className="mx-auto text-xs text-slate-400 font-mono">cerebro-orchestrator ~ /research</div>
-                            <div className="w-12"></div>
-                        </div>
-                        <div className="p-6 font-mono text-sm sm:text-base text-slate-300 space-y-4 h-[300px] overflow-y-auto">
-                            <p className="flex items-center"><span className="text-emerald-400 mr-2">➜</span> <span className="text-blue-400">init</span> multi-agent research protocol --topic "Q1 Market Trends"</p>
-                            <p className="text-slate-500">[INFO] Spawning 3 specialized agents...</p>
-                            <p className="flex items-center gap-2"><span className="text-yellow-400">Agent Alpha [Search]:</span> Gathering market data from predefined sources...</p>
-                            <p className="flex items-center gap-2"><span className="text-purple-400">Agent Beta [Analysis]:</span> Processing 1,248 data points and finding correlations...</p>
-                            <p className="flex items-center gap-2"><span className="text-pink-400">Agent Gamma [Critic]:</span> Validating conclusions against ground truth set...</p>
-                            <p className="text-emerald-400 animate-pulse mt-4">✓ Research completed successfully in 12.4s. View results?</p>
-                            <p className="flex items-center"><span className="text-emerald-400 mr-2">➜</span> <span className="w-2 h-5 bg-slate-300 animate-pulse"></span></p>
-                        </div>
-                    </div>
-                </section>
+        {/* Closing */}
+        <section className="lp-closing" aria-labelledby="lp-os-title">
+          <div className="lp-closing-text">
+            <p className="lp-eyebrow">Open source</p>
+            <h2 id="lp-os-title">Read the source, then decide</h2>
+            <p>
+              Cerebro is open source. The workflows, run records, and evaluation logic described
+              above are all in the repository — inspect them before you rely on them.
+            </p>
+          </div>
+          <a className="lp-btn lp-btn--primary" href={GITHUB_URL} target="_blank" rel="noreferrer">
+            View on GitHub
+            <Github aria-hidden="true" />
+          </a>
+        </section>
+      </main>
 
-                {/* Features Grid */}
-                <section className="mt-32 py-16">
-                    <div className="text-center mb-16">
-                        <h2 className="text-3xl md:text-5xl font-bold mb-4">Powerful Core Features</h2>
-                        <p className="text-lg text-muted-foreground w-full max-w-2xl mx-auto">Everything you need to scale your research operations autonomously with minimal oversight.</p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {features.map((feature, idx) => (
-                            <Card key={idx} className="bg-card/50 backdrop-blur border-border/50 hover:border-primary/50 transition-colors shadow-sm hover:shadow-md h-full">
-                                <CardHeader>
-                                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 text-primary">
-                                        <feature.icon className="h-6 w-6" />
-                                    </div>
-                                    <CardTitle className="text-xl">{feature.title}</CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                    <CardDescription className="text-base text-muted-foreground">{feature.description}</CardDescription>
-                                </CardContent>
-                            </Card>
-                        ))}
-                    </div>
-                </section>
-
-                {/* Testimonials */}
-                <section className="mt-32 py-16 bg-muted/40 rounded-[2.5rem] p-8 md:p-16 mb-24 border border-border/50">
-                    <h2 className="text-3xl md:text-4xl font-bold text-center mb-16">Trusted by Researchers</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-12 max-w-5xl mx-auto">
-                        <div className="flex flex-col justify-between">
-                            <p className="text-xl italic mb-8 text-foreground/90 font-medium leading-relaxed">"Cerebro has completely revolutionized our data analysis pipeline. Our teams accomplish in minutes what used to take weeks of manual labor."</p>
-                            <div className="flex items-center gap-4">
-                                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Alice" alt="Alice" className="w-14 h-14 rounded-full border-2 border-primary/20 bg-background" />
-                                <div>
-                                    <div className="font-bold text-lg">Dr. Alice Chen</div>
-                                    <div className="text-sm text-muted-foreground font-medium">Lead Data Scientist, TechCorp</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex flex-col justify-between">
-                            <p className="text-xl italic mb-8 text-foreground/90 font-medium leading-relaxed">"The multi-agent QA system ensures our research is not only fast but highly accurate. We trust it with our most critical analyses."</p>
-                            <div className="flex items-center gap-4">
-                                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Bob" alt="Bob" className="w-14 h-14 rounded-full border-2 border-primary/20 bg-background" />
-                                <div>
-                                    <div className="font-bold text-lg">Robert Johnson</div>
-                                    <div className="text-sm text-muted-foreground font-medium">Head of AI, Innovate Inc.</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-            </main>
-
-            {/* Footer */}
-            <footer className="w-full border-t border-border/40 py-10 bg-muted/20">
-                <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                        <Brain className="h-6 w-6 text-primary/70" />
-                        <span className="font-medium text-base">© 2026 Cerebro AI. All rights reserved.</span>
-                    </div>
-                    <div className="flex gap-8 font-medium">
-                        <a href="#" className="hover:text-primary transition-colors">Documentation</a>
-                        <a href="#" className="hover:text-primary transition-colors">GitHub</a>
-                        <a href="#" className="hover:text-primary transition-colors">API Reference</a>
-                    </div>
-                </div>
-            </footer>
-        </div>
-    );
+      <footer className="lp-foot">
+        <span>cerebro workbench · open-source</span>
+        <nav aria-label="Footer">
+          <a href={DOCS_URL} target="_blank" rel="noreferrer">
+            Documentation
+          </a>
+          <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+            GitHub
+          </a>
+          <a href="#cli">API reference</a>
+        </nav>
+      </footer>
+    </div>
+  );
 }

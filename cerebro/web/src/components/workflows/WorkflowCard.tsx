@@ -11,6 +11,7 @@ import { OriginValueDisplay } from '@/components/runs/OriginValueDisplay';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 const maturityLabel: Record<Workflow['maturity'], string> = {
   experimental: 'Experimental',
@@ -96,12 +97,16 @@ export function WorkflowCard({
               </p>
             </div>
           </div>
-          <Badge variant={workflow.maturity === 'unknown' ? 'outline' : 'secondary'}>
+          <span
+            className={cn('wb-maturity', workflow.maturity === 'unknown' && 'wb-maturity--muted')}
+            title={`Maturity: ${maturityLabel[workflow.maturity]}`}
+          >
+            <span aria-hidden="true" className="wb-maturity-pip" />
             {maturityLabel[workflow.maturity]}
             {workflow.maturity === 'unknown' && workflow.rawMaturity
               ? ` (${workflow.rawMaturity})`
               : ''}
-          </Badge>
+          </span>
         </div>
       </CardHeader>
 
@@ -113,7 +118,7 @@ export function WorkflowCard({
           </p>
         </section>
 
-        <div className="grid gap-5 border-y py-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="workflow-attr-grid">
           <section>
             <p className="workbench-kicker">Supported modes</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -159,7 +164,7 @@ export function WorkflowCard({
           </section>
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="workflow-limits-grid">
           <section>
             <div className="flex items-center gap-2">
               <Wrench aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
@@ -189,12 +194,9 @@ export function WorkflowCard({
         <Button
           type="button"
           disabled={disabled}
-          variant={isSelected ? 'default' : 'outline'}
-          className={
-            isSelected
-              ? 'workflow-card-action-selected w-full justify-between sm:w-auto'
-              : 'w-full justify-between sm:w-auto'
-          }
+          variant="outline"
+          aria-pressed={isSelected}
+          className="w-full justify-between sm:w-auto"
           onClick={() => onConfigure(workflow)}
         >
           {isSelected ? 'Selected for preflight' : 'Configure controlled run'}

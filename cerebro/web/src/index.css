@@ -3,81 +3,234 @@
 @tailwind utilities;
 
 @layer base {
+  /* ===========================================================================
+     Direction-A token system. Warm cream
+     light base, one teal signal accent, warm dark mode. Colors are HSL channel
+     triplets composed via hsl(var(--token)) / hsl(var(--token) / <alpha>).
+     Dark is emitted under Tailwind's `.dark` class (themeStore toggles it);
+     the shadcn/legacy alias layer references tokens that are re-declared under
+     `.dark`, so aliases follow the theme automatically.
+     =========================================================================== */
   :root {
-    --background: 42 28% 96%;
-    --foreground: 165 18% 14%;
-    --card: 43 33% 98%;
-    --card-foreground: 165 18% 14%;
-    --popover: 43 33% 98%;
-    --popover-foreground: 165 18% 14%;
-    --primary: 174 72% 22%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 39 20% 91%;
-    --secondary-foreground: 165 16% 19%;
-    --muted: 39 18% 91%;
-    --muted-foreground: 156 7% 36%;
-    --accent: 16 67% 42%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 48%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 36 15% 80%;
-    --input: 36 15% 80%;
-    --ring: 174 72% 22%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --radius: 0.375rem;
-    --font-editorial: Georgia, "Times New Roman", serif;
-    --font-interface: "Avenir Next", Avenir, "Segoe UI", sans-serif;
-    --font-provenance: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    /* Surfaces — stepped ladder: sunken < base(canvas) < surface-base < raised < elevated */
+    --bg-base: 42 28% 96%;
+    --surface-sunken: 40 24% 92%;
+    --surface-base: 43 30% 98%;
+    --surface-raised: 44 36% 99%;
+    --surface-elevated: 45 40% 100%;
+
+    /* Text — all AA (>=4.5:1) on every surface above */
+    --text-primary: 174 22% 13%;
+    --text-secondary: 172 12% 30%;
+    --text-muted: 165 8% 40%;
+    --text-on-accent: 44 40% 98%;
+
+    /* The one signal accent — refined teal */
+    --signal: 176 66% 30%;
+    --signal-strong: 176 70% 24%;
+    --signal-subtle: 176 40% 92%;
+    --signal-ring: 176 66% 30%;
+
+    /* Hairlines */
+    --line: 40 16% 82%;
+    --line-strong: 40 14% 72%;
+
+    /* Evidence-confidence palette (single warm family, no rainbow) */
+    --claim-supported: 168 55% 28%;
+    --claim-partial: 37 78% 30%;
+    --claim-disputed: 20 70% 40%;
+    --claim-unsupported: 6 55% 42%;
+    --claim-unknown: 40 8% 38%;
+
+    /* Provenance chips (Measured / Fixture-derived / Unavailable) */
+    --provenance-measured: var(--signal-strong);
+    --provenance-fixture: 37 78% 30%;
+    --provenance-unavailable: 40 8% 38%;
+
+    /* Error / destructive only */
+    --status-danger: 4 65% 44%;
+
+    /* Warm shadow */
+    --shadow-color: 165 20% 14%;
+    --shadow-alpha: 0.10;
+
+    /* Type families */
+    --font-display: "Fraunces", "Newsreader", "Iowan Old Style", Georgia, "Times New Roman", serif;
+    --font-ui: "IBM Plex Sans", "Hanken Grotesk", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+    /* Type scale */
+    --text-micro: 0.6875rem;
+    --text-caption: 0.75rem;
+    --text-fine: 0.8125rem;
+    --text-body-sm: 0.875rem;
+    --text-body: 1rem;
+    --text-body-lg: 1.125rem;
+    --text-title: 1.375rem;
+    --text-heading: 1.75rem;
+    --text-display-sm: clamp(1.9rem, 3.5vw, 2.4rem);
+    --text-display: clamp(2.6rem, 5vw, 3.6rem);
+
+    /* Leading */
+    --leading-tight: 1.08;
+    --leading-snug: 1.28;
+    --leading-normal: 1.5;
+    --leading-relaxed: 1.7;
+    --leading-prose: 1.85;
+
+    /* Tracking */
+    --tracking-tight: -0.03em;
+    --tracking-snug: -0.01em;
+    --tracking-normal: 0em;
+    --tracking-wide: 0.02em;
+    --tracking-caps: 0.14em;
+
+    /* Weights */
+    --weight-regular: 400;
+    --weight-medium: 500;
+    --weight-semibold: 600;
+    --weight-bold: 700;
+
+    /* Spacing (4px base) */
+    --space-0: 0;
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
+    --space-7: 3rem;
+    --space-8: 4rem;
+
+    /* Semantic spacing */
+    --content-padding: clamp(1.25rem, 3vw, 2.25rem);
+    --card-gap: var(--space-5);
+    --section-gap: clamp(1.5rem, 3vw, 2.75rem);
+    --list-item-gap: var(--space-3);
+    --icon-text-gap: var(--space-2);
+
     --reading-width: 72rem;
     --prose-width: 46rem;
-    --density-section: clamp(1.5rem, 3vw, 2.75rem);
-    --density-inline: 0.625rem;
+
+    /* Radii */
+    --radius-sm: 0.25rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.875rem;
+    --radius-pill: 999px;
+    --radius: var(--radius-md);
+
+    /* Shadows */
+    --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / calc(var(--shadow-alpha) * 0.7));
+    --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / calc(var(--shadow-alpha) * 0.6)),
+                 0 2px 6px hsl(var(--shadow-color) / calc(var(--shadow-alpha) * 0.7));
+    --shadow-md: 0 4px 10px hsl(var(--shadow-color) / calc(var(--shadow-alpha) * 0.8)),
+                 0 1px 3px hsl(var(--shadow-color) / calc(var(--shadow-alpha) * 0.6));
+    --shadow-lg: 0 16px 40px hsl(var(--shadow-color) / var(--shadow-alpha)),
+                 0 4px 12px hsl(var(--shadow-color) / calc(var(--shadow-alpha) * 0.7));
+    --shadow-glow-signal: 0 0 0 1px hsl(var(--signal) / 0.45),
+                          0 0 16px hsl(var(--signal) / 0.25);
+
+    /* Motion */
+    --duration-instant: 80ms;
+    --duration-fast: 140ms;
+    --duration-base: 200ms;
+    --duration-slow: 320ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+    /* Iconography + focus */
+    --icon-stroke: 1.5;
+    --icon-size: 1rem;
     --focus-width: 3px;
-    --status-success: 153 47% 31%;
-    --status-warning: 27 76% 37%;
-    --status-failed: 0 65% 43%;
-    --status-neutral: 158 6% 42%;
-    --provenance-measured: 174 72% 22%;
-    --provenance-fixture: 16 67% 42%;
-    --provenance-unavailable: 158 6% 42%;
+
+    /* -------------------------------------------------------------------------
+       shadcn / existing-app compat aliases. `--accent` now points at the single
+       signal (teal); burnt-orange is retired. These reference tokens re-declared
+       under `.dark`, so they follow the active theme without duplication.
+       ------------------------------------------------------------------------- */
+    --background: var(--bg-base);
+    --foreground: var(--text-primary);
+    --card: var(--surface-base);
+    --card-foreground: var(--text-primary);
+    --popover: var(--surface-elevated);
+    --popover-foreground: var(--text-primary);
+    --primary: var(--signal);
+    --primary-foreground: var(--text-on-accent);
+    --secondary: var(--surface-sunken);
+    --secondary-foreground: var(--text-secondary);
+    --muted: var(--surface-sunken);
+    --muted-foreground: var(--text-muted);
+    --accent: var(--signal);
+    --accent-foreground: var(--text-on-accent);
+    --destructive: var(--status-danger);
+    --destructive-foreground: var(--text-on-accent);
+    --border: var(--line);
+    --input: var(--line);
+    --ring: var(--signal-ring);
+
+    /* Chart series — single warm evidence family */
+    --chart-1: var(--claim-supported);
+    --chart-2: var(--signal);
+    --chart-3: var(--claim-partial);
+    --chart-4: var(--claim-disputed);
+    --chart-5: var(--claim-unknown);
+
+    /* App status tokens (consumed by @layer components below) */
+    --status-success: var(--claim-supported);
+    --status-warning: var(--claim-partial);
+    --status-failed: var(--status-danger);
+    --status-neutral: var(--claim-unknown);
+
+    /* Font aliases (used by @layer components below) */
+    --font-editorial: var(--font-display);
+    --font-interface: var(--font-ui);
+    --font-provenance: var(--font-mono);
+
+    /* Legacy layout aliases */
+    --density-section: var(--section-gap);
+    --density-inline: var(--space-2);
   }
 
+  /* ===========================================================================
+     DARK — warm near-black (hue-derived from cream, NOT navy). Only the theme
+     tokens are overridden here; the alias layer in :root inherits automatically
+     because custom-property references resolve in the element's scope.
+     =========================================================================== */
   .dark {
-    --background: 223 39% 7%;
-    --foreground: 210 40% 98%;
-    --card: 217 33% 17%;
-    --card-foreground: 210 40% 98%;
-    --popover: 217 33% 17%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 172 66% 51%;
-    --primary-foreground: 222 47% 11%;
-    --secondary: 215 25% 27%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 215 25% 27%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 27 96% 61%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 215 25% 27%;
-    --input: 215 25% 27%;
-    --ring: 172 66% 51%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
-    --status-success: 151 53% 57%;
-    --status-warning: 32 96% 61%;
-    --status-failed: 0 72% 62%;
-    --status-neutral: 215 20% 65%;
-    --provenance-measured: 172 66% 51%;
-    --provenance-fixture: 27 96% 61%;
-    --provenance-unavailable: 215 20% 65%;
+    --bg-base: 40 14% 8%;
+    --surface-sunken: 40 15% 6%;
+    --surface-base: 39 12% 12%;
+    --surface-raised: 38 11% 16%;
+    --surface-elevated: 37 10% 20%;
+
+    --text-primary: 42 24% 92%;
+    --text-secondary: 40 12% 72%;
+    --text-muted: 40 11% 61%;
+    --text-on-accent: 40 20% 10%;
+
+    --signal: 172 60% 52%;
+    --signal-strong: 172 55% 62%;
+    --signal-subtle: 172 40% 16%;
+    --signal-ring: 172 60% 52%;
+
+    --line: 40 10% 24%;
+    --line-strong: 40 9% 34%;
+
+    --claim-supported: 166 50% 55%;
+    --claim-partial: 40 70% 60%;
+    --claim-disputed: 22 75% 62%;
+    --claim-unsupported: 8 66% 67%;
+    --claim-unknown: 40 9% 61%;
+
+    --provenance-measured: var(--signal-strong);
+    --provenance-fixture: 40 70% 60%;
+    --provenance-unavailable: 40 9% 61%;
+
+    --status-danger: 8 74% 68%;
+
+    --shadow-color: 40 30% 2%;
+    --shadow-alpha: 0.45;
   }
 
   * {
@@ -166,18 +319,6 @@
     --provenance-unavailable: 215 24% 78%;
   }
 
-  .workflow-dossier .workflow-card-action-selected {
-    background-color: #37645f;
-  }
-
-  .workflow-dossier .workflow-card-action-selected:hover {
-    background-color: #315a56;
-  }
-
-  .dark .workflow-dossier .workflow-card-action-selected {
-    background-color: hsl(var(--primary));
-  }
-
   .workbench-page-intro {
     max-width: var(--prose-width);
   }
@@ -237,31 +378,48 @@
     background: hsl(var(--primary) / 0.06);
   }
 
+  /* Base: an outlined pill that works with any color class (incl. the
+     workbench-status-* tones composed by WorkbenchStateNotice). The tinted-fill
+     + uppercase provenance identity lives on the -measured/-fixture/-unavailable
+     modifiers so status badges keep their plain outlined look. */
   .workbench-provenance {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.375rem;
     width: fit-content;
-    padding: 0.3rem 0.5rem;
+    padding: 0.15rem 0.5rem;
     border: 1px solid currentColor;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     font-family: var(--font-provenance);
-    font-size: 0.66rem;
-    font-weight: 600;
-    line-height: 1;
+    font-size: var(--text-micro);
+    font-weight: 500;
+    line-height: 1.2;
     white-space: nowrap;
+  }
+
+  .workbench-provenance-measured,
+  .workbench-provenance-fixture,
+  .workbench-provenance-unavailable {
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
   }
 
   .workbench-provenance-measured {
     color: hsl(var(--provenance-measured));
+    background: hsl(var(--signal-subtle));
+    border-color: hsl(var(--signal) / 0.3);
   }
 
   .workbench-provenance-fixture {
     color: hsl(var(--provenance-fixture));
+    background: hsl(var(--provenance-fixture) / 0.12);
+    border-color: hsl(var(--provenance-fixture) / 0.3);
   }
 
   .workbench-provenance-unavailable {
     color: hsl(var(--provenance-unavailable));
+    background: hsl(var(--provenance-unavailable) / 0.1);
+    border-color: hsl(var(--provenance-unavailable) / 0.3);
   }
 
   .workbench-status-success {
@@ -394,15 +552,23 @@
     border-top: 3px double hsl(var(--border));
   }
 
-  .run-claim {
-    padding-left: 1rem;
-    border-left: 3px solid hsl(var(--accent) / 0.65);
+  /* .run-claim card styling lives in the Run trace detail @layer block below. */
+
+  /* D0: the rail scrolls internally (a real run may have many evidence records)
+     with a pinned head, rather than the whole rail sticking to the viewport. */
+  .run-evidence-rail {
+    min-width: 0;
+    max-height: calc(100vh - 8rem);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
   }
 
-  .run-evidence-rail {
+  .run-evidence-rail-head {
     position: sticky;
-    top: 5.5rem;
-    min-width: 0;
+    top: 0;
+    z-index: 1;
+    padding-bottom: 0.75rem;
+    background: hsl(var(--background));
   }
 
   .run-evidence-record,
@@ -604,6 +770,12 @@
 
   .run-evidence-rail {
     position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .run-evidence-rail-head {
+    position: static;
   }
 }
 
@@ -614,5 +786,823 @@
 
   to {
     transform: translateY(0);
+  }
+}
+
+/* =============================================================================
+   Run trace detail (Direction A) — consolidated pill badge (D1), numbered
+   citation/evidence affordance, claim cards. Rail scroll (D0) is above.
+   ============================================================================= */
+@layer components {
+  /* D1: the one workbench pill. Colored by StatusBadge's semantics tone. */
+  .wb-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid transparent;
+    line-height: 1.3;
+  }
+
+  /* The honest "(reported as …)" disclosure stays sentence-case, not shouted. */
+  .wb-badge-raw {
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .wb-badge--positive {
+    color: hsl(var(--claim-supported));
+    background: hsl(var(--claim-supported) / 0.12);
+    border-color: hsl(var(--claim-supported) / 0.3);
+  }
+
+  .wb-badge--caution {
+    color: hsl(var(--claim-partial));
+    background: hsl(var(--claim-partial) / 0.12);
+    border-color: hsl(var(--claim-partial) / 0.3);
+  }
+
+  .wb-badge--critical {
+    color: hsl(var(--claim-unsupported));
+    background: hsl(var(--claim-unsupported) / 0.12);
+    border-color: hsl(var(--claim-unsupported) / 0.3);
+  }
+
+  .wb-badge--neutral {
+    color: hsl(var(--claim-unknown));
+    background: hsl(var(--claim-unknown) / 0.1);
+    border-color: hsl(var(--claim-unknown) / 0.3);
+  }
+
+  .wb-badge--informative {
+    color: hsl(var(--signal-strong));
+    background: hsl(var(--signal-subtle));
+    border-color: hsl(var(--signal) / 0.3);
+  }
+
+  .wb-badge--muted {
+    color: hsl(var(--text-muted));
+    background: hsl(var(--surface-sunken));
+    border-color: hsl(var(--line-strong));
+  }
+
+  /* Numbered citation button (links to the same-numbered evidence card). */
+  .run-cite-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-wide);
+    color: hsl(var(--signal-strong));
+    background: hsl(var(--signal-subtle));
+    border: 1px solid hsl(var(--signal) / 0.3);
+    border-radius: var(--radius-pill);
+    padding: 0.2rem 0.6rem 0.2rem 0.2rem;
+    cursor: pointer;
+    transition:
+      box-shadow var(--duration-fast) ease,
+      border-color var(--duration-fast) ease;
+  }
+
+  .run-cite-btn:hover {
+    border-color: hsl(var(--signal) / 0.6);
+    box-shadow: 0 0 0 3px hsl(var(--signal-ring) / 0.15);
+  }
+
+  /* The numbered citation chip and evidence-card chip share one look (so their
+     numbers can't drift) and differ only in size. */
+  .run-cite-idx,
+  .run-evidence-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-pill);
+    background: hsl(var(--signal));
+    color: hsl(var(--text-on-accent));
+    font-family: var(--font-mono);
+    font-weight: var(--weight-bold);
+    flex: none;
+  }
+
+  .run-cite-idx {
+    width: 1.05rem;
+    height: 1.05rem;
+    font-size: 0.625rem;
+  }
+
+  .run-evidence-index {
+    width: 1.25rem;
+    height: 1.25rem;
+    font-size: 0.6875rem;
+  }
+
+  /* Ensure a flashed/focused card lands below the sticky rail head. */
+  .run-evidence-record {
+    scroll-margin-top: 4rem;
+  }
+
+  .run-evidence-excerpt {
+    scroll-margin-top: 4rem;
+  }
+
+  /* Claim cards — a lightly raised card with a signal accent edge. */
+  .run-claim {
+    padding: 1rem 1.1rem 0.9rem;
+    border: 1px solid hsl(var(--line));
+    border-left: 3px solid hsl(var(--signal) / 0.65);
+    border-radius: var(--radius-md);
+    background: hsl(var(--surface-raised));
+  }
+}
+
+/* =============================================================================
+   Workflow launch (Direction A) — maturity pill + hairline attribute grids.
+   ============================================================================= */
+@layer components {
+  .wb-maturity {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-wide);
+    color: hsl(var(--signal-strong));
+    background: hsl(var(--signal-subtle));
+    border: 1px solid hsl(var(--signal) / 0.35);
+    border-radius: var(--radius-pill);
+    padding: var(--space-2) var(--space-3);
+    white-space: nowrap;
+  }
+
+  .wb-maturity-pip {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: var(--radius-pill);
+    background: hsl(var(--signal));
+    flex: none;
+  }
+
+  .wb-maturity--muted {
+    color: hsl(var(--text-muted));
+    background: hsl(var(--surface-sunken));
+    border-color: hsl(var(--line-strong));
+  }
+
+  .wb-maturity--muted .wb-maturity-pip {
+    background: hsl(var(--text-muted));
+  }
+
+  .workflow-attr-grid,
+  .workflow-limits-grid {
+    display: grid;
+    gap: 1px;
+    background: hsl(var(--line));
+    border: 1px solid hsl(var(--line));
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .workflow-attr-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .workflow-limits-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workflow-attr-grid > *,
+  .workflow-limits-grid > * {
+    min-width: 0;
+    background: hsl(var(--card));
+    padding: var(--content-padding);
+  }
+}
+
+@media (max-width: 1024px) {
+  .workflow-attr-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .workflow-attr-grid,
+  .workflow-limits-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* =============================================================================
+   Landing page (Direction A) — scoped under .lp-root. Uses the global design
+   tokens from @layer base above; theme-conditional rules key off Tailwind's
+   `.dark` class (never [data-theme]).
+   ============================================================================= */
+@layer components {
+  .lp-root {
+    min-height: 100vh;
+    background: hsl(var(--bg-base));
+    color: hsl(var(--text-primary));
+    font-family: var(--font-ui);
+    font-size: var(--text-body-sm);
+    line-height: var(--leading-normal);
+  }
+
+  .lp-eyebrow {
+    margin: 0;
+    font-family: var(--font-ui);
+    font-size: var(--text-caption);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: hsl(var(--text-muted));
+  }
+
+  /* ---- nav ---- */
+  .lp-nav-wrap {
+    border-bottom: 1px solid hsl(var(--line));
+    background: hsl(var(--bg-base));
+  }
+
+  .lp-nav {
+    max-width: var(--reading-width);
+    margin: 0 auto;
+    padding: var(--space-4) var(--content-padding);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+  }
+
+  .lp-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    font-family: var(--font-display);
+    font-weight: var(--weight-semibold);
+    font-size: var(--text-body-lg);
+    letter-spacing: var(--tracking-snug);
+    color: hsl(var(--text-primary));
+  }
+
+  .lp-brand-mark {
+    width: 1.6rem;
+    height: 1.6rem;
+    color: hsl(var(--signal));
+    flex: none;
+  }
+
+  .lp-nav-links {
+    display: flex;
+    align-items: center;
+    gap: var(--space-5);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .lp-nav-links a {
+    font-size: var(--text-body-sm);
+    font-weight: var(--weight-medium);
+    color: hsl(var(--text-secondary));
+    transition: color var(--duration-fast) var(--ease-standard);
+  }
+
+  .lp-nav-links a:hover {
+    color: hsl(var(--signal-strong));
+  }
+
+  .lp-nav-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  /* ---- shell ---- */
+  .lp-shell {
+    max-width: var(--reading-width);
+    margin: 0 auto;
+    padding: clamp(1.75rem, 4vw, 3.5rem) var(--content-padding) var(--space-8);
+  }
+
+  /* ---- buttons ---- */
+  .lp-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--icon-text-gap);
+    font-family: var(--font-ui);
+    font-size: var(--text-body-sm);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-wide);
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-5);
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition:
+      background var(--duration-fast) var(--ease-standard),
+      box-shadow var(--duration-fast) var(--ease-standard),
+      border-color var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard),
+      transform var(--duration-fast) var(--ease-standard);
+  }
+
+  .lp-btn--primary {
+    background: hsl(var(--signal));
+    color: hsl(var(--text-on-accent));
+  }
+
+  .lp-btn--primary:hover {
+    box-shadow: var(--shadow-glow-signal);
+  }
+
+  .lp-btn--primary:active {
+    transform: translateY(1px);
+  }
+
+  .lp-btn--secondary {
+    background: hsl(var(--surface-base));
+    color: hsl(var(--text-primary));
+    border-color: hsl(var(--line-strong));
+  }
+
+  .lp-btn--secondary:hover {
+    border-color: hsl(var(--signal));
+    color: hsl(var(--signal-strong));
+  }
+
+  .lp-btn--secondary:active {
+    transform: translateY(1px);
+  }
+
+  .lp-btn svg {
+    width: 1.05rem;
+    height: 1.05rem;
+  }
+
+  /* ---- hero ---- */
+  .lp-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(16rem, 1fr);
+    gap: clamp(2rem, 5vw, 4rem);
+    align-items: start;
+  }
+
+  .lp-hero-lede {
+    max-width: 40rem;
+  }
+
+  .lp-hero h1 {
+    font-family: var(--font-display);
+    font-weight: var(--weight-semibold);
+    font-size: var(--text-display);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
+    margin: var(--space-3) 0 0;
+  }
+
+  .lp-hero h1 .lp-accent {
+    color: hsl(var(--signal-strong));
+  }
+
+  .lp-accent-rule {
+    width: 3.25rem;
+    height: 3px;
+    background: hsl(var(--signal));
+    border-radius: var(--radius-pill);
+    margin: var(--space-4) 0;
+  }
+
+  .lp-lede {
+    margin: 0;
+    color: hsl(var(--text-secondary));
+    font-size: var(--text-body-lg);
+    line-height: var(--leading-relaxed);
+    max-width: 36rem;
+  }
+
+  .lp-hero-cta {
+    margin-top: var(--space-6);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: center;
+  }
+
+  .lp-hero-note {
+    margin: var(--space-5) 0 0;
+    display: flex;
+    gap: var(--icon-text-gap);
+    align-items: flex-start;
+    font-size: var(--text-fine);
+    color: hsl(var(--text-muted));
+    line-height: var(--leading-relaxed);
+    max-width: 34rem;
+  }
+
+  .lp-hero-note svg {
+    color: hsl(var(--text-muted));
+    margin-top: 2px;
+    width: 0.9rem;
+    height: 0.9rem;
+    flex: none;
+  }
+
+  /* ---- primitives index card ---- */
+  .lp-primitives-card {
+    background: hsl(var(--surface-base));
+    border: 1px solid hsl(var(--line));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+
+  .dark .lp-primitives-card {
+    box-shadow: var(--shadow-md), inset 0 0 0 1px hsl(var(--text-primary) / 0.02);
+  }
+
+  .lp-pc-head {
+    padding: var(--space-4) var(--space-5);
+    border-bottom: 1px solid hsl(var(--line));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  .lp-pc-count {
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    color: hsl(var(--text-muted));
+  }
+
+  .lp-primitives-index {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .lp-primitives-index li {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-5);
+    border-bottom: 1px solid hsl(var(--line));
+  }
+
+  .lp-primitives-index li:last-child {
+    border-bottom: 0;
+  }
+
+  .lp-pi-num {
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    color: hsl(var(--signal-strong));
+    flex: none;
+    min-width: 1.4rem;
+  }
+
+  .lp-pi-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-fine);
+    color: hsl(var(--text-primary));
+    font-weight: var(--weight-medium);
+  }
+
+  .lp-pi-role {
+    margin-left: auto;
+    font-size: var(--text-micro);
+    color: hsl(var(--text-muted));
+    text-align: right;
+  }
+
+  /* ---- section heading ---- */
+  .lp-section {
+    margin-top: clamp(3rem, 6vw, 5rem);
+  }
+
+  .lp-section-head {
+    max-width: 44rem;
+  }
+
+  .lp-section-head h2 {
+    font-family: var(--font-display);
+    font-weight: var(--weight-semibold);
+    font-size: var(--text-heading);
+    line-height: var(--leading-snug);
+    letter-spacing: var(--tracking-snug);
+    margin: var(--space-2) 0 var(--space-3);
+  }
+
+  .lp-section-head p {
+    margin: 0;
+    color: hsl(var(--text-secondary));
+    font-size: var(--text-body);
+    line-height: var(--leading-relaxed);
+    max-width: 40rem;
+  }
+
+  .lp-section-head code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+  }
+
+  /* ---- CLI reference panel ---- */
+  .lp-cli {
+    margin-top: var(--space-5);
+    border-radius: var(--radius-lg);
+    border: 1px solid hsl(var(--line));
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+    background: hsl(var(--surface-sunken));
+  }
+
+  .lp-cli-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: hsl(var(--surface-base));
+    border-bottom: 1px solid hsl(var(--line));
+    font-family: var(--font-mono);
+    font-size: var(--text-fine);
+    color: hsl(var(--text-muted));
+  }
+
+  .lp-cli-dots {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .lp-cli-dots span {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: var(--radius-pill);
+    background: hsl(var(--line-strong));
+  }
+
+  .lp-cli-title {
+    margin-left: var(--space-2);
+  }
+
+  .lp-cli-body {
+    margin: 0;
+    padding: var(--content-padding);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    font-family: var(--font-mono);
+    font-size: var(--text-fine);
+    line-height: var(--leading-relaxed);
+    overflow-x: auto;
+    white-space: normal;
+  }
+
+  .lp-cli-line {
+    display: block;
+    white-space: nowrap;
+  }
+
+  .lp-cli-cmt {
+    color: hsl(var(--text-muted));
+  }
+
+  .lp-cli-cmd {
+    color: hsl(var(--text-primary));
+  }
+
+  .lp-cli-prompt {
+    color: hsl(var(--signal-strong));
+    user-select: none;
+  }
+
+  .lp-cli-bin {
+    color: hsl(var(--signal-strong));
+  }
+
+  .lp-cli-sub {
+    color: hsl(var(--claim-partial));
+  }
+
+  .lp-cli-str {
+    color: hsl(var(--text-secondary));
+  }
+
+  /* ---- capability ledger ---- */
+  .lp-cap-grid {
+    margin-top: var(--space-5);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: hsl(var(--line));
+    border: 1px solid hsl(var(--line));
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .lp-cap {
+    background: hsl(var(--surface-base));
+    padding: var(--content-padding);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .lp-cap-top {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+  }
+
+  .lp-cap-idx {
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    color: hsl(var(--signal-strong));
+  }
+
+  .lp-cap-name {
+    font-family: var(--font-display);
+    font-weight: var(--weight-semibold);
+    font-size: var(--text-title);
+    line-height: var(--leading-snug);
+    letter-spacing: var(--tracking-snug);
+    margin: 0;
+  }
+
+  .lp-cap-kind {
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    color: hsl(var(--text-muted));
+    margin: 0;
+  }
+
+  .lp-cap p {
+    margin: var(--space-1) 0 0;
+    color: hsl(var(--text-secondary));
+    font-size: var(--text-body-sm);
+    line-height: var(--leading-relaxed);
+  }
+
+  /* ---- priorities ledger ---- */
+  .lp-priorities {
+    margin-top: var(--space-5);
+    background: hsl(var(--surface-base));
+    border: 1px solid hsl(var(--line));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .dark .lp-priorities {
+    box-shadow: var(--shadow-md), inset 0 0 0 1px hsl(var(--text-primary) / 0.02);
+  }
+
+  .lp-priorities ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .lp-priorities li {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--content-padding);
+    border-bottom: 1px dashed hsl(var(--line));
+  }
+
+  .lp-priorities li:last-child {
+    border-bottom: 0;
+  }
+
+  .lp-marker {
+    color: hsl(var(--signal));
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    transform: translateY(-1px);
+    flex: none;
+  }
+
+  .lp-p-text {
+    font-size: var(--text-body-sm);
+    color: hsl(var(--text-primary));
+    line-height: var(--leading-relaxed);
+  }
+
+  .lp-p-text strong {
+    font-weight: var(--weight-semibold);
+  }
+
+  /* ---- closing ---- */
+  .lp-closing {
+    margin-top: clamp(3rem, 6vw, 5rem);
+    background: hsl(var(--surface-base));
+    border: 1px solid hsl(var(--line));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: clamp(1.75rem, 4vw, 2.75rem) var(--content-padding);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-5);
+  }
+
+  .dark .lp-closing {
+    box-shadow: var(--shadow-md), inset 0 0 0 1px hsl(var(--text-primary) / 0.02);
+  }
+
+  .lp-closing-text {
+    max-width: 40rem;
+  }
+
+  .lp-closing-text h2 {
+    font-family: var(--font-display);
+    font-weight: var(--weight-semibold);
+    font-size: var(--text-title);
+    line-height: var(--leading-snug);
+    letter-spacing: var(--tracking-snug);
+    margin: 0 0 var(--space-2);
+  }
+
+  .lp-closing-text p {
+    margin: 0;
+    color: hsl(var(--text-secondary));
+    font-size: var(--text-body-sm);
+    line-height: var(--leading-relaxed);
+  }
+
+  /* ---- footer ---- */
+  .lp-foot {
+    max-width: var(--reading-width);
+    margin: var(--section-gap) auto 0;
+    padding: var(--space-4) var(--content-padding) var(--space-7);
+    border-top: 1px solid hsl(var(--line));
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-wide);
+    color: hsl(var(--text-muted));
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .lp-foot nav {
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .lp-foot a {
+    transition: color var(--duration-fast) var(--ease-standard);
+  }
+
+  .lp-foot a:hover {
+    color: hsl(var(--text-primary));
+  }
+}
+
+@media (max-width: 960px) {
+  .lp-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-primitives-card {
+    max-width: 32rem;
+  }
+
+  .lp-cap-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .lp-nav-links {
+    display: none;
+  }
+
+  .lp-cap-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-hero-cta .lp-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .lp-closing {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .lp-closing .lp-btn {
+    justify-content: center;
   }
 }

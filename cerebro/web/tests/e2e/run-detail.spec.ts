@@ -255,6 +255,44 @@ test.describe('inspectable run detail', () => {
     await expect(page.getByText('Unknown state')).toBeVisible();
   });
 
+  test('gives the evidence rail an internal scroll region on desktop and relaxes it on mobile (D0)', async ({
+    page,
+  }) => {
+    await installRunDetailContractApi(page, 'completed');
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await page.goto(routeFor('completed'));
+
+    const rail = page.locator('.run-evidence-rail');
+    await expect(rail).toBeVisible();
+    const desktop = await rail.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { overflowY: style.overflowY, maxHeight: style.maxHeight };
+    });
+    expect(desktop.overflowY).toBe('auto');
+    expect(desktop.maxHeight).not.toBe('none');
+
+    await page.setViewportSize({ width: 900, height: 1000 });
+    const mobile = await rail.evaluate((el) => getComputedStyle(el).maxHeight);
+    expect(mobile).toBe('none');
+  });
+
+  test('consolidates claim support into a pill badge with a numbered citation/evidence affordance (D1)', async ({
+    page,
+  }) => {
+    await installRunDetailContractApi(page, 'completed');
+    await page.goto(routeFor('completed'));
+
+    const supportedClaim = page.locator('.run-claim').filter({
+      hasText: 'ALPHA belongs to the invented copper collection.',
+    });
+    // Consolidated workbench pill (D1) — claim support routes through the shared badge.
+    await expect(supportedClaim.locator('.wb-badge').first()).toBeVisible();
+    // The citation carries a numbered index matching its evidence card.
+    const citation = supportedClaim.getByRole('button', { name: 'Inspect exact evidence 1' });
+    await expect(citation.locator('.run-cite-idx')).toHaveText('1');
+    await expect(page.locator('.run-evidence-record .run-evidence-index').first()).toHaveText('1');
+  });
+
   for (const viewport of [
     { name: 'desktop', width: 1280, height: 1000 },
     { name: '390px', width: 390, height: 844 },

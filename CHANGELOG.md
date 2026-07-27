@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Web workbench redesign (Direction A): migrated the frontend design-token system in `web/src/index.css` to a warm cream/teal light palette with a single teal signal accent and a warm (non-navy) dark mode with a stepped surface ladder. Dark mode is carried by the Tailwind `.dark` class. Loaded Fraunces (display), IBM Plex Sans (UI), and IBM Plex Mono (data) type families and pointed `tailwind.config.js` font families at them.
+- Rebuilt the web landing page (`/`) around the project's real positioning: an editorial hero, the six core primitives, a `research-cli agents` command reference, a traceability priorities ledger, and an open-source closing. Removed the previous fabricated content (mock terminal demo, invented testimonials, "beta" pill). All CLI commands shown are real and copy-paste runnable.
+- Restyled the workflow launch surface (`/app/workflows`): workflow attributes now render in hairline grids, maturity is a pill, and provenance/status chips share a consistent pill treatment. Fixed the call-to-action hierarchy so the page has a single primary action ("Start controlled run"); the per-card configure control is now a secondary toggle that reports its state via `aria-pressed`.
+- Restyled the run trace detail surface (`/app/runs/:id`): consolidated claim-support, evidence-availability, lifecycle, and evaluation badges into one semantic pill (`StatusBadge`); gave the claims↔evidence inspector numbered citations that match numbered evidence cards; and gave the evidence rail an internal scroll region with a pinned head so long runs stay navigable. Evidence excerpts, task/event log, evaluation cards, and the operational ledger were restyled while preserving the existing citation-focus interaction and provenance/honesty semantics.
+
 ## [0.2.0] - 2026-06-29
 
 ### Added
