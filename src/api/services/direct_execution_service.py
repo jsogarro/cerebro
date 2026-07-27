@@ -33,6 +33,7 @@ from src.repositories.checkpoint_repository import CheckpointRepository
 
 from ...agents.models import AgentTask
 from ...agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+from ...agents.supervisors.base_supervisor import BaseSupervisor
 from ...agents.supervisors.content_supervisor import ContentSupervisor
 from ...agents.supervisors.finance_supervisor import FinanceSupervisor
 from ...agents.supervisors.research_supervisor import ResearchSupervisor
@@ -49,6 +50,13 @@ from ...ai_brain.router.routing_types import (
     CollaborationMode,
     RoutingExecutionPolicy,
 )
+from ...core.kernel import (
+    RegistryEntry,
+    RegistryKey,
+    RegistryNamespace,
+    TypedRegistry,
+    UnknownRegistryKeyError,
+)
 from ...models.research_project import ResearchProject
 from ...models.websocket_messages import ProgressUpdate
 from .event_publisher import EventPublisher
@@ -57,6 +65,54 @@ if TYPE_CHECKING:
     from ...ai_brain.providers.openrouter_provider import OpenRouterProvider
 
 logger = get_logger()
+
+_SUPERVISOR_KEYS: dict[str, RegistryKey[type[BaseSupervisor]]] = {
+    name: RegistryKey(RegistryNamespace.SUPERVISOR, name)
+    for name in ("analytics", "content", "finance", "research")
+}
+
+
+def _default_supervisor_registry() -> TypedRegistry:
+    """Build the kernel-owned catalog used by the existing MASR bridge."""
+
+    return TypedRegistry(
+        [
+            RegistryEntry(
+                _SUPERVISOR_KEYS["research"],
+                ResearchSupervisor,
+            ),
+            RegistryEntry(
+                _SUPERVISOR_KEYS["content"],
+                ContentSupervisor,
+            ),
+            RegistryEntry(
+                _SUPERVISOR_KEYS["analytics"],
+                AnalyticsSupervisor,
+            ),
+            RegistryEntry(
+                _SUPERVISOR_KEYS["finance"],
+                FinanceSupervisor,
+            ),
+        ]
+    )
+
+
+def _validate_supervisor_registry(registry: TypedRegistry) -> None:
+    """Reject invalid bridge composition before background execution starts."""
+
+    registry.resolve(_SUPERVISOR_KEYS["research"])
+    for key in _SUPERVISOR_KEYS.values():
+        try:
+            supervisor_class = registry.resolve(key)
+        except UnknownRegistryKeyError:
+            continue
+        if not isinstance(supervisor_class, type) or not issubclass(
+            supervisor_class, BaseSupervisor
+        ):
+            raise TypeError(
+                f"Registry component {key.qualified_name} must be a BaseSupervisor "
+                f"subclass; got {type(supervisor_class).__name__}"
+            )
 
 
 @dataclass
@@ -119,6 +175,7 @@ class DirectExecutionService:
         gemini_service: Any | None = None,
         session_factory: Any | None = None,
         outcome_recorder: RoutingOutcomeRecorder | None = None,
+        supervisor_registry: TypedRegistry | None = None,
     ):
         """Initialize direct execution service."""
 
@@ -149,6 +206,12 @@ class DirectExecutionService:
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._fast_path_provider: OpenRouterProvider | None = None
         self.closed = False
+        self.supervisor_registry = (
+            supervisor_registry
+            if supervisor_registry is not None
+            else _default_supervisor_registry()
+        )
+        _validate_supervisor_registry(self.supervisor_registry)
 
         # Performance metrics
         self.execution_stats = {
@@ -969,14 +1032,12 @@ class DirectExecutionService:
                     routing_decision.collaboration_mode = CollaborationMode.DIRECT
                     # Continue to normal supervisor path below
 
-            # Get supervisor registry
-            from ...agents.supervisors.base_supervisor import BaseSupervisor
-
-            supervisor_registry: dict[str, type[BaseSupervisor]] = {
-                "research": ResearchSupervisor,
-                "content": ContentSupervisor,
-                "analytics": AnalyticsSupervisor,
-                "finance": FinanceSupervisor,
+            # Preserve the bridge's existing string-keyed call contract while
+            # keeping the authoritative catalog behind typed registry keys.
+            supervisor_registry = {
+                name: self.supervisor_registry.resolve(key)
+                for name, key in _SUPERVISOR_KEYS.items()
+                if key in self.supervisor_registry.keys
             }
 
             # Detect multi-domain and branch execution
