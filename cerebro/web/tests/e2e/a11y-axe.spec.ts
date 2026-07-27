@@ -4,6 +4,8 @@ import { expect, type Page, test } from '@playwright/test';
 import { mockApi } from './helpers/mock-api';
 
 const appRoutes = [
+    '/app/workflows',
+    '/app/runs',
     '/app/dashboard',
     '/app/research',
     '/app/research/RES-101',
@@ -37,7 +39,7 @@ test.describe('axe accessibility checks', () => {
 
     test('mobile navigation dialog has no WCAG A/AA axe violations', async ({ page }) => {
         await page.setViewportSize({ width: 390, height: 844 });
-        await page.goto('/app/dashboard');
+        await page.goto('/app/workflows');
         await page.getByRole('button', { name: 'Open navigation menu' }).click();
         await waitForSettledPage(page);
 

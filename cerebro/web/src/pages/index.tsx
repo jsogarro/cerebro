@@ -1,4 +1,6 @@
 export { Research } from "./Research";
+export { Workflows } from "./Workflows";
+export { Runs } from "./Runs";
 export { Agents } from "./Agents";
 export { Memory } from "./Memory";
 export { QA } from "./QA";
