@@ -3,7 +3,7 @@ Tests for agent query, pattern, and metrics API surfaces.
 """
 
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from src.api.services.agent_execution_service import AgentExecutionService
 from src.models.agent_api_models import (
+    AgentExecutionResponse,
     AgentType,
     ChainOfAgentsRequest,
     MixtureOfAgentsRequest,
@@ -149,6 +150,58 @@ class TestResearchPatternImplementation:
         assert len(request.agent_types) == 3
         assert request.aggregation_strategy == "consensus"
         assert request.weight_by_confidence is True
+
+    @pytest.mark.asyncio
+    async def test_mixture_reports_total_wall_clock_duration(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bounded waves must report elapsed execution, not the longest result."""
+        service = AgentExecutionService()
+        start = datetime(2026, 7, 27, 12, 0, 0)
+        completed = start + timedelta(seconds=13)
+
+        class ControlledDatetime:
+            timestamps = iter([start, completed])
+
+            @classmethod
+            def now(cls) -> datetime:
+                return next(cls.timestamps)
+
+        def response_for(
+            agent_type: AgentType, execution_time_seconds: float
+        ) -> AgentExecutionResponse:
+            return AgentExecutionResponse(
+                execution_id=f"fixture-{agent_type.value}",
+                agent_type=agent_type,
+                status="completed",
+                output={"fixture": agent_type.value},
+                confidence=0.8,
+                quality_score=0.8,
+                execution_time_seconds=execution_time_seconds,
+                started_at=start,
+                completed_at=completed,
+            )
+
+        service.execute_single_agent = AsyncMock(
+            side_effect=[
+                response_for(AgentType.LITERATURE_REVIEW, 5.0),
+                response_for(AgentType.METHODOLOGY, 7.0),
+            ]
+        )
+        monkeypatch.setattr(
+            "src.api.services.agent_execution_service.datetime", ControlledDatetime
+        )
+
+        response = await service.execute_mixture_of_agents(
+            MixtureOfAgentsRequest(
+                query="Test mixture duration",
+                agent_types=[AgentType.LITERATURE_REVIEW, AgentType.METHODOLOGY],
+                max_parallel=1,
+            )
+        )
+
+        assert response.total_execution_time_seconds == 13.0
+        assert response.parallel_efficiency == pytest.approx(12 / 13)
 
     def test_agent_capability_mapping(self) -> None:
         """Test agent capability mapping for research patterns."""

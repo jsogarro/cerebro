@@ -12,7 +12,6 @@ Key Features:
 - Integration with MASR routing decisions
 """
 
-import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -23,6 +22,7 @@ from langgraph.graph import StateGraph
 from structlog import get_logger
 
 from src.ai_brain.compaction import ConstraintRegistry
+from src.core.kernel import BoundedTaskRunner
 from src.core.telemetry import count_tokens_capped, telemetry_enabled
 from src.core.types import SupervisionStatsDict
 from src.qa.mast import MASTLabeler, format_mast_labels_for_metadata
@@ -1251,8 +1251,8 @@ Task: Revise your previous response addressing the feedback while maintaining yo
             Dict mapping worker_type to worker response (or None on failure)
 
         PARALLEL mode behavior:
-            - Executes all workers concurrently via asyncio.gather with return_exceptions=True
-            - Bounded by asyncio.Semaphore(self.max_parallel_workers)
+            - Admits workers in input order up to max_parallel_workers at a time
+            - Retains failure isolation and input-order result processing
             - Failed workers are logged and excluded; successful workers proceed
             - If ALL workers fail, returns empty dict (graceful degradation)
 
@@ -1262,34 +1262,41 @@ Task: Revise your previous response addressing the feedback while maintaining yo
 
         """
         if supervision_mode == SupervisionMode.PARALLEL:
-            # Create semaphore to bound parallelism
-            semaphore = asyncio.Semaphore(self.max_parallel_workers)
 
-            async def execute_with_semaphore(
-                worker_type: str,
-                message_type: MessageType,
-                content: TalkHierContent | str,
-                context: dict[str, Any] | None,
+            async def execute_worker(
+                worker_spec: tuple[
+                    str,
+                    MessageType,
+                    TalkHierContent | str,
+                    dict[str, Any] | None,
+                ],
             ) -> tuple[str, TalkHierMessage | Exception | None]:
-                """Execute single worker with semaphore bound."""
-                async with semaphore:
-                    try:
-                        response = await self.send_talkhier_message(
-                            worker_type,
-                            message_type,
-                            content,
-                            context,
-                        )
-                        return (worker_type, response)
-                    except Exception as e:
-                        return (worker_type, e)
+                """Execute one admitted worker while preserving failure isolation."""
+                worker_type, message_type, content, context = worker_spec
+                try:
+                    response = await self.send_talkhier_message(
+                        worker_type,
+                        message_type,
+                        content,
+                        context,
+                    )
+                    return (worker_type, response)
+                except Exception as e:
+                    return (worker_type, e)
 
-            # Execute all workers concurrently with return_exceptions via gather
-            tasks = [
-                execute_with_semaphore(worker_type, msg_type, content, ctx)
-                for worker_type, msg_type, content, ctx in worker_specs
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            results = await BoundedTaskRunner[
+                tuple[
+                    str,
+                    MessageType,
+                    TalkHierContent | str,
+                    dict[str, Any] | None,
+                ],
+                tuple[str, TalkHierMessage | Exception | None],
+            ](self.max_parallel_workers).run(
+                worker_specs,
+                execute_worker,
+                return_exceptions=True,
+            )
 
             # Process results: separate successes from failures
             worker_results: dict[str, TalkHierMessage | None] = {}

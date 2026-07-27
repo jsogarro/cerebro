@@ -24,6 +24,7 @@ from structlog import get_logger
 from ...agents.base import BaseAgent
 from ...agents.factory import AgentFactory
 from ...agents.models import AgentTask
+from ...core.kernel import BoundedTaskRunner
 from ...models.agent_api_models import (
     AgentCapability,
     AgentExecutionRequest,
@@ -404,8 +405,7 @@ class AgentExecutionService:
         )
 
         try:
-            # Create agent execution tasks
-            agent_tasks = []
+            agent_specs = []
 
             for agent_type in request.agent_types:
                 agent_request = AgentExecutionRequest(
@@ -417,35 +417,39 @@ class AgentExecutionService:
                     session_id=None,
                 )
 
-                task = asyncio.create_task(
-                    self.execute_single_agent(agent_type, agent_request),
-                    name=f"mixture_agent_{agent_type.value}",
-                )
-                agent_tasks.append((agent_type, task))
+                agent_specs.append((agent_type, agent_request))
 
-            # Execute agents in parallel (with concurrency limit)
-            semaphore = asyncio.Semaphore(request.max_parallel)
-
-            async def execute_with_limit(agent_type: Any, task: Any) -> Any:
-                async with semaphore:
-                    result = await task
-                    return result
+            async def execute_agent(
+                agent_spec: tuple[AgentType, AgentExecutionRequest],
+            ) -> AgentExecutionResponse:
+                agent_type, agent_request = agent_spec
+                return await self.execute_single_agent(agent_type, agent_request)
 
             # Wait for all agents to complete
             agent_results = {}
             execution_times = {}
 
-            for agent_type, task in agent_tasks:
-                try:
-                    agent_response = await execute_with_limit(agent_type, task)
-                    agent_results[agent_type.value] = agent_response
-                    execution_times[agent_type.value] = (
-                        agent_response.execution_time_seconds
+            mixture_results = await BoundedTaskRunner[
+                tuple[AgentType, AgentExecutionRequest], AgentExecutionResponse
+            ](request.max_parallel).run(
+                agent_specs,
+                execute_agent,
+                return_exceptions=True,
+            )
+
+            for (agent_type, _), agent_result in zip(
+                agent_specs,
+                mixture_results,
+                strict=True,
+            ):
+                if isinstance(agent_result, BaseException):
+                    logger.error(
+                        f"Mixture agent {agent_type.value} failed: {agent_result}"
                     )
-                except Exception as e:
-                    logger.error(f"Mixture agent {agent_type.value} failed: {e}")
-                    # Continue with other agents
                     continue
+
+                agent_results[agent_type.value] = agent_result
+                execution_times[agent_type.value] = agent_result.execution_time_seconds
 
             # Aggregate results using specified strategy
             aggregated_result = await self._aggregate_mixture_results(
@@ -465,16 +469,6 @@ class AgentExecutionService:
             response.consensus_achieved = aggregated_result["consensus_achieved"]
             response.agent_weights = aggregated_result["weights"]
 
-            # Calculate performance metrics
-            if execution_times:
-                response.total_execution_time_seconds = max(
-                    execution_times.values()
-                )  # Parallel execution
-                theoretical_sequential_time = sum(execution_times.values())
-                response.parallel_efficiency = (
-                    theoretical_sequential_time / response.total_execution_time_seconds
-                )
-
             # Calculate quality metrics
             quality_scores = [result.quality_score for result in agent_results.values()]
             if quality_scores:
@@ -487,6 +481,18 @@ class AgentExecutionService:
 
             response.status = "completed"
             response.completed_at = datetime.now()
+            response.total_execution_time_seconds = (
+                response.completed_at - response.started_at
+            ).total_seconds()
+
+            # Preserve individual execution-time inputs for efficiency while
+            # reporting the actual mixture wall-clock duration across bounded
+            # waves instead of the longest individual agent response.
+            if execution_times and response.total_execution_time_seconds > 0:
+                theoretical_sequential_time = sum(execution_times.values())
+                response.parallel_efficiency = (
+                    theoretical_sequential_time / response.total_execution_time_seconds
+                )
 
             logger.info(
                 f"Mixture-of-Agents completed: {len(request.agent_types)} agents, consensus: {response.consensus_score:.3f}"

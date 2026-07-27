@@ -51,6 +51,7 @@ from ...ai_brain.router.routing_types import (
     RoutingExecutionPolicy,
 )
 from ...core.kernel import (
+    BoundedTaskRunner,
     RegistryEntry,
     RegistryKey,
     RegistryNamespace,
@@ -1055,36 +1056,35 @@ class DirectExecutionService:
                 execution_status.progress_percentage = 30.0
                 await self._publish_progress_update(execution_status)
 
-                # Execute domain supervisors concurrently
-                semaphore = asyncio.Semaphore(self.max_domain_parallelism)
-
                 # Capture decomposition in closure for type narrowing
                 current_decomposition = decomposition
 
-                async def bounded_domain_execution(
-                    domain: str, sub_query: str
+                async def execute_domain(
+                    domain_spec: tuple[str, str],
                 ) -> dict[str, Any]:
-                    async with semaphore:
-                        return await self._execute_domain_supervisor(
-                            domain=domain,
-                            sub_query=sub_query,
-                            project=project,
-                            routing_context=routing_context,
-                            supervisor_registry=supervisor_registry,
-                            execution_status=execution_status,
-                        )
-
-                # Dispatch all domain sub-queries concurrently
-                domain_tasks = [
-                    bounded_domain_execution(
-                        domain, current_decomposition.domain_subqueries[domain]
+                    domain, sub_query = domain_spec
+                    return await self._execute_domain_supervisor(
+                        domain=domain,
+                        sub_query=sub_query,
+                        project=project,
+                        routing_context=routing_context,
+                        supervisor_registry=supervisor_registry,
+                        execution_status=execution_status,
                     )
+
+                domain_specs = [
+                    (domain, current_decomposition.domain_subqueries[domain])
                     for domain in current_decomposition.detected_domains
                 ]
 
-                # Gather with return_exceptions to handle partial failures
-                domain_results = await asyncio.gather(
-                    *domain_tasks, return_exceptions=True
+                # Admit at most the configured number of domain executions;
+                # queued domains remain values rather than pre-created tasks.
+                domain_results = await BoundedTaskRunner[
+                    tuple[str, str], dict[str, Any]
+                ](self.max_domain_parallelism).run(
+                    domain_specs,
+                    execute_domain,
+                    return_exceptions=True,
                 )
 
                 # Convert exceptions to error result dicts

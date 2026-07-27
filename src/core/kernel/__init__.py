@@ -1,5 +1,6 @@
 """Canonical internal execution kernel boundary."""
 
+from .bounded_concurrency import BoundedTaskRunner
 from .registry import (
     DuplicateRegistryKeyError,
     RegistryEntry,
@@ -11,6 +12,7 @@ from .registry import (
 from .research_kernel import KernelExecutor, ResearchKernel
 
 __all__ = [
+    "BoundedTaskRunner",
     "DuplicateRegistryKeyError",
     "KernelExecutor",
     "RegistryEntry",
