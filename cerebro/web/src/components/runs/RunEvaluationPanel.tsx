@@ -2,12 +2,12 @@ import { OriginValueDisplay } from './OriginValueDisplay';
 import type { Evaluation } from '@/api/workbench';
 import { formatTimestamp } from './format';
 
-const statusClass: Record<Evaluation['status'], string> = {
-  passed: 'workbench-status-success',
-  warning: 'workbench-status-warning',
-  failed: 'workbench-status-failed',
-  'not-run': 'workbench-status-muted',
-  unknown: 'workbench-status-warning',
+const statusToneClass: Record<Evaluation['status'], string> = {
+  passed: 'wb-badge--positive',
+  warning: 'wb-badge--caution',
+  failed: 'wb-badge--critical',
+  'not-run': 'wb-badge--muted',
+  unknown: 'wb-badge--caution',
 };
 
 export function RunEvaluationPanel({ evaluations }: { evaluations: readonly Evaluation[] }) {
@@ -29,7 +29,7 @@ export function RunEvaluationPanel({ evaluations }: { evaluations: readonly Eval
                 </span>
               </h4>
             </div>
-            <span className={`text-sm font-semibold ${statusClass[evaluation.status]}`}>
+            <span className={`wb-badge ${statusToneClass[evaluation.status]}`}>
               {evaluation.status.replace('-', ' ')} · severity {evaluation.severity}
             </span>
           </div>

@@ -552,15 +552,23 @@
     border-top: 3px double hsl(var(--border));
   }
 
-  .run-claim {
-    padding-left: 1rem;
-    border-left: 3px solid hsl(var(--accent) / 0.65);
+  /* .run-claim card styling lives in the Run trace detail @layer block below. */
+
+  /* D0: the rail scrolls internally (a real run may have many evidence records)
+     with a pinned head, rather than the whole rail sticking to the viewport. */
+  .run-evidence-rail {
+    min-width: 0;
+    max-height: calc(100vh - 8rem);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
   }
 
-  .run-evidence-rail {
+  .run-evidence-rail-head {
     position: sticky;
-    top: 5.5rem;
-    min-width: 0;
+    top: 0;
+    z-index: 1;
+    padding-bottom: 0.75rem;
+    background: hsl(var(--background));
   }
 
   .run-evidence-record,
@@ -762,6 +770,12 @@
 
   .run-evidence-rail {
     position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .run-evidence-rail-head {
+    position: static;
   }
 }
 
@@ -772,6 +786,141 @@
 
   to {
     transform: translateY(0);
+  }
+}
+
+/* =============================================================================
+   Run trace detail (Direction A) — consolidated pill badge (D1), numbered
+   citation/evidence affordance, claim cards. Rail scroll (D0) is above.
+   ============================================================================= */
+@layer components {
+  /* D1: the one workbench pill. Colored by StatusBadge's semantics tone. */
+  .wb-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid transparent;
+    line-height: 1.3;
+  }
+
+  /* The honest "(reported as …)" disclosure stays sentence-case, not shouted. */
+  .wb-badge-raw {
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .wb-badge--positive {
+    color: hsl(var(--claim-supported));
+    background: hsl(var(--claim-supported) / 0.12);
+    border-color: hsl(var(--claim-supported) / 0.3);
+  }
+
+  .wb-badge--caution {
+    color: hsl(var(--claim-partial));
+    background: hsl(var(--claim-partial) / 0.12);
+    border-color: hsl(var(--claim-partial) / 0.3);
+  }
+
+  .wb-badge--critical {
+    color: hsl(var(--claim-unsupported));
+    background: hsl(var(--claim-unsupported) / 0.12);
+    border-color: hsl(var(--claim-unsupported) / 0.3);
+  }
+
+  .wb-badge--neutral {
+    color: hsl(var(--claim-unknown));
+    background: hsl(var(--claim-unknown) / 0.1);
+    border-color: hsl(var(--claim-unknown) / 0.3);
+  }
+
+  .wb-badge--informative {
+    color: hsl(var(--signal-strong));
+    background: hsl(var(--signal-subtle));
+    border-color: hsl(var(--signal) / 0.3);
+  }
+
+  .wb-badge--muted {
+    color: hsl(var(--text-muted));
+    background: hsl(var(--surface-sunken));
+    border-color: hsl(var(--line-strong));
+  }
+
+  /* Numbered citation button (links to the same-numbered evidence card). */
+  .run-cite-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-wide);
+    color: hsl(var(--signal-strong));
+    background: hsl(var(--signal-subtle));
+    border: 1px solid hsl(var(--signal) / 0.3);
+    border-radius: var(--radius-pill);
+    padding: 0.2rem 0.6rem 0.2rem 0.2rem;
+    cursor: pointer;
+    transition:
+      box-shadow var(--duration-fast) ease,
+      border-color var(--duration-fast) ease;
+  }
+
+  .run-cite-btn:hover {
+    border-color: hsl(var(--signal) / 0.6);
+    box-shadow: 0 0 0 3px hsl(var(--signal-ring) / 0.15);
+  }
+
+  .run-cite-idx {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.05rem;
+    height: 1.05rem;
+    border-radius: var(--radius-pill);
+    background: hsl(var(--signal));
+    color: hsl(var(--text-on-accent));
+    font-size: 0.625rem;
+    font-weight: var(--weight-bold);
+    flex: none;
+  }
+
+  .run-evidence-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: var(--radius-pill);
+    background: hsl(var(--signal));
+    color: hsl(var(--text-on-accent));
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: var(--weight-bold);
+    flex: none;
+  }
+
+  /* Ensure a flashed/focused card lands below the sticky rail head. */
+  .run-evidence-record {
+    scroll-margin-top: 4rem;
+  }
+
+  .run-evidence-excerpt {
+    scroll-margin-top: 4rem;
+  }
+
+  /* Claim cards — a lightly raised card with a signal accent edge. */
+  .run-claim {
+    padding: 1rem 1.1rem 0.9rem;
+    border: 1px solid hsl(var(--line));
+    border-left: 3px solid hsl(var(--signal) / 0.65);
+    border-radius: var(--radius-md);
+    background: hsl(var(--surface-raised));
   }
 }
 

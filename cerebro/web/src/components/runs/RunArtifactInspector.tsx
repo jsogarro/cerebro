@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, BookOpen, Quote } from 'lucide-react';
+import { ArrowUp, Quote } from 'lucide-react';
 import {
   availabilitySemantics,
   supportSemantics,
@@ -77,12 +77,14 @@ function ArtifactContent({ content }: { content: unknown }) {
 
 function EvidenceRecord({
   item,
+  index,
   selected,
   activeClaim,
   setExcerptRef,
   onReturn,
 }: {
   item: Evidence;
+  index: number;
   selected: boolean;
   activeClaim: ClaimSupport | null;
   setExcerptRef: (node: HTMLQuoteElement | null) => void;
@@ -95,11 +97,14 @@ function EvidenceRecord({
       aria-labelledby={`evidence-title-${item.id}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="workbench-kicker">{item.sourceType}</p>
-          <h5 id={`evidence-title-${item.id}`} className="mt-1 break-words font-editorial text-lg">
-            {sourceName}
-          </h5>
+        <div className="flex min-w-0 items-start gap-3">
+          <span aria-hidden="true" className="run-evidence-index">{index}</span>
+          <div className="min-w-0">
+            <p className="workbench-kicker">{item.sourceType}</p>
+            <h5 id={`evidence-title-${item.id}`} className="mt-1 break-words font-editorial text-lg">
+              {sourceName}
+            </h5>
+          </div>
         </div>
         <StatusBadge
           semantics={availabilitySemantics[item.availability]}
@@ -198,6 +203,9 @@ export function RunArtifactInspector({
   const claimRefs = useRef(new Map<string, HTMLButtonElement>());
   const focusFrameRef = useRef<number | null>(null);
   const evidenceById = new Map(evidence.map((item) => [item.id, item]));
+  // Global 1-based evidence number, shared by the citation chip and the evidence
+  // card so a numbered citation points at the same-numbered rail card.
+  const evidenceNumberById = new Map(evidence.map((item, index) => [item.id, index + 1]));
   const evidenceIsResolved =
     evidenceState === 'ready' || evidenceState === 'partial' || evidenceState === 'empty';
 
@@ -352,18 +360,24 @@ export function RunArtifactInspector({
                       </p>
                     ) : exactEvidence.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2" aria-label="Citation controls">
-                        {exactEvidence.map((evidenceId, evidenceIndex) => (
-                          <Button
-                            key={evidenceId}
-                            variant="outline"
-                            size="sm"
-                            className="gap-2"
-                            onClick={(event) => focusEvidence(claim, evidenceId, event.currentTarget)}
-                          >
-                            <BookOpen aria-hidden="true" className="h-4 w-4" />
-                            Inspect exact evidence {evidenceIndex + 1}
-                          </Button>
-                        ))}
+                        {exactEvidence.map((evidenceId) => {
+                          const evidenceNumber = evidenceNumberById.get(evidenceId) ?? 0;
+                          return (
+                            <button
+                              key={evidenceId}
+                              type="button"
+                              className="run-cite-btn"
+                              onClick={(event) =>
+                                focusEvidence(claim, evidenceId, event.currentTarget)
+                              }
+                            >
+                              <span aria-hidden="true" className="run-cite-idx">
+                                {evidenceNumber}
+                              </span>
+                              Inspect exact evidence {evidenceNumber}
+                            </button>
+                          );
+                        })}
                       </div>
                     ) : (
                       <p className="mt-3 text-sm font-medium">
@@ -407,23 +421,26 @@ export function RunArtifactInspector({
       ) : null}
 
       <aside className="run-evidence-rail" aria-labelledby="evidence-inspector-heading">
-        <p className="workbench-kicker">Provenance rail</p>
-        <h4 id="evidence-inspector-heading" className="mt-1 font-editorial text-xl">
-          Exact evidence
-        </h4>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Source identity, locator, excerpt, and retrieval provenance remain independently inspectable.
-        </p>
+        <div className="run-evidence-rail-head">
+          <p className="workbench-kicker">Provenance rail</p>
+          <h4 id="evidence-inspector-heading" className="mt-1 font-editorial text-xl">
+            Exact evidence
+          </h4>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Source identity, locator, excerpt, and retrieval provenance remain independently inspectable.
+          </p>
+        </div>
         <div className="mt-5 space-y-5">
           {!evidenceIsResolved ? (
             <p className="border-y border-border py-5 text-sm leading-6 text-muted-foreground">
               Evidence inspection is {evidenceState}. No conclusion about record or excerpt absence has been made.
             </p>
           ) : evidence.length > 0 ? (
-            evidence.map((item) => (
+            evidence.map((item, index) => (
               <EvidenceRecord
                 key={item.id}
                 item={item}
+                index={index + 1}
                 selected={selectedEvidenceId === item.id}
                 activeClaim={selectedEvidenceId === item.id ? activeClaim : null}
                 setExcerptRef={(node) => {

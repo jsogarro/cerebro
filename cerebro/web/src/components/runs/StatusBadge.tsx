@@ -35,13 +35,16 @@ const iconByKey: Record<SemanticIconKey, LucideIcon> = {
   'file-warning': FileWarning,
 };
 
+// D1: the single consolidated workbench pill. Every semantic badge — claim
+// support, evidence availability, run/task lifecycle, evaluation status — routes
+// through here, colored by the semantics table's tone.
 const toneClassByTone: Record<StateSemantics['tone'], string> = {
-  neutral: 'workbench-status-neutral',
-  informative: 'workbench-status-informative',
-  positive: 'workbench-status-success',
-  caution: 'workbench-status-warning',
-  critical: 'workbench-status-failed',
-  muted: 'workbench-status-muted',
+  neutral: 'wb-badge--neutral',
+  informative: 'wb-badge--informative',
+  positive: 'wb-badge--positive',
+  caution: 'wb-badge--caution',
+  critical: 'wb-badge--critical',
+  muted: 'wb-badge--muted',
 };
 
 export interface StatusBadgeProps {
@@ -54,17 +57,13 @@ export function StatusBadge({ semantics, rawValue, className }: StatusBadgeProps
   const Icon = iconByKey[semantics.iconKey];
   return (
     <span
-      className={cn(
-        'inline-flex items-center gap-1.5 text-sm font-medium',
-        toneClassByTone[semantics.tone],
-        className,
-      )}
+      className={cn('wb-badge', toneClassByTone[semantics.tone], className)}
       title={semantics.description}
     >
-      <Icon aria-hidden="true" className="h-4 w-4 flex-shrink-0" />
+      <Icon aria-hidden="true" className="h-[0.85rem] w-[0.85rem] flex-shrink-0" />
       <span>
         {semantics.label}
-        {rawValue ? ` (reported as "${rawValue}")` : ''}
+        {rawValue ? <span className="wb-badge-raw"> (reported as "{rawValue}")</span> : null}
       </span>
     </span>
   );
