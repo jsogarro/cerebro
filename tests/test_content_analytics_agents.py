@@ -13,6 +13,7 @@ from src.agents.analytics_agents import (
     InsightSynthesisAgent,
     StatisticalModelingAgent,
 )
+from src.agents.base import BaseAgent
 from src.agents.content_agents import (
     ContentPlanningAgent,
     DraftingAgent,
@@ -20,8 +21,13 @@ from src.agents.content_agents import (
     OptimizationAgent,
 )
 from src.agents.factory import AgentFactory
-from src.agents.models import AgentTask
+from src.agents.models import AgentResult, AgentTask
 from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+from src.agents.supervisors.base_supervisor import (
+    BaseSupervisor,
+    SupervisionState,
+    WorkerDefinition,
+)
 from src.agents.supervisors.content_supervisor import ContentSupervisor
 
 
@@ -39,6 +45,41 @@ ALL = {
     "statistical_modeling": StatisticalModelingAgent,
     "insight_synthesis": InsightSynthesisAgent,
 }
+
+
+class _ExtensionAgent(BaseAgent):
+    async def execute(self, task: AgentTask) -> AgentResult:
+        return AgentResult(
+            task_id=task.id,
+            status="completed",
+            output={},
+            confidence=1.0,
+            execution_time=0.0,
+        )
+
+    async def validate_result(self, result: AgentResult) -> bool:
+        return True
+
+
+class _WorkerExtensionSupervisor(BaseSupervisor):
+    def __init__(self, worker_definition: WorkerDefinition) -> None:
+        self._worker_definition = worker_definition
+        super().__init__(supervisor_type="extension", domain="extension")
+
+    def _register_worker_types(self) -> None:
+        self.worker_definitions = {
+            self._worker_definition.worker_type: self._worker_definition
+        }
+
+    def _build_workflow_graph(self) -> None:
+        self.workflow_graph = object()
+
+    async def _coordinate_workers(
+        self,
+        state: SupervisionState,
+        task: AgentTask,
+    ) -> SupervisionState:
+        return state
 
 
 @pytest.mark.parametrize("agent_type,cls", list(ALL.items()))
@@ -86,3 +127,45 @@ def test_worker_classes_are_instantiable_with_service_args() -> None:
     for cls in ALL.values():
         agent = cls(gemini_service=None, cache_client=None, config={})
         assert agent is not None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_instantiates_non_builtin_worker_definition_class() -> None:
+    supervisor = _WorkerExtensionSupervisor(
+        WorkerDefinition(
+            worker_type="extension_worker",
+            agent_class=_ExtensionAgent,
+            specialization="extension",
+        )
+    )
+
+    await supervisor.execute(
+        AgentTask(
+            id="extension-task",
+            agent_type="extension",
+            input_data={"query": "Use the extension worker"},
+        )
+    )
+
+    assert isinstance(supervisor.active_workers["extension_worker"], _ExtensionAgent)
+
+
+@pytest.mark.asyncio
+async def test_supervisor_builtin_worker_name_uses_registry_class() -> None:
+    supervisor = _WorkerExtensionSupervisor(
+        WorkerDefinition(
+            worker_type="drafting",
+            agent_class=_ExtensionAgent,
+            specialization="attempted override",
+        )
+    )
+
+    await supervisor.execute(
+        AgentTask(
+            id="builtin-task",
+            agent_type="extension",
+            input_data={"query": "Use the built-in worker"},
+        )
+    )
+
+    assert isinstance(supervisor.active_workers["drafting"], DraftingAgent)

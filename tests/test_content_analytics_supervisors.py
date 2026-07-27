@@ -14,8 +14,14 @@ import pytest
 
 from src.agents.models import AgentTask
 from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+from src.agents.supervisors.base_supervisor import BaseSupervisor, SupervisionState
 from src.agents.supervisors.content_supervisor import ContentSupervisor
-from src.agents.supervisors.supervisor_factory import SupervisorFactory
+from src.agents.supervisors.supervisor_factory import (
+    SupervisorCapability,
+    SupervisorFactory,
+    SupervisorSpecification,
+)
+from src.ai_brain.integration.masr_supervisor_bridge import SupervisorConfiguration
 from src.ai_brain.router.cost_optimizer import ModelSpec, ModelTier, OptimizationResult
 from src.ai_brain.router.masr import (
     AgentAllocation,
@@ -23,6 +29,35 @@ from src.ai_brain.router.masr import (
     RoutingDecision,
 )
 from src.ai_brain.router.query_analyzer import ComplexityAnalysis, ComplexityLevel
+
+
+class _ExtensionSupervisor(BaseSupervisor):
+    def __init__(
+        self,
+        gemini_service=None,
+        cache_client=None,
+        config=None,
+    ) -> None:
+        super().__init__(
+            supervisor_type="extension",
+            domain="extension",
+            gemini_service=gemini_service,
+            cache_client=cache_client,
+            config=config,
+        )
+
+    def _register_worker_types(self) -> None:
+        self.worker_definitions = {}
+
+    def _build_workflow_graph(self) -> None:
+        self.workflow_graph = None
+
+    async def _coordinate_workers(
+        self,
+        state: SupervisionState,
+        task: AgentTask,
+    ) -> SupervisionState:
+        return state
 
 
 def _make_routing_decision(
@@ -272,10 +307,6 @@ class TestSupervisorFactoryRegistration:
     @pytest.mark.asyncio
     async def test_factory_creates_analytics_supervisor(self, factory):
         """Test factory can create AnalyticsSupervisor instance."""
-        from src.ai_brain.integration.masr_supervisor_bridge import (
-            SupervisorConfiguration,
-        )
-
         config = SupervisorConfiguration(
             supervisor_type="analytics",
             domain="analytics",
@@ -288,6 +319,48 @@ class TestSupervisorFactoryRegistration:
         supervisor = await factory.create_supervisor_from_config(config)
         assert supervisor is not None
         assert isinstance(supervisor, AnalyticsSupervisor)
+
+    @pytest.mark.asyncio
+    async def test_factory_creates_registered_non_builtin_supervisor(self, factory):
+        factory.register_supervisor(
+            SupervisorSpecification(
+                supervisor_type="extension",
+                supervisor_class=_ExtensionSupervisor,
+                domain="extension",
+                capabilities={SupervisorCapability.SERVICE},
+            )
+        )
+
+        supervisor = await factory.create_supervisor_from_config(
+            SupervisorConfiguration(
+                supervisor_type="extension",
+                domain="extension",
+                worker_allocation=[],
+                quality_threshold=0.8,
+                max_refinement_rounds=1,
+                timeout_seconds=60,
+            )
+        )
+
+        assert isinstance(supervisor, _ExtensionSupervisor)
+
+    def test_factory_rejects_builtin_supervisor_override(self, factory):
+        original = factory.get_supervisor_spec("research")
+
+        with pytest.raises(
+            ValueError,
+            match="Built-in supervisor 'research' cannot be overridden",
+        ):
+            factory.register_supervisor(
+                SupervisorSpecification(
+                    supervisor_type="research",
+                    supervisor_class=_ExtensionSupervisor,
+                    domain="extension",
+                    capabilities={SupervisorCapability.SERVICE},
+                )
+            )
+
+        assert factory.get_supervisor_spec("research") is original
 
 
 class TestMASRBridgeIntegration:

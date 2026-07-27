@@ -89,9 +89,13 @@ class SupervisorCoordinationService:
         # endpoint actually needs to execute).
         self._real_executor: Any | None = None
         self._gemini_service: Any | None = None
+        self._close_lock = asyncio.Lock()
+        self._closed = False
 
     def _get_real_executor(self) -> Any:
         """Lazily build the real supervisor executor (MASR-bridge backed)."""
+        if self._closed:
+            raise RuntimeError("Supervisor coordination service is closed")
         if self._real_executor is None:
             from src.ai_brain.integration.masr_supervisor_bridge import (
                 MASRSupervisorBridge,
@@ -107,6 +111,18 @@ class SupervisorCoordinationService:
                 MASRSupervisorBridge(component_registry=self.component_registry),
             )
         return self._real_executor
+
+    async def close(self) -> None:
+        """Idempotently close the lazily initialized supervisor bridge."""
+        async with self._close_lock:
+            if self._closed:
+                return
+
+            self._closed = True
+            executor = self._real_executor
+            self._real_executor = None
+            if executor is not None:
+                await executor.masr_bridge.cleanup()
 
     def _get_gemini_service(self) -> Any:
         """Lazily build a Gemini service for conflict adjudication; None on failure."""

@@ -202,6 +202,10 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     first_masr_service = app.state.masr_routing_service
     first_talkhier_service = app.state.talkhier_session_service
     first_supervisor_coordination = app.state.supervisor_coordination_service
+    first_supervisor_cleanup = AsyncMock()
+    first_supervisor_coordination._get_real_executor().masr_bridge.cleanup = (
+        first_supervisor_cleanup
+    )
 
     await second_context.__aenter__()
     second_runtime = app.state.masr_runtime
@@ -211,6 +215,10 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     second_masr_service = app.state.masr_routing_service
     second_talkhier_service = app.state.talkhier_session_service
     second_supervisor_coordination = app.state.supervisor_coordination_service
+    second_supervisor_cleanup = AsyncMock()
+    second_supervisor_coordination._get_real_executor().masr_bridge.cleanup = (
+        second_supervisor_cleanup
+    )
 
     try:
         await first_context.__aexit__(None, None, None)
@@ -231,6 +239,8 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
             app.state.supervisor_coordination_service is second_supervisor_coordination
         )
         assert first_supervisor_coordination is not second_supervisor_coordination
+        first_supervisor_cleanup.assert_awaited_once()
+        second_supervisor_cleanup.assert_not_awaited()
         assert second_runtime.closed is False
         assert second_direct.closed is False
     finally:
@@ -240,6 +250,7 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     assert second_direct.closed is True
     assert second_masr_service.closed is True
     assert second_talkhier_service.closed is True
+    second_supervisor_cleanup.assert_awaited_once()
     for state_name in (
         "masr_runtime",
         "direct_execution_service",
@@ -250,6 +261,37 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
         "supervisor_coordination_service",
     ):
         assert not hasattr(app.state, state_name)
+
+
+@pytest.mark.asyncio
+async def test_supervisor_coordination_close_is_safe_before_initialization() -> None:
+    from src.api.services.supervisor_coordination_service import (
+        SupervisorCoordinationService,
+    )
+
+    service = SupervisorCoordinationService()
+
+    await service.close()
+    await service.close()
+
+    assert service._real_executor is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_coordination_close_cleans_initialized_bridge_once() -> None:
+    from src.api.services.supervisor_coordination_service import (
+        SupervisorCoordinationService,
+    )
+
+    service = SupervisorCoordinationService()
+    executor = service._get_real_executor()
+    executor.masr_bridge.cleanup = AsyncMock()
+
+    await service.close()
+    await service.close()
+
+    executor.masr_bridge.cleanup.assert_awaited_once()
+    assert service._real_executor is None
 
 
 @pytest.mark.asyncio

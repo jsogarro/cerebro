@@ -551,6 +551,24 @@ class SupervisorFactory:
             spec: Supervisor specification to register
         """
 
+        if not isinstance(spec.supervisor_class, type) or not issubclass(
+            spec.supervisor_class,
+            BaseSupervisor,
+        ):
+            raise TypeError("supervisor_class must be a BaseSupervisor subclass")
+
+        if spec.supervisor_type in SUPERVISOR_KEYS:
+            expected_class = self.component_registry.resolve(
+                SUPERVISOR_KEYS[spec.supervisor_type]
+            )
+            if (
+                spec.supervisor_class is not expected_class
+                or spec.supervisor_type in self.supervisor_registry
+            ):
+                raise ValueError(
+                    f"Built-in supervisor '{spec.supervisor_type}' cannot be overridden"
+                )
+
         self.supervisor_registry[spec.supervisor_type] = spec
         self.health_monitor.register_supervisor(spec)
         self.factory_stats["registry_size"] = len(self.supervisor_registry)
@@ -624,9 +642,12 @@ class SupervisorFactory:
                 "cache_client": None,
                 "config": supervisor_config,
             }
-            supervisor_class = self.component_registry.resolve(
-                SUPERVISOR_KEYS[config.supervisor_type]
-            )
+            if config.supervisor_type in SUPERVISOR_KEYS:
+                supervisor_class = self.component_registry.resolve(
+                    SUPERVISOR_KEYS[config.supervisor_type]
+                )
+            else:
+                supervisor_class = spec.supervisor_class
             supervisor_instance = supervisor_class(**kwargs)
 
             # Update statistics

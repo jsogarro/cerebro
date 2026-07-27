@@ -249,6 +249,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         supervisor_coordination_service = SupervisorCoordinationService(
             component_registry=component_registry,
         )
+        resources.push_async_callback(
+            _close_lifespan_resource,
+            "supervisor_coordination_service",
+            supervisor_coordination_service.close,
+        )
         app.state.supervisor_coordination_service = supervisor_coordination_service
         resources.callback(
             _remove_app_state_if_owned,

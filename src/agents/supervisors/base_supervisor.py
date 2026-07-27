@@ -286,10 +286,14 @@ class BaseSupervisor(BaseAgent, ABC):
             if not self.active_workers:
                 from src.core.kernel.component_keys import AGENT_KEYS
 
-                for worker_type in self.worker_definitions:
+                for worker_type, worker_definition in self.worker_definitions.items():
                     try:
-                        agent_key = AGENT_KEYS[worker_type]
-                        agent_class = self.component_registry.resolve(agent_key)
+                        if worker_type in AGENT_KEYS:
+                            agent_class = self.component_registry.resolve(
+                                AGENT_KEYS[worker_type]
+                            )
+                        else:
+                            agent_class = worker_definition.agent_class
                         worker = agent_class(
                             gemini_service=self.gemini_service,
                             cache_client=self.cache_client,

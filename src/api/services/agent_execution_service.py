@@ -111,7 +111,11 @@ class AgentExecutionService:
         }
 
     async def execute_single_agent(
-        self, agent_type: AgentType, request: AgentExecutionRequest
+        self,
+        agent_type: AgentType,
+        request: AgentExecutionRequest,
+        *,
+        timeout_seconds: float | None = None,
     ) -> AgentExecutionResponse:
         """
         Execute single agent following direct interaction pattern.
@@ -165,7 +169,10 @@ class AgentExecutionService:
 
             # Execute with timeout
             agent_result = await asyncio.wait_for(
-                agent.execute(task), timeout=request.timeout_seconds
+                agent.execute(task),
+                timeout=timeout_seconds
+                if timeout_seconds is not None
+                else request.timeout_seconds,
             )
 
             # Build response
@@ -417,6 +424,8 @@ class AgentExecutionService:
         )
 
         try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + request.timeout_seconds
             agent_specs = []
 
             for agent_type in request.agent_types:
@@ -435,19 +444,27 @@ class AgentExecutionService:
                 agent_spec: tuple[AgentType, AgentExecutionRequest],
             ) -> AgentExecutionResponse:
                 agent_type, agent_request = agent_spec
-                return await self.execute_single_agent(agent_type, agent_request)
+                remaining_seconds = deadline - loop.time()
+                if remaining_seconds <= 0:
+                    raise TimeoutError
+                return await self.execute_single_agent(
+                    agent_type,
+                    agent_request,
+                    timeout_seconds=remaining_seconds,
+                )
 
             # Wait for all agents to complete
             agent_results = {}
             execution_times = {}
 
-            mixture_results = await BoundedTaskRunner[
-                tuple[AgentType, AgentExecutionRequest], AgentExecutionResponse
-            ](request.max_parallel).run(
-                agent_specs,
-                execute_agent,
-                return_exceptions=True,
-            )
+            async with asyncio.timeout_at(deadline):
+                mixture_results = await BoundedTaskRunner[
+                    tuple[AgentType, AgentExecutionRequest], AgentExecutionResponse
+                ](request.max_parallel).run(
+                    agent_specs,
+                    execute_agent,
+                    return_exceptions=True,
+                )
 
             for (agent_type, _), agent_result in zip(
                 agent_specs,
