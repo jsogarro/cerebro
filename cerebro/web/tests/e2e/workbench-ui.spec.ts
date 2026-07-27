@@ -14,7 +14,8 @@ test.describe('research workbench journey', () => {
     }) => {
       await page.setViewportSize(viewport);
       const runtime = observeRuntime(page);
-      const { runId } = await installWorkbenchJourneyContractApi(page);
+      const { runId, resourceRequestCounts } =
+        await installWorkbenchJourneyContractApi(page);
 
       await page.goto('/app/workflows');
       const workflow = page.getByRole('article', {
@@ -49,6 +50,12 @@ test.describe('research workbench journey', () => {
         name: 'Provider and cost ledger',
       });
       await expect(artifactHeading).toBeVisible();
+      for (const resource of ['tasks', 'events', 'evidence', 'artifacts', 'evaluations']) {
+        expect(
+          resourceRequestCounts.get(resource),
+          `${resource} receives a final fetch after the run becomes terminal`,
+        ).toBeGreaterThanOrEqual(2);
+      }
       expect(await artifactHeading.evaluate((node) => node.getBoundingClientRect().top)).toBeLessThan(
         await operationsHeading.evaluate((node) => node.getBoundingClientRect().top),
       );

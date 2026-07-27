@@ -286,9 +286,43 @@ export function RunArtifactInspector({
                 const exactEvidence = evidenceIsResolved
                   ? claim.evidenceIds.filter((evidenceId) => evidenceById.get(evidenceId)?.excerpt)
                   : [];
-                const absentEvidence = evidenceIsResolved
-                  ? claim.evidenceIds.filter((evidenceId) => !evidenceById.get(evidenceId)?.excerpt)
+                const missingEvidence = evidenceIsResolved
+                  ? claim.evidenceIds.filter((evidenceId) => !evidenceById.has(evidenceId))
                   : [];
+                const evidenceWithoutExcerpt = evidenceIsResolved
+                  ? claim.evidenceIds.filter((evidenceId) => {
+                      const item = evidenceById.get(evidenceId);
+                      return item !== undefined && item.excerpt === null;
+                    })
+                  : [];
+                const unusableEvidence = evidenceIsResolved
+                  ? claim.evidenceIds.filter((evidenceId) => {
+                      const item = evidenceById.get(evidenceId);
+                      return (
+                        item !== undefined &&
+                        item.availability !== 'available' &&
+                        item.availability !== 'partial'
+                      );
+                    })
+                  : [];
+                const hasUsableEvidence = evidenceIsResolved
+                  ? claim.evidenceIds.some((evidenceId) => {
+                      const item = evidenceById.get(evidenceId);
+                      return (
+                        item !== undefined &&
+                        (item.availability === 'available' ||
+                          item.availability === 'partial') &&
+                        item.excerpt !== null
+                      );
+                    })
+                  : false;
+                const supportCannotBeVerified =
+                  evidenceIsResolved &&
+                  ((claim.status === 'supported' &&
+                    (missingEvidence.length > 0 ||
+                      unusableEvidence.length > 0 ||
+                      evidenceWithoutExcerpt.length > 0)) ||
+                    (claim.status === 'partially-supported' && !hasUsableEvidence));
                 return (
                   <li key={claim.claimId} className="run-claim">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -299,8 +333,14 @@ export function RunArtifactInspector({
                         {claim.claimText}
                       </p>
                       <StatusBadge
-                        semantics={supportSemantics[claim.status]}
-                        rawValue={claim.rawStatus}
+                        semantics={
+                          supportSemantics[supportCannotBeVerified ? 'unknown' : claim.status]
+                        }
+                        rawValue={
+                          supportCannotBeVerified
+                            ? (claim.rawStatus ?? claim.status)
+                            : claim.rawStatus
+                        }
                       />
                     </div>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -332,9 +372,19 @@ export function RunArtifactInspector({
                           : 'Linked evidence has no exact excerpt available, so no citation control is provided.'}
                       </p>
                     )}
-                    {absentEvidence.length > 0 ? (
+                    {missingEvidence.length > 0 ? (
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                        {absentEvidence.length} linked evidence record{absentEvidence.length === 1 ? '' : 's'} cannot provide an exact excerpt.
+                        {missingEvidence.length} linked evidence record{missingEvidence.length === 1 ? '' : 's'} {missingEvidence.length === 1 ? 'is' : 'are'} missing, so the reported support cannot be independently verified.
+                      </p>
+                    ) : null}
+                    {unusableEvidence.length > 0 ? (
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {unusableEvidence.length} linked evidence record{unusableEvidence.length === 1 ? '' : 's'} {unusableEvidence.length === 1 ? 'is' : 'are'} not available for independent verification.
+                      </p>
+                    ) : null}
+                    {evidenceWithoutExcerpt.length > 0 ? (
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {evidenceWithoutExcerpt.length} linked evidence record{evidenceWithoutExcerpt.length === 1 ? '' : 's'} cannot provide an exact excerpt.
                       </p>
                     ) : null}
                   </li>

@@ -15,8 +15,9 @@ export function formatDurationMs(value: number, unit: string | null): string {
   if (value < 1000) return `${Math.round(value)} ms`;
   const totalSeconds = value / 1000;
   if (totalSeconds < 60) return `${totalSeconds.toFixed(1)} s`;
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = Math.round(totalSeconds % 60);
+  const roundedSeconds = Math.round(totalSeconds);
+  const minutes = Math.floor(roundedSeconds / 60);
+  const seconds = roundedSeconds % 60;
   return `${minutes}m ${seconds}s`;
 }
 

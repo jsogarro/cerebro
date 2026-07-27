@@ -4,6 +4,7 @@ import {
   adaptOperationalMetrics,
   adaptOriginValue,
   isRecord,
+  lifecycleSemantics,
   listPayload,
   normalizeToken,
   parseAvailabilityState,
@@ -150,6 +151,7 @@ export interface RunSubresourceOptions {
 
 export const runKeys = {
   all: ['runs'] as const,
+  lists: () => [...runKeys.all, 'list'] as const,
   list: (filters: RunListFilters = {}) => [...runKeys.all, 'list', filters] as const,
   detail: (runId: string) => [...runKeys.all, 'detail', runId] as const,
   tasks: (runId: string) => [...runKeys.detail(runId), 'tasks'] as const,
@@ -195,6 +197,36 @@ function referenceIds(value: unknown): string[] {
   });
 }
 
+function optionalReferences(
+  record: Record<string, unknown>,
+  canonical: string,
+  alias: string,
+): { ids: string[]; reported: boolean; issue: string | null } {
+  const key = Object.prototype.hasOwnProperty.call(record, canonical)
+    ? canonical
+    : Object.prototype.hasOwnProperty.call(record, alias)
+      ? alias
+      : null;
+  if (key === null) return { ids: [], reported: false, issue: null };
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    return {
+      ids: [],
+      reported: true,
+      issue: `${key} is present but is not an array.`,
+    };
+  }
+  const ids = referenceIds(value);
+  if (ids.length !== value.length) {
+    return {
+      ids,
+      reported: true,
+      issue: `${key} contains one or more malformed references.`,
+    };
+  }
+  return { ids, reported: true, issue: null };
+}
+
 function optionalTimestamp(record: Record<string, unknown>, key: string): string | null {
   return readString(record, key);
 }
@@ -218,16 +250,24 @@ export function adaptRun(value: unknown): ResourceContract<Run> {
   }
 
   const issues: string[] = [];
-  const reportedStatus =
-    typeof value.status === 'string' && normalizeToken(value.status) === 'queued'
-      ? { state: 'pending' as const, raw: value.status }
-      : parseLifecycleState(value.status);
-  const status = reportedStatus;
+  const status = parseLifecycleState(value.status);
   const mode = parseExecutionMode(value.mode ?? value.execution_mode);
   if (status.state === 'unknown') issues.push(unknownStateIssue('status', status.raw));
   if (mode.mode === 'unknown') issues.push(unknownStateIssue('execution mode', mode.raw));
   const inputs = readRecord(value, 'inputs') ?? readRecord(value, 'normalized_inputs');
   if (inputs === null) issues.push('inputs are unavailable.');
+  const taskReferences = optionalReferences(value, 'task_ids', 'tasks');
+  const artifactReferences = optionalReferences(value, 'artifact_ids', 'artifacts');
+  const evidenceReferences = optionalReferences(value, 'evidence_ids', 'evidence');
+  const evaluationReferences = optionalReferences(value, 'evaluation_ids', 'evaluations');
+  for (const reference of [
+    taskReferences,
+    artifactReferences,
+    evidenceReferences,
+    evaluationReferences,
+  ]) {
+    if (reference.issue !== null) issues.push(reference.issue);
+  }
 
   return {
     value: {
@@ -245,10 +285,14 @@ export function adaptRun(value: unknown): ResourceContract<Run> {
       updatedAt: optionalTimestamp(value, 'updated_at'),
       completedAt: optionalTimestamp(value, 'completed_at'),
       providerPolicySnapshot: readRecord(value, 'provider_policy_snapshot'),
-      taskIds: referenceIds(value.task_ids ?? value.tasks),
-      artifactIds: referenceIds(value.artifact_ids ?? value.artifacts),
-      evidenceIds: referenceIds(value.evidence_ids ?? value.evidence),
-      evaluationIds: referenceIds(value.evaluation_ids ?? value.evaluations),
+      taskIds: taskReferences.ids,
+      taskReferencesReported: taskReferences.reported,
+      artifactIds: artifactReferences.ids,
+      artifactReferencesReported: artifactReferences.reported,
+      evidenceIds: evidenceReferences.ids,
+      evidenceReferencesReported: evidenceReferences.reported,
+      evaluationIds: evaluationReferences.ids,
+      evaluationReferencesReported: evaluationReferences.reported,
       metrics: adaptOperationalMetrics(value.operational_metrics ?? value.metrics),
       warnings: readStringArray(value, 'warnings'),
       failureSummary: readString(value, 'failure_summary') ?? readString(value, 'error_summary'),
@@ -774,24 +818,25 @@ async function fetchRunCollection<T>(
   runId: string,
   resource: string,
   adapter: (value: unknown) => CollectionContract<T>,
+  signal?: AbortSignal,
 ): Promise<CollectionContract<T>> {
   const { data } = await apiClient.get<unknown>(
     `/runs/${encodeURIComponent(runId)}/${resource}`,
-    { handleErrorLocally: true },
+    { handleErrorLocally: true, signal },
   );
   return adapter(data);
 }
 
-export const fetchRunTasks = (runId: string) =>
-  fetchRunCollection(runId, 'tasks', adaptTaskCollection);
-export const fetchRunEvents = (runId: string) =>
-  fetchRunCollection(runId, 'events', adaptEventCollection);
-export const fetchRunEvidence = (runId: string) =>
-  fetchRunCollection(runId, 'evidence', adaptEvidenceCollection);
-export const fetchRunArtifacts = (runId: string) =>
-  fetchRunCollection(runId, 'artifacts', adaptArtifactCollection);
-export const fetchRunEvaluations = (runId: string) =>
-  fetchRunCollection(runId, 'evaluations', adaptEvaluationCollection);
+export const fetchRunTasks = (runId: string, signal?: AbortSignal) =>
+  fetchRunCollection(runId, 'tasks', adaptTaskCollection, signal);
+export const fetchRunEvents = (runId: string, signal?: AbortSignal) =>
+  fetchRunCollection(runId, 'events', adaptEventCollection, signal);
+export const fetchRunEvidence = (runId: string, signal?: AbortSignal) =>
+  fetchRunCollection(runId, 'evidence', adaptEvidenceCollection, signal);
+export const fetchRunArtifacts = (runId: string, signal?: AbortSignal) =>
+  fetchRunCollection(runId, 'artifacts', adaptArtifactCollection, signal);
+export const fetchRunEvaluations = (runId: string, signal?: AbortSignal) =>
+  fetchRunCollection(runId, 'evaluations', adaptEvaluationCollection, signal);
 
 export function runRefetchInterval(
   contract: ResourceContract<Run> | undefined,
@@ -814,12 +859,57 @@ export function subresourceRefetchInterval(
     : false;
 }
 
+function lifecycleIsActive(status: LifecycleState): boolean {
+  return status === 'pending' || status === 'running';
+}
+
+export function runsRefetchInterval(
+  contract: CollectionContract<Run> | undefined,
+  failureCount: number,
+): number | false {
+  if (
+    failureCount >= MAX_POLL_FAILURES ||
+    contract === undefined ||
+    contract.items.every((run) => !lifecycleIsActive(run.status))
+  ) {
+    return false;
+  }
+  return ACTIVE_POLL_INTERVAL_MS;
+}
+
+export function reconcileRunCollection(
+  previous: CollectionContract<Run> | undefined,
+  next: CollectionContract<Run>,
+): CollectionContract<Run> {
+  if (previous === undefined) return next;
+  const previousById = new Map(previous.items.map((run) => [run.id, run]));
+  return {
+    ...next,
+    items: next.items.map((run) => {
+      const prior = previousById.get(run.id);
+      return prior &&
+        lifecycleSemantics[prior.status].isTerminal &&
+        lifecycleIsActive(run.status)
+        ? prior
+        : run;
+    }),
+  };
+}
+
 export function useRuns(filters: RunListFilters = {}) {
-  return useQuery({
+  return useQuery<CollectionContract<Run>>({
     queryKey: runKeys.list(filters),
     queryFn: () => fetchRuns(filters),
     staleTime: 10_000,
     retry: 2,
+    refetchInterval: (query) =>
+      runsRefetchInterval(query.state.data, query.state.fetchFailureCount),
+    refetchIntervalInBackground: false,
+    structuralSharing: (previous, next) =>
+      reconcileRunCollection(
+        previous as CollectionContract<Run> | undefined,
+        next as CollectionContract<Run>,
+      ),
   });
 }
 
@@ -854,8 +944,8 @@ export function useCancelRun() {
     onSuccess: (contract, runId) => {
       if (contract.value) {
         queryClient.setQueryData(runKeys.detail(runId), contract);
-        queryClient.setQueryData<CollectionContract<Run>>(
-          runKeys.list(),
+        queryClient.setQueriesData<CollectionContract<Run>>(
+          { queryKey: runKeys.lists() },
           (current) =>
             current
               ? {
@@ -867,7 +957,6 @@ export function useCancelRun() {
               : current,
         );
       }
-      void queryClient.invalidateQueries({ queryKey: runKeys.all });
     },
   });
 }
@@ -875,12 +964,12 @@ export function useCancelRun() {
 function useRunSubresource<T>(
   runId: string,
   queryKey: readonly unknown[],
-  queryFn: (id: string) => Promise<CollectionContract<T>>,
+  queryFn: (id: string, signal?: AbortSignal) => Promise<CollectionContract<T>>,
   options: RunSubresourceOptions,
 ) {
   return useQuery({
     queryKey,
-    queryFn: () => queryFn(runId),
+    queryFn: ({ signal }) => queryFn(runId, signal),
     enabled: runId.length > 0,
     staleTime: 2_000,
     retry: 2,

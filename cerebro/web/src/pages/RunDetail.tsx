@@ -53,12 +53,23 @@ function resolveState<T extends HasPresentation>(query: QueryLike<T>): Presentat
   return query.data.presentation.state;
 }
 
+function timestampOrder(value: string | null): number {
+  if (value === null) return Number.POSITIVE_INFINITY;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
+}
+
 function orderTasks(tasks: readonly Task[]): Task[] {
-  return [...tasks].sort((a, b) => (a.startedAt ?? '9999').localeCompare(b.startedAt ?? '9999'));
+  return [...tasks].sort(
+    (a, b) => timestampOrder(a.startedAt) - timestampOrder(b.startedAt) || a.id.localeCompare(b.id),
+  );
 }
 
 function orderEvents(events: readonly Event[]): Event[] {
-  return [...events].sort((a, b) => (a.occurredAt ?? '9999').localeCompare(b.occurredAt ?? '9999'));
+  return [...events].sort(
+    (a, b) =>
+      timestampOrder(a.occurredAt) - timestampOrder(b.occurredAt) || a.id.localeCompare(b.id),
+  );
 }
 
 function RetryNotice({
@@ -228,22 +239,45 @@ export function RunDetail() {
   const evidenceState = resolveState(evidenceQuery);
   const artifactsState = resolveState(artifactsQuery);
   const evaluationsState = resolveState(evaluationsQuery);
-  const previousLifecycle = useRef<{ runId: string; label: string } | null>(null);
+  const previousLifecycle = useRef<{
+    runId: string;
+    status: NonNullable<typeof run>['status'];
+  } | null>(null);
   const lifecycleAnnouncer = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     if (!run) return;
     const label = lifecycleSemantics[run.status].label;
+    const previous = previousLifecycle.current;
     if (
-      previousLifecycle.current?.runId === run.id &&
-      previousLifecycle.current.label !== label
+      previous?.runId === run.id &&
+      previous.status !== run.status
     ) {
       if (lifecycleAnnouncer.current) {
         lifecycleAnnouncer.current.textContent = `Run status updated to ${label}.`;
       }
+      if (
+        !lifecycleSemantics[previous.status].isTerminal &&
+        lifecycleSemantics[run.status].isTerminal
+      ) {
+        void Promise.all([
+          tasksQuery.refetch(),
+          eventsQuery.refetch(),
+          evidenceQuery.refetch(),
+          artifactsQuery.refetch(),
+          evaluationsQuery.refetch(),
+        ]);
+      }
     }
-    previousLifecycle.current = { runId: run.id, label };
-  }, [run]);
+    previousLifecycle.current = { runId: run.id, status: run.status };
+  }, [
+    artifactsQuery,
+    evaluationsQuery,
+    eventsQuery,
+    evidenceQuery,
+    run,
+    tasksQuery,
+  ]);
 
   let overview: ReactNode;
   if (runState === 'loading') {
@@ -307,13 +341,19 @@ export function RunDetail() {
     run === null
       ? []
       : (artifactsQuery.data?.items ?? [])
-          .filter((artifact) => artifact.runId !== run.id || !run.artifactIds.includes(artifact.id))
+          .filter(
+            (artifact) =>
+              artifact.runId !== run.id ||
+              (run.artifactReferencesReported && !run.artifactIds.includes(artifact.id)),
+          )
           .map((artifact) => `Artifact ${artifact.id} is not owned and referenced by this run.`);
   const primaryArtifact =
     run === null
       ? null
       : (artifactsQuery.data?.items ?? []).find(
-          (artifact) => artifact.runId === run.id && run.artifactIds.includes(artifact.id),
+          (artifact) =>
+            artifact.runId === run.id &&
+            (!run.artifactReferencesReported || run.artifactIds.includes(artifact.id)),
         ) ?? null;
   const referencedEvidenceIds = new Set([
     ...(primaryArtifact?.evidenceIds ?? []),
@@ -326,6 +366,7 @@ export function RunDetail() {
           .filter(
             (item) =>
               item.runId !== run.id ||
+              (run.evidenceReferencesReported && !run.evidenceIds.includes(item.id)) ||
               (primaryArtifact !== null && !referencedEvidenceIds.has(item.id)),
           )
           .map((item) => `Evidence ${item.id} is not owned by this run or referenced by the artifact.`);
@@ -333,16 +374,69 @@ export function RunDetail() {
     (item) =>
       run !== null &&
       item.runId === run.id &&
+      (!run.evidenceReferencesReported || run.evidenceIds.includes(item.id)) &&
       (primaryArtifact === null || referencedEvidenceIds.has(item.id)),
   );
+  const inspectableEvidenceIds = new Set(inspectableEvidence.map((item) => item.id));
+  const inspectableEvidenceById = new Map(inspectableEvidence.map((item) => [item.id, item]));
+  const claimEvidenceIntegrityIssues =
+    !['ready', 'partial', 'empty'].includes(evidenceState) || primaryArtifact === null
+      ? []
+      : primaryArtifact.claims.flatMap((claim) => {
+          if (claim.status !== 'supported' && claim.status !== 'partially-supported') {
+            return [];
+          }
+          const hasUsableEvidence = claim.evidenceIds.some((evidenceId) => {
+            const evidence = inspectableEvidenceById.get(evidenceId);
+            return (
+              evidence !== undefined &&
+              (evidence.availability === 'available' ||
+                evidence.availability === 'partial') &&
+              evidence.excerpt !== null
+            );
+          });
+          if (claim.status === 'partially-supported' && hasUsableEvidence) {
+            return [];
+          }
+          return claim.evidenceIds.flatMap((evidenceId) => {
+            const evidence = inspectableEvidenceById.get(evidenceId);
+            if (!inspectableEvidenceIds.has(evidenceId)) {
+              return [
+                `Claim ${claim.claimId} references missing evidence ${evidenceId}; its reported support cannot be independently verified.`,
+              ];
+            }
+            if (
+              evidence !== undefined &&
+              evidence.availability !== 'available' &&
+              evidence.availability !== 'partial'
+            ) {
+              return [
+                `Claim ${claim.claimId} references evidence ${evidenceId}, but its availability is ${evidence.availability}; reported support cannot be independently verified.`,
+              ];
+            }
+            if (evidence?.excerpt === null) {
+              return [
+                `Claim ${claim.claimId} references evidence ${evidenceId}, but no exact excerpt is available; reported support cannot be independently verified.`,
+              ];
+            }
+            return [];
+          });
+        });
   const taskIntegrityIssues =
     run === null
       ? []
       : (tasksQuery.data?.items ?? [])
-          .filter((task) => task.runId !== run.id)
+          .filter(
+            (task) =>
+              task.runId !== run.id ||
+              (run.taskReferencesReported && !run.taskIds.includes(task.id)),
+          )
           .map((task) => `Task ${task.id} is not owned by this run.`);
   const inspectableTasks = (tasksQuery.data?.items ?? []).filter(
-    (task) => run !== null && task.runId === run.id,
+    (task) =>
+      run !== null &&
+      task.runId === run.id &&
+      (!run.taskReferencesReported || run.taskIds.includes(task.id)),
   );
   const eventIntegrityIssues =
     run === null
@@ -357,16 +451,36 @@ export function RunDetail() {
     run === null
       ? []
       : (evaluationsQuery.data?.items ?? [])
-          .filter(
-            (evaluation) =>
-              evaluation.runId !== run.id || !run.evaluationIds.includes(evaluation.id),
-          )
-          .map((evaluation) => `Evaluation ${evaluation.id} is not owned and referenced by this run.`);
+          .flatMap((evaluation) => {
+            const issues: string[] = [];
+            if (
+              evaluation.runId !== run.id ||
+              (run.evaluationReferencesReported &&
+                !run.evaluationIds.includes(evaluation.id))
+            ) {
+              issues.push(`Evaluation ${evaluation.id} is not owned and referenced by this run.`);
+            }
+            if (
+              evaluation.artifactIds.some(
+                (artifactId) => primaryArtifact === null || artifactId !== primaryArtifact.id,
+              )
+            ) {
+              issues.push(`Evaluation ${evaluation.id} references an unavailable artifact.`);
+            }
+            if (evaluation.evidenceIds.some((evidenceId) => !inspectableEvidenceIds.has(evidenceId))) {
+              issues.push(`Evaluation ${evaluation.id} references unavailable evidence.`);
+            }
+            return issues;
+          });
   const inspectableEvaluations = (evaluationsQuery.data?.items ?? []).filter(
     (evaluation) =>
       run !== null &&
       evaluation.runId === run.id &&
-      run.evaluationIds.includes(evaluation.id),
+      (!run.evaluationReferencesReported || run.evaluationIds.includes(evaluation.id)) &&
+      evaluation.artifactIds.every(
+        (artifactId) => primaryArtifact !== null && artifactId === primaryArtifact.id,
+      ) &&
+      evaluation.evidenceIds.every((evidenceId) => inspectableEvidenceIds.has(evidenceId)),
   );
   const inspectorEvidenceIdentity = inspectableEvidence
     .map(
@@ -404,7 +518,7 @@ export function RunDetail() {
           <IssuesBanner heading="Some artifact records failed run-integrity checks." issues={artifactIntegrityIssues} className="mb-4" />
           {evidenceStateNotice ? <div className="mb-4">{evidenceStateNotice}</div> : null}
           {evidenceState === 'partial' ? <IssuesBanner heading="Some evidence fields could not be interpreted." issues={evidenceQuery.data?.presentation.issues ?? []} className="mb-4" /> : null}
-          <IssuesBanner heading="Some evidence records failed run-integrity checks." issues={evidenceIntegrityIssues} className="mb-4" />
+          <IssuesBanner heading="Some evidence records failed run-integrity checks." issues={[...evidenceIntegrityIssues, ...claimEvidenceIntegrityIssues]} className="mb-4" />
           {primaryArtifact || inspectableEvidence.length > 0 ? (
             <RunArtifactInspector
               key={`${id}:${primaryArtifact?.id ?? 'evidence-only'}:${inspectorEvidenceIdentity}`}

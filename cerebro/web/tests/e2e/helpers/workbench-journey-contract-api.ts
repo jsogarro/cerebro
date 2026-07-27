@@ -17,10 +17,8 @@ function json(route: Route, body: unknown, status = 200) {
 export async function installWorkbenchJourneyContractApi(page: Page) {
   const runId = createdRunFixture.run_id;
   let detailRequests = 0;
-  let releaseTerminalResources = () => {};
-  const terminalResources = new Promise<void>((resolve) => {
-    releaseTerminalResources = resolve;
-  });
+  let terminalPublished = false;
+  const resourceRequestCounts = new Map<string, number>();
 
   const withRunId = <T extends Record<string, unknown>>(record: T) => ({
     ...record,
@@ -74,7 +72,7 @@ export async function installWorkbenchJourneyContractApi(page: Page) {
         await json(route, runningRun);
         return;
       }
-      releaseTerminalResources();
+      terminalPublished = true;
       await json(route, terminalRun);
       return;
     }
@@ -83,8 +81,13 @@ export async function installWorkbenchJourneyContractApi(page: Page) {
       new RegExp(`^/runs/${runId}/(tasks|events|evidence|artifacts|evaluations)$`),
     );
     if (request.method() === 'GET' && resourceMatch) {
-      await terminalResources;
       const resource = resourceMatch[1];
+      const resourceRequests = (resourceRequestCounts.get(resource) ?? 0) + 1;
+      resourceRequestCounts.set(resource, resourceRequests);
+      if (!terminalPublished || resourceRequests === 1) {
+        await json(route, { items: [] });
+        return;
+      }
       const items =
         resource === 'tasks'
           ? runDetailContractFixtures.tasks.map(withRunId)
@@ -106,5 +109,5 @@ export async function installWorkbenchJourneyContractApi(page: Page) {
     );
   });
 
-  return { runId };
+  return { runId, resourceRequestCounts };
 }

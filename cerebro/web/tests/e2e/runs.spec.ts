@@ -129,6 +129,42 @@ test.describe('runs ledger and lifecycle observation', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  test('reports a malformed cancellation success instead of silently accepting it', async ({
+    page,
+  }) => {
+    await installRunsContractApi(page, { cancellation: 'malformed-success' });
+    await page.goto('/app/runs');
+
+    const pendingRow = page.getByRole('row').filter({
+      hasText: 'Await a controlled source pack before beginning fixture research.',
+    });
+    await pendingRow.getByRole('button', { name: 'Cancel run' }).click();
+    await expect(pendingRow.getByRole('alert')).toContainText(
+      'cancellation response did not include an interpretable run',
+    );
+    await expect(pendingRow.getByRole('button', { name: 'Cancel run' })).toBeEnabled();
+  });
+
+  test('does not roll a confirmed cancellation back after a stale ledger read', async ({
+    page,
+  }) => {
+    const contractApi = await installRunsContractApi(page, {
+      cancellation: 'stale-ledger-after-success',
+    });
+    await page.goto('/app/runs');
+
+    const pendingRow = page.getByRole('row').filter({
+      hasText: 'Await a controlled source pack before beginning fixture research.',
+    });
+    await pendingRow.getByRole('button', { name: 'Cancel run' }).click();
+    await expect(pendingRow.getByText('Cancelled', { exact: true })).toBeVisible();
+    await expect
+      .poll(contractApi.getLedgerRequests, { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(2);
+    await expect(pendingRow.getByText('Cancelled', { exact: true })).toBeVisible();
+    await expect(pendingRow.getByRole('button', { name: 'Cancel run' })).toHaveCount(0);
+  });
+
   test('keeps a long cancellation failure associated and within 390px', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await installRunsContractApi(page, { cancellation: 'failure-long-detail' });

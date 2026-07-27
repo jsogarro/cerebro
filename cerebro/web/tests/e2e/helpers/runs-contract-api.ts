@@ -15,6 +15,8 @@ export type RunsCancellationScenario =
   | 'success'
   | 'failure'
   | 'failure-long-detail'
+  | 'malformed-success'
+  | 'stale-ledger-after-success'
   | 'delayed-success';
 
 interface RunsContractApiOptions {
@@ -88,13 +90,19 @@ export async function installRunsContractApi(
       if (cancellation === 'delayed-success') {
         await pendingCancellation;
       }
+      if (cancellation === 'malformed-success') {
+        await json(route, { run_id: runId, status: 'cancelled' });
+        return;
+      }
       const cancelledRun = {
         ...runsContractFixtures.cancellation.success,
         run_id: runId,
       };
-      currentLedger = currentLedger.map((run) =>
-        run.run_id === runId ? cancelledRun : run,
-      );
+      if (cancellation !== 'stale-ledger-after-success') {
+        currentLedger = currentLedger.map((run) =>
+          run.run_id === runId ? cancelledRun : run,
+        );
+      }
       await json(route, cancelledRun);
       return;
     }
@@ -102,5 +110,9 @@ export async function installRunsContractApi(
     await json(route, { detail: `Unexpected Runs fixture request: ${relativePath}` }, 500);
   });
 
-  return { releaseCancellation, releaseLedger };
+  return {
+    releaseCancellation,
+    releaseLedger,
+    getLedgerRequests: () => ledgerRequests,
+  };
 }

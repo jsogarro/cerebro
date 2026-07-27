@@ -98,6 +98,7 @@ export const failedDetailRun = {
   ...baseRun,
   run_id: 'run-detail-failed',
   status: 'failed',
+  task_ids: ['task-detail-failed'],
   artifact_ids: [],
   evidence_ids: [],
   evaluation_ids: [],

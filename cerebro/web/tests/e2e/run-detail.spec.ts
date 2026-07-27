@@ -65,6 +65,73 @@ test.describe('inspectable run detail', () => {
     await expect(partial).toContainText('1 linked evidence record cannot provide an exact excerpt.');
   });
 
+  test('does not hide valid subresources when optional run summary references are omitted', async ({
+    page,
+  }) => {
+    await installRunDetailContractApi(page, 'omitted-summary-references');
+    await page.goto(routeFor('omitted-summary-references'));
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'An inspectable dossier of invented archive labels',
+      }),
+    ).toBeVisible();
+    await expect(page.getByText('fixture-grounding-auditor')).toBeVisible();
+    await expect(
+      page.getByText('Some artifact records failed run-integrity checks.'),
+    ).toHaveCount(0);
+  });
+
+  test('quarantines subresources when reported summary references are malformed', async ({
+    page,
+  }) => {
+    await installRunDetailContractApi(page, 'malformed-summary-references');
+    await page.goto(routeFor('malformed-summary-references'));
+
+    await expect(
+      page.getByRole('heading', { name: 'An inspectable dossier of invented archive labels' }),
+    ).toHaveCount(0);
+    await expect(page.getByText('fixture-grounding-auditor')).toHaveCount(0);
+    await expect(page.getByText(/artifact_ids contains one or more malformed references/)).toBeVisible();
+    await expect(page.getByText(/evaluation_ids contains one or more malformed references/)).toBeVisible();
+  });
+
+  test('downgrades positive support when a referenced evidence record is missing', async ({
+    page,
+  }) => {
+    await installRunDetailContractApi(page, 'missing-claim-evidence');
+    await page.goto(routeFor('missing-claim-evidence'));
+
+    const supportedClaim = page.locator('.run-claim').filter({
+      hasText: 'ALPHA belongs to the invented copper collection.',
+    });
+    await expect(supportedClaim.getByText(/Unknown support/)).toBeVisible();
+    await expect(supportedClaim).toContainText(
+      'reported support cannot be independently verified',
+    );
+    await expect(
+      page.getByText(/Claim claim-detail-supported references missing evidence evidence-detail-alpha/),
+    ).toBeVisible();
+  });
+
+  test('downgrades supported claims whose referenced evidence is unavailable', async ({
+    page,
+  }) => {
+    await installRunDetailContractApi(page, 'unavailable-supported-evidence');
+    await page.goto(routeFor('unavailable-supported-evidence'));
+
+    const supportedClaim = page.locator('.run-claim').filter({
+      hasText: 'ALPHA belongs to the invented copper collection.',
+    });
+    await expect(supportedClaim.getByText(/Unknown support/)).toBeVisible();
+    await expect(supportedClaim).toContainText(
+      'not available for independent verification',
+    );
+    await expect(
+      page.getByText(/Claim claim-detail-supported references evidence evidence-detail-beta, but its availability is unavailable/),
+    ).toBeVisible();
+  });
+
   test('keeps returned evidence independently inspectable when no artifact can be rendered', async ({ page }) => {
     await installRunDetailContractApi(page, 'evidence-only');
     await page.goto(routeFor('evidence-only'));
@@ -83,6 +150,8 @@ test.describe('inspectable run detail', () => {
       await expect(page.getByText(`Evidence inspection is ${scenario === 'evidence-unavailable' ? 'unavailable' : 'malformed'}; citation targets cannot be resolved yet.`).first()).toBeVisible();
       await expect(page.getByText('No evidence records were returned.')).toHaveCount(0);
       await expect(page.getByText('No evidence is linked; there is no citation target to inspect.')).toHaveCount(0);
+      await expect(page.getByText(/references missing evidence/)).toHaveCount(0);
+      await expect(page.getByText(/reported support cannot be independently verified/)).toHaveCount(0);
     });
   }
 

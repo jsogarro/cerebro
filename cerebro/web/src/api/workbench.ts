@@ -319,9 +319,13 @@ export interface Run {
   completedAt: string | null;
   providerPolicySnapshot: Readonly<Record<string, unknown>> | null;
   taskIds: readonly string[];
+  taskReferencesReported: boolean;
   artifactIds: readonly string[];
+  artifactReferencesReported: boolean;
   evidenceIds: readonly string[];
+  evidenceReferencesReported: boolean;
   evaluationIds: readonly string[];
+  evaluationReferencesReported: boolean;
   metrics: OperationalMetrics;
   warnings: readonly string[];
   failureSummary: string | null;
@@ -483,7 +487,10 @@ export function parseLifecycleState(value: unknown): {
   if (typeof value !== 'string') return { state: 'unknown', raw: null };
   const normalized = normalizeToken(value);
   const aliases: Record<string, LifecycleState> = {
+    queued: 'pending',
     pending: 'pending',
+    'in-progress': 'running',
+    retrying: 'running',
     running: 'running',
     'completed-with-warnings': 'completed-with-warnings',
     failed: 'failed',
