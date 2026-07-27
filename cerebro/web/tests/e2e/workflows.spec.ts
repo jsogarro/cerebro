@@ -135,6 +135,43 @@ test.describe('workflow discovery and controlled start', () => {
     await expect(page.getByRole('button', { name: 'Start controlled run' })).toBeEnabled();
   });
 
+  test('exposes a single primary run CTA while the card control stays secondary', async ({
+    page,
+  }) => {
+    await installWorkflowsContractApi(page);
+    await page.goto('/app/workflows');
+
+    // Exactly one primary/submit CTA on the page (the review's CTA-hierarchy fix).
+    await expect(page.getByRole('button', { name: 'Start controlled run' })).toHaveCount(1);
+
+    // The auto-selected card's control is present but must not be a competing filled primary.
+    const control = page.getByRole('button', { name: 'Selected for preflight' });
+    await expect(control).toBeVisible();
+    await expect(control).not.toHaveClass(/bg-primary(?![\w-])/);
+    await expect(control).not.toHaveClass(/workflow-card-action-selected/);
+  });
+
+  test('renders provenance chips for typical operation metrics without fabricating values', async ({
+    page,
+  }) => {
+    await installWorkflowsContractApi(page);
+    await page.goto('/app/workflows');
+
+    const workflow = page.getByRole('article', { name: 'Comparative Research Brief' });
+    // The canonical fixture reports every typical metric as unavailable — each renders an
+    // "Unavailable" provenance chip, never a fabricated $0.00 / 0 ms.
+    await expect(workflow.getByText('Unavailable', { exact: true })).toHaveCount(3);
+    await expect(workflow.getByText('$0.00')).toHaveCount(0);
+  });
+
+  test('preflight checklist renders all five checks', async ({ page }) => {
+    await installWorkflowsContractApi(page);
+    await page.goto('/app/workflows');
+
+    const preflight = page.locator('aside[aria-labelledby="preflight-heading"] ul > li');
+    await expect(preflight).toHaveCount(5);
+  });
+
   for (const viewport of [
     { name: 'desktop', width: 1280, height: 900 },
     { name: '390px', width: 390, height: 844 },
