@@ -92,6 +92,7 @@ class ResearchSupervisor(BaseSupervisor):
             self.get_agent_type,
             self.quality_threshold,
             max_revisions=self.max_paper_revisions,
+            component_registry=self.component_registry,
         )
 
     def _register_worker_types(self) -> None:

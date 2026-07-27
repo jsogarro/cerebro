@@ -1,11 +1,19 @@
 """Focused tests for the research kernel and its typed registry."""
 
 from dataclasses import FrozenInstanceError
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 
+from src.agents.base import BaseAgent
+from src.agents.factory import AgentFactory
+from src.agents.models import AgentResult, AgentTask
+from src.ai_brain.providers.model_router import ModelRouter
+from src.api.services.agent_execution_service import AgentExecutionService
+from src.api.services.component_catalog import build_application_component_registry
 from src.api.services.direct_execution_service import DirectExecutionService
+from src.api.services.research_kernel import compose_application_research_kernel
 from src.core.kernel import (
     DuplicateRegistryKeyError,
     RegistryEntry,
@@ -15,6 +23,8 @@ from src.core.kernel import (
     TypedRegistry,
     UnknownRegistryKeyError,
 )
+from src.core.kernel.component_keys import SUPERVISOR_KEYS
+from src.models.agent_api_models import AgentType
 
 
 def _entry(
@@ -104,6 +114,30 @@ def test_registry_reports_unknown_key_with_sorted_available_keys() -> None:
         )
 
 
+def test_registry_rejects_forged_same_name_typed_token() -> None:
+    registered_key = RegistryKey[object](
+        RegistryNamespace.WORKFLOW,
+        "routed-research",
+    )
+    registry = TypedRegistry([RegistryEntry(registered_key, object())])
+    forged_key = cast(
+        RegistryKey[object],
+        RegistryKey[str](
+            RegistryNamespace.WORKFLOW,
+            "routed-research",
+        ),
+    )
+
+    with pytest.raises(
+        UnknownRegistryKeyError,
+        match=(
+            r"^Unknown registry key: workflow:routed-research; "
+            r"available keys: workflow:routed-research$"
+        ),
+    ):
+        registry.resolve(forged_key)
+
+
 def test_registry_and_entries_are_immutable() -> None:
     component = object()
     entry = _entry(RegistryNamespace.SUPERVISOR, "research", component)
@@ -168,12 +202,142 @@ def test_direct_execution_owns_default_typed_supervisor_catalog() -> None:
         supervisor_factory=Mock(),
     )
 
-    assert service.supervisor_registry.keys == (
-        RegistryKey(RegistryNamespace.SUPERVISOR, "analytics"),
-        RegistryKey(RegistryNamespace.SUPERVISOR, "content"),
-        RegistryKey(RegistryNamespace.SUPERVISOR, "finance"),
-        RegistryKey(RegistryNamespace.SUPERVISOR, "research"),
+    assert tuple(
+        key
+        for key in service.supervisor_registry.keys
+        if key.namespace is RegistryNamespace.SUPERVISOR
+    ) == (
+        SUPERVISOR_KEYS["analytics"],
+        SUPERVISOR_KEYS["content"],
+        SUPERVISOR_KEYS["finance"],
+        SUPERVISOR_KEYS["research"],
     )
+
+
+def test_application_kernel_registry_covers_active_component_catalogs() -> None:
+    direct_service = DirectExecutionService(
+        masr_router=Mock(),
+        supervisor_bridge=None,
+        supervisor_factory=None,
+    )
+    agent_service = AgentExecutionService()
+    kernel = compose_application_research_kernel(direct_service, agent_service)
+
+    qualified_names = tuple(key.qualified_name for key in kernel.registry.keys)
+
+    assert qualified_names == (
+        "agent:citation",
+        "agent:comparative-analysis",
+        "agent:content-planning",
+        "agent:data-analysis",
+        "agent:drafting",
+        "agent:editing",
+        "agent:financial-analysis",
+        "agent:financial-calculator",
+        "agent:insight-synthesis",
+        "agent:literature-review",
+        "agent:methodology",
+        "agent:optimization",
+        "agent:risk-assessment",
+        "agent:statistical-modeling",
+        "agent:synthesis",
+        "agent:valuation",
+        "agent:verification",
+        "domain:analytics",
+        "domain:content",
+        "domain:finance",
+        "domain:general",
+        "domain:multimodal",
+        "domain:research",
+        "domain:service",
+        "provider:deepseek",
+        "provider:gemini",
+        "provider:llama",
+        "provider:openrouter",
+        "supervisor:analytics",
+        "supervisor:content",
+        "supervisor:finance",
+        "supervisor:research",
+        "workflow:agent-chain",
+        "workflow:agent-mixture",
+        "workflow:collaboration-mode",
+        "workflow:direct-agent",
+        "workflow:routed-research",
+    )
+    assert direct_service.component_registry is kernel.registry
+    assert direct_service.supervisor_registry is kernel.registry
+    assert agent_service.component_registry is kernel.registry
+    assert kernel.executor.component_registry is kernel.registry
+    assert direct_service.supervisor_bridge.translator.component_registry is (
+        kernel.registry
+    )
+    assert direct_service.supervisor_factory.component_registry is kernel.registry
+    assert agent_service.agent_factory.component_registry is kernel.registry
+    assert not hasattr(AgentFactory, "_agent_registry")
+    assert "agent_type_mapping" not in agent_service.__dict__
+    assert not hasattr(
+        direct_service.supervisor_bridge.translator,
+        "domain_to_supervisor",
+    )
+    assert not hasattr(
+        direct_service.supervisor_bridge.translator,
+        "collaboration_to_execution",
+    )
+
+    model_router = ModelRouter({"providers": {}}, component_registry=kernel.registry)
+    assert model_router.component_registry is kernel.registry
+    assert not hasattr(model_router, "provider_classes")
+
+
+def test_application_kernel_rejects_split_registry_authority() -> None:
+    direct_service = DirectExecutionService(
+        masr_router=Mock(),
+        supervisor_bridge=None,
+        supervisor_factory=None,
+    )
+    agent_service = AgentExecutionService(
+        component_registry=build_application_component_registry()
+    )
+
+    with pytest.raises(
+        TypeError,
+        match=(
+            r"^Research and agent execution backends must share one "
+            r"component registry$"
+        ),
+    ):
+        compose_application_research_kernel(direct_service, agent_service)
+
+
+@pytest.mark.asyncio
+async def test_agent_service_resolves_agent_class_from_kernel_registry() -> None:
+    class ReplacementAgent(BaseAgent):
+        async def execute(self, task: AgentTask) -> AgentResult:
+            raise NotImplementedError
+
+        async def validate_result(self, result: AgentResult) -> bool:
+            return True
+
+        def get_agent_type(self) -> str:
+            return "literature_review"
+
+    direct_service = DirectExecutionService(
+        masr_router=Mock(),
+        supervisor_bridge=None,
+        supervisor_factory=None,
+    )
+    entries = [
+        RegistryEntry(entry.key, ReplacementAgent)
+        if entry.key.qualified_name == "agent:literature-review"
+        else entry
+        for entry in direct_service.component_registry.entries
+    ]
+    registry = TypedRegistry(entries)
+    service = AgentExecutionService(component_registry=registry)
+
+    agent = await service._get_agent_instance(AgentType.LITERATURE_REVIEW)
+
+    assert type(agent) is ReplacementAgent
 
 
 def test_direct_execution_rejects_registry_without_research_fallback() -> None:
@@ -190,15 +354,7 @@ def test_direct_execution_rejects_registry_without_research_fallback() -> None:
 
 
 def test_direct_execution_rejects_invalid_supervisor_component() -> None:
-    registry = TypedRegistry(
-        [
-            _entry(
-                RegistryNamespace.SUPERVISOR,
-                "research",
-                object(),
-            )
-        ]
-    )
+    registry = TypedRegistry([RegistryEntry(SUPERVISOR_KEYS["research"], object())])
 
     with pytest.raises(
         TypeError,

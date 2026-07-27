@@ -11,6 +11,7 @@ import json
 
 from fastapi import (
     APIRouter,
+    Depends,
     HTTPException,
     Query,
     WebSocket,
@@ -20,6 +21,7 @@ from structlog import get_logger
 
 from src.api.services.supervisor_coordination_service import (
     SupervisorCoordinationService,
+    get_application_supervisor_coordination_service,
 )
 from src.api.services.supervisor_progress_tracker import SupervisorProgressTracker
 from src.models.supervisor_api_models import (
@@ -60,6 +62,20 @@ router = APIRouter(
 
 # Initialize service (in production, this would be dependency injected)
 supervisor_service = SupervisorCoordinationService()
+_SUPERVISOR_SERVICE_DEPENDENCY = Depends(
+    get_application_supervisor_coordination_service
+)
+
+
+def _resolved_supervisor_service(
+    service: SupervisorCoordinationService,
+) -> SupervisorCoordinationService:
+    """Keep direct Python calls compatible while HTTP uses lifespan state."""
+
+    if service is _SUPERVISOR_SERVICE_DEPENDENCY:
+        return supervisor_service
+    return service
+
 
 # Initialize connection manager
 connection_manager = SupervisorProgressTracker()
@@ -70,7 +86,9 @@ connection_manager = SupervisorProgressTracker()
 
 @router.post("/{supervisor_type}/execute", response_model=SupervisorExecuteResponse)
 async def execute_supervisor_task(
-    supervisor_type: SupervisorType, request: SupervisorExecuteRequest
+    supervisor_type: SupervisorType,
+    request: SupervisorExecuteRequest,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> SupervisorExecuteResponse:
     """
     Execute a task through a specific supervisor with worker coordination.
@@ -78,6 +96,7 @@ async def execute_supervisor_task(
     This endpoint implements the hierarchical supervision pattern where a
     supervisor coordinates multiple specialist workers to complete complex tasks.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         # Validate supervisor type
         if supervisor_type not in SupervisorType:
@@ -119,10 +138,13 @@ async def execute_supervisor_task(
 
 
 @router.get("", response_model=SupervisorListResponse)
-async def list_supervisors() -> SupervisorListResponse:
+async def list_supervisors(
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
+) -> SupervisorListResponse:
     """
     List all available supervisors with their current status and capabilities.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         supervisors = await supervisor_service.get_all_supervisors()
 
@@ -146,10 +168,14 @@ async def list_supervisors() -> SupervisorListResponse:
 
 
 @router.get("/{supervisor_type}", response_model=SupervisorInfo)
-async def get_supervisor_info(supervisor_type: SupervisorType) -> SupervisorInfo:
+async def get_supervisor_info(
+    supervisor_type: SupervisorType,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
+) -> SupervisorInfo:
     """
     Get detailed information about a specific supervisor.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         return await supervisor_service.get_supervisor_info(supervisor_type.value)
     except ValueError as e:
@@ -166,10 +192,14 @@ async def get_supervisor_info(supervisor_type: SupervisorType) -> SupervisorInfo
 
 
 @router.get("/{supervisor_type}/workers", response_model=WorkerListResponse)
-async def get_supervisor_workers(supervisor_type: SupervisorType) -> WorkerListResponse:
+async def get_supervisor_workers(
+    supervisor_type: SupervisorType,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
+) -> WorkerListResponse:
     """
     Get all workers managed by a specific supervisor.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         workers = await supervisor_service.get_supervisor_workers(supervisor_type.value)
 
@@ -199,7 +229,9 @@ async def get_supervisor_workers(supervisor_type: SupervisorType) -> WorkerListR
 
 @router.post("/{supervisor_type}/coordinate", response_model=WorkerCoordinationResponse)
 async def coordinate_workers(
-    supervisor_type: SupervisorType, request: WorkerCoordinationRequest
+    supervisor_type: SupervisorType,
+    request: WorkerCoordinationRequest,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> WorkerCoordinationResponse:
     """
     Coordinate specific workers under a supervisor for a task.
@@ -207,6 +239,7 @@ async def coordinate_workers(
     This endpoint allows fine-grained control over worker coordination,
     including specification of coordination modes and conflict resolution strategies.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         response = await supervisor_service.coordinate_workers(
             supervisor_type.value, request
@@ -241,6 +274,7 @@ async def coordinate_workers(
 @router.post("/multi/orchestrate", response_model=MultiSupervisorOrchestrationResponse)
 async def orchestrate_multi_supervisor(
     request: MultiSupervisorOrchestrationRequest,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> MultiSupervisorOrchestrationResponse:
     """
     Orchestrate multiple supervisors for complex cross-domain tasks.
@@ -248,6 +282,7 @@ async def orchestrate_multi_supervisor(
     This endpoint enables sophisticated multi-supervisor coordination for
     queries that span multiple domains, with optional result synthesis.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         response = await supervisor_service.orchestrate_multi_supervisor(request)
 
@@ -273,6 +308,7 @@ async def orchestrate_multi_supervisor(
 @router.get("/{supervisor_type}/stats", response_model=SupervisorStatsResponse)
 async def get_supervisor_stats(
     supervisor_type: SupervisorType,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> SupervisorStatsResponse:
     """
     Get performance statistics for a specific supervisor.
@@ -280,6 +316,7 @@ async def get_supervisor_stats(
     Returns comprehensive metrics including success rate, average quality,
     execution times, and worker utilization.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         return await supervisor_service.get_supervisor_stats(supervisor_type.value)
     except ValueError as e:
@@ -298,12 +335,14 @@ async def get_supervisor_stats(
 @router.get("/{supervisor_type}/health", response_model=SupervisorHealthResponse)
 async def get_supervisor_health(
     supervisor_type: SupervisorType,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> SupervisorHealthResponse:
     """
     Get health status of a specific supervisor.
 
     Provides health metrics and recommendations for supervisor optimization.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         return await supervisor_service.get_supervisor_health(supervisor_type.value)
     except ValueError as e:
@@ -327,6 +366,7 @@ async def get_supervisor_health(
 )
 async def optimize_worker_allocation(
     request: WorkerAllocationOptimizationRequest,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> WorkerAllocationOptimizationResponse:
     """
     Optimize worker allocation based on task requirements and goals.
@@ -334,6 +374,7 @@ async def optimize_worker_allocation(
     Uses intelligent optimization to determine the best worker allocation
     for quality, speed, cost, or balanced objectives.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         return await supervisor_service.optimize_worker_allocation(request)
     except Exception as e:
@@ -346,6 +387,7 @@ async def optimize_worker_allocation(
 @router.post("/resolve-conflicts", response_model=ConflictResolutionResponse)
 async def resolve_conflicts(
     request: ConflictResolutionRequest,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> ConflictResolutionResponse:
     """
     Resolve conflicts between worker outputs using specified strategy.
@@ -353,6 +395,7 @@ async def resolve_conflicts(
     Implements multiple conflict resolution strategies including supervisor override,
     majority vote, quality-based selection, and structured debate.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         response = await supervisor_service.resolve_conflict(request)
 
@@ -388,6 +431,7 @@ async def compare_supervisor_performance(
     supervisors: list[SupervisorType] = Query(
         ..., description="List of supervisor types to compare"
     ),
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> SupervisorComparisonResponse:
     """
     Compare performance metrics across multiple supervisors.
@@ -395,6 +439,7 @@ async def compare_supervisor_performance(
     Provides rankings and recommendations for supervisor selection based on
     various performance criteria.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         supervisor_types = [s.value for s in supervisors]
         return await supervisor_service.compare_supervisor_performance(supervisor_types)
@@ -410,13 +455,17 @@ async def compare_supervisor_performance(
 
 
 @router.post("/experiment", response_model=ExperimentResponse)
-async def run_coordination_experiment(request: ExperimentRequest) -> ExperimentResponse:
+async def run_coordination_experiment(
+    request: ExperimentRequest,
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
+) -> ExperimentResponse:
     """
     Run experiments to test different coordination strategies.
 
     Enables systematic testing of various supervision strategies to determine
     optimal approaches for specific query types.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     try:
         response = await supervisor_service.run_experiment(request)
 
@@ -443,7 +492,9 @@ async def run_coordination_experiment(request: ExperimentRequest) -> ExperimentR
 
 @router.websocket("/coordination/ws")
 async def coordination_progress_websocket(
-    websocket: WebSocket, coordination_id: str | None = Query(None)
+    websocket: WebSocket,
+    coordination_id: str | None = Query(None),
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> None:
     """
     WebSocket endpoint for real-time worker coordination progress updates.
@@ -451,6 +502,7 @@ async def coordination_progress_websocket(
     Streams live updates about worker assignments, task progress,
     conflict detection, and resolution events.
     """
+    _resolved_supervisor_service(service)
     client_id = f"coordination-{coordination_id or id(websocket)}"
 
     try:
@@ -503,6 +555,7 @@ async def supervisor_websocket(
     websocket: WebSocket,
     supervisor_type: SupervisorType,
     client_id: str | None = Query(None),
+    service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> None:
     """
     WebSocket endpoint for real-time supervisor updates.
@@ -510,6 +563,7 @@ async def supervisor_websocket(
     Provides live updates on supervisor status, task assignments,
     worker coordination progress, and performance alerts.
     """
+    supervisor_service = _resolved_supervisor_service(service)
     client_id = client_id or f"anonymous-{id(websocket)}"
 
     try:

@@ -24,7 +24,8 @@ from structlog import get_logger
 from ...agents.base import BaseAgent
 from ...agents.factory import AgentFactory
 from ...agents.models import AgentTask
-from ...core.kernel import BoundedTaskRunner
+from ...core.kernel import BoundedTaskRunner, TypedRegistry
+from ...core.kernel.component_keys import API_AGENT_KEYS
 from ...models.agent_api_models import (
     AgentCapability,
     AgentExecutionRequest,
@@ -50,11 +51,30 @@ class AgentExecutionService:
     with built-in performance tracking and quality assurance.
     """
 
-    def __init__(self, agent_factory: AgentFactory | None = None):
+    def __init__(
+        self,
+        agent_factory: AgentFactory | None = None,
+        component_registry: TypedRegistry | None = None,
+    ):
         """Initialize agent execution service."""
 
         # Agent management
-        self.agent_factory = agent_factory or AgentFactory()
+        if component_registry is None and agent_factory is not None:
+            component_registry = agent_factory.component_registry
+        if component_registry is None:
+            from .component_catalog import get_default_component_registry
+
+            component_registry = get_default_component_registry()
+        if (
+            agent_factory is not None
+            and agent_factory.component_registry is not component_registry
+        ):
+            raise TypeError(
+                "AgentFactory and AgentExecutionService must share one "
+                "component registry"
+            )
+        self.component_registry = component_registry
+        self.agent_factory = agent_factory or AgentFactory(self.component_registry)
 
         # Execution tracking
         self.active_executions: dict[str, dict[str, Any]] = {}
@@ -81,21 +101,13 @@ class AgentExecutionService:
         self.default_timeout_seconds = 300
         self.enable_performance_tracking = True
 
-        # Agent type to class mapping
-        # Map the API enum to AgentFactory registry keys (snake_case), NOT class
-        # names. AgentFactory.create_agent looks up by registry key, so class
-        # names like "LiteratureReviewAgent" raise "Unknown agent type".
-        self.agent_type_mapping = {
-            AgentType.LITERATURE_REVIEW: "literature_review",
-            AgentType.CITATION: "citation",
-            AgentType.METHODOLOGY: "methodology",
-            AgentType.COMPARATIVE_ANALYSIS: "comparative_analysis",
-            AgentType.SYNTHESIS: "synthesis",
-            AgentType.FINANCIAL_ANALYSIS: "financial_analysis",
-            AgentType.VALUATION: "valuation",
-            AgentType.RISK_ASSESSMENT: "risk_assessment",
-            AgentType.FINANCIAL_CALCULATOR: "financial_calculator",
-            AgentType.VERIFICATION: "verification",
+    @property
+    def agent_type_mapping(self) -> dict[AgentType, str]:
+        """Expose the legacy API-enum aliases without owning implementations."""
+
+        return {
+            agent_type: key.name.replace("-", "_")
+            for agent_type, key in API_AGENT_KEYS.items()
         }
 
     async def execute_single_agent(
@@ -962,16 +974,12 @@ class AgentExecutionService:
     async def _get_agent_instance(self, agent_type: AgentType) -> BaseAgent:
         """Get agent instance from factory."""
 
-        agent_class_name = self.agent_type_mapping.get(agent_type)
-        if not agent_class_name:
+        key = API_AGENT_KEYS.get(agent_type)
+        if key is None:
             raise ValueError(f"Unknown agent type: {agent_type.value}")
 
-        # Get agent from factory
-        agent = self.agent_factory.create_agent(agent_class_name)
-        if not agent:
-            raise RuntimeError(f"Failed to create agent: {agent_type.value}")
-
-        return agent
+        self.component_registry.resolve(key)
+        return self.agent_factory.resolve_agent(key.name.replace("-", "_"))
 
     async def get_service_stats(self) -> dict[str, Any]:
         """Get comprehensive service statistics."""
@@ -1042,10 +1050,14 @@ def get_agent_execution_service() -> AgentExecutionService:
 def configure_agent_execution_service(
     *,
     agent_factory: AgentFactory | None = None,
+    component_registry: TypedRegistry | None = None,
 ) -> AgentExecutionService:
     """Create an application-owned service without changing legacy globals."""
 
-    return AgentExecutionService(agent_factory=agent_factory)
+    return AgentExecutionService(
+        agent_factory=agent_factory,
+        component_registry=component_registry,
+    )
 
 
 def get_application_agent_execution_service(

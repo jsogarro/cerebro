@@ -202,7 +202,10 @@ class LLMWorkerAgentBase(BaseAgent):
                     "enable_fallback": True,
                     "max_retries": 3,
                 }
-                self._model_router = ModelRouter(router_config)
+                self._model_router = ModelRouter(
+                    router_config,
+                    component_registry=self.config.get("component_registry"),
+                )
 
             # Route and generate via OpenRouter
             response = await self._model_router.route_and_generate(
@@ -355,7 +358,10 @@ class LLMWorkerAgentBase(BaseAgent):
                     "enable_fallback": True,
                     "max_retries": 3,
                 }
-                self._model_router = ModelRouter(router_config)
+                self._model_router = ModelRouter(
+                    router_config,
+                    component_registry=self.config.get("component_registry"),
+                )
 
             # Route and generate via OpenRouter with truncation-aware retry
             response = await self._model_router.route_and_generate(

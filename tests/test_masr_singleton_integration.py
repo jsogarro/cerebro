@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +27,7 @@ def test_lifespan_injects_one_router_across_active_consumers(
     monkeypatch.setattr(websocket_manager, "shutdown", AsyncMock())
     monkeypatch.setattr(direct_execution_service, "_direct_execution_service", None)
 
-    with TestClient(app):
+    with TestClient(app) as client:
         from src.api.services.agent_execution_service import (
             get_application_agent_execution_service,
         )
@@ -42,8 +42,73 @@ def test_lifespan_injects_one_router_across_active_consumers(
             app.state.research_kernel.registry
             is app.state.direct_execution_service.supervisor_registry
         )
+        component_registry = app.state.research_kernel.registry
+        assert (
+            app.state.direct_execution_service.component_registry is component_registry
+        )
+        assert (
+            app.state.agent_execution_service.component_registry is component_registry
+        )
         assert app.state.masr_routing_service.router is runtime.router
+        assert app.state.masr_routing_service.component_registry is component_registry
+        assert (
+            app.state.masr_routing_service.bridge.component_registry
+            is component_registry
+        )
+        assert (
+            app.state.masr_routing_service.bridge.translator.component_registry
+            is component_registry
+        )
+        assert (
+            app.state.masr_routing_service.bridge.resource_pool.component_registry
+            is component_registry
+        )
         assert app.state.talkhier_session_service.masr_router is runtime.router
+        assert (
+            app.state.talkhier_session_service.component_registry is component_registry
+        )
+        assert (
+            app.state.talkhier_session_service.supervisor_factory.component_registry
+            is component_registry
+        )
+        assert (
+            app.state.talkhier_session_service.masr_bridge.component_registry
+            is component_registry
+        )
+        assert (
+            app.state.talkhier_session_service.masr_bridge.translator.component_registry
+            is component_registry
+        )
+        assert (
+            app.state.talkhier_session_service.session_coordinator.component_registry
+            is component_registry
+        )
+        assert app.state.supervisor_coordination_service.component_registry is (
+            component_registry
+        )
+        real_executor = app.state.supervisor_coordination_service._get_real_executor()
+        assert real_executor.masr_bridge.component_registry is component_registry
+        assert (
+            real_executor.masr_bridge.translator.component_registry
+            is component_registry
+        )
+        routing_decision = Mock(
+            agent_allocation=Mock(
+                supervisor_type="research",
+                worker_types=["literature_review"],
+                retry_attempts=1,
+                timeout_seconds=30,
+                worker_count=1,
+            ),
+            complexity_analysis=Mock(domains=[]),
+            estimated_quality=0.85,
+        )
+        created_supervisor = client.portal.call(
+            app.state.talkhier_session_service.session_coordinator.create_supervisor,
+            routing_decision,
+            "research",
+        )
+        assert created_supervisor.component_registry is component_registry
         assert app.state.direct_execution_service.gemini_service is None
         request = AsyncMock()
         request.app = app
@@ -59,6 +124,55 @@ def test_lifespan_injects_one_router_across_active_consumers(
     assert runtime.closed is True
     assert not hasattr(app.state, "research_kernel")
     assert direct_execution_service._direct_execution_service is None
+
+
+def test_registry_aware_services_reject_mismatched_components() -> None:
+    from src.agents.supervisors.supervisor_factory import SupervisorFactory
+    from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
+    from src.ai_brain.router.masr import MASRouter
+    from src.api.services.component_catalog import (
+        build_application_component_registry,
+    )
+    from src.api.services.masr_routing_service import MASRRoutingService
+    from src.api.services.talkhier_session_service import TalkHierSessionService
+
+    expected = build_application_component_registry()
+    other = build_application_component_registry()
+
+    with pytest.raises(ValueError, match="MASR routing bridge registry mismatch"):
+        MASRRoutingService(
+            router=MASRouter(config={"enable_caching": False}),
+            component_registry=expected,
+            bridge=MASRSupervisorBridge(component_registry=other),
+        )
+
+    with pytest.raises(
+        ValueError, match="TalkHier supervisor factory registry mismatch"
+    ):
+        TalkHierSessionService(
+            component_registry=expected,
+            supervisor_factory=SupervisorFactory(component_registry=other),
+        )
+
+
+def test_mounted_supervisor_api_declares_lifespan_service_dependency() -> None:
+    from fastapi.routing import APIRoute
+
+    from src.api.routes.supervisor_api import (
+        get_application_supervisor_coordination_service,
+    )
+
+    mounted_route = next(
+        route
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/api/v1/supervisors/{supervisor_type}/execute"
+    )
+
+    assert any(
+        dependency.call is get_application_supervisor_coordination_service
+        for dependency in mounted_route.dependant.dependencies
+    )
 
 
 @pytest.mark.asyncio
@@ -87,6 +201,7 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     first_kernel = app.state.research_kernel
     first_masr_service = app.state.masr_routing_service
     first_talkhier_service = app.state.talkhier_session_service
+    first_supervisor_coordination = app.state.supervisor_coordination_service
 
     await second_context.__aenter__()
     second_runtime = app.state.masr_runtime
@@ -95,6 +210,7 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     second_kernel = app.state.research_kernel
     second_masr_service = app.state.masr_routing_service
     second_talkhier_service = app.state.talkhier_session_service
+    second_supervisor_coordination = app.state.supervisor_coordination_service
 
     try:
         await first_context.__aexit__(None, None, None)
@@ -111,6 +227,10 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
         assert first_agent is not second_agent
         assert app.state.masr_routing_service is second_masr_service
         assert app.state.talkhier_session_service is second_talkhier_service
+        assert (
+            app.state.supervisor_coordination_service is second_supervisor_coordination
+        )
+        assert first_supervisor_coordination is not second_supervisor_coordination
         assert second_runtime.closed is False
         assert second_direct.closed is False
     finally:
@@ -127,6 +247,7 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
         "research_kernel",
         "masr_routing_service",
         "talkhier_session_service",
+        "supervisor_coordination_service",
     ):
         assert not hasattr(app.state, state_name)
 

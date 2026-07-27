@@ -22,7 +22,7 @@ from langgraph.graph import StateGraph
 from structlog import get_logger
 
 from src.ai_brain.compaction import ConstraintRegistry
-from src.core.kernel import BoundedTaskRunner
+from src.core.kernel import BoundedTaskRunner, TypedRegistry
 from src.core.telemetry import count_tokens_capped, telemetry_enabled
 from src.core.types import SupervisionStatsDict
 from src.qa.mast import MASTLabeler, format_mast_labels_for_metadata
@@ -145,6 +145,14 @@ class BaseSupervisor(BaseAgent, ABC):
         self.domain = domain
 
         super().__init__(gemini_service, cache_client, config)
+        component_registry = self.config.get("component_registry")
+        if not isinstance(component_registry, TypedRegistry):
+            from src.api.services.component_catalog import (
+                get_default_component_registry,
+            )
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
 
         # Worker management
         self.worker_definitions: dict[str, WorkerDefinition] = {}
@@ -276,9 +284,13 @@ class BaseSupervisor(BaseAgent, ABC):
         try:
             # Instantiate workers from definitions if not already active
             if not self.active_workers:
-                for worker_type, worker_def in self.worker_definitions.items():
+                from src.core.kernel.component_keys import AGENT_KEYS
+
+                for worker_type in self.worker_definitions:
                     try:
-                        worker = worker_def.agent_class(
+                        agent_key = AGENT_KEYS[worker_type]
+                        agent_class = self.component_registry.resolve(agent_key)
+                        worker = agent_class(
                             gemini_service=self.gemini_service,
                             cache_client=self.cache_client,
                             config=self.config,
@@ -818,7 +830,7 @@ class BaseSupervisor(BaseAgent, ABC):
             from ..factory import AgentFactory
 
             # Create verification agent with the same gemini_service
-            verification_agent = AgentFactory.create_agent(
+            verification_agent = AgentFactory(self.component_registry).resolve_agent(
                 "verification",
                 {
                     "gemini_service": self.gemini_service,

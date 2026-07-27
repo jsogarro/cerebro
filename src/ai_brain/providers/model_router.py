@@ -14,16 +14,15 @@ from typing import Any
 
 from structlog import get_logger
 
+from src.core.kernel import TypedRegistry
+from src.core.kernel.component_keys import PROVIDER_KEYS
+
 from .base_provider import (
     BaseProvider,
     ModelRequest,
     ModelResponse,
     ProviderHealthStatus,
 )
-from .deepseek_provider import DeepSeekProvider
-from .gemini_provider import GeminiProvider
-from .llama_provider import LlamaProvider
-from .openrouter_provider import OpenRouterProvider
 
 logger = get_logger(__name__)
 
@@ -58,9 +57,20 @@ class ModelRouter:
     foundation models in the Cerebro system.
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        component_registry: TypedRegistry | None = None,
+    ):
         """Initialize model router with configuration."""
         self.config = config
+        if component_registry is None:
+            from src.api.services.component_catalog import (
+                get_default_component_registry,
+            )
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
 
         # Provider registry
         self.registry = ProviderRegistry()
@@ -71,14 +81,6 @@ class ModelRouter:
         )  # 5 minutes
         self.max_retries = config.get("max_retries", 3)
         self.fallback_enabled = config.get("enable_fallback", True)
-
-        # Provider class mapping
-        self.provider_classes = {
-            "deepseek": DeepSeekProvider,
-            "llama": LlamaProvider,
-            "gemini": GeminiProvider,
-            "openrouter": OpenRouterProvider,
-        }
 
         # Performance tracking
         self.request_count = 0
@@ -99,10 +101,11 @@ class ModelRouter:
                 continue
 
             try:
-                provider_class = self.provider_classes.get(provider_name)
-                if not provider_class:
+                provider_key = PROVIDER_KEYS.get(provider_name)
+                if provider_key is None:
                     logger.warning("Unknown provider type", provider_name=provider_name)
                     continue
+                provider_class = self.component_registry.resolve(provider_key)
 
                 # Initialize provider
                 provider = provider_class(provider_config)
@@ -430,9 +433,10 @@ class ModelRouter:
         """Dynamically add a new provider."""
 
         try:
-            provider_class = self.provider_classes.get(provider_name)
-            if not provider_class:
+            provider_key = PROVIDER_KEYS.get(provider_name)
+            if provider_key is None:
                 raise ValueError(f"Unknown provider type: {provider_name}")
+            provider_class = self.component_registry.resolve(provider_key)
 
             provider = provider_class(provider_config)
 

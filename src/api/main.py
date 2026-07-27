@@ -157,16 +157,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from src.api.services.agent_execution_service import (
             configure_agent_execution_service,
         )
+        from src.api.services.component_catalog import (
+            build_application_component_registry,
+        )
         from src.api.services.direct_execution_service import (
             configure_direct_execution_service,
         )
         from src.api.services.masr_routing_service import MASRRoutingService
         from src.api.services.research_kernel import compose_application_research_kernel
+        from src.api.services.supervisor_coordination_service import (
+            SupervisorCoordinationService,
+        )
         from src.api.services.talkhier_session_service import TalkHierSessionService
 
+        component_registry = build_application_component_registry()
         direct_execution_service = configure_direct_execution_service(
             gemini_service=gemini_service,
             masr_router=masr_runtime.router,
+            component_registry=component_registry,
         )
         resources.push_async_callback(
             _close_lifespan_resource,
@@ -181,7 +189,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             direct_execution_service,
         )
 
-        agent_execution_service = configure_agent_execution_service()
+        agent_execution_service = configure_agent_execution_service(
+            component_registry=component_registry,
+        )
         app.state.agent_execution_service = agent_execution_service
         resources.callback(
             _remove_app_state_if_owned,
@@ -202,7 +212,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             research_kernel,
         )
 
-        masr_routing_service = MASRRoutingService(router=masr_runtime.router)
+        masr_routing_service = MASRRoutingService(
+            router=masr_runtime.router,
+            component_registry=component_registry,
+        )
         resources.push_async_callback(
             _close_lifespan_resource,
             "masr_routing_service",
@@ -217,7 +230,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
         talkhier_session_service = TalkHierSessionService(
-            masr_router=masr_runtime.router
+            masr_router=masr_runtime.router,
+            component_registry=component_registry,
         )
         resources.push_async_callback(
             _close_lifespan_resource,
@@ -230,6 +244,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             app,
             "talkhier_session_service",
             talkhier_session_service,
+        )
+
+        supervisor_coordination_service = SupervisorCoordinationService(
+            component_registry=component_registry,
+        )
+        app.state.supervisor_coordination_service = supervisor_coordination_service
+        resources.callback(
+            _remove_app_state_if_owned,
+            app,
+            "supervisor_coordination_service",
+            supervisor_coordination_service,
         )
 
         # FIX 4: Eagerly initialize the Langfuse client at startup (when enabled) so

@@ -170,10 +170,12 @@ class TestTalkHierSessionCoordinator:
     @pytest.fixture
     def coordinator(self) -> TalkHierSessionCoordinator:
         """Create coordinator with mocked dependencies."""
+        component_registry = MagicMock()
         return TalkHierSessionCoordinator(
-            supervisor_factory=MagicMock(),
-            masr_bridge=MagicMock(),
+            supervisor_factory=MagicMock(component_registry=component_registry),
+            masr_bridge=MagicMock(component_registry=component_registry),
             masr_router=MagicMock(),
+            component_registry=component_registry,
         )
 
     def test_estimate_duration_uses_protocol_multiplier(

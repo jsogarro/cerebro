@@ -6,6 +6,7 @@ from src.agents.supervisors.base_supervisor import BaseSupervisor
 from src.agents.supervisors.supervisor_factory import SupervisorFactory
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter, RoutingDecision
+from src.core.kernel import TypedRegistry
 from src.models.talkhier_api_models import MessageRole, ParticipantInfo, ProtocolType
 
 
@@ -17,7 +18,19 @@ class TalkHierSessionCoordinator:
         supervisor_factory: SupervisorFactory,
         masr_bridge: MASRSupervisorBridge,
         masr_router: MASRouter,
+        component_registry: TypedRegistry | None = None,
     ) -> None:
+        self.component_registry = (
+            component_registry
+            if component_registry is not None
+            else supervisor_factory.component_registry
+        )
+        if supervisor_factory.component_registry is not self.component_registry:
+            raise ValueError(
+                "TalkHier coordinator supervisor factory registry mismatch"
+            )
+        if masr_bridge.component_registry is not self.component_registry:
+            raise ValueError("TalkHier coordinator bridge registry mismatch")
         self.supervisor_factory = supervisor_factory
         self.masr_bridge = masr_bridge
         self.masr_router = masr_router

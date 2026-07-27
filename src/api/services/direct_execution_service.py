@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException, Request, status
 from structlog import get_logger
@@ -32,11 +32,7 @@ from src.core.telemetry import count_tokens, telemetry_enabled
 from src.repositories.checkpoint_repository import CheckpointRepository
 
 from ...agents.models import AgentTask
-from ...agents.supervisors.analytics_supervisor import AnalyticsSupervisor
 from ...agents.supervisors.base_supervisor import BaseSupervisor
-from ...agents.supervisors.content_supervisor import ContentSupervisor
-from ...agents.supervisors.finance_supervisor import FinanceSupervisor
-from ...agents.supervisors.research_supervisor import ResearchSupervisor
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.masr import MASRouter
@@ -52,12 +48,10 @@ from ...ai_brain.router.routing_types import (
 )
 from ...core.kernel import (
     BoundedTaskRunner,
-    RegistryEntry,
-    RegistryKey,
-    RegistryNamespace,
     TypedRegistry,
     UnknownRegistryKeyError,
 )
+from ...core.kernel.component_keys import PROVIDER_KEYS, SUPERVISOR_KEYS
 from ...models.research_project import ResearchProject
 from ...models.websocket_messages import ProgressUpdate
 from .event_publisher import EventPublisher
@@ -67,42 +61,12 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
-_SUPERVISOR_KEYS: dict[str, RegistryKey[type[BaseSupervisor]]] = {
-    name: RegistryKey(RegistryNamespace.SUPERVISOR, name)
-    for name in ("analytics", "content", "finance", "research")
-}
-
-
-def _default_supervisor_registry() -> TypedRegistry:
-    """Build the kernel-owned catalog used by the existing MASR bridge."""
-
-    return TypedRegistry(
-        [
-            RegistryEntry(
-                _SUPERVISOR_KEYS["research"],
-                ResearchSupervisor,
-            ),
-            RegistryEntry(
-                _SUPERVISOR_KEYS["content"],
-                ContentSupervisor,
-            ),
-            RegistryEntry(
-                _SUPERVISOR_KEYS["analytics"],
-                AnalyticsSupervisor,
-            ),
-            RegistryEntry(
-                _SUPERVISOR_KEYS["finance"],
-                FinanceSupervisor,
-            ),
-        ]
-    )
-
 
 def _validate_supervisor_registry(registry: TypedRegistry) -> None:
     """Reject invalid bridge composition before background execution starts."""
 
-    registry.resolve(_SUPERVISOR_KEYS["research"])
-    for key in _SUPERVISOR_KEYS.values():
+    registry.resolve(SUPERVISOR_KEYS["research"])
+    for key in SUPERVISOR_KEYS.values():
         try:
             supervisor_class = registry.resolve(key)
         except UnknownRegistryKeyError:
@@ -176,9 +140,41 @@ class DirectExecutionService:
         gemini_service: Any | None = None,
         session_factory: Any | None = None,
         outcome_recorder: RoutingOutcomeRecorder | None = None,
+        component_registry: TypedRegistry | None = None,
         supervisor_registry: TypedRegistry | None = None,
     ):
         """Initialize direct execution service."""
+
+        if component_registry is not None and supervisor_registry is not None:
+            raise TypeError(
+                "Pass component_registry or supervisor_registry compatibility alias, "
+                "not both"
+            )
+        if component_registry is None:
+            component_registry = supervisor_registry
+        if component_registry is None:
+            from .component_catalog import get_default_component_registry
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
+        _validate_supervisor_registry(self.component_registry)
+        for collaborator_name, collaborator in (
+            ("MASRSupervisorBridge", supervisor_bridge),
+            ("SupervisorFactory", supervisor_factory),
+        ):
+            collaborator_registry = getattr(
+                collaborator,
+                "component_registry",
+                None,
+            )
+            if (
+                isinstance(collaborator_registry, TypedRegistry)
+                and collaborator_registry is not self.component_registry
+            ):
+                raise TypeError(
+                    f"{collaborator_name} and DirectExecutionService must share "
+                    "one component registry"
+                )
 
         # Initialize components (would be injected in production)
         self.gemini_service = gemini_service
@@ -188,8 +184,11 @@ class DirectExecutionService:
         )
         self.supervisor_bridge = supervisor_bridge or MASRSupervisorBridge(
             gemini_service=gemini_service,
+            component_registry=self.component_registry,
         )
-        self.supervisor_factory = supervisor_factory or SupervisorFactory()
+        self.supervisor_factory = supervisor_factory or SupervisorFactory(
+            component_registry=self.component_registry,
+        )
         self.event_publisher = event_publisher
         self.session_factory = session_factory
 
@@ -207,13 +206,6 @@ class DirectExecutionService:
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._fast_path_provider: OpenRouterProvider | None = None
         self.closed = False
-        self.supervisor_registry = (
-            supervisor_registry
-            if supervisor_registry is not None
-            else _default_supervisor_registry()
-        )
-        _validate_supervisor_registry(self.supervisor_registry)
-
         # Performance metrics
         self.execution_stats = {
             "total_executions": 0,
@@ -222,6 +214,12 @@ class DirectExecutionService:
             "average_execution_time": 0.0,
             "concurrent_executions": 0,
         }
+
+    @property
+    def supervisor_registry(self) -> TypedRegistry:
+        """Retain the legacy name as a read-only view of the kernel catalog."""
+
+        return self.component_registry
 
     def _measure_domain_output_tokens(
         self, domain: str, output: str, label: str = "domain_output"
@@ -504,16 +502,17 @@ class DirectExecutionService:
 
             if settings.MULTI_PROVIDER_ROUTING_ENABLED and settings.OPENROUTER_API_KEY:
                 from src.ai_brain.providers.base_provider import ModelRequest
-                from src.ai_brain.providers.openrouter_provider import (
-                    OpenRouterProvider,
-                )
 
                 # Lazily cache the provider: constructing per call would re-run
                 # startup slug validation (a catalog fetch) on every fast-path
                 # query. NOTE: no await between the hasattr check and the
                 # assignment - safe under asyncio; keep it that way.
                 if self._fast_path_provider is None:
-                    self._fast_path_provider = OpenRouterProvider(
+                    provider_class = cast(
+                        "type[OpenRouterProvider]",
+                        self.component_registry.resolve(PROVIDER_KEYS["openrouter"]),
+                    )
+                    provider = provider_class(
                         {
                             "enabled": True,
                             "api_key": settings.OPENROUTER_API_KEY,
@@ -521,6 +520,9 @@ class DirectExecutionService:
                             "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
                         }
                     )
+                    self._fast_path_provider = provider
+                else:
+                    provider = self._fast_path_provider
 
                 # Simple tier by construction: the fast path only ever serves
                 # classifier-approved trivial queries.
@@ -531,7 +533,7 @@ class DirectExecutionService:
                     complexity_score=0.1,
                     metadata={"tier": "simple"},
                 )
-                provider_response = await self._fast_path_provider.generate(request)
+                provider_response = await provider.generate(request)
                 if not provider_response.success or not provider_response.content:
                     raise RuntimeError(
                         "Fast path generation failed: "
@@ -1037,7 +1039,7 @@ class DirectExecutionService:
             # keeping the authoritative catalog behind typed registry keys.
             supervisor_registry = {
                 name: self.supervisor_registry.resolve(key)
-                for name, key in _SUPERVISOR_KEYS.items()
+                for name, key in SUPERVISOR_KEYS.items()
                 if key in self.supervisor_registry.keys
             }
 
@@ -1672,12 +1674,14 @@ def configure_direct_execution_service(
     *,
     masr_router: MASRouter,
     gemini_service: Any | None = None,
+    component_registry: TypedRegistry | None = None,
 ) -> DirectExecutionService:
     """Create an application-owned service without changing legacy globals."""
 
     return DirectExecutionService(
         gemini_service=gemini_service,
         masr_router=masr_router,
+        component_registry=component_registry,
     )
 
 

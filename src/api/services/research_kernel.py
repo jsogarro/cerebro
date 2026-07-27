@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Annotated, Any, Protocol, TypeAlias, cast
 from uuid import UUID
@@ -14,7 +15,17 @@ from src.api.services.agent_execution_service import (
 from src.api.services.direct_execution_service import (
     get_application_direct_execution_service,
 )
-from src.core.kernel import ResearchKernel, TypedRegistry
+from src.core.kernel import (
+    ResearchKernel,
+    TypedRegistry,
+    UnknownRegistryKeyError,
+)
+from src.core.kernel.component_keys import (
+    AGENT_CHAIN_WORKFLOW_KEY,
+    AGENT_MIXTURE_WORKFLOW_KEY,
+    DIRECT_AGENT_WORKFLOW_KEY,
+    ROUTED_RESEARCH_WORKFLOW_KEY,
+)
 from src.models.agent_api_models import (
     AgentExecutionRequest,
     AgentExecutionResponse,
@@ -90,11 +101,30 @@ class AgentKernelOperations(AgentExecutionBackend, Protocol):
     """Stateless agent calls exposed by the application kernel adapter."""
 
 
+RoutedResearchWorkflow: TypeAlias = Callable[
+    [ResearchExecutionBackend, ResearchProject, dict[str, Any] | None],
+    Awaitable[str],
+]
+DirectAgentWorkflow: TypeAlias = Callable[
+    [AgentExecutionBackend, AgentType, AgentExecutionRequest],
+    Awaitable[AgentExecutionResponse],
+]
+AgentChainWorkflow: TypeAlias = Callable[
+    [AgentExecutionBackend, ChainOfAgentsRequest],
+    Awaitable[ChainOfAgentsResponse],
+]
+AgentMixtureWorkflow: TypeAlias = Callable[
+    [AgentExecutionBackend, MixtureOfAgentsRequest],
+    Awaitable[MixtureOfAgentsResponse],
+]
+
+
 @dataclass(frozen=True, slots=True)
 class _ApplicationKernelAdapter:
     """Stateless call-shape adapter over the existing execution backends."""
 
     backend: ResearchExecutionBackend
+    component_registry: TypedRegistry
     agent_backend: AgentExecutionBackend | None = None
 
     async def __call__(
@@ -102,7 +132,14 @@ class _ApplicationKernelAdapter:
         project: ResearchProject,
         context: dict[str, Any] | None = None,
     ) -> str:
-        return await self.backend.start_research_execution(project, context)
+        try:
+            workflow = cast(
+                RoutedResearchWorkflow,
+                self.component_registry.resolve(ROUTED_RESEARCH_WORKFLOW_KEY),
+            )
+        except UnknownRegistryKeyError:
+            return await self.backend.start_research_execution(project, context)
+        return await workflow(self.backend, project, context)
 
     async def get_execution_status(self, execution_id: str) -> Any:
         return await self.backend.get_execution_status(execution_id)
@@ -126,19 +163,43 @@ class _ApplicationKernelAdapter:
         agent_type: AgentType,
         request: AgentExecutionRequest,
     ) -> AgentExecutionResponse:
-        return await self._agents().execute_single_agent(agent_type, request)
+        backend = self._agents()
+        try:
+            workflow = cast(
+                DirectAgentWorkflow,
+                self.component_registry.resolve(DIRECT_AGENT_WORKFLOW_KEY),
+            )
+        except UnknownRegistryKeyError:
+            return await backend.execute_single_agent(agent_type, request)
+        return await workflow(backend, agent_type, request)
 
     async def execute_chain_of_agents(
         self,
         request: ChainOfAgentsRequest,
     ) -> ChainOfAgentsResponse:
-        return await self._agents().execute_chain_of_agents(request)
+        backend = self._agents()
+        try:
+            workflow = cast(
+                AgentChainWorkflow,
+                self.component_registry.resolve(AGENT_CHAIN_WORKFLOW_KEY),
+            )
+        except UnknownRegistryKeyError:
+            return await backend.execute_chain_of_agents(request)
+        return await workflow(backend, request)
 
     async def execute_mixture_of_agents(
         self,
         request: MixtureOfAgentsRequest,
     ) -> MixtureOfAgentsResponse:
-        return await self._agents().execute_mixture_of_agents(request)
+        backend = self._agents()
+        try:
+            workflow = cast(
+                AgentMixtureWorkflow,
+                self.component_registry.resolve(AGENT_MIXTURE_WORKFLOW_KEY),
+            )
+        except UnknownRegistryKeyError:
+            return await backend.execute_mixture_of_agents(request)
+        return await workflow(backend, request)
 
     async def get_agent_list(self) -> list[AgentInfo]:
         return await self._agents().get_agent_list()
@@ -173,13 +234,20 @@ def compose_application_research_kernel(
 ) -> ApplicationResearchKernel:
     """Compose a canonical kernel over the existing execution implementation."""
 
-    registry = getattr(backend, "supervisor_registry", None)
+    registry = getattr(backend, "component_registry", None)
+    if not isinstance(registry, TypedRegistry):
+        registry = getattr(backend, "supervisor_registry", None)
     if not isinstance(registry, TypedRegistry):
         # Lightweight compatibility fakes predate the typed registry. They remain
         # substitutable at the HTTP boundary without becoming production catalogs.
         registry = TypedRegistry()
+    agent_registry = getattr(agent_backend, "component_registry", None)
+    if isinstance(agent_registry, TypedRegistry) and agent_registry is not registry:
+        raise TypeError(
+            "Research and agent execution backends must share one component registry"
+        )
     return ResearchKernel(
-        executor=_ApplicationKernelAdapter(backend, agent_backend),
+        executor=_ApplicationKernelAdapter(backend, registry, agent_backend),
         registry=registry,
     )
 

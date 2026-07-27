@@ -24,10 +24,9 @@ from src.api.services.direct_execution_service import (
 )
 from src.core.kernel import (
     RegistryEntry,
-    RegistryKey,
-    RegistryNamespace,
     TypedRegistry,
 )
+from src.core.kernel.component_keys import SUPERVISOR_KEYS
 from src.models.research_project import (
     ResearchDepth,
     ResearchProject,
@@ -196,13 +195,20 @@ class TestDirectExecutionService:
         class InjectedResearchSupervisor(ResearchSupervisor):
             pass
 
-        execution_service.supervisor_registry = TypedRegistry(
+        injected_registry = TypedRegistry(
             [
                 RegistryEntry(
-                    RegistryKey(RegistryNamespace.SUPERVISOR, "research"),
+                    SUPERVISOR_KEYS["research"],
                     InjectedResearchSupervisor,
                 )
             ]
+        )
+        execution_service = DirectExecutionService(
+            masr_router=execution_service.masr_router,
+            supervisor_bridge=execution_service.supervisor_bridge,
+            supervisor_factory=execution_service.supervisor_factory,
+            event_publisher=execution_service.event_publisher,
+            supervisor_registry=injected_registry,
         )
 
         await execution_service.start_research_execution(sample_project)

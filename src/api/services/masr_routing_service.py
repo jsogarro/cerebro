@@ -21,6 +21,7 @@ from src.ai_brain.router.query_analyzer import (
     ComplexityLevel,
     QueryDomain,
 )
+from src.core.kernel import TypedRegistry
 from src.models.masr_api_models import (
     AvailableStrategy,
     ComplexityAnalysisRequest,
@@ -56,13 +57,32 @@ class MASRRoutingService:
     - Learning and feedback integration
     """
 
-    def __init__(self, router: MASRouter | None = None) -> None:
+    def __init__(
+        self,
+        router: MASRouter | None = None,
+        component_registry: TypedRegistry | None = None,
+        bridge: MASRSupervisorBridge | None = None,
+    ) -> None:
         """Initialize MASR routing service with all components"""
         from src.ai_brain.router.cost_optimizer import CostOptimizer
+        from src.api.services.component_catalog import get_default_component_registry
 
         # Core routing components
         self.router = router or MASRouter()
-        self.bridge = MASRSupervisorBridge()
+        self.component_registry = (
+            component_registry
+            if component_registry is not None
+            else get_default_component_registry()
+        )
+        self.bridge = bridge or MASRSupervisorBridge(
+            component_registry=self.component_registry
+        )
+        if self.bridge.component_registry is not self.component_registry:
+            raise ValueError("MASR routing bridge registry mismatch")
+        if self.bridge.translator.component_registry is not self.component_registry:
+            raise ValueError("MASR routing translator registry mismatch")
+        if self.bridge.resource_pool.component_registry is not self.component_registry:
+            raise ValueError("MASR routing resource pool registry mismatch")
         base_cost_optimizer = CostOptimizer()
         self.cost_optimizer = HierarchicalCostOptimizer(
             base_cost_optimizer=base_cost_optimizer

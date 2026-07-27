@@ -30,6 +30,7 @@ from src.api.services.talkhier_consensus_evaluator import TalkHierConsensusEvalu
 from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
 from src.api.services.talkhier_session_coordinator import TalkHierSessionCoordinator
 from src.api.services.talkhier_state_manager import TalkHierStateManager
+from src.core.kernel import TypedRegistry
 from src.models.talkhier_api_models import (
     ConsensusCheckRequest,
     ConsensusResult,
@@ -106,20 +107,59 @@ class TalkHierSessionService:
     TalkHier protocol, enabling multi-round refinement with consensus building.
     """
 
-    def __init__(self, masr_router: MASRouter | None = None) -> None:
+    def __init__(
+        self,
+        masr_router: MASRouter | None = None,
+        component_registry: TypedRegistry | None = None,
+        supervisor_factory: SupervisorFactory | None = None,
+        masr_bridge: MASRSupervisorBridge | None = None,
+        session_coordinator: TalkHierSessionCoordinator | None = None,
+    ) -> None:
+        from src.api.services.component_catalog import get_default_component_registry
+
+        self.component_registry = (
+            component_registry
+            if component_registry is not None
+            else get_default_component_registry()
+        )
         self.state_manager = TalkHierStateManager()
         self.round_executor = TalkHierRoundExecutor()
         self.consensus_evaluator = TalkHierConsensusEvaluator()
         self.sessions: dict[str, TalkHierSession] = self.state_manager.sessions
         self.consensus_builder = self.consensus_evaluator.consensus_builder
-        self.supervisor_factory = SupervisorFactory()
-        self.masr_bridge = MASRSupervisorBridge()
+        self.supervisor_factory = supervisor_factory or SupervisorFactory(
+            component_registry=self.component_registry
+        )
+        if self.supervisor_factory.component_registry is not self.component_registry:
+            raise ValueError("TalkHier supervisor factory registry mismatch")
+        self.masr_bridge = masr_bridge or MASRSupervisorBridge(
+            component_registry=self.component_registry
+        )
+        if self.masr_bridge.component_registry is not self.component_registry:
+            raise ValueError("TalkHier bridge registry mismatch")
+        if (
+            self.masr_bridge.translator.component_registry
+            is not self.component_registry
+        ):
+            raise ValueError("TalkHier bridge translator registry mismatch")
+        if (
+            self.masr_bridge.resource_pool.component_registry
+            is not self.component_registry
+        ):
+            raise ValueError("TalkHier bridge resource pool registry mismatch")
         self.masr_router = masr_router or MASRouter()
-        self.session_coordinator = TalkHierSessionCoordinator(
+        self.session_coordinator = session_coordinator or TalkHierSessionCoordinator(
             self.supervisor_factory,
             self.masr_bridge,
             self.masr_router,
+            component_registry=self.component_registry,
         )
+        if self.session_coordinator.component_registry is not self.component_registry:
+            raise ValueError("TalkHier session coordinator registry mismatch")
+        if self.session_coordinator.supervisor_factory is not self.supervisor_factory:
+            raise ValueError("TalkHier session coordinator factory mismatch")
+        if self.session_coordinator.masr_bridge is not self.masr_bridge:
+            raise ValueError("TalkHier session coordinator bridge mismatch")
 
         # Protocol configurations
         self.protocol_configs = self._initialize_protocol_configs()

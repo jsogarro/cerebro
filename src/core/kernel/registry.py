@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Generic, TypeVar, cast
@@ -30,6 +30,7 @@ class RegistryKey(Generic[ComponentT]):
 
     namespace: RegistryNamespace
     name: str
+    _identity: object = field(default_factory=object, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.namespace, RegistryNamespace):
@@ -81,6 +82,7 @@ class TypedRegistry:
         entries: Iterable[RegistryEntry[Any]] = (),
     ) -> None:
         indexed: dict[RegistryKey[Any], RegistryEntry[Any]] = {}
+        qualified_names: set[str] = set()
         for entry in entries:
             if not isinstance(entry, RegistryEntry):
                 raise TypeError(
@@ -92,11 +94,12 @@ class TypedRegistry:
                     "Registry entry key must be a RegistryKey; "
                     f"got {type(entry.key).__name__}"
                 )
-            if entry.key in indexed:
+            if entry.key.qualified_name in qualified_names:
                 raise DuplicateRegistryKeyError(
                     f"Duplicate registry key: {entry.key.qualified_name}"
                 )
             indexed[entry.key] = entry
+            qualified_names.add(entry.key.qualified_name)
         object.__setattr__(self, "_entries", MappingProxyType(indexed))
 
     @property
