@@ -1,4 +1,11 @@
 import axios from 'axios';
+import { toast } from '@/hooks/use-toast';
+
+declare module 'axios' {
+    interface AxiosRequestConfig {
+        handleErrorLocally?: boolean;
+    }
+}
 
 export const apiClient = axios.create({
     baseURL: '/api/v1',
@@ -16,12 +23,14 @@ apiClient.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-import { toast } from '@/hooks/use-toast';
-
 // Response interceptor for error handling
 apiClient.interceptors.response.use(
     (response) => response,
     (error) => {
+        if (axios.isAxiosError(error) && error.config?.handleErrorLocally) {
+            return Promise.reject(error);
+        }
+
         // Global error handling
         const message = error.response?.data?.detail || error.message || 'An unexpected error occurred';
         toast({

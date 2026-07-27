@@ -218,7 +218,11 @@ export function adaptRun(value: unknown): ResourceContract<Run> {
   }
 
   const issues: string[] = [];
-  const status = parseLifecycleState(value.status);
+  const reportedStatus =
+    typeof value.status === 'string' && normalizeToken(value.status) === 'queued'
+      ? { state: 'pending' as const, raw: value.status }
+      : parseLifecycleState(value.status);
+  const status = reportedStatus;
   const mode = parseExecutionMode(value.mode ?? value.execution_mode);
   if (status.state === 'unknown') issues.push(unknownStateIssue('status', status.raw));
   if (mode.mode === 'unknown') issues.push(unknownStateIssue('execution mode', mode.raw));
@@ -347,6 +351,7 @@ export function adaptTask(value: unknown): ResourceContract<Task> {
       metrics: adaptOperationalMetrics(value.operational_metrics ?? value.metrics),
       toolInvocations,
       outputSummary: readString(value, 'output_summary'),
+      degradationReason: readString(value, 'degradation_reason'),
       errorSummary: readString(value, 'error_summary'),
       parentTaskId: readString(value, 'parent_task_id'),
       childTaskIds: referenceIds(value.child_task_ids),
@@ -713,12 +718,17 @@ function runParams(filters: RunListFilters): Record<string, string | number> {
 export async function fetchRuns(
   filters: RunListFilters = {},
 ): Promise<CollectionContract<Run>> {
-  const { data } = await apiClient.get<unknown>('/runs', { params: runParams(filters) });
+  const { data } = await apiClient.get<unknown>('/runs', {
+    params: runParams(filters),
+    handleErrorLocally: true,
+  });
   return adaptRunCollection(data);
 }
 
 export async function fetchRun(runId: string): Promise<ResourceContract<Run>> {
-  const { data } = await apiClient.get<unknown>(`/runs/${encodeURIComponent(runId)}`);
+  const { data } = await apiClient.get<unknown>(`/runs/${encodeURIComponent(runId)}`, {
+    handleErrorLocally: true,
+  });
   return adaptRun(data);
 }
 
@@ -738,13 +748,26 @@ export async function createRun(input: CreateRunInput): Promise<ResourceContract
       : undefined,
     provider_policy_id: input.providerPolicyId,
   };
-  const { data } = await apiClient.post<unknown>('/runs', payload);
+  const { data } = await apiClient.post<unknown>('/runs', payload, {
+    handleErrorLocally: true,
+  });
   return adaptRun(data);
 }
 
 export async function cancelRun(runId: string): Promise<ResourceContract<Run>> {
-  const { data } = await apiClient.post<unknown>(`/runs/${encodeURIComponent(runId)}/cancel`);
-  return adaptRun(data);
+  const { data } = await apiClient.post<unknown>(
+    `/runs/${encodeURIComponent(runId)}/cancel`,
+    undefined,
+    { handleErrorLocally: true },
+  );
+  const contract = adaptRun(data);
+  if (contract.value === null) {
+    throw new Error('The cancellation response did not include an interpretable run.');
+  }
+  if (contract.value.id !== runId) {
+    throw new Error('The cancellation response identified a different run.');
+  }
+  return contract;
 }
 
 async function fetchRunCollection<T>(
@@ -754,6 +777,7 @@ async function fetchRunCollection<T>(
 ): Promise<CollectionContract<T>> {
   const { data } = await apiClient.get<unknown>(
     `/runs/${encodeURIComponent(runId)}/${resource}`,
+    { handleErrorLocally: true },
   );
   return adapter(data);
 }
@@ -828,8 +852,22 @@ export function useCancelRun() {
   return useMutation({
     mutationFn: cancelRun,
     onSuccess: (contract, runId) => {
+      if (contract.value) {
+        queryClient.setQueryData(runKeys.detail(runId), contract);
+        queryClient.setQueryData<CollectionContract<Run>>(
+          runKeys.list(),
+          (current) =>
+            current
+              ? {
+                  ...current,
+                  items: current.items.map((run) =>
+                    run.id === runId ? contract.value! : run,
+                  ),
+                }
+              : current,
+        );
+      }
       void queryClient.invalidateQueries({ queryKey: runKeys.all });
-      if (contract.value) queryClient.setQueryData(runKeys.detail(runId), contract);
     },
   });
 }

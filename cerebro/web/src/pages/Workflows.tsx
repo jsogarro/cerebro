@@ -1,92 +1,31 @@
-import type { ReactNode } from 'react';
-import { FlaskConical, ScrollText } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { RefreshCw, ScrollText } from 'lucide-react';
 import { useWorkflows } from '@/api/workflows';
 import type { Workflow } from '@/api/workbench';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { IssuesBanner } from '@/components/runs/IssuesBanner';
 import { WorkbenchStateNotice } from '@/components/runs/WorkbenchStateNotice';
 import { describeQueryError } from '@/components/runs/format';
-
-const maturityLabel: Record<Workflow['maturity'], string> = {
-  experimental: 'Experimental',
-  preview: 'Preview',
-  stable: 'Stable',
-  unknown: 'Unknown maturity',
-};
-
-const modeLabel: Record<string, string> = {
-  fixture: 'Fixture',
-  live: 'Live',
-  unknown: 'Unknown mode',
-};
-
-function WorkflowCard({ workflow }: { workflow: Workflow }) {
-  return (
-    <Card aria-label={`Workflow ${workflow.name}`} className="flex flex-col">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-primary/10">
-              <FlaskConical aria-hidden="true" className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <CardTitle className="text-base">{workflow.name}</CardTitle>
-              <div className="mt-0.5 font-mono text-xs text-muted-foreground">
-                {workflow.id} · v{workflow.version}
-              </div>
-            </div>
-          </div>
-          <Badge variant={workflow.maturity === 'unknown' ? 'outline' : 'secondary'}>
-            {maturityLabel[workflow.maturity]}
-            {workflow.maturity === 'unknown' && workflow.rawMaturity
-              ? ` (${workflow.rawMaturity})`
-              : ''}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-4">
-        <CardDescription className="text-sm leading-6 text-foreground/80">
-          {workflow.description}
-        </CardDescription>
-
-        <div>
-          <p className="workbench-kicker">Supported modes</p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {workflow.supportedModes.length === 0 ? (
-              <span className="text-sm text-muted-foreground">No modes reported.</span>
-            ) : (
-              workflow.supportedModes.map((mode) => (
-                <Badge key={mode} variant="outline">
-                  {modeLabel[mode] ?? mode}
-                </Badge>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="mt-auto">
-          <p className="workbench-kicker">Limitations</p>
-          {workflow.limitations.length === 0 ? (
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              No documented limitations were reported.
-            </p>
-          ) : (
-            <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm leading-6 text-muted-foreground">
-              {workflow.limitations.map((limitation) => (
-                <li key={limitation}>{limitation}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+import { ControlledRunSetup } from '@/components/workflows/ControlledRunSetup';
+import { WorkflowCard } from '@/components/workflows/WorkflowCard';
+import { Button } from '@/components/ui/button';
 
 export function Workflows() {
   const query = useWorkflows();
   const contract = query.data;
+  const [selectedWorkflow, setSelectedWorkflow] = useState<
+    Pick<Workflow, 'id' | 'version'> | null
+  >(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const resolvedWorkflow =
+    contract?.items.find(
+      (workflow) =>
+        workflow.id === selectedWorkflow?.id &&
+        workflow.version === selectedWorkflow.version,
+    ) ??
+    contract?.items.find((workflow) => workflow.supportedModes.includes('fixture')) ??
+    contract?.items[0] ??
+    null;
 
   let body: ReactNode;
 
@@ -101,13 +40,29 @@ export function Workflows() {
     );
   } else if (query.isError) {
     body = (
-      <WorkbenchStateNotice
-        tone="unavailable"
-        icon={ScrollText}
-        kicker="Catalog status"
-        heading="Workflow catalog is unavailable"
-        message={describeQueryError(query.error)}
-      />
+      <div className="space-y-4">
+        <WorkbenchStateNotice
+          announcementRole="alert"
+          tone="unavailable"
+          icon={ScrollText}
+          kicker="Catalog status"
+          heading="Workflow service is unavailable"
+          message={`${describeQueryError(query.error)} No workflow or run data has been substituted.`}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          disabled={query.isFetching}
+          onClick={() => void query.refetch()}
+          className="min-h-11 w-full sm:w-auto"
+        >
+          <RefreshCw
+            aria-hidden="true"
+            className={query.isFetching ? 'h-4 w-4 animate-spin' : 'h-4 w-4'}
+          />
+          {query.isFetching ? 'Retrying workflow service…' : 'Retry workflow service'}
+        </Button>
+      </div>
     );
   } else if (contract === undefined) {
     body = (
@@ -116,7 +71,7 @@ export function Workflows() {
         icon={ScrollText}
         kicker="Catalog status"
         heading="Workflow catalog is unavailable"
-        message="No response was received for the workflow catalog."
+        message="No response was received for the workflow catalog. No workflow data has been substituted."
       />
     );
   } else if (contract.presentation.state === 'malformed') {
@@ -135,41 +90,67 @@ export function Workflows() {
         tone="empty"
         icon={ScrollText}
         kicker="Catalog status"
-        heading="No workflow catalog has been loaded"
+        heading="No runnable workflows are available"
         message={
           contract.presentation.message ??
-          'This route is ready for the catalog connection. Workflow availability, maturity, and execution requirements will remain unreported until the service supplies them.'
+          'Workflow outcomes, maturity, modes, and execution requirements remain unavailable until the service supplies them.'
         }
       />
     );
   } else {
     body = (
-      <div className="space-y-4">
+      <div className="space-y-8">
         {contract.presentation.state === 'partial' ? (
           <IssuesBanner
             heading="Some workflow fields could not be interpreted."
             issues={contract.presentation.issues}
           />
         ) : null}
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+
+        <div className="space-y-4">
           {contract.items.map((workflow) => (
-            <WorkflowCard key={`${workflow.id}@${workflow.version}`} workflow={workflow} />
+            <WorkflowCard
+              key={`${workflow.id}@${workflow.version}`}
+              workflow={workflow}
+              disabled={isSubmitting}
+              isSelected={
+                workflow.id === resolvedWorkflow?.id &&
+                workflow.version === resolvedWorkflow.version
+              }
+              onConfigure={(selected) =>
+                setSelectedWorkflow({ id: selected.id, version: selected.version })
+              }
+            />
           ))}
         </div>
+
+        {resolvedWorkflow ? (
+          <ControlledRunSetup
+            key={`${resolvedWorkflow.id}@${resolvedWorkflow.version}`}
+            workflow={resolvedWorkflow}
+            onSubmissionStateChange={setIsSubmitting}
+          />
+        ) : null}
       </div>
     );
   }
 
   return (
-    <section aria-labelledby="workflow-catalog-heading" className="workbench-page">
+    <section
+      aria-labelledby="workflow-catalog-heading"
+      className="workbench-page workflow-dossier"
+    >
       <div className="workbench-page-intro">
         <p className="workbench-kicker">Choose a research protocol</p>
-        <h2 id="workflow-catalog-heading" className="font-editorial text-3xl tracking-[-0.025em] md:text-4xl">
+        <h2
+          id="workflow-catalog-heading"
+          className="font-editorial text-3xl tracking-[-0.025em] md:text-4xl"
+        >
           Workflow catalog
         </h2>
         <p className="workbench-lede">
-          Review a protocol's outcome, version, operating limits, and source requirements before
-          beginning a controlled research run.
+          Review what a versioned protocol produces, what it requires, and what remains
+          unavailable before starting a controlled research run.
         </p>
       </div>
 

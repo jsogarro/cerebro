@@ -174,7 +174,7 @@ export function adaptWorkflowCollection(value: unknown): CollectionContract<Work
 }
 
 export async function fetchWorkflows(): Promise<CollectionContract<Workflow>> {
-  const { data } = await apiClient.get<unknown>('/workflows');
+  const { data } = await apiClient.get<unknown>('/workflows', { handleErrorLocally: true });
   return adaptWorkflowCollection(data);
 }
 
@@ -190,7 +190,7 @@ export function useWorkflows() {
     queryKey: workflowKeys.catalog(),
     queryFn: fetchWorkflows,
     staleTime: 60_000,
-    retry: 2,
+    retry: false,
   });
 }
 

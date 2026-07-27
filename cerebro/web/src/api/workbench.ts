@@ -273,12 +273,15 @@ export const presentation = {
 
 export interface OperationalMetrics {
   durationMs: OriginValue<number>;
+  latencyMs: OriginValue<number>;
   cost: OriginValue<number>;
   inputTokens: OriginValue<number>;
   outputTokens: OriginValue<number>;
   totalTokens: OriginValue<number>;
   provider: OriginValue<string>;
   model: OriginValue<string>;
+  promptId: OriginValue<string>;
+  promptVersion: OriginValue<string>;
 }
 
 export interface Workflow {
@@ -349,6 +352,7 @@ export interface Task {
   metrics: OperationalMetrics;
   toolInvocations: readonly ToolInvocation[];
   outputSummary: string | null;
+  degradationReason: string | null;
   errorSummary: string | null;
   parentTaskId: string | null;
   childTaskIds: readonly string[];
@@ -553,12 +557,15 @@ export function adaptOperationalMetrics(value: unknown): OperationalMetrics {
   const record = isRecord(value) ? value : {};
   return {
     durationMs: adaptOriginValue<number>(record.duration_ms, 'number', 'ms'),
+    latencyMs: adaptOriginValue<number>(record.latency_ms, 'number', 'ms'),
     cost: adaptOriginValue<number>(record.cost, 'number'),
     inputTokens: adaptOriginValue<number>(record.input_tokens, 'number', 'tokens'),
     outputTokens: adaptOriginValue<number>(record.output_tokens, 'number', 'tokens'),
     totalTokens: adaptOriginValue<number>(record.total_tokens, 'number', 'tokens'),
     provider: adaptOriginValue<string>(record.provider, 'string'),
     model: adaptOriginValue<string>(record.model, 'string'),
+    promptId: adaptOriginValue<string>(record.prompt_id, 'string'),
+    promptVersion: adaptOriginValue<string>(record.prompt_version, 'string'),
   };
 }
 

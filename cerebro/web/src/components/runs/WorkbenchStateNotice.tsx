@@ -47,6 +47,8 @@ export interface WorkbenchStateNoticeProps {
   issues?: readonly string[];
   icon?: ComponentType<IconProps>;
   className?: string;
+  announcementRole?: 'status' | 'alert';
+  headingLevel?: 3 | 4;
 }
 
 export function WorkbenchStateNotice({
@@ -57,18 +59,21 @@ export function WorkbenchStateNotice({
   issues,
   icon,
   className,
+  announcementRole = 'status',
+  headingLevel = 3,
 }: WorkbenchStateNoticeProps) {
   const defaults = toneDefaults[tone];
   const Icon = icon ?? defaults.icon;
+  const Heading = headingLevel === 4 ? 'h4' : 'h3';
 
   return (
-    <div className={cn('workbench-empty-state', className)} role="status">
+    <div className={cn('workbench-empty-state', className)} role={announcementRole}>
       <span className="workbench-empty-mark" aria-hidden="true">
         <Icon aria-hidden="true" className={cn('h-5 w-5', defaults.iconSpin && 'animate-spin')} />
       </span>
       <div>
         <p className="workbench-kicker">{kicker}</p>
-        <h3 className="font-editorial mt-1 text-xl">{heading}</h3>
+        <Heading className="font-editorial mt-1 text-xl">{heading}</Heading>
         {message ? (
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{message}</p>
         ) : null}

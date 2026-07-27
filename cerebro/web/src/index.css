@@ -156,6 +156,28 @@
     animation: dossier-enter 260ms ease-out both;
   }
 
+  .workflow-dossier {
+    --muted-foreground: 158 10% 24%;
+    --provenance-unavailable: 158 10% 24%;
+  }
+
+  .dark .workflow-dossier {
+    --muted-foreground: 215 24% 78%;
+    --provenance-unavailable: 215 24% 78%;
+  }
+
+  .workflow-dossier .workflow-card-action-selected {
+    background-color: #37645f;
+  }
+
+  .workflow-dossier .workflow-card-action-selected:hover {
+    background-color: #315a56;
+  }
+
+  .dark .workflow-dossier .workflow-card-action-selected {
+    background-color: hsl(var(--primary));
+  }
+
   .workbench-page-intro {
     max-width: var(--prose-width);
   }
@@ -266,6 +288,265 @@
     color: hsl(var(--muted-foreground));
   }
 
+  .run-detail-page {
+    overflow-wrap: anywhere;
+  }
+
+  .run-overview-grid,
+  .run-artifact-folio,
+  .run-audit-meta {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .run-overview-grid dt,
+  .run-artifact-folio dt,
+  .run-audit-meta dt,
+  .run-evidence-meta dt,
+  .run-operational-ledger dt,
+  .run-developer-detail dt {
+    color: hsl(var(--muted-foreground));
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .run-overview-grid dd,
+  .run-artifact-folio dd,
+  .run-audit-meta dd {
+    margin-top: 0.3rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .run-inspection-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(18rem, 0.85fr);
+    gap: clamp(1.5rem, 3vw, 2.5rem);
+    align-items: start;
+  }
+
+  .run-inspection-layout-evidence-only {
+    grid-template-columns: minmax(18rem, 32rem);
+  }
+
+  .run-artifact-sheet {
+    min-width: 0;
+    border: 1px solid hsl(var(--border));
+    background:
+      linear-gradient(90deg, hsl(var(--accent) / 0.055), transparent 4.5rem),
+      hsl(var(--card));
+    box-shadow: 0 1.25rem 3.5rem hsl(var(--foreground) / 0.055);
+  }
+
+  .run-artifact-masthead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: clamp(1.25rem, 3vw, 2.25rem);
+    border-bottom: 3px double hsl(var(--border));
+  }
+
+  .run-artifact-folio {
+    padding: 1rem clamp(1.25rem, 3vw, 2.25rem);
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.35);
+  }
+
+  .run-artifact-prose {
+    max-width: var(--prose-width);
+    padding: clamp(2rem, 5vw, 4rem) clamp(1.25rem, 5vw, 3.5rem);
+    font-family: var(--font-editorial);
+    font-size: 1.03rem;
+    line-height: 1.85;
+  }
+
+  .run-artifact-prose h5 {
+    max-width: 36rem;
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+  }
+
+  .run-artifact-prose h6 {
+    margin-top: 2.5rem;
+    font-size: 1.35rem;
+    line-height: 1.25;
+  }
+
+  .run-artifact-prose p {
+    margin-top: 0.75rem;
+  }
+
+  .run-artifact-deck {
+    max-width: 40rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 1.15rem;
+    line-height: 1.7;
+  }
+
+  .run-claims {
+    padding: clamp(1.25rem, 4vw, 2.5rem);
+    border-top: 3px double hsl(var(--border));
+  }
+
+  .run-claim {
+    padding-left: 1rem;
+    border-left: 3px solid hsl(var(--accent) / 0.65);
+  }
+
+  .run-evidence-rail {
+    position: sticky;
+    top: 5.5rem;
+    min-width: 0;
+  }
+
+  .run-evidence-record,
+  .run-audit-record {
+    min-width: 0;
+    padding: 1.1rem;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card) / 0.78);
+    transition:
+      border-color 180ms ease,
+      box-shadow 180ms ease,
+      transform 180ms ease;
+  }
+
+  .run-evidence-record-selected {
+    border-color: hsl(var(--primary));
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.14);
+    transform: translateY(-0.15rem);
+  }
+
+  .run-evidence-meta {
+    display: grid;
+    gap: 0.7rem;
+    margin-top: 1rem;
+  }
+
+  .run-evidence-meta dd {
+    margin-top: 0.2rem;
+    overflow-wrap: anywhere;
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+
+  .run-evidence-excerpt {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    padding: 1rem;
+    border-left: 3px solid hsl(var(--accent));
+    background: hsl(var(--accent) / 0.055);
+    font-family: var(--font-editorial);
+    font-size: 0.98rem;
+    line-height: 1.7;
+  }
+
+  .run-evidence-excerpt:focus {
+    outline: var(--focus-width) solid hsl(var(--ring));
+    outline-offset: 4px;
+  }
+
+  .run-task-log {
+    position: relative;
+    padding-left: 1.5rem;
+    border-left: 1px solid hsl(var(--border));
+  }
+
+  .run-log-record {
+    position: relative;
+    padding: 0 0 2rem 1rem;
+  }
+
+  .run-log-marker {
+    position: absolute;
+    top: 0.25rem;
+    left: -1.89rem;
+    width: 0.75rem;
+    height: 0.75rem;
+    border: 2px solid hsl(var(--background));
+    border-radius: 999px;
+    background: hsl(var(--primary));
+    box-shadow: 0 0 0 1px hsl(var(--primary));
+  }
+
+  .run-event-record {
+    padding-block: 1rem;
+    border-bottom: 1px solid hsl(var(--border) / 0.75);
+  }
+
+  .run-audit-record + .run-audit-record {
+    margin-top: 1rem;
+  }
+
+  .run-audit-meta {
+    margin-top: 1rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .run-operational-ledger {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-block: 1px solid hsl(var(--border));
+  }
+
+  .run-operational-ledger > div {
+    min-width: 0;
+    padding: 1rem;
+    border-bottom: 1px solid hsl(var(--border) / 0.65);
+  }
+
+  .run-operational-ledger > div:nth-child(odd) {
+    border-right: 1px solid hsl(var(--border) / 0.65);
+  }
+
+  .run-operational-ledger dd {
+    margin-top: 0.45rem;
+    overflow-wrap: anywhere;
+  }
+
+  .run-developer-detail {
+    margin-top: 1.25rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid hsl(var(--border) / 0.7);
+    font-size: 0.78rem;
+  }
+
+  .run-developer-detail summary {
+    width: fit-content;
+    cursor: pointer;
+    color: hsl(var(--muted-foreground));
+    font-weight: 700;
+  }
+
+  .run-developer-detail dl {
+    display: grid;
+    gap: 0.65rem;
+    margin-top: 0.85rem;
+  }
+
+  .run-developer-detail dd {
+    margin-top: 0.2rem;
+    overflow-wrap: anywhere;
+  }
+
+  .run-developer-detail pre {
+    max-width: 100%;
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    overflow: auto;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.45);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
   .skip-link {
     position: fixed;
     top: 0.75rem;
@@ -299,16 +580,39 @@
   .workbench-empty-state .workbench-provenance {
     grid-column: 2;
   }
+
+  .run-overview-grid,
+  .run-artifact-folio,
+  .run-audit-meta,
+  .run-operational-ledger {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .run-operational-ledger > div:nth-child(odd) {
+    border-right: 0;
+  }
+
+  .run-artifact-masthead {
+    display: grid;
+  }
+}
+
+@media (max-width: 959px) {
+  .run-inspection-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .run-evidence-rail {
+    position: static;
+  }
 }
 
 @keyframes dossier-enter {
   from {
-    opacity: 0;
     transform: translateY(0.35rem);
   }
 
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }
