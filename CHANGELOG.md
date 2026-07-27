@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Web workbench redesign (Direction A): migrated the frontend design-token system in `web/src/index.css` to a warm cream/teal light palette with a single teal signal accent and a warm (non-navy) dark mode with a stepped surface ladder. Dark mode is carried by the Tailwind `.dark` class. Loaded Fraunces (display), IBM Plex Sans (UI), and IBM Plex Mono (data) type families and pointed `tailwind.config.js` font families at them.
+
 ## [0.2.0] - 2026-06-29
 
 ### Added

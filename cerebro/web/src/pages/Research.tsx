@@ -88,7 +88,7 @@ function ResearchDetail({ id }: { id: string }) {
                     <h2 className="text-3xl font-bold tracking-tight">{project.title}</h2>
                     <div className="flex items-center text-sm text-muted-foreground gap-3 mt-1">
                         <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-xs">{project.id}</span>
-                        <Badge variant="secondary" className="capitalize bg-primary/10 text-primary hover:bg-primary/20">{project.status}</Badge>
+                        <Badge variant="secondary" className="capitalize bg-primary/10 text-[hsl(var(--signal-strong))] hover:bg-primary/20">{project.status}</Badge>
                     </div>
                 </div>
             </div>
@@ -314,7 +314,7 @@ export function Research() {
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between">
                                         <Badge variant={project.status === 'completed' ? 'default' : project.status === 'failed' ? 'destructive' : 'secondary'}
-                                            className={`capitalize ${project.status === 'completed' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-none' : project.status === 'running' ? 'bg-primary/10 text-primary border-none' : ''}`}>
+                                            className={`capitalize ${project.status === 'completed' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-none' : project.status === 'running' ? 'bg-primary/10 text-[hsl(var(--signal-strong))] border-none' : ''}`}>
                                             {project.status}
                                         </Badge>
                                         <div className="flex items-center text-xs text-muted-foreground gap-1">
