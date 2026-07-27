@@ -28,8 +28,16 @@ def test_lifespan_injects_one_router_across_active_consumers(
     monkeypatch.setattr(direct_execution_service, "_direct_execution_service", None)
 
     with TestClient(app):
+        from src.api.services.agent_execution_service import (
+            get_application_agent_execution_service,
+        )
+
         runtime = app.state.masr_runtime
         assert app.state.direct_execution_service.masr_router is runtime.router
+        assert (
+            app.state.research_kernel.executor.agent_backend
+            is app.state.agent_execution_service
+        )
         assert (
             app.state.research_kernel.registry
             is app.state.direct_execution_service.supervisor_registry
@@ -42,6 +50,10 @@ def test_lifespan_injects_one_router_across_active_consumers(
         assert (
             direct_execution_service.get_application_direct_execution_service(request)
             is app.state.direct_execution_service
+        )
+        assert (
+            get_application_agent_execution_service(request)
+            is app.state.agent_execution_service
         )
 
     assert runtime.closed is True
@@ -71,6 +83,7 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     await first_context.__aenter__()
     first_runtime = app.state.masr_runtime
     first_direct = app.state.direct_execution_service
+    first_agent = app.state.agent_execution_service
     first_kernel = app.state.research_kernel
     first_masr_service = app.state.masr_routing_service
     first_talkhier_service = app.state.talkhier_session_service
@@ -78,6 +91,7 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     await second_context.__aenter__()
     second_runtime = app.state.masr_runtime
     second_direct = app.state.direct_execution_service
+    second_agent = app.state.agent_execution_service
     second_kernel = app.state.research_kernel
     second_masr_service = app.state.masr_routing_service
     second_talkhier_service = app.state.talkhier_session_service
@@ -91,8 +105,10 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
         assert first_talkhier_service.closed is True
         assert app.state.masr_runtime is second_runtime
         assert app.state.direct_execution_service is second_direct
+        assert app.state.agent_execution_service is second_agent
         assert app.state.research_kernel is second_kernel
         assert first_kernel is not second_kernel
+        assert first_agent is not second_agent
         assert app.state.masr_routing_service is second_masr_service
         assert app.state.talkhier_session_service is second_talkhier_service
         assert second_runtime.closed is False
@@ -107,6 +123,7 @@ async def test_overlapping_lifespans_close_only_their_owned_services(
     for state_name in (
         "masr_runtime",
         "direct_execution_service",
+        "agent_execution_service",
         "research_kernel",
         "masr_routing_service",
         "talkhier_session_service",

@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from src.agents.supervisors.research_supervisor import ResearchSupervisor
 from src.ai_brain.router.masr import MASRouter
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
@@ -20,6 +21,12 @@ from src.api.services.direct_execution_service import (
     close_direct_execution_service,
     configure_direct_execution_service,
     get_direct_execution_service,
+)
+from src.core.kernel import (
+    RegistryEntry,
+    RegistryKey,
+    RegistryNamespace,
+    TypedRegistry,
 )
 from src.models.research_project import (
     ResearchDepth,
@@ -177,6 +184,34 @@ class TestDirectExecutionService:
         assert execution_status.status in ["running", "completed"]
         assert execution_status.routing_decision is not None
         assert execution_status.supervisor_type == "research"
+
+    @pytest.mark.asyncio
+    async def test_injected_supervisor_override_reaches_masr_bridge(
+        self,
+        execution_service,
+        sample_project,
+    ):
+        """A valid typed override is forwarded to the bridge unchanged."""
+
+        class InjectedResearchSupervisor(ResearchSupervisor):
+            pass
+
+        execution_service.supervisor_registry = TypedRegistry(
+            [
+                RegistryEntry(
+                    RegistryKey(RegistryNamespace.SUPERVISOR, "research"),
+                    InjectedResearchSupervisor,
+                )
+            ]
+        )
+
+        await execution_service.start_research_execution(sample_project)
+        await asyncio.sleep(0.1)
+
+        call = execution_service.supervisor_bridge.execute_routing_decision.call_args
+        assert call.kwargs["supervisor_registry"] == {
+            "research": InjectedResearchSupervisor,
+        }
 
     @pytest.mark.asyncio
     async def test_get_execution_status(self, execution_service, sample_project):

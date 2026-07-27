@@ -8,10 +8,25 @@ from uuid import UUID
 
 from fastapi import Depends, Request
 
+from src.api.services.agent_execution_service import (
+    get_application_agent_execution_service,
+)
 from src.api.services.direct_execution_service import (
     get_application_direct_execution_service,
 )
 from src.core.kernel import ResearchKernel, TypedRegistry
+from src.models.agent_api_models import (
+    AgentExecutionRequest,
+    AgentExecutionResponse,
+    AgentHealthStatus,
+    AgentInfo,
+    AgentMetricsResponse,
+    AgentType,
+    ChainOfAgentsRequest,
+    ChainOfAgentsResponse,
+    MixtureOfAgentsRequest,
+    MixtureOfAgentsResponse,
+)
 from src.models.research_project import ResearchProject
 
 
@@ -33,11 +48,54 @@ class ResearchExecutionBackend(Protocol):
     async def resume_execution(self, project_id: UUID) -> str | None: ...
 
 
+class AgentExecutionBackend(Protocol):
+    """Legacy operations implemented by the direct-agent backend."""
+
+    async def execute_single_agent(
+        self,
+        agent_type: AgentType,
+        request: AgentExecutionRequest,
+    ) -> AgentExecutionResponse: ...
+
+    async def execute_chain_of_agents(
+        self,
+        request: ChainOfAgentsRequest,
+    ) -> ChainOfAgentsResponse: ...
+
+    async def execute_mixture_of_agents(
+        self,
+        request: MixtureOfAgentsRequest,
+    ) -> MixtureOfAgentsResponse: ...
+
+    async def get_agent_list(self) -> list[AgentInfo]: ...
+
+    async def get_agent_metrics(
+        self,
+        agent_type: AgentType,
+    ) -> AgentMetricsResponse: ...
+
+    async def get_agent_health(
+        self,
+        agent_type: AgentType,
+    ) -> AgentHealthStatus: ...
+
+    async def get_service_stats(self) -> dict[str, Any]: ...
+
+    async def get_active_execution_snapshot(
+        self,
+    ) -> tuple[dict[str, dict[str, Any]], int]: ...
+
+
+class AgentKernelOperations(AgentExecutionBackend, Protocol):
+    """Stateless agent calls exposed by the application kernel adapter."""
+
+
 @dataclass(frozen=True, slots=True)
-class _DirectExecutionKernelAdapter:
-    """Stateless call-shape adapter over the single execution implementation."""
+class _ApplicationKernelAdapter:
+    """Stateless call-shape adapter over the existing execution backends."""
 
     backend: ResearchExecutionBackend
+    agent_backend: AgentExecutionBackend | None = None
 
     async def __call__(
         self,
@@ -58,12 +116,60 @@ class _DirectExecutionKernelAdapter:
     async def resume_execution(self, project_id: UUID) -> str | None:
         return await self.backend.resume_execution(project_id)
 
+    def _agents(self) -> AgentExecutionBackend:
+        if self.agent_backend is None:
+            raise TypeError("Research kernel was not composed for agent execution")
+        return self.agent_backend
+
+    async def execute_single_agent(
+        self,
+        agent_type: AgentType,
+        request: AgentExecutionRequest,
+    ) -> AgentExecutionResponse:
+        return await self._agents().execute_single_agent(agent_type, request)
+
+    async def execute_chain_of_agents(
+        self,
+        request: ChainOfAgentsRequest,
+    ) -> ChainOfAgentsResponse:
+        return await self._agents().execute_chain_of_agents(request)
+
+    async def execute_mixture_of_agents(
+        self,
+        request: MixtureOfAgentsRequest,
+    ) -> MixtureOfAgentsResponse:
+        return await self._agents().execute_mixture_of_agents(request)
+
+    async def get_agent_list(self) -> list[AgentInfo]:
+        return await self._agents().get_agent_list()
+
+    async def get_agent_metrics(
+        self,
+        agent_type: AgentType,
+    ) -> AgentMetricsResponse:
+        return await self._agents().get_agent_metrics(agent_type)
+
+    async def get_agent_health(
+        self,
+        agent_type: AgentType,
+    ) -> AgentHealthStatus:
+        return await self._agents().get_agent_health(agent_type)
+
+    async def get_service_stats(self) -> dict[str, Any]:
+        return await self._agents().get_service_stats()
+
+    async def get_active_execution_snapshot(
+        self,
+    ) -> tuple[dict[str, dict[str, Any]], int]:
+        return await self._agents().get_active_execution_snapshot()
+
 
 ApplicationResearchKernel: TypeAlias = ResearchKernel[..., str]
 
 
 def compose_application_research_kernel(
     backend: ResearchExecutionBackend,
+    agent_backend: AgentExecutionBackend | None = None,
 ) -> ApplicationResearchKernel:
     """Compose a canonical kernel over the existing execution implementation."""
 
@@ -73,18 +179,18 @@ def compose_application_research_kernel(
         # substitutable at the HTTP boundary without becoming production catalogs.
         registry = TypedRegistry()
     return ResearchKernel(
-        executor=_DirectExecutionKernelAdapter(backend),
+        executor=_ApplicationKernelAdapter(backend, agent_backend),
         registry=registry,
     )
 
 
 def _execution_adapter(
     kernel: ApplicationResearchKernel,
-) -> _DirectExecutionKernelAdapter:
+) -> _ApplicationKernelAdapter:
     """Return the adapter owned by a composed application kernel."""
 
     adapter = kernel.executor
-    if not isinstance(adapter, _DirectExecutionKernelAdapter):
+    if not isinstance(adapter, _ApplicationKernelAdapter):
         raise TypeError("Research kernel was not composed for direct execution")
     return adapter
 
@@ -102,7 +208,7 @@ def get_application_research_kernel(
     if isinstance(kernel, ResearchKernel):
         adapter = kernel.executor
         if (
-            isinstance(adapter, _DirectExecutionKernelAdapter)
+            isinstance(adapter, _ApplicationKernelAdapter)
             and adapter.backend is backend
         ):
             return cast(ApplicationResearchKernel, kernel)
@@ -112,12 +218,56 @@ def get_application_research_kernel(
     return compose_application_research_kernel(backend)
 
 
+def get_application_agent_research_kernel(
+    request: Request,
+    backend: Annotated[
+        AgentExecutionBackend,
+        Depends(get_application_agent_execution_service),
+    ],
+) -> ApplicationResearchKernel:
+    """Resolve the app kernel or adapt an overridden agent backend."""
+
+    kernel = getattr(request.app.state, "research_kernel", None)
+    if isinstance(kernel, ResearchKernel):
+        adapter = kernel.executor
+        if isinstance(adapter, _ApplicationKernelAdapter):
+            if adapter.agent_backend is backend:
+                return cast(ApplicationResearchKernel, kernel)
+            return compose_application_research_kernel(adapter.backend, backend)
+
+    return get_legacy_agent_research_kernel(backend)
+
+
 def get_legacy_research_kernel() -> ApplicationResearchKernel:
     """Retain direct-call compatibility outside FastAPI dependency injection."""
 
     from .direct_execution_service import get_direct_execution_service
 
     return compose_application_research_kernel(get_direct_execution_service())
+
+
+def get_legacy_agent_research_kernel(
+    backend: AgentExecutionBackend | None = None,
+) -> ApplicationResearchKernel:
+    """Retain direct-call and raw-ASGI compatibility for legacy agent clients."""
+
+    from .agent_execution_service import get_agent_execution_service
+    from .direct_execution_service import get_direct_execution_service
+
+    return compose_application_research_kernel(
+        get_direct_execution_service(),
+        backend if backend is not None else get_agent_execution_service(),
+    )
+
+
+def get_kernel_agent_operations(
+    kernel: ApplicationResearchKernel,
+) -> AgentKernelOperations:
+    """Return stateless agent methods owned by the canonical kernel adapter."""
+
+    adapter = _execution_adapter(kernel)
+    adapter._agents()
+    return adapter
 
 
 async def get_kernel_execution_status(
@@ -148,12 +298,17 @@ async def resume_kernel_execution(
 
 
 __all__ = [
+    "AgentExecutionBackend",
+    "AgentKernelOperations",
     "ApplicationResearchKernel",
     "ResearchExecutionBackend",
     "compose_application_research_kernel",
+    "get_application_agent_research_kernel",
     "get_application_research_kernel",
+    "get_kernel_agent_operations",
     "get_kernel_execution_results",
     "get_kernel_execution_status",
+    "get_legacy_agent_research_kernel",
     "get_legacy_research_kernel",
     "resume_kernel_execution",
 ]

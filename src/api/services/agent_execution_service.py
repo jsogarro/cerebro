@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from fastapi import HTTPException, Request, status
 from structlog import get_logger
 
 from ...agents.base import BaseAgent
@@ -988,6 +989,19 @@ class AgentExecutionService:
             "system_health": await self._get_system_health(),
         }
 
+    async def get_active_execution_snapshot(
+        self,
+    ) -> tuple[dict[str, dict[str, Any]], int]:
+        """Return current execution state without exposing mutable ownership."""
+
+        return (
+            {
+                execution_id: dict(execution_data)
+                for execution_id, execution_data in self.active_executions.items()
+            },
+            self.max_concurrent_executions,
+        )
+
     async def _get_system_health(self) -> str:
         """Calculate overall system health."""
 
@@ -1019,7 +1033,32 @@ def get_agent_execution_service() -> AgentExecutionService:
     return _agent_execution_service
 
 
+def configure_agent_execution_service(
+    *,
+    agent_factory: AgentFactory | None = None,
+) -> AgentExecutionService:
+    """Create an application-owned service without changing legacy globals."""
+
+    return AgentExecutionService(agent_factory=agent_factory)
+
+
+def get_application_agent_execution_service(
+    request: Request,
+) -> AgentExecutionService:
+    """Resolve the agent service owned by the current FastAPI application."""
+
+    service = getattr(request.app.state, "agent_execution_service", None)
+    if not isinstance(service, AgentExecutionService):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agent execution runtime is unavailable",
+        )
+    return service
+
+
 __all__ = [
     "AgentExecutionService",
+    "configure_agent_execution_service",
     "get_agent_execution_service",
+    "get_application_agent_execution_service",
 ]

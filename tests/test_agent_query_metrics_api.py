@@ -172,11 +172,24 @@ class TestPerformanceAndMetrics:
     """Test performance tracking and metrics."""
 
     @pytest.fixture
-    def client(self) -> TestClient:
-        """Create test client."""
+    def client(self) -> Iterator[TestClient]:
+        """Create a raw-ASGI client with the established backend override."""
         from src.api.main import app
+        from src.api.services.agent_execution_service import (
+            get_application_agent_execution_service,
+        )
 
-        return TestClient(app)
+        service = AgentExecutionService()
+        app.dependency_overrides[get_application_agent_execution_service] = lambda: (
+            service
+        )
+        try:
+            yield TestClient(app)
+        finally:
+            app.dependency_overrides.pop(
+                get_application_agent_execution_service,
+                None,
+            )
 
     def test_agent_metrics_structure(self, client: TestClient) -> None:
         """Test agent metrics response structure."""

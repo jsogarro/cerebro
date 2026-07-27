@@ -8,9 +8,13 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.testclient import TestClient
 
-from src.api.routes import query_api
+from src.api.routes import agent_api, query_api
+from src.api.services.agent_execution_service import (
+    get_application_agent_execution_service,
+)
 from src.api.services.research_kernel import (
     compose_application_research_kernel,
     get_application_research_kernel,
@@ -24,6 +28,11 @@ from src.core.kernel import (
     RegistryNamespace,
     ResearchKernel,
     TypedRegistry,
+)
+from src.models.agent_api_models import (
+    AgentExecutionRequest,
+    AgentExecutionResponse,
+    AgentType,
 )
 
 
@@ -77,6 +86,30 @@ class _DirectExecutionBackend:
     async def resume_execution(self, project_id: UUID) -> str | None:
         self.calls.append(("resume", project_id, None))
         return "kernel-resumed" if project_id == UUID(int=1) else None
+
+
+class _AgentExecutionBackend:
+    """Small agent-execution fake used to prove adapter delegation."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object, object | None]] = []
+
+    async def execute_single_agent(
+        self,
+        agent_type: AgentType,
+        request: AgentExecutionRequest,
+    ) -> AgentExecutionResponse:
+        self.calls.append(("single", agent_type, request))
+        return AgentExecutionResponse(
+            execution_id="kernel-agent-execution",
+            agent_type=agent_type,
+            status="completed",
+            output={"source": "application-kernel"},
+            confidence=0.9,
+            quality_score=0.9,
+            execution_time_seconds=0.1,
+            started_at=datetime(2026, 7, 27, tzinfo=UTC),
+        )
 
 
 @pytest.mark.asyncio
@@ -194,3 +227,59 @@ def test_application_dependency_adapts_existing_lightweight_overrides() -> None:
 
     assert isinstance(resolved, ResearchKernel)
     assert resolved.registry.keys == ()
+
+
+def test_agent_routes_declare_the_application_kernel_dependency() -> None:
+    execute_route = next(
+        route
+        for route in agent_api.router.routes
+        if route.path == "/api/v1/agents/{agent_type}/execute"
+    )
+
+    dependency_names = {
+        dependency.call.__name__
+        for dependency in execute_route.dependant.dependencies
+        if dependency.call is not None
+    }
+
+    assert "get_application_agent_research_kernel" in dependency_names
+
+
+@pytest.mark.asyncio
+async def test_agent_adapter_executes_through_composed_application_kernel() -> None:
+    direct_backend = _DirectExecutionBackend()
+    agent_backend = _AgentExecutionBackend()
+    kernel = compose_application_research_kernel(direct_backend, agent_backend)
+    request = AgentExecutionRequest(query="Use the application-owned agent backend.")
+
+    response = await agent_api.execute_agent(
+        AgentType.LITERATURE_REVIEW,
+        request,
+        background_tasks=None,
+        execution_service=kernel,
+    )
+
+    assert response.execution_id == "kernel-agent-execution"
+    assert response.output == {"source": "application-kernel"}
+    assert agent_backend.calls == [
+        ("single", AgentType.LITERATURE_REVIEW, request),
+    ]
+
+
+def test_agent_http_adapter_accepts_lightweight_backend_override() -> None:
+    backend = _AgentExecutionBackend()
+    test_app = FastAPI()
+    test_app.include_router(agent_api.router)
+    test_app.dependency_overrides[get_application_agent_execution_service] = lambda: (
+        backend
+    )
+
+    with TestClient(test_app) as client:
+        response = client.post(
+            "/api/v1/agents/literature-review/execute",
+            json={"query": "Use the raw ASGI backend override."},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["execution_id"] == "kernel-agent-execution"
+    assert backend.calls[0][0] == "single"

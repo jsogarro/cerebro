@@ -154,6 +154,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
 
         # Initialize all active MASR consumers from the application-owned runtime.
+        from src.api.services.agent_execution_service import (
+            configure_agent_execution_service,
+        )
         from src.api.services.direct_execution_service import (
             configure_direct_execution_service,
         )
@@ -178,7 +181,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             direct_execution_service,
         )
 
-        research_kernel = compose_application_research_kernel(direct_execution_service)
+        agent_execution_service = configure_agent_execution_service()
+        app.state.agent_execution_service = agent_execution_service
+        resources.callback(
+            _remove_app_state_if_owned,
+            app,
+            "agent_execution_service",
+            agent_execution_service,
+        )
+
+        research_kernel = compose_application_research_kernel(
+            direct_execution_service,
+            agent_execution_service,
+        )
         app.state.research_kernel = research_kernel
         resources.callback(
             _remove_app_state_if_owned,

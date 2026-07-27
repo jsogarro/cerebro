@@ -15,9 +15,18 @@ import statistics
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    HTTPException,
+    Query,
+    status,
+)
 from structlog import get_logger
 
+from ...core.kernel import ResearchKernel
 from ...core.pii_redactor import redact_pii
 from ...models.agent_api_models import (
     AgentExecutionRequest,
@@ -35,15 +44,40 @@ from ...models.agent_api_models import (
     MixtureOfAgentsRequest,
     MixtureOfAgentsResponse,
 )
-from ..services.agent_execution_service import get_agent_execution_service
+from ..services.research_kernel import (
+    AgentExecutionBackend,
+    AgentKernelOperations,
+    ApplicationResearchKernel,
+    get_application_agent_research_kernel,
+    get_kernel_agent_operations,
+    get_legacy_agent_research_kernel,
+)
 
 logger = get_logger()
 router = APIRouter(prefix="/api/v1/agents")
+_AGENT_KERNEL_DEPENDENCY = Depends(get_application_agent_research_kernel)
+
+
+def _resolved_agent_operations(
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend,
+) -> AgentKernelOperations:
+    """Preserve direct-call compatibility while HTTP uses app-owned state."""
+
+    if execution_service is _AGENT_KERNEL_DEPENDENCY:
+        kernel = get_legacy_agent_research_kernel()
+    elif isinstance(execution_service, ResearchKernel):
+        kernel = execution_service
+    else:
+        kernel = get_legacy_agent_research_kernel(execution_service)
+    return get_kernel_agent_operations(kernel)
 
 
 @router.get("", response_model=AgentListResponse)
 async def list_agents(
     include_metrics: bool = Query(False, description="Include performance metrics"),
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
 ) -> AgentListResponse:
     """
     List all available agents with capabilities.
@@ -51,7 +85,7 @@ async def list_agents(
     Following research pattern: Agent capability discovery for optimal selection.
     """
     try:
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
         agents = await service.get_agent_list()
 
         # Calculate system metrics
@@ -87,14 +121,19 @@ async def list_agents(
 
 
 @router.get("/{agent_type}", response_model=AgentInfo)
-async def get_agent_info(agent_type: AgentType) -> AgentInfo:
+async def get_agent_info(
+    agent_type: AgentType,
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
+) -> AgentInfo:
     """
     Get detailed information about a specific agent.
 
     Provides agent capabilities, performance characteristics, and API endpoints.
     """
     try:
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
         agents = await service.get_agent_list()
 
         agent_info = next(
@@ -124,6 +163,9 @@ async def execute_agent(
     agent_type: AgentType,
     request: AgentExecutionRequest,
     background_tasks: BackgroundTasks,
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
 ) -> AgentExecutionResponse:
     """
     Execute single agent directly.
@@ -138,7 +180,7 @@ async def execute_agent(
             query_preview=redact_pii(request.query)[:100],
         )
 
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
 
         # Execute agent
         response = await service.execute_single_agent(agent_type, request)
@@ -165,6 +207,9 @@ async def execute_agent(
 @router.post("/chain", response_model=ChainOfAgentsResponse)
 async def execute_chain_of_agents(
     request: ChainOfAgentsRequest,
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
 ) -> ChainOfAgentsResponse:
     """
     Execute Chain-of-Agents (sequential execution pattern).
@@ -179,7 +224,7 @@ async def execute_chain_of_agents(
             f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}"
         )
 
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
 
         # Execute chain
         response = await service.execute_chain_of_agents(request)
@@ -207,6 +252,9 @@ async def execute_chain_of_agents(
 @router.post("/mixture", response_model=MixtureOfAgentsResponse)
 async def execute_mixture_of_agents(
     request: MixtureOfAgentsRequest,
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
 ) -> MixtureOfAgentsResponse:
     """
     Execute Mixture-of-Agents (parallel execution with aggregation).
@@ -221,7 +269,7 @@ async def execute_mixture_of_agents(
             f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}"
         )
 
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
 
         # Execute mixture
         response = await service.execute_mixture_of_agents(request)
@@ -314,7 +362,12 @@ async def validate_agent_input(
 
 
 @router.get("/{agent_type}/metrics", response_model=AgentMetricsResponse)
-async def get_agent_metrics(agent_type: AgentType) -> AgentMetricsResponse:
+async def get_agent_metrics(
+    agent_type: AgentType,
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
+) -> AgentMetricsResponse:
     """
     Get performance metrics for specific agent.
 
@@ -322,7 +375,7 @@ async def get_agent_metrics(agent_type: AgentType) -> AgentMetricsResponse:
     engineering approach for agent evaluation and optimization.
     """
     try:
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
         metrics = await service.get_agent_metrics(agent_type)
 
         logger.debug(f"Retrieved metrics for {agent_type.value}")
@@ -338,7 +391,12 @@ async def get_agent_metrics(agent_type: AgentType) -> AgentMetricsResponse:
 
 
 @router.get("/{agent_type}/health", response_model=AgentHealthStatus)
-async def get_agent_health(agent_type: AgentType) -> AgentHealthStatus:
+async def get_agent_health(
+    agent_type: AgentType,
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
+) -> AgentHealthStatus:
     """
     Get health status for specific agent.
 
@@ -346,7 +404,7 @@ async def get_agent_health(agent_type: AgentType) -> AgentHealthStatus:
     and recovery information.
     """
     try:
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
         health = await service.get_agent_health(agent_type)
 
         logger.debug(f"Retrieved health for {agent_type.value}: {health.status}")
@@ -362,7 +420,11 @@ async def get_agent_health(agent_type: AgentType) -> AgentHealthStatus:
 
 
 @router.get("/system/stats")
-async def get_system_stats() -> dict[str, Any]:
+async def get_system_stats(
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
+) -> dict[str, Any]:
     """
     Get comprehensive system statistics.
 
@@ -370,7 +432,7 @@ async def get_system_stats() -> dict[str, Any]:
     for monitoring and optimization.
     """
     try:
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
         stats = await service.get_service_stats()
 
         return stats
@@ -384,17 +446,25 @@ async def get_system_stats() -> dict[str, Any]:
 
 
 @router.get("/executions/active")
-async def get_active_executions() -> dict[str, Any]:
+async def get_active_executions(
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
+) -> dict[str, Any]:
     """
     Get information about currently active agent executions.
 
     Useful for monitoring system load and debugging performance issues.
     """
     try:
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
+        (
+            execution_snapshot,
+            max_concurrent_executions,
+        ) = await service.get_active_execution_snapshot()
 
         active_executions = []
-        for execution_id, execution_data in service.active_executions.items():
+        for execution_id, execution_data in execution_snapshot.items():
             active_executions.append(
                 {
                     "execution_id": execution_id,
@@ -412,8 +482,7 @@ async def get_active_executions() -> dict[str, Any]:
         return {
             "active_executions": active_executions,
             "total_active": len(active_executions),
-            "capacity_utilization": len(active_executions)
-            / service.max_concurrent_executions,
+            "capacity_utilization": len(active_executions) / max_concurrent_executions,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -433,6 +502,9 @@ async def literature_search(
     query: str = Query(..., min_length=1, max_length=500),
     max_sources: int = Query(25, ge=5, le=100),
     domains: list[str] = Query(default=[]),
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
 ) -> AgentExecutionResponse:
     """
     Optimized literature search endpoint.
@@ -450,13 +522,21 @@ async def literature_search(
         session_id=None,
     )
 
-    return await execute_agent(AgentType.LITERATURE_REVIEW, request, BackgroundTasks())
+    return await execute_agent(
+        AgentType.LITERATURE_REVIEW,
+        request,
+        BackgroundTasks(),
+        execution_service,
+    )
 
 
 @router.post("/citation/format", response_model=AgentExecutionResponse)
 async def format_citations(
     sources: list[str] = Body(..., min_length=1),
     style: str = Body("APA", pattern="^(APA|MLA|Chicago)$"),
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
 ) -> AgentExecutionResponse:
     """
     Optimized citation formatting endpoint.
@@ -473,7 +553,12 @@ async def format_citations(
         session_id=None,
     )
 
-    return await execute_agent(AgentType.CITATION, request, BackgroundTasks())
+    return await execute_agent(
+        AgentType.CITATION,
+        request,
+        BackgroundTasks(),
+        execution_service,
+    )
 
 
 @router.post("/synthesis/combine", response_model=AgentExecutionResponse)
@@ -481,6 +566,9 @@ async def synthesize_findings(
     findings: list[dict[str, Any]] = Body(..., min_length=2),
     synthesis_focus: str = Body(
         "comprehensive", pattern="^(comprehensive|comparative|thematic)$"
+    ),
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
     ),
 ) -> AgentExecutionResponse:
     """
@@ -498,7 +586,12 @@ async def synthesize_findings(
         session_id=None,
     )
 
-    return await execute_agent(AgentType.SYNTHESIS, request, BackgroundTasks())
+    return await execute_agent(
+        AgentType.SYNTHESIS,
+        request,
+        BackgroundTasks(),
+        execution_service,
+    )
 
 
 # Research workflow convenience endpoints
@@ -509,6 +602,9 @@ async def literature_analysis_workflow(
     query: str = Query(..., min_length=10),
     domains: list[str] = Query(default=[]),
     max_sources: int = Query(25, ge=10, le=100),
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
 ) -> ChainOfAgentsResponse:
     """
     Convenience endpoint for literature analysis workflow.
@@ -531,7 +627,7 @@ async def literature_analysis_workflow(
         early_stopping=False,
     )
 
-    return await execute_chain_of_agents(request)
+    return await execute_chain_of_agents(request, execution_service)
 
 
 @router.post(
@@ -542,6 +638,9 @@ async def comprehensive_research_workflow(
     domains: list[str] = Query(default=[]),
     analysis_depth: str = Query(
         "comprehensive", pattern="^(basic|comprehensive|exhaustive)$"
+    ),
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
     ),
 ) -> MixtureOfAgentsResponse:
     """
@@ -572,18 +671,22 @@ async def comprehensive_research_workflow(
         consensus_threshold=0.8,
     )
 
-    return await execute_mixture_of_agents(request)
+    return await execute_mixture_of_agents(request, execution_service)
 
 
 # System monitoring endpoints
 
 
 @router.get("/health/summary")
-async def get_agents_health_summary() -> dict[str, Any]:
+async def get_agents_health_summary(
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
+) -> dict[str, Any]:
     """Get health summary for all agents."""
 
     try:
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
 
         health_statuses = {}
         overall_health_scores = []
@@ -649,6 +752,9 @@ async def compare_agent_performance(
         pattern="^(quality_score|execution_time|success_rate|cost_efficiency)$",
     ),
     time_period_hours: int = Query(24, ge=1, le=168),  # 1 hour to 1 week
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
+        _AGENT_KERNEL_DEPENDENCY
+    ),
 ) -> dict[str, Any]:
     """
     Compare performance across all agent types.
@@ -657,7 +763,7 @@ async def compare_agent_performance(
     performance analysis across the agent ecosystem.
     """
     try:
-        service = get_agent_execution_service()
+        service = _resolved_agent_operations(execution_service)
 
         comparison_data = {}
 

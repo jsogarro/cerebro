@@ -122,21 +122,26 @@ def _mixture_response() -> MixtureOfAgentsResponse:
 
 
 @pytest.mark.asyncio
-async def test_execute_and_convenience_routes_forward_legacy_requests(monkeypatch):
+async def test_execute_and_convenience_routes_forward_legacy_requests():
     service = _AgentService()
-    monkeypatch.setattr(agent_api, "get_agent_execution_service", lambda: service)
 
     direct = await agent_api.execute_agent(
         AgentType.LITERATURE_REVIEW,
         AgentExecutionRequest(query="Characterize direct execution"),
         background_tasks=None,
+        execution_service=service,
     )
     literature = await agent_api.literature_search(
         query="Characterize literature convenience",
         max_sources=30,
         domains=["research"],
+        execution_service=service,
     )
-    citations = await agent_api.format_citations(["source"], "MLA")
+    citations = await agent_api.format_citations(
+        ["source"],
+        "MLA",
+        execution_service=service,
+    )
 
     assert direct.status == "completed"
     assert literature.agent_type == AgentType.LITERATURE_REVIEW
@@ -151,9 +156,8 @@ async def test_execute_and_convenience_routes_forward_legacy_requests(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_synthesis_combine_pins_exact_agent_request(monkeypatch):
+async def test_synthesis_combine_pins_exact_agent_request():
     service = _AgentService()
-    monkeypatch.setattr(agent_api, "get_agent_execution_service", lambda: service)
     findings = [
         {"claim": "Alpha", "evidence_ids": ["evidence-1"]},
         {"claim": "Beta", "evidence_ids": ["evidence-2"]},
@@ -162,6 +166,7 @@ async def test_synthesis_combine_pins_exact_agent_request(monkeypatch):
     response = await agent_api.synthesize_findings(
         findings=findings,
         synthesis_focus="thematic",
+        execution_service=service,
     )
 
     assert response.agent_type is AgentType.SYNTHESIS
@@ -177,15 +182,18 @@ async def test_synthesis_combine_pins_exact_agent_request(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_chain_mixture_and_workflows_preserve_distinct_shapes(monkeypatch):
+async def test_chain_mixture_and_workflows_preserve_distinct_shapes():
     service = _AgentService()
-    monkeypatch.setattr(agent_api, "get_agent_execution_service", lambda: service)
 
     workflow = await agent_api.literature_analysis_workflow(
-        query="Characterize literature workflow", domains=["research"]
+        query="Characterize literature workflow",
+        domains=["research"],
+        execution_service=service,
     )
     mixture = await agent_api.comprehensive_research_workflow(
-        query="Characterize comprehensive workflow", analysis_depth="exhaustive"
+        query="Characterize comprehensive workflow",
+        analysis_depth="exhaustive",
+        execution_service=service,
     )
 
     assert workflow.final_result == {"legacy": "final"}
@@ -222,15 +230,18 @@ async def test_agent_validation_is_local_heuristic_not_agent_execution():
 
 
 @pytest.mark.asyncio
-async def test_list_info_and_health_preserve_legacy_discovery_and_status_shapes(
-    monkeypatch,
-):
+async def test_list_info_and_health_preserve_legacy_discovery_and_status_shapes():
     service = _AgentService()
-    monkeypatch.setattr(agent_api, "get_agent_execution_service", lambda: service)
 
-    listed = await agent_api.list_agents()
-    info = await agent_api.get_agent_info(AgentType.LITERATURE_REVIEW)
-    health = await agent_api.get_agent_health(AgentType.LITERATURE_REVIEW)
+    listed = await agent_api.list_agents(execution_service=service)
+    info = await agent_api.get_agent_info(
+        AgentType.LITERATURE_REVIEW,
+        execution_service=service,
+    )
+    health = await agent_api.get_agent_health(
+        AgentType.LITERATURE_REVIEW,
+        execution_service=service,
+    )
 
     assert listed.system_health == "degraded"
     assert listed.total_system_executions == 3

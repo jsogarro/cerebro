@@ -8,8 +8,9 @@ Tests the research-informed agent API endpoints including:
 - Intelligent query routing via MASR
 """
 
+from collections.abc import Iterator
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,11 +25,44 @@ class TestAgentAPI:
     """Test suite for Agent Framework API endpoints."""
 
     @pytest.fixture
-    def client(self) -> TestClient:
-        """Create test client."""
+    def client(self) -> Iterator[TestClient]:
+        """Create a raw-ASGI client with the established backend override."""
         from src.api.main import app
+        from src.api.services.agent_execution_service import (
+            get_application_agent_execution_service,
+        )
+        from src.models.agent_api_models import AgentExecutionResponse
 
-        return TestClient(app)
+        service = AgentExecutionService()
+
+        async def execute_fixture_agent(
+            agent_type: AgentType,
+            _request: object,
+        ) -> AgentExecutionResponse:
+            now = datetime.now()
+            return AgentExecutionResponse(
+                execution_id=f"fixture-{agent_type.value}",
+                agent_type=agent_type,
+                status="completed",
+                output={"fixture": True},
+                confidence=0.9,
+                quality_score=0.9,
+                execution_time_seconds=0.01,
+                started_at=now,
+                completed_at=now,
+            )
+
+        service.execute_single_agent = AsyncMock(side_effect=execute_fixture_agent)
+        app.dependency_overrides[get_application_agent_execution_service] = lambda: (
+            service
+        )
+        try:
+            yield TestClient(app)
+        finally:
+            app.dependency_overrides.pop(
+                get_application_agent_execution_service,
+                None,
+            )
 
     @pytest.fixture
     def mock_agent_execution_service(self) -> Mock:
@@ -86,16 +120,20 @@ class TestAgentAPI:
 
         assert response.status_code == 422  # Validation error for invalid enum
 
-    @patch("src.api.routes.agent_api.get_agent_execution_service")
     def test_execute_single_agent(
         self,
-        mock_get_service: Mock,
         client: TestClient,
         mock_agent_execution_service: Mock,
     ) -> None:
         """Test direct agent execution."""
+        from src.api.main import app
+        from src.api.services.agent_execution_service import (
+            get_application_agent_execution_service,
+        )
 
-        mock_get_service.return_value = mock_agent_execution_service
+        app.dependency_overrides[get_application_agent_execution_service] = lambda: (
+            mock_agent_execution_service
+        )
 
         request_data = {
             "query": "What are the impacts of AI on society?",
@@ -116,14 +154,16 @@ class TestAgentAPI:
         assert "output" in data
         assert "confidence" in data
 
-    @patch("src.api.routes.agent_api.get_agent_execution_service")
     def test_execute_chain_of_agents(
         self,
-        mock_get_service: Mock,
         client: TestClient,
         mock_agent_execution_service: Mock,
     ) -> None:
         """Test Chain-of-Agents execution."""
+        from src.api.main import app
+        from src.api.services.agent_execution_service import (
+            get_application_agent_execution_service,
+        )
 
         # Mock chain execution response
         from src.models.agent_api_models import ChainOfAgentsResponse
@@ -146,7 +186,9 @@ class TestAgentAPI:
         mock_agent_execution_service.execute_chain_of_agents = AsyncMock(
             return_value=mock_chain_response
         )
-        mock_get_service.return_value = mock_agent_execution_service
+        app.dependency_overrides[get_application_agent_execution_service] = lambda: (
+            mock_agent_execution_service
+        )
 
         request_data = {
             "query": "Analyze AI impact on education",
@@ -164,14 +206,16 @@ class TestAgentAPI:
         assert "final_result" in data
         assert data["overall_confidence"] > 0.8
 
-    @patch("src.api.routes.agent_api.get_agent_execution_service")
     def test_execute_mixture_of_agents(
         self,
-        mock_get_service: Mock,
         client: TestClient,
         mock_agent_execution_service: Mock,
     ) -> None:
         """Test Mixture-of-Agents execution."""
+        from src.api.main import app
+        from src.api.services.agent_execution_service import (
+            get_application_agent_execution_service,
+        )
 
         # Mock mixture execution response
         from src.models.agent_api_models import MixtureOfAgentsResponse
@@ -200,7 +244,9 @@ class TestAgentAPI:
         mock_agent_execution_service.execute_mixture_of_agents = AsyncMock(
             return_value=mock_mixture_response
         )
-        mock_get_service.return_value = mock_agent_execution_service
+        app.dependency_overrides[get_application_agent_execution_service] = lambda: (
+            mock_agent_execution_service
+        )
 
         request_data = {
             "query": "Analyze AI impact comprehensively",
