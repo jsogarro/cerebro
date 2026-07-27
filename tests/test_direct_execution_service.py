@@ -14,7 +14,9 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from src.agents.supervisors.research_supervisor import ResearchSupervisor
+from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter
+from src.api.services.component_catalog import build_application_component_registry
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
@@ -418,6 +420,36 @@ async def test_close_releases_lazy_fast_path_provider_exactly_once(
 
     provider.close.assert_awaited_once()
     assert execution_service._fast_path_provider is None
+
+
+@pytest.mark.asyncio
+async def test_close_cleans_internally_owned_supervisor_bridge_exactly_once() -> None:
+    service = DirectExecutionService(
+        masr_router=MASRouter(config={"enable_caching": False}),
+    )
+    service.supervisor_bridge.cleanup = AsyncMock()
+
+    await service.close()
+    await service.close()
+
+    service.supervisor_bridge.cleanup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_leaves_injected_supervisor_bridge_caller_owned() -> None:
+    registry = build_application_component_registry()
+    bridge = MASRSupervisorBridge(component_registry=registry)
+    bridge.cleanup = AsyncMock()
+    service = DirectExecutionService(
+        masr_router=MASRouter(config={"enable_caching": False}),
+        supervisor_bridge=bridge,
+        component_registry=registry,
+    )
+
+    await service.close()
+    await service.close()
+
+    bridge.cleanup.assert_not_awaited()
 
 
 class TestExecutionStatus:

@@ -182,9 +182,14 @@ class DirectExecutionService:
         self.outcome_recorder = outcome_recorder or RoutingOutcomeRecorder(
             self.masr_router
         )
-        self.supervisor_bridge = supervisor_bridge or MASRSupervisorBridge(
-            gemini_service=gemini_service,
-            component_registry=self.component_registry,
+        self._owns_supervisor_bridge = supervisor_bridge is None
+        self.supervisor_bridge = (
+            MASRSupervisorBridge(
+                gemini_service=gemini_service,
+                component_registry=self.component_registry,
+            )
+            if supervisor_bridge is None
+            else supervisor_bridge
         )
         self.supervisor_factory = supervisor_factory or SupervisorFactory(
             component_registry=self.component_registry,
@@ -1607,6 +1612,14 @@ class DirectExecutionService:
             except Exception as exc:
                 logger.warning(
                     "direct_execution_fast_path_provider_shutdown_failed",
+                    error=type(exc).__name__,
+                )
+        if self._owns_supervisor_bridge:
+            try:
+                await self.supervisor_bridge.cleanup()
+            except Exception as exc:
+                logger.warning(
+                    "direct_execution_supervisor_bridge_shutdown_failed",
                     error=type(exc).__name__,
                 )
 

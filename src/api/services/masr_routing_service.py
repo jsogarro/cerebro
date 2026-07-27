@@ -10,6 +10,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from structlog import get_logger
+
 from src.ai_brain.config.model_schemas import ModelTier, RoutingStrategy
 from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
@@ -44,6 +46,8 @@ from src.models.masr_api_models import (
 )
 from src.utils.type_coercion import coerce_float
 
+logger = get_logger()
+
 
 class MASRRoutingService:
     """
@@ -74,8 +78,11 @@ class MASRRoutingService:
             if component_registry is not None
             else get_default_component_registry()
         )
-        self.bridge = bridge or MASRSupervisorBridge(
-            component_registry=self.component_registry
+        self._owns_bridge = bridge is None
+        self.bridge = (
+            MASRSupervisorBridge(component_registry=self.component_registry)
+            if bridge is None
+            else bridge
         )
         if self.bridge.component_registry is not self.component_registry:
             raise ValueError("MASR routing bridge registry mismatch")
@@ -112,8 +119,16 @@ class MASRRoutingService:
 
         if self.closed:
             return
-        self.routing_history.clear()
         self.closed = True
+        self.routing_history.clear()
+        if self._owns_bridge:
+            try:
+                await self.bridge.cleanup()
+            except Exception as exc:
+                logger.warning(
+                    "masr_routing_bridge_shutdown_failed",
+                    error=type(exc).__name__,
+                )
 
     async def get_routing_decision(
         self, request: RoutingRequest

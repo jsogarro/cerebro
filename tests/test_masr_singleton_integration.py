@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.main import app, lifespan
@@ -155,24 +159,158 @@ def test_registry_aware_services_reject_mismatched_components() -> None:
         )
 
 
-def test_mounted_supervisor_api_declares_lifespan_service_dependency() -> None:
-    from fastapi.routing import APIRoute
-
-    from src.api.routes.supervisor_api import (
+def test_mounted_supervisor_api_requires_lifespan_or_explicit_override() -> None:
+    from src.api.routes import supervisor_api
+    from src.api.services.supervisor_coordination_service import (
         get_application_supervisor_coordination_service,
     )
 
-    mounted_route = next(
-        route
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        and route.path == "/api/v1/supervisors/{supervisor_type}/execute"
+    test_app = FastAPI()
+    test_app.include_router(supervisor_api.router)
+    client = TestClient(test_app)
+
+    unavailable = client.get("/api/v1/supervisors")
+
+    assert unavailable.status_code == 503
+    assert (
+        unavailable.json()["detail"] == "Supervisor coordination runtime is unavailable"
     )
 
-    assert any(
-        dependency.call is get_application_supervisor_coordination_service
-        for dependency in mounted_route.dependant.dependencies
+    service = Mock()
+    service.get_all_supervisors = AsyncMock(return_value=[])
+    test_app.dependency_overrides[get_application_supervisor_coordination_service] = (
+        lambda: service
     )
+
+    available = client.get("/api/v1/supervisors")
+
+    assert available.status_code == 200
+    assert available.json() == {
+        "supervisors": [],
+        "total_count": 0,
+        "active_count": 0,
+        "available_count": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_masr_routing_close_owns_only_internally_created_bridge() -> None:
+    from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
+    from src.ai_brain.router.masr import MASRouter
+    from src.api.services.component_catalog import (
+        build_application_component_registry,
+    )
+    from src.api.services.masr_routing_service import MASRRoutingService
+
+    registry = build_application_component_registry()
+    owned = MASRRoutingService(
+        router=MASRouter(config={"enable_caching": False}),
+        component_registry=registry,
+    )
+    owned.bridge.cleanup = AsyncMock()
+    injected_bridge = MASRSupervisorBridge(component_registry=registry)
+    injected_bridge.cleanup = AsyncMock()
+    injected = MASRRoutingService(
+        router=MASRouter(config={"enable_caching": False}),
+        component_registry=registry,
+        bridge=injected_bridge,
+    )
+
+    await owned.close()
+    await owned.close()
+    await injected.close()
+    await injected.close()
+
+    owned.bridge.cleanup.assert_awaited_once()
+    injected_bridge.cleanup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_talkhier_close_releases_unique_supervisors_and_owned_bridge() -> None:
+    from src.api.services.talkhier_session_service import (
+        TalkHierSession,
+        TalkHierSessionService,
+    )
+    from src.models.talkhier_api_models import (
+        ConsensusType,
+        ProtocolType,
+        RefinementStrategy,
+        SessionStatus,
+    )
+
+    service = TalkHierSessionService()
+    service.masr_bridge.cleanup = AsyncMock()
+    shared = cast(Any, SimpleNamespace(close=AsyncMock()))
+    failing = cast(
+        Any,
+        SimpleNamespace(close=AsyncMock(side_effect=RuntimeError("close failed"))),
+    )
+    remaining = cast(Any, SimpleNamespace(close=AsyncMock()))
+
+    def session(session_id: str, supervisor: Any) -> TalkHierSession:
+        return TalkHierSession(
+            session_id=session_id,
+            query="query",
+            domains=["research"],
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(UTC),
+            protocol_type=ProtocolType.STANDARD,
+            refinement_strategy=RefinementStrategy.QUALITY_FOCUSED,
+            max_rounds=3,
+            min_rounds=1,
+            quality_threshold=0.85,
+            consensus_type=ConsensusType.WEIGHTED,
+            consensus_threshold=0.8,
+            timeout_seconds=300,
+            participants=[],
+            supervisor=supervisor,
+        )
+
+    first = session("first", shared)
+    second = session("second", shared)
+    third = session("third", failing)
+    fourth = session("fourth", remaining)
+    service.sessions.update(
+        {
+            first.session_id: first,
+            second.session_id: second,
+            third.session_id: third,
+            fourth.session_id: fourth,
+        }
+    )
+
+    await service.close()
+    await service.close()
+
+    shared.close.assert_awaited_once()
+    failing.close.assert_awaited_once()
+    remaining.close.assert_awaited_once()
+    service.masr_bridge.cleanup.assert_awaited_once()
+    assert all(session.supervisor is None for session in (first, second, third, fourth))
+    assert service.sessions == {}
+    assert service.closed is True
+
+
+@pytest.mark.asyncio
+async def test_talkhier_close_leaves_injected_bridge_caller_owned() -> None:
+    from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
+    from src.api.services.component_catalog import (
+        build_application_component_registry,
+    )
+    from src.api.services.talkhier_session_service import TalkHierSessionService
+
+    registry = build_application_component_registry()
+    bridge = MASRSupervisorBridge(component_registry=registry)
+    bridge.cleanup = AsyncMock()
+    service = TalkHierSessionService(
+        component_registry=registry,
+        masr_bridge=bridge,
+    )
+
+    await service.close()
+    await service.close()
+
+    bridge.cleanup.assert_not_awaited()
 
 
 @pytest.mark.asyncio

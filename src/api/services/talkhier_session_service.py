@@ -132,8 +132,11 @@ class TalkHierSessionService:
         )
         if self.supervisor_factory.component_registry is not self.component_registry:
             raise ValueError("TalkHier supervisor factory registry mismatch")
-        self.masr_bridge = masr_bridge or MASRSupervisorBridge(
-            component_registry=self.component_registry
+        self._owns_masr_bridge = masr_bridge is None
+        self.masr_bridge = (
+            MASRSupervisorBridge(component_registry=self.component_registry)
+            if masr_bridge is None
+            else masr_bridge
         )
         if self.masr_bridge.component_registry is not self.component_registry:
             raise ValueError("TalkHier bridge registry mismatch")
@@ -176,13 +179,42 @@ class TalkHierSessionService:
 
         if self.closed:
             return
+        self.closed = True
         if self.cleanup_task is not None:
             self.cleanup_task.cancel()
             await asyncio.gather(self.cleanup_task, return_exceptions=True)
             self.cleanup_task = None
+
+        supervisors: dict[int, BaseSupervisor] = {}
+        for session in tuple(self.sessions.values()):
+            supervisor = session.supervisor
+            session.supervisor = None
+            if supervisor is not None:
+                supervisors.setdefault(id(supervisor), supervisor)
+        for supervisor in supervisors.values():
+            try:
+                await supervisor.close()
+            except Exception as exc:
+                logger.warning(
+                    "talkhier_session_supervisor_shutdown_failed",
+                    supervisor_type=getattr(
+                        supervisor,
+                        "supervisor_type",
+                        "unknown",
+                    ),
+                    error=type(exc).__name__,
+                )
+
         self.sessions.clear()
         self.session_metrics.clear()
-        self.closed = True
+        if self._owns_masr_bridge:
+            try:
+                await self.masr_bridge.cleanup()
+            except Exception as exc:
+                logger.warning(
+                    "talkhier_bridge_shutdown_failed",
+                    error=type(exc).__name__,
+                )
 
     def _initialize_protocol_configs(self) -> dict[ProtocolType, dict[str, Any]]:
         """Initialize protocol configurations"""
