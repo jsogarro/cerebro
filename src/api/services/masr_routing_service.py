@@ -10,6 +10,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from structlog import get_logger
+
 from src.ai_brain.config.model_schemas import ModelTier, RoutingStrategy
 from src.ai_brain.config.supervisor_config import SupervisorConfigurationManager
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
@@ -21,6 +23,7 @@ from src.ai_brain.router.query_analyzer import (
     ComplexityLevel,
     QueryDomain,
 )
+from src.core.kernel import TypedRegistry
 from src.models.masr_api_models import (
     AvailableStrategy,
     ComplexityAnalysisRequest,
@@ -43,6 +46,8 @@ from src.models.masr_api_models import (
 )
 from src.utils.type_coercion import coerce_float
 
+logger = get_logger()
+
 
 class MASRRoutingService:
     """
@@ -56,13 +61,35 @@ class MASRRoutingService:
     - Learning and feedback integration
     """
 
-    def __init__(self, router: MASRouter | None = None) -> None:
+    def __init__(
+        self,
+        router: MASRouter | None = None,
+        component_registry: TypedRegistry | None = None,
+        bridge: MASRSupervisorBridge | None = None,
+    ) -> None:
         """Initialize MASR routing service with all components"""
         from src.ai_brain.router.cost_optimizer import CostOptimizer
+        from src.api.services.component_catalog import get_default_component_registry
 
         # Core routing components
         self.router = router or MASRouter()
-        self.bridge = MASRSupervisorBridge()
+        self.component_registry = (
+            component_registry
+            if component_registry is not None
+            else get_default_component_registry()
+        )
+        self._owns_bridge = bridge is None
+        self.bridge = (
+            MASRSupervisorBridge(component_registry=self.component_registry)
+            if bridge is None
+            else bridge
+        )
+        if self.bridge.component_registry is not self.component_registry:
+            raise ValueError("MASR routing bridge registry mismatch")
+        if self.bridge.translator.component_registry is not self.component_registry:
+            raise ValueError("MASR routing translator registry mismatch")
+        if self.bridge.resource_pool.component_registry is not self.component_registry:
+            raise ValueError("MASR routing resource pool registry mismatch")
         base_cost_optimizer = CostOptimizer()
         self.cost_optimizer = HierarchicalCostOptimizer(
             base_cost_optimizer=base_cost_optimizer
@@ -92,8 +119,16 @@ class MASRRoutingService:
 
         if self.closed:
             return
-        self.routing_history.clear()
         self.closed = True
+        self.routing_history.clear()
+        if self._owns_bridge:
+            try:
+                await self.bridge.cleanup()
+            except Exception as exc:
+                logger.warning(
+                    "masr_routing_bridge_shutdown_failed",
+                    error=type(exc).__name__,
+                )
 
     async def get_routing_decision(
         self, request: RoutingRequest

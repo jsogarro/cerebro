@@ -9,7 +9,7 @@ Validates that supervisors can:
 5. Pass through on first PASS without extra worker calls
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
 
@@ -23,6 +23,37 @@ from src.agents.supervisors.base_supervisor import (
     MAX_VERIFICATION_REVISION_ROUNDS,
     BaseSupervisor,
 )
+from src.agents.verification_agent import VerificationAgent
+from src.api.services.component_catalog import build_application_component_registry
+from src.core.kernel import RegistryEntry, TypedRegistry
+from src.core.kernel.component_keys import AGENT_KEYS
+
+
+def _registry_with_verification_component(component: MagicMock) -> TypedRegistry:
+    registry = build_application_component_registry()
+    return TypedRegistry(
+        RegistryEntry(
+            entry.key,
+            component if entry.key == AGENT_KEYS["verification"] else entry.component,
+        )
+        for entry in registry.entries
+    )
+
+
+def _registry_with_verification_agent(agent: MagicMock) -> TypedRegistry:
+    component = create_autospec(
+        VerificationAgent,
+        spec_set=True,
+        return_value=agent,
+    )
+    return _registry_with_verification_component(component)
+
+
+def _assert_verification_task(agent: MagicMock, expected_content: str) -> None:
+    agent.execute.assert_awaited_once()
+    task = agent.execute.await_args.args[0]
+    assert task.agent_type == "verification"
+    assert task.input_data == {"content": expected_content}
 
 
 class MockSupervisor(BaseSupervisor):
@@ -288,19 +319,20 @@ class TestVerificationAgent:
             execution_time=1.0,
         )
 
-        with patch("src.agents.factory.AgentFactory") as mock_factory:
-            mock_agent = MagicMock()
-            mock_agent.execute = AsyncMock(return_value=mock_agent_result)
-            mock_factory.create_agent.return_value = mock_agent
+        mock_agent = create_autospec(VerificationAgent, instance=True, spec_set=True)
+        mock_agent.execute.return_value = mock_agent_result
+        mock_supervisor.component_registry = _registry_with_verification_agent(
+            mock_agent
+        )
 
-            result = await mock_supervisor._run_verification("Test content to verify")
+        result = await mock_supervisor._run_verification("Test content to verify")
+        _assert_verification_task(mock_agent, "Test content to verify")
 
-            assert result["verdict"] == "pass"
-            assert (
-                result["report"]
-                == "VERDICT: PASS\nISSUES: None\n\nAll content looks good."
-            )
-            assert result["issues"] == []
+        assert result["verdict"] == "pass"
+        assert (
+            result["report"] == "VERDICT: PASS\nISSUES: None\n\nAll content looks good."
+        )
+        assert result["issues"] == []
 
     @pytest.mark.asyncio
     async def test_run_verification_revise_verdict(self, mock_supervisor):
@@ -315,17 +347,19 @@ class TestVerificationAgent:
             execution_time=1.0,
         )
 
-        with patch("src.agents.factory.AgentFactory") as mock_factory:
-            mock_agent = MagicMock()
-            mock_agent.execute = AsyncMock(return_value=mock_agent_result)
-            mock_factory.create_agent.return_value = mock_agent
+        mock_agent = create_autospec(VerificationAgent, instance=True, spec_set=True)
+        mock_agent.execute.return_value = mock_agent_result
+        mock_supervisor.component_registry = _registry_with_verification_agent(
+            mock_agent
+        )
 
-            result = await mock_supervisor._run_verification("Test content with issues")
+        result = await mock_supervisor._run_verification("Test content with issues")
+        _assert_verification_task(mock_agent, "Test content with issues")
 
-            assert result["verdict"] == "revise"
-            assert len(result["issues"]) == 2
-            assert "Missing citation" in result["issues"][0]
-            assert "Arithmetic error" in result["issues"][1]
+        assert result["verdict"] == "revise"
+        assert len(result["issues"]) == 2
+        assert "Missing citation" in result["issues"][0]
+        assert "Arithmetic error" in result["issues"][1]
 
     @pytest.mark.asyncio
     async def test_run_verification_empty_content_returns_pass(self, mock_supervisor):
@@ -339,14 +373,18 @@ class TestVerificationAgent:
     @pytest.mark.asyncio
     async def test_run_verification_error_returns_neutral_pass(self, mock_supervisor):
         """Test verification error returns neutral PASS fallback."""
-        with patch("src.agents.factory.AgentFactory") as mock_factory:
-            mock_factory.create_agent.side_effect = Exception("Service unavailable")
+        component = create_autospec(VerificationAgent, spec_set=True)
+        component.side_effect = Exception("Service unavailable")
+        mock_supervisor.component_registry = _registry_with_verification_component(
+            component
+        )
 
-            result = await mock_supervisor._run_verification("Content to verify")
+        result = await mock_supervisor._run_verification("Content to verify")
 
-            assert result["verdict"] == "pass"  # Neutral fallback
-            assert "Verification error" in result["report"]
-            assert result["issues"] == []
+        component.assert_called_once()
+        assert result["verdict"] == "pass"  # Neutral fallback
+        assert "Verification error" in result["report"]
+        assert result["issues"] == []
 
 
 class TestIssueExtraction:

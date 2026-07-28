@@ -12,7 +12,6 @@ Key Features:
 - Integration with MASR routing decisions
 """
 
-import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -23,6 +22,7 @@ from langgraph.graph import StateGraph
 from structlog import get_logger
 
 from src.ai_brain.compaction import ConstraintRegistry
+from src.core.kernel import BoundedTaskRunner, TypedRegistry
 from src.core.telemetry import count_tokens_capped, telemetry_enabled
 from src.core.types import SupervisionStatsDict
 from src.qa.mast import MASTLabeler, format_mast_labels_for_metadata
@@ -145,6 +145,14 @@ class BaseSupervisor(BaseAgent, ABC):
         self.domain = domain
 
         super().__init__(gemini_service, cache_client, config)
+        component_registry = self.config.get("component_registry")
+        if not isinstance(component_registry, TypedRegistry):
+            from src.api.services.component_catalog import (
+                get_default_component_registry,
+            )
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
 
         # Worker management
         self.worker_definitions: dict[str, WorkerDefinition] = {}
@@ -276,9 +284,17 @@ class BaseSupervisor(BaseAgent, ABC):
         try:
             # Instantiate workers from definitions if not already active
             if not self.active_workers:
-                for worker_type, worker_def in self.worker_definitions.items():
+                from src.core.kernel.component_keys import AGENT_KEYS
+
+                for worker_type, worker_definition in self.worker_definitions.items():
                     try:
-                        worker = worker_def.agent_class(
+                        if worker_type in AGENT_KEYS:
+                            agent_class = self.component_registry.resolve(
+                                AGENT_KEYS[worker_type]
+                            )
+                        else:
+                            agent_class = worker_definition.agent_class
+                        worker = agent_class(
                             gemini_service=self.gemini_service,
                             cache_client=self.cache_client,
                             config=self.config,
@@ -818,7 +834,7 @@ class BaseSupervisor(BaseAgent, ABC):
             from ..factory import AgentFactory
 
             # Create verification agent with the same gemini_service
-            verification_agent = AgentFactory.create_agent(
+            verification_agent = AgentFactory(self.component_registry).resolve_agent(
                 "verification",
                 {
                     "gemini_service": self.gemini_service,
@@ -1251,8 +1267,8 @@ Task: Revise your previous response addressing the feedback while maintaining yo
             Dict mapping worker_type to worker response (or None on failure)
 
         PARALLEL mode behavior:
-            - Executes all workers concurrently via asyncio.gather with return_exceptions=True
-            - Bounded by asyncio.Semaphore(self.max_parallel_workers)
+            - Admits workers in input order up to max_parallel_workers at a time
+            - Retains failure isolation and input-order result processing
             - Failed workers are logged and excluded; successful workers proceed
             - If ALL workers fail, returns empty dict (graceful degradation)
 
@@ -1262,34 +1278,41 @@ Task: Revise your previous response addressing the feedback while maintaining yo
 
         """
         if supervision_mode == SupervisionMode.PARALLEL:
-            # Create semaphore to bound parallelism
-            semaphore = asyncio.Semaphore(self.max_parallel_workers)
 
-            async def execute_with_semaphore(
-                worker_type: str,
-                message_type: MessageType,
-                content: TalkHierContent | str,
-                context: dict[str, Any] | None,
+            async def execute_worker(
+                worker_spec: tuple[
+                    str,
+                    MessageType,
+                    TalkHierContent | str,
+                    dict[str, Any] | None,
+                ],
             ) -> tuple[str, TalkHierMessage | Exception | None]:
-                """Execute single worker with semaphore bound."""
-                async with semaphore:
-                    try:
-                        response = await self.send_talkhier_message(
-                            worker_type,
-                            message_type,
-                            content,
-                            context,
-                        )
-                        return (worker_type, response)
-                    except Exception as e:
-                        return (worker_type, e)
+                """Execute one admitted worker while preserving failure isolation."""
+                worker_type, message_type, content, context = worker_spec
+                try:
+                    response = await self.send_talkhier_message(
+                        worker_type,
+                        message_type,
+                        content,
+                        context,
+                    )
+                    return (worker_type, response)
+                except Exception as e:
+                    return (worker_type, e)
 
-            # Execute all workers concurrently with return_exceptions via gather
-            tasks = [
-                execute_with_semaphore(worker_type, msg_type, content, ctx)
-                for worker_type, msg_type, content, ctx in worker_specs
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            results = await BoundedTaskRunner[
+                tuple[
+                    str,
+                    MessageType,
+                    TalkHierContent | str,
+                    dict[str, Any] | None,
+                ],
+                tuple[str, TalkHierMessage | Exception | None],
+            ](self.max_parallel_workers).run(
+                worker_specs,
+                execute_worker,
+                return_exceptions=True,
+            )
 
             # Process results: separate successes from failures
             worker_results: dict[str, TalkHierMessage | None] = {}

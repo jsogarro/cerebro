@@ -13,11 +13,15 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from fastapi import HTTPException, status
+from starlette.requests import HTTPConnection
 from structlog import get_logger
 
 from src.api.services.supervisor_registry import SupervisorMetrics, SupervisorRegistry
 from src.api.services.supervisor_result_aggregator import ResultAggregator
 from src.api.services.supervisor_worker_dispatcher import WorkerDispatcher
+from src.core.kernel import TypedRegistry
+from src.core.kernel.component_keys import SUPERVISOR_KEYS
 from src.models.supervisor_api_models import (
     ConflictResolutionRequest,
     ConflictResolutionResponse,
@@ -43,7 +47,11 @@ from src.models.supervisor_api_models import (
     WorkerStatus,
 )
 
-__all__ = ["SupervisorCoordinationService", "SupervisorMetrics"]
+__all__ = [
+    "SupervisorCoordinationService",
+    "SupervisorMetrics",
+    "get_application_supervisor_coordination_service",
+]
 
 logger = get_logger()
 
@@ -54,8 +62,15 @@ class SupervisorCoordinationService:
     Integrates with existing supervisor factory and MASR router.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, component_registry: TypedRegistry | None = None) -> None:
         """Initialize the supervisor coordination service"""
+        if component_registry is None:
+            from src.api.services.component_catalog import (
+                get_default_component_registry,
+            )
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
         self.registry = SupervisorRegistry()
         self.supervisors = self.registry.supervisors
         self.workers = self.registry.workers
@@ -74,27 +89,40 @@ class SupervisorCoordinationService:
         # endpoint actually needs to execute).
         self._real_executor: Any | None = None
         self._gemini_service: Any | None = None
+        self._close_lock = asyncio.Lock()
+        self._closed = False
 
     def _get_real_executor(self) -> Any:
         """Lazily build the real supervisor executor (MASR-bridge backed)."""
+        if self._closed:
+            raise RuntimeError("Supervisor coordination service is closed")
         if self._real_executor is None:
-            from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
-            from src.agents.supervisors.content_supervisor import ContentSupervisor
-            from src.agents.supervisors.research_supervisor import ResearchSupervisor
             from src.ai_brain.integration.masr_supervisor_bridge import (
                 MASRSupervisorBridge,
             )
             from src.api.services.real_supervisor_executor import RealSupervisorExecutor
 
             registry = {
-                "research": ResearchSupervisor,
-                "content": ContentSupervisor,
-                "analytics": AnalyticsSupervisor,
+                name: self.component_registry.resolve(key)
+                for name, key in SUPERVISOR_KEYS.items()
             }
             self._real_executor = RealSupervisorExecutor(
-                registry, MASRSupervisorBridge()
+                registry,
+                MASRSupervisorBridge(component_registry=self.component_registry),
             )
         return self._real_executor
+
+    async def close(self) -> None:
+        """Idempotently close the lazily initialized supervisor bridge."""
+        async with self._close_lock:
+            if self._closed:
+                return
+
+            self._closed = True
+            executor = self._real_executor
+            self._real_executor = None
+            if executor is not None:
+                await executor.masr_bridge.cleanup()
 
     def _get_gemini_service(self) -> Any:
         """Lazily build a Gemini service for conflict adjudication; None on failure."""
@@ -1093,3 +1121,17 @@ class SupervisorCoordinationService:
                 },
             },
         )
+
+
+def get_application_supervisor_coordination_service(
+    connection: HTTPConnection,
+) -> SupervisorCoordinationService:
+    """Resolve the supervisor service owned by the current FastAPI lifespan."""
+
+    service = getattr(connection.app.state, "supervisor_coordination_service", None)
+    if not isinstance(service, SupervisorCoordinationService):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supervisor coordination runtime is unavailable",
+        )
+    return service

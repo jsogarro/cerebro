@@ -20,12 +20,17 @@ from typing import Any
 
 from structlog import get_logger
 
+from src.core.kernel import TypedRegistry
+from src.core.kernel.component_keys import (
+    COLLABORATION_MODE_WORKFLOW_KEY,
+    DOMAIN_KEYS,
+)
 from src.core.types import HealthCheckDict
 
 from ...agents.delegation_contract import DelegationContract
 from ...agents.models import AgentResult, AgentTask
 from ...agents.supervisors.base_supervisor import BaseSupervisor
-from ..router.masr import CollaborationMode, RoutingDecision, RoutingStrategy
+from ..router.masr import RoutingDecision, RoutingStrategy
 from ..router.query_analyzer import ComplexityLevel
 
 logger = get_logger()
@@ -118,9 +123,20 @@ class SupervisorExecutionResult:
 class RoutingDecisionTranslator:
     """Translates MASR routing decisions into supervisor configurations."""
 
-    def __init__(self, config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        component_registry: TypedRegistry | None = None,
+    ):
         """Initialize translator with configuration."""
         self.config = config or {}
+        if component_registry is None:
+            from src.api.services.component_catalog import (
+                get_default_component_registry,
+            )
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
 
         # Quality threshold mapping
         self.strategy_to_quality = {
@@ -129,24 +145,6 @@ class RoutingDecisionTranslator:
             RoutingStrategy.QUALITY_FOCUSED: 0.95,
             RoutingStrategy.BALANCED: 0.85,
             RoutingStrategy.ADAPTIVE: 0.85,
-        }
-
-        # Collaboration mode to execution mode mapping
-        self.collaboration_to_execution = {
-            CollaborationMode.DIRECT: "sequential",
-            CollaborationMode.PARALLEL: "parallel",
-            CollaborationMode.HIERARCHICAL: "hybrid",
-            CollaborationMode.DEBATE: "adaptive",
-            CollaborationMode.ENSEMBLE: "parallel",
-        }
-
-        # Domain to supervisor type mapping
-        self.domain_to_supervisor = {
-            "research": "research",
-            "content": "content",
-            "analytics": "analytics",
-            "service": "service",
-            "multimodal": "content",  # Fallback to content for now
         }
 
     def translate(self, routing_decision: RoutingDecision) -> SupervisorConfiguration:
@@ -171,7 +169,8 @@ class RoutingDecisionTranslator:
         ]:
             # Use domain mapping for generic supervisor types
             primary_domain = self._get_primary_domain(routing_decision)
-            supervisor_type = self.domain_to_supervisor.get(primary_domain, "research")
+            domain_key = DOMAIN_KEYS.get(primary_domain, DOMAIN_KEYS["research"])
+            supervisor_type = self.component_registry.resolve(domain_key)
 
         # Get quality threshold based on routing strategy
         routing_strategy = self._infer_routing_strategy(routing_decision)
@@ -184,9 +183,10 @@ class RoutingDecisionTranslator:
         )
 
         # Get execution mode from collaboration mode
-        execution_mode = self.collaboration_to_execution.get(
-            routing_decision.collaboration_mode, "parallel"
+        collaboration_resolver = self.component_registry.resolve(
+            COLLABORATION_MODE_WORKFLOW_KEY
         )
+        execution_mode = collaboration_resolver(routing_decision.collaboration_mode)
 
         return SupervisorConfiguration(
             supervisor_type=supervisor_type,
@@ -268,11 +268,21 @@ class ResourcePool:
     """Resource pool for managing supervisor instances."""
 
     def __init__(
-        self, config: dict[str, Any] | None = None, gemini_service: Any | None = None
+        self,
+        config: dict[str, Any] | None = None,
+        gemini_service: Any | None = None,
+        component_registry: TypedRegistry | None = None,
     ):
         """Initialize resource pool."""
         self.config = config or {}
         self.gemini_service = gemini_service
+        if component_registry is None:
+            from src.api.services.component_catalog import (
+                get_default_component_registry,
+            )
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
 
         # Pool configuration
         self.max_pool_size = self.config.get("max_pool_size", 10)
@@ -367,6 +377,7 @@ class ResourcePool:
                 "max_refinement_rounds": config.max_refinement_rounds,
                 "consensus_threshold": config.quality_threshold,
             },
+            "component_registry": self.component_registry,
         }
 
     async def cleanup(self) -> None:
@@ -556,17 +567,31 @@ class MASRSupervisorBridge:
     """
 
     def __init__(
-        self, config: dict[str, Any] | None = None, gemini_service: Any | None = None
+        self,
+        config: dict[str, Any] | None = None,
+        gemini_service: Any | None = None,
+        component_registry: TypedRegistry | None = None,
     ):
         """Initialize MASR-Supervisor bridge."""
         self.config = config or {}
         self.gemini_service = gemini_service
+        if component_registry is None:
+            from src.api.services.component_catalog import (
+                get_default_component_registry,
+            )
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
 
         # Initialize components
-        self.translator = RoutingDecisionTranslator(self.config.get("translator", {}))
+        self.translator = RoutingDecisionTranslator(
+            self.config.get("translator", {}),
+            component_registry=self.component_registry,
+        )
         self.resource_pool = ResourcePool(
             self.config.get("resource_pool", {}),
             gemini_service=gemini_service,
+            component_registry=self.component_registry,
         )
         self.executor = SupervisorExecutor(
             self.resource_pool,

@@ -15,10 +15,13 @@ from src.models.supervisor_api_models import SupervisionStrategy
 @pytest.fixture
 def app() -> FastAPI:
     """Create FastAPI app with supervisor routes."""
-    from src.api.routes.supervisor_api import router
+    from src.api.routes import supervisor_api
 
     app = FastAPI()
-    app.include_router(router)
+    app.include_router(supervisor_api.router)
+    app.dependency_overrides[
+        supervisor_api.get_application_supervisor_coordination_service
+    ] = lambda: supervisor_api.supervisor_service
     return app
 
 

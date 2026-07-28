@@ -5,6 +5,8 @@ from typing import Any
 
 from structlog import get_logger
 
+from src.core.kernel import TypedRegistry
+
 from ..communication.talkhier_message import (
     MessageType,
     TalkHierContent,
@@ -25,11 +27,13 @@ class ResearchQualityValidator:
         get_agent_type: Callable[[], str],
         quality_threshold: float,
         max_revisions: int = 2,
+        component_registry: TypedRegistry | None = None,
     ) -> None:
         self.gemini_service = gemini_service
         self.communication_protocol = communication_protocol
         self.get_agent_type = get_agent_type
         self.quality_threshold = quality_threshold
+        self.component_registry = component_registry
         # Cap on graduate-review -> revise-paper rounds before accepting the
         # best draft. Each round is a slow thinking-model call, so the default
         # is kept low; raise via the supervisor's max_paper_revisions config
@@ -469,7 +473,7 @@ If a paper exists but with slightly different details, mark exists=true and prov
             from ..factory import AgentFactory
             from ..models import AgentTask
 
-            verification_agent = AgentFactory.create_agent(
+            verification_agent = AgentFactory(self.component_registry).resolve_agent(
                 "verification",
                 {
                     "gemini_service": self.gemini_service,

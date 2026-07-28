@@ -18,11 +18,14 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from fastapi import HTTPException, Request, status
 from structlog import get_logger
 
 from ...agents.base import BaseAgent
 from ...agents.factory import AgentFactory
 from ...agents.models import AgentTask
+from ...core.kernel import BoundedTaskRunner, TypedRegistry
+from ...core.kernel.component_keys import API_AGENT_KEYS
 from ...models.agent_api_models import (
     AgentCapability,
     AgentExecutionRequest,
@@ -48,11 +51,30 @@ class AgentExecutionService:
     with built-in performance tracking and quality assurance.
     """
 
-    def __init__(self, agent_factory: AgentFactory | None = None):
+    def __init__(
+        self,
+        agent_factory: AgentFactory | None = None,
+        component_registry: TypedRegistry | None = None,
+    ):
         """Initialize agent execution service."""
 
         # Agent management
-        self.agent_factory = agent_factory or AgentFactory()
+        if component_registry is None and agent_factory is not None:
+            component_registry = agent_factory.component_registry
+        if component_registry is None:
+            from .component_catalog import get_default_component_registry
+
+            component_registry = get_default_component_registry()
+        if (
+            agent_factory is not None
+            and agent_factory.component_registry is not component_registry
+        ):
+            raise TypeError(
+                "AgentFactory and AgentExecutionService must share one "
+                "component registry"
+            )
+        self.component_registry = component_registry
+        self.agent_factory = agent_factory or AgentFactory(self.component_registry)
 
         # Execution tracking
         self.active_executions: dict[str, dict[str, Any]] = {}
@@ -79,25 +101,21 @@ class AgentExecutionService:
         self.default_timeout_seconds = 300
         self.enable_performance_tracking = True
 
-        # Agent type to class mapping
-        # Map the API enum to AgentFactory registry keys (snake_case), NOT class
-        # names. AgentFactory.create_agent looks up by registry key, so class
-        # names like "LiteratureReviewAgent" raise "Unknown agent type".
-        self.agent_type_mapping = {
-            AgentType.LITERATURE_REVIEW: "literature_review",
-            AgentType.CITATION: "citation",
-            AgentType.METHODOLOGY: "methodology",
-            AgentType.COMPARATIVE_ANALYSIS: "comparative_analysis",
-            AgentType.SYNTHESIS: "synthesis",
-            AgentType.FINANCIAL_ANALYSIS: "financial_analysis",
-            AgentType.VALUATION: "valuation",
-            AgentType.RISK_ASSESSMENT: "risk_assessment",
-            AgentType.FINANCIAL_CALCULATOR: "financial_calculator",
-            AgentType.VERIFICATION: "verification",
+    @property
+    def agent_type_mapping(self) -> dict[AgentType, str]:
+        """Expose the legacy API-enum aliases without owning implementations."""
+
+        return {
+            agent_type: key.name.replace("-", "_")
+            for agent_type, key in API_AGENT_KEYS.items()
         }
 
     async def execute_single_agent(
-        self, agent_type: AgentType, request: AgentExecutionRequest
+        self,
+        agent_type: AgentType,
+        request: AgentExecutionRequest,
+        *,
+        timeout_seconds: float | None = None,
     ) -> AgentExecutionResponse:
         """
         Execute single agent following direct interaction pattern.
@@ -151,7 +169,10 @@ class AgentExecutionService:
 
             # Execute with timeout
             agent_result = await asyncio.wait_for(
-                agent.execute(task), timeout=request.timeout_seconds
+                agent.execute(task),
+                timeout=timeout_seconds
+                if timeout_seconds is not None
+                else request.timeout_seconds,
             )
 
             # Build response
@@ -403,8 +424,9 @@ class AgentExecutionService:
         )
 
         try:
-            # Create agent execution tasks
-            agent_tasks = []
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + request.timeout_seconds
+            agent_specs = []
 
             for agent_type in request.agent_types:
                 agent_request = AgentExecutionRequest(
@@ -416,35 +438,47 @@ class AgentExecutionService:
                     session_id=None,
                 )
 
-                task = asyncio.create_task(
-                    self.execute_single_agent(agent_type, agent_request),
-                    name=f"mixture_agent_{agent_type.value}",
+                agent_specs.append((agent_type, agent_request))
+
+            async def execute_agent(
+                agent_spec: tuple[AgentType, AgentExecutionRequest],
+            ) -> AgentExecutionResponse:
+                agent_type, agent_request = agent_spec
+                remaining_seconds = deadline - loop.time()
+                if remaining_seconds <= 0:
+                    raise TimeoutError
+                return await self.execute_single_agent(
+                    agent_type,
+                    agent_request,
+                    timeout_seconds=remaining_seconds,
                 )
-                agent_tasks.append((agent_type, task))
-
-            # Execute agents in parallel (with concurrency limit)
-            semaphore = asyncio.Semaphore(request.max_parallel)
-
-            async def execute_with_limit(agent_type: Any, task: Any) -> Any:
-                async with semaphore:
-                    result = await task
-                    return result
 
             # Wait for all agents to complete
             agent_results = {}
             execution_times = {}
 
-            for agent_type, task in agent_tasks:
-                try:
-                    agent_response = await execute_with_limit(agent_type, task)
-                    agent_results[agent_type.value] = agent_response
-                    execution_times[agent_type.value] = (
-                        agent_response.execution_time_seconds
+            async with asyncio.timeout_at(deadline):
+                mixture_results = await BoundedTaskRunner[
+                    tuple[AgentType, AgentExecutionRequest], AgentExecutionResponse
+                ](request.max_parallel).run(
+                    agent_specs,
+                    execute_agent,
+                    return_exceptions=True,
+                )
+
+            for (agent_type, _), agent_result in zip(
+                agent_specs,
+                mixture_results,
+                strict=True,
+            ):
+                if isinstance(agent_result, BaseException):
+                    logger.error(
+                        f"Mixture agent {agent_type.value} failed: {agent_result}"
                     )
-                except Exception as e:
-                    logger.error(f"Mixture agent {agent_type.value} failed: {e}")
-                    # Continue with other agents
                     continue
+
+                agent_results[agent_type.value] = agent_result
+                execution_times[agent_type.value] = agent_result.execution_time_seconds
 
             # Aggregate results using specified strategy
             aggregated_result = await self._aggregate_mixture_results(
@@ -464,16 +498,6 @@ class AgentExecutionService:
             response.consensus_achieved = aggregated_result["consensus_achieved"]
             response.agent_weights = aggregated_result["weights"]
 
-            # Calculate performance metrics
-            if execution_times:
-                response.total_execution_time_seconds = max(
-                    execution_times.values()
-                )  # Parallel execution
-                theoretical_sequential_time = sum(execution_times.values())
-                response.parallel_efficiency = (
-                    theoretical_sequential_time / response.total_execution_time_seconds
-                )
-
             # Calculate quality metrics
             quality_scores = [result.quality_score for result in agent_results.values()]
             if quality_scores:
@@ -486,6 +510,18 @@ class AgentExecutionService:
 
             response.status = "completed"
             response.completed_at = datetime.now()
+            response.total_execution_time_seconds = (
+                response.completed_at - response.started_at
+            ).total_seconds()
+
+            # Preserve individual execution-time inputs for efficiency while
+            # reporting the actual mixture wall-clock duration across bounded
+            # waves instead of the longest individual agent response.
+            if execution_times and response.total_execution_time_seconds > 0:
+                theoretical_sequential_time = sum(execution_times.values())
+                response.parallel_efficiency = (
+                    theoretical_sequential_time / response.total_execution_time_seconds
+                )
 
             logger.info(
                 f"Mixture-of-Agents completed: {len(request.agent_types)} agents, consensus: {response.consensus_score:.3f}"
@@ -955,16 +991,12 @@ class AgentExecutionService:
     async def _get_agent_instance(self, agent_type: AgentType) -> BaseAgent:
         """Get agent instance from factory."""
 
-        agent_class_name = self.agent_type_mapping.get(agent_type)
-        if not agent_class_name:
+        key = API_AGENT_KEYS.get(agent_type)
+        if key is None:
             raise ValueError(f"Unknown agent type: {agent_type.value}")
 
-        # Get agent from factory
-        agent = self.agent_factory.create_agent(agent_class_name)
-        if not agent:
-            raise RuntimeError(f"Failed to create agent: {agent_type.value}")
-
-        return agent
+        self.component_registry.resolve(key)
+        return self.agent_factory.resolve_agent(key.name.replace("-", "_"))
 
     async def get_service_stats(self) -> dict[str, Any]:
         """Get comprehensive service statistics."""
@@ -987,6 +1019,19 @@ class AgentExecutionService:
             },
             "system_health": await self._get_system_health(),
         }
+
+    async def get_active_execution_snapshot(
+        self,
+    ) -> tuple[dict[str, dict[str, Any]], int]:
+        """Return current execution state without exposing mutable ownership."""
+
+        return (
+            {
+                execution_id: dict(execution_data)
+                for execution_id, execution_data in self.active_executions.items()
+            },
+            self.max_concurrent_executions,
+        )
 
     async def _get_system_health(self) -> str:
         """Calculate overall system health."""
@@ -1019,7 +1064,36 @@ def get_agent_execution_service() -> AgentExecutionService:
     return _agent_execution_service
 
 
+def configure_agent_execution_service(
+    *,
+    agent_factory: AgentFactory | None = None,
+    component_registry: TypedRegistry | None = None,
+) -> AgentExecutionService:
+    """Create an application-owned service without changing legacy globals."""
+
+    return AgentExecutionService(
+        agent_factory=agent_factory,
+        component_registry=component_registry,
+    )
+
+
+def get_application_agent_execution_service(
+    request: Request,
+) -> AgentExecutionService:
+    """Resolve the agent service owned by the current FastAPI application."""
+
+    service = getattr(request.app.state, "agent_execution_service", None)
+    if not isinstance(service, AgentExecutionService):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agent execution runtime is unavailable",
+        )
+    return service
+
+
 __all__ = [
     "AgentExecutionService",
+    "configure_agent_execution_service",
     "get_agent_execution_service",
+    "get_application_agent_execution_service",
 ]

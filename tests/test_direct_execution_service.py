@@ -13,7 +13,13 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
+from src.agents.supervisors.content_supervisor import ContentSupervisor
+from src.agents.supervisors.finance_supervisor import FinanceSupervisor
+from src.agents.supervisors.research_supervisor import ResearchSupervisor
+from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter
+from src.api.services.component_catalog import build_application_component_registry
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
@@ -21,6 +27,11 @@ from src.api.services.direct_execution_service import (
     configure_direct_execution_service,
     get_direct_execution_service,
 )
+from src.core.kernel import (
+    RegistryEntry,
+    TypedRegistry,
+)
+from src.core.kernel.component_keys import SUPERVISOR_KEYS
 from src.models.research_project import (
     ResearchDepth,
     ResearchProject,
@@ -169,6 +180,12 @@ class TestDirectExecutionService:
 
         # Verify supervisor bridge was called
         execution_service.supervisor_bridge.execute_routing_decision.assert_called_once()
+        supervisor_registry = execution_service.supervisor_bridge.execute_routing_decision.call_args.kwargs[
+            "supervisor_registry"
+        ]
+        assert supervisor_registry["content"] is ContentSupervisor
+        assert supervisor_registry["analytics"] is AnalyticsSupervisor
+        assert supervisor_registry["finance"] is FinanceSupervisor
 
         # Check execution status
         execution_status = execution_service.active_executions[execution_id]
@@ -177,6 +194,76 @@ class TestDirectExecutionService:
         assert execution_status.status in ["running", "completed"]
         assert execution_status.routing_decision is not None
         assert execution_status.supervisor_type == "research"
+
+    @pytest.mark.asyncio
+    async def test_injected_supervisor_override_reaches_masr_bridge(
+        self,
+        execution_service,
+        sample_project,
+    ):
+        """A valid typed override is forwarded to the bridge unchanged."""
+
+        class InjectedResearchSupervisor(ResearchSupervisor):
+            pass
+
+        class InjectedContentSupervisor(ContentSupervisor):
+            pass
+
+        class InjectedAnalyticsSupervisor(AnalyticsSupervisor):
+            pass
+
+        class InjectedFinanceSupervisor(FinanceSupervisor):
+            pass
+
+        default_registry = build_application_component_registry()
+        replacements = {
+            SUPERVISOR_KEYS["research"]: InjectedResearchSupervisor,
+            SUPERVISOR_KEYS["content"]: InjectedContentSupervisor,
+            SUPERVISOR_KEYS["analytics"]: InjectedAnalyticsSupervisor,
+            SUPERVISOR_KEYS["finance"]: InjectedFinanceSupervisor,
+        }
+        injected_registry = TypedRegistry(
+            RegistryEntry(entry.key, replacements.get(entry.key, entry.component))
+            for entry in default_registry.entries
+        )
+        execution_service = DirectExecutionService(
+            masr_router=execution_service.masr_router,
+            supervisor_bridge=execution_service.supervisor_bridge,
+            supervisor_factory=execution_service.supervisor_factory,
+            event_publisher=execution_service.event_publisher,
+            supervisor_registry=injected_registry,
+        )
+
+        bridge_called = asyncio.Event()
+        bridge_result = (
+            execution_service.supervisor_bridge.execute_routing_decision.return_value
+        )
+
+        async def signal_bridge_call(*args, **kwargs):
+            bridge_called.set()
+            return bridge_result
+
+        execution_service.supervisor_bridge.execute_routing_decision.side_effect = (
+            signal_bridge_call
+        )
+
+        await execution_service.start_research_execution(sample_project)
+        await asyncio.wait_for(bridge_called.wait(), timeout=1)
+
+        call = execution_service.supervisor_bridge.execute_routing_decision.call_args
+        assert (
+            call.kwargs["supervisor_registry"]["research"] is InjectedResearchSupervisor
+        )
+        assert (
+            call.kwargs["supervisor_registry"]["content"] is InjectedContentSupervisor
+        )
+        assert (
+            call.kwargs["supervisor_registry"]["analytics"]
+            is InjectedAnalyticsSupervisor
+        )
+        assert (
+            call.kwargs["supervisor_registry"]["finance"] is InjectedFinanceSupervisor
+        )
 
     @pytest.mark.asyncio
     async def test_get_execution_status(self, execution_service, sample_project):
@@ -377,6 +464,36 @@ async def test_close_releases_lazy_fast_path_provider_exactly_once(
 
     provider.close.assert_awaited_once()
     assert execution_service._fast_path_provider is None
+
+
+@pytest.mark.asyncio
+async def test_close_cleans_internally_owned_supervisor_bridge_exactly_once() -> None:
+    service = DirectExecutionService(
+        masr_router=MASRouter(config={"enable_caching": False}),
+    )
+    service.supervisor_bridge.cleanup = AsyncMock()
+
+    await service.close()
+    await service.close()
+
+    service.supervisor_bridge.cleanup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_leaves_injected_supervisor_bridge_caller_owned() -> None:
+    registry = build_application_component_registry()
+    bridge = MASRSupervisorBridge(component_registry=registry)
+    bridge.cleanup = AsyncMock()
+    service = DirectExecutionService(
+        masr_router=MASRouter(config={"enable_caching": False}),
+        supervisor_bridge=bridge,
+        component_registry=registry,
+    )
+
+    await service.close()
+    await service.close()
+
+    bridge.cleanup.assert_not_awaited()
 
 
 class TestExecutionStatus:

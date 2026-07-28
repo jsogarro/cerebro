@@ -20,15 +20,13 @@ from typing import Any
 
 from structlog import get_logger
 
+from src.core.kernel import TypedRegistry
+from src.core.kernel.component_keys import SUPERVISOR_KEYS
 from src.core.types import FactoryStatsDict, HealthCheckDict, HealthReportDict
 
 from ...ai_brain.integration.masr_supervisor_bridge import SupervisorConfiguration
 from ..models import AgentTask
-from .analytics_supervisor import AnalyticsSupervisor
 from .base_supervisor import BaseSupervisor
-from .content_supervisor import ContentSupervisor
-from .finance_supervisor import FinanceSupervisor
-from .research_supervisor import ResearchSupervisor
 
 logger = get_logger()
 
@@ -383,9 +381,20 @@ class SupervisorFactory:
     selection and instantiation based on task requirements.
     """
 
-    def __init__(self, config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        component_registry: TypedRegistry | None = None,
+    ):
         """Initialize supervisor factory."""
         self.config = config or {}
+        if component_registry is None:
+            from src.api.services.component_catalog import (
+                get_default_component_registry,
+            )
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
 
         # Core components
         self.health_monitor = SupervisorHealthMonitor(
@@ -415,7 +424,9 @@ class SupervisorFactory:
         # Research Supervisor
         research_spec = SupervisorSpecification(
             supervisor_type="research",
-            supervisor_class=ResearchSupervisor,
+            supervisor_class=self.component_registry.resolve(
+                SUPERVISOR_KEYS["research"]
+            ),
             domain="research",
             capabilities={
                 SupervisorCapability.RESEARCH,
@@ -445,7 +456,9 @@ class SupervisorFactory:
         # Content Supervisor
         content_spec = SupervisorSpecification(
             supervisor_type="content",
-            supervisor_class=ContentSupervisor,
+            supervisor_class=self.component_registry.resolve(
+                SUPERVISOR_KEYS["content"]
+            ),
             domain="content",
             capabilities={
                 SupervisorCapability.CONTENT,
@@ -473,7 +486,9 @@ class SupervisorFactory:
         # Analytics Supervisor
         analytics_spec = SupervisorSpecification(
             supervisor_type="analytics",
-            supervisor_class=AnalyticsSupervisor,
+            supervisor_class=self.component_registry.resolve(
+                SUPERVISOR_KEYS["analytics"]
+            ),
             domain="analytics",
             capabilities={
                 SupervisorCapability.ANALYTICS,
@@ -501,7 +516,9 @@ class SupervisorFactory:
         # Finance Supervisor
         finance_spec = SupervisorSpecification(
             supervisor_type="finance",
-            supervisor_class=FinanceSupervisor,
+            supervisor_class=self.component_registry.resolve(
+                SUPERVISOR_KEYS["finance"]
+            ),
             domain="finance",
             capabilities={
                 SupervisorCapability.FINANCE,
@@ -533,6 +550,24 @@ class SupervisorFactory:
         Args:
             spec: Supervisor specification to register
         """
+
+        if not isinstance(spec.supervisor_class, type) or not issubclass(
+            spec.supervisor_class,
+            BaseSupervisor,
+        ):
+            raise TypeError("supervisor_class must be a BaseSupervisor subclass")
+
+        if spec.supervisor_type in SUPERVISOR_KEYS:
+            expected_class = self.component_registry.resolve(
+                SUPERVISOR_KEYS[spec.supervisor_type]
+            )
+            if (
+                spec.supervisor_class is not expected_class
+                or spec.supervisor_type in self.supervisor_registry
+            ):
+                raise ValueError(
+                    f"Built-in supervisor '{spec.supervisor_type}' cannot be overridden"
+                )
 
         self.supervisor_registry[spec.supervisor_type] = spec
         self.health_monitor.register_supervisor(spec)
@@ -598,6 +633,7 @@ class SupervisorFactory:
                 # Additional context from MASR
                 "routing_context": config.context,
                 "execution_mode": config.execution_mode,
+                "component_registry": self.component_registry,
             }
 
             # Instantiate supervisor
@@ -606,7 +642,13 @@ class SupervisorFactory:
                 "cache_client": None,
                 "config": supervisor_config,
             }
-            supervisor_instance = spec.supervisor_class(**kwargs)  # type: BaseSupervisor
+            if config.supervisor_type in SUPERVISOR_KEYS:
+                supervisor_class = self.component_registry.resolve(
+                    SUPERVISOR_KEYS[config.supervisor_type]
+                )
+            else:
+                supervisor_class = spec.supervisor_class
+            supervisor_instance = supervisor_class(**kwargs)
 
             # Update statistics
             self.factory_stats["total_created"] += 1

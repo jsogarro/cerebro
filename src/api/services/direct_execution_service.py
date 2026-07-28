@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException, Request, status
 from structlog import get_logger
@@ -32,10 +32,7 @@ from src.core.telemetry import count_tokens, telemetry_enabled
 from src.repositories.checkpoint_repository import CheckpointRepository
 
 from ...agents.models import AgentTask
-from ...agents.supervisors.analytics_supervisor import AnalyticsSupervisor
-from ...agents.supervisors.content_supervisor import ContentSupervisor
-from ...agents.supervisors.finance_supervisor import FinanceSupervisor
-from ...agents.supervisors.research_supervisor import ResearchSupervisor
+from ...agents.supervisors.base_supervisor import BaseSupervisor
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.masr import MASRouter
@@ -49,6 +46,12 @@ from ...ai_brain.router.routing_types import (
     CollaborationMode,
     RoutingExecutionPolicy,
 )
+from ...core.kernel import (
+    BoundedTaskRunner,
+    TypedRegistry,
+    UnknownRegistryKeyError,
+)
+from ...core.kernel.component_keys import PROVIDER_KEYS, SUPERVISOR_KEYS
 from ...models.research_project import ResearchProject
 from ...models.websocket_messages import ProgressUpdate
 from .event_publisher import EventPublisher
@@ -57,6 +60,24 @@ if TYPE_CHECKING:
     from ...ai_brain.providers.openrouter_provider import OpenRouterProvider
 
 logger = get_logger()
+
+
+def _validate_supervisor_registry(registry: TypedRegistry) -> None:
+    """Reject invalid bridge composition before background execution starts."""
+
+    registry.resolve(SUPERVISOR_KEYS["research"])
+    for key in SUPERVISOR_KEYS.values():
+        try:
+            supervisor_class = registry.resolve(key)
+        except UnknownRegistryKeyError:
+            continue
+        if not isinstance(supervisor_class, type) or not issubclass(
+            supervisor_class, BaseSupervisor
+        ):
+            raise TypeError(
+                f"Registry component {key.qualified_name} must be a BaseSupervisor "
+                f"subclass; got {type(supervisor_class).__name__}"
+            )
 
 
 @dataclass
@@ -119,8 +140,41 @@ class DirectExecutionService:
         gemini_service: Any | None = None,
         session_factory: Any | None = None,
         outcome_recorder: RoutingOutcomeRecorder | None = None,
+        component_registry: TypedRegistry | None = None,
+        supervisor_registry: TypedRegistry | None = None,
     ):
         """Initialize direct execution service."""
+
+        if component_registry is not None and supervisor_registry is not None:
+            raise TypeError(
+                "Pass component_registry or supervisor_registry compatibility alias, "
+                "not both"
+            )
+        if component_registry is None:
+            component_registry = supervisor_registry
+        if component_registry is None:
+            from .component_catalog import get_default_component_registry
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
+        _validate_supervisor_registry(self.component_registry)
+        for collaborator_name, collaborator in (
+            ("MASRSupervisorBridge", supervisor_bridge),
+            ("SupervisorFactory", supervisor_factory),
+        ):
+            collaborator_registry = getattr(
+                collaborator,
+                "component_registry",
+                None,
+            )
+            if (
+                isinstance(collaborator_registry, TypedRegistry)
+                and collaborator_registry is not self.component_registry
+            ):
+                raise TypeError(
+                    f"{collaborator_name} and DirectExecutionService must share "
+                    "one component registry"
+                )
 
         # Initialize components (would be injected in production)
         self.gemini_service = gemini_service
@@ -128,10 +182,18 @@ class DirectExecutionService:
         self.outcome_recorder = outcome_recorder or RoutingOutcomeRecorder(
             self.masr_router
         )
-        self.supervisor_bridge = supervisor_bridge or MASRSupervisorBridge(
-            gemini_service=gemini_service,
+        self._owns_supervisor_bridge = supervisor_bridge is None
+        self.supervisor_bridge = (
+            MASRSupervisorBridge(
+                gemini_service=gemini_service,
+                component_registry=self.component_registry,
+            )
+            if supervisor_bridge is None
+            else supervisor_bridge
         )
-        self.supervisor_factory = supervisor_factory or SupervisorFactory()
+        self.supervisor_factory = supervisor_factory or SupervisorFactory(
+            component_registry=self.component_registry,
+        )
         self.event_publisher = event_publisher
         self.session_factory = session_factory
 
@@ -149,7 +211,6 @@ class DirectExecutionService:
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._fast_path_provider: OpenRouterProvider | None = None
         self.closed = False
-
         # Performance metrics
         self.execution_stats = {
             "total_executions": 0,
@@ -158,6 +219,12 @@ class DirectExecutionService:
             "average_execution_time": 0.0,
             "concurrent_executions": 0,
         }
+
+    @property
+    def supervisor_registry(self) -> TypedRegistry:
+        """Retain the legacy name as a read-only view of the kernel catalog."""
+
+        return self.component_registry
 
     def _measure_domain_output_tokens(
         self, domain: str, output: str, label: str = "domain_output"
@@ -440,16 +507,17 @@ class DirectExecutionService:
 
             if settings.MULTI_PROVIDER_ROUTING_ENABLED and settings.OPENROUTER_API_KEY:
                 from src.ai_brain.providers.base_provider import ModelRequest
-                from src.ai_brain.providers.openrouter_provider import (
-                    OpenRouterProvider,
-                )
 
                 # Lazily cache the provider: constructing per call would re-run
                 # startup slug validation (a catalog fetch) on every fast-path
                 # query. NOTE: no await between the hasattr check and the
                 # assignment - safe under asyncio; keep it that way.
                 if self._fast_path_provider is None:
-                    self._fast_path_provider = OpenRouterProvider(
+                    provider_class = cast(
+                        "type[OpenRouterProvider]",
+                        self.component_registry.resolve(PROVIDER_KEYS["openrouter"]),
+                    )
+                    provider = provider_class(
                         {
                             "enabled": True,
                             "api_key": settings.OPENROUTER_API_KEY,
@@ -457,6 +525,9 @@ class DirectExecutionService:
                             "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
                         }
                     )
+                    self._fast_path_provider = provider
+                else:
+                    provider = self._fast_path_provider
 
                 # Simple tier by construction: the fast path only ever serves
                 # classifier-approved trivial queries.
@@ -467,7 +538,7 @@ class DirectExecutionService:
                     complexity_score=0.1,
                     metadata={"tier": "simple"},
                 )
-                provider_response = await self._fast_path_provider.generate(request)
+                provider_response = await provider.generate(request)
                 if not provider_response.success or not provider_response.content:
                     raise RuntimeError(
                         "Fast path generation failed: "
@@ -969,14 +1040,12 @@ class DirectExecutionService:
                     routing_decision.collaboration_mode = CollaborationMode.DIRECT
                     # Continue to normal supervisor path below
 
-            # Get supervisor registry
-            from ...agents.supervisors.base_supervisor import BaseSupervisor
-
-            supervisor_registry: dict[str, type[BaseSupervisor]] = {
-                "research": ResearchSupervisor,
-                "content": ContentSupervisor,
-                "analytics": AnalyticsSupervisor,
-                "finance": FinanceSupervisor,
+            # Preserve the bridge's existing string-keyed call contract while
+            # keeping the authoritative catalog behind typed registry keys.
+            supervisor_registry = {
+                name: self.supervisor_registry.resolve(key)
+                for name, key in SUPERVISOR_KEYS.items()
+                if key in self.supervisor_registry.keys
             }
 
             # Detect multi-domain and branch execution
@@ -994,36 +1063,35 @@ class DirectExecutionService:
                 execution_status.progress_percentage = 30.0
                 await self._publish_progress_update(execution_status)
 
-                # Execute domain supervisors concurrently
-                semaphore = asyncio.Semaphore(self.max_domain_parallelism)
-
                 # Capture decomposition in closure for type narrowing
                 current_decomposition = decomposition
 
-                async def bounded_domain_execution(
-                    domain: str, sub_query: str
+                async def execute_domain(
+                    domain_spec: tuple[str, str],
                 ) -> dict[str, Any]:
-                    async with semaphore:
-                        return await self._execute_domain_supervisor(
-                            domain=domain,
-                            sub_query=sub_query,
-                            project=project,
-                            routing_context=routing_context,
-                            supervisor_registry=supervisor_registry,
-                            execution_status=execution_status,
-                        )
-
-                # Dispatch all domain sub-queries concurrently
-                domain_tasks = [
-                    bounded_domain_execution(
-                        domain, current_decomposition.domain_subqueries[domain]
+                    domain, sub_query = domain_spec
+                    return await self._execute_domain_supervisor(
+                        domain=domain,
+                        sub_query=sub_query,
+                        project=project,
+                        routing_context=routing_context,
+                        supervisor_registry=supervisor_registry,
+                        execution_status=execution_status,
                     )
+
+                domain_specs = [
+                    (domain, current_decomposition.domain_subqueries[domain])
                     for domain in current_decomposition.detected_domains
                 ]
 
-                # Gather with return_exceptions to handle partial failures
-                domain_results = await asyncio.gather(
-                    *domain_tasks, return_exceptions=True
+                # Admit at most the configured number of domain executions;
+                # queued domains remain values rather than pre-created tasks.
+                domain_results = await BoundedTaskRunner[
+                    tuple[str, str], dict[str, Any]
+                ](self.max_domain_parallelism).run(
+                    domain_specs,
+                    execute_domain,
+                    return_exceptions=True,
                 )
 
                 # Convert exceptions to error result dicts
@@ -1546,6 +1614,14 @@ class DirectExecutionService:
                     "direct_execution_fast_path_provider_shutdown_failed",
                     error=type(exc).__name__,
                 )
+        if self._owns_supervisor_bridge:
+            try:
+                await self.supervisor_bridge.cleanup()
+            except Exception as exc:
+                logger.warning(
+                    "direct_execution_supervisor_bridge_shutdown_failed",
+                    error=type(exc).__name__,
+                )
 
 
 # Legacy compatibility functions for migration
@@ -1611,12 +1687,14 @@ def configure_direct_execution_service(
     *,
     masr_router: MASRouter,
     gemini_service: Any | None = None,
+    component_registry: TypedRegistry | None = None,
 ) -> DirectExecutionService:
     """Create an application-owned service without changing legacy globals."""
 
     return DirectExecutionService(
         gemini_service=gemini_service,
         masr_router=masr_router,
+        component_registry=component_registry,
     )
 
 

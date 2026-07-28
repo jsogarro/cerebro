@@ -9,30 +9,9 @@ from typing import Any
 
 from structlog import get_logger
 
-from src.agents.analytics_agents import (
-    DataAnalysisAgent,
-    InsightSynthesisAgent,
-    StatisticalModelingAgent,
-)
 from src.agents.base import BaseAgent
-from src.agents.citation_agent import CitationAgent
-from src.agents.comparative_analysis_agent import ComparativeAnalysisAgent
-from src.agents.content_agents import (
-    ContentPlanningAgent,
-    DraftingAgent,
-    EditingAgent,
-    OptimizationAgent,
-)
-from src.agents.finance_agents import (
-    FinancialAnalysisAgent,
-    RiskAssessmentAgent,
-    ValuationAgent,
-)
-from src.agents.financial_calculator_agent import FinancialCalculatorAgent
-from src.agents.literature_review_agent import LiteratureReviewAgent
-from src.agents.methodology_agent import MethodologyAgent
-from src.agents.synthesis_agent import SynthesisAgent
-from src.agents.verification_agent import VerificationAgent
+from src.core.kernel import TypedRegistry
+from src.core.kernel.component_keys import AGENT_KEYS
 
 logger = get_logger()
 
@@ -44,55 +23,42 @@ class AgentFactory:
     Provides centralized agent creation and management.
     """
 
-    # Registry of available agent types
-    _agent_registry: dict[str, type[BaseAgent]] = {
-        "literature_review": LiteratureReviewAgent,
-        "comparative_analysis": ComparativeAnalysisAgent,
-        "methodology": MethodologyAgent,
-        "synthesis": SynthesisAgent,
-        "citation": CitationAgent,
-        "financial_calculator": FinancialCalculatorAgent,
-        "content_planning": ContentPlanningAgent,
-        "drafting": DraftingAgent,
-        "editing": EditingAgent,
-        "optimization": OptimizationAgent,
-        "data_analysis": DataAnalysisAgent,
-        "statistical_modeling": StatisticalModelingAgent,
-        "insight_synthesis": InsightSynthesisAgent,
-        "financial_analysis": FinancialAnalysisAgent,
-        "valuation": ValuationAgent,
-        "risk_assessment": RiskAssessmentAgent,
-        "verification": VerificationAgent,
-    }
+    # Legacy dynamic registrations are isolated to names outside the built-in
+    # application catalog; they cannot override kernel-owned agent tokens.
+    _compatibility_extensions: dict[str, type[BaseAgent]] = {}
 
-    @classmethod
-    def create_agent(
-        cls, agent_type: str, config: dict[str, Any] | None = None
+    def __init__(self, component_registry: TypedRegistry | None = None) -> None:
+        """Bind active selection to the application kernel catalog."""
+
+        if component_registry is None:
+            from src.api.services.component_catalog import (
+                get_default_component_registry,
+            )
+
+            component_registry = get_default_component_registry()
+        self.component_registry = component_registry
+
+    def resolve_agent(
+        self,
+        agent_type: str,
+        config: dict[str, Any] | None = None,
     ) -> BaseAgent:
-        """
-        Create an agent of the specified type.
+        """Create an agent by resolving its implementation token."""
 
-        Args:
-            agent_type: Type of agent to create
-            config: Configuration dictionary with optional:
-                - gemini_service: Gemini service instance
-                - cache_client: Redis cache client
-                - Additional agent-specific settings
-
-        Returns:
-            Configured agent instance
-
-        Raises:
-            ValueError: If agent_type is not recognized
-        """
-        if agent_type not in cls._agent_registry:
+        key = AGENT_KEYS.get(agent_type)
+        agent_class: type[BaseAgent] | None
+        if key is not None:
+            agent_class = self.component_registry.resolve(key)
+        else:
+            agent_class = self._compatibility_extensions.get(agent_type)
+        if agent_class is None:
             raise ValueError(
                 f"Unknown agent type: {agent_type}. "
-                f"Available types: {list(cls._agent_registry.keys())}"
+                f"Available types: {self.available_agent_types()}"
             )
 
         config = config or {}
-        agent_class = cls._agent_registry[agent_type]
+        config.setdefault("component_registry", self.component_registry)
 
         # Extract common configuration
         gemini_service = config.get("gemini_service")
@@ -119,6 +85,26 @@ class AgentFactory:
         return agent
 
     @classmethod
+    def create_agent(
+        cls,
+        agent_type: str,
+        config: dict[str, Any] | None = None,
+    ) -> BaseAgent:
+        """Retain class-call compatibility over the default typed catalog."""
+
+        return cls().resolve_agent(agent_type, config)
+
+    def available_agent_types(self) -> list[str]:
+        """Return agent aliases available through this bound registry."""
+
+        registered = [
+            name
+            for name, key in AGENT_KEYS.items()
+            if key in self.component_registry.keys
+        ]
+        return [*registered, *self._compatibility_extensions]
+
+    @classmethod
     def get_all_agents(cls, config: dict[str, Any] | None = None) -> list[BaseAgent]:
         """
         Get instances of all available agents.
@@ -132,9 +118,10 @@ class AgentFactory:
         config = config or {}
         agents = []
 
-        for agent_type in cls._agent_registry:
+        factory = cls()
+        for agent_type in factory.available_agent_types():
             try:
-                agent = cls.create_agent(agent_type, config)
+                agent = factory.resolve_agent(agent_type, config)
                 agents.append(agent)
             except Exception as e:
                 logger.warning(
@@ -154,7 +141,7 @@ class AgentFactory:
         Returns:
             List of agent type identifiers
         """
-        return list(cls._agent_registry.keys())
+        return cls().available_agent_types()
 
     @classmethod
     def register_agent(cls, agent_type: str, agent_class: type[BaseAgent]) -> None:
@@ -169,8 +156,12 @@ class AgentFactory:
         """
         if not issubclass(agent_class, BaseAgent):
             raise ValueError(f"{agent_class} must inherit from BaseAgent")
+        if agent_type in AGENT_KEYS:
+            raise ValueError(
+                f"Kernel-owned agent type cannot be overridden: {agent_type}"
+            )
 
-        cls._agent_registry[agent_type] = agent_class
+        cls._compatibility_extensions[agent_type] = agent_class
         logger.info("agent_type_registered", agent_type=agent_type)
 
     @classmethod
@@ -181,8 +172,8 @@ class AgentFactory:
         Args:
             agent_type: Agent type to remove
         """
-        if agent_type in cls._agent_registry:
-            del cls._agent_registry[agent_type]
+        if agent_type in cls._compatibility_extensions:
+            del cls._compatibility_extensions[agent_type]
             logger.info("agent_type_unregistered", agent_type=agent_type)
 
     def get_agent_registry(self) -> dict[str, type[BaseAgent]]:
@@ -192,7 +183,11 @@ class AgentFactory:
         Returns:
             Dictionary mapping agent types to classes
         """
-        return self._agent_registry.copy()
+        return {
+            name: self.component_registry.resolve(key)
+            for name, key in AGENT_KEYS.items()
+            if key in self.component_registry.keys
+        } | self._compatibility_extensions.copy()
 
     @classmethod
     def create_agent_with_fallback(
@@ -213,11 +208,11 @@ class AgentFactory:
             Agent instance (preferred or fallback)
         """
         try:
-            return cls.create_agent(agent_type, config)
+            return cls().resolve_agent(agent_type, config)
         except ValueError:
             logger.warning(
                 "agent_type_fallback_used",
                 agent_type=agent_type,
                 fallback_type=fallback_type,
             )
-            return cls.create_agent(fallback_type, config)
+            return cls().resolve_agent(fallback_type, config)
