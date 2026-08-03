@@ -6,6 +6,17 @@ import pytest
 
 from src.agents.analytics_agents import DataAnalysisAgent
 from src.agents.models import AgentTask
+from src.core.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """These workers execute a plain, plan-less ``AgentTask``. Without this,
+    a real MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY in the test
+    environment routes execute() through a live ModelRouter instead of the
+    mock_gemini_service fixture below, making these tests nondeterministic
+    and dependent on a paid network call."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
 
 @pytest.fixture

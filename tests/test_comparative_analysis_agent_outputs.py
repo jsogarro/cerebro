@@ -9,10 +9,20 @@ import pytest
 
 from src.agents.comparative_analysis_agent import ComparativeAnalysisAgent
 from src.agents.models import AgentResult, AgentTask
+from src.core.config import settings
 
 
 class TestComparativeAnalysisAgentOutputs:
     """Test output-specific comparative analysis behavior."""
+
+    @pytest.fixture(autouse=True)
+    def _no_live_provider_routing(self, monkeypatch):
+        """These agents execute a plain, plan-less ``AgentTask``. Without
+        this, a real MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY in
+        the test environment routes execute() through a live ModelRouter
+        instead of the mock_gemini fixtures below, making these tests
+        nondeterministic and dependent on a paid network call."""
+        monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
     @pytest.mark.asyncio
     async def test_visual_comparison_output(self) -> None:
