@@ -19,6 +19,7 @@ from src.agents.supervisors.finance_supervisor import FinanceSupervisor
 from src.agents.supervisors.research_supervisor import ResearchSupervisor
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter
+from src.ai_brain.router.routing_types import RoutingStrategy
 from src.api.services.component_catalog import build_application_component_registry
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
@@ -27,11 +28,26 @@ from src.api.services.direct_execution_service import (
     configure_direct_execution_service,
     get_direct_execution_service,
 )
+from src.api.services.execution_authority_resolver import (
+    MappingExecutionAuthorityResolver,
+)
+from src.core.contracts import (
+    ExecutionBudget,
+    FallbackMode,
+    ProviderModelPolicy,
+    ProviderModelRoute,
+    RoutingEdge,
+    WorkerAssignment,
+)
 from src.core.kernel import (
     RegistryEntry,
     TypedRegistry,
 )
 from src.core.kernel.component_keys import SUPERVISOR_KEYS
+from src.models.execution_authority import (
+    ExecutionAuthorityBinding,
+    ExecutionAuthorityReference,
+)
 from src.models.research_project import (
     ResearchDepth,
     ResearchProject,
@@ -58,6 +74,7 @@ class _FakeAgentAllocation:
 class _FakeComplexityAnalysis:
     """Minimal complexity analysis stub for single-domain path."""
 
+    domains: list[str] = field(default_factory=lambda: ["research"])
     decomposition: None = None  # No decomposition = single-domain path
 
 
@@ -74,6 +91,97 @@ class _FakeRoutingDecision:
     estimated_quality: float = 0.87
     confidence_score: float = 0.85
     context: dict[str, Any] = field(default_factory=dict)
+    routing_strategy: RoutingStrategy = RoutingStrategy.BALANCED
+    optimization_result: Any = field(
+        default_factory=lambda: type(
+            "_Optimization",
+            (),
+            {
+                "primary_model": type(
+                    "_Model",
+                    (),
+                    {"provider": "gemini", "model_name": "gemini-2.5-pro"},
+                )(),
+                "fallback_models": [],
+            },
+        )()
+    )
+
+
+def _authority_binding() -> ExecutionAuthorityBinding:
+    now = datetime(2026, 7, 28, tzinfo=UTC)
+    workers = tuple(
+        WorkerAssignment(
+            worker_id=f"worker-{worker_type}",
+            worker_type=worker_type,
+            objective=f"Handle {worker_type}",
+            output_schema={},
+            permission_scopes=(),
+            tool_allowlist=(),
+        )
+        for worker_type in ("literature", "analysis", "synthesis")
+    )
+    return ExecutionAuthorityBinding.create_for_test(
+        authority_id="test-authority",
+        authority_version="1",
+        run_id="test-run",
+        workflow_definition_id="test-workflow",
+        routing_policy_id="test-policy",
+        strategy="balanced",
+        collaboration_mode="hierarchical",
+        domains=("research",),
+        supervisor_id="test-supervisor",
+        supervisor_type="research",
+        workers=workers,
+        edges=(
+            RoutingEdge(
+                source_node_id="test-supervisor",
+                target_node_id="worker-literature",
+                relation="delegates",
+            ),
+        ),
+        provider_model_policy=ProviderModelPolicy(
+            primary=ProviderModelRoute(provider="gemini", model="gemini-2.5-pro"),
+            fallback_mode=FallbackMode.FAIL_CLOSED,
+            fallbacks=(),
+            provider_allowlist=("gemini",),
+            model_allowlist=("gemini-2.5-pro",),
+        ),
+        budget=ExecutionBudget(
+            max_cost_usd=0,
+            max_total_tokens=1,
+            max_tool_invocations=0,
+            max_parallel_tasks=3,
+            max_attempts_per_task=1,
+            task_timeout_seconds=1,
+        ),
+        stop_conditions=("complete",),
+        evaluator_requirements=(),
+        deadline=now.replace(year=2027),
+        compiled_at=now,
+    )
+
+
+TEST_AUTHORITY_REFERENCE = ExecutionAuthorityReference(
+    authority_id="test-authority", authority_version="1"
+)
+
+
+def _configure_test_authority(
+    service: DirectExecutionService,
+) -> DirectExecutionService:
+    binding = _authority_binding()
+    service.execution_authority_resolver = MappingExecutionAuthorityResolver(
+        {("test-authority", "1"): binding}
+    )
+    original_start = service.start_research_execution
+
+    async def start_with_test_authority(*args: Any, **kwargs: Any) -> str:
+        kwargs.setdefault("authority_reference", TEST_AUTHORITY_REFERENCE)
+        return await original_start(*args, **kwargs)
+
+    service.start_research_execution = start_with_test_authority  # type: ignore[method-assign]
+    return service
 
 
 @pytest.fixture
@@ -89,6 +197,7 @@ def execution_service():
 
     bridge = AsyncMock()
     bridge.health_check.return_value = {"status": "healthy"}
+    bridge.admit_execution_plan = Mock()
     result = Mock()
     result.execution_id = "supervisor-exec-123"
     result.supervisor_type = "research"
@@ -109,6 +218,10 @@ def execution_service():
     }
     result.agent_result = agent_result
     bridge.execute_routing_decision.return_value = result
+    plan_result = Mock()
+    plan_result.output = agent_result.output
+    plan_result.workers_used = 3
+    bridge.execute_execution_plan.return_value = plan_result
 
     publisher = AsyncMock()
     publisher.publish_project_event.return_value = None
@@ -116,11 +229,13 @@ def execution_service():
     supervisor_factory = Mock()
     supervisor_factory.health_check = AsyncMock(return_value={"status": "healthy"})
 
-    return DirectExecutionService(
-        masr_router=masr_router,
-        supervisor_bridge=bridge,
-        supervisor_factory=supervisor_factory,
-        event_publisher=publisher,
+    return _configure_test_authority(
+        DirectExecutionService(
+            masr_router=masr_router,
+            supervisor_bridge=bridge,
+            supervisor_factory=supervisor_factory,
+            event_publisher=publisher,
+        )
     )
 
 
@@ -178,14 +293,10 @@ class TestDirectExecutionService:
         call_args = execution_service.masr_router.route.call_args
         assert sample_project.query.text in str(call_args)
 
-        # Verify supervisor bridge was called
-        execution_service.supervisor_bridge.execute_routing_decision.assert_called_once()
-        supervisor_registry = execution_service.supervisor_bridge.execute_routing_decision.call_args.kwargs[
-            "supervisor_registry"
-        ]
-        assert supervisor_registry["content"] is ContentSupervisor
-        assert supervisor_registry["analytics"] is AnalyticsSupervisor
-        assert supervisor_registry["finance"] is FinanceSupervisor
+        # Plan-backed execution dispatches through the topology executor seam
+        # and never falls back to the legacy per-domain routing bridge call.
+        execution_service.supervisor_bridge.execute_execution_plan.assert_called_once()
+        execution_service.supervisor_bridge.execute_routing_decision.assert_not_called()
 
         # Check execution status
         execution_status = execution_service.active_executions[execution_id]
@@ -196,12 +307,14 @@ class TestDirectExecutionService:
         assert execution_status.supervisor_type == "research"
 
     @pytest.mark.asyncio
-    async def test_injected_supervisor_override_reaches_masr_bridge(
+    async def test_injected_supervisor_registry_does_not_reach_plan_backed_execution(
         self,
         execution_service,
         sample_project,
     ):
-        """A valid typed override is forwarded to the bridge unchanged."""
+        """A caller-injected supervisor registry has no effect on plan-backed
+        execution: the topology executor bypasses the legacy routing bridge
+        entirely, so the override never has anywhere to be forwarded to."""
 
         class InjectedResearchSupervisor(ResearchSupervisor):
             pass
@@ -226,44 +339,34 @@ class TestDirectExecutionService:
             RegistryEntry(entry.key, replacements.get(entry.key, entry.component))
             for entry in default_registry.entries
         )
-        execution_service = DirectExecutionService(
-            masr_router=execution_service.masr_router,
-            supervisor_bridge=execution_service.supervisor_bridge,
-            supervisor_factory=execution_service.supervisor_factory,
-            event_publisher=execution_service.event_publisher,
-            supervisor_registry=injected_registry,
+        execution_service = _configure_test_authority(
+            DirectExecutionService(
+                masr_router=execution_service.masr_router,
+                supervisor_bridge=execution_service.supervisor_bridge,
+                supervisor_factory=execution_service.supervisor_factory,
+                event_publisher=execution_service.event_publisher,
+                supervisor_registry=injected_registry,
+            )
         )
 
-        bridge_called = asyncio.Event()
-        bridge_result = (
-            execution_service.supervisor_bridge.execute_routing_decision.return_value
+        plan_called = asyncio.Event()
+        plan_result = (
+            execution_service.supervisor_bridge.execute_execution_plan.return_value
         )
 
-        async def signal_bridge_call(*args, **kwargs):
-            bridge_called.set()
-            return bridge_result
+        async def signal_plan_call(*args, **kwargs):
+            plan_called.set()
+            return plan_result
 
-        execution_service.supervisor_bridge.execute_routing_decision.side_effect = (
-            signal_bridge_call
+        execution_service.supervisor_bridge.execute_execution_plan.side_effect = (
+            signal_plan_call
         )
 
         await execution_service.start_research_execution(sample_project)
-        await asyncio.wait_for(bridge_called.wait(), timeout=1)
+        await asyncio.wait_for(plan_called.wait(), timeout=1)
 
-        call = execution_service.supervisor_bridge.execute_routing_decision.call_args
-        assert (
-            call.kwargs["supervisor_registry"]["research"] is InjectedResearchSupervisor
-        )
-        assert (
-            call.kwargs["supervisor_registry"]["content"] is InjectedContentSupervisor
-        )
-        assert (
-            call.kwargs["supervisor_registry"]["analytics"]
-            is InjectedAnalyticsSupervisor
-        )
-        assert (
-            call.kwargs["supervisor_registry"]["finance"] is InjectedFinanceSupervisor
-        )
+        execution_service.supervisor_bridge.execute_execution_plan.assert_called_once()
+        execution_service.supervisor_bridge.execute_routing_decision.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_execution_status(self, execution_service, sample_project):
@@ -330,17 +433,10 @@ class TestDirectExecutionService:
             "MASR routing failed"
         )
 
-        execution_id = await execution_service.start_research_execution(sample_project)
+        with pytest.raises(Exception, match="MASR routing failed"):
+            await execution_service.start_research_execution(sample_project)
 
-        # Wait for execution to complete
-        await asyncio.sleep(0.2)
-
-        execution_status = execution_service.active_executions[execution_id]
-
-        # Should be failed with error
-        assert execution_status.status == "failed"
-        assert len(execution_status.errors) > 0
-        assert "MASR routing failed" in execution_status.errors[0]
+        assert execution_service.active_executions == {}
 
     @pytest.mark.asyncio
     async def test_get_execution_results(self, execution_service, sample_project):

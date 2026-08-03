@@ -1,5 +1,6 @@
 """Shared primitives for the versioned canonical contracts."""
 
+import json
 import math
 from collections.abc import Mapping
 from types import MappingProxyType
@@ -88,6 +89,17 @@ class ContractModel(BaseModel):
     )
 
     schema_version: ContractSchemaVersion = "1.0"
+
+    def canonical_json(self) -> str:
+        """Return deterministic JSON suitable for hashing and boundary records."""
+
+        return json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
 
 
 def require_unique(values: tuple[str, ...], *, field_name: str) -> tuple[str, ...]:

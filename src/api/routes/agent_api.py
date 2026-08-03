@@ -44,6 +44,8 @@ from ...models.agent_api_models import (
     MixtureOfAgentsRequest,
     MixtureOfAgentsResponse,
 )
+from ...models.execution_authority import ExecutionAuthorityReference
+from ..services.execution_authority_resolver import ExecutionAuthorityError
 from ..services.research_kernel import (
     AgentExecutionBackend,
     AgentKernelOperations,
@@ -70,6 +72,37 @@ def _resolved_agent_operations(
     else:
         kernel = get_legacy_agent_research_kernel(execution_service)
     return get_kernel_agent_operations(kernel)
+
+
+def _require_agent_execution_authority(
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend,
+    reference: ExecutionAuthorityReference | None,
+) -> None:
+    """Fail closed on HTTP-kernel execution before reaching agent services."""
+
+    if reference is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "EXECUTION_AUTHORITY_REQUIRED"},
+        )
+    backend: Any = (
+        getattr(execution_service.executor, "backend", None)
+        if isinstance(execution_service, ResearchKernel)
+        else None
+    )
+    resolver = getattr(backend, "_resolve_execution_authority", None)
+    if resolver is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "EXECUTION_AUTHORITY_UNAVAILABLE"},
+        )
+    try:
+        resolver(reference)
+    except ExecutionAuthorityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.code},
+        ) from exc
 
 
 @router.get("", response_model=AgentListResponse)
@@ -180,6 +213,9 @@ async def execute_agent(
             query_preview=redact_pii(request.query)[:100],
         )
 
+        _require_agent_execution_authority(
+            execution_service, request.authority_reference
+        )
         service = _resolved_agent_operations(execution_service)
 
         # Execute agent
@@ -196,6 +232,8 @@ async def execute_agent(
 
         return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Agent execution failed: {agent_type.value} - {e}")
         raise HTTPException(
@@ -224,6 +262,9 @@ async def execute_chain_of_agents(
             f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}"
         )
 
+        _require_agent_execution_authority(
+            execution_service, request.authority_reference
+        )
         service = _resolved_agent_operations(execution_service)
 
         # Execute chain
@@ -241,6 +282,8 @@ async def execute_chain_of_agents(
 
         return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Chain-of-Agents execution failed: {e}")
         raise HTTPException(
@@ -269,6 +312,9 @@ async def execute_mixture_of_agents(
             f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}"
         )
 
+        _require_agent_execution_authority(
+            execution_service, request.authority_reference
+        )
         service = _resolved_agent_operations(execution_service)
 
         # Execute mixture
@@ -286,6 +332,8 @@ async def execute_mixture_of_agents(
 
         return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Mixture-of-Agents execution failed: {e}")
         raise HTTPException(

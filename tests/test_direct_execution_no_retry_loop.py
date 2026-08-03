@@ -16,9 +16,17 @@ This test drives `_execute_research_workflow` with mocked collaborators and
 asserts the workflow runs exactly once and reaches a terminal `completed` state
 with a computed duration. On the pre-fix code the `finally` raises, `@retry`
 re-runs it three times, and the call ultimately raises `RetryError`.
+
+Dispatch now goes through the plan-topology executor
+(``supervisor_bridge.execute_execution_plan``) rather than the legacy
+``execute_routing_decision`` bridge call, so this test drives a minimal
+compiled ``ExecutionPlan`` through that seam; the regression it guards
+(the ``finally`` block's tz-aware duration math) is unchanged live code.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -27,6 +35,18 @@ from src.ai_brain.router.routing_types import CollaborationMode
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
+)
+from src.core.contracts import (
+    CollaborationMode as PlanCollaborationMode,
+)
+from src.core.contracts import (
+    ExecutionBudget,
+    ExecutionPlan,
+    FallbackMode,
+    ProviderModelPolicy,
+    ProviderModelRoute,
+    RoutingDecision,
+    WorkerAssignment,
 )
 
 
@@ -53,6 +73,57 @@ class _DecisionStub:
     collaboration_mode: CollaborationMode = CollaborationMode.HIERARCHICAL
 
 
+def _minimal_execution_plan() -> ExecutionPlan:
+    now = datetime(2026, 8, 2, tzinfo=UTC)
+    worker = WorkerAssignment(
+        worker_id="worker-1",
+        worker_type="synthesis",
+        objective="Answer",
+        output_schema={},
+        permission_scopes=(),
+        tool_allowlist=(),
+    )
+    return ExecutionPlan(
+        execution_plan_id="plan-no-retry-loop",
+        plan_version=1,
+        run_id="run-1",
+        workflow_definition_id="workflow-1",
+        workflow_definition_version="1",
+        routing_policy_id="policy-1",
+        routing_policy_version="1",
+        compiled_at=now,
+        deadline=now + timedelta(minutes=5),
+        amendment=None,
+        routing_decision=RoutingDecision(
+            routing_decision_id="decision-1",
+            strategy="balanced",
+            domains=("research",),
+            collaboration_mode=PlanCollaborationMode.DIRECT,
+            supervisor_id=None,
+            supervisor_type=None,
+            workers=(worker,),
+            edges=(),
+            provider_model_policy=ProviderModelPolicy(
+                primary=ProviderModelRoute(provider="gemini", model="gemini-2.5-pro"),
+                fallback_mode=FallbackMode.FAIL_CLOSED,
+                fallbacks=(),
+                provider_allowlist=("gemini",),
+                model_allowlist=("gemini-2.5-pro",),
+            ),
+            budget=ExecutionBudget(
+                max_cost_usd=Decimal("1"),
+                max_total_tokens=1000,
+                max_tool_invocations=0,
+                max_parallel_tasks=1,
+                max_attempts_per_task=1,
+                task_timeout_seconds=30,
+            ),
+            stop_conditions=("complete",),
+            evaluator_requirements=(),
+        ),
+    )
+
+
 def _make_service() -> DirectExecutionService:
     router = MagicMock()
     router.route = AsyncMock(
@@ -60,14 +131,10 @@ def _make_service() -> DirectExecutionService:
     )
 
     bridge = MagicMock()
-    bridge.execute_routing_decision = AsyncMock(
+    bridge.execute_execution_plan = AsyncMock(
         return_value=SimpleNamespace(
-            status=SimpleNamespace(value="completed"),
-            agent_result=SimpleNamespace(output={"result": "ok"}, confidence=0.9),
-            quality_score=0.8,
-            consensus_score=0.7,
-            workers_used=3,
-            errors=[],
+            output={"result": "ok"},
+            workers_used=1,
         )
     )
 
@@ -98,13 +165,21 @@ async def test_workflow_runs_once_and_reaches_completed() -> None:
         status="pending",
         current_phase="initialization",
     )
+    routing_decision = _DecisionStub(_AllocStub(), _ComplexityAnalysisStub())
+    execution_plan = _minimal_execution_plan()
 
     # On the pre-fix code the finally raises TypeError, @retry re-runs the
     # workflow, and this await ultimately raises tenacity.RetryError.
-    await service._execute_research_workflow(project, status, {})
+    await service._execute_research_workflow(
+        project,
+        status,
+        {},
+        routing_decision=routing_decision,
+        execution_plan=execution_plan,
+    )
 
     # Exactly one execution — no spurious retry.
-    assert service.supervisor_bridge.execute_routing_decision.await_count == 1
+    assert service.supervisor_bridge.execute_execution_plan.await_count == 1
     # Terminal state, correctly recorded.
     assert status.status == "completed"
     assert status.progress_percentage == 100.0

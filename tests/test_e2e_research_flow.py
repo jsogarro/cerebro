@@ -314,15 +314,16 @@ class TestResearchFlow:
 
     @pytest.mark.asyncio
     async def test_intelligent_query_endpoint(self, client: AsyncClient) -> None:
-        """Test the intelligent query routing endpoint."""
+        """Routed research queries now require a resolvable execution
+        authority reference; this app instance has no lifespan-injected
+        resolver, so the endpoint correctly fails closed before dispatch
+        rather than returning a fabricated pending/running/completed state."""
         r = await client.post(
             "/api/v1/query/research",
             json={"query": "AI safety research overview", "domains": ["AI"]},
         )
-        assert r.status_code == 200
-        data = r.json()
-        assert "execution_id" in data
-        assert data["status"] in ("pending", "completed", "running")
+        assert r.status_code == 422
+        assert r.json()["error"]["code"] == "EXECUTION_AUTHORITY_REQUIRED"
 
     @pytest.mark.skip(reason=_AUTH_RLS_SKIP_REASON)
     @pytest.mark.asyncio

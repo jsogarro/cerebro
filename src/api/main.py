@@ -176,6 +176,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             masr_router=masr_runtime.router,
             component_registry=component_registry,
         )
+        # Production installs no authority records. Tests may explicitly place a
+        # trusted resolver on application state before entering this lifespan.
+        direct_execution_service.execution_authority_resolver = getattr(
+            app.state, "execution_authority_resolver", None
+        )
         resources.push_async_callback(
             _close_lifespan_resource,
             "direct_execution_service",

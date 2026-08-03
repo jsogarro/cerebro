@@ -30,9 +30,16 @@ def agents_group() -> None:
     default="research",
     help="Query type",
 )
+@click.option("--authority-id", help="Trusted execution authority identifier")
+@click.option("--authority-version", help="Trusted execution authority version")
 @click.pass_context
 def query_command(
-    ctx: Context, query_text: str, domains: tuple[str, ...], type: str
+    ctx: Context,
+    query_text: str,
+    domains: tuple[str, ...],
+    type: str,
+    authority_id: str | None,
+    authority_version: str | None,
 ) -> None:
     """Execute intelligent MASR-routed query."""
     client_verbose: bool = ctx.obj["verbose"]
@@ -45,6 +52,15 @@ def query_command(
                 payload: dict[str, Any] = {"query": query_text}
                 if domains:
                     payload["domains"] = list(domains)
+                if authority_id is not None or authority_version is not None:
+                    if not authority_id or not authority_version:
+                        raise click.UsageError(
+                            "--authority-id and --authority-version must be supplied together"
+                        )
+                    payload["authority_reference"] = {
+                        "authority_id": authority_id,
+                        "authority_version": authority_version,
+                    }
 
                 with console.status(
                     f"[bold green]Executing {type} query via MASR router..."
@@ -154,9 +170,16 @@ def estimate_command(ctx: Context, query_text: str, domains: tuple[str, ...]) ->
 @click.argument("agent_type")
 @click.argument("query_text")
 @click.option("--max-sources", type=int, help="Maximum sources (for literature-review)")
+@click.option("--authority-id", help="Trusted execution authority identifier")
+@click.option("--authority-version", help="Trusted execution authority version")
 @click.pass_context
 def execute_command(
-    ctx: Context, agent_type: str, query_text: str, max_sources: int | None
+    ctx: Context,
+    agent_type: str,
+    query_text: str,
+    max_sources: int | None,
+    authority_id: str | None,
+    authority_version: str | None,
 ) -> None:
     """Direct agent execution (bypass MASR routing)."""
     client_verbose: bool = ctx.obj["verbose"]
@@ -169,6 +192,15 @@ def execute_command(
                 payload: dict[str, Any] = {"query": query_text, "parameters": {}}
                 if max_sources:
                     payload["parameters"]["max_sources"] = max_sources
+                if authority_id is not None or authority_version is not None:
+                    if not authority_id or not authority_version:
+                        raise click.UsageError(
+                            "--authority-id and --authority-version must be supplied together"
+                        )
+                    payload["authority_reference"] = {
+                        "authority_id": authority_id,
+                        "authority_version": authority_version,
+                    }
 
                 with console.status(f"[bold green]Executing {agent_type} agent..."):
                     result = await client.post(endpoint, payload)
@@ -189,8 +221,16 @@ def execute_command(
 @click.option(
     "--agents", "-a", multiple=True, required=True, help="Agent chain (in order)"
 )
+@click.option("--authority-id", help="Trusted execution authority identifier")
+@click.option("--authority-version", help="Trusted execution authority version")
 @click.pass_context
-def chain_command(ctx: Context, query_text: str, agents: tuple[str, ...]) -> None:
+def chain_command(
+    ctx: Context,
+    query_text: str,
+    agents: tuple[str, ...],
+    authority_id: str | None,
+    authority_version: str | None,
+) -> None:
     """Execute Chain-of-Agents workflow."""
     client_verbose: bool = ctx.obj["verbose"]
     console: Any = ctx.obj["console"]
@@ -198,7 +238,19 @@ def chain_command(ctx: Context, query_text: str, agents: tuple[str, ...]) -> Non
     async def _chain() -> None:
         async with ResearchAPIClient(verbose=client_verbose) as client:
             try:
-                payload = {"query": query_text, "agent_chain": list(agents)}
+                payload: dict[str, Any] = {
+                    "query": query_text,
+                    "agent_chain": list(agents),
+                }
+                if authority_id is not None or authority_version is not None:
+                    if not authority_id or not authority_version:
+                        raise click.UsageError(
+                            "--authority-id and --authority-version must be supplied together"
+                        )
+                    payload["authority_reference"] = {
+                        "authority_id": authority_id,
+                        "authority_version": authority_version,
+                    }
 
                 with console.status("[bold green]Executing agent chain..."):
                     result = await client.post("/api/v1/agents/chain", payload)

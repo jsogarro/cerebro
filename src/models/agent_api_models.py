@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.models.execution_authority import ExecutionAuthorityReference
+
 
 class AgentType(StrEnum):
     """Available agent types in Cerebro."""
@@ -84,6 +86,7 @@ class AgentExecutionRequest(BaseModel):
     # Metadata
     user_id: str | None = Field(None, description="User ID for tracking")
     session_id: str | None = Field(None, description="Session ID for context")
+    authority_reference: ExecutionAuthorityReference | None = None
 
 
 class ChainOfAgentsRequest(BaseModel):
@@ -113,6 +116,7 @@ class ChainOfAgentsRequest(BaseModel):
     enable_validation: bool = Field(
         default=True, description="Enable result validation"
     )
+    authority_reference: ExecutionAuthorityReference | None = None
 
 
 class MixtureOfAgentsRequest(BaseModel):
@@ -146,6 +150,7 @@ class MixtureOfAgentsRequest(BaseModel):
     max_parallel: int = Field(
         default=3, ge=1, le=5, description="Maximum parallel agents"
     )
+    authority_reference: ExecutionAuthorityReference | None = None
 
 
 class AgentValidationRequest(BaseModel):

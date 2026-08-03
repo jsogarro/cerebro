@@ -5,6 +5,7 @@ the query (and any prior-stage context) with the Gemini service. Subclasses set
 ``agent_type`` and implement ``_build_prompt``. No external data sources.
 """
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.agents.base import BaseAgent
@@ -13,6 +14,27 @@ from src.agents.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from src.ai_brain.memory import ProceduralMemoryManager
+
+
+class PlanProviderUnavailableError(RuntimeError):
+    """A plan-backed generation call failed with no substitution permitted.
+
+    Raised only when the task carries a plan-authoritative
+    ``provider_model_policy`` (attached solely by
+    ``ExecutionPlanTopologyExecutor`` for v1 plans, which admission already
+    restricts to ``FallbackMode.FAIL_CLOSED`` with no fallbacks). The
+    presence of the policy is itself the fail-closed signal: on failure the
+    caller must not substitute Gemini or any other provider.
+    """
+
+
+@dataclass(frozen=True)
+class _GenerationRoute:
+    """A resolved provider router plus the exact routing decision to use."""
+
+    router: Any
+    routing_decision: dict[str, Any]
+    fail_closed: bool
 
 
 class LLMWorkerAgentBase(BaseAgent):
@@ -149,14 +171,106 @@ class LLMWorkerAgentBase(BaseAgent):
             self.log_warning(f"procedural_context_failed (graceful fallback): {e}")
             return None
 
+    def _plan_provider_policy(self, task: AgentTask | None) -> dict[str, Any] | None:
+        """Extract the plan-authoritative provider policy, if present.
+
+        Only ``ExecutionPlanTopologyExecutor`` attaches this key, and only for
+        plans the v1 admission gate already restricted to
+        ``FallbackMode.FAIL_CLOSED`` with no fallbacks — so its mere presence
+        means the plan's primary route is the only route this call may use.
+        A task-less call (``task=None``) can never be plan-backed.
+        """
+        if task is None:
+            return None
+        policy = task.input_data.get("provider_model_policy")
+        return policy if isinstance(policy, dict) else None
+
+    def _build_plan_route(self, policy: dict[str, Any]) -> _GenerationRoute:
+        """Build a router restricted to exactly the plan's primary provider."""
+        from src.ai_brain.providers import ModelRouter
+        from src.core.config import settings
+
+        provider_name = policy["primary"]["provider"]
+        model_name = policy["primary"]["model"]
+        provider_configs = settings.get_ai_brain_config()["providers"]
+        provider_config = {**provider_configs.get(provider_name, {}), "enabled": True}
+        router = ModelRouter(
+            {
+                "providers": {provider_name: provider_config},
+                "enable_fallback": False,
+            },
+            component_registry=self.config.get("component_registry"),
+        )
+        return _GenerationRoute(
+            router=router,
+            routing_decision={
+                "primary_model": {"provider": provider_name, "name": model_name},
+                "fallback_models": [],
+            },
+            fail_closed=True,
+        )
+
+    def _build_legacy_openrouter_route(self) -> _GenerationRoute | None:
+        """Preserve today's flag-driven OpenRouter routing, unchanged."""
+        from src.ai_brain.providers import ModelRouter
+        from src.core.config import settings
+
+        if (
+            not settings.MULTI_PROVIDER_ROUTING_ENABLED
+            or not settings.OPENROUTER_API_KEY
+        ):
+            return None
+
+        if not hasattr(self, "_model_router"):
+            router_config = {
+                "providers": {
+                    "openrouter": {
+                        "enabled": True,
+                        "api_key": settings.OPENROUTER_API_KEY,
+                        "endpoint": settings.OPENROUTER_ENDPOINT,
+                        "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
+                    }
+                },
+                "enable_fallback": True,
+                "max_retries": 3,
+            }
+            self._model_router = ModelRouter(
+                router_config,
+                component_registry=self.config.get("component_registry"),
+            )
+        return _GenerationRoute(
+            router=self._model_router,
+            routing_decision={
+                "primary_model": {"provider": "openrouter", "name": None},
+                "fallback_models": [],
+            },
+            fail_closed=False,
+        )
+
+    def _select_generation_route(
+        self, task: AgentTask | None
+    ) -> _GenerationRoute | None:
+        """Resolve which provider route to use for this call.
+
+        A plan-backed task's policy always wins. Otherwise this preserves
+        today's flag-driven OpenRouter routing (``None`` means "use
+        GeminiService directly") — independent of whether ``task`` is given,
+        matching the original method's task-optional contract.
+        """
+        policy = self._plan_provider_policy(task)
+        if policy is not None:
+            return self._build_plan_route(policy)
+        return self._build_legacy_openrouter_route()
+
     async def _generate_with_routing(
         self, prompt: str, task: AgentTask
     ) -> tuple[str | None, float]:
-        """Generate content via ModelRouter or GeminiService with graceful fallback.
+        """Generate content via the resolved provider route, or GeminiService.
 
-        When MULTI_PROVIDER_ROUTING_ENABLED=True and OPENROUTER_API_KEY is set,
-        routes through ModelRouter/OpenRouterProvider. Otherwise falls back to
-        GeminiService (preserves current behavior).
+        A plan-backed task uses only the plan's primary provider/model and
+        raises ``PlanProviderUnavailableError`` on failure rather than
+        substituting another provider. Otherwise this preserves the existing
+        ModelRouter/OpenRouter-with-Gemini-fallback behavior, unchanged.
 
         Args:
             prompt: The prompt to generate content for
@@ -164,22 +278,18 @@ class LLMWorkerAgentBase(BaseAgent):
 
         Returns:
             Tuple of (content, confidence_score). Content is None on failure.
-        """
-        from src.core.config import settings
 
-        # Check if multi-provider routing is enabled
-        if (
-            not settings.MULTI_PROVIDER_ROUTING_ENABLED
-            or not settings.OPENROUTER_API_KEY
-        ):
-            # Fallback to GeminiService (current behavior)
+        Raises:
+            PlanProviderUnavailableError: the plan-backed primary provider
+                failed and no fallback is permitted.
+        """
+        route = self._select_generation_route(task)
+        if route is None:
             return await self._generate_with_gemini(prompt)
 
-        # Route through ModelRouter with OpenRouter
         try:
-            from src.ai_brain.providers import ModelRequest, ModelRouter
+            from src.ai_brain.providers import ModelRequest
 
-            # Build ModelRequest
             request = ModelRequest(
                 prompt=prompt,
                 max_tokens=2000,
@@ -188,49 +298,37 @@ class LLMWorkerAgentBase(BaseAgent):
                 metadata={"tier": self._determine_tier(task)},
             )
 
-            # Initialize ModelRouter (lazy, cached on instance)
-            if not hasattr(self, "_model_router"):
-                router_config = {
-                    "providers": {
-                        "openrouter": {
-                            "enabled": True,
-                            "api_key": settings.OPENROUTER_API_KEY,
-                            "endpoint": settings.OPENROUTER_ENDPOINT,
-                            "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
-                        }
-                    },
-                    "enable_fallback": True,
-                    "max_retries": 3,
-                }
-                self._model_router = ModelRouter(
-                    router_config,
-                    component_registry=self.config.get("component_registry"),
-                )
-
-            # Route and generate via OpenRouter
-            response = await self._model_router.route_and_generate(
-                request,
-                routing_decision={
-                    "primary_model": {"provider": "openrouter", "name": None},
-                    "fallback_models": [],
-                },
+            response = await route.router.route_and_generate(
+                request, routing_decision=route.routing_decision
             )
 
             if response.success:
                 return response.content, response.confidence_score
 
-            # OpenRouter failed, log and fall back to Gemini
+            if route.fail_closed:
+                raise PlanProviderUnavailableError(
+                    "plan-backed provider "
+                    f"{route.routing_decision['primary_model']['provider']!r} "
+                    f"failed: {response.error_message}"
+                )
+
             self.log_warning(
                 f"OpenRouter generation failed: {response.error_message}, "
                 "falling back to GeminiService"
             )
 
+        except PlanProviderUnavailableError:
+            raise
         except Exception as exc:
+            if route.fail_closed:
+                raise PlanProviderUnavailableError(
+                    f"plan-backed provider routing failed: {exc}"
+                ) from exc
             self.log_warning(
                 f"ModelRouter routing failed: {exc}, falling back to GeminiService"
             )
 
-        # Fallback to GeminiService on any error
+        # Fallback to GeminiService (legacy route only; plan routes raised above)
         return await self._generate_with_gemini(prompt)
 
     async def _generate_with_gemini(self, prompt: str) -> tuple[str | None, float]:
@@ -278,9 +376,12 @@ class LLMWorkerAgentBase(BaseAgent):
         logged). Callers requiring complete content should treat that warning
         as a quality signal.
 
-        When MULTI_PROVIDER_ROUTING_ENABLED=True and OPENROUTER_API_KEY is set,
-        routes through ModelRouter/OpenRouterProvider using JSON mode. Otherwise
-        falls back to GeminiService (preserves current behavior).
+        A plan-backed task (``task.input_data["provider_model_policy"]``
+        present) uses only the plan's primary provider/model and raises
+        ``PlanProviderUnavailableError`` if it fails, instead of falling
+        through to GeminiService. Otherwise this preserves the existing
+        MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY-gated
+        ModelRouter/OpenRouterProvider routing, unchanged.
 
         Args:
             prompt: The prompt to generate content for
@@ -294,25 +395,22 @@ class LLMWorkerAgentBase(BaseAgent):
             Validated Pydantic model instance
 
         Raises:
-            Exception: If generation and fallback both fail
+            PlanProviderUnavailableError: the plan-backed primary provider
+                failed and no fallback is permitted.
+            Exception: If generation and fallback both fail (non-plan-backed)
         """
         self.last_structured_truncated = False
-        from src.core.config import settings
 
-        # Check if multi-provider routing is enabled
-        if (
-            not settings.MULTI_PROVIDER_ROUTING_ENABLED
-            or not settings.OPENROUTER_API_KEY
-        ):
-            # Fallback to GeminiService (current behavior)
+        route = self._select_generation_route(task)
+        if route is None:
             gemini = self._ensure_gemini_service()
             if gemini is None:
                 raise ValueError("No language model configured")
             return await gemini.generate_structured_content(prompt, schema)
 
-        # Route through ModelRouter with OpenRouter (JSON mode)
+        # Route through the resolved provider (JSON mode)
         try:
-            from src.ai_brain.providers import ModelRequest, ModelRouter
+            from src.ai_brain.providers import ModelRequest
 
             # Embed JSON schema in the prompt (broadest model support)
             schema_instructions = self._build_json_schema_instructions(schema)
@@ -344,32 +442,9 @@ class LLMWorkerAgentBase(BaseAgent):
                 metadata=metadata,
             )
 
-            # Initialize ModelRouter (lazy, cached on instance)
-            if not hasattr(self, "_model_router"):
-                router_config = {
-                    "providers": {
-                        "openrouter": {
-                            "enabled": True,
-                            "api_key": settings.OPENROUTER_API_KEY,
-                            "endpoint": settings.OPENROUTER_ENDPOINT,
-                            "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
-                        }
-                    },
-                    "enable_fallback": True,
-                    "max_retries": 3,
-                }
-                self._model_router = ModelRouter(
-                    router_config,
-                    component_registry=self.config.get("component_registry"),
-                )
-
-            # Route and generate via OpenRouter with truncation-aware retry
-            response = await self._model_router.route_and_generate(
-                request,
-                routing_decision={
-                    "primary_model": {"provider": "openrouter", "name": None},
-                    "fallback_models": [],
-                },
+            # Route and generate with truncation-aware retry
+            response = await route.router.route_and_generate(
+                request, routing_decision=route.routing_decision
             )
 
             if response.success:
@@ -432,11 +507,13 @@ class LLMWorkerAgentBase(BaseAgent):
 
                     # Pin the retry to the model that produced the first
                     # attempt so the retry is a continuation, not a re-roll.
-                    retry_response = await self._model_router.route_and_generate(
+                    retry_response = await route.router.route_and_generate(
                         retry_request,
                         routing_decision={
                             "primary_model": {
-                                "provider": "openrouter",
+                                "provider": route.routing_decision["primary_model"][
+                                    "provider"
+                                ],
                                 "name": getattr(response, "model_name", None),
                             },
                             "fallback_models": [],
@@ -499,13 +576,26 @@ class LLMWorkerAgentBase(BaseAgent):
                     "falling back to GeminiService"
                 )
 
+        except PlanProviderUnavailableError:
+            raise
         except Exception as exc:
+            if route.fail_closed:
+                raise PlanProviderUnavailableError(
+                    f"plan-backed structured generation failed: {exc}"
+                ) from exc
             self.log_warning(
                 f"ModelRouter structured routing failed: {exc}, "
                 "falling back to GeminiService"
             )
 
-        # Fallback to GeminiService on any error
+        if route.fail_closed:
+            raise PlanProviderUnavailableError(
+                "plan-backed provider "
+                f"{route.routing_decision['primary_model']['provider']!r} failed "
+                "and no fallback is permitted"
+            )
+
+        # Fallback to GeminiService (legacy route only; plan routes raised above)
         gemini = self._ensure_gemini_service()
         if gemini is None:
             raise ValueError("No language model configured and OpenRouter failed")
