@@ -105,6 +105,29 @@ def _require_agent_execution_authority(
         ) from exc
 
 
+def _optional_authority_reference(
+    authority_id: str | None,
+    authority_version: str | None,
+) -> ExecutionAuthorityReference | None:
+    """Build an authority reference from optional id/version, or None.
+
+    Mirrors the CLI's --authority-id/--authority-version pairing (both or
+    neither) so convenience endpoints — which have no full request model of
+    their own to carry authority_reference — can still accept one.
+    """
+
+    if authority_id is None and authority_version is None:
+        return None
+    if not authority_id or not authority_version:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "AUTHORITY_REFERENCE_INCOMPLETE"},
+        )
+    return ExecutionAuthorityReference(
+        authority_id=authority_id, authority_version=authority_version
+    )
+
+
 @router.get("", response_model=AgentListResponse)
 async def list_agents(
     include_metrics: bool = Query(False, description="Include performance metrics"),
@@ -550,6 +573,12 @@ async def literature_search(
     query: str = Query(..., min_length=1, max_length=500),
     max_sources: int = Query(25, ge=5, le=100),
     domains: list[str] = Query(default=[]),
+    authority_id: str | None = Query(
+        None, description="Trusted execution authority identifier"
+    ),
+    authority_version: str | None = Query(
+        None, description="Trusted execution authority version"
+    ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
@@ -568,6 +597,9 @@ async def literature_search(
         },
         user_id=None,
         session_id=None,
+        authority_reference=_optional_authority_reference(
+            authority_id, authority_version
+        ),
     )
 
     return await execute_agent(
@@ -582,6 +614,12 @@ async def literature_search(
 async def format_citations(
     sources: list[str] = Body(..., min_length=1),
     style: str = Body("APA", pattern="^(APA|MLA|Chicago)$"),
+    authority_id: str | None = Body(
+        None, description="Trusted execution authority identifier"
+    ),
+    authority_version: str | None = Body(
+        None, description="Trusted execution authority version"
+    ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
@@ -599,6 +637,9 @@ async def format_citations(
         },
         user_id=None,
         session_id=None,
+        authority_reference=_optional_authority_reference(
+            authority_id, authority_version
+        ),
     )
 
     return await execute_agent(
@@ -614,6 +655,12 @@ async def synthesize_findings(
     findings: list[dict[str, Any]] = Body(..., min_length=2),
     synthesis_focus: str = Body(
         "comprehensive", pattern="^(comprehensive|comparative|thematic)$"
+    ),
+    authority_id: str | None = Body(
+        None, description="Trusted execution authority identifier"
+    ),
+    authority_version: str | None = Body(
+        None, description="Trusted execution authority version"
     ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
@@ -632,6 +679,9 @@ async def synthesize_findings(
         },
         user_id=None,
         session_id=None,
+        authority_reference=_optional_authority_reference(
+            authority_id, authority_version
+        ),
     )
 
     return await execute_agent(
@@ -650,6 +700,12 @@ async def literature_analysis_workflow(
     query: str = Query(..., min_length=10),
     domains: list[str] = Query(default=[]),
     max_sources: int = Query(25, ge=10, le=100),
+    authority_id: str | None = Query(
+        None, description="Trusted execution authority identifier"
+    ),
+    authority_version: str | None = Query(
+        None, description="Trusted execution authority version"
+    ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
@@ -673,6 +729,9 @@ async def literature_analysis_workflow(
         },
         pass_intermediate_results=True,
         early_stopping=False,
+        authority_reference=_optional_authority_reference(
+            authority_id, authority_version
+        ),
     )
 
     return await execute_chain_of_agents(request, execution_service)
@@ -686,6 +745,12 @@ async def comprehensive_research_workflow(
     domains: list[str] = Query(default=[]),
     analysis_depth: str = Query(
         "comprehensive", pattern="^(basic|comprehensive|exhaustive)$"
+    ),
+    authority_id: str | None = Query(
+        None, description="Trusted execution authority identifier"
+    ),
+    authority_version: str | None = Query(
+        None, description="Trusted execution authority version"
     ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
@@ -717,6 +782,9 @@ async def comprehensive_research_workflow(
         aggregation_strategy="consensus",
         weight_by_confidence=True,
         consensus_threshold=0.8,
+        authority_reference=_optional_authority_reference(
+            authority_id, authority_version
+        ),
     )
 
     return await execute_mixture_of_agents(request, execution_service)

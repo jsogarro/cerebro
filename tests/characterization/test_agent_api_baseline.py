@@ -125,9 +125,9 @@ def _mixture_response() -> MixtureOfAgentsResponse:
 @pytest.mark.asyncio
 async def test_execute_and_convenience_routes_fail_closed_without_authority():
     """execute_agent and its convenience wrappers (literature_search,
-    format_citations) all delegate to the same authority-gated dispatch and
-    accept no authority_reference of their own, so none can reach the
-    service without one — they now fail closed before forwarding anything."""
+    format_citations) all delegate to the same authority-gated dispatch;
+    without a supplied authority reference, none can reach the service —
+    they fail closed before forwarding anything."""
     service = _AgentService()
 
     with pytest.raises(HTTPException) as direct_exc:
@@ -142,12 +142,16 @@ async def test_execute_and_convenience_routes_fail_closed_without_authority():
             query="Characterize literature convenience",
             max_sources=30,
             domains=["research"],
+            authority_id=None,
+            authority_version=None,
             execution_service=service,
         )
     with pytest.raises(HTTPException) as citations_exc:
         await agent_api.format_citations(
             ["source"],
             "MLA",
+            authority_id=None,
+            authority_version=None,
             execution_service=service,
         )
 
@@ -157,9 +161,42 @@ async def test_execute_and_convenience_routes_fail_closed_without_authority():
 
 
 @pytest.mark.asyncio
+async def test_convenience_route_threads_a_supplied_authority_reference():
+    """literature_search now accepts authority_id/authority_version. A
+    supplied reference changes the failure from EXECUTION_AUTHORITY_REQUIRED
+    (no reference at all) to EXECUTION_AUTHORITY_UNAVAILABLE (reference
+    present, but this fixture backend exposes no resolver) — proving the
+    reference reached the same authority gate execute_agent uses, rather
+    than being silently dropped."""
+    service = _AgentService()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_api.literature_search(
+            query="Characterize literature convenience",
+            max_sources=30,
+            domains=["research"],
+            authority_id="authority-1",
+            authority_version="1",
+            execution_service=service,
+        )
+
+    assert exc_info.value.detail == {"code": "EXECUTION_AUTHORITY_UNAVAILABLE"}
+    assert service.requests == []
+
+
+def test_partial_authority_reference_is_rejected() -> None:
+    """authority_id/authority_version must be supplied together, matching
+    the CLI's own --authority-id/--authority-version pairing rule."""
+    with pytest.raises(HTTPException) as exc_info:
+        agent_api._optional_authority_reference("authority-1", None)
+
+    assert exc_info.value.detail == {"code": "AUTHORITY_REFERENCE_INCOMPLETE"}
+
+
+@pytest.mark.asyncio
 async def test_synthesis_combine_fails_closed_without_authority():
-    """synthesize_findings delegates to execute_agent and has no
-    authority_reference parameter, so it fails closed before forwarding."""
+    """synthesize_findings delegates to execute_agent; without a supplied
+    authority reference it fails closed before forwarding."""
     service = _AgentService()
     findings = [
         {"claim": "Alpha", "evidence_ids": ["evidence-1"]},
@@ -170,6 +207,8 @@ async def test_synthesis_combine_fails_closed_without_authority():
         await agent_api.synthesize_findings(
             findings=findings,
             synthesis_focus="thematic",
+            authority_id=None,
+            authority_version=None,
             execution_service=service,
         )
 
@@ -180,21 +219,24 @@ async def test_synthesis_combine_fails_closed_without_authority():
 @pytest.mark.asyncio
 async def test_chain_mixture_and_workflows_fail_closed_without_authority():
     """literature_analysis_workflow and comprehensive_research_workflow
-    delegate to execute_chain_of_agents/execute_mixture_of_agents and have
-    no authority_reference parameter, so both fail closed before
-    forwarding."""
+    delegate to execute_chain_of_agents/execute_mixture_of_agents; without
+    a supplied authority reference, both fail closed before forwarding."""
     service = _AgentService()
 
     with pytest.raises(HTTPException) as workflow_exc:
         await agent_api.literature_analysis_workflow(
             query="Characterize literature workflow",
             domains=["research"],
+            authority_id=None,
+            authority_version=None,
             execution_service=service,
         )
     with pytest.raises(HTTPException) as mixture_exc:
         await agent_api.comprehensive_research_workflow(
             query="Characterize comprehensive workflow",
             analysis_depth="exhaustive",
+            authority_id=None,
+            authority_version=None,
             execution_service=service,
         )
 
