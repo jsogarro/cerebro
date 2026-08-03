@@ -198,17 +198,6 @@ def execution_service():
     bridge = AsyncMock()
     bridge.health_check.return_value = {"status": "healthy"}
     bridge.admit_execution_plan = Mock()
-    result = Mock()
-    result.execution_id = "supervisor-exec-123"
-    result.supervisor_type = "research"
-    result.domain = "research"
-    result.status.value = "completed"
-    result.quality_score = 0.89
-    result.consensus_score = 0.92
-    result.execution_time_seconds = 95.0
-    result.workers_used = 3
-    result.refinement_rounds = 2
-    result.errors = []
     agent_result = Mock()
     agent_result.output = {
         "research_findings": ["Finding 1"],
@@ -216,8 +205,6 @@ def execution_service():
         "synthesis": "ok",
         "quality_metrics": {"confidence": 0.89},
     }
-    result.agent_result = agent_result
-    bridge.execute_routing_decision.return_value = result
     plan_result = Mock()
     plan_result.output = agent_result.output
     plan_result.workers_used = 3
@@ -293,10 +280,8 @@ class TestDirectExecutionService:
         call_args = execution_service.masr_router.route.call_args
         assert sample_project.query.text in str(call_args)
 
-        # Plan-backed execution dispatches through the topology executor seam
-        # and never falls back to the legacy per-domain routing bridge call.
+        # Plan-backed execution dispatches through the topology executor seam.
         execution_service.supervisor_bridge.execute_execution_plan.assert_called_once()
-        execution_service.supervisor_bridge.execute_routing_decision.assert_not_called()
 
         # Check execution status
         execution_status = execution_service.active_executions[execution_id]
@@ -366,7 +351,6 @@ class TestDirectExecutionService:
         await asyncio.wait_for(plan_called.wait(), timeout=1)
 
         execution_service.supervisor_bridge.execute_execution_plan.assert_called_once()
-        execution_service.supervisor_bridge.execute_routing_decision.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_execution_status(self, execution_service, sample_project):
