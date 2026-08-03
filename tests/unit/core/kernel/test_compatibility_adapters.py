@@ -246,27 +246,32 @@ def test_agent_routes_declare_the_application_kernel_dependency() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_adapter_executes_through_composed_application_kernel() -> None:
+async def test_agent_adapter_fails_closed_without_execution_authority() -> None:
+    """Executing agent adapters require authority before reaching the agent
+    backend; the composed kernel's fake backends carry no resolver, so this
+    is the adapter's real current behavior, not a hypothetical."""
+
     direct_backend = _DirectExecutionBackend()
     agent_backend = _AgentExecutionBackend()
     kernel = compose_application_research_kernel(direct_backend, agent_backend)
     request = AgentExecutionRequest(query="Use the application-owned agent backend.")
 
-    response = await agent_api.execute_agent(
-        AgentType.LITERATURE_REVIEW,
-        request,
-        background_tasks=None,
-        execution_service=kernel,
-    )
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_api.execute_agent(
+            AgentType.LITERATURE_REVIEW,
+            request,
+            background_tasks=None,
+            execution_service=kernel,
+        )
 
-    assert response.execution_id == "kernel-agent-execution"
-    assert response.output == {"source": "application-kernel"}
-    assert agent_backend.calls == [
-        ("single", AgentType.LITERATURE_REVIEW, request),
-    ]
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == {"code": "EXECUTION_AUTHORITY_REQUIRED"}
+    assert agent_backend.calls == []
 
 
-def test_agent_http_adapter_accepts_lightweight_backend_override() -> None:
+def test_agent_http_adapter_fails_closed_without_execution_authority() -> None:
+    """Same fail-closed contract through the raw ASGI backend-override path."""
+
     backend = _AgentExecutionBackend()
     test_app = FastAPI()
     test_app.include_router(agent_api.router)
@@ -280,6 +285,6 @@ def test_agent_http_adapter_accepts_lightweight_backend_override() -> None:
             json={"query": "Use the raw ASGI backend override."},
         )
 
-    assert response.status_code == 200
-    assert response.json()["execution_id"] == "kernel-agent-execution"
-    assert backend.calls[0][0] == "single"
+    assert response.status_code == 422
+    assert response.json()["detail"] == {"code": "EXECUTION_AUTHORITY_REQUIRED"}
+    assert backend.calls == []

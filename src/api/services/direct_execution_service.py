@@ -15,18 +15,15 @@ Key Features:
 
 import asyncio
 import copy
-import math
-import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, status
 from structlog import get_logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from src.core.config import get_settings
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.core.telemetry import count_tokens, telemetry_enabled
 from src.repositories.checkpoint_repository import CheckpointRepository
@@ -35,26 +32,33 @@ from ...agents.models import AgentTask
 from ...agents.supervisors.base_supervisor import BaseSupervisor
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
+from ...ai_brain.router.execution_plan_compiler import ExecutionPlanCompiler
 from ...ai_brain.router.masr import MASRouter
+from ...ai_brain.router.masr import RoutingDecision as MASRRoutingDecision
 from ...ai_brain.router.outcome_recorder import (
-    ExecutedAllocationOutcome,
     RoutingOutcomeRecorder,
-    derive_opaque_identifier,
 )
-from ...ai_brain.router.routing_outcome import MetricAvailability, OutcomeSource
 from ...ai_brain.router.routing_types import (
-    CollaborationMode,
     RoutingExecutionPolicy,
 )
+from ...core.contracts import ExecutionPlan
 from ...core.kernel import (
-    BoundedTaskRunner,
     TypedRegistry,
     UnknownRegistryKeyError,
 )
-from ...core.kernel.component_keys import PROVIDER_KEYS, SUPERVISOR_KEYS
+from ...core.kernel.component_keys import SUPERVISOR_KEYS
+from ...models.execution_authority import (
+    ExecutionAuthorityBinding,
+    ExecutionAuthorityReference,
+)
 from ...models.research_project import ResearchProject
 from ...models.websocket_messages import ProgressUpdate
 from .event_publisher import EventPublisher
+from .execution_authority_resolver import (
+    ExecutionAuthorityRequiredError,
+    ExecutionAuthorityResolver,
+    ExecutionAuthorityUnavailableError,
+)
 
 if TYPE_CHECKING:
     from ...ai_brain.providers.openrouter_provider import OpenRouterProvider
@@ -102,6 +106,7 @@ class ExecutionStatus:
 
     # MASR routing information
     routing_decision: dict[str, Any] | None = None
+    execution_plan: ExecutionPlan | None = None
     sub_routing_decisions: dict[str, dict[str, Any]] = field(default_factory=dict)
     supervisor_type: str | None = None
     workers_used: int = 0
@@ -142,6 +147,8 @@ class DirectExecutionService:
         outcome_recorder: RoutingOutcomeRecorder | None = None,
         component_registry: TypedRegistry | None = None,
         supervisor_registry: TypedRegistry | None = None,
+        execution_authority_resolver: ExecutionAuthorityResolver | None = None,
+        execution_plan_compiler: ExecutionPlanCompiler | None = None,
     ):
         """Initialize direct execution service."""
 
@@ -196,6 +203,10 @@ class DirectExecutionService:
         )
         self.event_publisher = event_publisher
         self.session_factory = session_factory
+        self.execution_authority_resolver = execution_authority_resolver
+        self.execution_plan_compiler = (
+            execution_plan_compiler or ExecutionPlanCompiler()
+        )
 
         # Execution tracking
         self.active_executions: dict[str, ExecutionStatus] = {}
@@ -332,6 +343,7 @@ class DirectExecutionService:
         *,
         execution_policy: RoutingExecutionPolicy | None = None,
         fixture_result: dict[str, Any] | None = None,
+        authority_reference: ExecutionAuthorityReference | None = None,
     ) -> str:
         """
         Start direct research execution using MASR routing.
@@ -345,6 +357,18 @@ class DirectExecutionService:
         """
         if self.closed:
             raise RuntimeError("Direct execution service is closed")
+
+        binding = self._resolve_execution_authority(authority_reference)
+        routing_decision = await self._propose_routing(
+            project,
+            context=context,
+            execution_policy=execution_policy,
+        )
+        execution_plan = self.execution_plan_compiler.compile(
+            routing_decision,
+            binding,
+        )
+        self.supervisor_bridge.admit_execution_plan(execution_plan)
 
         execution_id = str(uuid.uuid4())
 
@@ -360,6 +384,7 @@ class DirectExecutionService:
             project_id=str(project.id),
             status="pending",
             current_phase="initialization",
+            execution_plan=execution_plan,
         )
 
         self.active_executions[execution_id] = execution_status
@@ -374,6 +399,8 @@ class DirectExecutionService:
                 context,
                 execution_policy,
                 fixture_result,
+                routing_decision,
+                execution_plan,
             )
         )
         self._background_tasks.add(task)
@@ -382,6 +409,48 @@ class DirectExecutionService:
         logger.info(f"Started direct execution {execution_id} for project {project.id}")
 
         return execution_id
+
+    def _resolve_execution_authority(
+        self,
+        authority_reference: ExecutionAuthorityReference | None,
+    ) -> ExecutionAuthorityBinding:
+        """Resolve authority before MASR, state mutation, or task creation."""
+
+        if authority_reference is None:
+            raise ExecutionAuthorityRequiredError("execution authority is required")
+        if self.execution_authority_resolver is None:
+            raise ExecutionAuthorityUnavailableError(
+                "execution authority is unavailable"
+            )
+        return self.execution_authority_resolver.resolve(authority_reference)
+
+    async def _propose_routing(
+        self,
+        project: ResearchProject,
+        *,
+        context: dict[str, Any] | None,
+        execution_policy: RoutingExecutionPolicy | None,
+    ) -> MASRRoutingDecision:
+        """Ask MASR for a proposal; it cannot fill execution authority."""
+
+        routing_context = {
+            "query": project.query.text,
+            "domains": project.query.domains,
+            "project_id": project.id,
+            "user_id": str(project.user_id) if project.user_id else None,
+        }
+        if context:
+            routing_context.update(context)
+        if execution_policy is not None and execution_policy.fixture_mode:
+            return await self.masr_router.route(
+                query=project.query.text,
+                context=routing_context,
+                execution_policy=execution_policy,
+            )
+        return await self.masr_router.route(
+            query=project.query.text,
+            context=routing_context,
+        )
 
     def _fast_path_passes_quality(self, response: str) -> bool:
         """Minimal quality gate for fast-path responses.
@@ -397,488 +466,6 @@ class DirectExecutionService:
             return False
         return not stripped.startswith(self._FAST_PATH_FAILURE_PREFIXES)
 
-    @staticmethod
-    def _quality_measurement(
-        value: Any,
-    ) -> tuple[float | None, MetricAvailability]:
-        """Validate an existing score without manufacturing a replacement."""
-
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return None, MetricAvailability.UNAVAILABLE
-        score = float(value)
-        if not math.isfinite(score) or not 0.0 <= score <= 1.0:
-            return None, MetricAvailability.MALFORMED
-        return score, MetricAvailability.MEASURED
-
-    @staticmethod
-    def _begin_allocation_attempt(execution_status: ExecutionStatus) -> str:
-        """Assign an opaque identity before one provider/supervisor invocation.
-
-        This sequence is incremented synchronously before an async execution
-        boundary, so concurrent domain tasks cannot reuse an ordinal in the
-        process-local event loop. The token contains no query, domain, or user
-        content.
-        """
-
-        execution_status._allocation_attempt_sequence += 1
-        return derive_opaque_identifier(
-            "routing",
-            execution_status.execution_id,
-            "allocation-attempt",
-            str(execution_status._allocation_attempt_sequence),
-        )
-
-    async def _record_executed_allocation(
-        self,
-        *,
-        decision: Any,
-        execution_status: ExecutionStatus,
-        allocation_key: str,
-        allocation_attempt_id: str,
-        allocation_status: str,
-        started_at: float,
-        source: OutcomeSource,
-        quality_score: Any = None,
-    ) -> None:
-        """Record one allocation after its execution boundary was reached."""
-
-        quality, availability = self._quality_measurement(quality_score)
-        try:
-            await self.outcome_recorder.record(
-                decision,
-                ExecutedAllocationOutcome(
-                    execution_id=execution_status.execution_id,
-                    allocation_key=allocation_key,
-                    allocation_attempt_id=allocation_attempt_id,
-                    execution_status=allocation_status,
-                    latency_ms=max(0, round((time.monotonic() - started_at) * 1000)),
-                    source=source,
-                    measured_cost=None,
-                    cost_availability=MetricAvailability.UNAVAILABLE,
-                    quality_score=quality,
-                    quality_availability=availability,
-                    run_id=execution_status.execution_id,
-                    task_id=derive_opaque_identifier(
-                        "routing",
-                        execution_status.execution_id,
-                        allocation_key,
-                        allocation_attempt_id,
-                        "task",
-                    ),
-                ),
-            )
-        except Exception as exc:
-            # Outcome telemetry cannot make base execution unavailable. Retryable
-            # delivery is handled inside the recorder with the same outcome ID.
-            logger.warning(
-                "masr_outcome_recording_failed",
-                execution_id=execution_status.execution_id,
-                allocation_key=allocation_key,
-                error=type(exc).__name__,
-            )
-
-    async def _execute_fast_path(
-        self,
-        query: str,
-        routing_decision: Any,
-        execution_status: ExecutionStatus,
-    ) -> dict[str, Any]:
-        """Execute fast path: single LLM call through multi-provider routing.
-
-        Args:
-            query: The user query
-            routing_decision: MASR routing decision (for model selection)
-            execution_status: Execution status tracker
-
-        Returns:
-            Result dict compatible with supervisor output
-
-        Raises:
-            RuntimeError: If fast path fails quality check (triggers escalation)
-        """
-        start_time = datetime.now(UTC)
-
-        try:
-            # Route through the multi-provider layer when enabled; fall back to
-            # GeminiService otherwise (matching the platform-wide convention).
-            settings = get_settings()
-            model_used = "unknown"
-            provider_used = "unknown"
-
-            if settings.MULTI_PROVIDER_ROUTING_ENABLED and settings.OPENROUTER_API_KEY:
-                from src.ai_brain.providers.base_provider import ModelRequest
-
-                # Lazily cache the provider: constructing per call would re-run
-                # startup slug validation (a catalog fetch) on every fast-path
-                # query. NOTE: no await between the hasattr check and the
-                # assignment - safe under asyncio; keep it that way.
-                if self._fast_path_provider is None:
-                    provider_class = cast(
-                        "type[OpenRouterProvider]",
-                        self.component_registry.resolve(PROVIDER_KEYS["openrouter"]),
-                    )
-                    provider = provider_class(
-                        {
-                            "enabled": True,
-                            "api_key": settings.OPENROUTER_API_KEY,
-                            "endpoint": settings.OPENROUTER_ENDPOINT,
-                            "tier_mapping": settings.OPENROUTER_TIER_MAPPING,
-                        }
-                    )
-                    self._fast_path_provider = provider
-                else:
-                    provider = self._fast_path_provider
-
-                # Simple tier by construction: the fast path only ever serves
-                # classifier-approved trivial queries.
-                request = ModelRequest(
-                    prompt=query,
-                    max_tokens=2048,
-                    temperature=0.7,
-                    complexity_score=0.1,
-                    metadata={"tier": "simple"},
-                )
-                provider_response = await provider.generate(request)
-                if not provider_response.success or not provider_response.content:
-                    raise RuntimeError(
-                        "Fast path generation failed: "
-                        f"{provider_response.error_message}"
-                    )
-                response = provider_response.content
-                model_used = provider_response.model_name or "openrouter"
-                provider_used = "openrouter"
-
-            elif self.gemini_service:
-                # Fallback to Gemini when multi-provider routing is disabled
-                response = await self.gemini_service.generate_content(query)
-                model_used = "gemini"
-                provider_used = "gemini"
-            else:
-                raise RuntimeError("No LLM service available for fast path")
-
-            # Quality gate
-            if not self._fast_path_passes_quality(response):
-                logger.info(
-                    "fast_path_quality_check_failed",
-                    execution_id=execution_status.execution_id,
-                    response_length=len(response),
-                )
-                raise RuntimeError("Fast path quality check failed")
-
-            execution_time = (datetime.now(UTC) - start_time).total_seconds()
-
-            return {
-                "output": response,
-                "metadata": {
-                    "collaboration_mode": "fast_path",
-                    "execution_time": execution_time,
-                    "model_used": model_used,
-                    "provider_used": provider_used,
-                    "workers_used": 1,
-                },
-            }
-
-        except Exception as e:
-            logger.warning(
-                "fast_path_execution_failed",
-                execution_id=execution_status.execution_id,
-                error=str(e),
-            )
-            raise
-
-    async def _execute_domain_supervisor(
-        self,
-        domain: str,
-        sub_query: str,
-        project: ResearchProject,
-        routing_context: dict[str, Any],
-        supervisor_registry: dict[str, type[Any]],
-        execution_status: ExecutionStatus,
-    ) -> dict[str, Any]:
-        """
-        Execute a single domain's sub-query via its supervisor.
-
-        Args:
-            domain: Domain name (research, content, analytics, finance)
-            sub_query: Domain-specific sub-query
-            project: Research project
-            routing_context: Routing context
-            supervisor_registry: Supervisor registry
-
-        Returns:
-            Domain result dict with output, quality_score, and metadata
-        """
-        routing_decision: Any | None = None
-        try:
-            # Route domain-specific query
-            routing_decision = await self.masr_router.route(
-                query=sub_query,
-                context={**routing_context, "domain": domain},
-            )
-            allocation_attempt_id = self._begin_allocation_attempt(execution_status)
-            allocation_started_at = time.monotonic()
-
-            # Create task for this domain
-            agent_task = AgentTask(
-                id=f"{domain}_{project.id}_{uuid.uuid4()}",
-                agent_type=domain,
-                input_data={
-                    "query": sub_query,
-                    "domains": [domain],
-                    "context": routing_context,
-                    "project_data": {
-                        "title": project.title,
-                        "scope": project.scope.model_dump() if project.scope else {},
-                        "query": project.query.model_dump(),
-                    },
-                    "routing_decision": asdict(routing_decision),
-                },
-            )
-
-            # Execute via supervisor bridge
-            supervisor_result = await self.supervisor_bridge.execute_routing_decision(
-                routing_decision=routing_decision,
-                task=agent_task,
-                supervisor_registry=supervisor_registry,
-            )
-            await self._record_executed_allocation(
-                decision=routing_decision,
-                execution_status=execution_status,
-                allocation_key=f"domain:{domain}",
-                allocation_attempt_id=allocation_attempt_id,
-                allocation_status=supervisor_result.status.value,
-                started_at=allocation_started_at,
-                source=OutcomeSource.HEURISTIC,
-                quality_score=supervisor_result.quality_score,
-            )
-            routing_id = derive_opaque_identifier(
-                "routing",
-                execution_status.execution_id,
-                f"domain:{domain}",
-                allocation_attempt_id,
-            )
-
-            # Return structured result
-            if (
-                supervisor_result.status.value == "completed"
-                and supervisor_result.agent_result
-            ):
-                return {
-                    "domain": domain,
-                    "status": "completed",
-                    "output": supervisor_result.agent_result.output,
-                    "quality_score": supervisor_result.quality_score,
-                    "consensus_score": supervisor_result.consensus_score,
-                    "workers_used": supervisor_result.workers_used,
-                    "execution_time_seconds": supervisor_result.execution_time_seconds,
-                    "routing_id": routing_id,
-                    "routing_decision": asdict(routing_decision),
-                }
-            else:
-                return {
-                    "domain": domain,
-                    "status": "failed",
-                    "errors": supervisor_result.errors,
-                    "routing_id": routing_id,
-                    "routing_decision": asdict(routing_decision),
-                }
-
-        except Exception as e:
-            if routing_decision is not None:
-                await self._record_executed_allocation(
-                    decision=routing_decision,
-                    execution_status=execution_status,
-                    allocation_key=f"domain:{domain}",
-                    allocation_attempt_id=allocation_attempt_id,
-                    allocation_status="failed",
-                    started_at=allocation_started_at,
-                    source=OutcomeSource.HEURISTIC,
-                )
-            logger.error(f"Domain supervisor execution failed for {domain}: {e}")
-            return {"domain": domain, "status": "failed", "errors": [str(e)]}
-
-    async def _synthesize_domain_outputs(
-        self,
-        domain_outputs: dict[str, Any],
-        succeeded_domains: list[str],
-        failed_domains: list[dict[str, Any]],
-    ) -> tuple[str, float]:
-        """
-        Use LLM synthesis to compose per-domain outputs into one coherent answer.
-
-        Args:
-            domain_outputs: Dict mapping domain names to their outputs
-            succeeded_domains: List of domain names that succeeded
-            failed_domains: List of dicts with failed domain info
-
-        Returns:
-            Tuple of (synthesized_text, confidence_score)
-
-        Raises:
-            Exception: If synthesis fails (caller handles fallback)
-        """
-        settings = get_settings()
-        char_limit = settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT
-
-        # Truncate each domain's output to the char limit
-        truncated_outputs = {}
-        for domain in succeeded_domains:
-            output = domain_outputs.get(domain, {})
-            output_str = str(output)
-
-            # Measure before truncation
-            tokens_before = self._measure_domain_output_tokens(
-                domain, output_str, label="before_truncation"
-            )
-
-            if len(output_str) > char_limit:
-                truncated_str = output_str[:char_limit] + "..."
-                truncated_outputs[domain] = truncated_str
-
-                # Measure after truncation
-                tokens_after = self._measure_domain_output_tokens(
-                    domain, truncated_str, label="after_truncation"
-                )
-
-                logger.info(
-                    "Domain output truncated",
-                    domain=domain,
-                    chars_before=len(output_str),
-                    chars_after=len(truncated_str),
-                    tokens_before=tokens_before,
-                    tokens_after=tokens_after,
-                    tokens_saved=tokens_before - tokens_after,
-                )
-            else:
-                truncated_outputs[domain] = output_str
-
-        # Build synthesis task input
-        synthesis_input = {
-            "agent_outputs": truncated_outputs,
-            "succeeded_domains": succeeded_domains,
-            "failed_domains": [fd["domain"] for fd in failed_domains],
-        }
-
-        # Use the synthesis agent via supervisor factory
-        from ...agents.synthesis_agent import SynthesisAgent
-
-        synthesis_agent = SynthesisAgent(
-            gemini_service=self.gemini_service,
-        )
-
-        task = AgentTask(
-            id=f"synthesis_{uuid.uuid4().hex[:8]}",
-            agent_type="synthesis",
-            input_data=synthesis_input,
-        )
-
-        result = await synthesis_agent.execute(task)
-
-        if result.status != "success":
-            raise ValueError(f"Synthesis agent returned status: {result.status}")
-
-        # Extract the comprehensive narrative as the primary synthesized output
-        comprehensive_narrative = result.output.get("comprehensive_narrative", "")
-        if not comprehensive_narrative:
-            raise ValueError("Synthesis agent returned empty comprehensive_narrative")
-
-        confidence = result.confidence or 0.5
-
-        return comprehensive_narrative, confidence
-
-    async def _merge_domain_results(
-        self, domain_results: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        """
-        Merge per-domain results into one coherent result.
-
-        Uses labeled concatenation (default) or LLM synthesis based on
-        MULTI_DOMAIN_MERGE_STRATEGY config. LLM synthesis composes per-domain
-        outputs into one coherent answer; falls back to concatenation on error.
-
-        Args:
-            domain_results: List of domain result dicts
-
-        Returns:
-            Merged result with combined outputs and aggregated metadata
-        """
-        settings = get_settings()
-        merge_strategy = settings.MULTI_DOMAIN_MERGE_STRATEGY
-
-        # Collect per-domain outputs and metadata
-        merged_output = {}
-        quality_scores = {}
-        workers_used_total = 0
-        succeeded_domains = []
-        failed_domains = []
-        execution_time_max = 0.0
-
-        for result in domain_results:
-            domain = result["domain"]
-            if result["status"] == "completed":
-                succeeded_domains.append(domain)
-                # Store domain output under domain key
-                merged_output[domain] = result.get("output", {})
-                quality_scores[f"{domain}_quality"] = result.get("quality_score", 0.0)
-                quality_scores[f"{domain}_consensus"] = result.get(
-                    "consensus_score", 0.0
-                )
-                workers_used_total += result.get("workers_used", 0)
-                execution_time_max = max(
-                    execution_time_max, result.get("execution_time_seconds", 0.0)
-                )
-            else:
-                failed_domains.append(
-                    {"domain": domain, "errors": result.get("errors", [])}
-                )
-
-        # Attempt LLM synthesis if configured
-        synthesis_confidence = None
-        if merge_strategy == "llm" and succeeded_domains:
-            try:
-                (
-                    synthesized_output,
-                    synthesis_confidence,
-                ) = await self._synthesize_domain_outputs(
-                    merged_output, succeeded_domains, failed_domains
-                )
-                # Use synthesized output as primary while preserving per-domain outputs
-                final_output = {
-                    "synthesis": synthesized_output,
-                    "per_domain": merged_output,
-                }
-                actual_strategy = "llm"
-            except Exception as e:
-                logger.warning(
-                    f"LLM synthesis failed, falling back to concatenation: {e!s}"
-                )
-                final_output = merged_output
-                actual_strategy = "concat_fallback"
-        else:
-            final_output = merged_output
-            actual_strategy = "concat"
-
-        # Add metadata summary
-        metadata = {
-            "succeeded_domains": succeeded_domains,
-            "failed_domains": failed_domains,
-            "total_workers_used": workers_used_total,
-            "max_execution_time_seconds": execution_time_max,
-            "merge_strategy": actual_strategy,
-        }
-        if synthesis_confidence is not None:
-            metadata["synthesis_confidence"] = synthesis_confidence
-
-        final_output["_multi_domain_metadata"] = metadata
-
-        return {
-            "output": final_output,
-            "quality_scores": quality_scores,
-            "workers_used": workers_used_total,
-            "succeeded_domains": succeeded_domains,
-            "failed_domains": failed_domains,
-        }
-
     @retry(
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
     )
@@ -889,6 +476,8 @@ class DirectExecutionService:
         context: dict[str, Any] | None = None,
         execution_policy: RoutingExecutionPolicy | None = None,
         fixture_result: dict[str, Any] | None = None,
+        routing_decision: MASRRoutingDecision | None = None,
+        execution_plan: ExecutionPlan | None = None,
     ) -> None:
         """
         Execute research workflow with retry logic.
@@ -905,9 +494,8 @@ class DirectExecutionService:
 
             await self._publish_progress_update(execution_status)
 
-            # Step 1: MASR Routing
-            logger.info(f"Getting MASR routing for project {project.id}")
-
+            if routing_decision is None or execution_plan is None:
+                raise RuntimeError("execution plan must be compiled before dispatch")
             execution_policy = execution_policy or RoutingExecutionPolicy()
             routing_context = {
                 "query": project.query.text,
@@ -915,25 +503,11 @@ class DirectExecutionService:
                 "project_id": project.id,
                 "user_id": str(project.user_id) if project.user_id else None,
             }
-
             if context:
                 routing_context.update(context)
 
-            if execution_policy.fixture_mode:
-                routing_decision = await self.masr_router.route(
-                    query=project.query.text,
-                    context=routing_context,
-                    execution_policy=execution_policy,
-                )
-            else:
-                # Preserve the established call shape for injected routers and
-                # existing service integrations.
-                routing_decision = await self.masr_router.route(
-                    query=project.query.text,
-                    context=routing_context,
-                )
-
             execution_status.routing_decision = asdict(routing_decision)
+            execution_status.execution_plan = execution_plan
             execution_status.supervisor_type = (
                 routing_decision.agent_allocation.supervisor_type
             )
@@ -964,312 +538,37 @@ class DirectExecutionService:
                 )
                 return
 
-            # Check for fast path (bypass orchestration entirely)
-            if routing_decision.collaboration_mode == CollaborationMode.FAST_PATH:
-                logger.info(
-                    "fast_path_selected",
-                    execution_id=execution_status.execution_id,
-                    query_preview=project.query.text[:100],
-                )
-
-                try:
-                    allocation_attempt_id = self._begin_allocation_attempt(
-                        execution_status
-                    )
-                    fast_path_started_at = time.monotonic()
-                    execution_status.current_phase = "fast_path_execution"
-                    execution_status.progress_percentage = 40.0
-                    await self._publish_progress_update(execution_status)
-
-                    # Single LLM call
-                    result = await self._execute_fast_path(
-                        query=project.query.text,
-                        routing_decision=routing_decision,
-                        execution_status=execution_status,
-                    )
-                    await self._record_executed_allocation(
-                        decision=routing_decision,
-                        execution_status=execution_status,
-                        allocation_key="fast_path",
-                        allocation_attempt_id=allocation_attempt_id,
-                        allocation_status="completed",
-                        started_at=fast_path_started_at,
-                        source=OutcomeSource.FIXED,
-                    )
-
-                    # Fast path succeeded
-                    execution_status.final_output = result
-                    execution_status.workers_used = 1
-                    execution_status.current_phase = "completed"
-                    execution_status.progress_percentage = 100.0
-                    execution_status.status = "completed"
-                    execution_status.completed_at = datetime.now(UTC)
-                    execution_status.execution_time_seconds = (
-                        execution_status.completed_at - execution_status.started_at
-                    ).total_seconds()
-
-                    await self._publish_progress_update(execution_status)
-                    await self._checkpoint(execution_status, "fast_path_completed")
-
-                    self.execution_stats["successful_executions"] += 1
-
-                    logger.info(
-                        "fast_path_execution_completed",
-                        execution_id=execution_status.execution_id,
-                        execution_time=execution_status.execution_time_seconds,
-                    )
-                    return
-
-                except RuntimeError as e:
-                    await self._record_executed_allocation(
-                        decision=routing_decision,
-                        execution_status=execution_status,
-                        allocation_key="fast_path",
-                        allocation_attempt_id=allocation_attempt_id,
-                        allocation_status="failed",
-                        started_at=fast_path_started_at,
-                        source=OutcomeSource.FIXED,
-                    )
-                    # Fast path quality check failed → escalate to DIRECT mode
-                    logger.info(
-                        "fast_path_escalating_to_direct",
-                        execution_id=execution_status.execution_id,
-                        reason=str(e),
-                    )
-                    # Mutate routing decision to DIRECT mode
-                    routing_decision.collaboration_mode = CollaborationMode.DIRECT
-                    # Continue to normal supervisor path below
-
-            # Preserve the bridge's existing string-keyed call contract while
-            # keeping the authoritative catalog behind typed registry keys.
-            supervisor_registry = {
-                name: self.supervisor_registry.resolve(key)
-                for name, key in SUPERVISOR_KEYS.items()
-                if key in self.supervisor_registry.keys
-            }
-
-            # Detect multi-domain and branch execution
-            decomposition = routing_decision.complexity_analysis.decomposition
-            is_multi_domain = (
-                decomposition is not None and decomposition.is_multi_domain
-            )
-
-            if is_multi_domain and decomposition is not None:
-                # Type narrowing: decomposition is non-None here
-                logger.info(
-                    f"Multi-domain query detected: {decomposition.detected_domains}"
-                )
-                execution_status.current_phase = "multi_domain_execution"
-                execution_status.progress_percentage = 30.0
-                await self._publish_progress_update(execution_status)
-
-                # Capture decomposition in closure for type narrowing
-                current_decomposition = decomposition
-
-                async def execute_domain(
-                    domain_spec: tuple[str, str],
-                ) -> dict[str, Any]:
-                    domain, sub_query = domain_spec
-                    return await self._execute_domain_supervisor(
-                        domain=domain,
-                        sub_query=sub_query,
-                        project=project,
-                        routing_context=routing_context,
-                        supervisor_registry=supervisor_registry,
-                        execution_status=execution_status,
-                    )
-
-                domain_specs = [
-                    (domain, current_decomposition.domain_subqueries[domain])
-                    for domain in current_decomposition.detected_domains
-                ]
-
-                # Admit at most the configured number of domain executions;
-                # queued domains remain values rather than pre-created tasks.
-                domain_results = await BoundedTaskRunner[
-                    tuple[str, str], dict[str, Any]
-                ](self.max_domain_parallelism).run(
-                    domain_specs,
-                    execute_domain,
-                    return_exceptions=True,
-                )
-
-                # Convert exceptions to error result dicts
-                processed_results: list[dict[str, Any]] = []
-                for i, domain_result in enumerate(domain_results):
-                    if isinstance(domain_result, BaseException):
-                        domain = current_decomposition.detected_domains[i]
-                        logger.error(
-                            f"Domain {domain} execution raised: {domain_result}"
-                        )
-                        processed_results.append(
-                            {
-                                "domain": domain,
-                                "status": "failed",
-                                "errors": [str(domain_result)],
-                            }
-                        )
-                    else:
-                        processed_results.append(domain_result)
-                execution_status.sub_routing_decisions = {
-                    str(result["domain"]): {
-                        "routing_id": result["routing_id"],
-                        "decision": result["routing_decision"],
-                    }
-                    for result in processed_results
-                    if "routing_id" in result and "routing_decision" in result
-                }
-
-                execution_status.progress_percentage = 80.0
-                execution_status.current_phase = "result_merging"
-                await self._publish_progress_update(execution_status)
-
-                # Merge domain results
-                merged = await self._merge_domain_results(processed_results)
-
-                execution_status.agent_results = merged["output"]
-                execution_status.quality_scores = merged["quality_scores"]
-                execution_status.workers_used = merged["workers_used"]
-                execution_status.final_output = merged["output"]
-
-                # Determine overall status
-                if merged["succeeded_domains"]:
-                    execution_status.status = "completed"
-                    execution_status.progress_percentage = 100.0
-                    execution_status.current_phase = "completed"
-                    self.execution_stats["successful_executions"] += 1
-
-                    if merged["failed_domains"]:
-                        execution_status.warnings.append(
-                            f"Partial success: {len(merged['failed_domains'])} "
-                            f"domain(s) failed: {merged['failed_domains']}"
-                        )
-
-                    await self._checkpoint(execution_status, "completed")
-                    logger.info(
-                        f"Multi-domain execution {execution_status.execution_id} completed: "
-                        f"{len(merged['succeeded_domains'])} succeeded, "
-                        f"{len(merged['failed_domains'])} failed"
-                    )
-                else:
-                    execution_status.status = "failed"
-                    execution_status.errors.append("All domains failed")
-                    execution_status.current_phase = "failed"
-                    self.execution_stats["failed_executions"] += 1
-                    logger.error(
-                        f"Multi-domain execution {execution_status.execution_id} failed: all domains failed"
-                    )
-
-            else:
-                # Single-domain execution (existing path)
-                logger.info(
-                    f"Executing via {routing_decision.agent_allocation.supervisor_type} supervisor"
-                )
-
-                agent_task = AgentTask(
-                    id=f"research_{project.id}_{execution_status.execution_id}",
-                    agent_type="research",
-                    input_data={
-                        "query": project.query.text,
-                        "domains": project.query.domains,
-                        "context": routing_context,
-                        "project_data": {
-                            "title": project.title,
-                            "scope": (
-                                project.scope.model_dump() if project.scope else {}
-                            ),
-                            "query": project.query.model_dump(),
-                        },
-                        "routing_decision": asdict(routing_decision),
+            plan_task = AgentTask(
+                id=f"research_{project.id}_{execution_status.execution_id}",
+                agent_type="execution_plan",
+                input_data={
+                    "query": project.query.text,
+                    "domains": list(execution_plan.routing_decision.domains),
+                    "context": routing_context,
+                    "project_data": {
+                        "title": project.title,
+                        "scope": project.scope.model_dump() if project.scope else {},
+                        "query": project.query.model_dump(),
                     },
-                )
-
-                execution_status.current_phase = "hierarchical_coordination"
-                execution_status.progress_percentage = 40.0
-                await self._publish_progress_update(execution_status)
-                await self._checkpoint(execution_status, "supervisor_execution")
-
-                # Execute via MASR-Supervisor bridge
-                allocation_attempt_id = self._begin_allocation_attempt(execution_status)
-                allocation_started_at = time.monotonic()
-                try:
-                    supervisor_result = (
-                        await self.supervisor_bridge.execute_routing_decision(
-                            routing_decision=routing_decision,
-                            task=agent_task,
-                            supervisor_registry=supervisor_registry,
-                        )
-                    )
-                except Exception:
-                    await self._record_executed_allocation(
-                        decision=routing_decision,
-                        execution_status=execution_status,
-                        allocation_key="primary",
-                        allocation_attempt_id=allocation_attempt_id,
-                        allocation_status="failed",
-                        started_at=allocation_started_at,
-                        source=OutcomeSource.HEURISTIC,
-                    )
-                    raise
-                await self._record_executed_allocation(
-                    decision=routing_decision,
-                    execution_status=execution_status,
-                    allocation_key="primary",
-                    allocation_attempt_id=allocation_attempt_id,
-                    allocation_status=supervisor_result.status.value,
-                    started_at=allocation_started_at,
-                    source=OutcomeSource.HEURISTIC,
-                    quality_score=supervisor_result.quality_score,
-                )
-
-                execution_status.progress_percentage = 80.0
-                execution_status.current_phase = "result_processing"
-                await self._publish_progress_update(execution_status)
-
-                # Process results
-                if (
-                    supervisor_result.status.value == "completed"
-                    and supervisor_result.agent_result
-                ):
-                    execution_status.agent_results = (
-                        supervisor_result.agent_result.output
-                    )
-                    execution_status.quality_scores = {
-                        "overall": supervisor_result.quality_score,
-                        "consensus": supervisor_result.consensus_score,
-                    }
-                    execution_status.workers_used = supervisor_result.workers_used
-
-                    # Extract final output
-                    if isinstance(supervisor_result.agent_result.output, dict):
-                        execution_status.final_output = (
-                            supervisor_result.agent_result.output
-                        )
-
-                    execution_status.status = "completed"
-                    execution_status.progress_percentage = 100.0
-                    execution_status.current_phase = "completed"
-
-                    self.execution_stats["successful_executions"] += 1
-
-                    await self._checkpoint(execution_status, "completed")
-
-                    logger.info(
-                        f"Direct execution {execution_status.execution_id} completed successfully"
-                    )
-
-                else:
-                    # Execution failed or incomplete
-                    execution_status.status = "failed"
-                    execution_status.errors.extend(supervisor_result.errors)
-                    execution_status.current_phase = "failed"
-
-                    self.execution_stats["failed_executions"] += 1
-
-                    logger.error(
-                        f"Direct execution {execution_status.execution_id} failed: {supervisor_result.errors}"
-                    )
-
+                },
+            )
+            execution_status.current_phase = "plan_topology_execution"
+            execution_status.progress_percentage = 40.0
+            await self._publish_progress_update(execution_status)
+            await self._checkpoint(execution_status, "plan_topology_execution")
+            plan_result = await self.supervisor_bridge.execute_execution_plan(
+                execution_plan,
+                plan_task,
+            )
+            execution_status.agent_results = plan_result.output
+            execution_status.final_output = plan_result.output
+            execution_status.workers_used = plan_result.workers_used
+            execution_status.status = "completed"
+            execution_status.current_phase = "completed"
+            execution_status.progress_percentage = 100.0
+            self.execution_stats["successful_executions"] += 1
+            await self._checkpoint(execution_status, "completed")
+            return
         except Exception as e:
             logger.error(
                 f"Direct execution {execution_status.execution_id} failed with exception: {e}"

@@ -72,15 +72,15 @@ PUBLIC_ROUTE_CHARACTERIZATION_MANIFEST = {
     (
         "POST",
         "/api/v1/agents/{agent_type}/execute",
-    ): "test_agent_api_baseline.py::test_execute_and_convenience_routes_forward_legacy_requests",
+    ): "test_agent_api_baseline.py::test_execute_and_convenience_routes_fail_closed_without_authority",
     (
         "POST",
         "/api/v1/agents/chain",
-    ): "test_agent_api_baseline.py::test_chain_mixture_and_workflows_preserve_distinct_shapes",
+    ): "test_agent_api_baseline.py::test_chain_mixture_and_workflows_fail_closed_without_authority",
     (
         "POST",
         "/api/v1/agents/mixture",
-    ): "test_agent_api_baseline.py::test_chain_mixture_and_workflows_preserve_distinct_shapes",
+    ): "test_agent_api_baseline.py::test_chain_mixture_and_workflows_fail_closed_without_authority",
     (
         "POST",
         "/api/v1/agents/{agent_type}/validate",
@@ -104,23 +104,23 @@ PUBLIC_ROUTE_CHARACTERIZATION_MANIFEST = {
     (
         "POST",
         "/api/v1/agents/literature-review/search",
-    ): "test_agent_api_baseline.py::test_execute_and_convenience_routes_forward_legacy_requests",
+    ): "test_agent_api_baseline.py::test_execute_and_convenience_routes_fail_closed_without_authority",
     (
         "POST",
         "/api/v1/agents/citation/format",
-    ): "test_agent_api_baseline.py::test_execute_and_convenience_routes_forward_legacy_requests",
+    ): "test_agent_api_baseline.py::test_execute_and_convenience_routes_fail_closed_without_authority",
     (
         "POST",
         "/api/v1/agents/synthesis/combine",
-    ): "test_agent_api_baseline.py::test_synthesis_combine_pins_exact_agent_request",
+    ): "test_agent_api_baseline.py::test_synthesis_combine_fails_closed_without_authority",
     (
         "POST",
         "/api/v1/agents/workflows/literature-analysis",
-    ): "test_agent_api_baseline.py::test_chain_mixture_and_workflows_preserve_distinct_shapes",
+    ): "test_agent_api_baseline.py::test_chain_mixture_and_workflows_fail_closed_without_authority",
     (
         "POST",
         "/api/v1/agents/workflows/comprehensive-research",
-    ): "test_agent_api_baseline.py::test_chain_mixture_and_workflows_preserve_distinct_shapes",
+    ): "test_agent_api_baseline.py::test_chain_mixture_and_workflows_fail_closed_without_authority",
     (
         "GET",
         "/api/v1/agents/health/summary",

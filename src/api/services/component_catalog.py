@@ -66,6 +66,7 @@ from src.models.agent_api_models import (
     MixtureOfAgentsRequest,
     MixtureOfAgentsResponse,
 )
+from src.models.execution_authority import ExecutionAuthorityReference
 from src.models.research_project import ResearchProject
 
 
@@ -76,6 +77,8 @@ class ResearchWorkflowBackend(Protocol):
         self,
         project: ResearchProject,
         context: dict[str, Any] | None = None,
+        *,
+        authority_reference: ExecutionAuthorityReference | None = None,
     ) -> str: ...
 
 
@@ -100,7 +103,12 @@ class AgentWorkflowBackend(Protocol):
 
 
 ResearchWorkflow = Callable[
-    [ResearchWorkflowBackend, ResearchProject, dict[str, Any] | None],
+    [
+        ResearchWorkflowBackend,
+        ResearchProject,
+        dict[str, Any] | None,
+        ExecutionAuthorityReference | None,
+    ],
     Awaitable[str],
 ]
 DirectAgentWorkflow = Callable[
@@ -122,10 +130,17 @@ async def execute_routed_research(
     backend: ResearchWorkflowBackend,
     project: ResearchProject,
     context: dict[str, Any] | None,
+    authority_reference: ExecutionAuthorityReference | None,
 ) -> str:
     """Preserve the routed-research workflow call shape."""
 
-    return await backend.start_research_execution(project, context)
+    if authority_reference is None:
+        return await backend.start_research_execution(project, context)
+    return await backend.start_research_execution(
+        project,
+        context,
+        authority_reference=authority_reference,
+    )
 
 
 async def execute_direct_agent(

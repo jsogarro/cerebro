@@ -23,7 +23,9 @@ from ...ai_brain.router.masr import RoutingStrategy
 from ...core.kernel import ResearchKernel
 from ...core.observability import set_llm_request_estimated_cost
 from ...core.pii_redactor import redact_pii
+from ...models.execution_authority import ExecutionAuthorityReference
 from ...models.research_project import ResearchDepth, ResearchQuery
+from ..services.execution_authority_resolver import ExecutionAuthorityError
 from ..services.research_kernel import (
     ApplicationResearchKernel,
     ResearchExecutionBackend,
@@ -88,6 +90,7 @@ class IntelligentQueryRequest(BaseModel):
     # User context
     user_id: str | None = Field(None, description="User ID for personalization")
     session_id: str | None = Field(None, description="Session ID for context")
+    authority_reference: ExecutionAuthorityReference | None = None
 
 
 class AnalysisRequest(BaseModel):
@@ -107,6 +110,7 @@ class AnalysisRequest(BaseModel):
     # Context
     context: dict[str, Any] = Field(default_factory=dict)
     user_id: str | None = Field(None)
+    authority_reference: ExecutionAuthorityReference | None = None
 
 
 class SynthesisRequest(BaseModel):
@@ -127,6 +131,7 @@ class SynthesisRequest(BaseModel):
     # Context
     context: dict[str, Any] = Field(default_factory=dict)
     user_id: str | None = Field(None)
+    authority_reference: ExecutionAuthorityReference | None = None
 
 
 # Response Models
@@ -221,6 +226,7 @@ async def intelligent_research_query(
                 "cost_preference": request.cost_preference,
                 "api_endpoint": "intelligent_research_query",
             },
+            authority_reference=request.authority_reference,
         )
 
         # Get execution status for response
@@ -267,6 +273,11 @@ async def intelligent_research_query(
 
         return response
 
+    except ExecutionAuthorityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.code},
+        ) from exc
     except Exception as e:
         logger.error(f"Intelligent research query failed: {e}")
         raise HTTPException(
@@ -314,6 +325,7 @@ async def intelligent_analysis_query(
             cost_preference=None,
             user_id=request.user_id,
             session_id=None,
+            authority_reference=request.authority_reference,
         )
 
         return await intelligent_research_query(
@@ -364,6 +376,7 @@ async def intelligent_synthesis_query(
             cost_preference=None,
             user_id=request.user_id,
             session_id=None,
+            authority_reference=request.authority_reference,
         )
 
         return await intelligent_research_query(
@@ -376,6 +389,36 @@ async def intelligent_synthesis_query(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Synthesis query failed: {e!s}",
         ) from e
+
+
+def _recorded_plan_summary(exec_status: Any) -> dict[str, Any] | None:
+    """Expose the compiled ``ExecutionPlan`` for plan-backed executions.
+
+    Deliberately limited to opaque identifiers, bounded fields, and numeric
+    budgets — never ``permission_scopes``, ``tool_allowlist``, provider
+    allowlists, or edges, matching the "opaque IDs and bounded enums only"
+    telemetry convention used elsewhere for plan-backed observability.
+    """
+
+    plan = getattr(exec_status, "execution_plan", None)
+    if plan is None:
+        return None
+    decision = plan.routing_decision
+    budget = decision.budget
+    return {
+        "execution_plan_id": str(plan.execution_plan_id),
+        "plan_version": plan.plan_version,
+        "collaboration_mode": decision.collaboration_mode.value,
+        "primary_provider": str(decision.provider_model_policy.primary.provider),
+        "primary_model": str(decision.provider_model_policy.primary.model),
+        "budget": {
+            "max_cost_usd": float(budget.max_cost_usd),
+            "max_total_tokens": budget.max_total_tokens,
+            "max_parallel_tasks": budget.max_parallel_tasks,
+            "max_attempts_per_task": budget.max_attempts_per_task,
+            "task_timeout_seconds": budget.task_timeout_seconds,
+        },
+    }
 
 
 @router.get("/execution/{execution_id}/status")
@@ -412,6 +455,7 @@ async def get_execution_status(
             "supervisor_type": exec_status.supervisor_type,
             "workers_used": exec_status.workers_used,
             "routing_decision": exec_status.routing_decision,
+            "execution_plan": _recorded_plan_summary(exec_status),
             "execution_time_seconds": exec_status.execution_time_seconds,
             "errors": exec_status.errors,
             "timestamp": datetime.now().isoformat(),

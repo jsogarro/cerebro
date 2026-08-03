@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 from click.testing import CliRunner
+from fastapi import HTTPException
 
 from src.api.routes import agent_api
 from src.cli.commands import agents
@@ -120,17 +121,24 @@ class _KernelHTTPClient:
         ),
     ],
 )
-def test_cli_agent_commands_preserve_kernel_endpoint_payload_and_output(
+def test_cli_agent_commands_construct_correct_payload_then_fail_closed_without_authority(
     monkeypatch,
     arguments,
     expected_call,
     expected_output,
 ):
+    """CLI commands still build the exact legacy payload/path (thin-adapter
+    compatibility holds), but executing routes now require authority: without
+    it, the real route rejects before reaching the agent backend. This is the
+    CLI's actual current behavior, not the pre-authority success path."""
+
+    del expected_output  # no longer reachable without a supplied authority
     _KernelHTTPClient.calls = []
     monkeypatch.setattr(agents, "ResearchAPIClient", _KernelHTTPClient)
 
     result = CliRunner().invoke(cli, arguments)
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1
     assert _KernelHTTPClient.calls == [expected_call]
-    assert expected_output in result.output
+    assert isinstance(result.exception, HTTPException)
+    assert result.exception.detail == {"code": "EXECUTION_AUTHORITY_REQUIRED"}

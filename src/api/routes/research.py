@@ -18,6 +18,7 @@ from src.api.services.direct_execution_service import (
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.research_project import ProjectStatus
 from src.models.db.session import get_session
+from src.models.execution_authority import ExecutionAuthorityReference
 from src.models.research_project import (
     ResearchProgress,
     ResearchProject,
@@ -40,6 +41,20 @@ def _resolved_execution_service(
     if service is _EXECUTION_SERVICE_DEPENDENCY:
         return get_direct_execution_service()
     return service
+
+
+def _to_research_status(status: ProjectStatus) -> ResearchStatus:
+    """Map the DB status to the API status.
+
+    ``ProjectStatus.DRAFT`` has no matching ``ResearchStatus`` member — a
+    project stays in DRAFT whenever execution never started (including
+    failing to start, per create_research_project's graceful degradation),
+    which ``create_research_project`` itself already reports as PENDING.
+    """
+
+    if status == ProjectStatus.DRAFT:
+        return ResearchStatus.PENDING
+    return ResearchStatus(status.value)
 
 
 async def get_research_repo(
@@ -66,6 +81,7 @@ class CreateResearchProjectRequest(BaseModel):
     query: ResearchQuery
     user_id: str = Field(..., min_length=1, max_length=255)
     scope: ResearchScope | None = None
+    authority_reference: ExecutionAuthorityReference | None = None
 
 
 @router.post(
@@ -118,7 +134,13 @@ async def create_research_project(
         # Start direct execution via MASR
         try:
             execution_service = _resolved_execution_service(execution_service)
-            execution_id = await execution_service.start_research_execution(project)
+            if request.authority_reference is None:
+                execution_id = await execution_service.start_research_execution(project)
+            else:
+                execution_id = await execution_service.start_research_execution(
+                    project,
+                    authority_reference=request.authority_reference,
+                )
             await repo.update_status(
                 db_project.id,
                 ProjectStatus.IN_PROGRESS,
@@ -131,6 +153,10 @@ async def create_research_project(
                 execution_id=execution_id,
             )
         except Exception as exec_error:
+            # Missing/invalid execution authority is one more reason execution
+            # can fail to start; treat it like any other — the project is
+            # still created and returned, just not started. A hard failure
+            # here would orphan the row `repo.create()` already committed.
             logger.warning(
                 "Failed to start execution, project created but not started",
                 project_id=str(project.id),
@@ -189,7 +215,7 @@ async def get_research_project(
         title=db_project.title,
         query=ResearchQuery(**query_data),
         user_id=db_project.user_id,
-        status=ResearchStatus(db_project.status.value),
+        status=_to_research_status(db_project.status),
         created_at=db_project.created_at,
         updated_at=db_project.updated_at,
     )
@@ -263,7 +289,7 @@ async def list_research_projects(
             title=p.title,
             query=ResearchQuery(**_parse_query(p.query)),
             user_id=p.user_id,
-            status=ResearchStatus(p.status.value),
+            status=_to_research_status(p.status),
             created_at=p.created_at,
             updated_at=p.updated_at,
         )

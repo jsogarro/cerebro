@@ -38,6 +38,7 @@ from src.models.agent_api_models import (
     MixtureOfAgentsRequest,
     MixtureOfAgentsResponse,
 )
+from src.models.execution_authority import ExecutionAuthorityReference
 from src.models.research_project import ResearchProject
 
 
@@ -48,6 +49,8 @@ class ResearchExecutionBackend(Protocol):
         self,
         project: ResearchProject,
         context: dict[str, Any] | None = None,
+        *,
+        authority_reference: ExecutionAuthorityReference | None = None,
     ) -> str: ...
 
     async def get_execution_status(self, execution_id: str) -> Any: ...
@@ -102,7 +105,12 @@ class AgentKernelOperations(AgentExecutionBackend, Protocol):
 
 
 RoutedResearchWorkflow: TypeAlias = Callable[
-    [ResearchExecutionBackend, ResearchProject, dict[str, Any] | None],
+    [
+        ResearchExecutionBackend,
+        ResearchProject,
+        dict[str, Any] | None,
+        ExecutionAuthorityReference | None,
+    ],
     Awaitable[str],
 ]
 DirectAgentWorkflow: TypeAlias = Callable[
@@ -131,6 +139,8 @@ class _ApplicationKernelAdapter:
         self,
         project: ResearchProject,
         context: dict[str, Any] | None = None,
+        *,
+        authority_reference: ExecutionAuthorityReference | None = None,
     ) -> str:
         try:
             workflow = cast(
@@ -138,8 +148,14 @@ class _ApplicationKernelAdapter:
                 self.component_registry.resolve(ROUTED_RESEARCH_WORKFLOW_KEY),
             )
         except UnknownRegistryKeyError:
-            return await self.backend.start_research_execution(project, context)
-        return await workflow(self.backend, project, context)
+            if authority_reference is None:
+                return await self.backend.start_research_execution(project, context)
+            return await self.backend.start_research_execution(
+                project,
+                context,
+                authority_reference=authority_reference,
+            )
+        return await workflow(self.backend, project, context, authority_reference)
 
     async def get_execution_status(self, execution_id: str) -> Any:
         return await self.backend.get_execution_status(execution_id)

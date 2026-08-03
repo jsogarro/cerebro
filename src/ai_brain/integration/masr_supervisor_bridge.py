@@ -22,6 +22,7 @@ from structlog import get_logger
 
 from src.core.kernel import TypedRegistry
 from src.core.kernel.component_keys import (
+    AGENT_KEYS,
     COLLABORATION_MODE_WORKFLOW_KEY,
     DOMAIN_KEYS,
 )
@@ -30,8 +31,13 @@ from src.core.types import HealthCheckDict
 from ...agents.delegation_contract import DelegationContract
 from ...agents.models import AgentResult, AgentTask
 from ...agents.supervisors.base_supervisor import BaseSupervisor
+from ...core.contracts import ExecutionPlan, WorkerAssignment
 from ..router.masr import RoutingDecision, RoutingStrategy
 from ..router.query_analyzer import ComplexityLevel
+from .execution_plan_topology import (
+    ExecutionPlanTopologyExecutor,
+    PlanExecutionResult,
+)
 
 logger = get_logger()
 
@@ -597,6 +603,10 @@ class MASRSupervisorBridge:
             self.resource_pool,
             self.config.get("executor", {}),
         )
+        self.plan_topology_executor = ExecutionPlanTopologyExecutor(
+            worker_executor=self._execute_plan_worker,
+            capability_checker=self._has_plan_worker_capability,
+        )
 
         # Bridge statistics
         self.bridge_stats = {
@@ -606,6 +616,42 @@ class MASRSupervisorBridge:
             "average_response_time": 0.0,
             "routing_accuracy": 0.0,
         }
+
+    def _has_plan_worker_capability(self, worker_type: str) -> bool:
+        key = AGENT_KEYS.get(worker_type)
+        return key is not None and key in self.component_registry.keys
+
+    async def _execute_plan_worker(
+        self,
+        worker: WorkerAssignment,
+        task: AgentTask,
+    ) -> AgentResult:
+        worker_class = self.component_registry.resolve(
+            AGENT_KEYS[str(worker.worker_type)]
+        )
+        worker_instance = worker_class(
+            gemini_service=self.gemini_service,
+            cache_client=None,
+            config={
+                "permission_scopes": list(worker.permission_scopes),
+                "tool_allowlist": list(worker.tool_allowlist),
+            },
+        )
+        return await worker_instance.execute(task)
+
+    def admit_execution_plan(self, execution_plan: ExecutionPlan) -> None:
+        """Synchronously validate plan-backed execution before service state exists."""
+
+        self.plan_topology_executor.admit(execution_plan)
+
+    async def execute_execution_plan(
+        self,
+        execution_plan: ExecutionPlan,
+        task: AgentTask,
+    ) -> PlanExecutionResult:
+        """Execute a compiled plan without translating it to a supervisor graph."""
+
+        return await self.plan_topology_executor.execute(execution_plan, task)
 
     async def execute_routing_decision(
         self,

@@ -334,6 +334,110 @@ class TestTierDetermination:
         assert test_agent._determine_tier(task) == "balanced"
 
 
+class TestPlanBackedProviderPolicy:
+    """A plan-backed task's ``provider_model_policy`` is authoritative: only
+    the plan's primary provider/model is used, and failure raises rather
+    than substituting Gemini or any other provider."""
+
+    @pytest.fixture
+    def plan_task(self):
+        return AgentTask(
+            id="plan-task-001",
+            agent_type="test_worker",
+            input_data={
+                "query": "What is AI?",
+                "complexity_score": 0.5,
+                "provider_model_policy": {
+                    "primary": {"provider": "gemini", "model": "gemini-2.5-pro"}
+                },
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_plan_policy_routes_to_exactly_the_plan_primary(
+        self, test_agent, plan_task, mock_model_response
+    ):
+        mock_router = MagicMock()
+        mock_router.route_and_generate = AsyncMock(return_value=mock_model_response)
+
+        with patch("src.ai_brain.providers.ModelRouter", return_value=mock_router):
+            result = await test_agent.execute(plan_task)
+
+        assert result.status == "success"
+        assert result.output["content"] == "Response from OpenRouter"
+        routing_decision = mock_router.route_and_generate.call_args.kwargs[
+            "routing_decision"
+        ]
+        assert routing_decision == {
+            "primary_model": {"provider": "gemini", "name": "gemini-2.5-pro"},
+            "fallback_models": [],
+        }
+
+    @pytest.mark.asyncio
+    async def test_plan_policy_failure_raises_without_touching_gemini(
+        self, test_agent, plan_task
+    ):
+        from src.agents.llm_worker_base import PlanProviderUnavailableError
+        from src.ai_brain.providers.base_provider import ModelResponse
+
+        error_response = ModelResponse(
+            request_id="req-1",
+            success=False,
+            error_message="primary provider unavailable",
+        )
+        mock_router = MagicMock()
+        mock_router.route_and_generate = AsyncMock(return_value=error_response)
+
+        with (
+            patch("src.ai_brain.providers.ModelRouter", return_value=mock_router),
+            patch.object(LLMWorkerAgentBase, "_ensure_gemini_service") as ensure_gemini,
+            pytest.raises(PlanProviderUnavailableError),
+        ):
+            await test_agent._generate_with_routing("prompt", plan_task)
+
+        ensure_gemini.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_plan_policy_exception_raises_without_touching_gemini(
+        self, test_agent, plan_task
+    ):
+        from src.agents.llm_worker_base import PlanProviderUnavailableError
+
+        mock_router = MagicMock()
+        mock_router.route_and_generate = AsyncMock(
+            side_effect=Exception("transport error")
+        )
+
+        with (
+            patch("src.ai_brain.providers.ModelRouter", return_value=mock_router),
+            patch.object(LLMWorkerAgentBase, "_ensure_gemini_service") as ensure_gemini,
+            pytest.raises(PlanProviderUnavailableError),
+        ):
+            await test_agent._generate_with_routing("prompt", plan_task)
+
+        ensure_gemini.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_plan_backed_task_is_unaffected(
+        self, test_agent, test_task, mock_gemini_service
+    ):
+        """A task without ``provider_model_policy`` (test_task) keeps today's
+        flag-driven behavior; this is the same assertion as
+        TestRegressionGuard, repeated here to pin the plan/non-plan branch."""
+        with patch("src.core.config.settings") as mock_settings:
+            mock_settings.MULTI_PROVIDER_ROUTING_ENABLED = False
+            mock_settings.GEMINI_API_KEY = "test-key"
+
+            with patch(
+                "src.services.gemini_service.GeminiService",
+                return_value=mock_gemini_service,
+            ):
+                result = await test_agent.execute(test_task)
+
+        assert result.status == "success"
+        assert result.output["content"] == "Response from GeminiService"
+
+
 class TestRegressionGuard:
     """Regression guard: default behavior is byte-for-byte current."""
 

@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from src.api.routes import agent_api
 from src.models.agent_api_models import (
@@ -122,94 +123,84 @@ def _mixture_response() -> MixtureOfAgentsResponse:
 
 
 @pytest.mark.asyncio
-async def test_execute_and_convenience_routes_forward_legacy_requests():
+async def test_execute_and_convenience_routes_fail_closed_without_authority():
+    """execute_agent and its convenience wrappers (literature_search,
+    format_citations) all delegate to the same authority-gated dispatch and
+    accept no authority_reference of their own, so none can reach the
+    service without one — they now fail closed before forwarding anything."""
     service = _AgentService()
 
-    direct = await agent_api.execute_agent(
-        AgentType.LITERATURE_REVIEW,
-        AgentExecutionRequest(query="Characterize direct execution"),
-        background_tasks=None,
-        execution_service=service,
-    )
-    literature = await agent_api.literature_search(
-        query="Characterize literature convenience",
-        max_sources=30,
-        domains=["research"],
-        execution_service=service,
-    )
-    citations = await agent_api.format_citations(
-        ["source"],
-        "MLA",
-        execution_service=service,
-    )
+    with pytest.raises(HTTPException) as direct_exc:
+        await agent_api.execute_agent(
+            AgentType.LITERATURE_REVIEW,
+            AgentExecutionRequest(query="Characterize direct execution"),
+            background_tasks=None,
+            execution_service=service,
+        )
+    with pytest.raises(HTTPException) as literature_exc:
+        await agent_api.literature_search(
+            query="Characterize literature convenience",
+            max_sources=30,
+            domains=["research"],
+            execution_service=service,
+        )
+    with pytest.raises(HTTPException) as citations_exc:
+        await agent_api.format_citations(
+            ["source"],
+            "MLA",
+            execution_service=service,
+        )
 
-    assert direct.status == "completed"
-    assert literature.agent_type == AgentType.LITERATURE_REVIEW
-    assert citations.agent_type == AgentType.CITATION
-    assert service.requests[1][0] == AgentType.LITERATURE_REVIEW
-    assert service.requests[1][1].parameters == {
-        "max_sources": 30,
-        "domains": ["research"],
-    }
-    assert service.requests[2][0] == AgentType.CITATION
-    assert service.requests[2][1].parameters["citation_style"] == "MLA"
+    for exc in (direct_exc, literature_exc, citations_exc):
+        assert exc.value.detail == {"code": "EXECUTION_AUTHORITY_REQUIRED"}
+    assert service.requests == []
 
 
 @pytest.mark.asyncio
-async def test_synthesis_combine_pins_exact_agent_request():
+async def test_synthesis_combine_fails_closed_without_authority():
+    """synthesize_findings delegates to execute_agent and has no
+    authority_reference parameter, so it fails closed before forwarding."""
     service = _AgentService()
     findings = [
         {"claim": "Alpha", "evidence_ids": ["evidence-1"]},
         {"claim": "Beta", "evidence_ids": ["evidence-2"]},
     ]
 
-    response = await agent_api.synthesize_findings(
-        findings=findings,
-        synthesis_focus="thematic",
-        execution_service=service,
-    )
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_api.synthesize_findings(
+            findings=findings,
+            synthesis_focus="thematic",
+            execution_service=service,
+        )
 
-    assert response.agent_type is AgentType.SYNTHESIS
-    agent_type, request = service.requests[0]
-    assert agent_type is AgentType.SYNTHESIS
-    assert request.query == "Synthesize findings with thematic focus"
-    assert request.parameters == {
-        "findings": findings,
-        "synthesis_focus": "thematic",
-    }
-    assert request.user_id is None
-    assert request.session_id is None
+    assert exc_info.value.detail == {"code": "EXECUTION_AUTHORITY_REQUIRED"}
+    assert service.requests == []
 
 
 @pytest.mark.asyncio
-async def test_chain_mixture_and_workflows_preserve_distinct_shapes():
+async def test_chain_mixture_and_workflows_fail_closed_without_authority():
+    """literature_analysis_workflow and comprehensive_research_workflow
+    delegate to execute_chain_of_agents/execute_mixture_of_agents and have
+    no authority_reference parameter, so both fail closed before
+    forwarding."""
     service = _AgentService()
 
-    workflow = await agent_api.literature_analysis_workflow(
-        query="Characterize literature workflow",
-        domains=["research"],
-        execution_service=service,
-    )
-    mixture = await agent_api.comprehensive_research_workflow(
-        query="Characterize comprehensive workflow",
-        analysis_depth="exhaustive",
-        execution_service=service,
-    )
+    with pytest.raises(HTTPException) as workflow_exc:
+        await agent_api.literature_analysis_workflow(
+            query="Characterize literature workflow",
+            domains=["research"],
+            execution_service=service,
+        )
+    with pytest.raises(HTTPException) as mixture_exc:
+        await agent_api.comprehensive_research_workflow(
+            query="Characterize comprehensive workflow",
+            analysis_depth="exhaustive",
+            execution_service=service,
+        )
 
-    assert workflow.final_result == {"legacy": "final"}
-    assert [item.value for item in service.requests[0].agent_chain] == [
-        "literature-review",
-        "citation",
-        "synthesis",
-    ]
-    assert mixture.aggregated_result == {"legacy": "aggregate"}
-    assert [item.value for item in service.requests[1].agent_types] == [
-        "literature-review",
-        "methodology",
-        "comparative-analysis",
-        "synthesis",
-        "citation",
-    ]
+    for exc in (workflow_exc, mixture_exc):
+        assert exc.value.detail == {"code": "EXECUTION_AUTHORITY_REQUIRED"}
+    assert service.requests == []
 
 
 @pytest.mark.asyncio

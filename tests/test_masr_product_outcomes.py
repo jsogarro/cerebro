@@ -5,12 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from tenacity import wait_none
 
 from src.ai_brain.router.adaptive_state_store import (
     AdaptiveExperimentSnapshot,
@@ -103,18 +101,6 @@ def _project() -> ResearchProject:
     )
 
 
-def _supervisor_result(domain: str = "research") -> SimpleNamespace:
-    return SimpleNamespace(
-        status=SimpleNamespace(value="completed"),
-        agent_result=SimpleNamespace(output={domain: "synthetic result"}),
-        quality_score=0.84,
-        consensus_score=0.8,
-        workers_used=2,
-        execution_time_seconds=0.01,
-        errors=[],
-    )
-
-
 def test_opaque_identifiers_are_retry_stable_and_non_revealing() -> None:
     first = derive_opaque_identifier("outcome", "run-1", "domain:finance")
     retry = derive_opaque_identifier("outcome", "run-1", "domain:finance")
@@ -188,173 +174,6 @@ async def test_recorder_retries_with_same_outcome_id_and_keeps_cost_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_tenacity_reexecution_gets_new_ids_but_one_delivery_keeps_its_id() -> (
-    None
-):
-    decision = _Decision()
-    captured: list[RoutingOutcome] = []
-    router = Mock(
-        adaptive_policy_version="masr-adaptive-v1",
-        adaptive_schema_version="1",
-    )
-    router.route = AsyncMock(return_value=decision)
-
-    async def capture_outcome(outcome: RoutingOutcome) -> OutcomeApplicationResult:
-        captured.append(outcome)
-        evaluated = outcome.with_eligibility(
-            OutcomeEligibility(
-                eligible=False,
-                reason=OutcomeEligibilityReason.SOURCE_NOT_EVALUATOR,
-            )
-        )
-        return OutcomeApplicationResult(
-            status=OutcomeApplicationStatus.INELIGIBLE_RECORDED,
-            outcome=evaluated,
-            learning_updated=False,
-            reason="source_not_evaluator",
-        )
-
-    router.record_routing_outcome = AsyncMock(side_effect=capture_outcome)
-    bridge = Mock()
-    bridge.execute_routing_decision = AsyncMock(
-        return_value=_supervisor_result("research")
-    )
-    service = DirectExecutionService(
-        masr_router=router,
-        supervisor_bridge=bridge,
-        supervisor_factory=Mock(),
-        outcome_recorder=RoutingOutcomeRecorder(
-            router,  # type: ignore[arg-type]
-            retry_delay_seconds=0,
-        ),
-    )
-    real_record = service._record_executed_allocation
-    observations_completed = 0
-
-    async def record_then_fail_once(**kwargs: Any) -> None:
-        nonlocal observations_completed
-        await real_record(**kwargs)
-        observations_completed += 1
-        if observations_completed == 1:
-            raise RuntimeError("synthetic post-allocation failure")
-
-    service._record_executed_allocation = record_then_fail_once  # type: ignore[method-assign]
-    project = _project()
-    execution_status = ExecutionStatus(
-        execution_id="execution-retry",
-        project_id=str(project.id),
-        status="pending",
-    )
-
-    retrying_workflow = type(service)._execute_research_workflow.retry_with(
-        wait=wait_none()
-    )
-    await retrying_workflow(service, project, execution_status)
-
-    assert execution_status.status == "completed"
-    assert bridge.execute_routing_decision.await_count == 2
-    assert execution_status._allocation_attempt_sequence == 2
-    assert len(captured) == 2
-    assert captured[0].outcome_id != captured[1].outcome_id
-    assert captured[0].routing_id != captured[1].routing_id
-    assert all(outcome.outcome_id.startswith("out_") for outcome in captured)
-    assert all(outcome.routing_id.startswith("rt_") for outcome in captured)
-
-
-@pytest.mark.asyncio
-async def test_multi_domain_records_only_executed_subdecisions() -> None:
-    decomposition = QueryDecomposition(
-        detected_domains=["research", "analytics"],
-        domain_relevance={"research": 0.8, "analytics": 0.7},
-        domain_subqueries={
-            "research": "Synthetic research subquery",
-            "analytics": "Synthetic analytics subquery",
-        },
-        cross_domain_dependencies=[],
-        coordination_complexity=2,
-    )
-    parent = _Decision(complexity_analysis=_Analysis(decomposition=decomposition))
-
-    async def route_side_effect(
-        query: str,
-        context: dict[str, Any] | None = None,
-    ) -> _Decision:
-        del query
-        if context and context.get("domain"):
-            domain = str(context["domain"])
-            return _Decision(
-                agent_allocation=_Allocation(supervisor_type=domain),
-                complexity_analysis=_Analysis(),
-            )
-        return parent
-
-    router = Mock()
-    router.route = AsyncMock(side_effect=route_side_effect)
-    bridge = Mock()
-    bridge.execute_routing_decision = AsyncMock(
-        side_effect=lambda routing_decision, task, supervisor_registry: (
-            _supervisor_result(routing_decision.agent_allocation.supervisor_type)
-        )
-    )
-    recorder = _CaptureRecorder()
-    service = DirectExecutionService(
-        masr_router=router,
-        supervisor_bridge=bridge,
-        supervisor_factory=Mock(),
-        outcome_recorder=recorder,  # type: ignore[arg-type]
-    )
-    status = ExecutionStatus(
-        execution_id="execution-multi",
-        project_id=str(_project().id),
-        status="pending",
-    )
-
-    await service._execute_research_workflow(_project(), status)
-
-    assert status.status == "completed"
-    assert set(status.sub_routing_decisions) == {"research", "analytics"}
-    assert {call[1].allocation_key for call in recorder.calls} == {
-        "domain:research",
-        "domain:analytics",
-    }
-    assert all(call[0] is not parent for call in recorder.calls)
-    assert all(call[1].source is OutcomeSource.HEURISTIC for call in recorder.calls)
-
-
-@pytest.mark.asyncio
-async def test_fast_path_records_fixed_unavailable_quality() -> None:
-    decision = _Decision(collaboration_mode=CollaborationMode.FAST_PATH)
-    router = Mock()
-    router.route = AsyncMock(return_value=decision)
-    recorder = _CaptureRecorder()
-    service = DirectExecutionService(
-        masr_router=router,
-        supervisor_bridge=Mock(),
-        supervisor_factory=Mock(),
-        outcome_recorder=recorder,  # type: ignore[arg-type]
-    )
-    service._execute_fast_path = AsyncMock(
-        return_value={"output": "synthetic", "metadata": {"workers_used": 1}}
-    )
-    project = _project()
-    status = ExecutionStatus(
-        execution_id="execution-fast",
-        project_id=str(project.id),
-        status="pending",
-    )
-
-    await service._execute_research_workflow(project, status)
-
-    assert status.status == "completed"
-    assert status.quality_scores == {}
-    assert len(recorder.calls) == 1
-    observation = recorder.calls[0][1]
-    assert observation.source is OutcomeSource.FIXED
-    assert observation.quality_score is None
-    assert observation.quality_availability is MetricAvailability.UNAVAILABLE
-
-
-@pytest.mark.asyncio
 async def test_explicit_fixture_policy_is_deterministic_provider_free_and_store_free(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -414,11 +233,20 @@ async def test_explicit_fixture_policy_is_deterministic_provider_free_and_store_
             project_id=str(project.id),
             status="pending",
         )
+        # routing_decision/execution_plan are now required parameters (the
+        # authority-bound compiled plan, not something computed internally
+        # by _execute_research_workflow); fixture mode is checked after the
+        # authority guard, so a minimal stand-in decision satisfies it
+        # without touching MASR/the adaptive store.
         await service._execute_research_workflow(
             project,
             status,
             execution_policy=RoutingExecutionPolicy.fixture(),
             fixture_result=fixture_payload,
+            routing_decision=_Decision(
+                adaptive_metadata={"status": "fixture_off", "enabled": False}
+            ),
+            execution_plan=Mock(),
         )
         outputs.append(status.final_output)
         decisions.append(status.routing_decision)

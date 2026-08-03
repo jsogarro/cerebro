@@ -125,7 +125,8 @@ class TestAgentAPI:
         client: TestClient,
         mock_agent_execution_service: Mock,
     ) -> None:
-        """Test direct agent execution."""
+        """Direct agent execution fails closed without a supplied authority
+        reference, before reaching the agent backend."""
         from src.api.main import app
         from src.api.services.agent_execution_service import (
             get_application_agent_execution_service,
@@ -145,21 +146,17 @@ class TestAgentAPI:
             "/api/v1/agents/literature-review/execute", json=request_data
         )
 
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["agent_type"] == "literature-review"
-        assert data["status"] == "completed"
-        assert "execution_id" in data
-        assert "output" in data
-        assert "confidence" in data
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "EXECUTION_AUTHORITY_REQUIRED"
+        mock_agent_execution_service.execute_single_agent.assert_not_called()
 
     def test_execute_chain_of_agents(
         self,
         client: TestClient,
         mock_agent_execution_service: Mock,
     ) -> None:
-        """Test Chain-of-Agents execution."""
+        """Chain-of-Agents execution fails closed without a supplied authority
+        reference, before reaching the agent backend."""
         from src.api.main import app
         from src.api.services.agent_execution_service import (
             get_application_agent_execution_service,
@@ -198,20 +195,17 @@ class TestAgentAPI:
 
         response = client.post("/api/v1/agents/chain", json=request_data)
 
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["status"] == "completed"
-        assert len(data["agent_chain"]) == 2
-        assert "final_result" in data
-        assert data["overall_confidence"] > 0.8
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "EXECUTION_AUTHORITY_REQUIRED"
+        mock_agent_execution_service.execute_chain_of_agents.assert_not_called()
 
     def test_execute_mixture_of_agents(
         self,
         client: TestClient,
         mock_agent_execution_service: Mock,
     ) -> None:
-        """Test Mixture-of-Agents execution."""
+        """Mixture-of-Agents execution fails closed without a supplied
+        authority reference, before reaching the agent backend."""
         from src.api.main import app
         from src.api.services.agent_execution_service import (
             get_application_agent_execution_service,
@@ -257,13 +251,9 @@ class TestAgentAPI:
 
         response = client.post("/api/v1/agents/mixture", json=request_data)
 
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["status"] == "completed"
-        assert len(data["agent_types"]) == 2
-        assert data["consensus_achieved"] is True
-        assert data["parallel_efficiency"] > 1.0  # Should be faster than sequential
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "EXECUTION_AUTHORITY_REQUIRED"
+        mock_agent_execution_service.execute_mixture_of_agents.assert_not_called()
 
     def test_agent_validation(self, client: TestClient) -> None:
         """Test agent input validation."""
@@ -338,7 +328,11 @@ class TestAgentAPI:
     # Convenience endpoint tests
 
     def test_literature_search_convenience(self, client: TestClient) -> None:
-        """Test literature search convenience endpoint."""
+        """Convenience endpoints delegate to the authority-gated execute
+        path internally and accept no authority_reference of their own, so
+        they now fail closed deterministically rather than reaching the
+        backend (previously tolerated 200 or 500 — a placeholder for "we
+        don't know what this returns," which fail-closed now answers)."""
 
         response = client.post(
             "/api/v1/agents/literature-review/search",
@@ -349,14 +343,12 @@ class TestAgentAPI:
             },
         )
 
-        # Should work (may fail due to mocking, but endpoint should exist)
-        assert response.status_code in [
-            200,
-            500,
-        ]  # 500 due to missing dependencies in test
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "EXECUTION_AUTHORITY_REQUIRED"
 
     def test_citation_format_convenience(self, client: TestClient) -> None:
-        """Test citation formatting convenience endpoint."""
+        """Same fail-closed contract via the citation-format convenience
+        endpoint, which also has no authority_reference parameter."""
 
         response = client.post(
             "/api/v1/agents/citation/format",
@@ -366,13 +358,13 @@ class TestAgentAPI:
             },
         )
 
-        assert response.status_code in [
-            200,
-            500,
-        ]  # 500 due to missing dependencies in test
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "EXECUTION_AUTHORITY_REQUIRED"
 
     def test_research_workflow_convenience(self, client: TestClient) -> None:
-        """Test literature analysis workflow convenience endpoint."""
+        """Same fail-closed contract via the literature-analysis workflow
+        convenience endpoint, which also has no authority_reference
+        parameter."""
 
         response = client.post(
             "/api/v1/agents/workflows/literature-analysis",
@@ -382,10 +374,8 @@ class TestAgentAPI:
             },
         )
 
-        assert response.status_code in [
-            200,
-            500,
-        ]  # 500 due to missing dependencies in test
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "EXECUTION_AUTHORITY_REQUIRED"
 
 
 class TestAgentTypeResolution:
