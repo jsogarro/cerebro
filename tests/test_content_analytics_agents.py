@@ -29,6 +29,17 @@ from src.agents.supervisors.base_supervisor import (
     WorkerDefinition,
 )
 from src.agents.supervisors.content_supervisor import ContentSupervisor
+from src.core.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """These agents execute a plain, plan-less ``AgentTask``. Without this,
+    a real MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY in the test
+    environment routes execute() through a live ModelRouter instead of
+    _FakeGemini below, making these tests nondeterministic and dependent
+    on a paid network call."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
 
 class _FakeGemini:
