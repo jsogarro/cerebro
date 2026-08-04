@@ -5,8 +5,22 @@ computed values when structured parameters are provided, and that
 those values appear in both the output and the prompt sent to the model.
 """
 
+import pytest
+
 from src.agents.finance_agents import FinancialAnalysisAgent, ValuationAgent
 from src.agents.models import AgentTask
+from src.core.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """These agents execute a plain, plan-less ``AgentTask``. Without this,
+    a real MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY in the test
+    environment routes execute() through a live ModelRouter instead of the
+    _PromptCapturingGemini mock below, making these tests nondeterministic
+    and dependent on a paid network call (this file previously hung the
+    full suite on an unbounded live request)."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
 
 class _PromptCapturingGemini:

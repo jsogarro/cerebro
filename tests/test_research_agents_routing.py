@@ -17,6 +17,19 @@ from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.methodology_agent import MethodologyAgent
 from src.agents.models import AgentTask
 from src.agents.synthesis_agent import SynthesisAgent
+from src.core.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """_generate_with_routing/_generate_structured_with_routing check
+    MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY before ever
+    reaching _ensure_gemini_service, so patching that alone (as several
+    tests below do) doesn't stop a real MULTI_PROVIDER_ROUTING_ENABLED
+    in the test environment from dispatching through a live ModelRouter
+    first. Force it off at module level so every test in this file is
+    deterministic and credential-free."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
 
 @pytest.mark.asyncio
@@ -171,6 +184,8 @@ class TestResearchAgentsMigration:
 
     async def test_citation_result_shape_preserved(self):
         """CitationAgent preserves result shape after migration."""
+        from src.agents.schemas.citation import CitationSchema, FormattedCitation
+
         agent = CitationAgent()
         task = AgentTask(
             id="test",
@@ -181,7 +196,18 @@ class TestResearchAgentsMigration:
             },
         )
 
-        result = await agent.execute(task)
+        with patch.object(
+            agent,
+            "_generate_structured_with_routing",
+            return_value=CitationSchema(
+                citations=[
+                    FormattedCitation(
+                        citation_text="Author. (2024). Test.", source_id="0"
+                    )
+                ]
+            ),
+        ):
+            result = await agent.execute(task)
 
         # Verify result has expected structure (shape contract preserved)
         assert result.status == "success"

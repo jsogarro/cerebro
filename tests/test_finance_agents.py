@@ -18,7 +18,18 @@ from src.agents.supervisors.finance_supervisor import FinanceSupervisor
 from src.agents.supervisors.supervisor_factory import SupervisorFactory
 from src.ai_brain.router.masr import MASRouter
 from src.api.services.component_catalog import build_application_component_registry
+from src.core.config import settings
 from src.core.kernel.component_keys import SUPERVISOR_KEYS
+
+
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """These agents execute a plain, plan-less ``AgentTask``. Without this,
+    a real MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY in the test
+    environment routes execute() through a live ModelRouter instead of
+    _FakeGemini below, making these tests nondeterministic and dependent
+    on a paid network call."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
 
 class _FakeGemini:
@@ -61,12 +72,23 @@ async def test_agent_empty_query_is_error() -> None:
     assert result.status != "success" or not result.output.get("content")
 
 
-async def test_agent_without_llm_returns_wellformed_fallback() -> None:
+async def test_agent_without_llm_returns_wellformed_fallback(monkeypatch) -> None:
     agent = RiskAssessmentAgent(gemini_service=None)
+    # Passing gemini_service=None is not enough: _ensure_gemini_service
+    # lazily constructs a real GeminiService from settings.GEMINI_API_KEY,
+    # so on any machine with a key this test would exercise a live paid
+    # call instead of the deterministic no-LLM fallback it exists to
+    # verify. Pin the "no service constructible" branch explicitly.
+    monkeypatch.setattr(agent, "_ensure_gemini_service", lambda: None)
     result = await agent.execute(_task("Assess a tech-concentrated portfolio"))
     assert result.status == "success"
     assert result.output["agent_type"] == "risk_assessment"
-    assert result.output["content"]  # non-empty
+    # The deterministic fallback marker — live LLM output could never
+    # match this, so this assertion also guards against the patch being
+    # removed and the test silently going back onto the network.
+    assert result.output["content"].startswith(
+        "[risk_assessment] No language model configured"
+    )
 
 
 def test_finance_supervisor_registered_and_has_workers() -> None:

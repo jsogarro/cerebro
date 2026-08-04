@@ -85,10 +85,9 @@ async def _execute_research_workflow(project, execution_status, context):
     )
     
     # Step 2: Supervisor Execution (hierarchical coordination)
-    supervisor_result = await self.supervisor_bridge.execute_routing_decision(
-        routing_decision=routing_decision,
-        task=agent_task,
-        supervisor_registry=supervisor_registry
+    supervisor_result = await self.supervisor_bridge.execute_execution_plan(
+        execution_plan=execution_plan,
+        task=agent_task
     )
     
     # Step 3: Return results with real-time WebSocket updates
@@ -164,7 +163,7 @@ To integrate orchestration as the primary execution engine, the following change
    ```python
    # Current (106 lines):
    routing_decision = await masr_router.route(...)
-   supervisor_result = await supervisor_bridge.execute_routing_decision(...)
+   supervisor_result = await supervisor_bridge.execute_execution_plan(...)
    
    # Proposed (using orchestration):
    orchestrator = ResearchOrchestrator(config)

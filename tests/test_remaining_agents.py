@@ -12,6 +12,17 @@ from src.agents.models import AgentResult, AgentTask
 from src.agents.schemas.citation import CitationSchema, FormattedCitation
 from src.agents.schemas.methodology import MethodologySchema
 from src.agents.schemas.synthesis import SynthesisSchema
+from src.core.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """These agents execute a plain, plan-less ``AgentTask``. Without this,
+    a real MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY in the test
+    environment routes execute() through a live ModelRouter instead of the
+    mock gemini fixtures below, making these tests nondeterministic and
+    dependent on a paid network call."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
 
 class TestMethodologyAgent:

@@ -205,7 +205,7 @@ async def test_explicit_fixture_policy_is_deterministic_provider_free_and_store_
     )
     router.episodic_memory = memory
     bridge = Mock()
-    bridge.execute_routing_decision = AsyncMock(
+    bridge.execute_execution_plan = AsyncMock(
         side_effect=AssertionError("fixture invoked a supervisor/provider")
     )
     provider = Mock()
@@ -261,7 +261,7 @@ async def test_explicit_fixture_policy_is_deterministic_provider_free_and_store_
     assert store.load.await_count == 0
     assert store.compare_and_set.await_count == 0
     assert memory.retrieve_episodes.await_count == 0
-    assert bridge.execute_routing_decision.await_count == 0
+    assert bridge.execute_execution_plan.await_count == 0
     assert provider.generate_content.await_count == 0
     assert recorder.calls == []
 

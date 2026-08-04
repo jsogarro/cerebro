@@ -66,8 +66,8 @@ sequenceDiagram
         DES->>DES: quality gate (>= 50 chars, not Error/refusal)
         Note over DES: on gate fail, mutate mode to DIRECT and fall through
     else supervisor path (DIRECT / PARALLEL / HIERARCHICAL / ...)
-        DES->>Bridge: execute_routing_decision(decision, task, registry)
-        Bridge->>Sup: run selected supervisor (internal LangGraph StateGraph)
+        DES->>Bridge: execute_execution_plan(execution_plan, task)
+        Bridge->>Sup: execute the compiled plan's worker topology
         Sup-->>Bridge: aggregated worker output + verification labels
         Bridge-->>DES: supervisor result
     end

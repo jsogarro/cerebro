@@ -30,7 +30,22 @@ from src.ai_brain.router.masr import (
 )
 from src.ai_brain.router.query_analyzer import ComplexityAnalysis, ComplexityLevel
 from src.api.services.component_catalog import build_application_component_registry
+from src.core.config import settings
 from src.core.kernel.component_keys import SUPERVISOR_KEYS
+
+
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """Worker agents route through a live ModelRouter when
+    MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY are real, independent
+    of whatever gemini_service a test injects. Force it off so execute()
+    tests are deterministic and credential-free."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
+
+
+class _FakeGemini:
+    async def generate_content(self, prompt: str) -> str:
+        return "Generated content for the supervised workflow."
 
 
 class _ExtensionSupervisor(BaseSupervisor):
@@ -159,15 +174,16 @@ class TestContentSupervisor:
         assert content_supervisor.workflow_graph is not None
 
     @pytest.mark.asyncio
-    async def test_execute_returns_result(self, content_supervisor):
+    async def test_execute_returns_result(self):
         """Test ContentSupervisor.execute returns an AgentResult."""
+        supervisor = ContentSupervisor(gemini_service=_FakeGemini())
         task = AgentTask(
             id="test_content_task",
             agent_type="content",
             input_data={"query": "Write an article about Python testing"},
         )
 
-        result = await content_supervisor.execute(task)
+        result = await supervisor.execute(task)
 
         assert result is not None
         assert result.task_id == task.id
@@ -232,15 +248,16 @@ class TestAnalyticsSupervisor:
         assert analytics_supervisor.workflow_graph is not None
 
     @pytest.mark.asyncio
-    async def test_execute_returns_result(self, analytics_supervisor):
+    async def test_execute_returns_result(self):
         """Test AnalyticsSupervisor.execute returns an AgentResult."""
+        supervisor = AnalyticsSupervisor(gemini_service=_FakeGemini())
         task = AgentTask(
             id="test_analytics_task",
             agent_type="analytics",
             input_data={"query": "Analyze user engagement trends"},
         )
 
-        result = await analytics_supervisor.execute(task)
+        result = await supervisor.execute(task)
 
         assert result is not None
         assert result.task_id == task.id

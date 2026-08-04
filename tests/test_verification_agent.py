@@ -1,10 +1,23 @@
 """Tests for the cross-cutting verification (critic) agent."""
 
+import pytest
+
 from src.agents.factory import AgentFactory
 from src.agents.models import AgentTask
 from src.agents.verification_agent import VerificationAgent
 from src.api.services.agent_execution_service import AgentExecutionService
+from src.core.config import settings
 from src.models.agent_api_models import AgentType
+
+
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """VerificationAgent executes a plain, plan-less ``AgentTask``. Without
+    this, a real MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY in the
+    test environment routes execute() through a live ModelRouter instead
+    of _FakeGemini below, making this test nondeterministic and dependent
+    on a paid network call."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
 
 class _FakeGemini:

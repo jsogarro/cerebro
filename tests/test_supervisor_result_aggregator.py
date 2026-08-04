@@ -46,8 +46,13 @@ async def test_result_aggregator_synthesizes_weighted_results() -> None:
 
 
 @pytest.mark.asyncio
-async def test_service_keeps_result_aggregator_delegates() -> None:
+async def test_service_keeps_result_aggregator_delegates(monkeypatch) -> None:
     service = SupervisorCoordinationService()
+    # Force the "no LLM available" branch this test characterizes — a real
+    # GEMINI_API_KEY in the test environment would otherwise make
+    # _synthesize_results dispatch a real Gemini call instead of delegating
+    # to the deterministic aggregator.
+    monkeypatch.setattr(service, "_get_gemini_service", lambda: None)
 
     consistency = service._calculate_consistency(
         {
