@@ -31,7 +31,7 @@ _AUTH_RLS_SKIP_REASON = (
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncClient:
+async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
     """Create a test client with initialized database."""
     import pathlib
 
@@ -45,12 +45,17 @@ async def client() -> AsyncClient:
     db_session_mod._async_session_factory = None
 
     # Override DATABASE_URL so the app sees our test DB
-    os.environ["DATABASE_URL"] = _TEST_DB_URL
+    monkeypatch.setenv("DATABASE_URL", _TEST_DB_URL)
 
-    # Reload settings to pick up the new DATABASE_URL
+    # Reload settings to pick up the new DATABASE_URL. Uses monkeypatch (not
+    # a raw assignment) so the *original* settings object — not just its
+    # DATABASE_URL field — is restored after the test; every module that
+    # already holds `from src.core.config import settings` (captured at its
+    # own import time, not re-read per call) would otherwise keep pointing
+    # at this test's throwaway instance for the rest of the process.
     from src.core import config as config_mod
 
-    config_mod.settings = config_mod.Settings()  # type: ignore[misc]
+    monkeypatch.setattr(config_mod, "settings", config_mod.Settings())
 
     # Initialize DB
     await init_db(database_url=_TEST_DB_URL)
@@ -116,7 +121,6 @@ class TestAppBoot:
         """Bug: SECRET_KEY validator required >=32 chars but test conftest set 15 chars.
         Fix: Updated conftest.py to use a 32+ char test secret key.
         """
-        import os
 
         secret = os.environ.get("SECRET_KEY", "")
         assert len(secret) >= 32, f"SECRET_KEY must be >= 32 chars, got {len(secret)}"
