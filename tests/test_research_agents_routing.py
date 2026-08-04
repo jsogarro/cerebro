@@ -20,20 +20,21 @@ from src.agents.synthesis_agent import SynthesisAgent
 from src.core.config import settings
 
 
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """_generate_with_routing/_generate_structured_with_routing check
+    MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY before ever
+    reaching _ensure_gemini_service, so patching that alone (as several
+    tests below do) doesn't stop a real MULTI_PROVIDER_ROUTING_ENABLED
+    in the test environment from dispatching through a live ModelRouter
+    first. Force it off at module level so every test in this file is
+    deterministic and credential-free."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
+
+
 @pytest.mark.asyncio
 class TestResearchAgentsMigration:
     """Test suite for research agent migration to LLMWorkerAgentBase."""
-
-    @pytest.fixture(autouse=True)
-    def _no_live_provider_routing(self, monkeypatch):
-        """_generate_with_routing/_generate_structured_with_routing check
-        MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY before ever
-        reaching _ensure_gemini_service, so patching that alone (as several
-        tests below do) doesn't stop a real MULTI_PROVIDER_ROUTING_ENABLED
-        in the test environment from dispatching through a live
-        ModelRouter first. Force it off so every test in this class is
-        deterministic and credential-free."""
-        monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
     def test_literature_review_inherits_from_worker_base(self):
         """LiteratureReviewAgent inherits from LLMWorkerAgentBase."""

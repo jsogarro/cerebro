@@ -48,17 +48,19 @@ def _mock_gemini_two_call(
     return mock
 
 
+@pytest.fixture(autouse=True)
+def _no_live_provider_routing(monkeypatch):
+    """These agents execute a plain, plan-less ``AgentTask``. Without
+    this, a real MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY in
+    the test environment routes execute() through a live ModelRouter
+    instead of the mock gemini fixtures below, making these tests
+    nondeterministic and dependent on a paid network call. Module-level
+    so any future test added outside the class is covered too."""
+    monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
+
+
 class TestLiteratureReviewAgent:
     """Test cases for Literature Review Agent."""
-
-    @pytest.fixture(autouse=True)
-    def _no_live_provider_routing(self, monkeypatch):
-        """These agents execute a plain, plan-less ``AgentTask``. Without
-        this, a real MULTI_PROVIDER_ROUTING_ENABLED/OPENROUTER_API_KEY in
-        the test environment routes execute() through a live ModelRouter
-        instead of the mock gemini fixtures below, making these tests
-        nondeterministic and dependent on a paid network call."""
-        monkeypatch.setattr(settings, "MULTI_PROVIDER_ROUTING_ENABLED", False)
 
     @pytest.mark.asyncio
     async def test_execute_literature_review(self):
