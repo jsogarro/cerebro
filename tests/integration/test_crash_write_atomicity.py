@@ -9,8 +9,9 @@ block raises, the block's ``session.commit()`` is never reached and the
 session closes without committing, so SQLAlchemy rolls back everything
 flushed so far. These tests prove that rollback actually happens against a
 real Postgres testcontainer — not just that the code is shaped to expect it —
-and separately prove what a *replayed* admission (the same run_id submitted
-twice, as a client retry would produce) actually does today.
+and separately prove that a *replayed* admission (the same run_id submitted
+twice, as a client retry would produce) neither writes a second durable
+record nor repeats the work.
 """
 
 from typing import Any
@@ -189,25 +190,14 @@ async def test_transition_failure_mid_write_does_not_advance_durable_status(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "FINDING: a replayed admission (the same authority_reference / "
-        "run_id submitted twice, as a client network retry would produce) "
-        "is deduped only at the database row level — create_run's primary-"
-        "key collision is caught and logged, so no duplicate agent_runs row "
-        "is ever written. But start_research_execution never checks for an "
-        "existing non-terminal run before dispatching the background "
-        "asyncio.Task, so the SECOND call still runs the real workflow a "
-        "second time (a second call into the supervisor bridge). Durable "
-        "state is not corrupted, but the plan's claim that 'a replayed "
-        "admission... must not double-execute' does not hold for the "
-        "in-flight work itself, only for its durable bookkeeping."
-    ),
-)
 async def test_replayed_admission_does_not_double_execute_supervisor(
     test_engine: AsyncEngine,
 ) -> None:
+    """The same authority submitted twice — an ordinary client network retry
+    — must run the workflow once. The replay is coalesced onto the execution
+    already handling that run and gets its handle back, so the caller can
+    read one status and one result rather than racing two."""
+
     session_factory = sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -249,7 +239,10 @@ async def test_replayed_admission_does_not_double_execute_supervisor(
     execution_id_2 = await service.start_research_execution(
         project, authority_reference=reference
     )
-    assert execution_id_1 != execution_id_2
+    # One run, one execution: the replay is handed the existing handle rather
+    # than a second one that would have to be reconciled against it later.
+    assert execution_id_2 == execution_id_1
+    assert len(service.active_executions) == 1
 
     for _ in range(50):
         statuses = [
@@ -262,10 +255,11 @@ async def test_replayed_admission_does_not_double_execute_supervisor(
 
         await asyncio.sleep(0.02)
 
-    # The correct behavior: a replayed admission for the same run_id is
-    # rejected or coalesced before the supervisor bridge is invoked a second
-    # time. Today it is invoked twice.
+    # A replayed admission for the same run_id is coalesced before the
+    # supervisor bridge is invoked a second time — the non-idempotent effect
+    # is what must not repeat.
     assert bridge.execute_execution_plan.await_count == 1
+    assert service.active_executions[execution_id_1].status == "completed"
 
     async with session_factory() as session:
         rows = (
@@ -276,3 +270,81 @@ async def test_replayed_admission_does_not_double_execute_supervisor(
         assert len(rows) == 1
 
     await service.close()
+
+
+@pytest.mark.asyncio
+async def test_replayed_admission_after_a_restart_resumes_rather_than_restarts(
+    test_engine: AsyncEngine,
+) -> None:
+    """A replay that arrives after the process handling the run restarted is
+    still a replay: the new process recovered that run from the durable
+    record, so it must hand back the recovered execution instead of starting
+    the work over."""
+
+    import asyncio
+
+    from src.models.execution_authority import ExecutionAuthorityReference
+    from tests.integration.crash_fixtures import _RoutingDecisionStub
+
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "atomicity-replay-after-restart"
+    binding = make_binding(run_id, authority_id="atomicity-replay-restart-authority")
+    resolver = MappingExecutionAuthorityResolver(
+        {("atomicity-replay-restart-authority", "1"): binding}
+    )
+    reference = ExecutionAuthorityReference(
+        authority_id="atomicity-replay-restart-authority", authority_version="1"
+    )
+
+    router = AsyncMock()
+    router.route.return_value = _RoutingDecisionStub()
+    supervisor_started = asyncio.Event()
+    release_supervisor = asyncio.Event()
+
+    async def _blocking_execute_plan(*_args: Any, **_kwargs: Any) -> Any:
+        supervisor_started.set()
+        await release_supervisor.wait()
+        return Mock(output={"ok": True}, workers_used=1)
+
+    bridge_a = AsyncMock()
+    bridge_a.admit_execution_plan = Mock()
+    bridge_a.execute_execution_plan.side_effect = _blocking_execute_plan
+    service_a = DirectExecutionService(
+        masr_router=router,
+        supervisor_bridge=bridge_a,
+        supervisor_factory=Mock(),
+        session_factory=session_factory,
+        execution_authority_resolver=resolver,
+    )
+    project = make_project()
+    execution_id = await service_a.start_research_execution(
+        project, authority_reference=reference
+    )
+    await asyncio.wait_for(supervisor_started.wait(), timeout=5)
+
+    # The restart: a new process, sharing only Postgres, recovers the run.
+    bridge_b = AsyncMock()
+    bridge_b.admit_execution_plan = Mock()
+    service_b = DirectExecutionService(
+        masr_router=AsyncMock(),
+        supervisor_bridge=bridge_b,
+        supervisor_factory=Mock(),
+        session_factory=session_factory,
+        execution_authority_resolver=resolver,
+    )
+    assert await service_b.restore_active_executions() >= 1
+    assert execution_id in service_b.active_executions
+
+    replayed = await service_b.start_research_execution(
+        project, authority_reference=reference
+    )
+
+    assert replayed == execution_id
+    bridge_b.admit_execution_plan.assert_not_called()
+    assert bridge_b.execute_execution_plan.await_count == 0
+
+    release_supervisor.set()
+    await service_a.close()
+    await service_b.close()

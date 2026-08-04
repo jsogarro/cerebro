@@ -592,6 +592,9 @@ class DirectExecutionService:
             execution_status._run = queued_run
             execution_status._task = ready_task
             execution_status._attempt = attempt
+            self._execution_ids_by_run_id[queued_run.run_id] = (
+                execution_status.execution_id
+            )
         except Exception as exc:
             logger.warning(
                 "run_admission_persistence_failed",
@@ -1032,10 +1035,34 @@ class DirectExecutionService:
                         )
                         execution_status.errors = list(journaled.get("errors") or [])
                     self.active_executions[execution_id] = execution_status
+                    self._execution_ids_by_run_id[run_row.run_id] = execution_id
                     restored += 1
         except Exception as exc:
             logger.warning("active_execution_restore_failed", error=str(exc))
         return restored
+
+    def _replayed_execution_id(self, run_id: str) -> str | None:
+        """Return the execution already handling ``run_id``, if any.
+
+        A run is admitted once: ``agent_runs`` is unique on
+        ``(tenant_id, idempotency_key)``, and the authority binding fixes
+        ``run_id`` before the caller ever gets a handle. So a second
+        admission of the same run is a replay — a client retry, not a second
+        piece of work — and the execution already running (or already
+        finished) it is the answer.
+
+        Restored runs are in this index too, so a replay that arrives after a
+        restart still finds the execution the durable record says exists.
+        """
+        execution_id = self._execution_ids_by_run_id.get(run_id)
+        if execution_id is None:
+            return None
+        if execution_id not in self.active_executions:
+            # The index outlived what it pointed at; treat the run as
+            # unclaimed rather than handing back a dangling handle.
+            del self._execution_ids_by_run_id[run_id]
+            return None
+        return execution_id
 
     async def start_research_execution(
         self,
@@ -1049,6 +1076,14 @@ class DirectExecutionService:
         """
         Start direct research execution using MASR routing.
 
+        Admission is idempotent per run: submitting the same execution
+        authority twice — an ordinary client network retry — returns the
+        handle of the execution already running that run instead of starting
+        a second one. The caller sees one execution id, and reads status and
+        results for it exactly as if it had only asked once. Nothing about
+        the replay reaches the router, the supervisor bridge, or the durable
+        record.
+
         Args:
             project: Research project to execute
             context: Additional execution context
@@ -1060,6 +1095,15 @@ class DirectExecutionService:
             raise RuntimeError("Direct execution service is closed")
 
         binding = self._resolve_execution_authority(authority_reference)
+        replayed_execution_id = self._replayed_execution_id(binding.run.run_id)
+        if replayed_execution_id is not None:
+            logger.info(
+                "replayed_admission_coalesced",
+                run_id=binding.run.run_id,
+                execution_id=replayed_execution_id,
+            )
+            return replayed_execution_id
+
         routing_decision = await self._propose_routing(
             project,
             context=context,
