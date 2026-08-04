@@ -15,9 +15,11 @@ Key Features:
 
 import asyncio
 import copy
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, status
@@ -52,7 +54,7 @@ from ...core.contracts import (
     Task,
     TaskStatus,
 )
-from ...core.contracts.states import TERMINAL_ATTEMPT_STATUSES
+from ...core.contracts.states import TERMINAL_ATTEMPT_STATUSES, TERMINAL_RUN_STATUSES
 from ...core.kernel import (
     TypedRegistry,
     UnknownRegistryKeyError,
@@ -89,6 +91,68 @@ _RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
     RunStatus.RUNNING.value: "running",
     RunStatus.CANCELLING.value: "running",
 }
+
+
+# Observable ``current_phase`` for an execution whose real outcome is known
+# but whose durable write has not landed. It is deliberately not a
+# ``status`` value: ``status`` stays non-terminal precisely because no
+# terminal claim is backed by the database yet.
+AWAITING_DURABLE_CONFIRMATION_PHASE = "awaiting_durable_confirmation"
+
+
+class DurableWriteOutcome(StrEnum):
+    """What the durable layer did with a lifecycle write.
+
+    ``RECORDED`` also covers memory-only mode (no session factory, or an
+    execution that was never admitted): there is nothing to record, so
+    nothing was lost. ``REJECTED`` means the write can never succeed as
+    formulated — the contract refused the transition because the durable
+    record already moved past it — so retrying is pointless. ``UNAVAILABLE``
+    means the write itself never landed and the durable record still holds
+    the previous state; the same write can succeed later.
+    """
+
+    RECORDED = "recorded"
+    REJECTED = "rejected"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass
+class _DurableTransition:
+    """One fully planned lifecycle write, ready to commit or re-commit.
+
+    Planning is pure (contract ``transition_to`` calls) and happens once, so
+    a retry re-commits the *same* facts rather than re-deriving them from
+    state that may have moved on. ``occurred_at`` is the moment the outcome
+    happened, not the moment the write finally succeeded.
+    """
+
+    run: Run
+    task: Task | None
+    attempt: Attempt | None
+    event_type: str
+    payload: dict[str, Any]
+    occurred_at: datetime
+    journaled_result: dict[str, Any] | None = None
+
+
+@dataclass
+class _PendingTerminalOutcome:
+    """A terminal outcome the database has not accepted yet.
+
+    Held in process memory only. While it sits here the execution's
+    observable ``status`` stays non-terminal, so nothing reports a terminal
+    state the durable layer never took. If the process dies before
+    reconciliation lands the write, the outcome is lost — but the durable
+    record still shows a non-terminal run, which recovery surfaces as
+    unfinished work rather than as fabricated success.
+    """
+
+    transition: _DurableTransition
+    execution_status: "ExecutionStatus"
+    observable_status: str
+    observable_phase: str
+    observable_progress: float | None
 
 
 def _validate_supervisor_registry(registry: TypedRegistry) -> None:
@@ -151,6 +215,12 @@ class ExecutionStatus:
     # Populated by ``_admit_run``; ``None`` for executions started without a
     # session factory (most unit tests) or whose admission write failed.
     run_id: str | None = None
+
+    # The terminal status this execution really reached, set only while the
+    # durable layer has not accepted it yet. ``status`` deliberately stays
+    # non-terminal until then, so a reader is never told the run finished on
+    # the strength of process memory alone. Cleared when the write lands.
+    unconfirmed_terminal_status: str | None = None
 
     # In-memory copies of the durable Run/Task/Attempt contracts this
     # execution is writing through. They track the *last successfully
@@ -256,6 +326,23 @@ class DirectExecutionService:
         self.enable_retry = True
         self.max_retries = MAX_RETRY_ATTEMPTS
         self.max_domain_parallelism = 4  # Bounded multi-domain concurrency
+
+        # Durable-write resilience. A lifecycle write is retried a bounded
+        # number of times before it is treated as unavailable; a terminal
+        # write that still has not landed is parked and reconciled in the
+        # background for a bounded window rather than being dropped.
+        self.durable_write_max_attempts = 3
+        self.durable_write_retry_seconds = 0.1
+        self.durable_reconcile_interval_seconds = 1.0
+        self.durable_reconcile_max_seconds = 300.0
+        self._pending_terminal_outcomes: dict[str, _PendingTerminalOutcome] = {}
+        self._terminal_reconciler: asyncio.Task[None] | None = None
+
+        # Durable run identity -> execution_id, for the executions this
+        # process admitted or restored. A replayed admission of an already
+        # admitted run is coalesced onto the existing execution through this
+        # index instead of starting a second one.
+        self._execution_ids_by_run_id: dict[str, str] = {}
 
         # Store background task references to prevent GC
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -557,22 +644,30 @@ class DirectExecutionService:
         event_type: str,
         payload: dict[str, Any],
         reason: str | None = None,
-    ) -> None:
+    ) -> DurableWriteOutcome:
         """Advance the durable run/task/attempt and append their event.
 
-        No-ops when there is nothing to persist (no session factory, or this
-        execution was never admitted — e.g. tests that drive
-        ``_execute_research_workflow`` directly without going through
-        ``start_research_execution``). Any failure, including an illegal
-        transition (a retried workflow attempting to re-enter a phase whose
-        durable record already advanced past it), is logged and swallowed —
-        it degrades the durability of this one transition, not the
-        execution.
+        Returns what the durable layer did, so a caller can decide whether an
+        observable state change is backed by anything. Nothing raises: a
+        rejected or unavailable write degrades the durability of this one
+        transition, not the execution.
+
+        ``RECORDED`` is also the answer when there is nothing to persist (no
+        session factory, or this execution was never admitted — e.g. tests
+        that drive ``_execute_research_workflow`` directly without going
+        through ``start_research_execution``): memory-only mode has no
+        durable state to contradict.
+
+        A transient failure is retried a bounded number of times before the
+        write is called unavailable, and an unavailable *terminal* write is
+        parked for reconciliation rather than dropped — the outcome is the
+        one thing a run cannot afford to lose.
         """
         if not self.session_factory or execution_status._run is None:
-            return
+            return DurableWriteOutcome.RECORDED
+
+        now = datetime.now(UTC)
         try:
-            now = datetime.now(UTC)
             run = execution_status._run.transition_to(run_target, at=now, reason=reason)
             task = execution_status._task
             if task is not None and task_target is not None:
@@ -580,47 +675,239 @@ class DirectExecutionService:
             attempt = execution_status._attempt
             if attempt is not None and attempt_target is not None:
                 attempt = attempt.transition_to(attempt_target, at=now, reason=reason)
+        except Exception as exc:
+            # The durable record already moved past this transition (a
+            # retried workflow re-entering a phase it left). Retrying cannot
+            # help — the same write would be refused every time.
+            logger.warning(
+                "run_transition_rejected_by_contract",
+                execution_id=execution_status.execution_id,
+                run_id=execution_status._run.run_id,
+                event_type=event_type,
+                error=str(exc),
+            )
+            return DurableWriteOutcome.REJECTED
 
-            async with self.session_factory() as session:
-                repo = RunLifecycleRepository(session)
-                await repo.record_run_transition(run, organization_id=run.tenant_id)
-                if task is not None:
-                    await repo.record_task_transition(
-                        task, organization_id=run.tenant_id
-                    )
-                if attempt is not None:
-                    await repo.record_attempt_transition(
-                        attempt, organization_id=run.tenant_id
-                    )
-                    if attempt.status in TERMINAL_ATTEMPT_STATUSES:
-                        await repo.write_journaled_result(
-                            attempt.attempt_id,
-                            organization_id=run.tenant_id,
-                            result={
-                                "final_output": execution_status.final_output,
-                                "agent_results": execution_status.agent_results,
-                                "errors": list(execution_status.errors),
-                            },
-                        )
-                await self._append_event(
-                    session,
-                    run=run,
-                    event_type=event_type,
-                    payload=payload,
-                    occurred_at=now,
-                )
-                await session.commit()
+        journaled_result = None
+        if attempt is not None and attempt.status in TERMINAL_ATTEMPT_STATUSES:
+            journaled_result = {
+                "final_output": execution_status.final_output,
+                "agent_results": execution_status.agent_results,
+                "errors": list(execution_status.errors),
+            }
+        transition = _DurableTransition(
+            run=run,
+            task=task,
+            attempt=attempt,
+            event_type=event_type,
+            payload=payload,
+            occurred_at=now,
+            journaled_result=journaled_result,
+        )
 
+        if await self._commit_transition(transition):
             execution_status._run = run
             execution_status._task = task
             execution_status._attempt = attempt
-        except Exception as exc:
+            # A landed write supersedes any earlier outcome still waiting to
+            # be reconciled for this execution.
+            self._pending_terminal_outcomes.pop(execution_status.execution_id, None)
+            return DurableWriteOutcome.RECORDED
+
+        if run.status in TERMINAL_RUN_STATUSES:
+            self._park_terminal_outcome(execution_status, transition)
+        return DurableWriteOutcome.UNAVAILABLE
+
+    async def _commit_transition(self, transition: _DurableTransition) -> bool:
+        """Commit one planned transition, retrying transient failures.
+
+        All writes share a single transaction and a single commit, so a
+        failure anywhere inside leaves the durable record exactly where it
+        was — which is what makes a retry safe to attempt at all.
+        """
+        if not self.session_factory:
+            return False
+        run = transition.run
+        last_error: Exception | None = None
+        for attempt_number in range(1, self.durable_write_max_attempts + 1):
+            try:
+                async with self.session_factory() as session:
+                    repo = RunLifecycleRepository(session)
+                    await repo.record_run_transition(run, organization_id=run.tenant_id)
+                    if transition.task is not None:
+                        await repo.record_task_transition(
+                            transition.task, organization_id=run.tenant_id
+                        )
+                    if transition.attempt is not None:
+                        await repo.record_attempt_transition(
+                            transition.attempt, organization_id=run.tenant_id
+                        )
+                        if transition.journaled_result is not None:
+                            await repo.write_journaled_result(
+                                transition.attempt.attempt_id,
+                                organization_id=run.tenant_id,
+                                result=transition.journaled_result,
+                            )
+                    await self._append_event(
+                        session,
+                        run=run,
+                        event_type=transition.event_type,
+                        payload=transition.payload,
+                        occurred_at=transition.occurred_at,
+                    )
+                    await session.commit()
+                return True
+            except Exception as exc:
+                last_error = exc
+                if attempt_number < self.durable_write_max_attempts:
+                    await asyncio.sleep(
+                        self.durable_write_retry_seconds * 2 ** (attempt_number - 1)
+                    )
+        logger.warning(
+            "run_transition_persistence_failed",
+            run_id=run.run_id,
+            event_type=transition.event_type,
+            attempts=self.durable_write_max_attempts,
+            error=str(last_error),
+        )
+        return False
+
+    def _park_terminal_outcome(
+        self, execution_status: ExecutionStatus, transition: _DurableTransition
+    ) -> None:
+        """Hold a terminal outcome the database refused, and keep retrying it.
+
+        The observable status is left alone here; :meth:`_settle_terminal_state`
+        is what decides what a caller gets to see, and it withholds the
+        terminal flip for exactly this case.
+        """
+        self._pending_terminal_outcomes[execution_status.execution_id] = (
+            _PendingTerminalOutcome(
+                transition=transition,
+                execution_status=execution_status,
+                observable_status=execution_status.status,
+                observable_phase=execution_status.current_phase,
+                observable_progress=None,
+            )
+        )
+        logger.error(
+            "terminal_outcome_not_durably_recorded",
+            execution_id=execution_status.execution_id,
+            run_id=transition.run.run_id,
+            run_status=transition.run.status.value,
+        )
+        self._schedule_terminal_reconciliation()
+
+    def _settle_terminal_state(
+        self,
+        execution_status: ExecutionStatus,
+        *,
+        outcome: DurableWriteOutcome,
+        status: str,
+        phase: str,
+        progress: float | None = None,
+    ) -> None:
+        """Publish a terminal status only if the durable layer accepted it.
+
+        When the write was merely rejected there is nothing further to wait
+        for, and the in-memory view is the only view left — it is flipped, as
+        it always was. When the write was *unavailable*, the flip is withheld:
+        the execution keeps a non-terminal status, records which outcome is
+        waiting on the database, and reconciliation performs the flip once the
+        write lands.
+        """
+        if outcome is DurableWriteOutcome.UNAVAILABLE:
+            pending = self._pending_terminal_outcomes.get(execution_status.execution_id)
+            if pending is not None:
+                pending.observable_status = status
+                pending.observable_phase = phase
+                pending.observable_progress = progress
+            execution_status.unconfirmed_terminal_status = status
+            execution_status.current_phase = AWAITING_DURABLE_CONFIRMATION_PHASE
             logger.warning(
-                "run_transition_persistence_failed",
+                "terminal_status_withheld_pending_durable_write",
                 execution_id=execution_status.execution_id,
-                run_id=execution_status._run.run_id if execution_status._run else None,
-                event_type=event_type,
-                error=str(exc),
+                run_id=execution_status.run_id,
+                withheld_status=status,
+            )
+            return
+        execution_status.status = status
+        execution_status.current_phase = phase
+        if progress is not None:
+            execution_status.progress_percentage = progress
+        execution_status.unconfirmed_terminal_status = None
+
+    async def reconcile_pending_terminal_transitions(self) -> int:
+        """Retry terminal outcomes the database refused, and publish the ones
+        that land.
+
+        Safe to call at any time; it is what turns "the outcome is known but
+        unrecorded" back into "the outcome is recorded", and it is the only
+        thing that flips an execution parked in
+        ``awaiting_durable_confirmation`` to its real terminal status.
+
+        Returns:
+            The number of outcomes durably recorded on this pass.
+        """
+        reconciled = 0
+        for execution_id, pending in list(self._pending_terminal_outcomes.items()):
+            if not await self._commit_transition(pending.transition):
+                continue
+            self._pending_terminal_outcomes.pop(execution_id, None)
+            execution_status = pending.execution_status
+            execution_status._run = pending.transition.run
+            execution_status._task = pending.transition.task
+            execution_status._attempt = pending.transition.attempt
+            self._settle_terminal_state(
+                execution_status,
+                outcome=DurableWriteOutcome.RECORDED,
+                status=pending.observable_status,
+                phase=pending.observable_phase,
+                progress=pending.observable_progress,
+            )
+            reconciled += 1
+            logger.info(
+                "terminal_outcome_reconciled",
+                execution_id=execution_id,
+                run_id=pending.transition.run.run_id,
+                run_status=pending.transition.run.status.value,
+            )
+        return reconciled
+
+    def _schedule_terminal_reconciliation(self) -> None:
+        """Ensure a background reconciler is draining the parked outcomes."""
+
+        if self.closed:
+            return
+        task = self._terminal_reconciler
+        if task is not None and not task.done():
+            return
+        self._terminal_reconciler = asyncio.create_task(self._reconcile_until_drained())
+        self._background_tasks.add(self._terminal_reconciler)
+        self._terminal_reconciler.add_done_callback(self._background_tasks.discard)
+
+    async def _reconcile_until_drained(self) -> None:
+        """Retry parked terminal outcomes until they land or time runs out.
+
+        Bounded on purpose: an outage longer than
+        ``durable_reconcile_max_seconds`` is not something a process-memory
+        backlog can outlive anyway, and the loop says so loudly instead of
+        spinning forever.
+        """
+        deadline = time.monotonic() + self.durable_reconcile_max_seconds
+        while self._pending_terminal_outcomes and time.monotonic() < deadline:
+            await asyncio.sleep(self.durable_reconcile_interval_seconds)
+            try:
+                await self.reconcile_pending_terminal_transitions()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("terminal_outcome_reconciliation_failed", error=str(exc))
+        if self._pending_terminal_outcomes:
+            logger.error(
+                "terminal_outcome_reconciliation_abandoned",
+                execution_ids=sorted(self._pending_terminal_outcomes),
+                elapsed_seconds=self.durable_reconcile_max_seconds,
             )
 
     async def _persist_cancellation(self, execution_status: ExecutionStatus) -> None:
@@ -958,8 +1245,8 @@ class DirectExecutionService:
                 # execution_status, so those must already be set (above)
                 # before this call — but the terminal status flip below must
                 # come after it, so nothing observes "completed" ahead of
-                # the durable row.
-                await self._persist_transition(
+                # the durable row, and only if the durable row exists.
+                outcome = await self._persist_transition(
                     execution_status,
                     run_target=RunStatus.SUCCEEDED,
                     task_target=TaskStatus.SUCCEEDED,
@@ -967,9 +1254,13 @@ class DirectExecutionService:
                     event_type="run.succeeded",
                     payload={"fixture_mode": True},
                 )
-                execution_status.status = "completed"
-                execution_status.current_phase = "completed"
-                execution_status.progress_percentage = 100.0
+                self._settle_terminal_state(
+                    execution_status,
+                    outcome=outcome,
+                    status="completed",
+                    phase="completed",
+                    progress=100.0,
+                )
                 await self._checkpoint(execution_status, "fixture_completed")
                 logger.info(
                     "fixture_execution_completed",
@@ -1005,7 +1296,7 @@ class DirectExecutionService:
             execution_status.final_output = plan_result.output
             execution_status.workers_used = plan_result.workers_used
             self.execution_stats["successful_executions"] += 1
-            await self._persist_transition(
+            outcome = await self._persist_transition(
                 execution_status,
                 run_target=RunStatus.SUCCEEDED,
                 task_target=TaskStatus.SUCCEEDED,
@@ -1013,9 +1304,13 @@ class DirectExecutionService:
                 event_type="run.succeeded",
                 payload={"workers_used": execution_status.workers_used},
             )
-            execution_status.status = "completed"
-            execution_status.current_phase = "completed"
-            execution_status.progress_percentage = 100.0
+            self._settle_terminal_state(
+                execution_status,
+                outcome=outcome,
+                status="completed",
+                phase="completed",
+                progress=100.0,
+            )
             await self._checkpoint(execution_status, "completed")
             return
         except Exception as e:
@@ -1028,7 +1323,7 @@ class DirectExecutionService:
 
             self.execution_stats["failed_executions"] += 1
 
-            await self._persist_transition(
+            outcome = await self._persist_transition(
                 execution_status,
                 run_target=RunStatus.FAILED,
                 task_target=TaskStatus.FAILED,
@@ -1037,8 +1332,12 @@ class DirectExecutionService:
                 payload={"error": str(e)},
                 reason=(str(e).strip() or "execution failed")[:500],
             )
-            execution_status.status = "failed"
-            execution_status.current_phase = "failed"
+            self._settle_terminal_state(
+                execution_status,
+                outcome=outcome,
+                status="failed",
+                phase="failed",
+            )
 
             # Re-raise for retry logic
             raise
@@ -1356,6 +1655,16 @@ class DirectExecutionService:
         if self.closed:
             return
         self.closed = True
+        if self._pending_terminal_outcomes:
+            # Last chance to record an outcome this process is about to
+            # forget. Best-effort: if it still fails, the durable record
+            # keeps showing a non-terminal run, which is the honest reading.
+            try:
+                await self.reconcile_pending_terminal_transitions()
+            except Exception as exc:
+                logger.warning(
+                    "terminal_outcome_shutdown_reconciliation_failed", error=str(exc)
+                )
         tasks = tuple(self._background_tasks)
         for task in tasks:
             task.cancel()
@@ -1499,7 +1808,9 @@ async def close_direct_execution_service(
 
 
 __all__ = [
+    "AWAITING_DURABLE_CONFIRMATION_PHASE",
     "DirectExecutionService",
+    "DurableWriteOutcome",
     "ExecutionStatus",
     "aggregate_results",
     "close_direct_execution_service",

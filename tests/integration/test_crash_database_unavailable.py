@@ -19,7 +19,9 @@ from sqlalchemy.orm import sessionmaker
 
 from src.ai_brain.router.routing_types import RoutingExecutionPolicy
 from src.api.services.direct_execution_service import (
+    AWAITING_DURABLE_CONFIRMATION_PHASE,
     DirectExecutionService,
+    DurableWriteOutcome,
     ExecutionStatus,
 )
 from src.api.services.execution_authority_resolver import (
@@ -188,30 +190,15 @@ async def test_cancellation_degrades_gracefully_when_database_goes_down(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "FINDING: a database outage that lands exactly at the terminal "
-        "(SUCCEEDED) persist call is swallowed by _persist_transition's "
-        "broad except-and-log, and _execute_research_workflow flips "
-        "execution_status.status to 'completed' in memory unconditionally "
-        "afterward regardless of whether the durable write landed. If the "
-        "process then disappears (crashes, is redeployed) before the "
-        "database recovers, the run's true SUCCEEDED outcome — including "
-        "final_output, which is only ever journaled inside that same failed "
-        "transaction — is never durably recorded. A restart's "
-        "restore_active_executions() finds the run still non-terminal "
-        "('running', its last successfully committed status) and resurrects "
-        "it as still in-flight forever: no fabricated success, but the run's "
-        "real terminal state is permanently and silently lost. This is a "
-        "direct violation of the wave's own validation bar: 'an API restart "
-        "during an active golden run recovers without fabricated success or "
-        "lost terminal state.'"
-    ),
-)
 async def test_db_outage_at_terminal_transition_does_not_lose_true_outcome(
     test_engine: AsyncEngine,
 ) -> None:
+    """A database outage landing exactly on the terminal write must neither
+    fabricate success nor drop the outcome on the floor: the status stays
+    non-terminal while the durable layer has not accepted it, the real
+    outcome is held for reconciliation, and it lands — journaled
+    ``final_output`` included — once the database is back."""
+
     session_factory = sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -230,6 +217,11 @@ async def test_db_outage_at_terminal_transition_does_not_lose_true_outcome(
         session_factory=toggle,
         execution_authority_resolver=resolver,
     )
+    service.durable_write_retry_seconds = 0.01
+    # Reconcile only when this test says so: a background pass landing the
+    # write mid-assertion would make the timing, not the behavior, the thing
+    # under test.
+    service.durable_reconcile_interval_seconds = 60.0
     project = make_project()
     execution_status = ExecutionStatus(
         execution_id="exec-db-down-terminal",
@@ -251,6 +243,7 @@ async def test_db_outage_at_terminal_transition_does_not_lose_true_outcome(
         event_type="run.started",
         payload={},
     )
+    execution_status.status = "running"
     assert execution_status._run is not None
     assert execution_status._run.status == RunStatus.RUNNING
 
@@ -262,7 +255,7 @@ async def test_db_outage_at_terminal_transition_does_not_lose_true_outcome(
     # The database goes down at the worst possible instant: right as the
     # terminal transition tries to persist.
     toggle.broken = True
-    await service._persist_transition(
+    outcome = await service._persist_transition(
         execution_status,
         run_target=RunStatus.SUCCEEDED,
         task_target=TaskStatus.SUCCEEDED,
@@ -270,13 +263,207 @@ async def test_db_outage_at_terminal_transition_does_not_lose_true_outcome(
         event_type="run.succeeded",
         payload={},
     )
-    # Mirrors _execute_research_workflow's unconditional flip after
-    # _persist_transition returns, regardless of whether it durably landed.
-    execution_status.status = "completed"
+    assert outcome is DurableWriteOutcome.UNAVAILABLE
 
-    # "The process disappears": database recovers, but this Python process
-    # (and its in-memory execution_status) is gone. A brand-new service,
-    # sharing only Postgres, is what a real restart looks like.
+    # What _execute_research_workflow does with that answer: it refuses to
+    # publish a terminal status the database never took, and says which
+    # outcome is waiting on it instead.
+    service._settle_terminal_state(
+        execution_status,
+        outcome=outcome,
+        status="completed",
+        phase="completed",
+        progress=100.0,
+    )
+    assert execution_status.status != "completed"
+    assert execution_status.unconfirmed_terminal_status == "completed"
+    assert execution_status.current_phase == AWAITING_DURABLE_CONFIRMATION_PHASE
+
+    # While the write is outstanding the durable record is honest about it:
+    # still running, no fabricated terminal row for a restart to read.
+    async with session_factory() as session:
+        row = await RunLifecycleRepository(session).get_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert row is not None
+        assert row.status == RunStatus.RUNNING.value
+
+    # The database comes back. The outcome was held, not discarded, so it is
+    # still there to record.
+    toggle.broken = False
+    assert await service.reconcile_pending_terminal_transitions() == 1
+    assert execution_status.status == "completed"
+    assert execution_status.unconfirmed_terminal_status is None
+
+    async with session_factory() as session:
+        repo = RunLifecycleRepository(session)
+        row = await repo.get_run(run_id, organization_id=ORG_ID)
+        assert row is not None
+        assert row.status == RunStatus.SUCCEEDED.value
+        tasks = await repo.get_tasks_for_run(run_id, organization_id=ORG_ID)
+        attempts = await repo.get_attempts_for_task(
+            tasks[0].task_id, organization_id=ORG_ID
+        )
+        # final_output is journaled inside the very transaction that failed,
+        # so its survival is the proof the true outcome was not lost.
+        assert attempts[-1].journaled_result["final_output"] == {
+            "result": "the real answer"
+        }
+
+    # "The process disappears": a brand-new service sharing only Postgres —
+    # what a real restart looks like. The run is durably terminal now, so it
+    # is correctly not resurrected as in-flight.
+    service_b = DirectExecutionService(
+        masr_router=AsyncMock(),
+        supervisor_bridge=AsyncMock(),
+        supervisor_factory=Mock(),
+        session_factory=session_factory,
+    )
+    await service_b.restore_active_executions()
+    assert "exec-db-down-terminal" not in service_b.active_executions
+
+    await service.close()
+    await service_b.close()
+
+
+@pytest.mark.asyncio
+async def test_workflow_does_not_report_success_the_database_refused(
+    test_engine: AsyncEngine,
+) -> None:
+    """The same guarantee through the production path: a database that dies
+    between the work finishing and the terminal write must not leave a
+    caller polling ``active_executions`` with a 'completed' that nothing
+    durable backs."""
+
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    toggle = _ToggleFailingSessionFactory(session_factory)
+    run_id = "db-down-workflow-terminal-run"
+    binding = make_binding(run_id, authority_id="db-down-workflow-authority")
+    resolver = MappingExecutionAuthorityResolver(
+        {("db-down-workflow-authority", "1"): binding}
+    )
+    router = AsyncMock()
+    router.route.return_value = _RoutingDecisionStub()
+
+    async def _work_then_kill_the_database(*_args: Any, **_kwargs: Any) -> Any:
+        toggle.broken = True
+        return Mock(output={"result": "the real answer"}, workers_used=1)
+
+    bridge = AsyncMock()
+    bridge.admit_execution_plan = Mock()
+    bridge.execute_execution_plan.side_effect = _work_then_kill_the_database
+
+    service = DirectExecutionService(
+        masr_router=router,
+        supervisor_bridge=bridge,
+        supervisor_factory=Mock(),
+        session_factory=toggle,
+        execution_authority_resolver=resolver,
+    )
+    service.durable_write_retry_seconds = 0.01
+    # Reconcile only when this test says so: a background pass landing the
+    # write mid-assertion would make the timing, not the behavior, the thing
+    # under test.
+    service.durable_reconcile_interval_seconds = 60.0
+    project = make_project()
+    execution_id = await service.start_research_execution(
+        project,
+        authority_reference=ExecutionAuthorityReference(
+            authority_id="db-down-workflow-authority", authority_version="1"
+        ),
+    )
+
+    execution = service.active_executions[execution_id]
+    for _ in range(100):
+        if execution.unconfirmed_terminal_status is not None:
+            break
+        await asyncio.sleep(0.02)
+
+    assert execution.unconfirmed_terminal_status == "completed"
+    assert execution.status != "completed"
+    assert execution.current_phase == AWAITING_DURABLE_CONFIRMATION_PHASE
+    assert execution.final_output == {"result": "the real answer"}
+
+    toggle.broken = False
+    assert await service.reconcile_pending_terminal_transitions() == 1
+    assert execution.status == "completed"
+
+    async with session_factory() as session:
+        row = await RunLifecycleRepository(session).get_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert row is not None
+        assert row.status == RunStatus.SUCCEEDED.value
+
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_outcome_lost_to_a_dead_process_recovers_as_unfinished_work(
+    test_engine: AsyncEngine,
+) -> None:
+    """The residual case, stated honestly: if the process dies before the
+    database comes back, the held outcome dies with it — process memory is
+    not durable. What must not happen is a fabricated terminal record. The
+    run comes back as unfinished work a restart can see and act on, exactly
+    the state the database was left in."""
+
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    toggle = _ToggleFailingSessionFactory(session_factory)
+    run_id = "db-down-terminal-lost-run"
+    binding = make_binding(run_id, authority_id="db-down-terminal-lost-authority")
+    resolver = MappingExecutionAuthorityResolver(
+        {("db-down-terminal-lost-authority", "1"): binding}
+    )
+    bridge = AsyncMock()
+    bridge.admit_execution_plan = Mock()
+    service = DirectExecutionService(
+        masr_router=AsyncMock(),
+        supervisor_bridge=bridge,
+        supervisor_factory=Mock(),
+        session_factory=toggle,
+        execution_authority_resolver=resolver,
+    )
+    service.durable_write_retry_seconds = 0.01
+    # Reconcile only when this test says so: a background pass landing the
+    # write mid-assertion would make the timing, not the behavior, the thing
+    # under test.
+    service.durable_reconcile_interval_seconds = 60.0
+    project = make_project()
+    execution_status = ExecutionStatus(
+        execution_id="exec-db-down-terminal-lost",
+        project_id=str(project.id),
+        status="pending",
+        current_phase="initialization",
+    )
+    await service._admit_run(execution_status, binding, project)
+    await service._persist_transition(
+        execution_status,
+        run_target=RunStatus.RUNNING,
+        task_target=TaskStatus.RUNNING,
+        attempt_target=AttemptStatus.RUNNING,
+        event_type="run.started",
+        payload={},
+    )
+    execution_status.status = "running"
+    execution_status.final_output = {"result": "the real answer"}
+
+    toggle.broken = True
+    outcome = await service._persist_transition(
+        execution_status,
+        run_target=RunStatus.SUCCEEDED,
+        task_target=TaskStatus.SUCCEEDED,
+        attempt_target=AttemptStatus.SUCCEEDED,
+        event_type="run.succeeded",
+        payload={},
+    )
+    assert outcome is DurableWriteOutcome.UNAVAILABLE
+
+    # The process disappears with the outcome still parked in its memory.
     toggle.broken = False
     service_b = DirectExecutionService(
         masr_router=AsyncMock(),
@@ -286,10 +473,17 @@ async def test_db_outage_at_terminal_transition_does_not_lose_true_outcome(
     )
     await service_b.restore_active_executions()
 
-    recovered = service_b.active_executions.get("exec-db-down-terminal")
+    recovered = service_b.active_executions.get("exec-db-down-terminal-lost")
     assert recovered is not None
-    assert recovered.status == "completed"
-    assert recovered.final_output == {"result": "the real answer"}
+    assert recovered.status == "running"
+    assert recovered.unconfirmed_terminal_status is None
+    async with session_factory() as session:
+        row = await RunLifecycleRepository(session).get_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert row is not None
+        assert row.status == RunStatus.RUNNING.value
+        assert row.completed_at is None
 
     await service.close()
     await service_b.close()
