@@ -38,6 +38,16 @@ class WorkflowCheckpoint(BaseModel):
         index=True,
     )
 
+    # Optional link to a durable run. Checkpoints predate the run lifecycle
+    # tables and are still written for project-scoped workflows, so this stays
+    # nullable rather than forcing every checkpoint through a run.
+    run_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("agent_runs.run_id"),
+        nullable=True,
+        index=True,
+    )
+
     # Checkpoint data
     checkpoint_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
