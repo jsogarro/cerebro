@@ -329,10 +329,11 @@ class TestAgentAPI:
 
     def test_literature_search_convenience(self, client: TestClient) -> None:
         """Convenience endpoints delegate to the authority-gated execute
-        path internally and accept no authority_reference of their own, so
-        they now fail closed deterministically rather than reaching the
-        backend (previously tolerated 200 or 500 — a placeholder for "we
-        don't know what this returns," which fail-closed now answers)."""
+        path internally; when the request supplies no authority_id/
+        authority_version pair, they fail closed deterministically rather
+        than reaching the backend (previously tolerated 200 or 500 — a
+        placeholder for "we don't know what this returns," which
+        fail-closed now answers)."""
 
         response = client.post(
             "/api/v1/agents/literature-review/search",
@@ -348,7 +349,7 @@ class TestAgentAPI:
 
     def test_citation_format_convenience(self, client: TestClient) -> None:
         """Same fail-closed contract via the citation-format convenience
-        endpoint, which also has no authority_reference parameter."""
+        endpoint when no authority reference is supplied."""
 
         response = client.post(
             "/api/v1/agents/citation/format",
@@ -363,8 +364,7 @@ class TestAgentAPI:
 
     def test_research_workflow_convenience(self, client: TestClient) -> None:
         """Same fail-closed contract via the literature-analysis workflow
-        convenience endpoint, which also has no authority_reference
-        parameter."""
+        convenience endpoint when no authority reference is supplied."""
 
         response = client.post(
             "/api/v1/agents/workflows/literature-analysis",
@@ -376,6 +376,38 @@ class TestAgentAPI:
 
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "EXECUTION_AUTHORITY_REQUIRED"
+
+    def test_overlong_authority_reference_is_a_validation_error(
+        self, client: TestClient
+    ) -> None:
+        """Authority values exceeding the ExecutionAuthorityReference bounds
+        (255/100) must fail request validation with a 422, matching the
+        direct execute routes whose request model enforces the same limits —
+        not escape as a raw pydantic ValidationError into the catch-all 500
+        handler."""
+
+        response = client.post(
+            "/api/v1/agents/literature-review/search",
+            params={
+                "query": "AI ethics in healthcare",
+                "authority_id": "a" * 300,
+                "authority_version": "1",
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+        response = client.post(
+            "/api/v1/agents/citation/format",
+            json={
+                "sources": ["Source 1"],
+                "style": "APA",
+                "authority_id": "authority-1",
+                "authority_version": "v" * 200,
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 class TestAgentTypeResolution:

@@ -160,25 +160,66 @@ async def test_execute_and_convenience_routes_fail_closed_without_authority():
     assert service.requests == []
 
 
-@pytest.mark.asyncio
-async def test_convenience_route_threads_a_supplied_authority_reference():
-    """literature_search now accepts authority_id/authority_version. A
-    supplied reference changes the failure from EXECUTION_AUTHORITY_REQUIRED
-    (no reference at all) to EXECUTION_AUTHORITY_UNAVAILABLE (reference
-    present, but this fixture backend exposes no resolver) — proving the
-    reference reached the same authority gate execute_agent uses, rather
-    than being silently dropped."""
-    service = _AgentService()
-
-    with pytest.raises(HTTPException) as exc_info:
-        await agent_api.literature_search(
-            query="Characterize literature convenience",
-            max_sources=30,
+_CONVENIENCE_CALLS_WITH_AUTHORITY = {
+    "literature_search": lambda service: agent_api.literature_search(
+        query="Characterize literature convenience",
+        max_sources=30,
+        domains=["research"],
+        authority_id="authority-1",
+        authority_version="1",
+        execution_service=service,
+    ),
+    "format_citations": lambda service: agent_api.format_citations(
+        sources=["Source 1", "Source 2"],
+        style="APA",
+        authority_id="authority-1",
+        authority_version="1",
+        execution_service=service,
+    ),
+    "synthesize_findings": lambda service: agent_api.synthesize_findings(
+        findings=[
+            {"claim": "Alpha", "evidence_ids": ["evidence-1"]},
+            {"claim": "Beta", "evidence_ids": ["evidence-2"]},
+        ],
+        synthesis_focus="thematic",
+        authority_id="authority-1",
+        authority_version="1",
+        execution_service=service,
+    ),
+    "literature_analysis_workflow": lambda service: (
+        agent_api.literature_analysis_workflow(
+            query="Characterize literature workflow",
             domains=["research"],
             authority_id="authority-1",
             authority_version="1",
             execution_service=service,
         )
+    ),
+    "comprehensive_research_workflow": lambda service: (
+        agent_api.comprehensive_research_workflow(
+            query="Characterize comprehensive workflow",
+            analysis_depth="exhaustive",
+            authority_id="authority-1",
+            authority_version="1",
+            execution_service=service,
+        )
+    ),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", sorted(_CONVENIENCE_CALLS_WITH_AUTHORITY))
+async def test_convenience_route_threads_a_supplied_authority_reference(endpoint):
+    """Every convenience endpoint accepts authority_id/authority_version. A
+    supplied reference changes the failure from EXECUTION_AUTHORITY_REQUIRED
+    (no reference at all) to EXECUTION_AUTHORITY_UNAVAILABLE (reference
+    present, but this fixture backend exposes no resolver) — proving the
+    reference reached the same authority gate execute_agent uses, rather
+    than being silently dropped on any of the five routes."""
+    service = _AgentService()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _CONVENIENCE_CALLS_WITH_AUTHORITY[endpoint](service)
 
     assert exc_info.value.detail == {"code": "EXECUTION_AUTHORITY_UNAVAILABLE"}
     assert service.requests == []

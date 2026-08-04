@@ -574,10 +574,10 @@ async def literature_search(
     max_sources: int = Query(25, ge=5, le=100),
     domains: list[str] = Query(default=[]),
     authority_id: str | None = Query(
-        None, description="Trusted execution authority identifier"
+        None, max_length=255, description="Trusted execution authority identifier"
     ),
     authority_version: str | None = Query(
-        None, description="Trusted execution authority version"
+        None, max_length=100, description="Trusted execution authority version"
     ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
@@ -615,10 +615,10 @@ async def format_citations(
     sources: list[str] = Body(..., min_length=1),
     style: str = Body("APA", pattern="^(APA|MLA|Chicago)$"),
     authority_id: str | None = Body(
-        None, description="Trusted execution authority identifier"
+        None, max_length=255, description="Trusted execution authority identifier"
     ),
     authority_version: str | None = Body(
-        None, description="Trusted execution authority version"
+        None, max_length=100, description="Trusted execution authority version"
     ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
@@ -657,10 +657,10 @@ async def synthesize_findings(
         "comprehensive", pattern="^(comprehensive|comparative|thematic)$"
     ),
     authority_id: str | None = Body(
-        None, description="Trusted execution authority identifier"
+        None, max_length=255, description="Trusted execution authority identifier"
     ),
     authority_version: str | None = Body(
-        None, description="Trusted execution authority version"
+        None, max_length=100, description="Trusted execution authority version"
     ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
@@ -701,10 +701,10 @@ async def literature_analysis_workflow(
     domains: list[str] = Query(default=[]),
     max_sources: int = Query(25, ge=10, le=100),
     authority_id: str | None = Query(
-        None, description="Trusted execution authority identifier"
+        None, max_length=255, description="Trusted execution authority identifier"
     ),
     authority_version: str | None = Query(
-        None, description="Trusted execution authority version"
+        None, max_length=100, description="Trusted execution authority version"
     ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
@@ -747,10 +747,10 @@ async def comprehensive_research_workflow(
         "comprehensive", pattern="^(basic|comprehensive|exhaustive)$"
     ),
     authority_id: str | None = Query(
-        None, description="Trusted execution authority identifier"
+        None, max_length=255, description="Trusted execution authority identifier"
     ),
     authority_version: str | None = Query(
-        None, description="Trusted execution authority version"
+        None, max_length=100, description="Trusted execution authority version"
     ),
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
