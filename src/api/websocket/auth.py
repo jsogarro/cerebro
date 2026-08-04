@@ -7,6 +7,10 @@ This module provides authentication and authorization for WebSocket connections.
 from jose import JWTError
 from structlog import get_logger
 
+from src.api.websocket.run_stream import (
+    RunStreamAuthorizationError,
+    RunStreamEntitlement,
+)
 from src.auth.jwt_service import JWTService
 from src.core.config import settings
 
@@ -118,6 +122,44 @@ async def verify_project_access(user_id: str | None, project_id: str) -> bool:
     # This would typically check database for user-project relationships
     # For now, authenticated users can access any project
     return user_id is not None
+
+
+async def resolve_run_stream_entitlement(
+    token: str | None,
+    jwt_service: JWTService,
+) -> RunStreamEntitlement:
+    """Derive a run-stream subscriber's tenant entitlement from its token.
+
+    Deliberately does not honor the anonymous development opt-in that
+    ``verify_websocket_token`` allows: an anonymous connection carries no
+    organization claim, and the run event stream has no safe unscoped mode.
+    Every subscriber must present a token with a tenant organization.
+
+    Raises:
+        WebSocketAuthError: The token is missing, invalid, or carries no
+            usable organization claim.
+    """
+    if not token:
+        raise WebSocketAuthError("Authentication token required")
+
+    if token.startswith("Bearer "):
+        token = token[7:]
+
+    try:
+        token_payload = await jwt_service.validate_token(token)
+    except WebSocketAuthError:
+        raise
+    except JWTError as e:
+        raise WebSocketAuthError("Invalid authentication token") from e
+    except Exception as e:
+        raise WebSocketAuthError("Authentication failed") from e
+
+    try:
+        return RunStreamEntitlement.from_organization_claim(
+            token_payload.organization_id, user_id=str(token_payload.sub)
+        )
+    except RunStreamAuthorizationError as e:
+        raise WebSocketAuthError(str(e), code=1008) from e
 
 
 def extract_client_type(user_agent: str | None) -> str:

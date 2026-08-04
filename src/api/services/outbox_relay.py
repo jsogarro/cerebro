@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from structlog import get_logger
 
 from src.api.services.event_publisher import EventPublisher
+from src.api.websocket.run_stream import RunStreamHub, run_stream_hub
 from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 
 logger = get_logger()
@@ -55,9 +56,11 @@ class OutboxRelay:
         poll_interval_seconds: float = 1.0,
         batch_size: int = 50,
         max_attempts: int = 10,
+        stream_hub: RunStreamHub | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.event_publisher = event_publisher
+        self.stream_hub = stream_hub if stream_hub is not None else run_stream_hub
         self.worker_id = worker_id or f"outbox-relay-{uuid.uuid4().hex[:8]}"
         self.poll_interval_seconds = poll_interval_seconds
         self.batch_size = batch_size
@@ -108,7 +111,30 @@ class OutboxRelay:
                 await session.commit()
             if ok:
                 delivered += 1
+        self._notify_stream_subscribers(rows)
         return delivered
+
+    def _notify_stream_subscribers(self, rows: list[AgentRunEventOutbox]) -> None:
+        """Wake local stream subscribers for every run this batch touched.
+
+        Deliberately independent of whether a row's own delivery succeeded:
+        the event is already durable in ``agent_run_events``, and subscribers
+        re-read it from there rather than from anything this relay hands them.
+        Rows with no organization are skipped — an unattributable row has no
+        tenant to notify, and guessing one would be the leak this notification
+        scheme exists to avoid.
+        """
+        notified: set[tuple[str, str]] = set()
+        for row in rows:
+            if row.organization_id is None:
+                continue
+            key = (str(row.organization_id), row.run_id)
+            if key in notified:
+                continue
+            notified.add(key)
+            self.stream_hub.notify(
+                organization_id=row.organization_id, run_id=row.run_id
+            )
 
     async def _claim_batch(self, session: AsyncSession) -> list[AgentRunEventOutbox]:
         """Atomically move claimable rows to ``in_flight`` and return them.
@@ -160,6 +186,18 @@ class OutboxRelay:
                 payload=envelope.get("payload", {}),
                 occurred_at=envelope.get("occurred_at"),
             )
+        if row.destination == "websocket":
+            # Tenant-scoped by construction: the wakeup is keyed by the row's
+            # own organization, and carries no payload. Subscribers re-read
+            # the event through their own organization-filtered query, so a
+            # notification can never deliver another tenant's data. A row with
+            # no organization is unattributable and is left to retry.
+            if row.organization_id is None:
+                return False
+            self.stream_hub.notify(
+                organization_id=row.organization_id, run_id=row.run_id
+            )
+            return True
         logger.warning(
             "outbox_relay_unknown_destination",
             destination=row.destination,
@@ -179,11 +217,12 @@ class OutboxRelay:
             )
             return
         backoff_seconds = min(2**row.attempts, _MAX_BACKOFF_SECONDS)
-        error = (
-            f"unknown destination {row.destination!r}"
-            if row.destination != "redis"
-            else "redis publish unavailable or failed"
-        )
+        if row.destination == "redis":
+            error = "redis publish unavailable or failed"
+        elif row.destination == "websocket":
+            error = "stream row has no organization to notify"
+        else:
+            error = f"unknown destination {row.destination!r}"
         await session.execute(
             update(AgentRunEventOutbox)
             .where(AgentRunEventOutbox.id == row.id)
