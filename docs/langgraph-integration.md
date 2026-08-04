@@ -66,7 +66,7 @@ graph TB
 
 - **FAST_PATH** — when `routing_decision.collaboration_mode == CollaborationMode.FAST_PATH`, `_execute_fast_path` makes a **single LLM call that bypasses supervisors entirely** (no LangGraph). If its minimal quality gate rejects the response, the code mutates the collaboration mode to `DIRECT` and falls through to the supervisor path, so one request can incur both a fast-path call and a full supervisor run.
 - **Multi-domain** — when the decomposition is multi-domain, domain subqueries run **concurrently** under an `asyncio.Semaphore` (default parallelism 4), gathered with `return_exceptions=True`; each domain re-routes and runs its own supervisor. Results are merged (`concat` by default, or `llm` via the SynthesisAgent). Partial success is supported: the run is still `completed` if any domain succeeds.
-- **Single-domain** — builds an `AgentTask` and calls `MASRSupervisorBridge.execute_routing_decision(...)`, which maps the MASR routing decision to a supervisor (defaulting to `research`) and invokes that supervisor's LangGraph `StateGraph`.
+- **Single-domain** — builds an `AgentTask` and dispatches the compiled execution plan via `MASRSupervisorBridge.execute_execution_plan(...)`, whose plan-topology executor runs the plan's worker topology directly.
 
 `CollaborationMode` values are `FAST_PATH`, `DIRECT`, `PARALLEL`, `HIERARCHICAL`, `DEBATE`, `ENSEMBLE`. MASR never selects Chain-of-Agents or Mixture-of-Agents; CoA/MoA exist only as bypass endpoints (`POST /api/v1/agents/chain`, `POST /api/v1/agents/mixture`).
 

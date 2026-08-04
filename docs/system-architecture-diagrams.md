@@ -166,7 +166,7 @@ graph LR
     subgraph "Routing and Coordination"
         ROUTE["MASRouter.route"]
         FAST["FAST_PATH: single LLM call, bypasses supervisors"]
-        BRIDGE2["MASRSupervisorBridge.execute_routing_decision"]
+        BRIDGE2["MASRSupervisorBridge.execute_execution_plan"]
         SUPS["Domain supervisor + workers"]
         QA["Verification QA gate"]
     end

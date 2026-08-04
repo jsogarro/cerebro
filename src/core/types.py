@@ -46,7 +46,6 @@ class FactoryStatsDict(TypedDict):
 class BridgeStatsDict(TypedDict):
     """Return structure of MASRSupervisorBridge.get_bridge_stats()."""
 
-    bridge: dict[str, Any]
     translator: dict[str, Any]
     executor: dict[str, Any]
 

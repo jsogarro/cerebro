@@ -112,10 +112,6 @@ class SupervisorExecutionResult:
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None
 
-    # MASR feedback data
-    routing_accuracy: float | None = None
-    cost_accuracy: float | None = None
-
     def mark_completed(self) -> None:
         """Mark execution as completed."""
         self.completed_at = datetime.now()
@@ -607,15 +603,6 @@ class MASRSupervisorBridge:
             capability_checker=self._has_plan_worker_capability,
         )
 
-        # Bridge statistics
-        self.bridge_stats = {
-            "total_requests": 0,
-            "successful_requests": 0,
-            "failed_requests": 0,
-            "average_response_time": 0.0,
-            "routing_accuracy": 0.0,
-        }
-
     def _has_plan_worker_capability(self, worker_type: str) -> bool:
         key = AGENT_KEYS.get(worker_type)
         return key is not None and key in self.component_registry.keys
@@ -655,18 +642,15 @@ class MASRSupervisorBridge:
     async def get_bridge_stats(self) -> dict[str, Any]:
         """Get comprehensive bridge statistics."""
         return {
-            "bridge": self.bridge_stats.copy(),
             "translator": {"active": True},  # Could add translator stats
             "executor": await self.executor.get_stats(),
         }
 
     async def health_check(self) -> HealthCheckDict:
         """Perform health check on bridge components."""
-        await self.get_bridge_stats()
         health_dict: HealthCheckDict = {
             "status": "healthy",
             "metrics": {
-                "total_requests": self.bridge_stats["total_requests"],
                 "active_executions": len(self.executor.active_executions),
             },
             "components": {
