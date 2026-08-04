@@ -8,13 +8,16 @@ durable fact — Redis pub/sub, and whatever eventually subscribes to it, is
 delivery, not the source of truth. The source of truth stays
 ``agent_run_events``.
 
-Delivery is at-least-once, never exactly-once: a row that fails to deliver,
-or a relay process that crashes between claiming a row and marking it
-delivered, is retried on a later poll once its backoff window elapses.
-Consumers must dedupe on ``idempotency_key`` (derived once, at event-append
-time, from the event's ``deduplication_key`` and the destination — see
-``src.core.contracts.delivery_idempotency_key``), which stays the same
-across every redelivery attempt of the same event to the same destination.
+Delivery is at-least-once, never exactly-once: a row that fails to deliver
+is retried on a later poll once its backoff window elapses, and a row whose
+claim was abandoned — the relay process died between committing the claim
+and finalizing the row — is reclaimed once its claim lease expires. Both
+paths can hand a consumer the same event twice; that is the expected cost of
+at-least-once. Consumers must dedupe on ``idempotency_key`` (derived once,
+at event-append time, from the event's ``deduplication_key`` and the
+destination — see ``src.core.contracts.delivery_idempotency_key``), which
+stays the same across every redelivery attempt of the same event to the same
+destination.
 """
 
 import asyncio
@@ -22,7 +25,7 @@ import contextlib
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from structlog import get_logger
 
@@ -33,6 +36,7 @@ from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 logger = get_logger()
 
 _MAX_BACKOFF_SECONDS = 300
+_DEFAULT_CLAIM_LEASE_SECONDS = 60.0
 
 
 class OutboxRelay:
@@ -45,6 +49,16 @@ class OutboxRelay:
     claim — acceptable under at-least-once delivery, but not something this
     packet tunes for throughput. Multi-instance coordination (e.g. claiming
     with ``SKIP LOCKED``) is future work, not a correctness requirement here.
+
+    A claim is a *lease*, not a permanent assignment: a row left ``in_flight``
+    by a relay that died mid-batch becomes claimable again once
+    ``claim_lease_seconds`` have passed since ``claimed_at``, by this instance
+    or by any other one sharing the database. Without that, an abandoned claim
+    would never be delivered by anything, silently — the one failure mode a
+    transactional outbox exists to rule out. The lease must be longer than a
+    healthy delivery attempt takes, or a live relay's own rows get reclaimed
+    underneath it; that costs a duplicate delivery, not correctness, since
+    consumers dedupe on ``idempotency_key``.
     """
 
     def __init__(
@@ -56,6 +70,7 @@ class OutboxRelay:
         poll_interval_seconds: float = 1.0,
         batch_size: int = 50,
         max_attempts: int = 10,
+        claim_lease_seconds: float = _DEFAULT_CLAIM_LEASE_SECONDS,
         stream_hub: RunStreamHub | None = None,
     ) -> None:
         self.session_factory = session_factory
@@ -65,6 +80,7 @@ class OutboxRelay:
         self.poll_interval_seconds = poll_interval_seconds
         self.batch_size = batch_size
         self.max_attempts = max_attempts
+        self.claim_lease_seconds = claim_lease_seconds
         self._task: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
 
@@ -139,16 +155,24 @@ class OutboxRelay:
     async def _claim_batch(self, session: AsyncSession) -> list[AgentRunEventOutbox]:
         """Atomically move claimable rows to ``in_flight`` and return them.
 
-        Claimable means ``pending`` or a previously ``failed`` row whose
-        backoff window (``available_at``) has elapsed. ``attempts`` is
-        incremented as part of the same claim, so a row's attempt count
-        always reflects delivery attempts actually made, not attempts
-        merely scheduled.
+        A row is claimable when it is ``pending`` or previously ``failed``
+        and its backoff window (``available_at``) has elapsed, or when it is
+        ``in_flight`` under an expired claim lease — an abandoned claim from a
+        relay that died before finalizing it. ``attempts`` is incremented as
+        part of the same claim, so a row's attempt count always reflects
+        delivery attempts actually made, not attempts merely scheduled, and a
+        reclaimed row's backoff keeps growing rather than restarting.
+
+        An ``in_flight`` row with no ``claimed_at`` is treated as expired:
+        this relay always stamps ``claimed_at`` in the same statement that
+        sets ``in_flight``, so such a row can only come from outside this
+        code path, and leaving it unclaimable would reopen the very hole the
+        lease closes.
         """
         now = datetime.now(UTC)
-        select_stmt = (
-            select(AgentRunEventOutbox.id)
-            .where(
+        lease_expires_before = now - timedelta(seconds=self.claim_lease_seconds)
+        claimable = or_(
+            and_(
                 AgentRunEventOutbox.status.in_(
                     (
                         EventDeliveryStatus.PENDING.value,
@@ -156,16 +180,30 @@ class OutboxRelay:
                     )
                 ),
                 AgentRunEventOutbox.available_at <= now,
-            )
+            ),
+            and_(
+                AgentRunEventOutbox.status == EventDeliveryStatus.IN_FLIGHT.value,
+                or_(
+                    AgentRunEventOutbox.claimed_at.is_(None),
+                    AgentRunEventOutbox.claimed_at <= lease_expires_before,
+                ),
+            ),
+        )
+        select_stmt = (
+            select(AgentRunEventOutbox.id)
+            .where(claimable)
             .order_by(AgentRunEventOutbox.id)
             .limit(self.batch_size)
         )
         ids = [row[0] for row in (await session.execute(select_stmt)).all()]
         if not ids:
             return []
+        # Re-check claimability inside the UPDATE so a row another relay
+        # claimed between the select and here is not stolen from it: only the
+        # rows this statement actually transitions come back from RETURNING.
         claim_stmt = (
             update(AgentRunEventOutbox)
-            .where(AgentRunEventOutbox.id.in_(ids))
+            .where(AgentRunEventOutbox.id.in_(ids), claimable)
             .values(
                 status=EventDeliveryStatus.IN_FLIGHT.value,
                 claimed_at=now,

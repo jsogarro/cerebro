@@ -4,11 +4,12 @@ At-least-once delivery means a consumer may see the same event more than
 once; ``src.core.contracts.delivery_idempotency_key`` exists so a consumer
 can dedupe on a value that is stable across redeliveries. The first test
 here proves that stability holds for a redelivery an operator (or a future
-multi-instance/`SKIP LOCKED` relay) forces. The second documents a real gap
-found while probing the other direction: the relay's claim step
-(``status -> in_flight``) has no matching reclaim path, so a crash between
-claiming a row and finalizing it does not produce a duplicate delivery — it
-produces no further delivery at all, silently, forever.
+multi-instance/`SKIP LOCKED` relay) forces. The second covers the other
+direction: a relay that dies between claiming a row and finalizing it leaves
+that row ``in_flight``, and the claim is a lease — once it expires the row is
+claimable again, by the same relay or a freshly restarted one. Redelivery is
+the expected outcome there, not a defect; the defect would be the row never
+being delivered again at all.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -118,32 +119,19 @@ async def test_forced_redelivery_carries_a_stable_idempotency_key(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "FINDING: OutboxRelay._claim_batch only selects rows with status "
-        "'pending' or 'failed'; once a row is claimed it moves to "
-        "'in_flight' and stays there unless _finalize runs. If the relay "
-        "process crashes (or is killed) after committing the claim but "
-        "before _deliver/_finalize completes, the row is not "
-        "'duplicate-delivered' on the next poll — it is never delivered "
-        "again by anything: no timeout-based reclaim exists for 'in_flight' "
-        "rows, by this relay instance or a freshly restarted one. This is a "
-        "silent hole (no error, no warning, no visible signal), the exact "
-        "failure mode the wave's validation bar rules out for state "
-        "transitions in general: 'a failure between persisting state and "
-        "delivering an event leaves a recoverable, observable state.'"
-    ),
-)
 async def test_relay_crash_between_claim_and_finalize_is_eventually_recovered(
     test_engine: AsyncEngine,
 ) -> None:
+    """A claim abandoned by a dead relay is reclaimed once its lease expires,
+    and not one moment before — the lease is a real bound, not a blanket
+    'anything in_flight is up for grabs'."""
+
     session_factory = sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
     run_id = "outbox-stuck-in-flight"
     async with session_factory() as session:
-        await seed_run_with_event(session, run_id=run_id)
+        event_id = await seed_run_with_event(session, run_id=run_id)
 
     publisher = _FakeEventPublisher(succeed=True)
     relay = OutboxRelay(session_factory=session_factory, event_publisher=publisher)
@@ -156,12 +144,43 @@ async def test_relay_crash_between_claim_and_finalize_is_eventually_recovered(
         await session.commit()
     assert len(claimed) == 1
     assert claimed[0].status == EventDeliveryStatus.IN_FLIGHT.value
+    assert publisher.calls == []
+
+    # A relay whose lease has not yet expired must leave the row alone: a
+    # live relay's in-flight rows are not other relays' to take, and the row
+    # this one is holding is indistinguishable from that.
+    unexpired_relay = OutboxRelay(
+        session_factory=session_factory,
+        event_publisher=publisher,
+        claim_lease_seconds=3600,
+    )
+    assert await unexpired_relay.run_once() == 0
+    assert publisher.calls == []
 
     # "Restart": a fresh relay instance, sharing only the database, polls
-    # again — the correct behavior is that an abandoned claim is eventually
-    # retried.
+    # after the abandoned claim's lease has expired — the abandoned claim is
+    # reclaimed and delivered rather than sitting in_flight forever.
     fresh_relay = OutboxRelay(
-        session_factory=session_factory, event_publisher=publisher
+        session_factory=session_factory,
+        event_publisher=publisher,
+        claim_lease_seconds=0,
     )
     delivered = await fresh_relay.run_once()
     assert delivered == 1
+
+    async with session_factory() as session:
+        row = (
+            await session.execute(
+                select(AgentRunEventOutbox).where(
+                    AgentRunEventOutbox.event_id == event_id
+                )
+            )
+        ).scalar_one()
+        assert row.status == EventDeliveryStatus.DELIVERED.value
+        # Both the abandoned claim and the reclaim count as delivery attempts;
+        # a reclaim continues the row's history rather than resetting it.
+        assert row.attempts == 2
+        assert row.claimed_by == fresh_relay.worker_id
+
+    assert len(publisher.calls) == 1
+    assert publisher.calls[0]["run_id"] == run_id
