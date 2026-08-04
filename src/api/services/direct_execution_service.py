@@ -27,6 +27,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.core.telemetry import count_tokens, telemetry_enabled
 from src.repositories.checkpoint_repository import CheckpointRepository
+from src.repositories.run_event_repository import RunEventRepository
+from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 
 from ...agents.models import AgentTask
 from ...agents.supervisors.base_supervisor import BaseSupervisor
@@ -41,7 +43,16 @@ from ...ai_brain.router.outcome_recorder import (
 from ...ai_brain.router.routing_types import (
     RoutingExecutionPolicy,
 )
-from ...core.contracts import ExecutionPlan
+from ...core.contracts import (
+    Attempt,
+    AttemptStatus,
+    ExecutionPlan,
+    Run,
+    RunStatus,
+    Task,
+    TaskStatus,
+)
+from ...core.contracts.states import TERMINAL_ATTEMPT_STATUSES
 from ...core.kernel import (
     TypedRegistry,
     UnknownRegistryKeyError,
@@ -64,6 +75,20 @@ if TYPE_CHECKING:
     from ...ai_brain.providers.openrouter_provider import OpenRouterProvider
 
 logger = get_logger()
+
+
+# Cold-start rehydration maps a durable ``RunStatus`` back onto the legacy
+# ``ExecutionStatus.status`` string vocabulary the rest of this module (and
+# ``src/api/routes/research.py``'s direct dict reads) already understands.
+# ``CANCELLING`` maps to "running" rather than a new string so a
+# not-yet-finalized cancellation still counts as active in
+# ``list_active_executions``/``get_service_stats``.
+_RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
+    RunStatus.CREATED.value: "pending",
+    RunStatus.QUEUED.value: "pending",
+    RunStatus.RUNNING.value: "running",
+    RunStatus.CANCELLING.value: "running",
+}
 
 
 def _validate_supervisor_registry(registry: TypedRegistry) -> None:
@@ -121,6 +146,20 @@ class ExecutionStatus:
     # survives Tenacity re-entry because the same ExecutionStatus instance is
     # reused, but is deliberately excluded from persisted/product contracts.
     _allocation_attempt_sequence: int = field(default=0, repr=False)
+
+    # Durable identity of the admitted run, when persistence is configured.
+    # Populated by ``_admit_run``; ``None`` for executions started without a
+    # session factory (most unit tests) or whose admission write failed.
+    run_id: str | None = None
+
+    # In-memory copies of the durable Run/Task/Attempt contracts this
+    # execution is writing through. They track the *last successfully
+    # persisted* state so each subsequent transition advances from the real
+    # row, not from the original admission-time snapshot. Never serialized —
+    # a caller wanting durable state reads it from the repositories.
+    _run: Run | None = field(default=None, repr=False)
+    _task: Task | None = field(default=None, repr=False)
+    _attempt: Attempt | None = field(default=None, repr=False)
 
 
 class DirectExecutionService:
@@ -336,6 +375,381 @@ class DirectExecutionService:
                 error=str(e),
             )
 
+    # --- durable run/task/attempt persistence -----------------------------
+    #
+    # These methods make the persisted ``agent_runs``/``agent_run_tasks``/
+    # ``agent_task_attempts``/``agent_run_events`` rows the authority for a
+    # run's lifecycle, replacing ``active_executions`` as the thing a status
+    # read trusts after a restart. Every write is best-effort — matching the
+    # graceful-degradation posture ``_checkpoint`` already established — so a
+    # missing session factory, an unpersistable tenant (e.g. a test fixture's
+    # non-UUID ``tenant_id``), or a transient DB failure logs a warning and
+    # lets execution continue in memory-only mode rather than crashing the
+    # request. Only ONE task and ONE attempt is persisted per execution,
+    # representing the whole compiled plan as a single unit of work — this
+    # does not track the individual sub-agent tasks the supervisor bridge
+    # dispatches internally, which is a coarser grain than the frozen
+    # Task/Attempt contracts ultimately support and a natural next step, not
+    # something this packet's scope covers.
+    #
+    # The event appended alongside each transition and its outbox row are
+    # written in the same transaction as the row update (see
+    # ``RunEventRepository.append_event``), so an outbox row is never visible
+    # for a state change that didn't durably land — that is the whole of
+    # "persist before publish" for the durable event stream. It says nothing
+    # about the pre-existing ad hoc WebSocket progress broadcast
+    # (``_publish_progress_update``), which is a separate, older delivery
+    # path this packet does not gate or remove.
+
+    def _new_task_and_attempt(
+        self,
+        run: Run,
+        *,
+        execution_id: str,
+        project: ResearchProject,
+        now: datetime,
+    ) -> tuple[Task, Attempt]:
+        """Build the one durable Task/Attempt representing this execution.
+
+        ``task_key`` is set to ``execution_id`` so a cold-start rehydration
+        (:meth:`restore_active_executions`) can recover the in-memory
+        execution identity from the durable row. ``input`` carries the
+        project binding — ``project_id`` in particular — since ``AgentRun``
+        has no project column of its own; project-scoped reads
+        (``src/api/routes/research.py``) key off it after a restart.
+        """
+        objective = (project.query.text or "").strip()[:2000] or "research execution"
+        task = Task(
+            task_id=str(uuid.uuid4()),
+            run_id=run.run_id,
+            task_key=execution_id,
+            task_type="execution_plan",
+            objective=objective,
+            idempotency_key=f"{run.idempotency_key}:task",
+            input={
+                "project_id": str(project.id),
+                "execution_id": execution_id,
+                "domains": list(project.query.domains or []),
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        attempt = Attempt(
+            attempt_id=str(uuid.uuid4()),
+            task_id=task.task_id,
+            ordinal=1,
+            idempotency_key=f"{task.idempotency_key}:attempt-1",
+            created_at=now,
+            updated_at=now,
+        )
+        return task, attempt
+
+    async def _admit_run(
+        self,
+        execution_status: ExecutionStatus,
+        binding: ExecutionAuthorityBinding,
+        project: ResearchProject,
+    ) -> None:
+        """Persist the admitted run, its task, and its attempt.
+
+        Advances the run/task to their post-admission resting states
+        (``QUEUED``/``READY``) so exactly one further transition
+        (``QUEUED``/``READY`` -> ``RUNNING``) is needed once execution
+        actually starts. On success, caches the persisted contracts on
+        ``execution_status`` so later phases advance from real state.
+        """
+        if not self.session_factory:
+            return
+        try:
+            now = datetime.now(UTC)
+            task, attempt = self._new_task_and_attempt(
+                binding.run,
+                execution_id=execution_status.execution_id,
+                project=project,
+                now=now,
+            )
+            queued_run = binding.run.transition_to(RunStatus.QUEUED, at=now)
+            ready_task = task.transition_to(TaskStatus.READY, at=now)
+
+            async with self.session_factory() as session:
+                repo = RunLifecycleRepository(session)
+                await repo.create_run(
+                    binding.run, organization_id=binding.run.tenant_id
+                )
+                await repo.record_run_transition(
+                    queued_run, organization_id=binding.run.tenant_id
+                )
+                await repo.create_task(task, organization_id=binding.run.tenant_id)
+                await repo.record_task_transition(
+                    ready_task, organization_id=binding.run.tenant_id
+                )
+                await repo.create_attempt(
+                    attempt,
+                    run_id=binding.run.run_id,
+                    organization_id=binding.run.tenant_id,
+                )
+                await self._append_event(
+                    session,
+                    run=queued_run,
+                    event_type="run.admitted",
+                    payload={
+                        "execution_id": execution_status.execution_id,
+                        "task_id": task.task_id,
+                        "attempt_id": attempt.attempt_id,
+                    },
+                    occurred_at=now,
+                )
+                await session.commit()
+
+            execution_status.run_id = queued_run.run_id
+            execution_status._run = queued_run
+            execution_status._task = ready_task
+            execution_status._attempt = attempt
+        except Exception as exc:
+            logger.warning(
+                "run_admission_persistence_failed",
+                execution_id=execution_status.execution_id,
+                run_id=binding.run.run_id,
+                error=str(exc),
+            )
+
+    async def _append_event(
+        self,
+        session: Any,
+        *,
+        run: Run,
+        event_type: str,
+        payload: dict[str, Any],
+        occurred_at: datetime,
+    ) -> None:
+        """Append one durable event and its outbox row within ``session``.
+
+        The relay's only wired destination today is ``redis`` — a
+        project-scoped WebSocket derivation from this persisted stream is
+        Wave 3 Packet 3D's scope. Broadcasting an unscoped ``websocket``
+        destination here would leak run payloads across tenants through
+        ``ConnectionManager.broadcast_to_all``, so this deliberately does not
+        request one.
+        """
+        event_id = str(uuid.uuid4())
+        await RunEventRepository(session).append_event(
+            run_id=run.run_id,
+            organization_id=run.tenant_id,
+            event_id=event_id,
+            aggregate_type="run",
+            aggregate_id=run.run_id,
+            event_type=event_type,
+            event_type_version="1",
+            occurred_at=occurred_at,
+            producer="direct_execution_service",
+            deduplication_key=event_id,
+            payload=payload,
+            destinations=("redis",),
+        )
+
+    async def _persist_transition(
+        self,
+        execution_status: ExecutionStatus,
+        *,
+        run_target: RunStatus,
+        task_target: TaskStatus | None,
+        attempt_target: AttemptStatus | None,
+        event_type: str,
+        payload: dict[str, Any],
+        reason: str | None = None,
+    ) -> None:
+        """Advance the durable run/task/attempt and append their event.
+
+        No-ops when there is nothing to persist (no session factory, or this
+        execution was never admitted — e.g. tests that drive
+        ``_execute_research_workflow`` directly without going through
+        ``start_research_execution``). Any failure, including an illegal
+        transition (a retried workflow attempting to re-enter a phase whose
+        durable record already advanced past it), is logged and swallowed —
+        it degrades the durability of this one transition, not the
+        execution.
+        """
+        if not self.session_factory or execution_status._run is None:
+            return
+        try:
+            now = datetime.now(UTC)
+            run = execution_status._run.transition_to(run_target, at=now, reason=reason)
+            task = execution_status._task
+            if task is not None and task_target is not None:
+                task = task.transition_to(task_target, at=now, reason=reason)
+            attempt = execution_status._attempt
+            if attempt is not None and attempt_target is not None:
+                attempt = attempt.transition_to(attempt_target, at=now, reason=reason)
+
+            async with self.session_factory() as session:
+                repo = RunLifecycleRepository(session)
+                await repo.record_run_transition(run, organization_id=run.tenant_id)
+                if task is not None:
+                    await repo.record_task_transition(
+                        task, organization_id=run.tenant_id
+                    )
+                if attempt is not None:
+                    await repo.record_attempt_transition(
+                        attempt, organization_id=run.tenant_id
+                    )
+                    if attempt.status in TERMINAL_ATTEMPT_STATUSES:
+                        await repo.write_journaled_result(
+                            attempt.attempt_id,
+                            organization_id=run.tenant_id,
+                            result={
+                                "final_output": execution_status.final_output,
+                                "agent_results": execution_status.agent_results,
+                                "errors": list(execution_status.errors),
+                            },
+                        )
+                await self._append_event(
+                    session,
+                    run=run,
+                    event_type=event_type,
+                    payload=payload,
+                    occurred_at=now,
+                )
+                await session.commit()
+
+            execution_status._run = run
+            execution_status._task = task
+            execution_status._attempt = attempt
+        except Exception as exc:
+            logger.warning(
+                "run_transition_persistence_failed",
+                execution_id=execution_status.execution_id,
+                run_id=execution_status._run.run_id if execution_status._run else None,
+                event_type=event_type,
+                error=str(exc),
+            )
+
+    async def _persist_cancellation(self, execution_status: ExecutionStatus) -> None:
+        """Persist a cancellation request onto the run/task/attempt.
+
+        This can only ever record ``CANCELLING`` (via
+        :meth:`Run.request_cancellation`, which picks ``CANCELLING`` over
+        ``CANCELLED`` for a running record) — it does not, and cannot today,
+        record ``CANCELLED``. Nothing in this codebase propagates an actual
+        cancellation signal into the running ``asyncio.Task``
+        (``cancel_execution`` only flips ``execution_status.status`` and
+        returns); persisting a fabricated ``CANCELLED`` would misrepresent
+        work that is still in flight. Closing that gap is a real limitation
+        beyond this packet's scope, not a hidden one.
+        """
+        if not self.session_factory or execution_status._run is None:
+            return
+        try:
+            now = datetime.now(UTC)
+            reason = "Execution cancelled by request"
+            run = execution_status._run.request_cancellation(at=now, reason=reason)
+            task = execution_status._task
+            if task is not None:
+                task = task.request_cancellation(at=now, reason=reason)
+            attempt = execution_status._attempt
+            if attempt is not None:
+                attempt = attempt.request_cancellation(at=now, reason=reason)
+
+            async with self.session_factory() as session:
+                repo = RunLifecycleRepository(session)
+                await repo.record_run_transition(run, organization_id=run.tenant_id)
+                if task is not None:
+                    await repo.record_task_transition(
+                        task, organization_id=run.tenant_id
+                    )
+                if attempt is not None:
+                    await repo.record_attempt_transition(
+                        attempt, organization_id=run.tenant_id
+                    )
+                await self._append_event(
+                    session,
+                    run=run,
+                    event_type="run.cancellation_requested",
+                    payload={"reason": reason},
+                    occurred_at=now,
+                )
+                await session.commit()
+
+            execution_status._run = run
+            execution_status._task = task
+            execution_status._attempt = attempt
+        except Exception as exc:
+            logger.warning(
+                "run_cancellation_persistence_failed",
+                execution_id=execution_status.execution_id,
+                run_id=execution_status._run.run_id if execution_status._run else None,
+                error=str(exc),
+            )
+
+    async def restore_active_executions(self) -> int:
+        """Rehydrate in-flight runs from persistence at startup.
+
+        ``active_executions`` is process memory; without this, every
+        non-terminal run admitted before a restart appears to have vanished
+        to the many call sites that read the dict directly rather than
+        through :meth:`get_execution_status`
+        (``src/api/routes/research.py``'s project status/results/cancel
+        endpoints all iterate ``active_executions.values()``). Call once at
+        startup, before the app serves traffic — mirrors
+        ``PersistedExecutionAuthorityResolver.warm_from_snapshots`` for the
+        authority cache.
+
+        Scans every tenant (``organization_id=None``) because this runs
+        before any authenticated request context exists. Only non-terminal
+        runs are restored; a run that reached a terminal status before the
+        restart already has its outcome durably recorded and does not need
+        an in-memory placeholder.
+
+        Returns:
+            The number of executions rehydrated.
+        """
+        if not self.session_factory:
+            return 0
+        restored = 0
+        try:
+            async with self.session_factory() as session:
+                lifecycle_repo = RunLifecycleRepository(session)
+                runs = await lifecycle_repo.list_non_terminal_runs(organization_id=None)
+                for run_row in runs:
+                    tasks = await lifecycle_repo.get_tasks_for_run(
+                        run_row.run_id, organization_id=run_row.organization_id
+                    )
+                    if not tasks:
+                        continue
+                    task_row = tasks[0]
+                    execution_id = task_row.task_key
+                    if execution_id in self.active_executions:
+                        continue
+
+                    task_input = task_row.input or {}
+                    project_id = task_input.get("project_id", "")
+
+                    attempts = await lifecycle_repo.get_attempts_for_task(
+                        task_row.task_id, organization_id=run_row.organization_id
+                    )
+                    journaled = attempts[-1].journaled_result if attempts else None
+
+                    execution_status = ExecutionStatus(
+                        execution_id=execution_id,
+                        project_id=project_id,
+                        status=_RUN_STATUS_TO_EXECUTION_STATUS.get(
+                            run_row.status, run_row.status
+                        ),
+                        current_phase=run_row.status,
+                        started_at=run_row.started_at or run_row.created_at,
+                        run_id=run_row.run_id,
+                    )
+                    if journaled:
+                        execution_status.final_output = journaled.get("final_output")
+                        execution_status.agent_results = (
+                            journaled.get("agent_results") or {}
+                        )
+                        execution_status.errors = list(journaled.get("errors") or [])
+                    self.active_executions[execution_id] = execution_status
+                    restored += 1
+        except Exception as exc:
+            logger.warning("active_execution_restore_failed", error=str(exc))
+        return restored
+
     async def start_research_execution(
         self,
         project: ResearchProject,
@@ -386,6 +800,8 @@ class DirectExecutionService:
             current_phase="initialization",
             execution_plan=execution_plan,
         )
+
+        await self._admit_run(execution_status, binding, project)
 
         self.active_executions[execution_id] = execution_status
         self.execution_stats["total_executions"] += 1
@@ -489,6 +905,18 @@ class DirectExecutionService:
         """
 
         try:
+            # Persist the durable transition before flipping the in-memory
+            # flag other code (including every caller polling
+            # ``active_executions``) treats as observable truth — otherwise a
+            # reader could see "running" before the row backing it exists.
+            await self._persist_transition(
+                execution_status,
+                run_target=RunStatus.RUNNING,
+                task_target=TaskStatus.RUNNING,
+                attempt_target=AttemptStatus.RUNNING,
+                event_type="run.started",
+                payload={"phase": "masr_routing"},
+            )
             execution_status.status = "running"
             execution_status.current_phase = "masr_routing"
 
@@ -525,10 +953,23 @@ class DirectExecutionService:
                 execution_status.final_output = copy.deepcopy(fixture_result)
                 execution_status.agent_results = copy.deepcopy(fixture_result)
                 execution_status.workers_used = 0
+                self.execution_stats["successful_executions"] += 1
+                # Journaling reads final_output/agent_results off
+                # execution_status, so those must already be set (above)
+                # before this call — but the terminal status flip below must
+                # come after it, so nothing observes "completed" ahead of
+                # the durable row.
+                await self._persist_transition(
+                    execution_status,
+                    run_target=RunStatus.SUCCEEDED,
+                    task_target=TaskStatus.SUCCEEDED,
+                    attempt_target=AttemptStatus.SUCCEEDED,
+                    event_type="run.succeeded",
+                    payload={"fixture_mode": True},
+                )
                 execution_status.status = "completed"
                 execution_status.current_phase = "completed"
                 execution_status.progress_percentage = 100.0
-                self.execution_stats["successful_executions"] += 1
                 await self._checkpoint(execution_status, "fixture_completed")
                 logger.info(
                     "fixture_execution_completed",
@@ -563,10 +1004,18 @@ class DirectExecutionService:
             execution_status.agent_results = plan_result.output
             execution_status.final_output = plan_result.output
             execution_status.workers_used = plan_result.workers_used
+            self.execution_stats["successful_executions"] += 1
+            await self._persist_transition(
+                execution_status,
+                run_target=RunStatus.SUCCEEDED,
+                task_target=TaskStatus.SUCCEEDED,
+                attempt_target=AttemptStatus.SUCCEEDED,
+                event_type="run.succeeded",
+                payload={"workers_used": execution_status.workers_used},
+            )
             execution_status.status = "completed"
             execution_status.current_phase = "completed"
             execution_status.progress_percentage = 100.0
-            self.execution_stats["successful_executions"] += 1
             await self._checkpoint(execution_status, "completed")
             return
         except Exception as e:
@@ -574,12 +1023,22 @@ class DirectExecutionService:
                 f"Direct execution {execution_status.execution_id} failed with exception: {e}"
             )
 
-            execution_status.status = "failed"
             execution_status.errors.append(str(e))
-            execution_status.current_phase = "failed"
             execution_status.retry_count += 1
 
             self.execution_stats["failed_executions"] += 1
+
+            await self._persist_transition(
+                execution_status,
+                run_target=RunStatus.FAILED,
+                task_target=TaskStatus.FAILED,
+                attempt_target=AttemptStatus.FAILED,
+                event_type="run.failed",
+                payload={"error": str(e)},
+                reason=(str(e).strip() or "execution failed")[:500],
+            )
+            execution_status.status = "failed"
+            execution_status.current_phase = "failed"
 
             # Re-raise for retry logic
             raise
@@ -723,6 +1182,7 @@ class DirectExecutionService:
             return False
 
         if execution.status in ["pending", "running"]:
+            await self._persist_cancellation(execution)
             execution.status = "cancelled"
             execution.current_phase = "cancelled"
 
@@ -987,13 +1447,24 @@ def configure_direct_execution_service(
     masr_router: MASRouter,
     gemini_service: Any | None = None,
     component_registry: TypedRegistry | None = None,
+    session_factory: Any | None = None,
+    event_publisher: EventPublisher | None = None,
 ) -> DirectExecutionService:
-    """Create an application-owned service without changing legacy globals."""
+    """Create an application-owned service without changing legacy globals.
+
+    ``session_factory``/``event_publisher`` were previously never threaded
+    through from the application lifespan, which made checkpointing, run
+    persistence, and WebSocket progress publication silent no-ops in
+    production. Both are optional here (default ``None``) so every existing
+    caller that omits them keeps today's in-memory-only behavior.
+    """
 
     return DirectExecutionService(
         gemini_service=gemini_service,
         masr_router=masr_router,
         component_registry=component_registry,
+        session_factory=session_factory,
+        event_publisher=event_publisher,
     )
 
 

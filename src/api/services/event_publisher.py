@@ -458,6 +458,61 @@ class EventPublisher:
             message=info_message,
         )
 
+    async def publish_run_event(
+        self,
+        *,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        occurred_at: str | None = None,
+    ) -> bool:
+        """Deliver one durable run event's envelope to the run-events Redis channel.
+
+        Called by the outbox relay (``src/api/services/outbox_relay.py``) for
+        each claimed row. This is a delivery mechanism only — the event this
+        call describes already exists durably in ``agent_run_events`` before
+        this is ever invoked; a failed or skipped publish here does not lose
+        the event, only delays a redelivery attempt.
+
+        Deliberately Redis-only, not a WebSocket broadcast: there is no
+        project-scoped routing available for an arbitrary persisted run
+        event today (``AgentRun`` carries no project reference), so
+        broadcasting one to every connected client via
+        ``ConnectionManager.broadcast_to_all`` would leak run payloads across
+        tenants. Deriving a properly tenant-scoped WebSocket/SSE stream from
+        the persisted event log is a separate, later piece of work.
+
+        Returns:
+            ``True`` if Redis accepted the publish, ``False`` if Redis is
+            unavailable (local-only mode) or the publish raised — the outbox
+            relay uses this to decide whether to mark the delivery row
+            delivered or retry it later.
+        """
+        if not self.redis_client:
+            return False
+        try:
+            await self.redis_client.publish(
+                "research_platform:run_events",
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "event_type": event_type,
+                        "payload": payload,
+                        "occurred_at": occurred_at,
+                    },
+                    default=str,
+                ),
+            )
+            return True
+        except Exception as e:
+            logger.warning(
+                "Failed to publish run event to Redis",
+                error=str(e),
+                run_id=run_id,
+                event_type=event_type,
+            )
+            return False
+
     async def _publish_event(self, message: WSMessage) -> None:
         """
         Publish an event both locally and to Redis.

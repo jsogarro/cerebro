@@ -109,24 +109,57 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
         # Initialize database
-        from src.models.db.session import init_db
+        from src.models.db.session import get_session_factory, init_db
 
+        database_initialized = False
         try:
             await init_db()
+            database_initialized = True
             logger.info("Database initialized")
 
-            # Create tables if using SQLite (development)
+            # Create tables if using SQLite (development). The durable run
+            # lifecycle tables (agent_runs/agent_run_tasks/agent_task_attempts/
+            # agent_run_config_snapshots/agent_run_events/
+            # agent_run_event_outbox) are included here so the SQLite dev path
+            # is genuinely durable across a process restart, not merely
+            # in-memory-with-extra-steps. They use only portable column types
+            # (``PortableUUID``, ``JSON``, ``DateTime``, ``String``,
+            # ``BigInteger``) already used elsewhere in this table list.
+            # SQLite gets the ORM-level append-only guard on the event and
+            # config-snapshot tables (``src/models/db/append_only.py``) but
+            # not the Postgres trigger layer the alembic migration installs —
+            # this matches the frozen schema's own documented expectation
+            # that a ``Base.metadata.create_all`` path gets ORM enforcement
+            # only.
             if "sqlite" in settings.DATABASE_URL:
                 from src.models.db.agent_task import AgentTask
                 from src.models.db.base import Base
                 from src.models.db.research_project import ResearchProject as DBProject
                 from src.models.db.research_result import ResearchResult
+                from src.models.db.run_config_snapshot import AgentRunConfigSnapshot
+                from src.models.db.run_event import AgentRunEvent, AgentRunEventOutbox
+                from src.models.db.run_lifecycle import (
+                    AgentRun,
+                    AgentRunTask,
+                    AgentTaskAttempt,
+                )
                 from src.models.db.session import _engine
                 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
                 tables = [
                     Base.metadata.tables[t.__tablename__]
-                    for t in [DBProject, ResearchResult, AgentTask, WorkflowCheckpoint]
+                    for t in [
+                        DBProject,
+                        ResearchResult,
+                        AgentTask,
+                        WorkflowCheckpoint,
+                        AgentRun,
+                        AgentRunTask,
+                        AgentTaskAttempt,
+                        AgentRunConfigSnapshot,
+                        AgentRunEvent,
+                        AgentRunEventOutbox,
+                    ]
                     if t.__tablename__ in Base.metadata.tables
                 ]
                 if _engine is not None and tables:
@@ -171,16 +204,77 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from src.api.services.talkhier_session_service import TalkHierSessionService
 
         component_registry = build_application_component_registry()
+        # ``database_initialized`` only means ``init_db()`` did not raise —
+        # it can be True with no real session factory behind it (e.g. a test
+        # that monkeypatches ``init_db`` to a no-op mock without ever setting
+        # the module-level engine/session-factory globals). Guard the lookup
+        # itself rather than trusting the flag, so that mismatch degrades to
+        # "no durable persistence" instead of crashing the whole lifespan.
+        durable_session_factory = None
+        if database_initialized:
+            try:
+                durable_session_factory = get_session_factory()
+            except Exception as e:
+                logger.warning(f"Session factory unavailable: {e}")
         direct_execution_service = configure_direct_execution_service(
             gemini_service=gemini_service,
             masr_router=masr_runtime.router,
             component_registry=component_registry,
+            session_factory=durable_session_factory,
+            event_publisher=event_publisher,
         )
-        # Production installs no authority records. Tests may explicitly place a
-        # trusted resolver on application state before entering this lifespan.
-        direct_execution_service.execution_authority_resolver = getattr(
-            app.state, "execution_authority_resolver", None
-        )
+        # Tests may explicitly place a trusted resolver on application state
+        # before entering this lifespan, which takes priority. Otherwise,
+        # production wires the durable, DB-backed resolver and warms its
+        # cache from every persisted config snapshot before the app starts
+        # serving — required because ``PersistedExecutionAuthorityResolver
+        # .resolve()`` is synchronous and only ever reads that in-process
+        # cache; without warming, every authority admitted before this
+        # restart would appear unavailable even though its row still exists.
+        existing_resolver = getattr(app.state, "execution_authority_resolver", None)
+        if existing_resolver is not None:
+            direct_execution_service.execution_authority_resolver = existing_resolver
+        elif durable_session_factory is not None:
+            from src.api.services.execution_authority_resolver import (
+                PersistedExecutionAuthorityResolver,
+            )
+
+            persisted_resolver = PersistedExecutionAuthorityResolver()
+            try:
+                async with durable_session_factory() as warm_session:
+                    warmed = await persisted_resolver.warm_from_snapshots(warm_session)
+                logger.info(
+                    "Execution authority resolver warmed from snapshots",
+                    count=warmed,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to warm execution authority resolver: {e}")
+            direct_execution_service.execution_authority_resolver = persisted_resolver
+        else:
+            direct_execution_service.execution_authority_resolver = None
+
+        if durable_session_factory is not None:
+            try:
+                restored = await direct_execution_service.restore_active_executions()
+                logger.info(
+                    "Active executions restored from persistence", count=restored
+                )
+            except Exception as e:
+                logger.warning(f"Failed to restore active executions: {e}")
+
+            from src.api.services.outbox_relay import OutboxRelay
+
+            outbox_relay = OutboxRelay(
+                session_factory=durable_session_factory,
+                event_publisher=event_publisher,
+            )
+            outbox_relay.start()
+            resources.push_async_callback(
+                _close_lifespan_resource,
+                "outbox_relay",
+                outbox_relay.stop,
+            )
+
         resources.push_async_callback(
             _close_lifespan_resource,
             "direct_execution_service",
