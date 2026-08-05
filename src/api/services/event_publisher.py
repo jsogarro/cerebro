@@ -464,6 +464,9 @@ class EventPublisher:
         run_id: str,
         event_type: str,
         payload: dict[str, Any],
+        event_id: str,
+        sequence: int,
+        idempotency_key: str,
         occurred_at: str | None = None,
     ) -> bool:
         """Deliver one durable run event's envelope to the run-events Redis channel.
@@ -473,6 +476,14 @@ class EventPublisher:
         call describes already exists durably in ``agent_run_events`` before
         this is ever invoked; a failed or skipped publish here does not lose
         the event, only delays a redelivery attempt.
+
+        ``event_id``, ``sequence``, and ``idempotency_key`` are required,
+        not optional enrichments: the outbox module's own contract is that
+        "consumers must dedupe on ``idempotency_key``" (see
+        ``src/api/services/outbox_relay.py``'s module docstring), and a
+        consumer cannot dedupe on a key it was never sent. Making them
+        required keyword arguments means a future call site that forgets to
+        pass them fails loudly at the call, not silently on the wire.
 
         Deliberately Redis-only, not a WebSocket broadcast: there is no
         project-scoped routing available for an arbitrary persisted run
@@ -499,6 +510,9 @@ class EventPublisher:
                         "event_type": event_type,
                         "payload": payload,
                         "occurred_at": occurred_at,
+                        "event_id": event_id,
+                        "sequence": sequence,
+                        "idempotency_key": idempotency_key,
                     },
                     default=str,
                 ),

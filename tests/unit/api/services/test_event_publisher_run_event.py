@@ -20,7 +20,12 @@ async def test_publish_run_event_returns_false_without_redis() -> None:
     assert publisher.redis_client is None
 
     delivered = await publisher.publish_run_event(
-        run_id="run-1", event_type="run.started", payload={"phase": "x"}
+        run_id="run-1",
+        event_type="run.started",
+        payload={"phase": "x"},
+        event_id="event-1",
+        sequence=1,
+        idempotency_key="redis:dedupe-1",
     )
 
     assert delivered is False
@@ -36,6 +41,9 @@ async def test_publish_run_event_publishes_envelope_to_redis_channel() -> None:
         event_type="run.succeeded",
         payload={"workers_used": 2},
         occurred_at="2026-08-04T00:00:00+00:00",
+        event_id="event-1",
+        sequence=3,
+        idempotency_key="redis:dedupe-1",
     )
 
     assert delivered is True
@@ -43,11 +51,17 @@ async def test_publish_run_event_publishes_envelope_to_redis_channel() -> None:
     channel, body = publisher.redis_client.publish.call_args.args
     assert channel == "research_platform:run_events"
     decoded = json.loads(body)
+    # event_id/sequence/idempotency_key are what a consumer needs to dedupe
+    # a redelivery — the outbox module's own contract ("consumers must
+    # dedupe on idempotency_key") is unmeetable without them on the wire.
     assert decoded == {
         "run_id": "run-1",
         "event_type": "run.succeeded",
         "payload": {"workers_used": 2},
         "occurred_at": "2026-08-04T00:00:00+00:00",
+        "event_id": "event-1",
+        "sequence": 3,
+        "idempotency_key": "redis:dedupe-1",
     }
 
 
@@ -58,7 +72,12 @@ async def test_publish_run_event_returns_false_when_redis_raises() -> None:
     publisher.redis_client.publish.side_effect = RuntimeError("connection reset")
 
     delivered = await publisher.publish_run_event(
-        run_id="run-1", event_type="run.started", payload={}
+        run_id="run-1",
+        event_type="run.started",
+        payload={},
+        event_id="event-1",
+        sequence=1,
+        idempotency_key="redis:dedupe-1",
     )
 
     assert delivered is False

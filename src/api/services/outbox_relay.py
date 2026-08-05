@@ -59,6 +59,17 @@ class OutboxRelay:
     healthy delivery attempt takes, or a live relay's own rows get reclaimed
     underneath it; that costs a duplicate delivery, not correctness, since
     consumers dedupe on ``idempotency_key``.
+
+    ``max_attempts`` bounds a row's total claims (ordinary failures and
+    lease-expiry reclaims both count): once a row's ``attempts`` reaches it,
+    ``_claim_batch`` never claims it again and ``_finalize`` marks it
+    dead-lettered. A dead-lettered row is still ``status=failed`` — there is
+    no separate dead-letter status or table — distinguished only by
+    ``last_error`` naming it permanently dropped and by never again matching
+    the claim query. Without this bound, a permanently undeliverable row
+    (e.g. a destination that never comes back) retried forever at the
+    ``_MAX_BACKOFF_SECONDS`` ceiling, silently, with nothing to page an
+    operator or say the event was given up on.
     """
 
     def __init__(
@@ -158,10 +169,12 @@ class OutboxRelay:
         A row is claimable when it is ``pending`` or previously ``failed``
         and its backoff window (``available_at``) has elapsed, or when it is
         ``in_flight`` under an expired claim lease — an abandoned claim from a
-        relay that died before finalizing it. ``attempts`` is incremented as
-        part of the same claim, so a row's attempt count always reflects
-        delivery attempts actually made, not attempts merely scheduled, and a
-        reclaimed row's backoff keeps growing rather than restarting.
+        relay that died before finalizing it — **and**, in either case, it has
+        not already exhausted ``max_attempts`` (see ``_finalize``'s
+        dead-letter path). ``attempts`` is incremented as part of the same
+        claim, so a row's attempt count always reflects delivery attempts
+        actually made, not attempts merely scheduled, and a reclaimed row's
+        backoff keeps growing rather than restarting.
 
         An ``in_flight`` row with no ``claimed_at`` is treated as expired:
         this relay always stamps ``claimed_at`` in the same statement that
@@ -171,21 +184,29 @@ class OutboxRelay:
         """
         now = datetime.now(UTC)
         lease_expires_before = now - timedelta(seconds=self.claim_lease_seconds)
-        claimable = or_(
-            and_(
-                AgentRunEventOutbox.status.in_(
-                    (
-                        EventDeliveryStatus.PENDING.value,
-                        EventDeliveryStatus.FAILED.value,
-                    )
+        claimable = and_(
+            # A row that has already used up its allotted attempts is
+            # dead-lettered by ``_finalize`` (see there) and must never be
+            # claimed again, whether it is sitting ``failed`` or was abandoned
+            # ``in_flight`` by a dead relay — either way, more attempts than
+            # ``max_attempts`` is the one thing this bound exists to prevent.
+            AgentRunEventOutbox.attempts < self.max_attempts,
+            or_(
+                and_(
+                    AgentRunEventOutbox.status.in_(
+                        (
+                            EventDeliveryStatus.PENDING.value,
+                            EventDeliveryStatus.FAILED.value,
+                        )
+                    ),
+                    AgentRunEventOutbox.available_at <= now,
                 ),
-                AgentRunEventOutbox.available_at <= now,
-            ),
-            and_(
-                AgentRunEventOutbox.status == EventDeliveryStatus.IN_FLIGHT.value,
-                or_(
-                    AgentRunEventOutbox.claimed_at.is_(None),
-                    AgentRunEventOutbox.claimed_at <= lease_expires_before,
+                and_(
+                    AgentRunEventOutbox.status == EventDeliveryStatus.IN_FLIGHT.value,
+                    or_(
+                        AgentRunEventOutbox.claimed_at.is_(None),
+                        AgentRunEventOutbox.claimed_at <= lease_expires_before,
+                    ),
                 ),
             ),
         )
@@ -217,12 +238,22 @@ class OutboxRelay:
 
     async def _deliver(self, row: AgentRunEventOutbox) -> bool:
         if row.destination == "redis":
+            # ``row.payload`` is the full stored ``RunEvent`` envelope
+            # (``RunEventRepository.append_event`` dumps it verbatim), so
+            # ``event_id``/``sequence`` are already present here — no join,
+            # no recomputation. ``row.idempotency_key`` is the same value a
+            # consumer must dedupe redeliveries on; it is a column on this
+            # row, not derived again, so it is guaranteed to match what the
+            # transactional outbox actually recorded.
             envelope = row.payload or {}
             return await self.event_publisher.publish_run_event(
                 run_id=row.run_id,
                 event_type=envelope.get("event_type", ""),
                 payload=envelope.get("payload", {}),
                 occurred_at=envelope.get("occurred_at"),
+                event_id=row.event_id,
+                sequence=int(envelope.get("sequence", 0)),
+                idempotency_key=row.idempotency_key,
             )
         if row.destination == "websocket":
             # Tenant-scoped by construction: the wakeup is keyed by the row's
@@ -254,13 +285,43 @@ class OutboxRelay:
                 .values(status=EventDeliveryStatus.DELIVERED.value, delivered_at=now)
             )
             return
-        backoff_seconds = min(2**row.attempts, _MAX_BACKOFF_SECONDS)
         if row.destination == "redis":
             error = "redis publish unavailable or failed"
         elif row.destination == "websocket":
             error = "stream row has no organization to notify"
         else:
             error = f"unknown destination {row.destination!r}"
+        if row.attempts >= self.max_attempts:
+            # Dead-letter: an explicit, observable terminal state built out
+            # of existing columns rather than a new status value or column.
+            # ``status`` stays the already-permitted ``failed`` (the DB
+            # CHECK constraint on this table only allows the four values
+            # frozen in the Wave 3 migration), and ``_claim_batch``'s
+            # ``attempts < max_attempts`` bound means this row can never be
+            # claimed again — no dead-letter queue, no give-up before this,
+            # just permanent silent retries against a ceiling that was
+            # configured but never enforced.
+            await session.execute(
+                update(AgentRunEventOutbox)
+                .where(AgentRunEventOutbox.id == row.id)
+                .values(
+                    status=EventDeliveryStatus.FAILED.value,
+                    last_error=(
+                        f"dead-lettered after {row.attempts} attempts "
+                        f"(max_attempts={self.max_attempts}): {error}"
+                    ),
+                )
+            )
+            logger.error(
+                "outbox_relay_dead_lettered",
+                event_id=row.event_id,
+                run_id=row.run_id,
+                destination=row.destination,
+                attempts=row.attempts,
+                max_attempts=self.max_attempts,
+            )
+            return
+        backoff_seconds = min(2**row.attempts, _MAX_BACKOFF_SECONDS)
         await session.execute(
             update(AgentRunEventOutbox)
             .where(AgentRunEventOutbox.id == row.id)

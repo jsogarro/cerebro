@@ -40,6 +40,9 @@ class _FakeEventPublisher:
         run_id: str,
         event_type: str,
         payload: dict[str, Any],
+        event_id: str,
+        sequence: int,
+        idempotency_key: str,
         occurred_at: str | None = None,
     ) -> bool:
         self.calls.append(
@@ -48,6 +51,9 @@ class _FakeEventPublisher:
                 "event_type": event_type,
                 "payload": payload,
                 "occurred_at": occurred_at,
+                "event_id": event_id,
+                "sequence": sequence,
+                "idempotency_key": idempotency_key,
             }
         )
         return self.succeed
@@ -116,6 +122,14 @@ async def test_forced_redelivery_carries_a_stable_idempotency_key(
     # A consumer keyed on idempotency_key sees the identical key both times
     # and can safely treat the second call as a no-op replay of the first —
     # this is the entire mechanism "duplicate delivery is safe" rests on.
+    # Asserting on the outbox ROW alone (above) is not enough: it proves the
+    # database recorded a stable key, not that a consumer was ever actually
+    # sent one. This asserts what the consumer receives on the wire, both
+    # times, matches the row exactly.
+    assert publisher.calls[0]["idempotency_key"] == first_idempotency_key
+    assert publisher.calls[1]["idempotency_key"] == first_idempotency_key
+    assert publisher.calls[0]["event_id"] == event_id
+    assert publisher.calls[1]["event_id"] == event_id
 
 
 @pytest.mark.asyncio

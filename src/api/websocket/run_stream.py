@@ -326,6 +326,18 @@ class RunEventStreamReader:
                     if len(frames) >= self.batch_limit:
                         continue
                 elif stop_when_terminal and await self.is_run_terminal(run_id):
+                    # `_persist_transition` commits a run's terminal event and
+                    # its terminal status together, in one transaction. If
+                    # that commit landed in the window between the batch read
+                    # above (which found nothing) and this terminal check,
+                    # the terminal event would otherwise never be read: this
+                    # check only observes `True` once its commit is already
+                    # visible, so one more read is guaranteed to pick up
+                    # everything that commit wrote, including the event that
+                    # made the run terminal, before this generator stops.
+                    frames, position = await self.read_batch(position)
+                    for frame in frames:
+                        yield frame
                     return
 
                 waiter.clear()

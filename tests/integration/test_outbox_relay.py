@@ -40,6 +40,9 @@ class _FakeEventPublisher:
         run_id: str,
         event_type: str,
         payload: dict[str, Any],
+        event_id: str,
+        sequence: int,
+        idempotency_key: str,
         occurred_at: str | None = None,
     ) -> bool:
         self.calls.append(
@@ -48,6 +51,9 @@ class _FakeEventPublisher:
                 "event_type": event_type,
                 "payload": payload,
                 "occurred_at": occurred_at,
+                "event_id": event_id,
+                "sequence": sequence,
+                "idempotency_key": idempotency_key,
             }
         )
         return self.succeed
@@ -106,14 +112,6 @@ async def test_run_once_delivers_pending_row_and_marks_it_delivered(
     delivered = await relay.run_once()
 
     assert delivered == 1
-    assert publisher.calls == [
-        {
-            "run_id": run_id,
-            "event_type": "run.admitted",
-            "payload": {"note": "seeded"},
-            "occurred_at": publisher.calls[0]["occurred_at"],
-        }
-    ]
 
     async with session_factory() as session:
         row = (
@@ -126,6 +124,22 @@ async def test_run_once_delivers_pending_row_and_marks_it_delivered(
         assert row.status == EventDeliveryStatus.DELIVERED.value
         assert row.delivered_at is not None
         assert row.attempts == 1
+        row_idempotency_key = row.idempotency_key
+
+    # The published call carries exactly what a consumer needs to dedupe a
+    # redelivery: the stored envelope's event_id/sequence plus this row's own
+    # idempotency_key, not four hand-picked fields.
+    assert publisher.calls == [
+        {
+            "run_id": run_id,
+            "event_type": "run.admitted",
+            "payload": {"note": "seeded"},
+            "occurred_at": publisher.calls[0]["occurred_at"],
+            "event_id": event_id,
+            "sequence": 1,
+            "idempotency_key": row_idempotency_key,
+        }
+    ]
 
     # A second run_once must not redeliver an already-delivered row.
     redelivered = await relay.run_once()
