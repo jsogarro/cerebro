@@ -16,6 +16,7 @@ import pytest
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
+    RunAdmissionError,
 )
 from src.core.contracts import AttemptStatus, RunStatus, TaskStatus
 
@@ -97,10 +98,18 @@ async def test_restore_active_executions_noop_without_session_factory() -> None:
 
 
 @pytest.mark.asyncio
-async def test_admit_run_failure_is_caught_and_does_not_raise() -> None:
-    """A session factory that raises on use (e.g. an unreachable DB, or a
-    non-UUID ``tenant_id`` tripping the tenant identity contract) must not
-    propagate out of admission — execution continues in memory-only mode."""
+async def test_admit_run_failure_fails_closed_instead_of_degrading() -> None:
+    """A session factory that raises on use (an unreachable DB, or a non-UUID
+    ``tenant_id`` tripping the tenant identity contract) must stop admission.
+
+    This test previously asserted the opposite — that the failure was
+    swallowed and "execution continues in memory-only mode". That is the
+    fabricated-success path: with ``_run`` left None, every later transition
+    took ``_persist_transition``'s memory-only branch, which reports
+    RECORDED, so the run went on to report a terminal outcome no durable
+    record ever held. Persistence being *configured* and failing is not the
+    same as persistence being absent, and only the latter may degrade.
+    """
     from src.models.execution_authority import ExecutionAuthorityBinding
 
     class _ExplodingSessionFactory:
@@ -178,8 +187,8 @@ async def test_admit_run_failure_is_caught_and_does_not_raise() -> None:
         scope=ResearchScope(max_sources=1),
     )
 
-    # Must not raise.
-    await service._admit_run(status, binding, project)
+    with pytest.raises(RunAdmissionError):
+        await service._admit_run(status, binding, project)
 
     assert status._run is None
     assert status.run_id is None

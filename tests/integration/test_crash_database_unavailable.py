@@ -23,6 +23,7 @@ from src.api.services.direct_execution_service import (
     DirectExecutionService,
     DurableWriteOutcome,
     ExecutionStatus,
+    RunAdmissionError,
 )
 from src.api.services.execution_authority_resolver import (
     MappingExecutionAuthorityResolver,
@@ -65,10 +66,19 @@ class _ToggleFailingSessionFactory:
 
 
 @pytest.mark.asyncio
-async def test_execution_completes_in_memory_when_database_is_never_reachable() -> None:
-    """Fixture-mode execution with a session factory that always raises must
-    still reach 'completed' in memory — persistence failing must never
-    surface as an execution failure."""
+async def test_admission_fails_closed_when_a_configured_database_is_unreachable() -> (
+    None
+):
+    """A database that is configured but unreachable must stop the run at
+    admission.
+
+    Previously this test asserted the opposite — that the execution ran to
+    'completed' with ``run_id is None``. That was a fabricated success: the
+    caller was handed a terminal outcome for a run no durable record ever
+    held, and every later transition silently took the memory-only path.
+    Refusing admission is the honest answer; the caller learns the run did
+    not start instead of being told it finished.
+    """
 
     run_id = "db-down-fixture-run"
     binding = make_binding(run_id, authority_id="db-down-fixture-authority")
@@ -88,12 +98,54 @@ async def test_execution_completes_in_memory_when_database_is_never_reachable() 
         execution_authority_resolver=resolver,
     )
     project = make_project()
+
+    with pytest.raises(RunAdmissionError):
+        await service.start_research_execution(
+            project,
+            execution_policy=RoutingExecutionPolicy.fixture(),
+            fixture_result={"result": "computed without a database"},
+            authority_reference=ExecutionAuthorityReference(
+                authority_id="db-down-fixture-authority", authority_version="1"
+            ),
+        )
+
+    # Nothing was started, so nothing can later claim an outcome.
+    assert service.active_executions == {}
+    assert service.execution_stats["total_executions"] == 0
+
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_execution_completes_in_memory_when_no_database_is_configured() -> None:
+    """The genuinely-unconfigured case is different and stays supported: with
+    no session factory at all there is no durable record to contradict, so a
+    fixture execution completes in memory exactly as documented."""
+
+    run_id = "no-db-fixture-run"
+    binding = make_binding(run_id, authority_id="no-db-fixture-authority")
+    resolver = MappingExecutionAuthorityResolver(
+        {("no-db-fixture-authority", "1"): binding}
+    )
+    router = AsyncMock()
+    router.route.return_value = _RoutingDecisionStub()
+    bridge = AsyncMock()
+    bridge.admit_execution_plan = Mock()
+
+    service = DirectExecutionService(
+        masr_router=router,
+        supervisor_bridge=bridge,
+        supervisor_factory=Mock(),
+        session_factory=None,
+        execution_authority_resolver=resolver,
+    )
+    project = make_project()
     execution_id = await service.start_research_execution(
         project,
         execution_policy=RoutingExecutionPolicy.fixture(),
         fixture_result={"result": "computed without a database"},
         authority_reference=ExecutionAuthorityReference(
-            authority_id="db-down-fixture-authority", authority_version="1"
+            authority_id="no-db-fixture-authority", authority_version="1"
         ),
     )
 
@@ -108,8 +160,7 @@ async def test_execution_completes_in_memory_when_database_is_never_reachable() 
     execution = service.active_executions[execution_id]
     assert execution.status == "completed"
     assert execution.final_output == {"result": "computed without a database"}
-    # Admission never persisted — a broken database must not fabricate a
-    # run_id that does not exist anywhere durable.
+    # No persistence was ever configured, so no run_id is claimed.
     assert execution.run_id is None
 
     await service.close()
@@ -132,13 +183,24 @@ async def test_restore_active_executions_returns_zero_when_database_unreachable(
 
 
 @pytest.mark.asyncio
-async def test_cancellation_degrades_gracefully_when_database_goes_down(
+async def test_cancellation_is_refused_when_the_database_cannot_record_it(
     test_engine: AsyncEngine,
 ) -> None:
-    """Cancelling a run whose database has gone down since admission must
-    still report success to the caller (the in-memory execution really is
-    being cancelled) without raising, even though the cancellation can't be
-    made durable right now."""
+    """Cancelling a run whose database has gone down must not report success.
+
+    Previously this test asserted that ``cancel_execution`` returned True and
+    flipped the status to 'cancelled' while the durable record still said
+    QUEUED — the same defect class the terminal-write gating already fixed
+    for success and failure, left open on the one transition the user is
+    explicitly told succeeded. The honest answer is to refuse: the caller
+    learns the cancellation did not take, and the run keeps the status the
+    database still holds, so a retry is possible.
+
+    The pre-existing CANCELLING-never-CANCELLED limitation is untouched and
+    still asserted by ``tests/integration/test_crash_cancellation_semantics.py``:
+    what a successful cancellation records is a *request*, not a finished
+    cancellation.
+    """
 
     session_factory = sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
@@ -172,8 +234,9 @@ async def test_cancellation_degrades_gracefully_when_database_goes_down(
     toggle.broken = True
     cancelled = await service.cancel_execution(execution_status.execution_id)
 
-    assert cancelled is True
-    assert execution_status.status == "cancelled"
+    assert cancelled is False
+    # The status the caller can still read is the one the database holds.
+    assert execution_status.status == "pending"
 
     toggle.broken = False
     async with session_factory() as session:

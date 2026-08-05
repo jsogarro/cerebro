@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from tenacity import wait_none
 
 from src.ai_brain.router.routing_types import (
     RoutingExecutionPolicy,
@@ -290,8 +291,22 @@ async def test_fixture_mode_run_persists_to_succeeded_with_journaled_result(
 
 @pytest.mark.asyncio
 async def test_execution_failure_persists_run_as_failed_with_reason(
-    test_engine: AsyncEngine,
+    test_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A run whose every attempt failed is durably FAILED, with the reason.
+
+    This test used to poll for a "failed" row while retries were still in
+    flight, on the premise that the first attempt's exception handler
+    persisted the terminal failure immediately. That premise was the defect:
+    a run marked terminally failed before its retries are exhausted is
+    immutable, so a retry that then succeeded left the caller reading
+    "completed" against a durable row that said "failed". The failure is now
+    recorded once no attempt remains, so this waits for the run to actually
+    finish failing.
+    """
+    monkeypatch.setattr(
+        DirectExecutionService._execute_research_workflow.retry, "wait", wait_none()
+    )
     session_factory = sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -313,15 +328,10 @@ async def test_execution_failure_persists_run_as_failed_with_reason(
         ),
     )
 
-    # The workflow retries on exception with real exponential backoff
-    # (``@retry`` on ``_execute_research_workflow``), so waiting for the
-    # in-memory ``ExecutionStatus.status`` to settle across every attempt
-    # would make this test slow and racy (it flips back to "running" at the
-    # top of each retry). ``_persist_transition(FAILED)`` runs inside the
-    # exception handler on the *first* attempt, before ``raise`` hands
-    # control to tenacity — so the durable row already reads "failed" within
-    # milliseconds, independent of how many retries follow. Poll the
-    # database directly instead of the in-memory dict.
+    # Every attempt fails, so the run does end up FAILED — but only after
+    # tenacity has spent them all. Poll the database rather than the
+    # in-memory dict, which flips back to "running" at the top of each
+    # retry; the backoff is patched out above so this stays fast.
     async def _run_failed() -> bool:
         async with session_factory() as poll_session:
             row = await RunLifecycleRepository(poll_session).get_run(

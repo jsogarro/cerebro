@@ -28,7 +28,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.core.telemetry import count_tokens, telemetry_enabled
+from src.models.db.run_event import EVENT_ENVELOPE_VERSION
 from src.repositories.checkpoint_repository import CheckpointRepository
+from src.repositories.run_config_snapshot_repository import (
+    RunConfigSnapshotRepository,
+)
 from src.repositories.run_event_repository import RunEventRepository
 from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 
@@ -49,6 +53,8 @@ from ...core.contracts import (
     Attempt,
     AttemptStatus,
     ExecutionPlan,
+    InvalidTransitionError,
+    PinnedVersions,
     Run,
     RunStatus,
     Task,
@@ -71,6 +77,7 @@ from .execution_authority_resolver import (
     ExecutionAuthorityRequiredError,
     ExecutionAuthorityResolver,
     ExecutionAuthorityUnavailableError,
+    serialize_execution_authority_binding,
 )
 
 if TYPE_CHECKING:
@@ -90,7 +97,17 @@ _RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
     RunStatus.QUEUED.value: "pending",
     RunStatus.RUNNING.value: "running",
     RunStatus.CANCELLING.value: "running",
+    RunStatus.SUCCEEDED.value: "completed",
+    RunStatus.FAILED.value: "failed",
+    RunStatus.CANCELLED.value: "cancelled",
 }
+
+
+# How many times ``_execute_research_workflow`` runs before its failure is
+# the run's outcome. Declared once because two things depend on agreeing
+# about it: the ``@retry`` decorator, and the failure path's decision about
+# whether a terminal FAILED may be persisted yet.
+_WORKFLOW_MAX_ATTEMPTS = 3
 
 
 # Observable ``current_phase`` for an execution whose real outcome is known
@@ -98,6 +115,16 @@ _RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
 # ``status`` value: ``status`` stays non-terminal precisely because no
 # terminal claim is backed by the database yet.
 AWAITING_DURABLE_CONFIRMATION_PHASE = "awaiting_durable_confirmation"
+
+
+class RunAdmissionError(RuntimeError):
+    """Admission could not be made durable, so no execution was started.
+
+    Raised only when persistence is configured and failed. A service with no
+    session factory at all is a different case — there is no durable record
+    to contradict, so memory-only execution stays supported and this is not
+    raised.
+    """
 
 
 class DurableWriteOutcome(StrEnum):
@@ -153,6 +180,18 @@ class _PendingTerminalOutcome:
     observable_status: str
     observable_phase: str
     observable_progress: float | None
+
+
+def _discard_unretrieved_admission_error(future: "asyncio.Future[str]") -> None:
+    """Mark a failed admission claim's exception as seen.
+
+    A claim nobody waited on still carries its exception, and asyncio logs
+    "Future exception was never retrieved" when it is garbage collected. The
+    caller that actually made the admission already raised it; reading it
+    here keeps a routine failure from also producing a spurious error log.
+    """
+    if not future.cancelled():
+        future.exception()
 
 
 def _validate_supervisor_registry(registry: TypedRegistry) -> None:
@@ -343,6 +382,14 @@ class DirectExecutionService:
         # admitted run is coalesced onto the existing execution through this
         # index instead of starting a second one.
         self._execution_ids_by_run_id: dict[str, str] = {}
+
+        # Durable run identity -> the admission currently claiming it. A
+        # duplicate arriving while the first admission is still awaiting the
+        # router or the database waits on this claim instead of racing it;
+        # the entry exists from before the first await until the execution
+        # id is known. Cross-process duplicates are caught instead by
+        # ``agent_runs``' uniqueness on (tenant_id, idempotency_key).
+        self._admissions_in_flight: dict[str, asyncio.Future[str]] = {}
 
         # Store background task references to prevent GC
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -537,13 +584,27 @@ class DirectExecutionService:
         binding: ExecutionAuthorityBinding,
         project: ResearchProject,
     ) -> None:
-        """Persist the admitted run, its task, and its attempt.
+        """Persist the admitted run, its task, its attempt, and its config snapshot.
 
         Advances the run/task to their post-admission resting states
         (``QUEUED``/``READY``) so exactly one further transition
         (``QUEUED``/``READY`` -> ``RUNNING``) is needed once execution
         actually starts. On success, caches the persisted contracts on
         ``execution_status`` so later phases advance from real state.
+
+        The configuration snapshot is written in the same transaction as the
+        run row, which is what makes a run *pinned*: the exact workflow,
+        routing policy, worker assignments, provider policy, and budget it
+        was admitted under survive a deployment that changes any of them.
+
+        Raises:
+            RunAdmissionError: Persistence is configured but the admission
+                write did not land. Nothing is started — a run whose
+                admission the database never accepted has no durable record
+                for any later transition to advance, and continuing would
+                mean reporting outcomes nothing backs. A service with no
+                session factory has no such record to contradict and returns
+                normally.
         """
         if not self.session_factory:
             return
@@ -575,6 +636,7 @@ class DirectExecutionService:
                     run_id=binding.run.run_id,
                     organization_id=binding.run.tenant_id,
                 )
+                await self._persist_config_snapshot(session, binding)
                 await self._append_event(
                     session,
                     run=queued_run,
@@ -602,6 +664,54 @@ class DirectExecutionService:
                 run_id=binding.run.run_id,
                 error=str(exc),
             )
+            raise RunAdmissionError(
+                f"run {binding.run.run_id!r} could not be admitted durably"
+            ) from exc
+
+    async def _persist_config_snapshot(
+        self, session: Any, binding: ExecutionAuthorityBinding
+    ) -> None:
+        """Freeze the configuration this run is pinned to, inside ``session``.
+
+        Only the versions the authority binding actually carries are pinned
+        as structured ``PinnedVersions``; the rest of the pinned semantics
+        live in the serialized configuration blob, which is the complete
+        compiled binding. Prompts, evaluators, and artifact schemas are not
+        individually versioned by any component today, so nothing invents a
+        version for them.
+
+        A resolver that can persist (the production
+        ``PersistedExecutionAuthorityResolver``) writes through its own
+        ``register`` so its in-process cache and the durable row are warmed
+        together; any other resolver still gets the durable row.
+        """
+        pinned_versions = PinnedVersions(
+            workflow_definition_id=binding.run.workflow_definition_id,
+            workflow_definition_version=binding.run.workflow_definition_version,
+            routing_policy_id=binding.run.routing_policy_id,
+            routing_policy_version=binding.run.routing_policy_version,
+            event_envelope_version=EVENT_ENVELOPE_VERSION,
+        )
+        config_snapshot_id = f"{binding.run.run_id}:config"
+        register = getattr(self.execution_authority_resolver, "register", None)
+        if callable(register):
+            await register(
+                session,
+                binding=binding,
+                organization_id=binding.run.tenant_id,
+                config_snapshot_id=config_snapshot_id,
+                pinned_versions=pinned_versions,
+            )
+            return
+        await RunConfigSnapshotRepository(session).create_snapshot(
+            run=binding.run,
+            organization_id=binding.run.tenant_id,
+            config_snapshot_id=config_snapshot_id,
+            authority_id=binding.authority_id,
+            authority_version=binding.authority_version,
+            pinned_versions=pinned_versions,
+            configuration=serialize_execution_authority_binding(binding),
+        )
 
     async def _append_event(
         self,
@@ -721,6 +831,36 @@ class DirectExecutionService:
             self._park_terminal_outcome(execution_status, transition)
         return DurableWriteOutcome.UNAVAILABLE
 
+    async def _record_attempt_failure(
+        self, execution_status: ExecutionStatus, *, error: str
+    ) -> None:
+        """Append a durable event for a failure another attempt will follow.
+
+        Deliberately no status transition: the run is still RUNNING and its
+        one attempt row is still the live attempt. This is the audit trail
+        for a transient failure, not the run's outcome, so a database that
+        refuses it degrades the history rather than the execution.
+        """
+        if not self.session_factory or execution_status._run is None:
+            return
+        try:
+            async with self.session_factory() as session:
+                await self._append_event(
+                    session,
+                    run=execution_status._run,
+                    event_type="run.attempt_failed",
+                    payload={"error": error, "attempt": execution_status.retry_count},
+                    occurred_at=datetime.now(UTC),
+                )
+                await session.commit()
+        except Exception as exc:
+            logger.warning(
+                "attempt_failure_event_not_recorded",
+                execution_id=execution_status.execution_id,
+                run_id=execution_status._run.run_id,
+                error=str(exc),
+            )
+
     async def _commit_transition(self, transition: _DurableTransition) -> bool:
         """Commit one planned transition, retrying transient failures.
 
@@ -812,13 +952,23 @@ class DirectExecutionService:
     ) -> None:
         """Publish a terminal status only if the durable layer accepted it.
 
-        When the write was merely rejected there is nothing further to wait
-        for, and the in-memory view is the only view left — it is flipped, as
-        it always was. When the write was *unavailable*, the flip is withheld:
-        the execution keeps a non-terminal status, records which outcome is
-        waiting on the database, and reconciliation performs the flip once the
-        write lands.
+        Three answers, three behaviours:
+
+        - ``RECORDED`` — the database holds this outcome, so publish it.
+        - ``UNAVAILABLE`` — the write never landed. The flip is withheld: the
+          execution keeps a non-terminal status, records which outcome is
+          waiting on the database, and reconciliation performs the flip once
+          the write lands.
+        - ``REJECTED`` — the durable record already moved somewhere this
+          transition cannot reach, so the requested status is one the
+          database contradicts. Publishing it anyway is how a run came to
+          read "completed" while its durable row said "failed"; instead the
+          in-memory view is realigned onto the status the durable record
+          actually holds.
         """
+        if outcome is DurableWriteOutcome.REJECTED:
+            self._realign_with_durable_record(execution_status, refused_status=status)
+            return
         if outcome is DurableWriteOutcome.UNAVAILABLE:
             pending = self._pending_terminal_outcomes.get(execution_status.execution_id)
             if pending is not None:
@@ -839,6 +989,34 @@ class DirectExecutionService:
         if progress is not None:
             execution_status.progress_percentage = progress
         execution_status.unconfirmed_terminal_status = None
+
+    def _realign_with_durable_record(
+        self, execution_status: ExecutionStatus, *, refused_status: str
+    ) -> None:
+        """Adopt the status the durable record holds after a refused write.
+
+        ``execution_status._run`` tracks the last state the database
+        accepted, so it — not the outcome this process wanted to publish —
+        is what a caller is allowed to be told.
+        """
+        run = execution_status._run
+        if run is None:  # pragma: no cover - REJECTED implies an admitted run
+            return
+        durable_status = _RUN_STATUS_TO_EXECUTION_STATUS.get(
+            run.status.value, run.status.value
+        )
+        logger.warning(
+            "run_status_realigned_with_durable_record",
+            execution_id=execution_status.execution_id,
+            run_id=run.run_id,
+            refused_status=refused_status,
+            durable_status=durable_status,
+        )
+        execution_status.status = durable_status
+        execution_status.current_phase = run.status.value
+        execution_status.unconfirmed_terminal_status = None
+        if run.status is RunStatus.SUCCEEDED:
+            execution_status.progress_percentage = 100.0
 
     async def reconcile_pending_terminal_transitions(self) -> int:
         """Retry terminal outcomes the database refused, and publish the ones
@@ -913,7 +1091,9 @@ class DirectExecutionService:
                 elapsed_seconds=self.durable_reconcile_max_seconds,
             )
 
-    async def _persist_cancellation(self, execution_status: ExecutionStatus) -> None:
+    async def _persist_cancellation(
+        self, execution_status: ExecutionStatus
+    ) -> DurableWriteOutcome:
         """Persist a cancellation request onto the run/task/attempt.
 
         This can only ever record ``CANCELLING`` (via
@@ -925,9 +1105,15 @@ class DirectExecutionService:
         returns); persisting a fabricated ``CANCELLED`` would misrepresent
         work that is still in flight. Closing that gap is a real limitation
         beyond this packet's scope, not a hidden one.
+
+        Returns:
+            What the durable layer did with the request, so
+            :meth:`cancel_execution` can decide whether it is entitled to
+            tell the caller the cancellation took. ``RECORDED`` also covers
+            memory-only mode, where there is no durable record to disagree.
         """
         if not self.session_factory or execution_status._run is None:
-            return
+            return DurableWriteOutcome.RECORDED
         try:
             now = datetime.now(UTC)
             reason = "Execution cancelled by request"
@@ -962,6 +1148,17 @@ class DirectExecutionService:
             execution_status._run = run
             execution_status._task = task
             execution_status._attempt = attempt
+            return DurableWriteOutcome.RECORDED
+        except InvalidTransitionError as exc:
+            # The durable record is already past cancelling — nothing to
+            # request, and nothing a retry could change.
+            logger.warning(
+                "run_cancellation_rejected_by_contract",
+                execution_id=execution_status.execution_id,
+                run_id=execution_status._run.run_id if execution_status._run else None,
+                error=str(exc),
+            )
+            return DurableWriteOutcome.REJECTED
         except Exception as exc:
             logger.warning(
                 "run_cancellation_persistence_failed",
@@ -969,6 +1166,7 @@ class DirectExecutionService:
                 run_id=execution_status._run.run_id if execution_status._run else None,
                 error=str(exc),
             )
+            return DurableWriteOutcome.UNAVAILABLE
 
     async def restore_active_executions(self) -> int:
         """Rehydrate in-flight runs from persistence at startup.
@@ -1000,46 +1198,65 @@ class DirectExecutionService:
                 lifecycle_repo = RunLifecycleRepository(session)
                 runs = await lifecycle_repo.list_non_terminal_runs(organization_id=None)
                 for run_row in runs:
-                    tasks = await lifecycle_repo.get_tasks_for_run(
-                        run_row.run_id, organization_id=run_row.organization_id
+                    execution_status = await self._rehydrate_execution(
+                        lifecycle_repo, run_row
                     )
-                    if not tasks:
+                    if execution_status is None:
                         continue
-                    task_row = tasks[0]
-                    execution_id = task_row.task_key
+                    execution_id = execution_status.execution_id
                     if execution_id in self.active_executions:
                         continue
-
-                    task_input = task_row.input or {}
-                    project_id = task_input.get("project_id", "")
-
-                    attempts = await lifecycle_repo.get_attempts_for_task(
-                        task_row.task_id, organization_id=run_row.organization_id
-                    )
-                    journaled = attempts[-1].journaled_result if attempts else None
-
-                    execution_status = ExecutionStatus(
-                        execution_id=execution_id,
-                        project_id=project_id,
-                        status=_RUN_STATUS_TO_EXECUTION_STATUS.get(
-                            run_row.status, run_row.status
-                        ),
-                        current_phase=run_row.status,
-                        started_at=run_row.started_at or run_row.created_at,
-                        run_id=run_row.run_id,
-                    )
-                    if journaled:
-                        execution_status.final_output = journaled.get("final_output")
-                        execution_status.agent_results = (
-                            journaled.get("agent_results") or {}
-                        )
-                        execution_status.errors = list(journaled.get("errors") or [])
                     self.active_executions[execution_id] = execution_status
                     self._execution_ids_by_run_id[run_row.run_id] = execution_id
                     restored += 1
         except Exception as exc:
             logger.warning("active_execution_restore_failed", error=str(exc))
         return restored
+
+    async def _rehydrate_execution(
+        self, lifecycle_repo: RunLifecycleRepository, run_row: Any
+    ) -> ExecutionStatus | None:
+        """Rebuild the in-memory view of one durably recorded run.
+
+        The durable row is the authority for everything here: status, phase,
+        timings, and — from the attempt's journaled result — the output the
+        run actually produced. Nothing is inferred from process memory,
+        because there may be none: this is what a fresh process and a
+        replayed admission both read.
+
+        Returns:
+            The rebuilt status, or ``None`` for a run with no task row (there
+            is no execution identity to recover without one).
+        """
+        tasks = await lifecycle_repo.get_tasks_for_run(
+            run_row.run_id, organization_id=run_row.organization_id
+        )
+        if not tasks:
+            return None
+        task_row = tasks[0]
+        task_input = task_row.input or {}
+
+        attempts = await lifecycle_repo.get_attempts_for_task(
+            task_row.task_id, organization_id=run_row.organization_id
+        )
+        journaled = attempts[-1].journaled_result if attempts else None
+
+        execution_status = ExecutionStatus(
+            execution_id=task_row.task_key,
+            project_id=task_input.get("project_id", ""),
+            status=_RUN_STATUS_TO_EXECUTION_STATUS.get(run_row.status, run_row.status),
+            current_phase=run_row.status,
+            started_at=run_row.started_at or run_row.created_at,
+            completed_at=run_row.completed_at,
+            run_id=run_row.run_id,
+        )
+        if run_row.status == RunStatus.SUCCEEDED.value:
+            execution_status.progress_percentage = 100.0
+        if journaled:
+            execution_status.final_output = journaled.get("final_output")
+            execution_status.agent_results = journaled.get("agent_results") or {}
+            execution_status.errors = list(journaled.get("errors") or [])
+        return execution_status
 
     def _replayed_execution_id(self, run_id: str) -> str | None:
         """Return the execution already handling ``run_id``, if any.
@@ -1084,26 +1301,155 @@ class DirectExecutionService:
         the replay reaches the router, the supervisor bridge, or the durable
         record.
 
+        That holds however the duplicate arrives: while the first admission
+        is still in flight (concurrent retries), after it finished (a replay
+        of a completed run), and after a restart that emptied this process's
+        memory entirely. See :meth:`_locally_known_execution_id` and
+        :meth:`_durably_recorded_execution_id`.
+
         Args:
             project: Research project to execute
             context: Additional execution context
 
         Returns:
             Execution ID for tracking progress
+
+        Raises:
+            RunAdmissionError: Persistence is configured and the admission
+                write did not land; no execution was started.
         """
         if self.closed:
             raise RuntimeError("Direct execution service is closed")
 
         binding = self._resolve_execution_authority(authority_reference)
-        replayed_execution_id = self._replayed_execution_id(binding.run.run_id)
-        if replayed_execution_id is not None:
-            logger.info(
-                "replayed_admission_coalesced",
-                run_id=binding.run.run_id,
-                execution_id=replayed_execution_id,
-            )
-            return replayed_execution_id
+        run_id = binding.run.run_id
 
+        locally_known_execution_id = self._locally_known_execution_id(run_id)
+        if locally_known_execution_id is not None:
+            # Shielded: this future may be another caller's admission claim,
+            # and a client that disconnects while waiting on it must not
+            # cancel the admission that is doing the actual work.
+            return await asyncio.shield(locally_known_execution_id)
+
+        # Claim the run before the first await. Everything below yields to
+        # the event loop — including the durable lookup — and until this
+        # claim exists a concurrent duplicate would sail past every check
+        # above and admit the same run a second time.
+        reservation: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        reservation.add_done_callback(_discard_unretrieved_admission_error)
+        self._admissions_in_flight[run_id] = reservation
+        try:
+            execution_id = await self._durably_recorded_execution_id(run_id)
+            if execution_id is None:
+                execution_id = await self._admit_new_execution(
+                    project,
+                    binding,
+                    context=context,
+                    execution_policy=execution_policy,
+                    fixture_result=fixture_result,
+                )
+        except BaseException as exc:
+            # Whoever was waiting on this claim was waiting for a handle that
+            # will never exist; they get the same failure the first caller
+            # got rather than a hang or a fabricated id.
+            if not reservation.done():
+                reservation.set_exception(exc)
+            raise
+        finally:
+            self._admissions_in_flight.pop(run_id, None)
+        if not reservation.done():
+            reservation.set_result(execution_id)
+        return execution_id
+
+    def _locally_known_execution_id(self, run_id: str) -> "asyncio.Future[str] | None":
+        """Return an awaitable for the execution this process already has.
+
+        A run is admitted once: ``agent_runs`` is unique on
+        ``(tenant_id, idempotency_key)`` and the authority binding fixes
+        ``run_id`` before the caller ever gets a handle, so a second
+        admission is a replay rather than a second piece of work.
+
+        Deliberately synchronous, and deliberately returns a future rather
+        than awaiting one: the caller must be able to decide, without ever
+        yielding to the event loop, whether this run is already claimed.
+        Two answers live in process memory — an admission still in flight
+        (the concurrent-retry case, where the run is claimed but not yet
+        admitted) and the replay index (a live or restored execution). The
+        third, the durable record, requires I/O and is consulted by
+        :meth:`_durably_recorded_execution_id` under the claim.
+        """
+        in_flight = self._admissions_in_flight.get(run_id)
+        if in_flight is not None:
+            logger.info("concurrent_admission_coalesced", run_id=run_id)
+            return in_flight
+
+        replayed_execution_id = self._replayed_execution_id(run_id)
+        if replayed_execution_id is None:
+            return None
+        logger.info(
+            "replayed_admission_coalesced",
+            run_id=run_id,
+            execution_id=replayed_execution_id,
+        )
+        settled: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        settled.set_result(replayed_execution_id)
+        return settled
+
+    async def _durably_recorded_execution_id(self, run_id: str) -> str | None:
+        """Rehydrate an already-admitted run from persistence, if one exists.
+
+        Unlike :meth:`restore_active_executions` this deliberately includes
+        terminal runs: the whole point is to answer a replay with the outcome
+        the database recorded instead of running the work again.
+        """
+        if not self.session_factory:
+            return None
+        try:
+            async with self.session_factory() as session:
+                lifecycle_repo = RunLifecycleRepository(session)
+                run_row = await lifecycle_repo.get_run(run_id)
+                if run_row is None:
+                    return None
+                execution_status = await self._rehydrate_execution(
+                    lifecycle_repo, run_row
+                )
+        except Exception as exc:
+            # An unreadable database cannot prove the run is new, and
+            # admitting it again on that assumption is exactly the double
+            # execution this guards against.
+            logger.warning(
+                "durable_admission_lookup_failed", run_id=run_id, error=str(exc)
+            )
+            raise RunAdmissionError(
+                f"cannot determine whether run {run_id!r} was already admitted"
+            ) from exc
+        if execution_status is None:
+            return None
+        self.active_executions[execution_status.execution_id] = execution_status
+        self._execution_ids_by_run_id[run_id] = execution_status.execution_id
+        logger.info(
+            "durably_recorded_admission_coalesced",
+            run_id=run_id,
+            execution_id=execution_status.execution_id,
+            run_status=execution_status.status,
+        )
+        return execution_status.execution_id
+
+    async def _admit_new_execution(
+        self,
+        project: ResearchProject,
+        binding: ExecutionAuthorityBinding,
+        *,
+        context: dict[str, Any] | None,
+        execution_policy: RoutingExecutionPolicy | None,
+        fixture_result: dict[str, Any] | None,
+    ) -> str:
+        """Route, admit, and dispatch one genuinely new run.
+
+        Only ever reached while holding the in-flight claim for this run, so
+        it may assume it is the only admission of ``binding.run`` in this
+        process.
+        """
         routing_decision = await self._propose_routing(
             project,
             context=context,
@@ -1135,6 +1481,10 @@ class DirectExecutionService:
         await self._admit_run(execution_status, binding, project)
 
         self.active_executions[execution_id] = execution_status
+        # ``_admit_run`` indexes the run when it has a durable identity to
+        # index. Memory-only mode deliberately does not: with no durable
+        # record there is nothing to coalesce a later replay against, and
+        # its behaviour is unchanged from Packet 3G.
         self.execution_stats["total_executions"] += 1
         self.execution_stats["concurrent_executions"] += 1
 
@@ -1214,7 +1564,8 @@ class DirectExecutionService:
         return not stripped.startswith(self._FAST_PATH_FAILURE_PREFIXES)
 
     @retry(
-        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
+        stop=stop_after_attempt(_WORKFLOW_MAX_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
     )
     async def _execute_research_workflow(
         self,
@@ -1367,6 +1718,17 @@ class DirectExecutionService:
 
             self.execution_stats["failed_executions"] += 1
 
+            if execution_status.retry_count < _WORKFLOW_MAX_ATTEMPTS:
+                # This attempt failed; the run has not. Recording FAILED here
+                # would make the run durably terminal and immutable, so every
+                # transition the retry attempts would be refused — and a
+                # retry that then succeeded would leave the caller reading
+                # "completed" against a durable record that says "failed".
+                # The attempt failure is recorded as an event; the run stays
+                # RUNNING, which is what it is.
+                await self._record_attempt_failure(execution_status, error=str(e))
+                raise
+
             outcome = await self._persist_transition(
                 execution_status,
                 run_target=RunStatus.FAILED,
@@ -1518,14 +1880,38 @@ class DirectExecutionService:
             return None
 
     async def cancel_execution(self, execution_id: str) -> bool:
-        """Cancel active execution."""
+        """Cancel active execution.
+
+        Reports success only when the cancellation request is backed by the
+        durable record. A database that cannot record the request leaves the
+        run reading exactly what the database still holds and returns False,
+        so the caller learns the cancellation did not take and can retry —
+        rather than being told a run was cancelled that the durable record
+        (and any other process reading it) still considers live.
+
+        What a successful cancellation records is the *request*: the durable
+        run moves to CANCELLING, never to CANCELLED, because nothing here
+        propagates cancellation into the running task. See
+        :meth:`_persist_cancellation`.
+
+        Returns:
+            True if the cancellation was accepted and durably requested.
+        """
 
         execution = self.active_executions.get(execution_id)
         if not execution:
             return False
 
         if execution.status in ["pending", "running"]:
-            await self._persist_cancellation(execution)
+            outcome = await self._persist_cancellation(execution)
+            if outcome is not DurableWriteOutcome.RECORDED:
+                logger.warning(
+                    "cancellation_not_durably_requested",
+                    execution_id=execution_id,
+                    run_id=execution.run_id,
+                    outcome=outcome.value,
+                )
+                return False
             execution.status = "cancelled"
             execution.current_phase = "cancelled"
 

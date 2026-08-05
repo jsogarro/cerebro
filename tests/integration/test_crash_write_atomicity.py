@@ -25,6 +25,7 @@ from sqlalchemy.orm import sessionmaker
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
+    RunAdmissionError,
 )
 from src.api.services.execution_authority_resolver import (
     MappingExecutionAuthorityResolver,
@@ -56,7 +57,13 @@ async def test_admission_failure_mid_write_leaves_zero_rows(
 ) -> None:
     """A fault after the run/task/attempt rows are added but before commit
     (simulated as the event-append raising) must not leave any of those rows
-    durably visible — admission is all-or-nothing."""
+    durably visible — admission is all-or-nothing.
+
+    The caller learns about it too: this test previously asserted that
+    ``_admit_run`` swallowed the failure, which is how an unadmitted run went
+    on to report a terminal outcome no durable record held. Atomicity is
+    still the subject; failing closed is now part of it.
+    """
 
     session_factory = sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
@@ -83,9 +90,10 @@ async def test_admission_failure_mid_write_leaves_zero_rows(
         status="pending",
         current_phase="initialization",
     )
-    # ``_admit_run`` swallows the failure — a caller must not crash because
-    # persistence failed mid-write.
-    await service._admit_run(execution_status, binding, project)
+    # Persistence is configured and the write did not land, so admission
+    # fails closed rather than handing back a run nothing durable holds.
+    with pytest.raises(RunAdmissionError):
+        await service._admit_run(execution_status, binding, project)
 
     assert execution_status.run_id is None
 
