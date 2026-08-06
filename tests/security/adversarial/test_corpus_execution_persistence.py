@@ -5,8 +5,17 @@ cannot borrow legitimacy from an ``Artifact`` outside its own run or tenant.
 Neither is reachable from the in-process harness — no tool path holds an
 ``AsyncSession``, so no mediated call writes an evidence row — and the
 in-process exercisers say exactly that rather than claiming a pass. This module
-is where they are actually exercised, against the repository that would perform
-the check if one existed.
+is where they are actually exercised, against the repository that performs the
+check.
+
+Both scenarios below were originally ``xfail(strict=True)``, documenting a
+real gap: ``EvidenceRepository._get_artifact_row`` selected by ``artifact_id``
+alone, with no organization or run filter, so a cross-tenant or cross-run
+artifact reference resolved successfully. The gap is now closed (the lookup
+is scoped to the caller's organization and run), so both are ordinary
+regression tests -- ``xfail(strict=True)`` would report the fix itself as a
+test failure (XPASS under strict mode), which is exactly backwards once the
+defect it was recording no longer exists.
 
 It carries the ``integration`` marker, like every other repository test here.
 Note that the marker does not exclude it: this project's ``addopts`` deselects
@@ -199,21 +208,20 @@ class TestTheControlsThatDoWork:
             )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "crosstenant-02: EvidenceRepository.record_evidence never compares the "
-        "referenced artifact's owning organization against the evidence row's "
-        "own. _get_artifact_row (evidence_repository.py:177-181) selects by "
-        "artifact_id alone, with no organization or run filter. Because "
-        "artifacts are content-addressed, the digest cross-check that does run "
-        "is satisfied by both tenants acquiring the same public source, so no "
-        "secret knowledge is needed to name the other tenant's artifact row."
-    ),
-)
 async def test_evidence_cannot_reference_another_tenants_artifact(
     db_session: AsyncSession,
 ) -> None:
+    """crosstenant-02, now a regression test rather than an xfail.
+
+    ``EvidenceRepository.record_evidence`` used to never compare the
+    referenced artifact's owning organization against the evidence row's own
+    -- ``_get_artifact_row`` selected by ``artifact_id`` alone, with no
+    organization or run filter. Because artifacts are content-addressed, the
+    digest cross-check that does run was satisfied by both tenants acquiring
+    the same public source, so no secret knowledge was needed to name the
+    other tenant's artifact row. The lookup is now scoped by organization and
+    run.
+    """
     await _seed_both_tenants(db_session)
     repository = EvidenceRepository(db_session)
     with pytest.raises((TenantMismatchError, ValueError)):
@@ -228,21 +236,19 @@ async def test_evidence_cannot_reference_another_tenants_artifact(
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "poisoned-05: the same missing check reached through the poisoned "
-        "tool-output path. An artifact belonging to a different RUN inside the "
-        "same tenant is accepted as an evidence row's snapshot, so a tool "
-        "output naming another run's artifact id creates a provenance edge "
-        "that crosses a run boundary. Evidence.validate_provenance_chain "
-        "checks the locator grammar and the parent chain, not the artifact's "
-        "run."
-    ),
-)
 async def test_evidence_cannot_reference_another_runs_artifact(
     db_session: AsyncSession,
 ) -> None:
+    """poisoned-05, now a regression test rather than an xfail.
+
+    The same missing check, reached through the poisoned tool-output path.
+    An artifact belonging to a different run inside the same tenant used to
+    be accepted as an evidence row's snapshot, so a tool output naming
+    another run's artifact id created a provenance edge that crossed a run
+    boundary -- ``Evidence.validate_provenance_chain`` checks the locator
+    grammar and the parent chain, not the artifact's run. The artifact
+    lookup is now scoped by run as well as organization.
+    """
     await seed_run_task_attempt(
         db_session,
         organization_id=ORG_A,
