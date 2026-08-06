@@ -75,6 +75,7 @@ RUN_ID = "run-1"
 TASK_ID = "task-1"
 ATTEMPT_ID = "attempt-1"
 ATTEMPT_ID_2 = "attempt-2"
+SHARED_KEY = "victim-chosen-key"
 GRANT_ID = "grant-1"
 SCOPE = "search"
 TOOL = "academic_search"
@@ -522,3 +523,47 @@ class TestADefectThisFixDidNotIntroduceAndDoesNotFix:
 
         second = await boundary.invoke(**call_kwargs())
         assert second.status is ToolOutcomeStatus.DENIED
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "PROVEN DEFECT, PRE-EXISTING at 477d77a, reproduced against real "
+            "Postgres. A DENIED row occupies its idempotency key but is excluded "
+            "from _REPLAYABLE_RECORD_STATUSES, so a later AUTHORIZED call under "
+            "that key is neither served from the record nor able to write its "
+            "own: the replay branch is skipped, the call executes, and the "
+            "REQUESTED insert violates uq_agent_tool_invocation_idempotency "
+            "(attempt_id, idempotency_key). The IntegrityError surfaces at the "
+            "legitimate caller, who also gets no record of their own call. "
+            "Verified pre-existing by checking out 477d77a's boundary.py with a "
+            "positive control on the checkout (_reject_input present, "
+            "_RejectedInput absent): identical IntegrityError before and after. "
+            "The exclusion of DENIED is correct and must stay -- one caller's "
+            "refusal must never become another's answer. What is missing is a "
+            "rule for a key whose only occupant is a non-answer. That is 4B's "
+            "DDL question plus the store adapter, not this packet's ordering "
+            "one, and fixing it here would mean either serving a denial as a "
+            "result or letting an unaudited second row exist."
+        ),
+    )
+    @pytest.mark.asyncio
+    async def test_a_denial_bricks_the_key_for_the_authorized_caller(
+        self, boundary: ToolBoundary
+    ) -> None:
+        """The sequence the in-memory store cannot fail on.
+
+        ``RecordingAuditStore.persist`` assigns into a dict, so the second write
+        silently overwrites the first and
+        ``test_an_authorized_caller_is_not_served_an_earlier_denial`` passes --
+        a control that cannot fail, because the constraint that would fail it is
+        not in the loop. That unit test still passes; this one raises.
+        """
+
+        denied = await boundary.invoke(**call_kwargs(idempotency_key=SHARED_KEY))
+        assert denied.status is ToolOutcomeStatus.DENIED
+
+        allowed = await boundary.invoke(
+            **call_kwargs(idempotency_key=SHARED_KEY, grants=granted())
+        )
+
+        assert allowed.succeeded
