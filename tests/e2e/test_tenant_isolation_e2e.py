@@ -20,7 +20,7 @@ VALID_PASSWORD = "Xy9!zAbCdEfG"
 
 
 async def register_and_login(username_prefix: str) -> tuple[str, str]:
-    """Helper: register a new user and return (token, email)."""
+    """Helper: register a new user and return (token, user id)."""
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
         email = f"{username_prefix}_{uuid.uuid4().hex[:8]}@example.com"
         register_response = await client.post(
@@ -35,7 +35,7 @@ async def register_and_login(username_prefix: str) -> tuple[str, str]:
         )
         assert register_response.status_code == 201
         data = register_response.json()
-        return data["tokens"]["access_token"], email
+        return data["tokens"]["access_token"], data["user"]["id"]
 
 
 @pytest.mark.asyncio
@@ -45,10 +45,8 @@ class TestTenantIsolationE2E:
     async def test_cross_tenant_project_access_denied(self):
         """
         Alice creates project P_A. Bob tries to access P_A -> denied.
-
-        Currently skips due to tenant org claim issue preventing project creation.
         """
-        alice_token, _ = await register_and_login("alice")
+        alice_token, alice_user_id = await register_and_login("alice")
         bob_token, _ = await register_and_login("bob")
 
         alice_headers = {"Authorization": f"Bearer {alice_token}"}
@@ -61,12 +59,10 @@ class TestTenantIsolationE2E:
                 headers=alice_headers,
                 json={
                     "title": "Alice's Research",
+                    "user_id": alice_user_id,
                     "query": {"text": "Alice's question", "domains": ["AI"]},
                 },
             )
-
-            if alice_create_response.status_code == 403:
-                pytest.skip("Tenant org claim required (known issue)")
 
             assert alice_create_response.status_code == 201
             alice_project = alice_create_response.json()
@@ -129,7 +125,7 @@ class TestTenantIsolationE2E:
 
     async def test_cross_tenant_cancel_denied(self):
         """Bob cannot cancel Alice's project."""
-        alice_token, _ = await register_and_login("alice3")
+        alice_token, alice_user_id = await register_and_login("alice3")
         bob_token, _ = await register_and_login("bob3")
 
         alice_headers = {"Authorization": f"Bearer {alice_token}"}
@@ -142,12 +138,10 @@ class TestTenantIsolationE2E:
                 headers=alice_headers,
                 json={
                     "title": "Alice's Research 3",
+                    "user_id": alice_user_id,
                     "query": {"text": "Alice's question 3", "domains": ["AI"]},
                 },
             )
-
-            if alice_create_response.status_code == 403:
-                pytest.skip("Tenant org claim required (known issue)")
 
             assert alice_create_response.status_code == 201
             alice_project = alice_create_response.json()

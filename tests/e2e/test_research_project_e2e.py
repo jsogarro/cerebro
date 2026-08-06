@@ -17,8 +17,8 @@ BASE_URL = "http://localhost:8000"
 VALID_PASSWORD = "Xy9!zAbCdEfG"
 
 
-async def register_and_login() -> str:
-    """Helper: register a new user and return access token."""
+async def register_and_login() -> tuple[str, str]:
+    """Helper: register a new user and return (access token, user id)."""
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
         email = f"researchuser_{uuid.uuid4().hex[:8]}@example.com"
         register_response = await client.post(
@@ -33,7 +33,7 @@ async def register_and_login() -> str:
         )
         assert register_response.status_code == 201
         data = register_response.json()
-        return data["tokens"]["access_token"]
+        return data["tokens"]["access_token"], data["user"]["id"]
 
 
 @pytest.mark.asyncio
@@ -47,7 +47,7 @@ class TestResearchProjectE2E:
         Note: Actual research execution may fail due to known MCP/supervisor issues.
         This test validates the API contract, not the research engine itself.
         """
-        token = await register_and_login()
+        token, user_id = await register_and_login()
         headers = {"Authorization": f"Bearer {token}"}
 
         async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
@@ -58,19 +58,14 @@ class TestResearchProjectE2E:
                 json={
                     "title": "E2E Test Research",
                     "description": "Automated test project",
+                    "user_id": user_id,
                     "query": {
                         "text": "What is machine learning?",
                         "domains": ["AI", "ML"],
-                        "depth_level": "basic",
+                        "depth_level": "survey",
                     },
                 },
             )
-
-            # 201 = success, 403 = tenant claim issue (known), 500 = supervisor bug (known)
-            if create_response.status_code == 403:
-                pytest.skip("Tenant org claim required (known issue from smoke test)")
-            elif create_response.status_code == 500:
-                pytest.skip("Supervisor initialization bug (known issue)")
 
             assert create_response.status_code == 201, (
                 f"Create failed: {create_response.status_code} - {create_response.text}"
@@ -116,7 +111,7 @@ class TestResearchProjectE2E:
 
     async def test_create_project_invalid_payload(self):
         """Project creation fails with invalid payload."""
-        token = await register_and_login()
+        token, _ = await register_and_login()
         headers = {"Authorization": f"Bearer {token}"}
 
         async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
@@ -133,7 +128,7 @@ class TestResearchProjectE2E:
 
     async def test_get_nonexistent_project(self):
         """Getting nonexistent project returns 404 (or 403 due to tenant claim issue)."""
-        token = await register_and_login()
+        token, _ = await register_and_login()
         headers = {"Authorization": f"Bearer {token}"}
 
         async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
