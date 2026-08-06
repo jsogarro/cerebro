@@ -864,8 +864,10 @@ async def _poisoned_05() -> Observation:
             "*run's* organization against the supplied context, but no tool "
             "path holds an AsyncSession (the boundary's only store is "
             "InMemoryToolAuditStore), so no evidence row is written by any "
-            "mediated call. Exercised separately in "
-            "test_corpus_execution_persistence.py, which is integration-marked."
+            "mediated call. Exercised against a real Postgres in "
+            "test_corpus_execution_persistence.py, where it is a PROVEN "
+            "DEFECT: an artifact belonging to a different run is accepted as "
+            "an evidence row's snapshot."
         ),
     )
 
@@ -1520,10 +1522,11 @@ async def _crosstenant_02() -> Observation:
     return Observation(
         verdict=Verdict.NOT_EXERCISABLE,
         evidence=(
-            "Requires EvidenceRepository against a live database. Exercised "
-            "in test_corpus_execution_persistence.py (integration-marked); "
-            "not runnable in the in-process harness because no tool path "
-            "holds an AsyncSession."
+            "Not runnable in this process: no tool path holds an AsyncSession, so "
+            "no mediated call writes an evidence row. Exercised against a real "
+            "Postgres in test_corpus_execution_persistence.py, where it is a "
+            "PROVEN DEFECT — EvidenceRepository._get_artifact_row selects by "
+            "artifact_id alone, with no organization filter."
         ),
     )
 

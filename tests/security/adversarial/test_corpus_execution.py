@@ -64,12 +64,41 @@ NOT_EXERCISABLE: Final[frozenset[str]] = frozenset(
 )
 """Scenarios with nothing to run against, pinned so the set cannot grow quietly.
 
-Each one's exerciser states its reason. Four of the five are the wave's already
-known limits — no tool path holds an ``AsyncSession``, and no Wave 4 event
-consumer exists — rather than anything discovered here. The two evidence
-scenarios ARE exercised, against a real database, in
-``test_corpus_execution_persistence.py``; they are listed here because the
-in-process harness cannot reach them.
+Each one's exerciser states its reason. All five are the wave's already known
+limits — no tool path holds an ``AsyncSession``, and no Wave 4 event consumer
+exists — rather than anything discovered here.
+
+Two of them are unrunnable *in this process only*; see
+:data:`DEFECTS_PROVEN_ELSEWHERE`.
+"""
+
+
+DEFECTS_PROVEN_ELSEWHERE: Final[dict[str, str]] = {
+    "crosstenant-02-cross-tenant-evidence-artifact-link": (
+        "Proven against a real Postgres in "
+        "test_corpus_execution_persistence.py::"
+        "test_evidence_cannot_reference_another_tenants_artifact. "
+        "EvidenceRepository._get_artifact_row selects by artifact_id alone, "
+        "with no organization or run filter, so an Evidence row in tenant A "
+        "may name tenant B's snapshot artifact. The digest cross-check that "
+        "does run is no mitigation: artifacts are content-addressed, so both "
+        "tenants acquiring the same public source produce the same digest."
+    ),
+    "poisoned-05-cross-run-evidence-borrow": (
+        "Proven against a real Postgres in "
+        "test_corpus_execution_persistence.py::"
+        "test_evidence_cannot_reference_another_runs_artifact. Same missing "
+        "check, reached through the poisoned tool-output path: an artifact "
+        "belonging to a different run is accepted as an evidence row's "
+        "snapshot."
+    ),
+}
+"""Scenarios this process cannot run that ARE proven defects in the DB suite.
+
+Listed so the in-process report does not read as "unknown" for two guarantees
+that are in fact known to be violated. Kept apart from :data:`DEFECTS` because
+this module has no way to reproduce them, and a defect recorded where it cannot
+be re-run is a defect nobody will notice regressing.
 """
 
 
@@ -227,7 +256,13 @@ class TestTheHarnessCannotReportHealthByRunningNothing:
     def test_the_not_exercisable_set_is_declared(self) -> None:
         assert set(_SCENARIOS_BY_ID) >= NOT_EXERCISABLE
         assert NOT_EXERCISABLE.isdisjoint(DEFECTS), (
-            "a scenario cannot be both unrunnable and a proven defect"
+            "a scenario cannot be both unrunnable here and reproducible here"
+        )
+
+    def test_defects_proven_elsewhere_are_unrunnable_here(self) -> None:
+        assert set(DEFECTS_PROVEN_ELSEWHERE) <= NOT_EXERCISABLE, (
+            "a scenario reproducible in this process belongs in DEFECTS, "
+            "where it is re-run on every suite execution"
         )
 
     def test_every_defect_names_a_deterministic_scenario(self) -> None:
