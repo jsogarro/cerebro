@@ -73,6 +73,7 @@ from typing import Any, Final, final
 
 from src.core.contracts.capabilities import (
     APPROVAL_REQUIRED_SENSITIVITIES,
+    CapabilityDecision,
     CapabilityGrant,
     SensitivityClass,
 )
@@ -271,6 +272,13 @@ class InMemoryToolAuditStore:
 
     invocations: list[ToolInvocation] = field(default_factory=list)
     events: list[ToolAuditEvent] = field(default_factory=list)
+    decisions: list[CapabilityDecision | None] = field(default_factory=list)
+    """Positionally aligned with :attr:`invocations`.
+
+    Kept alongside rather than merged in, because the decision is not part of
+    the invocation contract and must not start looking like it is. ``None``
+    entries are the malformed-request rows, which have no decision to record.
+    """
 
     async def find_invocation(
         self, *, run_id: str, organization_id: str | None, idempotency_key: str
@@ -289,9 +297,11 @@ class InMemoryToolAuditStore:
         invocation: ToolInvocation,
         events: Sequence[ToolAuditEvent],
         organization_id: str | None,
+        capability_decision: CapabilityDecision | None,
     ) -> None:
         self.invocations.append(invocation)
         self.events.extend(events)
+        self.decisions.append(capability_decision)
 
 
 def build_tool_boundary(

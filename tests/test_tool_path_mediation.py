@@ -660,6 +660,124 @@ class TestTheGrantWindowOutlivesTheCallBudget:
                 assert deadline * 4 <= DEFAULT_GRANT_TTL.total_seconds(), name
 
 
+class TestThePersistedRecordCarriesItsCapabilityDecision:
+    """Without this, the durable half of the boundary cannot be written.
+
+    4B's `ToolInvocationRepository.create_tool_invocation` requires a
+    `CapabilityDecision` — it sources five columns from it
+    (`capability_decision_effect`, `capability_grant_id`,
+    `capability_approval_id`, `capability_denial_reason`,
+    `request_fingerprint`), none of which is derivable from the
+    `ToolInvocation`, by design. 4C's `ToolAuditStore.persist` did not carry
+    one, so an adapter between them was unwritable — not for want of a database
+    session, but for want of a parameter.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_successful_call_persists_the_decision_that_allowed_it(
+        self,
+    ) -> None:
+        from src.core.contracts.capabilities import CapabilityDecisionEffect
+
+        store = InMemoryToolAuditStore()
+        client = _healthy_client()
+        client.search_academic.return_value = {"success": True, "results": []}
+        integration = MCPIntegration(mcp_client=client, audit_store=store)
+
+        await integration.search_academic_sources(query="q", identity=_identity())
+
+        decision = store.decisions[-1]
+        assert decision is not None
+        assert decision.effect is CapabilityDecisionEffect.ALLOW
+        assert decision.grant_id is not None
+        assert decision.request_fingerprint is not None
+
+    @pytest.mark.asyncio
+    async def test_a_denied_call_persists_the_decision_that_refused_it(self) -> None:
+        """The denial reason is a column, and it lives only on the decision."""
+
+        from src.core.contracts.capabilities import (
+            CapabilityDecisionEffect,
+            CapabilityDenialReason,
+        )
+        from src.core.contracts.trust import TrustClassification
+
+        store = InMemoryToolAuditStore()
+        client = _healthy_client()
+        integration = MCPIntegration(mcp_client=client, audit_store=store)
+
+        await integration.search_academic_sources(
+            query="q",
+            identity=_identity(),
+            input_trust=TrustClassification.DERIVED_UNTRUSTED,
+        )
+
+        decision = store.decisions[-1]
+        assert decision is not None
+        assert decision.effect is CapabilityDecisionEffect.DENY
+        assert (
+            decision.denial_reason is CapabilityDenialReason.INPUT_TRUST_EXCEEDS_GRANT
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_request_persists_no_decision_because_none_exists(
+        self,
+    ) -> None:
+        """The one invocation for which there is genuinely no decision.
+
+        Input validation runs *before* authorization, and it must: the
+        capability request's fingerprint includes the digest of the validated
+        input, so there is nothing to decide about until the arguments parse.
+        The boundary still records the rejection — deliberately, since an audit
+        trail with a hole where every malformed request should be is the trail
+        an attacker would prefer.
+
+        So `persist` carries `CapabilityDecision | None`, and `None` is a real
+        case rather than a defensive default. **The adapter is still blocked
+        for this one status** — see the packet handoff; the resolution is in
+        4B's DDL, not here.
+        """
+
+        store = InMemoryToolAuditStore()
+        registry = create_default_registry(audit_store=store)
+
+        result = await registry.execute(
+            "arithmetic", {"not_the_right_field": 1}, identity=_identity()
+        )
+
+        assert result.success is False
+        assert store.invocations[-1].status is ToolInvocationStatus.FAILED
+        assert store.invocations[-1].error_code == "invalid_input"
+        assert store.decisions[-1] is None
+
+    @pytest.mark.asyncio
+    async def test_the_requested_record_carries_the_decision_too(self) -> None:
+        """Both writes, not just the terminal one — the REQUESTED row is
+        inserted first and is the row the terminal write transitions.
+        """
+        from src.core.contracts.capabilities import CapabilityDecisionEffect
+
+        store = InMemoryToolAuditStore()
+        client = _healthy_client()
+        client.search_academic.return_value = {"success": True, "results": []}
+        integration = MCPIntegration(mcp_client=client, audit_store=store)
+
+        await integration.search_academic_sources(query="q", identity=_identity())
+
+        requested = [
+            decision
+            for invocation, decision in zip(
+                store.invocations, store.decisions, strict=True
+            )
+            if invocation.status is ToolInvocationStatus.REQUESTED
+        ]
+        assert requested
+        assert all(
+            d is not None and d.effect is CapabilityDecisionEffect.ALLOW
+            for d in requested
+        )
+
+
 class TestReplayReadsTheRecordRatherThanRedeciding:
     """4A's hazard: a grant minted at call time is not persisted, so a replay
     cannot reconstruct it. Re-deciding would let a replay reach a different
