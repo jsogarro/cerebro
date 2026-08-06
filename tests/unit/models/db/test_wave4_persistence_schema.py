@@ -402,6 +402,35 @@ def test_an_artifact_persists(session: Session) -> None:
     session.flush()
 
 
+def test_a_model_produced_artifact_cannot_omit_producer_kind(
+    session: Session,
+) -> None:
+    """producer_kind carries no default: a caller must declare a
+    model-produced row as such rather than have it silently persist as
+    deterministic. Omits the key entirely, not just sets it to None -- the
+    row must be rejected before ever reaching the producer_kind CHECKs."""
+    session.add(_make_run())
+    session.flush()
+    values = {
+        "artifact_id": "artifact-1",
+        "run_id": "run-1",
+        "kind": "source_snapshot",
+        "media_type": "text/html",
+        "storage_uri": "s3://bucket/key",
+        "content_sha256": "a" * 64,
+        "status": ArtifactStatus.FINAL.value,
+        "trust": TrustClassification.EXTERNAL_UNTRUSTED.value,
+        "producer": "acquisition-tool",
+        "metadata_": {},
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    assert "producer_kind" not in values
+    session.add(AgentArtifact(**values))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
 def test_artifact_status_domain_is_frozen(session: Session) -> None:
     session.add(_make_run())
     session.flush()
@@ -518,6 +547,44 @@ def test_a_tool_invocation_persists(session: Session) -> None:
     _seed_run_task_attempt(session)
     session.add(_make_invocation())
     session.flush()
+
+
+def test_a_model_produced_invocation_cannot_omit_producer_kind(
+    session: Session,
+) -> None:
+    """Same guarantee as agent_artifacts: producer_kind carries no default,
+    so a caller must declare a model-produced row as such. Omits the key
+    entirely -- the row must be rejected before ever reaching the
+    producer_kind CHECKs."""
+    _seed_run_task_attempt(session)
+    values = {
+        "tool_invocation_id": "invocation-1",
+        "run_id": "run-1",
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "tool_name": "academic_search",
+        "tool_version": "1.0",
+        "status": ToolInvocationStatus.SUCCEEDED.value,
+        "capability_scope": "search",
+        "idempotency_key": "invocation-key-1",
+        "input": {"query": "graph neural networks"},
+        "input_trust": TrustClassification.USER_SUPPLIED.value,
+        "input_sha256": "a" * 64,
+        "output": {"results": []},
+        "output_trust": TrustClassification.EXTERNAL_UNTRUSTED.value,
+        "output_sha256": "b" * 64,
+        "capability_decision_effect": "allow",
+        "capability_grant_id": "grant-1",
+        "request_fingerprint": "c" * 64,
+        "requested_at": NOW,
+        "completed_at": LATER,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    assert "producer_kind" not in values
+    session.add(AgentToolInvocation(**values))
+    with pytest.raises(IntegrityError):
+        session.flush()
 
 
 def test_tool_invocation_idempotency_scope_is_frozen() -> None:

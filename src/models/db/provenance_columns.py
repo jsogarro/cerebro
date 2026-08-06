@@ -8,6 +8,13 @@ record must not, and the four binding fields are set together or not at all.
 :class:`OptionalPromptBindingMixin` and the two CHECK-constraint builders
 below encode that pair of rules once so both tables enforce it identically.
 
+``producer_kind`` itself carries **no default**, on either table, matching
+``agent_evidence``/``agent_claim_supports``: a default lets a caller forget
+it and have a model-produced record silently persisted as deterministic —
+the exact inversion of what prompt pinning protects. A model judgment
+recorded as machine-derived is the silent-wrong path this column exists to
+close off, not one it should reopen by omission.
+
 ``Evidence`` and ``ClaimSupport`` carry a *required* ``PromptBinding`` — the
 evaluator or acquisition step that produced them always has a prompt — so
 those models declare their own ``NOT NULL`` columns directly and do not use
@@ -19,18 +26,12 @@ from enum import StrEnum
 from sqlalchemy import CheckConstraint, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.core.contracts import ProducerKind
-
 
 class OptionalPromptBindingMixin:
-    """Nullable ``PromptBinding`` columns plus the ``producer_kind`` they gate."""
+    """Nullable ``PromptBinding`` columns plus the required, non-defaulted
+    ``producer_kind`` that gates them."""
 
-    producer_kind: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default=ProducerKind.SYSTEM.value,
-        server_default=ProducerKind.SYSTEM.value,
-    )
+    producer_kind: Mapped[str] = mapped_column(String(20), nullable=False)
     prompt_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
     template_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -72,6 +72,38 @@ async def test_create_artifact_fails_closed_without_an_org_context(
 
 
 @pytest.mark.asyncio
+async def test_the_database_backstops_a_producer_kind_omitted_by_bypassing_the_repository(
+    repo: ArtifactRepository,
+) -> None:
+    """producer_kind carries no default at the database level either -- not
+    just on the Pydantic contract, which always supplies one. Bypasses both
+    the repository and the contract by constructing the ORM row directly,
+    the same way the capability-decision backstop test bypasses
+    create_tool_invocation."""
+    from sqlalchemy.exc import IntegrityError
+
+    from src.models.db.artifact import AgentArtifact
+
+    row = AgentArtifact(
+        artifact_id="artifact-bypass",
+        run_id="run-1",
+        kind="source_snapshot",
+        media_type="text/html",
+        storage_uri="s3://bucket/key",
+        content_sha256="a" * 64,
+        status=ArtifactStatus.FINAL.value,
+        trust=TrustClassification.EXTERNAL_UNTRUSTED.value,
+        producer="acquisition-tool",
+        metadata_={},
+        organization_id=ORG_ID,
+    )
+    repo.session.add(row)
+
+    with pytest.raises(IntegrityError):
+        await repo.session.flush()
+
+
+@pytest.mark.asyncio
 async def test_a_nested_metadata_payload_persists_and_reads_back(
     repo: ArtifactRepository,
 ) -> None:
