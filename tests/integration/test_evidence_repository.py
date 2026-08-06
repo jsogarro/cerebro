@@ -15,7 +15,12 @@ import pytest_asyncio
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.contracts import Evidence, PromptBinding, TrustClassification
+from src.core.contracts import (
+    Evidence,
+    ProducerKind,
+    PromptBinding,
+    TrustClassification,
+)
 from src.repositories.evidence_repository import (
     EvidenceDigestMismatchError,
     EvidenceRepository,
@@ -51,6 +56,7 @@ def _make_evidence(**overrides: object) -> Evidence:
         "content_sha256": "a" * 64,
         "locator": "char:0-120",
         "trust": TrustClassification.EXTERNAL_UNTRUSTED,
+        "producer_kind": ProducerKind.MODEL_TURN,
         "prompt_binding": BINDING,
         "acquired_at": NOW,
     }

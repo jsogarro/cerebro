@@ -116,13 +116,22 @@ def _optional_prompt_binding_columns() -> list[sa.Column]:
     ]
 
 
-def _required_prompt_binding_columns() -> list[sa.Column]:
-    """NOT NULL PromptBinding columns, for records that always name a prompt."""
+def _no_default_prompt_binding_columns() -> list[sa.Column]:
+    """Nullable PromptBinding columns plus a required, non-defaulted
+    producer_kind.
+
+    Used by ``agent_evidence`` and ``agent_claim_supports``: a caller must
+    say explicitly whether a row is model-produced or deterministic. Unlike
+    ``_optional_prompt_binding_columns()``, ``producer_kind`` here carries no
+    server default, so a caller cannot omit it and have a deterministic
+    record silently pass as model-produced.
+    """
     return [
-        sa.Column("prompt_id", sa.String(255), nullable=False),
-        sa.Column("prompt_version", sa.String(100), nullable=False),
-        sa.Column("template_sha256", sa.String(64), nullable=False),
-        sa.Column("rendered_sha256", sa.String(64), nullable=False),
+        sa.Column("producer_kind", sa.String(20), nullable=False),
+        sa.Column("prompt_id", sa.String(255), nullable=True),
+        sa.Column("prompt_version", sa.String(100), nullable=True),
+        sa.Column("template_sha256", sa.String(64), nullable=True),
+        sa.Column("rendered_sha256", sa.String(64), nullable=True),
     ]
 
 
@@ -443,7 +452,7 @@ def _create_evidence() -> None:
         sa.Column("locator_start", sa.BigInteger(), nullable=False),
         sa.Column("locator_end", sa.BigInteger(), nullable=False),
         sa.Column("trust", sa.String(30), nullable=False),
-        *_required_prompt_binding_columns(),
+        *_no_default_prompt_binding_columns(),
         sa.Column("producer_tool_invocation_id", sa.String(255), nullable=True),
         sa.Column("parent_evidence_ids", sa.JSON(), nullable=False),
         sa.Column("acquired_at", sa.DateTime(timezone=True), nullable=False),
@@ -495,6 +504,18 @@ def _create_evidence() -> None:
             f"trust IN ({TRUST_CLASSIFICATION_VALUES_SQL})",
             name="ck_agent_evidence_trust",
         ),
+        sa.CheckConstraint(
+            "producer_kind IN ('model_turn', 'system')",
+            name="ck_agent_evidence_producer_kind",
+        ),
+        sa.CheckConstraint(
+            PROMPT_BINDING_ALL_OR_NOTHING_SQL,
+            name="ck_agent_evidence_prompt_binding_all_or_nothing",
+        ),
+        sa.CheckConstraint(
+            PRODUCER_KIND_BICONDITIONAL_SQL,
+            name="ck_agent_evidence_producer_kind_biconditional",
+        ),
     )
     op.create_index(
         "idx_agent_evidence_org_run", "agent_evidence", ["organization_id", "run_id"]
@@ -522,7 +543,7 @@ def _create_claim_supports() -> None:
         sa.Column("absent_evidence_reason", sa.String(30), nullable=True),
         sa.Column("evaluator_id", sa.String(255), nullable=False),
         sa.Column("evaluator_version", sa.String(100), nullable=False),
-        *_required_prompt_binding_columns(),
+        *_no_default_prompt_binding_columns(),
         sa.Column("explanation", sa.Text(), nullable=False),
         sa.Column("evaluated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column(
@@ -567,6 +588,18 @@ def _create_claim_supports() -> None:
         sa.CheckConstraint(
             "absent_evidence_reason IS NULL OR status = 'unsupported'",
             name="ck_agent_claim_support_reason_only_when_unsupported",
+        ),
+        sa.CheckConstraint(
+            "producer_kind IN ('model_turn', 'system')",
+            name="ck_agent_claim_support_producer_kind",
+        ),
+        sa.CheckConstraint(
+            PROMPT_BINDING_ALL_OR_NOTHING_SQL,
+            name="ck_agent_claim_support_prompt_binding_all_or_nothing",
+        ),
+        sa.CheckConstraint(
+            PRODUCER_KIND_BICONDITIONAL_SQL,
+            name="ck_agent_claim_support_producer_kind_biconditional",
         ),
     )
     op.create_index(

@@ -7,11 +7,18 @@ out from under it — so this table follows the same append-only treatment as
 ``agent_run_events`` (``@register_append_only`` plus the migration's
 database trigger).
 
-``PromptBinding`` here is **required**, not optional: unlike
+``producer_kind`` and ``prompt_binding`` follow the same rule as
 ``ToolInvocation``/``Artifact`` (see ``provenance_columns.
-OptionalPromptBindingMixin``), every ``Evidence`` row names the prompt or
-acquisition step that produced it, so the four binding columns are declared
-``NOT NULL`` directly rather than through the optional mixin.
+OptionalPromptBindingMixin``): a ``model_turn`` record names its prompt, a
+``system`` record — an acquisition tool, a deterministic evaluator — does
+not, and the biconditional is a database CHECK, not just a Pydantic
+validator. Unlike the other two tables, ``producer_kind`` here has **no
+server default**: a default would let a caller omit it and have a
+deterministic record silently pass as model-produced, which is the exact
+inversion of what prompt pinning protects. This table therefore declares its
+own five columns (``producer_kind`` plus the four binding fields, all
+nullable except ``producer_kind`` itself) rather than reusing
+``OptionalPromptBindingMixin``, whose ``producer_kind`` does default.
 
 ``locator`` is sized to ``MAX_LOCATOR_LENGTH`` from
 ``src.core.contracts.locators`` — the frozen grammar's own bound — so the
@@ -47,10 +54,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.core.contracts import TrustClassification
+from src.core.contracts import ProducerKind, TrustClassification
 from src.core.contracts.locators import LOCATOR_CANONICAL_SCHEMES, MAX_LOCATOR_LENGTH
 from src.models.db.append_only import register_append_only
 from src.models.db.base import UUID, Base
+from src.models.db.provenance_columns import (
+    producer_kind_biconditional_check,
+    prompt_binding_all_or_nothing_check,
+)
 from src.models.db.run_lifecycle import status_check
 
 
@@ -92,10 +103,11 @@ class AgentEvidence(Base):
     locator_end: Mapped[int] = mapped_column(BigInteger, nullable=False)
     trust: Mapped[str] = mapped_column(String(30), nullable=False)
 
-    prompt_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
-    template_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    rendered_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    producer_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    prompt_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    template_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rendered_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     producer_tool_invocation_id: Mapped[str | None] = mapped_column(
         String(255),
@@ -147,6 +159,23 @@ class AgentEvidence(Base):
         ),
         status_check(
             column="trust", statuses=TrustClassification, name="ck_agent_evidence_trust"
+        ),
+        # Mutation-checked and found unreachable: `producer_kind_biconditional_check`
+        # only accepts 'system' or 'model_turn' — any other value fails both of
+        # its disjuncts regardless of prompt-binding state, so this value-domain
+        # CHECK never independently fires. Kept as the same defence-in-depth
+        # posture as the claim-support CHECKs above: if the biconditional is
+        # ever relaxed, this is what still bounds the column's value set.
+        status_check(
+            column="producer_kind",
+            statuses=ProducerKind,
+            name="ck_agent_evidence_producer_kind",
+        ),
+        prompt_binding_all_or_nothing_check(
+            name="ck_agent_evidence_prompt_binding_all_or_nothing"
+        ),
+        producer_kind_biconditional_check(
+            name="ck_agent_evidence_producer_kind_biconditional"
         ),
         Index("idx_agent_evidence_org_run", "organization_id", "run_id"),
     )

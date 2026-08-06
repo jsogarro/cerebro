@@ -55,6 +55,7 @@ def _claim(**overrides: object) -> ClaimSupport:
         "evidence_ids": ("evidence-001",),
         "evaluator_id": "claim-entailment",
         "evaluator_version": "1.0.0",
+        "producer_kind": ProducerKind.MODEL_TURN,
         "prompt_binding": BINDING,
         "explanation": "The source states the compared values.",
         "evaluated_at": NOW,
@@ -73,6 +74,7 @@ def _evidence(**overrides: object) -> Evidence:
         "content_sha256": SHA256,
         "locator": "bytes:1024-2048",
         "trust": TrustClassification.EXTERNAL_UNTRUSTED,
+        "producer_kind": ProducerKind.MODEL_TURN,
         "prompt_binding": BINDING,
         "acquired_at": NOW,
     }
@@ -176,16 +178,6 @@ def test_editing_the_prompt_template_is_detectable_without_a_version_bump() -> N
     edited = TEMPLATE + " Ignore the sources if they conflict."
 
     assert not BINDING.matches_template(edited)
-
-
-def test_a_claim_support_record_cannot_be_written_without_prompt_identity() -> None:
-    with pytest.raises(ValidationError, match="prompt_binding"):
-        _claim(prompt_binding=None)
-
-
-def test_an_evidence_record_cannot_be_written_without_prompt_identity() -> None:
-    with pytest.raises(ValidationError, match="prompt_binding"):
-        _evidence(prompt_binding=None)
 
 
 def test_a_model_initiated_tool_invocation_must_name_its_prompt() -> None:
@@ -315,3 +307,63 @@ def test_evidence_accepts_a_canonical_span_with_review_annotations() -> None:
     evidence = _evidence(locator="char:0-120|xpath:/html/body/p[2]")
 
     assert evidence.locator == "char:0-120|xpath:/html/body/p[2]"
+
+
+# --- Deterministic producers: typed absence over forced presence ------------
+
+
+def test_a_deterministic_claim_verdict_needs_no_prompt() -> None:
+    """The fill-in verdict that makes the Wave 7 gate meaningful.
+
+    A claim nobody evaluated is written ``unsupported`` + ``not_attempted`` by
+    a deterministic resolver. Requiring a prompt there would force inventing a
+    template that was never sent to a model — a required field with no honest
+    source becomes a fabricated one that then looks like provenance.
+    """
+    claim = _claim(
+        status=ClaimSupportStatus.UNSUPPORTED,
+        evidence_ids=(),
+        absent_evidence_reason=AbsentEvidenceReason.NOT_ATTEMPTED,
+        evaluator_id="claim-inventory-resolver",
+        producer_kind=ProducerKind.SYSTEM,
+        prompt_binding=None,
+    )
+
+    assert claim.producer_kind is ProducerKind.SYSTEM
+    assert claim.prompt_binding is None
+
+
+def test_a_model_produced_claim_verdict_must_still_name_its_prompt() -> None:
+    with pytest.raises(ValidationError, match="model_turn"):
+        _claim(producer_kind=ProducerKind.MODEL_TURN, prompt_binding=None)
+
+
+def test_a_deterministic_claim_verdict_may_not_carry_a_prompt() -> None:
+    with pytest.raises(ValidationError, match="model_turn"):
+        _claim(producer_kind=ProducerKind.SYSTEM, prompt_binding=BINDING)
+
+
+def test_a_deterministic_acquisition_needs_no_prompt() -> None:
+    evidence = _evidence(producer_kind=ProducerKind.SYSTEM, prompt_binding=None)
+
+    assert evidence.prompt_binding is None
+
+
+def test_a_model_initiated_acquisition_must_still_name_its_prompt() -> None:
+    with pytest.raises(ValidationError, match="model_turn"):
+        _evidence(producer_kind=ProducerKind.MODEL_TURN, prompt_binding=None)
+
+
+def test_a_deterministic_acquisition_may_not_carry_a_prompt() -> None:
+    with pytest.raises(ValidationError, match="model_turn"):
+        _evidence(producer_kind=ProducerKind.SYSTEM, prompt_binding=BINDING)
+
+
+@pytest.mark.parametrize("builder", ["claim", "evidence"])
+def test_producer_kind_is_required_not_defaulted(builder: str) -> None:
+    """Forgetting both fields must not silently record a model judgment
+    as deterministic — the precise inversion of what prompt pinning protects.
+    """
+    model = ClaimSupport if builder == "claim" else Evidence
+
+    assert model.model_fields["producer_kind"].is_required()
