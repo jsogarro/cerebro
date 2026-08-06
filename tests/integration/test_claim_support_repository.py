@@ -16,6 +16,7 @@ from src.core.contracts import (
     AbsentEvidenceReason,
     ClaimSupport,
     ClaimSupportStatus,
+    ProducerKind,
     PromptBinding,
 )
 from src.repositories.claim_support_repository import ClaimSupportRepository
@@ -51,6 +52,7 @@ def _make_claim(**overrides: object) -> ClaimSupport:
         "evidence_ids": ("evidence-1", "evidence-2"),
         "evaluator_id": "evaluator-1",
         "evaluator_version": "1.0",
+        "producer_kind": ProducerKind.MODEL_TURN,
         "prompt_binding": BINDING,
         "explanation": "Table 3 reports a 5% accuracy gain.",
         "evaluated_at": NOW,

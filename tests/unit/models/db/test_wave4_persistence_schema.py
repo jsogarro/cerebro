@@ -229,6 +229,7 @@ def _make_evidence(**overrides: object) -> AgentEvidence:
         "locator_start": 0,
         "locator_end": 120,
         "trust": TrustClassification.EXTERNAL_UNTRUSTED.value,
+        "producer_kind": ProducerKind.MODEL_TURN.value,
         "prompt_id": "prompt-1",
         "prompt_version": "1.0",
         "template_sha256": "b" * 64,
@@ -253,6 +254,7 @@ def _make_claim_support(**overrides: object) -> AgentClaimSupport:
         "absent_evidence_reason": None,
         "evaluator_id": "evaluator-1",
         "evaluator_version": "1.0",
+        "producer_kind": ProducerKind.MODEL_TURN.value,
         "prompt_id": "prompt-2",
         "prompt_version": "1.0",
         "template_sha256": "d" * 64,
@@ -812,6 +814,63 @@ def test_line_scheme_spans_are_one_based(session: Session) -> None:
         session.flush()
 
 
+def test_evidence_producer_kind_domain_is_frozen(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(_make_evidence(producer_kind="teleported"))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_model_turn_evidence_row_without_a_prompt_is_rejected(
+    session: Session,
+) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(
+        _make_evidence(
+            producer_kind=ProducerKind.MODEL_TURN.value,
+            prompt_id=None,
+            prompt_version=None,
+            template_sha256=None,
+            rendered_sha256=None,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_system_evidence_row_with_a_prompt_is_rejected(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(_make_evidence(producer_kind=ProducerKind.SYSTEM.value))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_deterministic_evidence_row_with_no_prompt_is_accepted(
+    session: Session,
+) -> None:
+    """The row 4A's contract change exists to make constructible: an
+    acquisition tool or deterministic evaluator has no prompt at all."""
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(
+        _make_evidence(
+            producer_kind=ProducerKind.SYSTEM.value,
+            prompt_id=None,
+            prompt_version=None,
+            template_sha256=None,
+            rendered_sha256=None,
+        )
+    )
+    session.flush()
+
+
 def test_evidence_cannot_be_updated(session: Session) -> None:
     _seed_run_task_attempt(session)
     session.add(_make_artifact())
@@ -986,6 +1045,70 @@ def test_a_reason_cannot_accompany_a_supported_status(session: Session) -> None:
     )
     with pytest.raises(IntegrityError):
         session.flush()
+
+
+def test_claim_support_producer_kind_domain_is_frozen(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(_make_claim_support(producer_kind="teleported"))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_model_turn_claim_support_without_a_prompt_is_rejected(
+    session: Session,
+) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(
+        _make_claim_support(
+            producer_kind=ProducerKind.MODEL_TURN.value,
+            prompt_id=None,
+            prompt_version=None,
+            template_sha256=None,
+            rendered_sha256=None,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_system_claim_support_with_a_prompt_is_rejected(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(_make_claim_support(producer_kind=ProducerKind.SYSTEM.value))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_the_previously_impossible_unattributed_row_is_now_constructible(
+    session: Session,
+) -> None:
+    """4A's motivating example: the resolver that writes
+    unsupported/not_attempted for a claim nobody examined has no prompt to
+    name. Before the producer_kind discriminator, this row required a
+    fabricated PromptBinding over a template never sent to a model; now it
+    is exactly what a deterministic no-op resolution looks like."""
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(
+        _make_claim_support(
+            status=ClaimSupportStatus.UNSUPPORTED.value,
+            evidence_ids=[],
+            evidence_count=0,
+            absent_evidence_reason=AbsentEvidenceReason.NOT_ATTEMPTED.value,
+            producer_kind=ProducerKind.SYSTEM.value,
+            prompt_id=None,
+            prompt_version=None,
+            template_sha256=None,
+            rendered_sha256=None,
+        )
+    )
+    session.flush()
 
 
 def test_claim_support_cannot_be_updated(session: Session) -> None:

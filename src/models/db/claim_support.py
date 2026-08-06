@@ -48,10 +48,16 @@ database invariants, one per branch of
    relaxed, this is what still stops a ``supported`` row from also citing
    an absent-evidence reason.
 
-``PromptBinding`` is **required** here, as on ``Evidence``: every judgment
-names the evaluator prompt that produced it, so the four binding columns are
-``NOT NULL`` directly rather than through
-``provenance_columns.OptionalPromptBindingMixin``.
+``producer_kind`` and ``prompt_binding`` follow the same rule as
+``ToolInvocation``/``Artifact``/``Evidence``: a ``model_turn`` judgment names
+its prompt, a ``system`` judgment — the deterministic evaluator stack, the
+resolver that writes ``unsupported``/``not_attempted`` for a claim nobody
+examined — does not, and the biconditional is a database CHECK. As on
+``Evidence``, ``producer_kind`` has **no server default**, so a caller cannot
+omit it and have a model judgment silently recorded as deterministic; this
+table declares its own five columns rather than reusing
+``provenance_columns.OptionalPromptBindingMixin``, whose ``producer_kind``
+does default.
 """
 
 import uuid
@@ -70,9 +76,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.core.contracts import AbsentEvidenceReason, ClaimSupportStatus
+from src.core.contracts import AbsentEvidenceReason, ClaimSupportStatus, ProducerKind
 from src.models.db.append_only import register_append_only
 from src.models.db.base import UUID, Base
+from src.models.db.provenance_columns import (
+    producer_kind_biconditional_check,
+    prompt_binding_all_or_nothing_check,
+)
 from src.models.db.run_lifecycle import status_check
 
 _EVIDENCE_BEARING_STATUSES_SQL = "('supported', 'partially_supported', 'disputed')"
@@ -124,10 +134,11 @@ class AgentClaimSupport(Base):
     evaluator_id: Mapped[str] = mapped_column(String(255), nullable=False)
     evaluator_version: Mapped[str] = mapped_column(String(100), nullable=False)
 
-    prompt_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
-    template_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    rendered_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    producer_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    prompt_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    template_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rendered_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
     evaluated_at: Mapped[datetime] = mapped_column(
@@ -180,6 +191,22 @@ class AgentClaimSupport(Base):
         CheckConstraint(
             "absent_evidence_reason IS NULL OR status = 'unsupported'",
             name="ck_agent_claim_support_reason_only_when_unsupported",
+        ),
+        # Mutation-checked and found unreachable, same as the evidence table's
+        # equivalent CHECK: `producer_kind_biconditional_check` only accepts
+        # 'system' or 'model_turn', so any other value fails both of its
+        # disjuncts regardless of prompt-binding state. Kept as defence in
+        # depth, same posture as (3) and (7) above.
+        status_check(
+            column="producer_kind",
+            statuses=ProducerKind,
+            name="ck_agent_claim_support_producer_kind",
+        ),
+        prompt_binding_all_or_nothing_check(
+            name="ck_agent_claim_support_prompt_binding_all_or_nothing"
+        ),
+        producer_kind_biconditional_check(
+            name="ck_agent_claim_support_producer_kind_biconditional"
         ),
         Index("idx_agent_claim_support_org_run", "organization_id", "run_id"),
         Index("idx_agent_claim_support_claim", "claim_id", "evaluated_at"),
