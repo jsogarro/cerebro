@@ -540,6 +540,33 @@ class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
 
         assert decision.effect is CapabilityDecisionEffect.DENY
 
+    @pytest.mark.parametrize("sensitivity_name", ["EXTERNAL_WRITE", "EXFILTRATION"])
+    def test_it_refuses_to_authorize_a_sink_that_requires_approval(
+        self, sensitivity_name: str
+    ) -> None:
+        """The one guard that makes the interim grant defensible.
+
+        A self-issued grant is safe at ``READ_ONLY`` only because no approval
+        requirement exists to waive at that sensitivity. The moment a tool
+        declares a sink that does require approval, the grant nobody issued
+        must not be what permits it — and that has to be a refusal in code, not
+        a rule in a docstring, because the rule is what gets forgotten.
+        """
+
+        from src.agents.tools.mediation import self_issued_grant
+        from src.core.contracts.capabilities import SensitivityClass
+        from src.core.contracts.trust import TrustClassification
+
+        with pytest.raises(ValueError, match="requires approval"):
+            self_issued_grant(
+                tool_name="dangerous",
+                tool_version="1.0.0",
+                sensitivity=SensitivityClass[sensitivity_name],
+                input_trust=TrustClassification.APPLICATION,
+                identity=_identity(),
+                now=datetime.now(UTC),
+            )
+
     def test_the_self_issued_scope_is_findable_by_audit(self) -> None:
         """Every call authorized by nobody must be findable with one query."""
 
