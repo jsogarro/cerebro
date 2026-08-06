@@ -47,18 +47,33 @@ from typing import Any, Final, final, get_args
 from pydantic import BaseModel
 
 from src.core.contracts.capabilities import SensitivityClass
-from src.core.contracts.redaction import SecretRef, _is_credential_key
+from src.core.contracts.redaction import SecretRef
 
 from .errors import ToolSpecError
 from .outcome import RetryDisposition
 
-_is_credential_name: Final = _is_credential_key
+try:
+    from src.core.contracts.redaction import (  # type: ignore[attr-defined]
+        is_credential_key,
+    )
+except ImportError:  # pragma: no cover - whichever branch this tree is on
+    # The contract fix that makes this public renames the private name outright
+    # rather than aliasing it, so *neither* spelling works on both branches.
+    # This bridge exists because the failure it prevents is a silent one: the
+    # rename lives in a file this package does not touch, so integrating the two
+    # branches produces no merge conflict — just an ImportError at runtime, in a
+    # module whose tests would no longer import either.
+    #
+    # Collapse to the public import once the contract change is integrated.
+    from src.core.contracts.redaction import (  # type: ignore[attr-defined,no-redef]
+        _is_credential_key as is_credential_key,
+    )
+
+_is_credential_name: Final = is_credential_key
 """Reuse redaction's own key-name test rather than restating the list.
 
-Deliberately importing a private name. Two copies of a security-relevant word
-list drift, and the copy that drifts is the one nobody is looking at. If this
-ever needs to be public, that is a contract change for 4A to make, not a second
-list for this module to own.
+Two copies of a security-relevant word list drift, and the copy that drifts is
+the one nobody is looking at.
 """
 
 
