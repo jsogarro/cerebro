@@ -32,29 +32,49 @@ MIXED_SOURCE = (
 )
 
 
-def test_segmentation_reproduces_the_source_byte_for_byte() -> None:
+UNTERMINATED_SOURCE = "The final sentence carries no terminator and no newline"
+
+
+def test_the_coverage_sources_exercise_the_shapes_that_break_coverage() -> None:
+    """The parametrized cases below are only as good as the inputs they use.
+
+    A mutation that dropped the trailing-remainder branch of the splitter
+    survived reassembly equality, because every sample happened to end on a
+    boundary and the branch was never reached. So the properties of the sample
+    set are asserted here rather than assumed: without an unterminated source,
+    the coverage test proves coverage only of sources that end tidily.
+    """
+    assert "\n\n" in MIXED_SOURCE, "must exercise blank-line runs"
+    assert "  " in MIXED_SOURCE, "must exercise repeated spaces"
+    assert {".", "?", "!"} <= set(MIXED_SOURCE), "must mix terminators"
+    assert not UNTERMINATED_SOURCE[-1].isspace(), "must not end on a boundary"
+    assert UNTERMINATED_SOURCE[-1] not in ".!?", "must not end on a terminator"
+
+
+@pytest.mark.parametrize(
+    "source", [MIXED_SOURCE, UNTERMINATED_SOURCE], ids=["mixed", "unterminated"]
+)
+def test_segmentation_reproduces_the_source_byte_for_byte(source: str) -> None:
     """Coverage is the property, not sentence quality.
 
     Reassembly equality is what makes "every statement was considered" a
-    checkable fact rather than a claim about the splitter. The precondition
-    assertions matter as much as the equality: a source with no blank lines,
-    no double spaces and one terminator shape would satisfy this against a
-    splitter that silently normalized whitespace.
+    checkable fact rather than a claim about the splitter — a splitter that
+    silently normalized whitespace, or dropped a trailing remainder, cannot
+    satisfy it.
     """
-    assert "\n\n" in MIXED_SOURCE, "source must exercise blank-line runs"
-    assert "  " in MIXED_SOURCE, "source must exercise repeated spaces"
-    assert {".", "?", "!"} <= set(MIXED_SOURCE), "source must mix terminators"
+    segments = segment_source(source)
 
-    segments = segment_source(MIXED_SOURCE)
-
-    assert "".join(segment.text for segment in segments) == MIXED_SOURCE
+    assert "".join(segment.text for segment in segments) == source
 
 
-def test_segments_are_contiguous_and_non_overlapping() -> None:
-    segments = segment_source(MIXED_SOURCE)
+@pytest.mark.parametrize(
+    "source", [MIXED_SOURCE, UNTERMINATED_SOURCE], ids=["mixed", "unterminated"]
+)
+def test_segments_are_contiguous_and_non_overlapping(source: str) -> None:
+    segments = segment_source(source)
 
     assert segments[0].start == 0
-    assert segments[-1].end == len(MIXED_SOURCE)
+    assert segments[-1].end == len(source)
     for earlier, later in pairwise(segments):
         assert earlier.end == later.start
 
