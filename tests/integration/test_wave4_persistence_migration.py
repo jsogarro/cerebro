@@ -259,15 +259,15 @@ async def _seed_evidence(
             INSERT INTO agent_evidence (
                 id, evidence_id, run_id, task_id, source_type, source_uri,
                 snapshot_artifact_id, content_sha256, locator, locator_scheme,
-                locator_start, locator_end, trust,
+                locator_start, locator_end, trust, producer_kind,
                 prompt_id, prompt_version, template_sha256, rendered_sha256,
                 parent_evidence_ids, acquired_at
             ) VALUES (
                 gen_random_uuid(), :evidence_id, :run_id, :task_id,
                 'web_page', 'https://example.org/paper', :artifact_id,
                 :digest, :locator, :locator_scheme, :locator_start,
-                :locator_end, 'external_untrusted', 'prompt-1', '1.0',
-                :template_digest, :rendered_digest, '[]', now()
+                :locator_end, 'external_untrusted', 'model_turn', 'prompt-1',
+                '1.0', :template_digest, :rendered_digest, '[]', now()
             )
             """
         ),
@@ -302,14 +302,14 @@ async def _seed_claim_support(
                 id, claim_support_id, run_id, artifact_id, claim_id,
                 claim_text, status, evidence_ids, evidence_count,
                 absent_evidence_reason, evaluator_id, evaluator_version,
-                prompt_id, prompt_version, template_sha256, rendered_sha256,
-                explanation, evaluated_at
+                producer_kind, prompt_id, prompt_version, template_sha256,
+                rendered_sha256, explanation, evaluated_at
             ) VALUES (
                 gen_random_uuid(), :claim_support_id, :run_id, :artifact_id,
                 :claim_id, 'The model improves accuracy.', 'unsupported',
-                '[]', 0, 'no_source_found', 'evaluator-1', '1.0', 'prompt-2',
-                '1.0', :template_digest, :rendered_digest,
-                'No evidence found.', now()
+                '[]', 0, 'no_source_found', 'evaluator-1', '1.0',
+                'model_turn', 'prompt-2', '1.0', :template_digest,
+                :rendered_digest, 'No evidence found.', now()
             )
             """
         ),
