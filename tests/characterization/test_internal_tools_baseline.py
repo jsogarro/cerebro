@@ -2,13 +2,24 @@
 
 Path 1 of the Wave 4 tool-boundary preflight: pure-internal tools reached via
 `AgentTool`/`ToolRegistry`, plus the `finance_math` module that is imported
-directly by two agents and never touches this registry at all. No network,
-no capability check, no provenance, no timeout — this file pins that absence
-so a future boundary (packet 4C/4D) has a diff to prove against.
+directly by two agents and never touches this registry at all.
+
+Written to pin an absence — no capability check, no provenance, no timeout — so
+that routing the path through the tool boundary would have a diff to prove
+against. `TestToolRegistryUnmediatedPath` now asserts the replacement for all
+three; each test names the original assertion it supersedes.
+
+`TestAgentToolExecuteContract` still characterizes `AgentTool.execute`, which
+remains as it was. That method is no longer the path the registry uses, and it
+is unreachable from the mediated route: `finance_math` is still imported
+directly by `financial_calculator_agent.py` and `finance_agents.py`, and
+`AgentTool.execute` is still callable by anything holding a tool instance. Both
+are unmediated surfaces that survived this wave.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -104,7 +115,21 @@ class TestAgentToolExecuteContract:
 
 
 class TestToolRegistryUnmediatedPath:
-    """No capability check, no timeout, no provenance at the registry layer."""
+    """The three absences this path was characterized for, now closed.
+
+    As originally written these tests pinned that the registry layer had no
+    capability check, no deadline, and no provenance. Routing it through the
+    tool boundary is what closed all three, so each test below now observes the
+    replacement rather than the absence. The original assertion is described in
+    each docstring, because "this used to be true" is the only reason the
+    replacement is worth asserting at all.
+
+    Two of the three originals would still have passed against the routed code
+    — they asserted method signatures, and the mediation happens inside the
+    method. That is exactly why they were changed: a signature was never the
+    thing worth pinning, and leaving them green would have reported a defect as
+    still-characterized while it was in fact fixed.
+    """
 
     @pytest.mark.asyncio
     async def test_unregistered_tool_returns_error_result_not_exception(self) -> None:
@@ -116,46 +141,122 @@ class TestToolRegistryUnmediatedPath:
         assert result.error == "Unknown tool: does-not-exist"
 
     @pytest.mark.asyncio
-    async def test_registry_execute_has_no_timeout_parameter(self) -> None:
-        """CHARACTERIZATION: `ToolRegistry.execute` takes exactly (name,
-        params) — there is no timeout, deadline, or cancellation token in
-        the signature. A tool that hangs inside `_execute_impl` hangs the
-        caller indefinitely; nothing in this layer can stop it.
+    async def test_a_hanging_tool_is_stopped_by_its_declared_deadline(self) -> None:
+        """WAS: `execute` took exactly (name, params), so a tool that hung
+        inside `_execute_impl` hung the caller indefinitely.
+
+        The deadline is not a parameter of `execute` now either — it is
+        declared by the tool and enforced by the boundary, which is a stronger
+        arrangement than a caller-supplied timeout because no caller can omit
+        it. So this observes the effect instead of the signature.
         """
-        import inspect
+        import asyncio
 
-        sig = inspect.signature(ToolRegistry.execute)
-        assert list(sig.parameters) == ["self", "name", "params"]
+        class _HangingTool(AgentTool[_EchoParams]):
+            @property
+            def name(self) -> str:
+                return "hangs"
 
-    def test_register_does_not_accept_or_check_any_capability_scope(self) -> None:
-        """CHARACTERIZATION: `register` takes only the tool instance. There
-        is no caller identity, task scope, or capability grant anywhere in
-        this path — any code holding a `ToolRegistry` reference can execute
-        any registered tool with any input.
-        """
-        import inspect
+            @property
+            def description(self) -> str:
+                return "never returns"
 
-        sig = inspect.signature(ToolRegistry.register)
-        assert list(sig.parameters) == ["self", "tool"]
+            @property
+            def params_model(self) -> type[_EchoParams]:
+                return _EchoParams
+
+            @property
+            def timeout_seconds(self) -> float:
+                return 0.05
+
+            async def _execute_impl(self, params: _EchoParams) -> Any:
+                await asyncio.sleep(30)
+                return "unreachable"
+
+        registry = ToolRegistry()
+        registry.register(_HangingTool())
+
+        result = await asyncio.wait_for(
+            registry.execute("hangs", {"value": 1}), timeout=5
+        )
+
+        assert result.success is False
+        assert "timed_out" in (result.error or "")
 
     @pytest.mark.asyncio
-    async def test_no_event_or_log_record_is_produced_by_a_tool_execution(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """CHARACTERIZATION: pins the absence of provenance. Executing a
-        tool through the registry produces no structured event, no audit
-        row, and (unlike the MCP tool path) not even a log line — there is
-        nothing in this repository today that can answer "which tool ran,
-        with what input, and what did it return" after the fact for this
-        path.
-        """
-        registry = create_default_registry()
+    async def test_a_call_is_authorized_against_a_grant_naming_its_tool(self) -> None:
+        """WAS: `register` took only the tool instance, and any code holding a
+        registry reference could execute any registered tool with any input.
 
-        result = await registry.execute("arithmetic", {"expression": "1 + 1"})
+        A capability decision is now reached for every call. The grant is
+        self-issued while no issuer exists — `src/agents/tools/mediation.py`
+        states at length that this is not authorization — but the check itself
+        is real, and a grant that names a different tool does not authorize
+        this one.
+        """
+        from src.agents.tools.mediation import (
+            SelfIssuedPolicy,
+            ToolCallIdentity,
+            self_issued_grant,
+        )
+        from src.core.contracts.capabilities import SensitivityClass
+        from src.core.contracts.trust import TrustClassification
+
+        registry = create_default_registry()
+        identity = ToolCallIdentity(
+            run_id="r", task_id="t", attempt_id="a", organization_id=None
+        )
+        wrong_grant = self_issued_grant(
+            tool_name="datetime_info",
+            policy=SelfIssuedPolicy(
+                sensitivity=SensitivityClass.READ_ONLY,
+                max_input_trust=TrustClassification.USER_SUPPLIED,
+                tool_versions=("1.0.0",),
+            ),
+            identity=identity,
+            now=datetime.now(UTC),
+        )
+
+        result = await registry.execute(
+            "arithmetic",
+            {"expression": "1 + 1"},
+            identity=identity,
+            grants=[wrong_grant],
+        )
+
+        assert result.success is False
+        assert "denied" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_an_execution_leaves_a_record_naming_its_tool_and_run(self) -> None:
+        """WAS: executing a tool produced no structured event, no audit row,
+        and not even a log line, so nothing could answer "which tool ran, with
+        what input, and what did it return" after the fact.
+
+        It can now. The default store is in-memory — durability needs a
+        session-backed store injected at construction — but the record exists,
+        carries the run/task/attempt identity, and is written before anything
+        is published.
+        """
+        from src.agents.tools.mediation import InMemoryToolAuditStore, ToolCallIdentity
+
+        store = InMemoryToolAuditStore()
+        registry = create_default_registry(audit_store=store)
+
+        result = await registry.execute(
+            "arithmetic",
+            {"expression": "1 + 1"},
+            identity=ToolCallIdentity(
+                run_id="run-9", task_id="task-9", attempt_id="attempt-9"
+            ),
+        )
 
         assert result.success is True
-        # No log record was emitted by the tool/registry layer itself.
-        assert caplog.records == []
+        recorded = store.invocations[-1]
+        assert recorded.tool_name == "arithmetic"
+        assert recorded.run_id == "run-9"
+        assert recorded.input == {"expression": "1 + 1"}
+        assert recorded.output is not None
 
 
 class TestFinanceMathBypassesTheToolContractEntirely:

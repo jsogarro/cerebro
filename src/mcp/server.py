@@ -6,7 +6,6 @@ Provides the main MCP server that manages and exposes tools.
 
 from typing import Any
 
-from fastmcp import FastMCP
 from pydantic import BaseModel
 from structlog import get_logger
 
@@ -43,6 +42,12 @@ class MCPServer:
         Args:
             config: Server configuration
         """
+        # Deferred: `fastmcp` is the optional `[mcp]` extra, and importing it
+        # at module scope made every test that merely reads this module's
+        # source uncollectable without it. Constructing a server still
+        # requires it — this only decouples import from construction.
+        from fastmcp import FastMCP
+
         self.config = config or MCPServerConfig()
         self.mcp = FastMCP(self.config.name)
         self.registry = ToolRegistry()
@@ -118,7 +123,13 @@ class MCPServer:
 
     async def execute_tool(self, name: str, **kwargs: Any) -> dict[str, Any]:
         """
-        Execute a tool by name.
+        Execute a tool by name, through its validated entry point.
+
+        Calls the tool rather than its `execute` method. `BaseMCPTool.__call__`
+        is the only place `validate_parameters` and `log_execution` run, and
+        this method used to skip it — so a required parameter could be silently
+        absent and the tool would still "run", and no invocation reached
+        through the server was logged at all.
 
         Args:
             name: Tool name
@@ -131,7 +142,7 @@ class MCPServer:
         if not tool:
             return {"success": False, "error": f"Tool not found: {name}"}
 
-        return await tool.execute(**kwargs)
+        return await tool(**kwargs)
 
     def get_server_info(self) -> dict[str, Any]:
         """

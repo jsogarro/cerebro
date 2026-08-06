@@ -27,6 +27,7 @@ from typing import Protocol, final, runtime_checkable
 
 from pydantic import JsonValue
 
+from src.core.contracts.capabilities import CapabilityDecision
 from src.core.contracts.provenance import ToolInvocation
 
 TOOL_INVOCATION_AGGREGATE: str = "tool_invocation"
@@ -87,6 +88,7 @@ class ToolAuditStore(Protocol):
         invocation: ToolInvocation,
         events: Sequence[ToolAuditEvent],
         organization_id: str | None,
+        capability_decision: CapabilityDecision | None,
     ) -> None:
         """Write the invocation and append its events atomically, and commit.
 
@@ -95,6 +97,24 @@ class ToolAuditStore(Protocol):
         transaction. Whoever adapts those repositories owns the commit; what
         the boundary requires is that this call does not return until the write
         is durable.
+
+        ``capability_decision`` is here because without it no adapter to Wave
+        3's ``ToolInvocationRepository`` can be written at all.
+        ``create_tool_invocation`` sources five columns from it —
+        ``capability_decision_effect``, ``capability_grant_id``,
+        ``capability_approval_id``, ``capability_denial_reason``, and
+        ``request_fingerprint`` — none of which is recoverable from the
+        ``ToolInvocation``, by design. The boundary holds the value; it had no
+        way to hand it over.
+
+        **``None`` is a real case, not a defensive default.** Input validation
+        runs before authorization, and must: the capability request's
+        fingerprint covers the digest of the *validated* input, so there is
+        nothing to decide about until the arguments parse. The boundary still
+        records that rejection, deliberately. Exactly one persisted status
+        therefore carries no decision, and an adapter has to answer for it
+        rather than assume it away — see the packet handoff for why the DDL
+        cannot currently hold such a row.
         """
         ...
 

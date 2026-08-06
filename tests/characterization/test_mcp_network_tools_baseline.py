@@ -1,19 +1,18 @@
 """Pin the current behavior of the individual network-calling MCP tools.
 
-`AcademicSearchTool`, `CitationTool`, and `KnowledgeGraphTool` are gated here
+`AcademicSearchTool`, `CitationTool`, and `KnowledgeGraphTool` were gated here
 behind `scipy`, not `fastmcp` — and none of them import `scipy` themselves.
-The dependency comes from `src/mcp/tools/__init__.py`, which unconditionally
-does `from src.mcp.tools.statistics_tool import StatisticsTool` alongside the
+The dependency came from `src/mcp/tools/__init__.py`, which unconditionally
+did `from src.mcp.tools.statistics_tool import StatisticsTool` alongside the
 other three. Because Python must execute a package's `__init__.py` before
 any of its submodules, `from src.mcp.tools.citation_tool import CitationTool`
-transitively requires `scipy` even though `citation_tool.py` never imports
+transitively required `scipy` even though `citation_tool.py` never imports
 it — confirmed by importing each tool module alone, in a fresh process, with
-`scipy` absent: all three fail with the identical
+`scipy` absent: all three failed with the identical
 `ModuleNotFoundError: No module named 'scipy'` traceback rooted in
-`src/mcp/tools/__init__.py:11`, not in the tool's own file. That is a real,
-separate finding from the `fastmcp`/`MCPServer` one in
-`test_mcp_server_baseline.py`: this package eagerly couples three
-network-only tools to one unrelated statistics dependency.
+`src/mcp/tools/__init__.py`, not in the tool's own file. That package now
+resolves its exports lazily, so these tests execute in the gate environment
+and `tests/test_mcp_import_decoupling.py` holds the decoupling in place.
 
 Network safety: every test that touches `AcademicSearchTool` or
 `CitationTool` patches `httpx.AsyncClient.get` (the pattern already used by
@@ -29,16 +28,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-
-pytest.importorskip(
-    "scipy",
-    reason=(
-        "src/mcp/tools/__init__.py eagerly imports StatisticsTool alongside "
-        "every other tool in the package, so importing AcademicSearchTool/"
-        "CitationTool/KnowledgeGraphTool alone still requires scipy "
-        "(declared in pyproject.toml's [stats] extra)"
-    ),
-)
 
 from src.mcp.registry import ToolRegistry as MCPToolRegistry
 from src.mcp.tools.academic_search_tool import AcademicSearchTool
