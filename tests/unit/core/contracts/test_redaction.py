@@ -184,3 +184,25 @@ def test_over_redaction_cannot_reach_the_evidentiary_record() -> None:
 
     assert snapshot_digest(verbatim) == snapshot_digest(verbatim)
     assert b"AKIAIOSFODNN7EXAMPLE" in verbatim
+
+
+def test_exact_values_are_applied_before_shape_patterns() -> None:
+    """Ordering is load-bearing: a shape pass can fragment a held secret.
+
+    A held secret whose *prefix* looks credential-shaped is only partially
+    matched by the pattern layer. If shape ran first it would replace that
+    prefix, and the exact-value pass would then no longer recognise what
+    remains — leaving the rest of the secret in the record. Running exact
+    values first removes the whole thing.
+
+    This failure is invisible for any held secret that does not overlap a
+    pattern, which is why it needs its own case rather than being implied by
+    the other exact-value tests.
+    """
+    held = "sk-abcdefgh SESSION xyz-tenant-42"
+    payload = {"scraped": f"operator pasted {held} into the ticket"}
+
+    redacted = redact(payload, known_secret_values=frozenset({held}))
+
+    assert "xyz-tenant-42" not in str(redacted)
+    assert held not in str(redacted)
