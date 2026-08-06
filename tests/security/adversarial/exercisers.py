@@ -1128,19 +1128,7 @@ async def _privesc_05() -> Observation:
         and outcome.invocation.completed_at is not None
         and outcome.invocation.completed_at > grant.expires_at
     )
-    # Control: the same expiry check, evaluated at request time, does deny.
-    late = build_boundary(extra_specs=[spec], clock=MutableClock(clock.now))
-    control = await late.boundary.invoke(
-        tool_name="revocable_fetch",
-        run_id=RUN_A,
-        task_id=TASK_A,
-        attempt_id="attempt-late",
-        organization_id=ORG_A,
-        capability_scope=_FETCH_SCOPE,
-        arguments={"url": "https://registry.example"},
-        input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
-        grants=[grant],
-    )
+    control = await expired_grant_is_refused()
     return Observation(
         verdict=Verdict.VIOLATED if completed_after_expiry else Verdict.HELD,
         evidence=(
@@ -1154,14 +1142,88 @@ async def _privesc_05() -> Observation:
             "duration."
         ),
         control=(
-            "not applicable — the guarantee did not hold"
-            if completed_after_expiry
-            else f"a call issued after expiry was denied ({control.status.value})"
+            "the expiry check itself is live and is asserted separately: a "
+            "call issued after the same grant's window closed is refused "
+            f"({control.status.value}, "
+            f"{control.decision.denial_reason if control.decision else None}). "
+            "That is what makes this a re-checking defect rather than a "
+            "missing expiry check."
         ),
         weakened_by=(
             "grant *revocation* is not modelled at all; only expiry is, so "
             "this exercises the weaker of the two the scenario names",
         ),
+    )
+
+
+async def expired_grant_is_refused() -> ToolOutcome:
+    """Issue a call after its grant's window has closed.
+
+    Exported rather than inlined so the suite can assert on it. A control that
+    an exerciser computes inside an unreachable branch is not asserted by
+    anything — a suite-level mutation check found exactly that, with the grant
+    and approval expiry branches both surviving deletion.
+    """
+
+    clock = MutableClock()
+    grant = grant_for(
+        tool_name=ACADEMIC_SEARCH,
+        sensitivity=SensitivityClass.READ_ONLY,
+        capability_scope=_SEARCH_SCOPE,
+        issued_at=clock.now,
+        ttl=timedelta(seconds=60),
+    )
+    clock.advance(3600)
+    wired = build_boundary(clock=clock)
+    return await wired.boundary.invoke(
+        tool_name=ACADEMIC_SEARCH,
+        run_id=RUN_A,
+        task_id=TASK_A,
+        attempt_id="attempt-after-expiry",
+        organization_id=ORG_A,
+        capability_scope=_SEARCH_SCOPE,
+        arguments={"query": "transformer robustness"},
+        input_trust=TrustClassification.USER_SUPPLIED,
+        grants=[grant],
+    )
+
+
+async def expired_approval_is_refused() -> ToolOutcome:
+    """Present an approval whose window closed before the request was made."""
+
+    clock = MutableClock()
+    target = "run-1"
+    grant = grant_for(
+        tool_name=EXPORT_BUNDLE,
+        sensitivity=SensitivityClass.EXFILTRATION,
+        capability_scope=_EXPORT_SCOPE,
+        issued_at=clock.now,
+        ttl=timedelta(hours=6),
+    )
+    approval = approval_for(
+        grant=grant,
+        # requested_at is excluded from the fingerprint, so this matches the
+        # later request exactly and the denial is about the window, not
+        # about the binding.
+        request_fingerprint=_export_fingerprint(
+            target, "attempt-after-expiry", clock.now
+        ),
+        approved_at=clock.now,
+        ttl=timedelta(seconds=10),
+    )
+    clock.advance(3600)
+    wired = build_boundary(clock=clock)
+    return await wired.boundary.invoke(
+        tool_name=EXPORT_BUNDLE,
+        run_id=RUN_A,
+        task_id=TASK_A,
+        attempt_id="attempt-after-expiry",
+        organization_id=ORG_A,
+        capability_scope=_EXPORT_SCOPE,
+        arguments={"target": target},
+        input_trust=TrustClassification.APPLICATION,
+        grants=[grant],
+        approvals=[approval],
     )
 
 
@@ -2584,19 +2646,7 @@ async def _sensitive_04() -> Observation:
         and outcome.invocation.completed_at is not None
         and outcome.invocation.completed_at > approval.expires_at
     )
-    late = build_boundary(extra_specs=[spec], clock=MutableClock(clock.now))
-    control = await late.boundary.invoke(
-        tool_name="slow_export",
-        run_id=RUN_A,
-        task_id=TASK_A,
-        attempt_id="attempt-late",
-        organization_id=ORG_A,
-        capability_scope=_EXPORT_SCOPE,
-        arguments={"target": target},
-        input_trust=TrustClassification.APPLICATION,
-        grants=[grant],
-        approvals=[approval],
-    )
+    control = await expired_approval_is_refused()
     return Observation(
         verdict=Verdict.VIOLATED if executed_after_expiry else Verdict.HELD,
         evidence=(
@@ -2608,9 +2658,11 @@ async def _sensitive_04() -> Observation:
             "side effect lands."
         ),
         control=(
-            "not applicable — the guarantee did not hold"
-            if executed_after_expiry
-            else f"an already-expired approval was refused ({_denial_reason(control)})"
+            "the approval window check itself is live and is asserted "
+            "separately: an approval whose window closed before the request "
+            f"was made is refused ({control.status.value}, "
+            f"{_denial_reason(control)}). That is what makes this a "
+            "re-checking defect rather than a missing expiry check."
         ),
         weakened_by=("approval *revocation* is not modelled; only expiry is",),
     )

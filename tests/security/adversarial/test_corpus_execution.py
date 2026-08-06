@@ -36,7 +36,14 @@ from typing import Final
 
 import pytest
 
-from .exercisers import EXERCISERS
+from src.core.contracts.capabilities import CapabilityDenialReason
+from src.core.tools import ToolOutcomeStatus
+
+from .exercisers import (
+    EXERCISERS,
+    expired_approval_is_refused,
+    expired_grant_is_refused,
+)
 from .harness import Observation, Verdict
 from .registry import ALL_SCENARIOS
 from .types import EnforcementStrength, Scenario
@@ -326,6 +333,42 @@ async def test_an_advisory_result_is_never_credited_as_the_security_bar(
         f"{scenario.scenario_id} is ADVISORY, so its result cannot stand as "
         "the security bar; the observation must say why"
     )
+
+
+class TestTheTwoTimeOfUseDefectsAreAboutRecheckingAndNotAboutExpiry:
+    """Pin what privesc-05 and sensitive-04 actually claim.
+
+    Both are recorded above as defects because validity is never re-evaluated
+    before the side effect lands. That claim is only meaningful if the expiry
+    checks themselves work — otherwise the honest finding would be the much
+    larger "expiry is not implemented", and the reproduction in ``DEFECTS``
+    would be describing the wrong bug.
+
+    These exist because a suite-level mutation check found both expiry branches
+    SURVIVING: the exercisers computed a control for each, but only inside the
+    unreachable branch of an observation that had already been ruled VIOLATED,
+    so nothing asserted either one. A control that is computed and never
+    asserted is not a control.
+    """
+
+    async def test_a_grant_that_expired_before_the_request_is_refused(self) -> None:
+        outcome = await expired_grant_is_refused()
+        assert outcome.status is ToolOutcomeStatus.DENIED
+        assert (
+            outcome.decision is not None
+            and outcome.decision.denial_reason is CapabilityDenialReason.GRANT_EXPIRED
+        )
+
+    async def test_an_approval_that_expired_before_the_request_is_refused(
+        self,
+    ) -> None:
+        outcome = await expired_approval_is_refused()
+        assert outcome.status is ToolOutcomeStatus.DENIED
+        assert (
+            outcome.decision is not None
+            and outcome.decision.denial_reason
+            is CapabilityDenialReason.APPROVAL_EXPIRED
+        )
 
 
 def test_the_report_covers_every_scenario_exactly_once() -> None:
