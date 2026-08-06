@@ -116,3 +116,71 @@ def test_snapshot_digest_covers_acquired_bytes_verbatim() -> None:
 def test_snapshot_digest_and_boundary_digest_are_not_interchangeable() -> None:
     with pytest.raises(TypeError):
         snapshot_digest({"not": "bytes"})  # type: ignore[arg-type]
+
+
+# --- The two notions of "secret", and which failure mode we accept ----------
+
+
+def test_a_held_secret_is_removed_by_exact_value_even_with_no_known_shape() -> None:
+    """The strong, deterministic layer: values the system actually holds.
+
+    Shape patterns cannot catch a secret in a format they do not know. An
+    exact-value pass over the credentials this system holds can, and it has no
+    false positives by construction.
+    """
+    held = "hunter2-CEREBRO-SENTINEL-9f3a"
+    payload = {"scraped": f"the operator pasted {held} into the ticket"}
+
+    redacted = redact(payload, known_secret_values=frozenset({held}))
+
+    assert held not in str(redacted)
+    assert REDACTION_MARKER in str(redacted["scraped"])
+
+
+def test_exact_value_redaction_reaches_nested_containers_and_keys() -> None:
+    held = "hunter2-CEREBRO-SENTINEL-9f3a"
+
+    redacted = redact(
+        {"outer": [{"note": held}, held]},
+        known_secret_values=frozenset({held}),
+    )
+
+    assert held not in str(redacted)
+
+
+def test_exact_value_redaction_is_idempotent() -> None:
+    held = "hunter2-CEREBRO-SENTINEL-9f3a"
+    secrets = frozenset({held})
+    once = redact({"a": held, "b": "safe"}, known_secret_values=secrets)
+
+    assert redact(once, known_secret_values=secrets) == once
+
+
+def test_a_short_held_value_is_rejected_rather_than_silently_scrubbing_everything() -> (
+    None
+):
+    """A 2-character 'secret' would match inside ordinary prose."""
+    with pytest.raises(ValueError, match="too short to redact by value"):
+        redact({"a": "x"}, known_secret_values=frozenset({"ab"}))
+
+
+def test_shape_matching_over_redacts_a_reserved_placeholder() -> None:
+    """The accepted failure mode, asserted so it cannot change unnoticed.
+
+    ``AKIAIOSFODNN7EXAMPLE`` is AWS's reserved documentation placeholder and is
+    not a credential. The shape layer removes it anyway. We accept this false
+    positive because redaction never touches snapshot bytes, so over-redaction
+    can degrade a prompt or event excerpt but can never corrupt the evidentiary
+    record or shift a locator offset.
+    """
+    redacted = redact({"note": "see AKIAIOSFODNN7EXAMPLE in the AWS docs"})
+
+    assert REDACTION_MARKER in str(redacted["note"])
+
+
+def test_over_redaction_cannot_reach_the_evidentiary_record() -> None:
+    """Snapshot integrity is computed over verbatim bytes, never redacted ones."""
+    verbatim = b"see AKIAIOSFODNN7EXAMPLE in the AWS docs"
+
+    assert snapshot_digest(verbatim) == snapshot_digest(verbatim)
+    assert b"AKIAIOSFODNN7EXAMPLE" in verbatim
