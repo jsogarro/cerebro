@@ -639,6 +639,22 @@ def test_a_deny_decision_may_still_name_the_furthest_matching_grant(
     session.flush()
 
 
+def test_a_deny_decision_requires_a_denial_reason(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(
+        _make_invocation(
+            capability_decision_effect="deny",
+            capability_denial_reason=None,
+            status=ToolInvocationStatus.DENIED.value,
+            output=None,
+            output_trust=None,
+            output_sha256=None,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
 def test_an_allow_decision_cannot_carry_a_denial_reason(session: Session) -> None:
     _seed_run_task_attempt(session)
     session.add(
