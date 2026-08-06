@@ -2,15 +2,24 @@
 
 Three Wave 4 guarantees are enforced here rather than merely described.
 
-**Prompt identity.** Every ``Evidence`` and ``ClaimSupport`` record names the
-prompt that produced it. Prompts resolve at runtime by agent type, so a
-declared version cannot carry this: editing a prompt body leaves the version
-string untouched and silently changes what an already-admitted run means.
+**Prompt identity.** Every **model-produced** record names the prompt that
+produced it. Prompts resolve at runtime by agent type, so a declared version
+cannot carry this: editing a prompt body leaves the version string untouched
+and silently changes what an already-admitted run means.
 :class:`PromptBinding` therefore carries digests of both the template source
-and the exact rendered text, which no edit can leave unchanged. Records that
-may legitimately have no prompt — a fetched source snapshot, a system-initiated
-retry — say so with :class:`ProducerKind` rather than by omission, so the
-absence is typed instead of forgotten.
+and the exact rendered text, which no edit can leave unchanged.
+
+Records that legitimately have no prompt say so with :class:`ProducerKind`
+rather than by omission, so the absence is typed instead of forgotten. All four
+provenance records follow the same rule, and the uniformity is deliberate: an
+*unconditional* requirement does not produce the guarantee, it produces
+fabrication. A deterministic evaluator — Wave 5's schema, citation-resolution,
+entailment, contradiction, and numerical checks, and the resolver that writes
+``unsupported``/``not_attempted`` for a claim nobody examined — has no prompt to
+name, and forcing one would mint a binding over a template that was never sent
+to a model. That record would satisfy every digest check while being a lie the
+contract vouches for. Deterministic verdicts stay attributable through
+``evaluator_id``/``evaluator_version`` and the run's pinned component digest.
 
 **No trust laundering.** A tool invocation with untrusted input cannot declare
 trusted-tier output. The constraint is on the tier, not the rank: moving
@@ -337,7 +346,8 @@ class Evidence(ContractModel):
     content_sha256: ContentSha256
     locator: str = Field(min_length=1)
     trust: TrustClassification
-    prompt_binding: PromptBinding
+    producer_kind: ProducerKind
+    prompt_binding: PromptBinding | None = None
     producer_tool_invocation_id: ContractId | None = None
     parent_evidence_ids: tuple[ContractId, ...] = ()
     acquired_at: AwareDatetime
@@ -351,6 +361,7 @@ class Evidence(ContractModel):
             parse_locator(self.locator)
         except InvalidLocatorError as error:
             raise ValueError(str(error)) from error
+        _validate_producer_binding(self.producer_kind, self.prompt_binding)
         return self
 
 
@@ -372,13 +383,15 @@ class ClaimSupport(ContractModel):
     absent_evidence_reason: AbsentEvidenceReason | None = None
     evaluator_id: ContractId
     evaluator_version: Version
-    prompt_binding: PromptBinding
+    producer_kind: ProducerKind
+    prompt_binding: PromptBinding | None = None
     explanation: str = Field(min_length=1)
     evaluated_at: AwareDatetime
 
     @model_validator(mode="after")
     def validate_evidence_links(self) -> Self:
         require_unique(self.evidence_ids, field_name="evidence_ids")
+        _validate_producer_binding(self.producer_kind, self.prompt_binding)
 
         if self.status in EVIDENCE_BEARING_STATUSES and not self.evidence_ids:
             raise ValueError(

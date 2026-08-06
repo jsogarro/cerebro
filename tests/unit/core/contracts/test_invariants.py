@@ -11,6 +11,7 @@ from src.core.contracts import (
     ClaimSupport,
     ClaimSupportStatus,
     Evidence,
+    ProducerKind,
     PromptBinding,
     Run,
     RunEvent,
@@ -97,6 +98,7 @@ def test_evidence_requires_a_sha256_content_hash() -> None:
             content_sha256="not-a-hash",
             locator="bytes:0-512",
             trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            producer_kind=ProducerKind.MODEL_TURN,
             prompt_binding=PROMPT_BINDING,
             acquired_at=NOW,
         )
@@ -122,6 +124,7 @@ def test_material_claim_judgments_require_evidence(
             evidence_ids=(),
             evaluator_id="claim-evaluator",
             evaluator_version="1.0.0",
+            producer_kind=ProducerKind.MODEL_TURN,
             prompt_binding=PROMPT_BINDING,
             explanation="No evidence supplied.",
             evaluated_at=NOW,
