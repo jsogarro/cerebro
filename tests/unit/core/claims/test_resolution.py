@@ -37,6 +37,12 @@ TWO_CLAIM_SOURCE = (
     "Latency fell from 210ms to 180ms in the same run.\n"
 )
 
+THREE_CLAIM_SOURCE = (
+    "The model improves accuracy by five percent.\n"
+    "Latency fell from 210ms to 180ms in the same run.\n"
+    "Memory use was unchanged across every configuration tested.\n"
+)
+
 EVALUATOR_BINDING = PromptBinding(
     prompt_id="entailment-check",
     prompt_version="1.0",
@@ -268,6 +274,41 @@ def test_the_gate_reads_two_integers_from_one_place() -> None:
     assert resolution.material_claim_count == 2
     assert resolution.unsupported_count == 1
     assert resolution.unsupported_ratio == 0.5
+
+
+def test_only_unsupported_counts_toward_the_gate() -> None:
+    """``disputed`` and ``partially_supported`` are findings, not failures.
+
+    Widening the numerator to "anything short of supported" is the change this
+    guards, and it is an easy one to make while tidying: it reads as stricter,
+    and it would fail a release for every claim two sources argued about. The
+    four-state model exists precisely so a reviewer can see those without a
+    gate counting them.
+    """
+    inventory = _inventory(THREE_CLAIM_SOURCE)
+    assert inventory.material_claim_count == 3
+
+    resolution = _resolver().resolve(
+        inventory=inventory,
+        run_id=RUN_ID,
+        verdicts=[
+            _verdict(inventory.claims[0].claim_id, status=ClaimSupportStatus.DISPUTED),
+            _verdict(
+                inventory.claims[1].claim_id,
+                status=ClaimSupportStatus.PARTIALLY_SUPPORTED,
+            ),
+            _verdict(inventory.claims[2].claim_id, status=ClaimSupportStatus.SUPPORTED),
+        ],
+        resolved_at=NOW,
+    )
+
+    assert {support.status for support in resolution.supports} == {
+        ClaimSupportStatus.DISPUTED,
+        ClaimSupportStatus.PARTIALLY_SUPPORTED,
+        ClaimSupportStatus.SUPPORTED,
+    }
+    assert resolution.unsupported_count == 0
+    assert resolution.unsupported_ratio == 0.0
 
 
 def test_an_empty_denominator_reports_no_ratio_rather_than_a_passing_one() -> None:
