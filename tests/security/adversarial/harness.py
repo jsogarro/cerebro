@@ -299,11 +299,31 @@ class Observation:
     """
 
     weakened_by: tuple[str, ...] = ()
-    """Why this pass is worth less than it reads — one entry per reason."""
+    """Why this pass is worth less than it reads — one entry per reason.
+
+    Unlike :attr:`control` this is irreducibly prose: "the grant is self-issued"
+    names no outcome a machine can compare. What *is* checkable is that each
+    entry says something, and that is enforced below — the suite's ADVISORY
+    guard tests ``assert observation.weakened_by``, which is a tuple-truthiness
+    check that ``("",)`` satisfies. That is the same "a sentence exists" shape
+    this module was rewritten to remove from :attr:`control`, so the blank case
+    is closed here rather than left as the one place it still worked.
+
+    This does not make a caveat load-bearing the way a control is. It closes the
+    floor, and the distinction is worth keeping straight.
+    """
 
     def __post_init__(self) -> None:
         if not self.evidence.strip():
             raise ValueError("an observation states its evidence")
+        for index, reason in enumerate(self.weakened_by):
+            if not reason.strip():
+                raise ValueError(
+                    f"weakened_by[{index}] is blank. An observation that says it "
+                    "is worth less than it reads has to say why; an empty "
+                    "string satisfies the suite's ADVISORY guard while stating "
+                    "nothing."
+                )
         if self.verdict not in _CONTROL_REQUIRED:
             return
         if self.control is None:

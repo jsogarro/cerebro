@@ -568,6 +568,11 @@ async def test_an_advisory_result_is_never_credited_as_the_security_bar(
         f"{scenario.scenario_id} is ADVISORY, so its result cannot stand as "
         "the security bar; the observation must say why"
     )
+    # The assertion above is tuple truthiness, which ``("",)`` satisfies — the
+    # same shape as the control string this packet removed. Observation refuses
+    # a blank entry at construction; this states that the floor exists so a
+    # reader does not take the line above for more than it is.
+    assert all(reason.strip() for reason in observation.weakened_by)
 
 
 class TestTheTwoTimeOfUseDefectsAreAboutRecheckingAndNotAboutExpiry:
@@ -675,6 +680,28 @@ def test_a_fixed_defect_surfaces_here_rather_than_as_an_xpass() -> None:
     with pytest.raises(ValueError, match="DEFECT HAS BEEN FIXED") as caught:
         Observation(verdict=Verdict.HELD, evidence="the guarantee now holds")
     assert "delete the entry from DEFECTS" in str(caught.value)
+
+
+def test_a_weakening_reason_cannot_be_blank() -> None:
+    """The ADVISORY caveat has a floor, even though it is prose.
+
+    ``test_an_advisory_result_is_never_credited_as_the_security_bar`` asserts
+    ``observation.weakened_by`` — tuple truthiness, which ``("",)`` satisfies.
+    That is the "a sentence exists" shape this packet removed from ``control``,
+    surviving in the one guard the packet did not originally touch. It is a
+    smaller hole, because a caveat is irreducibly prose and no machine can
+    check that a reason is *good*. It can check that there is one.
+    """
+
+    for blank in ("",), ("   ",), ("a real reason", "\n"):
+        with pytest.raises(ValueError, match="weakened_by"):
+            Observation(verdict=Verdict.VIOLATED, evidence="held", weakened_by=blank)
+    # A stated reason is accepted, so the check discriminates.
+    Observation(
+        verdict=Verdict.VIOLATED,
+        evidence="the effect occurred",
+        weakened_by=("the grant is self-issued; no authority decided it",),
+    )
 
 
 def test_observation_requires_a_control_for_a_pass() -> None:
