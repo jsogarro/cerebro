@@ -63,8 +63,17 @@ def pins(*, digest: str | None, prompt_id: str = PROMPT_ID) -> PinnedVersions:
 def forged(prompt_id: str = PROMPT_ID) -> RenderedPrompt:
     """A self-consistent prompt over a template nobody registered.
 
-    Every digest here is honest. That is the point: this object passes the
-    correspondence check completely, and only an identity check can reject it.
+    Every digest here is honest, and that is the entire point: this object
+    passes the correspondence check completely. Only an identity check can
+    reject it.
+
+    **Do not "simplify" this into an obviously-invalid object.** Corrupting a
+    digest would make every test below pass while proving nothing — they would
+    be rejecting a malformed value rather than a well-formed lie, and the suite
+    would look identical either way.
+    :func:`test_the_forged_prompt_is_genuinely_self_consistent` exists to keep
+    that from happening silently, which is why it asserts what looks like
+    already-obvious setup.
     """
 
     text = FABRICATED.replace("$topic", "inflation")
@@ -89,8 +98,14 @@ class TestSelfConsistencyIsNotIdentity:
     def test_the_forged_prompt_is_genuinely_self_consistent(self) -> None:
         """Establishes that the fixture attacks the right gap.
 
-        If this raised, every test below would be passing for the wrong reason —
-        rejecting a malformed object rather than a well-formed lie.
+        This reads as redundant — it asserts that a thing built to be valid is
+        valid. It is not redundant. It is the guard that keeps every identity
+        test below honest: if the forgery ever stopped being self-consistent,
+        those tests would still pass, for the wrong reason, and nothing in a
+        green suite would say so.
+
+        The same failure class as a mutation that appears caught when the test
+        that should catch it was never reached.
         """
 
         prompt = forged()
