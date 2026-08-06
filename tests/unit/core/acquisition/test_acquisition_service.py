@@ -34,13 +34,17 @@ from src.core.acquisition.service import (
     SourceAcquisitionService,
     UndeclaredSourceTypeError,
 )
-from src.core.acquisition.snapshots import FilesystemSnapshotStore
+from src.core.acquisition.snapshots import FilesystemSnapshotStore, SnapshotStore
 from src.core.acquisition.sources import (
     LicenseDeclaration,
     SourceLicense,
     SourceType,
 )
-from src.core.contracts.capabilities import CapabilityGrant, SensitivityClass
+from src.core.contracts.capabilities import (
+    CapabilityDecision,
+    CapabilityGrant,
+    SensitivityClass,
+)
 from src.core.contracts.provenance import (
     AbsentEvidenceReason,
     ArtifactStatus,
@@ -51,7 +55,11 @@ from src.core.contracts.provenance import (
 )
 from src.core.contracts.redaction import REDACTION_MARKER, redact, snapshot_digest
 from src.core.contracts.trust import TrustClassification
-from src.core.tools.audit import NullEventPublisher, ToolAuditEvent
+from src.core.tools.audit import (
+    NullEventPublisher,
+    ToolAuditEvent,
+    ToolAuditStore,
+)
 from src.core.tools.boundary import ToolBoundary
 from src.core.tools.errors import PromptBindingRefusedError
 from src.core.tools.prompts import (
@@ -63,6 +71,8 @@ from src.core.tools.prompts import (
 )
 from src.core.tools.secrets import MappingSecretProvider, NullSecretProvider
 from src.core.tools.spec import ToolCallContext
+from src.repositories.artifact_repository import ArtifactRepository
+from src.repositories.evidence_repository import EvidenceRepository
 
 NOW = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
 ORG = "org-1"
@@ -82,6 +92,7 @@ class FakeAuditStore:
 
     def __init__(self) -> None:
         self.invocations: list[ToolInvocation] = []
+        self.decisions: list[CapabilityDecision | None] = []
 
     async def find_invocation(
         self, *, run_id: str, organization_id: str | None, idempotency_key: str
@@ -94,8 +105,45 @@ class FakeAuditStore:
         invocation: ToolInvocation,
         events: Sequence[ToolAuditEvent],
         organization_id: str | None,
+        capability_decision: CapabilityDecision | None,
     ) -> None:
         self.invocations.append(invocation)
+        self.decisions.append(capability_decision)
+
+
+def _assert_double_matches_protocol(double: type, protocol: type) -> None:
+    """Fail if a test double has drifted from the protocol it stands in for.
+
+    Signature-level, not `isinstance`: ``ToolAuditStore`` is
+    ``runtime_checkable``, but a runtime protocol check compares **method names
+    only** — it passes for a double whose ``persist`` takes entirely different
+    arguments. That is exactly how this double drifted once already, when 4D
+    added ``capability_decision`` to ``persist``: no merge conflict, no type
+    error at the definition site, just a ``TypeError`` at call time in a packet
+    that never touched the protocol.
+
+    A double that has drifted from its protocol tests nothing, so this is
+    asserted rather than assumed.
+    """
+
+    checked = 0
+    for name in (n for n in vars(protocol) if not n.startswith("_")):
+        if not hasattr(double, name):
+            # A double may legitimately stand in for part of a concrete class;
+            # what it must not do is implement a method with the wrong shape.
+            continue
+        expected = inspect.signature(getattr(protocol, name))
+        actual = inspect.signature(getattr(double, name))
+        checked += 1
+        assert [(p.name, p.kind) for p in actual.parameters.values()] == [
+            (p.name, p.kind) for p in expected.parameters.values()
+        ], f"{double.__name__}.{name} has drifted from {protocol.__name__}"
+
+    assert checked, (
+        f"{double.__name__} shares no method name with {protocol.__name__}; "
+        "the comparison checked nothing, which is the failure this helper "
+        "exists to make impossible"
+    )
 
 
 @dataclass
@@ -819,3 +867,47 @@ class TestHandleRedactionStability:
         assert "@" not in uri
         assert "?" not in uri
         assert redact({"storage_uri": uri}) == {"storage_uri": uri}
+
+
+class TestDoubleConformance:
+    """Every double must track what it stands in for, or the suite proves nothing.
+
+    Checked for all three rather than only the one that drifted. 4D's change to
+    ``persist`` was invisible here — no merge conflict, no error at the
+    definition site, only a ``TypeError`` at call time — and the repositories
+    are just as reachable by a change in another packet.
+    """
+
+    def test_the_audit_double_has_not_drifted_from_the_protocol(self) -> None:
+        _assert_double_matches_protocol(FakeAuditStore, ToolAuditStore)
+
+    def test_the_artifact_repository_double_has_not_drifted(self) -> None:
+        _assert_double_matches_protocol(FakeArtifactRepository, ArtifactRepository)
+
+    def test_the_evidence_repository_double_has_not_drifted(self) -> None:
+        _assert_double_matches_protocol(FakeEvidenceRepository, EvidenceRepository)
+
+    def test_the_snapshot_store_double_satisfies_the_store_protocol(self) -> None:
+        store = FilesystemSnapshotStore(root=Path("/tmp/unused-by-this-check"))
+
+        assert isinstance(store, SnapshotStore)
+
+    def test_the_protocol_check_would_catch_a_drifted_double(self) -> None:
+        # Precondition: the assertion above is capable of failing. Without
+        # this, a helper that silently compared nothing would look identical
+        # to a double that genuinely conforms.
+        class Drifted:
+            async def find_invocation(self) -> None: ...
+            async def persist(self) -> None: ...
+
+        with pytest.raises(AssertionError, match="drifted"):
+            _assert_double_matches_protocol(Drifted, ToolAuditStore)
+
+    def test_the_protocol_check_refuses_to_pass_on_an_empty_comparison(self) -> None:
+        # The other way this helper could silently prove nothing: a double
+        # sharing no method names at all would loop zero times and pass.
+        class Unrelated:
+            pass
+
+        with pytest.raises(AssertionError, match="checked nothing"):
+            _assert_double_matches_protocol(Unrelated, ToolAuditStore)
