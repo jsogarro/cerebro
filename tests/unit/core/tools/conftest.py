@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from src.core.contracts.capabilities import (
     ApprovalRef,
+    CapabilityDecision,
     CapabilityGrant,
     SensitivityClass,
 )
@@ -64,6 +65,7 @@ class RecordingAuditStore:
     calls: list[str] = field(default_factory=list)
     invocations: list[ToolInvocation] = field(default_factory=list)
     events: list[ToolAuditEvent] = field(default_factory=list)
+    decisions: list[CapabilityDecision | None] = field(default_factory=list)
     replay: ToolInvocation | None = None
     fail_on_persist: bool = False
 
@@ -78,6 +80,7 @@ class RecordingAuditStore:
         invocation: ToolInvocation,
         events: Sequence[ToolAuditEvent],
         organization_id: str | None,
+        capability_decision: CapabilityDecision | None,
     ) -> None:
         if self.fail_on_persist:
             self.calls.append("persist-failed")
@@ -85,6 +88,7 @@ class RecordingAuditStore:
         self.calls.append(f"persist:{invocation.status.value}")
         self.invocations.append(invocation)
         self.events.extend(events)
+        self.decisions.append(capability_decision)
 
 
 @dataclass(slots=True)

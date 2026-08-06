@@ -12,6 +12,7 @@ from structlog import get_logger
 
 from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
+from src.agents.tools.mediation import ToolCallIdentity
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.models.research_project import ResearchDepth
 from src.services.parsers.json_parser import parse_json_response
@@ -93,11 +94,13 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
             # Step 3: Build knowledge graph of relationships
             knowledge_graph = await self._build_literature_knowledge_graph(
-                academic_sources, literature_analysis
+                academic_sources, literature_analysis, task
             )
 
             # Step 4: Format citations properly
-            formatted_citations = await self._format_source_citations(academic_sources)
+            formatted_citations = await self._format_source_citations(
+                academic_sources, task
+            )
 
             # Process and rank sources
             sources_list = academic_sources.get("sources", [])
@@ -132,9 +135,12 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 "databases_searched": academic_sources.get("databases_searched", []),
                 "formatted_citations": formatted_citations,
                 "knowledge_graph": knowledge_graph,
-                "data_source": (
-                    "mcp_tools" if academic_sources.get("success") else "fallback"
-                ),
+                # Reported by the tool boundary, not inferred here. The
+                # expression this replaces read `success` alone, and every
+                # fallback set `success: True` -- so a fabricated stand-in was
+                # labelled `mcp_tools`. The flag is now trustworthy, and taking
+                # the label from its source removes the inference entirely.
+                "data_source": academic_sources.get("data_source", "gemini_structured"),
                 "mcp_integration_status": self._get_mcp_status(),
             }
 
@@ -481,6 +487,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 databases=databases,
                 max_results=max_sources,
                 filters=filters,
+                identity=ToolCallIdentity.from_agent_task(task),
             )
 
             self.log_info(
@@ -535,7 +542,10 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             return self._generate_mock_analysis_from_sources(academic_sources)
 
     async def _build_literature_knowledge_graph(
-        self, academic_sources: dict[str, Any], literature_analysis: dict[str, Any]
+        self,
+        academic_sources: dict[str, Any],
+        literature_analysis: dict[str, Any],
+        task: AgentTask | None = None,
     ) -> dict[str, Any]:
         """
         Build knowledge graph from literature using MCP tools.
@@ -565,7 +575,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         try:
             result = await self.mcp_integration.build_knowledge_graph(
-                text=text_for_analysis
+                text=text_for_analysis, identity=ToolCallIdentity.from_agent_task(task)
             )
             self.log_info(
                 f"Knowledge graph built with {len(result.get('entities', []))} entities"
@@ -576,7 +586,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             return {"success": False, "error": str(e)}
 
     async def _format_source_citations(
-        self, academic_sources: dict[str, Any]
+        self, academic_sources: dict[str, Any], task: AgentTask | None = None
     ) -> dict[str, Any]:
         """
         Format citations using MCP citation tool.
@@ -608,7 +618,9 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         try:
             result = await self.mcp_integration.format_citations(
-                sources=citation_sources, style="APA"
+                sources=citation_sources,
+                style="APA",
+                identity=ToolCallIdentity.from_agent_task(task),
             )
             self.log_info(f"Formatted {len(citation_sources)} citations")
             return dict(result)

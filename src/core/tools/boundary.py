@@ -413,6 +413,7 @@ class ToolBoundary:
                 "input_sha256": input_sha256,
                 "input_trust": input_trust.value,
             },
+            decision=decision,
         )
 
         return await self._run_tool(
@@ -690,6 +691,7 @@ class ToolBoundary:
                 "error_code": invocation.error_code,
                 "capability_scope": call.capability_scope,
             },
+            decision=decision,
         )
         return ToolOutcome(
             mint=_OUTCOME_MINT,
@@ -707,6 +709,7 @@ class ToolBoundary:
         invocation: ToolInvocation,
         event_type: str,
         payload: Mapping[str, JsonValue],
+        decision: CapabilityDecision | None,
     ) -> None:
         """Persist the record and its event, then publish. Never the reverse.
 
@@ -737,6 +740,7 @@ class ToolBoundary:
             invocation=invocation,
             events=(event,),
             organization_id=call.organization_id,
+            capability_decision=decision,
         )
         await self._event_publisher.publish((event,))
 
