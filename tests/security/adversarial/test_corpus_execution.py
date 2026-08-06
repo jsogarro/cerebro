@@ -15,19 +15,33 @@ this is that re-evaluation — the corpus files are not edited, so the drift
 between what its author expected and what is true is visible rather than
 smoothed away.
 
-**Three guards against a suite that proves nothing.**
+**Five guards against a suite that proves nothing.**
 
 1. ``test_every_scenario_has_an_exerciser`` — the harness cannot report health
    by simply not running anything. Every id in ``ALL_SCENARIOS`` must have an
    exerciser, and every exerciser must name a real scenario.
-2. ``test_a_passing_scenario_names_the_control_that_could_have_failed`` — a
-   pass is only accepted alongside a demonstration that the mechanism had a
+2. ``TestAPassMustCarryAnOutcomeThatWentTheOtherWay`` — a pass is only accepted
+   alongside a *demonstration*, not a description, that the mechanism had a
    reachable opposite outcome. Packet 4D shipped a capability check whose
    ceiling was minted from the request being checked; every test passed, the
    boundary was demonstrably called, and the one control that mattered could
-   not fail.
-3. ``test_the_not_exercisable_set_is_declared`` — the set of scenarios nobody
-   can run is pinned to a literal, so it cannot grow quietly.
+   not fail. The first fix for that required a non-empty control string, which
+   18 scenarios satisfied while running against a boundary mutated to deny
+   everything. See that class's docstring for which test carries which half of
+   the guarantee — an earlier version of this docstring credited the wrong one.
+3. ``test_a_capability_mediated_pass_rests_on_an_allowed_call`` — the scenarios
+   whose guarantee is enforced *by the capability layer* may not settle for a
+   contrast on some other mechanism. Their control must be a real call the
+   boundary allowed, which a boundary that denies everything cannot produce.
+4. ``test_the_not_exercisable_set_is_declared`` and
+   ``test_the_control_free_set_is_declared`` — the set of scenarios nobody can
+   run, and the set whose pass rests on no control at all, are each pinned to a
+   literal so neither can grow quietly.
+5. ``test_no_exerciser_raises_instead_of_observing`` — every exerciser is run
+   once *without* its xfail mark. A strict xfail turns an exception into a
+   green defect report, so an exerciser that starts raising (because a control
+   stopped being reachable, say) would otherwise register as the defect it is
+   annotated for. This test is where that shows up red.
 """
 
 from __future__ import annotations
@@ -44,9 +58,9 @@ from .exercisers import (
     expired_approval_is_refused,
     expired_grant_is_refused,
 )
-from .harness import Observation, Verdict
+from .harness import Control, ControlKind, Observation, Verdict
 from .registry import ALL_SCENARIOS
-from .types import EnforcementStrength, Scenario
+from .types import EnforcementStrength, GuaranteeKind, Scenario
 
 _SCENARIOS_BY_ID: Final[dict[str, Scenario]] = {
     scenario.scenario_id: scenario for scenario in ALL_SCENARIOS
@@ -70,6 +84,45 @@ exists — rather than anything discovered here.
 
 Two of them are unrunnable *in this process only*; see
 :data:`DEFECTS_PROVEN_ELSEWHERE`.
+"""
+
+
+CONTROL_FREE: Final[frozenset[str]] = frozenset(
+    {
+        "sensitive-05-compositional-privilege-laundering",
+    }
+)
+"""Scenarios whose pass rests on no control, pinned so the set cannot grow.
+
+A scenario lands here only when there is genuinely no mechanism that could have
+gone the other way — not when writing a control is inconvenient. Each one's
+exerciser builds its control with :meth:`Control.absent` and states why in
+``why_absent``; the honest consequence is that its verdict demonstrates nothing
+about a live mechanism and must not be counted among the scenarios that do.
+
+One member today. ``sensitive-05``'s own guarantee is
+``NO_DETERMINISTIC_GUARANTEE_TODAY``: there is no cumulative-effect check
+anywhere in the design, so there is nothing to show discriminating. It
+previously pointed at ``sensitive-01``'s denial — a different scenario's
+observation of a different mechanism.
+"""
+
+
+CAPABILITY_MEDIATED: Final[frozenset[GuaranteeKind]] = frozenset(
+    {
+        GuaranteeKind.CAPABILITY_DENIED,
+        GuaranteeKind.CONTEXT_BINDING_ENFORCED,
+        GuaranteeKind.APPROVAL_REQUIRED_AND_SCOPED,
+        GuaranteeKind.TRUST_LABEL_NOT_ESCALATED,
+    }
+)
+"""Guarantees the capability layer itself enforces.
+
+A scenario claiming one of these is claiming that ``decide_capability`` made a
+*decision*. The only observation that distinguishes a decision from a boundary
+which refuses everything is a call the same boundary allowed, so
+:func:`test_a_capability_mediated_pass_rests_on_an_allowed_call` requires
+exactly that — a contrast on a sanitizer or a validator will not do.
 """
 
 
@@ -225,6 +278,13 @@ class TestTheHarnessCannotReportHealthByRunningNothing:
             "a scenario cannot be both unrunnable here and reproducible here"
         )
 
+    def test_the_control_free_set_is_declared(self) -> None:
+        assert set(_SCENARIOS_BY_ID) >= CONTROL_FREE
+        assert CONTROL_FREE.isdisjoint(NOT_EXERCISABLE | set(DEFECTS)), (
+            "a control-free pass is a pass; a scenario nobody runs and a "
+            "scenario recorded as violated do not need one"
+        )
+
     def test_defects_proven_elsewhere_are_unrunnable_here(self) -> None:
         assert set(DEFECTS_PROVEN_ELSEWHERE) <= NOT_EXERCISABLE, (
             "a scenario reproducible in this process belongs in DEFECTS, "
@@ -279,33 +339,102 @@ async def test_scenario_guarantee_holds(scenario: Scenario) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "scenario",
-    [
-        pytest.param(s, id=s.scenario_id)
-        for s in ALL_SCENARIOS
-        if s.scenario_id not in DEFECTS and s.scenario_id not in NOT_EXERCISABLE
-    ],
-)
-async def test_a_passing_scenario_names_the_control_that_could_have_failed(
-    scenario: Scenario,
-) -> None:
-    """A pass is only credited when the mechanism's opposite was reachable.
+_EXERCISED: Final[list[Scenario]] = [
+    s
+    for s in ALL_SCENARIOS
+    if s.scenario_id not in DEFECTS and s.scenario_id not in NOT_EXERCISABLE
+]
 
-    This is the guard against the failure packet 4D nearly shipped: a control
-    minted from the thing it checks passes every test while being incapable of
-    refusing anything. ``Observation.__post_init__`` requires the field; this
-    asserts it at the suite level too, so deleting the dataclass check does not
-    silently remove the guarantee.
+
+class TestAPassMustCarryAnOutcomeThatWentTheOtherWay:
+    """The guard against a pass that rests on a sentence.
+
+    **Which test carries which half, stated precisely, because the previous
+    version of this docstring got it wrong.** It claimed the suite-level test
+    was a second copy of the dataclass check, so that deleting
+    ``Observation.__post_init__`` would not silently remove the guarantee. It
+    was not: the suite-level test asserted ``observation.control.strip()`` —
+    string length — and passed unchanged with the dataclass check deleted. The
+    real coverage came only from
+    :func:`test_observation_refuses_a_pass_whose_control_did_not_go_the_other_way`
+    below.
+
+    Now:
+
+    - :meth:`test_the_control_is_a_demonstration_and_not_a_description` runs the
+      real exerciser and asserts on the recorded outcome. It catches a scenario
+      whose control *stops being reachable* — which is what a sibling packet
+      moving an outcome looks like — and it fails whether or not the dataclass
+      check exists.
+    - :func:`test_observation_refuses_a_pass_whose_control_did_not_go_the_other_way`
+      is the direct check on the mechanism itself: delete
+      ``Observation.__post_init__``'s control clause and that test goes red.
+
+    Two tests, two distinct failure modes, neither standing in for the other.
     """
 
-    observation = await EXERCISERS[scenario.scenario_id]()
-    assert observation.verdict in {Verdict.HELD, Verdict.HELD_VIA_FLOOR}
-    assert observation.control.strip(), (
-        f"{scenario.scenario_id} reported {observation.verdict.value} without "
-        "naming a paired outcome showing the mechanism could have gone the "
-        "other way"
+    @pytest.mark.parametrize(
+        "scenario", [pytest.param(s, id=s.scenario_id) for s in _EXERCISED]
     )
+    async def test_the_control_is_a_demonstration_and_not_a_description(
+        self, scenario: Scenario
+    ) -> None:
+        observation = await EXERCISERS[scenario.scenario_id]()
+        assert observation.verdict in {Verdict.HELD, Verdict.HELD_VIA_FLOOR}
+        control = observation.control
+        assert control is not None, (
+            f"{scenario.scenario_id} reported {observation.verdict.value} "
+            "without a paired outcome showing the mechanism could have gone "
+            "the other way"
+        )
+        if control.kind is ControlKind.NO_CAPABILITY_CONTROL:
+            assert scenario.scenario_id in CONTROL_FREE, (
+                f"{scenario.scenario_id} declared that no control is reachable "
+                f"but is not in CONTROL_FREE; add it there so the set of passes "
+                f"resting on nothing stays countable. Reason given: "
+                f"{control.why_absent}"
+            )
+            return
+        assert scenario.scenario_id not in CONTROL_FREE, (
+            f"{scenario.scenario_id} is pinned as control-free but produced a "
+            f"{control.kind.value} control; remove it from CONTROL_FREE"
+        )
+        assert control.demonstrated, (
+            f"{scenario.scenario_id} reported {observation.verdict.value}, but "
+            f"{control.diagnosis}"
+        )
+
+    @pytest.mark.parametrize(
+        "scenario",
+        [
+            pytest.param(s, id=s.scenario_id)
+            for s in _EXERCISED
+            if s.expected_outcome.guarantee in CAPABILITY_MEDIATED
+        ],
+    )
+    async def test_a_capability_mediated_pass_rests_on_an_allowed_call(
+        self, scenario: Scenario
+    ) -> None:
+        """A capability decision is only visible against an allowed call.
+
+        Every other control shape can be satisfied while the capability layer
+        is refusing everything: a sanitizer still discriminates, a validator
+        still rejects a malformed field, a contract still refuses an
+        unsupported claim. Only ``ALLOWED_CALL`` cannot be produced by a
+        boundary that denies unconditionally, because it is built from a
+        :class:`ToolOutcome` and reads its status.
+        """
+
+        observation = await EXERCISERS[scenario.scenario_id]()
+        control = observation.control
+        assert control is not None and control.kind is ControlKind.ALLOWED_CALL, (
+            f"{scenario.scenario_id} claims "
+            f"{scenario.expected_outcome.guarantee.value}, which the capability "
+            f"layer enforces, so its control must be a call the same boundary "
+            f"ALLOWED. It carries "
+            f"{'nothing' if control is None else control.kind.value}."
+        )
+        assert control.demonstrated, control.diagnosis
 
 
 @pytest.mark.parametrize(
@@ -385,6 +514,34 @@ def test_the_report_covers_every_scenario_exactly_once() -> None:
     assert len(exercised) + len(NOT_EXERCISABLE) + len(DEFECTS) == len(ALL_SCENARIOS)
 
 
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        pytest.param(s, id=s.scenario_id)
+        for s in ALL_SCENARIOS
+        if s.scenario_id not in NOT_EXERCISABLE
+    ],
+)
+async def test_no_exerciser_raises_instead_of_observing(scenario: Scenario) -> None:
+    """Every exerciser runs to an Observation, xfail marks deliberately absent.
+
+    ``test_scenario_guarantee_holds`` carries ``xfail(strict=True)`` for the
+    scenarios in ``DEFECTS``, which means an *exception* out of one of those
+    exercisers reads as the expected failure and the suite stays green — the
+    shape ``replay-03`` hit once already, where the guarantee working raised
+    ``IdempotencyConflictError`` and produced a defect report.
+
+    Now that a control is validated at construction, a sibling change that
+    makes some control unreachable turns into a ``ValueError`` from
+    ``Observation``. This test is un-marked so that lands red, with the
+    control's own diagnosis in the message, rather than disappearing into an
+    xfail.
+    """
+
+    observation = await EXERCISERS[scenario.scenario_id]()
+    assert isinstance(observation, Observation)
+
+
 def test_observation_requires_a_control_for_a_pass() -> None:
     """The control requirement is enforced, not merely documented."""
 
@@ -394,3 +551,64 @@ def test_observation_requires_a_control_for_a_pass() -> None:
         Observation(verdict=Verdict.HELD_VIA_FLOOR, evidence="the floor held")
     # A violation needs no control: there is no passing outcome to justify.
     Observation(verdict=Verdict.VIOLATED, evidence="the effect occurred")
+
+
+def test_observation_refuses_a_pass_whose_control_did_not_go_the_other_way() -> None:
+    """A control that records the wrong outcome is refused, not re-worded.
+
+    This is the test that goes red if ``Observation.__post_init__``'s control
+    clause is deleted. It builds the two shapes that actually shipped in this
+    wave: a paired call that came back DENIED, and a "contrast" between two
+    identical results.
+    """
+
+    denied_control = Control(
+        kind=ControlKind.ALLOWED_CALL,
+        what="academic_search on the same boundary and grant list",
+        observed=ToolOutcomeStatus.DENIED.value,
+        handler_invocations=0,
+    )
+    assert not denied_control.demonstrated
+    with pytest.raises(ValueError, match="did not go the other way"):
+        Observation(
+            verdict=Verdict.HELD,
+            evidence="send_notification was denied",
+            control=denied_control,
+        )
+
+    inert_contrast = Control.contrasting_result(
+        what="a benign input through the same sanitizer",
+        on_attack="was_modified=False",
+        on_control="was_modified=False",
+    )
+    assert not inert_contrast.demonstrated
+    with pytest.raises(ValueError, match="did not go the other way"):
+        Observation(
+            verdict=Verdict.HELD_VIA_FLOOR,
+            evidence="the sanitizer left it alone",
+            control=inert_contrast,
+        )
+
+    # An allowed call whose handler never ran proves the decision, not the
+    # effect; a scenario that supplies the count is taken at its word.
+    unreached = Control(
+        kind=ControlKind.ALLOWED_CALL,
+        what="a call that succeeded without reaching its handler",
+        observed=ToolOutcomeStatus.SUCCEEDED.value,
+        handler_invocations=0,
+    )
+    assert not unreached.demonstrated
+    with pytest.raises(ValueError, match="did not go the other way"):
+        Observation(verdict=Verdict.HELD, evidence="held", control=unreached)
+
+    # Declared absence is the one accepted non-demonstration, and it must say
+    # why. CONTROL_FREE pins which scenarios may use it.
+    Observation(
+        verdict=Verdict.HELD_VIA_FLOOR,
+        evidence="four benign calls all ran",
+        control=Control.absent(
+            what="a cumulative-effect rule", why="no such mechanism exists"
+        ),
+    )
+    with pytest.raises(ValueError, match="why no opposite outcome"):
+        Control.absent(what="a cumulative-effect rule", why="  ")
