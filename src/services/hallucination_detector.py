@@ -1,15 +1,54 @@
-"""Offline hallucination checks against trusted source evidence."""
+"""Offline hallucination checks against trusted source evidence.
+
+**This module's verdicts are advisory heuristics and are not claim support.**
+Matching is token overlap over regex-split sentences; it is a defense layer,
+which the Wave 4 non-goal distinguishes from a boundary. The authority for
+whether a claim is supported is
+:class:`~src.core.contracts.provenance.ClaimSupportStatus`, written through
+:mod:`src.core.claims.resolution` against real evidence.
+
+Until 2026-08-06 this module declared ``ClaimStatus = Literal["supported",
+"contradicted", "unsupported"]`` — two of whose three members were spelled
+exactly like ``ClaimSupportStatus`` values, and the third,
+``"contradicted"``, had been *removed* from that enum in favour of
+``disputed``. Two vocabularies overlapping in two members and disagreeing in
+the third is how a mapping bug gets written, and the specific bug is worth
+naming because it is the plausible one:
+
+    ``contradicted`` looks like ``disputed``. It is not.
+    ``disputed`` means sources disagree with each other. A source *refuting* a
+    claim is ``unsupported`` **with** evidence cited — the case the four-state
+    model deliberately keeps distinct from "no evidence". Mapping
+    ``contradicted → disputed`` would move refuted claims out of
+    ``n(unsupported)``, which is the numerator of the Wave 7 release gate, and
+    the gate would improve because refutations stopped counting.
+
+So the vocabularies are now disjoint by construction:
+:class:`HeuristicClaimSignal` shares no spelling with ``ClaimSupportStatus``,
+and ``test_the_two_claim_vocabularies_share_no_spelling`` fails if a future
+edit reintroduces one. Converting a signal to a status requires writing a
+mapping deliberately, in the open, rather than by string equality — and the
+right way to obtain a status is to evaluate the claim, not to translate a
+token-overlap result into one.
+"""
 
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from enum import StrEnum
+from typing import TypeAlias
 
 from src.services.evaluation_regression import ExpectedCitation, TrustedSource
 
-ClaimStatus = Literal["supported", "contradicted", "unsupported"]
+
+class HeuristicClaimSignal(StrEnum):
+    """What the overlap heuristic observed. Not a claim-support verdict."""
+
+    MATCHED_SUPPORTING_SOURCE = "matched_supporting_source"
+    MATCHED_CONTRADICTING_SOURCE = "matched_contradicting_source"
+    NO_SOURCE_MATCH = "no_source_match"
 
 
 @dataclass(frozen=True)
@@ -29,7 +68,7 @@ class CitationCheck:
 @dataclass(frozen=True)
 class ClaimCheck:
     claim: str
-    status: ClaimStatus
+    signal: HeuristicClaimSignal
     matched_source_titles: tuple[str, ...]
 
 
@@ -39,21 +78,27 @@ class HallucinationReport:
     citation_checks: tuple[CitationCheck, ...]
 
     @property
-    def supported_claims(self) -> tuple[ClaimCheck, ...]:
+    def claims_matching_supporting_sources(self) -> tuple[ClaimCheck, ...]:
         return tuple(
-            check for check in self.claim_checks if check.status == "supported"
+            check
+            for check in self.claim_checks
+            if check.signal is HeuristicClaimSignal.MATCHED_SUPPORTING_SOURCE
         )
 
     @property
-    def unsupported_claims(self) -> tuple[ClaimCheck, ...]:
+    def claims_matching_no_source(self) -> tuple[ClaimCheck, ...]:
         return tuple(
-            check for check in self.claim_checks if check.status == "unsupported"
+            check
+            for check in self.claim_checks
+            if check.signal is HeuristicClaimSignal.NO_SOURCE_MATCH
         )
 
     @property
-    def contradicted_claims(self) -> tuple[ClaimCheck, ...]:
+    def claims_matching_contradicting_sources(self) -> tuple[ClaimCheck, ...]:
         return tuple(
-            check for check in self.claim_checks if check.status == "contradicted"
+            check
+            for check in self.claim_checks
+            if check.signal is HeuristicClaimSignal.MATCHED_CONTRADICTING_SOURCE
         )
 
     @property
@@ -66,12 +111,21 @@ class HallucinationReport:
 
     @property
     def hallucination_score(self) -> float:
+        """A heuristic failure rate. **Not** the Wave 7 claim-support gate.
+
+        It is the same shape as ``n(unsupported) / n(material claims)`` and is
+        computed from neither: the denominator here is regex-split sentences
+        plus citations, and the numerator is token-overlap misses. Use
+        :attr:`~src.core.claims.resolution.ClaimSupportResolution.unsupported_ratio`
+        for the gate.
+        """
+
         total_checks = len(self.claim_checks) + len(self.citation_checks)
         if total_checks == 0:
             return 0.0
         failed_checks = (
-            len(self.unsupported_claims)
-            + len(self.contradicted_claims)
+            len(self.claims_matching_no_source)
+            + len(self.claims_matching_contradicting_sources)
             + len(self.missing_citations)
         )
         return failed_checks / total_checks
@@ -79,8 +133,8 @@ class HallucinationReport:
     @property
     def has_hallucinations(self) -> bool:
         return (
-            len(self.unsupported_claims) > 0
-            or len(self.contradicted_claims) > 0
+            len(self.claims_matching_no_source) > 0
+            or len(self.claims_matching_contradicting_sources) > 0
             or len(self.missing_citations) > 0
         )
 
@@ -130,7 +184,7 @@ class HallucinationDetector:
         if contradicted_sources:
             return ClaimCheck(
                 claim=claim,
-                status="contradicted",
+                signal=HeuristicClaimSignal.MATCHED_CONTRADICTING_SOURCE,
                 matched_source_titles=contradicted_sources,
             )
 
@@ -145,13 +199,13 @@ class HallucinationDetector:
         if supporting_sources:
             return ClaimCheck(
                 claim=claim,
-                status="supported",
+                signal=HeuristicClaimSignal.MATCHED_SUPPORTING_SOURCE,
                 matched_source_titles=supporting_sources,
             )
 
         return ClaimCheck(
             claim=claim,
-            status="unsupported",
+            signal=HeuristicClaimSignal.NO_SOURCE_MATCH,
             matched_source_titles=(),
         )
 
