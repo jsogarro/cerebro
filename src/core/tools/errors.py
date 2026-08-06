@@ -42,6 +42,22 @@ class PromptBindingRefusedError(ToolBoundaryError):
     """
 
 
+class IdempotencyConflictError(ToolBoundaryError):
+    """An idempotency key was presented for a request it does not identify.
+
+    A key asserts "this is the same call as before". When the recorded call
+    under that key is demonstrably a *different* one — another tool, another
+    version, another capability scope, or different input — the assertion is
+    false and there is no safe way to proceed. Serving the recorded result
+    answers a question nobody asked; executing the new request stores unaudited
+    work under a key that already belongs to something else.
+
+    It is also not recordable: ``agent_tool_invocations`` is unique on
+    ``(attempt_id, idempotency_key)``, so there is no row a conflict could be
+    written to. Hence an exception rather than a terminal outcome.
+    """
+
+
 class UnknownSecretError(ToolBoundaryError):
     """A :class:`~src.core.contracts.redaction.SecretRef` names no held secret.
 
@@ -71,6 +87,7 @@ class ToolOutcomeNotSuccessfulError(ToolBoundaryError):
 
 __all__ = [
     "CapabilityDecisionUnusableError",
+    "IdempotencyConflictError",
     "PromptBindingRefusedError",
     "ToolBoundaryError",
     "ToolNotRegisteredError",

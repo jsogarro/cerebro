@@ -70,6 +70,7 @@ from .audit import (
 from .circuit import BreakerRegistry
 from .errors import (
     CapabilityDecisionUnusableError,
+    IdempotencyConflictError,
     PromptBindingRefusedError,
     ToolNotRegisteredError,
     ToolSpecError,
@@ -93,15 +94,27 @@ CapabilityDecider = Callable[..., CapabilityDecision]
 
 _PRODUCER: Final[str] = "tool_boundary"
 
-_TERMINAL_RECORD_STATUSES: Final[frozenset[ToolInvocationStatus]] = frozenset(
+_REPLAYABLE_RECORD_STATUSES: Final[frozenset[ToolInvocationStatus]] = frozenset(
     {
         ToolInvocationStatus.SUCCEEDED,
         ToolInvocationStatus.FAILED,
         ToolInvocationStatus.CANCELLED,
         ToolInvocationStatus.TIMED_OUT,
-        ToolInvocationStatus.DENIED,
     }
 )
+"""Terminal records that answer for a later identical request.
+
+``DENIED`` is deliberately **excluded**, and it is a security exclusion rather
+than a tidiness one. A denial records a *decision*, not work that was done, and
+decisions are now re-made on every call. Serving a recorded denial would let one
+caller's refusal become another's answer: an unauthorized attempt writes a
+denial under a key, and the authorized caller who later presents that key is
+handed the refusal instead of their result. Authorization is fresh every time,
+so its outcome must be too.
+
+The rest are records of a call that actually reached the tool, which is exactly
+what an idempotency key exists to avoid repeating.
+"""
 
 _FAILED_STATUS_BY_ERROR_CODE: Final[dict[str, ToolOutcomeStatus]] = {
     ERROR_CODES[status]: status
@@ -299,14 +312,6 @@ class ToolBoundary:
             input_sha256=input_sha256,
         )
 
-        replayed = await self._audit_store.find_invocation(
-            run_id=run_id,
-            organization_id=organization_id,
-            idempotency_key=effective_key,
-        )
-        if replayed is not None and replayed.status in _TERMINAL_RECORD_STATUSES:
-            return self._replay(replayed)
-
         call = _Call(
             spec=spec,
             tool_invocation_id=self._id_factory(),
@@ -373,6 +378,33 @@ class ToolBoundary:
         # that actually authorized the call.
         grant = self._resolve_grant(decision, grants)
         call = replace(call, capability_scope=grant.capability_scope)
+
+        # The dedup lookup happens **here**, downstream of the authorization
+        # decision, and the ordering is the security property.
+        #
+        # It used to run before `self._decide`, keyed on run and idempotency key
+        # alone. Any caller who could choose a key could therefore present one
+        # from an earlier authorized call, name a different tool under an
+        # escalated scope, supply no grant, and be handed the earlier result as
+        # a success — because the `return` fired before authorization was ever
+        # reached. A check placed after a `return` is not a check.
+        #
+        # Comparing the recorded request's identity (below) closes the same hole
+        # a second way, but only this ordering makes the bypass unreachable: no
+        # path returns a result before a decision has been made.
+        replayed = await self._audit_store.find_invocation(
+            run_id=run_id,
+            organization_id=organization_id,
+            idempotency_key=effective_key,
+        )
+        if replayed is not None and replayed.status in _REPLAYABLE_RECORD_STATUSES:
+            self._require_same_request(
+                replayed,
+                spec=spec,
+                capability_scope=call.capability_scope,
+                input_sha256=input_sha256,
+            )
+            return self._replay(replayed, decision=decision)
 
         breaker = self._breakers.for_tool(spec.name)
         if not breaker.allows(now):
@@ -832,8 +864,64 @@ class ToolBoundary:
             }
         )
 
-    def _replay(self, recorded: ToolInvocation) -> ToolOutcome:
-        """Return the recorded outcome of an already-completed call."""
+    def _require_same_request(
+        self,
+        recorded: ToolInvocation,
+        *,
+        spec: ToolSpec,
+        capability_scope: str,
+        input_sha256: str,
+    ) -> None:
+        """Refuse to treat a lookup hit as a replay unless it is the same call.
+
+        An idempotency key asserts "this is the request I made before". The
+        assertion is checkable, so it is checked: same tool, same version, same
+        capability scope, same canonical input. A key that names a different
+        request is a collision, not a cache hit.
+
+        Neither resolution a caller might hope for is safe. Serving the recorded
+        result answers a question nobody asked. Executing the new request stores
+        unaudited work under a key that already belongs to something else — and
+        cannot even be written, since ``agent_tool_invocations`` is unique on
+        ``(attempt_id, idempotency_key)``. So it raises.
+
+        The input digest is recomputed from the stored redacted input rather
+        than read from a column, so this stays correct without depending on the
+        persistence layer to carry a digest alongside it.
+        """
+
+        mismatches: list[str] = []
+        if recorded.tool_name != spec.name:
+            mismatches.append(f"tool_name {recorded.tool_name!r} != {spec.name!r}")
+        if recorded.tool_version != spec.version:
+            mismatches.append(
+                f"tool_version {recorded.tool_version!r} != {spec.version!r}"
+            )
+        if recorded.capability_scope != capability_scope:
+            mismatches.append(
+                f"capability_scope {recorded.capability_scope!r} != "
+                f"{capability_scope!r}"
+            )
+        if boundary_digest(recorded.input) != input_sha256:
+            mismatches.append("input differs from the recorded request")
+
+        if mismatches:
+            raise IdempotencyConflictError(
+                f"idempotency key {recorded.idempotency_key!r} already identifies "
+                f"a different request ({'; '.join(mismatches)}); a key names one "
+                "request's content, not a slot that can be repointed at other work"
+            )
+
+    def _replay(
+        self, recorded: ToolInvocation, *, decision: CapabilityDecision
+    ) -> ToolOutcome:
+        """Return the recorded outcome of an already-completed call.
+
+        The decision is the one just made for *this* caller, not the one the
+        original call was authorized under. A replayed result is not a bearer
+        token: a caller whose grant has since been revoked never reaches here,
+        and the outcome names the authorization that permitted this delivery.
+        """
 
         status = _outcome_status_of(recorded)
         return ToolOutcome(
@@ -841,7 +929,7 @@ class ToolBoundary:
             status=status,
             invocation=recorded,
             retry=RETRY_DISPOSITIONS[status],
-            decision=None,
+            decision=decision,
             detail=recorded.status_reason,
         )
 
