@@ -12,15 +12,29 @@ row is constructed, the same way ``RunEventRepository`` allocates
 ``sequence`` internally rather than trusting a caller to supply the right
 value — that is what keeps the denormalized column from drifting out of
 agreement with the JSON array the seven CHECK constraints reason about.
+
+**Evidence citations are verified, not trusted.** ``evidence_ids`` is an
+evaluator-supplied field: ``ClaimSupport.validate_evidence_links`` (the
+Pydantic contract), ``ClaimSupportResolution`` (the totality check), and
+``ClaimSupportRecorder`` (the write-path wrapper) all pass it through
+without ever querying ``agent_evidence`` -- none of them has a database
+session. This repository is the only place both the claim and the evidence
+rows it cites are ever in hand together, the same reason the
+Evidence-to-Artifact digest cross-check lives in ``EvidenceRepository``
+rather than upstream of it. ``record_claim_support`` rejects any row citing
+an ``evidence_id`` that does not resolve within its own organization and
+run, before the row is ever added.
 """
 
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.contracts import ClaimSupport
 from src.models.db.claim_support import AgentClaimSupport
+from src.models.db.evidence import AgentEvidence
 from src.models.db.run_lifecycle import AgentRun
 from src.repositories.tenant_scope import (
     TenantMismatchError,
@@ -53,7 +67,8 @@ class ClaimSupportRepository:
             MissingOrganizationContextError: No org context was supplied.
             TenantMismatchError: The org context disagrees with the parent
                 run's organization.
-            ValueError: The parent run does not exist.
+            ValueError: The parent run does not exist, or claim.evidence_ids
+                cites an evidence row that does not exist in this run.
         """
         normalized_organization_id = normalize_organization_id(organization_id)
         run_organization_id = await self._get_run_organization_id(claim.run_id)
@@ -64,6 +79,19 @@ class ClaimSupportRepository:
                 f"run {claim.run_id!r} does not belong to organization "
                 f"{normalized_organization_id}"
             )
+
+        if claim.evidence_ids:
+            missing = await self._missing_evidence_ids(
+                claim.evidence_ids,
+                organization_id=normalized_organization_id,
+                run_id=claim.run_id,
+            )
+            if missing:
+                raise ValueError(
+                    f"claim support {claim.claim_support_id!r} cites evidence "
+                    f"{sorted(missing)!r} that does not exist in run "
+                    f"{claim.run_id!r}"
+                )
 
         binding = claim.prompt_binding
         row = AgentClaimSupport(
@@ -141,6 +169,30 @@ class ClaimSupportRepository:
             return None
         organization_id: uuid.UUID | None = row[0]
         return organization_id
+
+    async def _missing_evidence_ids(
+        self,
+        evidence_ids: Sequence[str],
+        *,
+        organization_id: uuid.UUID,
+        run_id: str,
+    ) -> set[str]:
+        """Return whichever of ``evidence_ids`` do not resolve to a row
+        within ``organization_id``'s ``run_id``.
+
+        Scoped the same way ``EvidenceRepository._get_artifact_row`` scopes
+        its artifact lookup: a cross-tenant or cross-run evidence_id is
+        indistinguishable here from one that was never recorded at all, so
+        this cannot leak which case applies.
+        """
+        query = select(AgentEvidence.evidence_id).where(
+            AgentEvidence.evidence_id.in_(evidence_ids),
+            AgentEvidence.organization_id == organization_id,
+            AgentEvidence.run_id == run_id,
+        )
+        result = await self.session.execute(query)
+        found = {row[0] for row in result.all()}
+        return set(evidence_ids) - found
 
 
 __all__ = ["ClaimSupportRepository"]
