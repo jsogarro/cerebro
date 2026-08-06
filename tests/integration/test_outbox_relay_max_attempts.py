@@ -149,6 +149,69 @@ async def test_a_permanently_failing_row_stops_retrying_after_max_attempts(
     assert row.last_error == dead_lettered_error  # unchanged: never re-finalized
 
 
+async def _strand_row_in_flight_at_ceiling(
+    session_factory: sessionmaker, event_id: str, *, attempts: int
+) -> None:
+    """Simulate a relay that claimed the attempt reaching ``max_attempts``
+    and died before ``_finalize`` recorded any outcome.
+
+    ``_claim_batch`` increments ``attempts`` as part of the same UPDATE that
+    sets ``status=in_flight``; a relay that crashes between that claim and
+    ``_finalize`` leaves exactly this row shape behind: ``in_flight``,
+    ``attempts`` already at the ceiling, and a long-expired lease.
+    """
+    async with session_factory() as session:
+        await session.execute(
+            update(AgentRunEventOutbox)
+            .where(AgentRunEventOutbox.event_id == event_id)
+            .values(
+                status=EventDeliveryStatus.IN_FLIGHT.value,
+                attempts=attempts,
+                claimed_at=datetime.now(UTC) - timedelta(hours=1),
+                claimed_by="dead-relay",
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_row_abandoned_in_flight_at_the_ceiling_is_dead_lettered(
+    test_engine: AsyncEngine,
+) -> None:
+    """Reproduces N1: a relay claims the attempt that reaches
+    ``max_attempts`` and dies before ``_finalize`` runs. ``_claim_batch``'s
+    ``attempts < max_attempts`` bound then excludes the row from every future
+    claim — including the lease-expiry reclaim path — so without a fix it is
+    never delivered, never retried, and never dead-lettered: stranded
+    ``in_flight`` forever with nothing to page an operator.
+    """
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "outbox-stranded-at-ceiling"
+    async with session_factory() as session:
+        event_id = await _seed_run_with_event(session, run_id=run_id)
+
+    await _strand_row_in_flight_at_ceiling(session_factory, event_id, attempts=2)
+
+    publisher = _AlwaysFailsPublisher()
+    relay = OutboxRelay(
+        session_factory=session_factory, event_publisher=publisher, max_attempts=2
+    )
+
+    assert await relay.run_once() == 0
+    # The row must never be handed to the publisher again: its attempt
+    # budget is already spent, so redelivering it would exceed max_attempts.
+    assert publisher.call_count == 0
+
+    row = await _load_row(session_factory, event_id)
+    assert row.status == EventDeliveryStatus.FAILED.value
+    assert row.attempts == 2  # unchanged — no further attempt was made
+    assert row.last_error is not None
+    assert "dead-letter" in row.last_error.lower()
+    assert "2" in row.last_error
+
+
 @pytest.mark.asyncio
 async def test_a_row_that_succeeds_before_the_ceiling_is_unaffected(
     test_engine: AsyncEngine,

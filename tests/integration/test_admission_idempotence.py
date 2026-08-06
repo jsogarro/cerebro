@@ -265,6 +265,93 @@ async def test_an_unreadable_database_refuses_admission_rather_than_guessing(
 
 
 @pytest.mark.asyncio
+async def test_cross_process_duplicate_admission_coalesces_instead_of_raising(
+    test_engine: AsyncEngine,
+) -> None:
+    """Reproduces N2: two ``DirectExecutionService`` instances — standing in
+    for two replicas behind a load balancer — race to admit the exact same
+    run. ``_admissions_in_flight`` only coalesces duplicates *within one
+    process*, so both instances pass their own in-memory checks and race
+    each other's durable ``create_run`` INSERT. The loser must hit Postgres'
+    ``uq_agent_run_tenant_idempotency`` constraint and, instead of
+    surfacing that as an admission failure (a 500 on an ordinary client
+    retry that happened to land on a different replica), must coalesce onto
+    the winner's execution — the same outcome an in-process concurrent
+    duplicate already gets.
+    """
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "cross-process-admission-run"
+    binding = make_binding(run_id, authority_id="cross-process-admission-authority")
+    resolver = MappingExecutionAuthorityResolver(
+        {("cross-process-admission-authority", "1"): binding}
+    )
+    reference = ExecutionAuthorityReference(
+        authority_id="cross-process-admission-authority", authority_version="1"
+    )
+    project = make_project()
+
+    bridge_a = _CountingBridge({"result": "answer from replica a"})
+    bridge_b = _CountingBridge({"result": "answer from replica b"})
+    service_a = _service(session_factory, resolver, bridge_a)
+    service_b = _service(session_factory, resolver, bridge_b)
+
+    results = await asyncio.gather(
+        service_a.start_research_execution(project, authority_reference=reference),
+        service_b.start_research_execution(project, authority_reference=reference),
+        return_exceptions=True,
+    )
+
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+
+    execution_id_a, execution_id_b = results
+    assert isinstance(execution_id_a, str)
+    assert isinstance(execution_id_b, str)
+    # Both callers must see the same execution — one run was admitted, not
+    # two — no matter which replica's write actually landed first.
+    assert execution_id_a == execution_id_b
+
+    # Poll the durable record rather than either service's in-memory
+    # ``active_executions``: the loser's entry (registered by
+    # ``_durably_recorded_execution_id`` when it coalesces) is a rehydrated
+    # snapshot nothing ever updates again, so waiting on it would spin
+    # forever whenever the loser happens to be the service this test polls.
+    for _ in range(200):
+        async with session_factory() as session:
+            row = await RunLifecycleRepository(session).get_run(
+                run_id, organization_id=ORG_ID
+            )
+        if row is not None and row.status in (
+            RunStatus.SUCCEEDED.value,
+            RunStatus.FAILED.value,
+        ):
+            break
+        await asyncio.sleep(0.02)
+    else:
+        raise AssertionError(f"run {run_id} never reached a terminal status")
+
+    # Exactly one durable row for this run, and it reached its terminal
+    # status — the durable record is the one thing every replica must agree
+    # on, no matter which replica's write actually landed first.
+    async with session_factory() as session:
+        row = await RunLifecycleRepository(session).get_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert row is not None
+        assert row.status == RunStatus.SUCCEEDED.value
+
+    # Only the winner's supervisor bridge ever dispatches real work; the
+    # loser's plan is validated (harmless) but never executed a second time.
+    assert bridge_a.execute_calls + bridge_b.execute_calls == 1
+
+    await service_a.close()
+    await service_b.close()
+
+
+@pytest.mark.asyncio
 async def test_replay_after_the_in_process_index_is_evicted_does_not_re_execute(
     test_engine: AsyncEngine,
 ) -> None:

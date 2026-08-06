@@ -23,6 +23,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 from structlog import get_logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -125,6 +126,29 @@ class RunAdmissionError(RuntimeError):
     to contradict, so memory-only execution stays supported and this is not
     raised.
     """
+
+
+class RunAlreadyAdmittedError(RuntimeError):
+    """A concurrent, cross-process admission already durably won this run.
+
+    Raised only from :meth:`DirectExecutionService._admit_run`, and only when
+    its ``create_run`` INSERT is refused by ``uq_agent_run_tenant_idempotency``
+    — the run's idempotency key already has a row, written by another process
+    between this process's pre-admission durable lookup and its own INSERT.
+    That is not an admission *failure*: the run really was admitted, just not
+    by this process. Carries the execution id
+    :meth:`DirectExecutionService._durably_recorded_execution_id` found for
+    that row, so the caller coalesces onto it exactly as an in-process
+    concurrent duplicate already does via ``_admissions_in_flight`` — instead
+    of surfacing an ordinary cross-replica race as a 500.
+    """
+
+    def __init__(self, execution_id: str) -> None:
+        super().__init__(
+            f"run already admitted by another process; coalescing onto "
+            f"execution {execution_id!r}"
+        )
+        self.execution_id = execution_id
 
 
 class DurableWriteOutcome(StrEnum):
@@ -605,6 +629,10 @@ class DirectExecutionService:
                 mean reporting outcomes nothing backs. A service with no
                 session factory has no such record to contradict and returns
                 normally.
+            RunAlreadyAdmittedError: The write failed because a concurrent,
+                cross-process admission already durably won this exact run —
+                not a database problem, so not treated as one. Carries the
+                execution id the caller should coalesce onto.
         """
         if not self.session_factory:
             return
@@ -657,6 +685,35 @@ class DirectExecutionService:
             self._execution_ids_by_run_id[queued_run.run_id] = (
                 execution_status.execution_id
             )
+        except IntegrityError as exc:
+            # A cross-process duplicate admission of the exact same run
+            # conflicts on ``uq_agent_run_tenant_idempotency`` — the run
+            # really was admitted, just not by this process. Re-run the same
+            # durable lookup a replayed admission uses (a fresh session: this
+            # one is aborted by the constraint violation) and coalesce onto
+            # whatever it finds. If nothing is found the conflict was not
+            # this run after all, and the failure is a genuine one — fail
+            # closed exactly as before rather than guessing.
+            winner_execution_id = await self._durably_recorded_execution_id(
+                binding.run.run_id
+            )
+            if winner_execution_id is not None:
+                logger.info(
+                    "cross_process_admission_coalesced",
+                    execution_id=execution_status.execution_id,
+                    run_id=binding.run.run_id,
+                    winner_execution_id=winner_execution_id,
+                )
+                raise RunAlreadyAdmittedError(winner_execution_id) from exc
+            logger.warning(
+                "run_admission_persistence_failed",
+                execution_id=execution_status.execution_id,
+                run_id=binding.run.run_id,
+                error=str(exc),
+            )
+            raise RunAdmissionError(
+                f"run {binding.run.run_id!r} could not be admitted durably"
+            ) from exc
         except Exception as exc:
             logger.warning(
                 "run_admission_persistence_failed",
@@ -1448,7 +1505,10 @@ class DirectExecutionService:
 
         Only ever reached while holding the in-flight claim for this run, so
         it may assume it is the only admission of ``binding.run`` in this
-        process.
+        process — but not the only admission across *every* process: another
+        replica can win the same run's durable INSERT between this caller's
+        own pre-admission lookup and its own. See
+        :meth:`_admit_run`/``RunAlreadyAdmittedError``.
         """
         routing_decision = await self._propose_routing(
             project,
@@ -1478,7 +1538,17 @@ class DirectExecutionService:
             execution_plan=execution_plan,
         )
 
-        await self._admit_run(execution_status, binding, project)
+        try:
+            await self._admit_run(execution_status, binding, project)
+        except RunAlreadyAdmittedError as exc:
+            # Another replica's write already won this run durably. Nothing
+            # was started for it here — no task row, no attempt row, no
+            # background workflow task — so there is nothing to unwind;
+            # coalesce onto the winner exactly like a replayed admission
+            # does (``_durably_recorded_execution_id`` already registered it
+            # in ``active_executions``/``_execution_ids_by_run_id`` before
+            # raising).
+            return exc.execution_id
 
         self.active_executions[execution_id] = execution_status
         # ``_admit_run`` indexes the run when it has a durable identity to

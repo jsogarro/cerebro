@@ -128,6 +128,7 @@ class OutboxRelay:
         """Claim and attempt delivery of one batch. Returns count delivered."""
         async with self.session_factory() as session:
             rows = await self._claim_batch(session)
+            await self._dead_letter_abandoned_claims(session)
             await session.commit()
 
         delivered = 0
@@ -274,6 +275,80 @@ class OutboxRelay:
         )
         return False
 
+    async def _dead_letter_abandoned_claims(
+        self, session: AsyncSession
+    ) -> list[AgentRunEventOutbox]:
+        """Dead-letter an ``in_flight`` row whose claim was abandoned exactly
+        at ``max_attempts``.
+
+        ``_claim_batch``'s ``attempts < max_attempts`` bound (see there)
+        exists to stop a dead-lettered row from being claimed again — but it
+        has a gap at the boundary: a relay that claims the attempt that
+        *reaches* ``max_attempts`` and then dies before ``_finalize`` records
+        an outcome leaves a row ``in_flight`` with ``attempts ==
+        max_attempts``. That row now matches neither claim branch in
+        ``_claim_batch`` — not the pending/failed branch (wrong status), not
+        the lease-expiry reclaim branch (``attempts < max_attempts`` excludes
+        it) — so without this sweep it is never delivered, never retried, and
+        never dead-lettered: exactly the silent-abandonment failure mode the
+        lease reclaim exists to rule out, reintroduced at the ceiling.
+
+        This makes no delivery attempt of its own — the row's attempt budget
+        is already spent, and claiming it again to retry would exceed
+        ``max_attempts`` — it only turns an abandoned, unrecorded outcome
+        into the same observable ``status=failed`` dead-letter shape
+        ``_finalize`` already produces on the ordinary path, including the
+        same ``outbox_relay_dead_lettered`` log signal.
+        """
+        now = datetime.now(UTC)
+        lease_expires_before = now - timedelta(seconds=self.claim_lease_seconds)
+        abandoned_at_ceiling = and_(
+            AgentRunEventOutbox.status == EventDeliveryStatus.IN_FLIGHT.value,
+            AgentRunEventOutbox.attempts >= self.max_attempts,
+            or_(
+                AgentRunEventOutbox.claimed_at.is_(None),
+                AgentRunEventOutbox.claimed_at <= lease_expires_before,
+            ),
+        )
+        rows = list(
+            (
+                await session.execute(
+                    select(AgentRunEventOutbox).where(abandoned_at_ceiling)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            last_error = self._dead_letter_message(
+                attempts=row.attempts,
+                error="claim abandoned by a relay that died before recording an outcome",
+            )
+            # Re-check claimability in the UPDATE's WHERE, same as
+            # ``_claim_batch``: a row another relay already dead-lettered
+            # between the SELECT and here is left alone rather than
+            # overwritten.
+            await session.execute(
+                update(AgentRunEventOutbox)
+                .where(AgentRunEventOutbox.id == row.id, abandoned_at_ceiling)
+                .values(status=EventDeliveryStatus.FAILED.value, last_error=last_error)
+            )
+            logger.error(
+                "outbox_relay_dead_lettered",
+                event_id=row.event_id,
+                run_id=row.run_id,
+                destination=row.destination,
+                attempts=row.attempts,
+                max_attempts=self.max_attempts,
+            )
+        return rows
+
+    def _dead_letter_message(self, *, attempts: int, error: str) -> str:
+        return (
+            f"dead-lettered after {attempts} attempts "
+            f"(max_attempts={self.max_attempts}): {error}"
+        )
+
     async def _finalize(
         self, session: AsyncSession, row: AgentRunEventOutbox, *, delivered: bool
     ) -> None:
@@ -306,9 +381,8 @@ class OutboxRelay:
                 .where(AgentRunEventOutbox.id == row.id)
                 .values(
                     status=EventDeliveryStatus.FAILED.value,
-                    last_error=(
-                        f"dead-lettered after {row.attempts} attempts "
-                        f"(max_attempts={self.max_attempts}): {error}"
+                    last_error=self._dead_letter_message(
+                        attempts=row.attempts, error=error
                     ),
                 )
             )
