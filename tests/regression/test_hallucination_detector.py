@@ -5,14 +5,43 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from src.core.contracts import ClaimSupportStatus
 from src.services.evaluation_regression import (
     ExpectedCitation,
     GoldenDatasetCase,
     load_golden_dataset,
 )
-from src.services.hallucination_detector import HallucinationDetector
+from src.services.hallucination_detector import (
+    HallucinationDetector,
+    HeuristicClaimSignal,
+)
 
 DATASET_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "golden_dataset.json"
+
+
+def test_the_two_claim_vocabularies_share_no_spelling() -> None:
+    """The heuristic signals and the canonical statuses must stay disjoint.
+
+    This module's signals used to be spelled ``supported`` / ``contradicted``
+    / ``unsupported``: two collided exactly with ``ClaimSupportStatus`` and the
+    third named a state that enum no longer has. Overlap is what makes a
+    mapping look like a rename, and the specific mapping it invites —
+    ``contradicted`` to ``disputed`` — is wrong in the direction that flatters
+    the release gate, because a refuted claim belongs in ``unsupported`` and
+    would stop being counted.
+
+    Disjointness is asserted on the *values*, not the member names, because
+    string equality is how the accidental mapping would be written.
+    """
+    signals = {signal.value for signal in HeuristicClaimSignal}
+    statuses = {status.value for status in ClaimSupportStatus}
+
+    assert signals, "the heuristic vocabulary must not be empty"
+    assert statuses, "the canonical vocabulary must not be empty"
+    assert signals.isdisjoint(statuses), (
+        f"heuristic signals collide with claim-support statuses: "
+        f"{sorted(signals & statuses)}"
+    )
 
 
 def test_detector_accepts_supported_claims_and_known_citations() -> None:
@@ -25,9 +54,9 @@ def test_detector_accepts_supported_claims_and_known_citations() -> None:
     )
 
     assert report.has_hallucinations is False
-    assert len(report.supported_claims) == len(case.expected_insights)
-    assert report.unsupported_claims == ()
-    assert report.contradicted_claims == ()
+    assert len(report.claims_matching_supporting_sources) == len(case.expected_insights)
+    assert report.claims_matching_no_source == ()
+    assert report.claims_matching_contradicting_sources == ()
     assert report.missing_citations == ()
 
 
@@ -46,10 +75,10 @@ def test_detector_flags_false_claim_from_trusted_source_contradictions() -> None
     )
 
     assert report.has_hallucinations is True
-    assert [claim.claim for claim in report.contradicted_claims] == [
+    assert [claim.claim for claim in report.claims_matching_contradicting_sources] == [
         contradicted_claim,
     ]
-    assert report.unsupported_claims == ()
+    assert report.claims_matching_no_source == ()
 
 
 def test_detector_flags_unsupported_claim_without_source_evidence() -> None:
@@ -63,10 +92,10 @@ def test_detector_flags_unsupported_claim_without_source_evidence() -> None:
     )
 
     assert report.has_hallucinations is True
-    assert [claim.claim for claim in report.unsupported_claims] == [
+    assert [claim.claim for claim in report.claims_matching_no_source] == [
         unsupported_claim,
     ]
-    assert report.contradicted_claims == ()
+    assert report.claims_matching_contradicting_sources == ()
 
 
 def test_detector_flags_citations_missing_from_trusted_sources() -> None:
