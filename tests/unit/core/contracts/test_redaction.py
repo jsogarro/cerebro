@@ -186,23 +186,50 @@ def test_over_redaction_cannot_reach_the_evidentiary_record() -> None:
     assert b"AKIAIOSFODNN7EXAMPLE" in verbatim
 
 
-def test_exact_values_are_applied_before_shape_patterns() -> None:
+@pytest.mark.parametrize(
+    ("held", "surviving_fragment"),
+    [
+        pytest.param(
+            "sk-abcdefgh SESSION xyz-tenant-42",
+            "xyz-tenant-42",
+            id="shape-matches-the-prefix",
+        ),
+        pytest.param(
+            "prefix-AKIAIOSFODNN7EXAMPLE-suffix",
+            "suffix",
+            id="shape-matches-the-middle",
+        ),
+    ],
+)
+def test_exact_values_are_applied_before_shape_patterns(
+    held: str, surviving_fragment: str
+) -> None:
     """Ordering is load-bearing: a shape pass can fragment a held secret.
 
-    A held secret whose *prefix* looks credential-shaped is only partially
-    matched by the pattern layer. If shape ran first it would replace that
-    prefix, and the exact-value pass would then no longer recognise what
-    remains — leaving the rest of the secret in the record. Running exact
-    values first removes the whole thing.
+    Where a held secret only *partially* overlaps a pattern, running shape
+    first replaces the overlapping part, and the exact-value pass no longer
+    recognises what remains — so the rest of the secret survives into the
+    record. Running exact values first removes the whole value.
 
-    This failure is invisible for any held secret that does not overlap a
-    pattern, which is why it needs its own case rather than being implied by
-    the other exact-value tests.
+    The two cases differ in where the overlap falls. When the pattern matches
+    the prefix, the tail survives; when it matches the middle, the surrounding
+    structure survives on both sides. Either way the record keeps material that
+    was supposed to be gone.
+
+    This is invisible to every other exact-value test, because those use held
+    secrets that overlap no pattern at all — which is why this needs its own
+    case and should not be deleted as redundant.
     """
-    held = "sk-abcdefgh SESSION xyz-tenant-42"
     payload = {"scraped": f"operator pasted {held} into the ticket"}
 
     redacted = redact(payload, known_secret_values=frozenset({held}))
 
-    assert "xyz-tenant-42" not in str(redacted)
+    # Assert the whole result, not merely the absence of the fragment, so this
+    # pins what the correct ordering *produces* rather than only what it
+    # removes. A future change that over-redacts the surrounding prose would
+    # otherwise pass.
+    assert redacted == {
+        "scraped": f"operator pasted {REDACTION_MARKER} into the ticket"
+    }
     assert held not in str(redacted)
+    assert surviving_fragment not in str(redacted)
