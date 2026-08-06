@@ -248,6 +248,19 @@ def _evaluate(
     if not at_least_as_trusted(request.input_trust, grant.max_input_trust):
         return CapabilityDenialReason.INPUT_TRUST_EXCEEDS_GRANT, None
 
+    # The second disjunct is defence in depth, and is unreachable through any
+    # validated grant: `CapabilityGrant.validate_grant` already rejects a
+    # sensitive sink with `requires_approval=False` at construction, so that is
+    # the load-bearing enforcement. Deleting this clause therefore breaks no
+    # test that builds grants normally.
+    #
+    # Keep it anyway. If the constructor validator is ever relaxed, this
+    # becomes the sole thing standing between an unapproved grant and an
+    # external write, and a reviewer reading only this function would otherwise
+    # have to infer the guarantee from a different class.
+    # `test_the_decision_time_approval_backstop_holds_without_the_constructor`
+    # reaches it via `model_construct`, which is the only way to obtain the
+    # invalid grant that the constructor forbids.
     requires_approval = (
         grant.requires_approval or grant.sensitivity in APPROVAL_REQUIRED_SENSITIVITIES
     )

@@ -299,3 +299,37 @@ def test_a_grant_must_expire() -> None:
 def test_a_grant_must_name_at_least_one_tool_version() -> None:
     with pytest.raises(ValidationError, match="at least 1 item"):
         _grant(tool_versions=())
+
+
+def test_the_decision_time_approval_backstop_holds_without_the_constructor() -> None:
+    """The sensitive-sink guarantee survives a relaxed constructor validator.
+
+    `CapabilityGrant.validate_grant` normally makes this state unreachable, so
+    mutating the decision-time clause breaks nothing that builds grants the
+    ordinary way — it is unreachable defence in depth. `model_construct`
+    bypasses validation, which is the only way to obtain the waiving grant the
+    constructor forbids, and lets this assert the backstop directly rather than
+    leaving it to be discovered after a future refactor removes its only cover.
+    """
+    waiving = CapabilityGrant.model_construct(
+        grant_id="grant-001",
+        run_id="run-001",
+        task_id="task-001",
+        capability_scope="research:read",
+        tool_name="web-search",
+        tool_versions=("1.0.0",),
+        sensitivity=SensitivityClass.EXTERNAL_WRITE,
+        requires_approval=False,
+        max_input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+        issued_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(minutes=10),
+    )
+
+    decision = decide_capability(
+        request=_request(sensitivity=SensitivityClass.EXTERNAL_WRITE),
+        grants=(waiving,),
+        now=NOW,
+    )
+
+    assert decision.effect is CapabilityDecisionEffect.DENY
+    assert decision.denial_reason is CapabilityDenialReason.APPROVAL_MISSING
