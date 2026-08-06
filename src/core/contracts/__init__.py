@@ -51,9 +51,11 @@ from .provenance import (
     ToolInvocationStatus,
 )
 from .redaction import (
+    MIN_REDACTABLE_SECRET_LENGTH,
     REDACTION_MARKER,
     SecretRef,
     boundary_digest,
+    is_credential_key,
     redact,
     snapshot_digest,
 )
@@ -78,6 +80,7 @@ __all__ = [
     "EVIDENCE_BEARING_STATUSES",
     "LOCATOR_ANNOTATION_SCHEMES",
     "LOCATOR_CANONICAL_SCHEMES",
+    "MIN_REDACTABLE_SECRET_LENGTH",
     "REDACTION_MARKER",
     "AbsentEvidenceReason",
     "AmendmentValidationStatus",
@@ -133,6 +136,7 @@ __all__ = [
     "canonical_span",
     "decide_capability",
     "delivery_idempotency_key",
+    "is_credential_key",
     "parse_locator",
     "propagate_trust",
     "redact",

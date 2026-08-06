@@ -148,7 +148,20 @@ def _normalize_key(key: str) -> str:
     return _KEY_SEPARATORS.sub("", key.lower())
 
 
-def _is_credential_key(key: str) -> bool:
+def is_credential_key(key: str) -> bool:
+    """Return whether ``key`` names a field that carries credential material.
+
+    Public because the boundary needs the same judgement at tool-registration
+    time — to reject a spec that declares a credential parameter as a bare
+    ``str`` instead of a :class:`SecretRef`. A second copy of the word list
+    would drift, and the drifting copy is the one nobody reads.
+
+    Used that way this is a lint that forces a structural fix at authoring
+    time, not a runtime authorization check. Per the Wave 4 non-goal, a
+    name-shaped heuristic must never be what decides whether a call is
+    permitted.
+    """
+
     normalized = _normalize_key(key)
     if normalized in _CREDENTIAL_KEY_NAMES:
         return True
@@ -180,7 +193,26 @@ def _redact_text(value: str, known_secret_values: frozenset[str]) -> str:
 
 
 def _is_secret_ref(value: Mapping[str, object]) -> bool:
-    return set(value) == {"$secret"} and isinstance(value.get("$secret"), str)
+    """Recognize a secret handle in **either** serialization it can arrive as.
+
+    ``as_json()`` produces the compact embedded form ``{"$secret": id}``.
+    Pydantic's ``model_dump()`` — what a boundary reaches for when persisting a
+    validated tool input — produces ``{"schema_version": ..., "secret_id":
+    id}``. Recognizing only the first meant the second fell through to the
+    credential-key rule and the whole handle was replaced, destroying which
+    credential an invocation used while removing nothing sensitive.
+
+    Both are accepted so no caller has to route through a particular method to
+    keep provenance. Neither carries secret material, so widening recognition
+    widens nothing that matters.
+    """
+
+    keys = set(value)
+    if keys == {"$secret"}:
+        return isinstance(value.get("$secret"), str)
+    if "secret_id" in keys and keys <= {"schema_version", "secret_id"}:
+        return isinstance(value.get("secret_id"), str)
+    return False
 
 
 def _redact_member(
@@ -196,7 +228,7 @@ def _redact_member(
 
     if isinstance(value, Mapping) and _is_secret_ref(value):
         return dict(value)
-    if _is_credential_key(key):
+    if is_credential_key(key):
         return REDACTION_MARKER
     return redact(value, known_secret_values=known_secret_values)
 
@@ -319,9 +351,11 @@ def snapshot_digest(data: bytes) -> ContentSha256:
 
 
 __all__ = [
+    "MIN_REDACTABLE_SECRET_LENGTH",
     "REDACTION_MARKER",
     "SecretRef",
     "boundary_digest",
+    "is_credential_key",
     "redact",
     "snapshot_digest",
 ]

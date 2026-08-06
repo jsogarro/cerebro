@@ -12,6 +12,7 @@ from src.core.contracts.redaction import (
     REDACTION_MARKER,
     SecretRef,
     boundary_digest,
+    is_credential_key,
     redact,
     snapshot_digest,
 )
@@ -233,3 +234,39 @@ def test_exact_values_are_applied_before_shape_patterns(
     }
     assert held not in str(redacted)
     assert surviving_fragment not in str(redacted)
+
+
+def test_a_secret_handle_survives_however_it_was_serialized() -> None:
+    """The recognized shape must be the shape natural serialization produces.
+
+    ``SecretRef`` is a ``ContractModel``, so ``model_dump()`` yields
+    ``{"schema_version": ..., "secret_id": ...}`` while ``as_json()`` yields
+    ``{"$secret": ...}``. Recognizing only the latter meant a boundary that
+    dumped a validated tool input the obvious way had its handle swallowed by
+    the credential-key rule — destroying which credential an invocation used
+    while removing nothing sensitive, which is the exact outcome the
+    reference-check-first ordering exists to prevent.
+    """
+    ref = SecretRef(secret_id="prod-key")
+
+    for serialized in (ref.as_json(), ref.model_dump()):
+        redacted = redact({"api_key": serialized})
+
+        assert redacted == {"api_key": serialized}, serialized
+        assert "prod-key" in str(redacted), serialized
+
+
+def test_a_serialized_secret_handle_is_still_idempotent() -> None:
+    ref = SecretRef(secret_id="prod-key")
+
+    for serialized in (ref.as_json(), ref.model_dump()):
+        once = redact({"token": serialized})
+
+        assert redact(once) == once, serialized
+
+
+def test_credential_key_detection_is_public_so_callers_need_not_restate_it() -> None:
+    """Two copies of the word list drift, and the drifting one is unread."""
+    assert is_credential_key("api_key")
+    assert is_credential_key("X-API-Key")
+    assert not is_credential_key("query")
