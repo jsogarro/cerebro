@@ -92,42 +92,125 @@ class TestAcademicSearchTool:
 
     @pytest.mark.asyncio
     async def test_search_multiple_databases(self):
-        """Test searching multiple databases."""
+        """Test searching multiple databases.
+
+        Every mocked response carries a nonsense marker string that no real
+        PubMed/arXiv record could ever contain, so this test can only pass
+        against the mock — a live response would leave the marker assertions
+        unsatisfied rather than silently pass. `httpx.AsyncClient.get` is
+        fully replaced for the duration of the test, so no call this tool
+        makes can leave the process; a call beyond the two we script would
+        raise `StopIteration` from the `side_effect` list rather than reach
+        the network.
+        """
         from src.mcp.tools.academic_search_tool import AcademicSearchTool
 
         tool = AcademicSearchTool()
 
-        result = await tool.execute(
-            query="artificial intelligence",
-            databases=["pubmed", "arxiv"],
-            max_results=20,
-        )
+        pubmed_marker = "zz-characterization-marker-pubmed-4f2e1a"
+        arxiv_marker = "zz-characterization-marker-arxiv-9b3c7d"
+
+        pubmed_esearch_response = MagicMock()
+        pubmed_esearch_response.status_code = 200
+        pubmed_esearch_response.json.return_value = {
+            "esearchresult": {"idlist": ["777"], "count": "1"}
+        }
+
+        pubmed_esummary_response = MagicMock()
+        pubmed_esummary_response.status_code = 200
+        pubmed_esummary_response.json.return_value = {
+            "result": {
+                "777": {
+                    "uid": "777",
+                    "title": pubmed_marker,
+                    "authors": [{"name": "Marker Author"}],
+                    "pubdate": "2024",
+                }
+            }
+        }
+
+        arxiv_response = MagicMock()
+        arxiv_response.status_code = 200
+        arxiv_response.text = f"""<?xml version="1.0"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <entry>
+                <title>{arxiv_marker}</title>
+                <author><name>Marker Author</name></author>
+                <summary>Marker abstract</summary>
+                <id>http://arxiv.org/abs/0000.00000</id>
+                <published>2024-01-01T00:00:00Z</published>
+            </entry>
+        </feed>"""
+
+        with patch("httpx.AsyncClient.get") as mock_get:
+            mock_get.side_effect = [
+                pubmed_esearch_response,
+                pubmed_esummary_response,
+                arxiv_response,
+            ]
+
+            result = await tool.execute(
+                query="artificial intelligence",
+                databases=["pubmed", "arxiv"],
+                max_results=20,
+            )
 
         assert result["success"]
-        assert "results" in result
-        assert "sources" in result
-        assert len(result["sources"]) == 2
+        assert mock_get.call_count == 3
+        titles = [r["title"] for r in result["results"]]
+        assert pubmed_marker in titles
+        assert arxiv_marker in titles
+        assert result["sources"] == ["pubmed", "arxiv"]
 
     @pytest.mark.asyncio
     async def test_search_with_filters(self):
-        """Test search with filters."""
+        """Test search with filters.
+
+        The marker title makes the result assertion self-protecting (see
+        `test_search_multiple_databases`); the `search_query` assertion
+        additionally proves the category filters actually reached the
+        outgoing request, which the original unmocked version of this test
+        never verified.
+        """
         from src.mcp.tools.academic_search_tool import AcademicSearchTool
 
         tool = AcademicSearchTool()
 
-        result = await tool.execute(
-            query="deep learning",
-            databases=["arxiv"],
-            filters={
-                "year_start": 2023,
-                "year_end": 2024,
-                "categories": ["cs.LG", "cs.AI"],
-            },
-            max_results=10,
-        )
+        arxiv_marker = "zz-characterization-marker-filtered-1a2b3c"
+        arxiv_response = MagicMock()
+        arxiv_response.status_code = 200
+        arxiv_response.text = f"""<?xml version="1.0"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <entry>
+                <title>{arxiv_marker}</title>
+                <author><name>Marker Author</name></author>
+                <summary>Marker abstract</summary>
+                <id>http://arxiv.org/abs/1111.11111</id>
+                <published>2023-06-01T00:00:00Z</published>
+            </entry>
+        </feed>"""
+
+        with patch("httpx.AsyncClient.get") as mock_get:
+            mock_get.return_value = arxiv_response
+
+            result = await tool.execute(
+                query="deep learning",
+                databases=["arxiv"],
+                filters={
+                    "year_start": 2023,
+                    "year_end": 2024,
+                    "categories": ["cs.LG", "cs.AI"],
+                },
+                max_results=10,
+            )
 
         assert result["success"]
-        assert "results" in result
+        assert mock_get.call_count == 1
+        assert result["results"][0]["title"] == arxiv_marker
+
+        sent_params = mock_get.call_args.kwargs["params"]
+        assert "cat:cs.LG" in sent_params["search_query"]
+        assert "cat:cs.AI" in sent_params["search_query"]
 
     @pytest.mark.asyncio
     async def test_invalid_database(self):
