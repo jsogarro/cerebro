@@ -74,24 +74,7 @@ from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.evidence_repository import EvidenceRepository
 from tests.integration.wave4_helpers import seed_run_task_attempt
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Blocked on ArtifactRepository.create_artifact, which cannot "
-            "persist nested metadata: `metadata_=dict(artifact.metadata)` is a "
-            "shallow copy, but `JsonObject` freezes recursively, so the "
-            "license block stays a `mappingproxy` and asyncpg raises "
-            "`TypeError: Object of type mappingproxy is not JSON "
-            "serializable`. The contract already ships the fix — its own "
-            "`PlainSerializer`, reachable as `artifact.model_dump()"
-            "['metadata']` — and the repository is another packet's file. "
-            "strict=True on purpose: when that lands, these XPASS and the "
-            "suite goes red, so nobody has to remember to remove this."
-        ),
-    ),
-]
+pytestmark = [pytest.mark.integration]
 
 NOW = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
 ORG_ID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
