@@ -25,6 +25,10 @@ from src.core.contracts.provenance import ToolInvocation
 from src.core.contracts.trust import TrustClassification
 from src.core.tools import (
     MappingSecretProvider,
+    PromptIdentityVerifier,
+    PromptRegistry,
+    PromptRenderer,
+    PromptTemplate,
     ToolAuditEvent,
     ToolBoundary,
     ToolCallContext,
@@ -40,6 +44,9 @@ SCOPE = "scope-search"
 GRANT_ID = "grant-1"
 TOOL_NAME = "echo"
 TOOL_VERSION = "1.0.0"
+PROMPT_ID = "summarize"
+PROMPT_VERSION = "1.0.0"
+PROMPT_TEMPLATE = "Summarize $topic for a reviewer."
 
 
 class EchoInput(BaseModel):
@@ -137,10 +144,29 @@ def clock() -> FrozenClock:
 
 
 @pytest.fixture
+def prompt_registry() -> PromptRegistry:
+    registry = PromptRegistry()
+    registry.register(
+        PromptTemplate(
+            prompt_id=PROMPT_ID, version=PROMPT_VERSION, source=PROMPT_TEMPLATE
+        )
+    )
+    return registry
+
+
+@pytest.fixture
+def renderer(prompt_registry: PromptRegistry) -> PromptRenderer:
+    return PromptRenderer(
+        registry=prompt_registry, secret_provider=MappingSecretProvider({})
+    )
+
+
+@pytest.fixture
 def boundary_dependencies(
     audit_store: RecordingAuditStore,
     publisher: RecordingPublisher,
     clock: FrozenClock,
+    prompt_registry: PromptRegistry,
 ) -> dict[str, Any]:
     return {
         "secret_provider": MappingSecretProvider({}),
@@ -148,6 +174,7 @@ def boundary_dependencies(
         "event_publisher": publisher,
         "clock": clock,
         "id_factory": SequentialIds(),
+        "prompt_verifier": PromptIdentityVerifier(registry=prompt_registry),
     }
 
 

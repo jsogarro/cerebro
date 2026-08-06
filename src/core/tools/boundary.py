@@ -13,8 +13,10 @@ but not enforce are enforced here, and each by *structure* rather than by an
 assertion a future edit could delete without anything noticing:
 
 - A prompt binding arrives only inside a self-verifying
-  :class:`~src.core.tools.prompts.RenderedPrompt`. There is no parameter
-  through which a bare digest can be supplied.
+  :class:`~src.core.tools.prompts.RenderedPrompt`, whose claimed identity is
+  then checked against the run's pin or the prompt registry. There is no
+  parameter through which a bare digest can be supplied, and a boundary with no
+  verifier refuses prompts outright rather than settling for self-consistency.
 - Credential parameters are ``SecretRef``-typed, checked when the tool is
   registered rather than when it is called.
 - ``now`` is read from the injected clock exactly once per call and is not a
@@ -49,6 +51,7 @@ from src.core.contracts.capabilities import (
     CapabilityRequest,
     decide_capability,
 )
+from src.core.contracts.pinning import PinnedVersions
 from src.core.contracts.provenance import (
     ProducerKind,
     ToolInvocation,
@@ -67,6 +70,7 @@ from .audit import (
 from .circuit import BreakerRegistry
 from .errors import (
     CapabilityDecisionUnusableError,
+    PromptBindingRefusedError,
     ToolNotRegisteredError,
     ToolSpecError,
 )
@@ -79,7 +83,7 @@ from .outcome import (
     ToolOutcomeStatus,
     invocation_status_for,
 )
-from .prompts import RenderedPrompt, require_rendered_prompt
+from .prompts import PromptIdentityVerifier, RenderedPrompt
 from .secrets import SecretProvider
 from .spec import ToolCallContext, ToolSpec
 
@@ -174,6 +178,7 @@ class ToolBoundary:
         decide: CapabilityDecider = decide_capability,
         id_factory: IdFactory | None = None,
         event_destinations: Sequence[str] = (),
+        prompt_verifier: PromptIdentityVerifier | None = None,
     ) -> None:
         """Wire the boundary's dependencies.
 
@@ -198,6 +203,7 @@ class ToolBoundary:
         self._decide = decide
         self._id_factory = id_factory if id_factory is not None else _uuid4_hex
         self._event_destinations = tuple(event_destinations)
+        self._prompt_verifier = prompt_verifier
         self._specs: dict[str, ToolSpec] = {}
 
     # ------------------------------------------------------------------
@@ -244,6 +250,7 @@ class ToolBoundary:
         output_trust: TrustClassification | None = None,
         idempotency_key: str | None = None,
         prompt: RenderedPrompt | None = None,
+        pinned_versions: PinnedVersions | None = None,
         cancellation: CancellationToken | None = None,
     ) -> ToolOutcome:
         """Execute one tool call under the full boundary.
@@ -259,7 +266,7 @@ class ToolBoundary:
 
         now = self._now()
         spec = self.specification(tool_name)
-        verified_prompt = None if prompt is None else require_rendered_prompt(prompt)
+        verified_prompt = self._verify_prompt(prompt, pinned_versions)
         secret_values = self._secret_provider.secret_values()
 
         try:
@@ -748,6 +755,28 @@ class ToolBoundary:
 
     def _resolve_secret(self, ref: SecretRef) -> str:
         return self._secret_provider.resolve(ref.secret_id)
+
+    def _verify_prompt(
+        self, prompt: RenderedPrompt | None, pinned: PinnedVersions | None
+    ) -> RenderedPrompt | None:
+        """Verify a prompt's self-consistency *and* its claimed identity.
+
+        A boundary with no verifier configured refuses any call that supplies a
+        prompt, rather than falling back to consistency alone. Accepting because
+        the stronger check is unavailable is how a check becomes optional in
+        production while still looking present in the code.
+        """
+
+        if prompt is None:
+            return None
+        if self._prompt_verifier is None:
+            raise PromptBindingRefusedError(
+                "a prompt was supplied but this boundary has no "
+                "PromptIdentityVerifier, so the prompt's identity cannot be "
+                "checked against the run's pin or the registry; refusing rather "
+                "than accepting self-consistency as though it were identity"
+            )
+        return self._prompt_verifier.verify(prompt, pinned=pinned)
 
     def _resolve_grant(
         self, decision: CapabilityDecision, grants: Sequence[CapabilityGrant]

@@ -23,6 +23,7 @@ from .errors import (
 )
 from .outcome import RetryDisposition, ToolOutcome, ToolOutcomeStatus
 from .prompts import (
+    PromptIdentityVerifier,
     PromptRegistry,
     PromptRenderer,
     PromptTemplate,
@@ -48,6 +49,7 @@ __all__ = [
     "NullEventPublisher",
     "NullSecretProvider",
     "PromptBindingRefusedError",
+    "PromptIdentityVerifier",
     "PromptRegistry",
     "PromptRenderer",
     "PromptTemplate",

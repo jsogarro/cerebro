@@ -26,23 +26,36 @@ The boundary re-verifies at the decision point anyway, and takes
 ``RenderedPrompt`` rather than ``PromptBinding`` in its public signature. There
 is no parameter through which a bare binding can arrive.
 
-**What this does not establish**, stated rather than implied: the digests prove
-that this text was rendered from this template source. They do not prove that
-the template source is what ``prompt_id`` names in the repository. Registration
-is the trust root, and a caller that registers a fabricated template gets an
-honest digest of a fabricated template. Closing that needs a build-time
-manifest of template digests, which is not this packet's.
+**Self-consistency alone is not enough**, and the gap is narrow but real: a
+hand-built pair can carry a production ``prompt_id`` over a *fabricated*
+template and still have honest digests of both. Correspondence holds; the
+identity is a lie. :class:`PromptIdentityVerifier` closes that by comparing the
+template digest against the run's **pin** — or, absent one, the registry — and
+refusing when neither can answer. The pin outranks the registry because the pin
+is what detects a prompt edited *after* the run was admitted.
+
+**What remains, stated rather than implied:** whoever can write to the registry
+before admission gets an honest digest of a template they authored. That is a
+write-authorization problem on the registry, not a provenance one, and closing
+it needs signed prompts or a trusted publication path.
 """
 
+import hashlib
 from collections.abc import Mapping
 from string import Template
 from typing import final
 
+from src.core.contracts.base import ContentSha256
+from src.core.contracts.pinning import PinnedComponentKind, PinnedVersions
 from src.core.contracts.provenance import PromptBinding
 from src.core.contracts.redaction import redact
 
 from .errors import PromptBindingRefusedError
 from .secrets import SecretProvider
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @final
@@ -96,23 +109,63 @@ class PromptRegistry:
     __slots__ = ("_templates",)
 
     def __init__(self) -> None:
-        self._templates: dict[str, PromptTemplate] = {}
+        self._templates: dict[tuple[str, str], PromptTemplate] = {}
 
     def register(self, template: PromptTemplate) -> None:
-        existing = self._templates.get(template.prompt_id)
+        key = (template.prompt_id, template.version)
+        existing = self._templates.get(key)
         if existing is not None and existing.source != template.source:
             raise ValueError(
-                f"prompt {template.prompt_id!r} is already registered with a "
-                "different body; re-registering would change what an "
-                "already-admitted run means"
+                f"prompt {template.prompt_id!r} version {template.version!r} is "
+                "already registered with a different body; re-registering would "
+                "change what an already-admitted run means"
             )
-        self._templates[template.prompt_id] = template
+        self._templates[key] = template
 
-    def get(self, prompt_id: str) -> PromptTemplate:
-        try:
-            return self._templates[prompt_id]
-        except KeyError:
-            raise KeyError(f"no prompt is registered as {prompt_id!r}") from None
+    def get(self, prompt_id: str, version: str | None = None) -> PromptTemplate:
+        """Return one registered template.
+
+        ``version`` may be omitted only while a single version of the prompt is
+        registered. Once there are two, an omitted version is ambiguous, and
+        resolving it by "latest" would silently change which template a caller
+        rendered the next time one was added.
+        """
+
+        if version is not None:
+            try:
+                return self._templates[(prompt_id, version)]
+            except KeyError:
+                raise KeyError(
+                    f"no prompt is registered as {prompt_id!r} version {version!r}"
+                ) from None
+        candidates = [
+            template
+            for (registered_id, _version), template in self._templates.items()
+            if registered_id == prompt_id
+        ]
+        if not candidates:
+            raise KeyError(f"no prompt is registered as {prompt_id!r}")
+        if len(candidates) > 1:
+            versions = sorted(template.version for template in candidates)
+            raise KeyError(
+                f"prompt {prompt_id!r} is registered at {versions}; name the "
+                "version rather than letting one be chosen"
+            )
+        return candidates[0]
+
+    def digest_of(self, prompt_id: str, version: str) -> ContentSha256 | None:
+        """Return the digest of a registered template body, or ``None``.
+
+        ``None`` means "not registered", which a caller must treat as a refusal
+        rather than as permission. It distinguishes "this template is not what
+        we have on file" from "we have nothing on file to compare against", and
+        both must fail.
+        """
+
+        template = self._templates.get((prompt_id, version))
+        if template is None:
+            return None
+        return _sha256(template.source)
 
 
 @final
@@ -194,11 +247,24 @@ class PromptRenderer:
         self._secret_provider = secret_provider
 
     def render(
-        self, *, prompt_id: str, variables: Mapping[str, str] | None = None
+        self,
+        *,
+        prompt_id: str,
+        version: str | None = None,
+        variables: Mapping[str, str] | None = None,
     ) -> RenderedPrompt:
-        """Render a registered template and pin what was rendered."""
+        """Render a registered template and pin what was rendered.
 
-        template = self._registry.get(prompt_id)
+        The redaction pass covers the **assembled** text, as the final step
+        before hashing. Redacting variables individually would not be enough: a
+        variable that never crossed the tool boundary — a query straight off the
+        API, a value read back from storage — arrives here unredacted, and only
+        a pass over the finished string catches it. ``redact`` is idempotent on
+        strings, so applying it unconditionally costs nothing when every
+        variable was already clean.
+        """
+
+        template = self._registry.get(prompt_id, version)
         filled = template.substitute(variables or {})
         redacted = redact(
             filled, known_secret_values=self._secret_provider.secret_values()
@@ -238,7 +304,86 @@ def require_rendered_prompt(prompt: object) -> RenderedPrompt:
     return prompt
 
 
+@final
+class PromptIdentityVerifier:
+    """Checks that a prompt is the one its claimed identity actually names.
+
+    Self-consistency is not enough, and this is the gap it leaves. A caller can
+    hand-build a :class:`RenderedPrompt` carrying the ``prompt_id`` of a real
+    production prompt, a **fabricated** template source, text rendered from that
+    fabrication, and perfectly honest digests of both. Every correspondence
+    check passes. The record then names a prompt identity whose real template is
+    something else entirely.
+
+    Closing it is a digest comparison against the claimed identity, not
+    provenance bookkeeping. A mint token would not help: it is process-local in
+    exactly the way a ledger is, and it establishes only that *this process*
+    produced the object, never that the template was the right one.
+
+    **The pin outranks the registry**, and that ordering is the whole point. A
+    run's configuration snapshot freezes the prompt digest at admission, so
+    comparing against the pin is what detects "someone edited this prompt after
+    the run was admitted". Comparing only against the live registry would
+    silently accept that edit, because the registry is precisely what changed.
+
+    Precedence:
+
+    1. The run pinned a digest for this prompt -> compare against the **pin**.
+       A mismatch means the run is executing a prompt it was not admitted with.
+    2. Otherwise -> compare against the **registry**.
+    3. The registry has no entry for that ``prompt_id`` at that version ->
+       **refuse**. Accepting because a check could not be made is the failure
+       this class exists to prevent; deny-by-default applies to provenance too.
+    """
+
+    __slots__ = ("_registry",)
+
+    def __init__(self, *, registry: PromptRegistry) -> None:
+        self._registry = registry
+
+    def verify(
+        self, prompt: object, *, pinned: PinnedVersions | None = None
+    ) -> RenderedPrompt:
+        """Return ``prompt`` if it is self-consistent *and* correctly named."""
+
+        rendered = require_rendered_prompt(prompt)
+        binding = rendered.binding
+
+        pinned_digest = (
+            None
+            if pinned is None
+            else pinned.content_hash_of(PinnedComponentKind.PROMPT, binding.prompt_id)
+        )
+        if pinned_digest is not None:
+            if binding.template_sha256 != pinned_digest:
+                raise PromptBindingRefusedError(
+                    f"prompt {binding.prompt_id!r} does not match the template "
+                    "this run was admitted with; it changed after admission, so "
+                    "the run is no longer executing what it was authorized to"
+                )
+            return rendered
+
+        registered_digest = self._registry.digest_of(
+            binding.prompt_id, binding.prompt_version
+        )
+        if registered_digest is None:
+            raise PromptBindingRefusedError(
+                f"no template is registered as {binding.prompt_id!r} version "
+                f"{binding.prompt_version!r}, and the run pinned no digest for "
+                "it; refusing rather than accepting an identity that cannot be "
+                "checked"
+            )
+        if binding.template_sha256 != registered_digest:
+            raise PromptBindingRefusedError(
+                f"prompt {binding.prompt_id!r} version "
+                f"{binding.prompt_version!r} does not match the registered "
+                "template of that name"
+            )
+        return rendered
+
+
 __all__ = [
+    "PromptIdentityVerifier",
     "PromptRegistry",
     "PromptRenderer",
     "PromptTemplate",

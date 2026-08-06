@@ -27,19 +27,10 @@ from src.core.tools import (
     require_rendered_prompt,
 )
 
+from .conftest import PROMPT_TEMPLATE as TEMPLATE
 from .conftest import invoke_kwargs
 
-TEMPLATE = "Summarize $topic for a reviewer."
 FAKE_DIGEST = "f" * 64
-
-
-@pytest.fixture
-def renderer() -> PromptRenderer:
-    registry = PromptRegistry()
-    registry.register(
-        PromptTemplate(prompt_id="summarize", version="1.0.0", source=TEMPLATE)
-    )
-    return PromptRenderer(registry=registry, secret_provider=MappingSecretProvider({}))
 
 
 class TestTheRendererIsTheMintSite:
