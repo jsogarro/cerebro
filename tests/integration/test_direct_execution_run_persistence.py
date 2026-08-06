@@ -220,6 +220,7 @@ async def test_fixture_mode_run_persists_to_succeeded_with_journaled_result(
         authority_reference=ExecutionAuthorityReference(
             authority_id="persistence-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
 
     for _ in range(50):
@@ -326,6 +327,7 @@ async def test_execution_failure_persists_run_as_failed_with_reason(
         authority_reference=ExecutionAuthorityReference(
             authority_id="persistence-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
 
     # Every attempt fails, so the run does end up FAILED — but only after
@@ -401,6 +403,7 @@ async def test_cancellation_persists_run_as_cancelling_not_cancelled(
         authority_reference=ExecutionAuthorityReference(
             authority_id="persistence-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
     await asyncio.wait_for(supervisor_started.wait(), timeout=5)
 

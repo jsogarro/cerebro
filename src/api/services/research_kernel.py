@@ -51,12 +51,15 @@ class ResearchExecutionBackend(Protocol):
         context: dict[str, Any] | None = None,
         *,
         authority_reference: ExecutionAuthorityReference | None = None,
+        organization_id: str | None = None,
     ) -> str: ...
 
-    async def get_execution_status(self, execution_id: str) -> Any: ...
+    async def get_execution_status(
+        self, execution_id: str, *, organization_id: str | None = None
+    ) -> Any: ...
 
     async def get_execution_results(
-        self, execution_id: str
+        self, execution_id: str, *, organization_id: str | None = None
     ) -> dict[str, Any] | None: ...
 
     async def resume_execution(self, project_id: UUID) -> str | None: ...
@@ -110,6 +113,7 @@ RoutedResearchWorkflow: TypeAlias = Callable[
         ResearchProject,
         dict[str, Any] | None,
         ExecutionAuthorityReference | None,
+        str | None,
     ],
     Awaitable[str],
 ]
@@ -141,6 +145,7 @@ class _ApplicationKernelAdapter:
         context: dict[str, Any] | None = None,
         *,
         authority_reference: ExecutionAuthorityReference | None = None,
+        organization_id: str | None = None,
     ) -> str:
         try:
             workflow = cast(
@@ -154,17 +159,32 @@ class _ApplicationKernelAdapter:
                 project,
                 context,
                 authority_reference=authority_reference,
+                organization_id=organization_id,
             )
-        return await workflow(self.backend, project, context, authority_reference)
+        return await workflow(
+            self.backend,
+            project,
+            context,
+            authority_reference,
+            organization_id,
+        )
 
-    async def get_execution_status(self, execution_id: str) -> Any:
-        return await self.backend.get_execution_status(execution_id)
+    async def get_execution_status(
+        self, execution_id: str, *, organization_id: str | None = None
+    ) -> Any:
+        return await self.backend.get_execution_status(
+            execution_id, organization_id=organization_id
+        )
 
     async def get_execution_results(
         self,
         execution_id: str,
+        *,
+        organization_id: str | None = None,
     ) -> dict[str, Any] | None:
-        return await self.backend.get_execution_results(execution_id)
+        return await self.backend.get_execution_results(
+            execution_id, organization_id=organization_id
+        )
 
     async def resume_execution(self, project_id: UUID) -> str | None:
         return await self.backend.resume_execution(project_id)
@@ -357,19 +377,27 @@ def get_kernel_agent_operations(
 async def get_kernel_execution_status(
     kernel: ApplicationResearchKernel,
     execution_id: str,
+    *,
+    organization_id: str | None = None,
 ) -> Any:
     """Read status through the adapter owned by the canonical kernel."""
 
-    return await _execution_adapter(kernel).get_execution_status(execution_id)
+    return await _execution_adapter(kernel).get_execution_status(
+        execution_id, organization_id=organization_id
+    )
 
 
 async def get_kernel_execution_results(
     kernel: ApplicationResearchKernel,
     execution_id: str,
+    *,
+    organization_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Read results through the adapter owned by the canonical kernel."""
 
-    return await _execution_adapter(kernel).get_execution_results(execution_id)
+    return await _execution_adapter(kernel).get_execution_results(
+        execution_id, organization_id=organization_id
+    )
 
 
 async def resume_kernel_execution(

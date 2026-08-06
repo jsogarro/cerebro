@@ -47,13 +47,61 @@ class ExecutionAuthorityUnavailableError(ExecutionAuthorityError):
     code = "EXECUTION_AUTHORITY_UNAVAILABLE"
 
 
+def tenant_owns_authority(tenant_id: str, organization_id: str) -> bool:
+    """Return whether an authority's tenant is the caller's organization.
+
+    Both sides are normalized through ``uuid.UUID(...)`` when both parse, so
+    formatting differences (case, missing dashes) are not a false mismatch.
+    The accepted tenant identity decision keeps ``Run.tenant_id`` a plain
+    contract string rather than a UUID type, so a non-UUID tenant is compared
+    exactly instead of being rejected outright — two distinct tenants never
+    compare equal either way.
+    """
+    try:
+        return uuid.UUID(tenant_id) == uuid.UUID(organization_id)
+    except (ValueError, AttributeError, TypeError):
+        return tenant_id == organization_id
+
+
+def enforce_authority_tenant(
+    binding: ExecutionAuthorityBinding,
+    organization_id: str | None,
+) -> ExecutionAuthorityBinding:
+    """Return ``binding`` only if it belongs to the caller's organization.
+
+    An authority reference is a client-supplied ``(authority_id,
+    authority_version)`` pair and nothing more, so resolution has to be
+    scoped by the caller's tenant or knowing another tenant's pair is enough
+    to execute as that tenant — the durable write path takes its
+    ``organization_id`` from ``binding.run.tenant_id``.
+
+    Fails closed with no org context. A cross-tenant reference raises the
+    same ``ExecutionAuthorityUnavailableError`` as a reference that does not
+    exist, so the resolver cannot be used to probe for other tenants'
+    authorities.
+    """
+    if organization_id is None or not tenant_owns_authority(
+        binding.run.tenant_id, organization_id
+    ):
+        raise ExecutionAuthorityUnavailableError("execution authority is unavailable")
+    return binding
+
+
 class ExecutionAuthorityResolver(Protocol):
     """Resolves only a reference supplied by an execution adapter."""
 
     def resolve(
-        self, reference: ExecutionAuthorityReference
+        self,
+        reference: ExecutionAuthorityReference,
+        *,
+        organization_id: str | None,
     ) -> ExecutionAuthorityBinding:
-        """Return the complete binding for one exact immutable reference."""
+        """Return the binding for one reference inside one tenant.
+
+        ``organization_id`` is the caller's authenticated tenant. There is no
+        unscoped resolution: implementations must reject a missing or
+        mismatched organization.
+        """
 
 
 class MappingExecutionAuthorityResolver:
@@ -75,14 +123,20 @@ class MappingExecutionAuthorityResolver:
         )
 
     def resolve(
-        self, reference: ExecutionAuthorityReference
+        self,
+        reference: ExecutionAuthorityReference,
+        *,
+        organization_id: str | None,
     ) -> ExecutionAuthorityBinding:
         try:
-            return self._bindings[(reference.authority_id, reference.authority_version)]
+            binding = self._bindings[
+                (reference.authority_id, reference.authority_version)
+            ]
         except KeyError as exc:
             raise ExecutionAuthorityUnavailableError(
                 "execution authority is unavailable"
             ) from exc
+        return enforce_authority_tenant(binding, organization_id)
 
 
 def serialize_execution_authority_binding(
@@ -175,6 +229,11 @@ class PersistedExecutionAuthorityResolver:
     ``ExecutionAuthorityUnavailableError`` even if the binding exists in the
     database — this resolver does not fall back to a live query. Callers
     that need that guarantee must warm the cache before serving requests.
+
+    The cache spans every tenant, because a cold start has to load whatever
+    is durable without a caller to scope it to. The tenant boundary is
+    therefore applied on the way *out*: ``resolve`` returns a binding only to
+    a caller whose organization owns it.
     """
 
     def __init__(
@@ -190,14 +249,20 @@ class PersistedExecutionAuthorityResolver:
         )
 
     def resolve(
-        self, reference: ExecutionAuthorityReference
+        self,
+        reference: ExecutionAuthorityReference,
+        *,
+        organization_id: str | None,
     ) -> ExecutionAuthorityBinding:
         try:
-            return self._bindings[(reference.authority_id, reference.authority_version)]
+            binding = self._bindings[
+                (reference.authority_id, reference.authority_version)
+            ]
         except KeyError as exc:
             raise ExecutionAuthorityUnavailableError(
                 "execution authority is unavailable"
             ) from exc
+        return enforce_authority_tenant(binding, organization_id)
 
     def cache_binding(self, binding: ExecutionAuthorityBinding) -> None:
         """Populate the in-process cache without touching persistence."""

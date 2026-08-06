@@ -279,6 +279,9 @@ async def test_direct_service_admits_before_state_and_bypasses_legacy_routing_br
         authority_reference=ExecutionAuthorityReference(
             authority_id="authority-1", authority_version="1"
         ),
+        # Authority resolution is tenant-scoped; ``create_for_test`` bindings
+        # belong to this organization.
+        organization_id="tenant-1",
     )
     assert events == ["route", "compile", "admit"]
     assert execution_id in service.active_executions

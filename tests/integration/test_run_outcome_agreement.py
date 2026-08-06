@@ -98,6 +98,7 @@ async def test_a_retried_workflow_never_reports_an_outcome_the_database_denies(
         authority_reference=ExecutionAuthorityReference(
             authority_id="retried-workflow-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
 
     execution = service.active_executions[execution_id]
@@ -254,6 +255,7 @@ async def test_a_workflow_that_exhausts_its_retries_is_durably_failed(
         authority_reference=ExecutionAuthorityReference(
             authority_id="exhausted-retries-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
 
     execution = service.active_executions[execution_id]

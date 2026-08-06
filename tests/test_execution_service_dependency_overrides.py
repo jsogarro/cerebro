@@ -33,7 +33,9 @@ class _FakeExecutionService:
         self.started_projects.append(project)
         return "fake-execution"
 
-    async def get_execution_status(self, execution_id: str) -> SimpleNamespace:
+    async def get_execution_status(
+        self, execution_id: str, *, organization_id: str | None = None
+    ) -> SimpleNamespace:
         return SimpleNamespace(
             status="running",
             routing_decision={"source": "fake"},
@@ -79,6 +81,9 @@ def test_query_endpoint_uses_non_concrete_dependency_override() -> None:
     test_app.include_router(query_api.router)
     test_app.dependency_overrides[get_application_direct_execution_service] = lambda: (
         fake
+    )
+    test_app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+        user_id="user-1", organization_id="org-1"
     )
 
     with TestClient(test_app) as client:

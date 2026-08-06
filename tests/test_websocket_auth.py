@@ -26,7 +26,12 @@ async def test_development_environment_alone_does_not_allow_anonymous_websocket(
 
     with pytest.raises(WebSocketAuthError, match="Authentication token required"):
         await verify_websocket_token(None, AsyncMock(spec=JWTService))
-    assert await verify_project_access(None, "project-1") is False
+    assert (
+        await verify_project_access(
+            None, "project-1", organization_id=None, session=None
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -37,7 +42,12 @@ async def test_explicit_development_opt_in_allows_anonymous_websocket(
     monkeypatch.setattr(settings, "DEV_ALLOW_ANONYMOUS_WEBSOCKETS", True)
 
     assert await verify_websocket_token(None, AsyncMock(spec=JWTService)) is None
-    assert await verify_project_access(None, "project-1") is True
+    assert (
+        await verify_project_access(
+            None, "project-1", organization_id=None, session=None
+        )
+        is True
+    )
 
 
 @pytest.mark.asyncio
@@ -49,7 +59,12 @@ async def test_production_ignores_anonymous_websocket_opt_in(
 
     with pytest.raises(WebSocketAuthError, match="Authentication token required"):
         await verify_websocket_token(None, AsyncMock(spec=JWTService))
-    assert await verify_project_access(None, "project-1") is False
+    assert (
+        await verify_project_access(
+            None, "project-1", organization_id=None, session=None
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio

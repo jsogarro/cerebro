@@ -143,6 +143,11 @@ def test_deserialize_supplies_the_caller_provided_clock_and_plan_id_factory() ->
     assert rebuilt.plan_id_factory() == "plan-rebuilt"
 
 
+# ``resolve`` is tenant-scoped, so every call names the organization that
+# owns the binding ``_make_binding`` builds.
+OWNING_ORGANIZATION = "tenant-1"
+
+
 # --- cache-backed resolve -----------------------------------------------------
 
 
@@ -153,7 +158,8 @@ def test_resolve_misses_raise_unavailable_when_the_cache_is_empty() -> None:
         resolver.resolve(
             ExecutionAuthorityReference(
                 authority_id="authority-1", authority_version="1"
-            )
+            ),
+            organization_id=OWNING_ORGANIZATION,
         )
 
 
@@ -167,7 +173,8 @@ def test_cache_binding_makes_resolve_return_it() -> None:
         ExecutionAuthorityReference(
             authority_id=binding.authority_id,
             authority_version=binding.authority_version,
-        )
+        ),
+        organization_id=OWNING_ORGANIZATION,
     )
     assert resolved is binding
 
@@ -182,7 +189,8 @@ def test_resolve_is_scoped_to_the_exact_authority_id_and_version() -> None:
         resolver.resolve(
             ExecutionAuthorityReference(
                 authority_id="authority-1", authority_version="2"
-            )
+            ),
+            organization_id=OWNING_ORGANIZATION,
         )
 
 

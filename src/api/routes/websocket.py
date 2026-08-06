@@ -15,7 +15,9 @@ from structlog import get_logger
 
 from src.api.websocket.auth import (
     WebSocketAuthError,
+    WebSocketPrincipal,
     authenticate_websocket_connection,
+    authenticate_websocket_principal,
     resolve_run_stream_entitlement,
     verify_project_access,
 )
@@ -41,6 +43,43 @@ router = APIRouter()
 # Stop a receive loop from spinning forever on a half-open/broken socket that
 # returns errors without raising WebSocketDisconnect.
 MAX_CONSECUTIVE_WS_ERRORS = 5
+
+
+async def _principal_may_subscribe_to_project(
+    principal: WebSocketPrincipal,
+    project_id: UUID,
+) -> bool:
+    """Authorize a project subscription against the caller's tenant boundary.
+
+    The session is opened for the duration of the check only. A project
+    WebSocket lives as long as the client keeps it open, and holding a
+    database session for that whole time would pin a connection per
+    subscriber.
+
+    A database that cannot be reached yields ``session=None``, which
+    ``verify_project_access`` denies — except under the explicit
+    anonymous-development opt-in, which it evaluates before it needs any
+    persistence at all.
+    """
+    session_factory = None
+    with contextlib.suppress(Exception):
+        session_factory = get_session_factory()
+
+    if session_factory is None:
+        return await verify_project_access(
+            principal.user_id,
+            str(project_id),
+            organization_id=principal.organization_id,
+            session=None,
+        )
+
+    async with session_factory() as session:
+        return await verify_project_access(
+            principal.user_id,
+            str(project_id),
+            organization_id=principal.organization_id,
+            session=session,
+        )
 
 
 @router.websocket("/ws")
@@ -201,14 +240,16 @@ async def project_websocket_endpoint(
         user_agent = websocket.headers.get("user-agent")
 
         # Authenticate connection
-        user_id, client_type = await authenticate_websocket_connection(
+        principal = await authenticate_websocket_principal(
             token=token,
             user_agent=user_agent,
             jwt_service=jwt_service,
         )
+        user_id = principal.user_id
+        client_type = principal.client_type
 
         # Verify project access
-        if not await verify_project_access(user_id, str(project_id)):
+        if not await _principal_may_subscribe_to_project(principal, project_id):
             raise WebSocketAuthError("Access denied to project")
 
         # Establish connection (accept=False since we already accepted above)
@@ -335,14 +376,15 @@ async def cli_websocket_endpoint(
         await websocket.accept()
 
         # Force client type to CLI
-        user_id, _ = await authenticate_websocket_connection(
+        principal = await authenticate_websocket_principal(
             token=token,
             user_agent="research-cli",  # Force CLI detection
             jwt_service=jwt_service,
         )
+        user_id = principal.user_id
 
         # Verify project access
-        if not await verify_project_access(user_id, str(project_id)):
+        if not await _principal_may_subscribe_to_project(principal, project_id):
             raise WebSocketAuthError("Access denied to project")
 
         # Establish connection with CLI type (accept=False since we already accepted above)
