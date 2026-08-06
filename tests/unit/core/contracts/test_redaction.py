@@ -1,0 +1,118 @@
+"""Redaction happens once, at the boundary, and hashing follows from it.
+
+The load-bearing property is that a persisted boundary record's digest is
+reproducible from the record as persisted. If a record were hashed raw and
+stored redacted, its digest could never be checked again and evidence
+integrity would become unfalsifiable rather than merely absent.
+"""
+
+import pytest
+
+from src.core.contracts.redaction import (
+    REDACTION_MARKER,
+    SecretRef,
+    boundary_digest,
+    redact,
+    snapshot_digest,
+)
+
+
+def test_values_under_credential_key_names_are_replaced() -> None:
+    redacted = redact({"api_key": "sk-live-abcdef", "query": "primary source"})
+
+    assert redacted == {"api_key": REDACTION_MARKER, "query": "primary source"}
+
+
+def test_key_matching_ignores_case_and_separators() -> None:
+    redacted = redact(
+        {"X-API-Key": "abc", "Authorization": "Bearer xyz", "refresh_token": "r"}
+    )
+
+    assert set(redacted.values()) == {REDACTION_MARKER}
+
+
+def test_non_string_values_under_a_credential_key_are_still_removed() -> None:
+    redacted = redact({"token": 1234, "secret": {"nested": "value"}})
+
+    assert redacted == {"token": REDACTION_MARKER, "secret": REDACTION_MARKER}
+
+
+def test_credential_shaped_values_are_replaced_under_any_key() -> None:
+    """The safety net for secrets arriving inside untrusted tool output."""
+    redacted = redact(
+        {
+            "scraped": "the deploy key is ghp_0123456789abcdefghijklmnopqrstuvwxyz",
+            "note": "nothing sensitive here",
+        }
+    )
+
+    assert REDACTION_MARKER in str(redacted["scraped"])
+    assert redacted["note"] == "nothing sensitive here"
+
+
+def test_redaction_recurses_through_nested_containers() -> None:
+    redacted = redact({"outer": [{"password": "p"}, {"safe": "s"}]})
+
+    assert redacted == {"outer": [{"password": REDACTION_MARKER}, {"safe": "s"}]}
+
+
+def test_redaction_does_not_mutate_its_input() -> None:
+    original = {"password": "p", "nested": {"token": "t"}}
+    snapshot = {"password": "p", "nested": {"token": "t"}}
+
+    redact(original)
+
+    assert original == snapshot
+
+
+def test_redaction_is_idempotent() -> None:
+    payload = {
+        "api_key": "sk-live-abcdef",
+        "outer": [{"password": "p"}, "ghp_0123456789abcdefghijklmnopqrstuvwxyz"],
+        "safe": "value",
+    }
+    once = redact(payload)
+
+    assert redact(once) == once
+
+
+def test_a_persisted_records_digest_is_reproducible_from_what_was_persisted() -> None:
+    """Redact, then hash. Never hash raw and store redacted."""
+    payload = {"api_key": "sk-live-abcdef", "query": "primary source"}
+    stored = redact(payload)
+
+    assert boundary_digest(stored) == boundary_digest(redact(stored))
+
+
+def test_redacted_and_raw_content_hash_differently() -> None:
+    payload = {"api_key": "sk-live-abcdef"}
+
+    assert boundary_digest(payload) != boundary_digest(redact(payload))
+
+
+def test_boundary_digest_is_independent_of_key_order() -> None:
+    assert boundary_digest({"a": 1, "b": 2}) == boundary_digest({"b": 2, "a": 1})
+
+
+def test_a_secret_reference_survives_redaction_because_it_carries_no_secret() -> None:
+    payload = {"credential": SecretRef(secret_id="openrouter-api-key").as_json()}
+
+    assert redact(payload) == payload
+
+
+def test_a_secret_reference_rejects_an_embedded_literal() -> None:
+    with pytest.raises(ValueError, match="at least 1 character"):
+        SecretRef(secret_id="")
+
+
+def test_snapshot_digest_covers_acquired_bytes_verbatim() -> None:
+    """Snapshot integrity means 'this is what the source said', unredacted."""
+    raw = b"the key is sk-live-abcdef"
+
+    assert snapshot_digest(raw) == snapshot_digest(b"the key is sk-live-abcdef")
+    assert snapshot_digest(raw) != snapshot_digest(b"the key is [REDACTED]")
+
+
+def test_snapshot_digest_and_boundary_digest_are_not_interchangeable() -> None:
+    with pytest.raises(TypeError):
+        snapshot_digest({"not": "bytes"})  # type: ignore[arg-type]

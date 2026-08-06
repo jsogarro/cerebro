@@ -12,7 +12,7 @@ from typing import Self
 
 from pydantic import model_validator
 
-from .base import ContractId, ContractModel, Version
+from .base import ContentSha256, ContractId, ContractModel, Version
 
 
 class PinnedComponentKind(StrEnum):
@@ -26,11 +26,20 @@ class PinnedComponentKind(StrEnum):
 
 
 class PinnedComponentVersion(ContractModel):
-    """One component identity pinned to the version a run was admitted with."""
+    """One component identity pinned to the version a run was admitted with.
+
+    ``content_sha256`` is what makes the pin *verifiable*. A declared version is
+    a hand-maintained assertion: editing a prompt body leaves its version string
+    untouched, so a version alone cannot detect that an admitted run is now
+    executing different content. The digest can. It is optional because not
+    every component family has content to hash, and a pin without one is honest
+    about being unverifiable rather than pretending otherwise.
+    """
 
     kind: PinnedComponentKind
     component_id: ContractId
     version: Version
+    content_sha256: ContentSha256 | None = None
 
 
 class PinnedVersions(ContractModel):
@@ -65,6 +74,22 @@ class PinnedVersions(ContractModel):
         for component in self.components:
             if component.kind is kind and component.component_id == component_id:
                 return component.version
+        return None
+
+    def content_hash_of(
+        self, kind: PinnedComponentKind, component_id: str
+    ) -> ContentSha256 | None:
+        """Return the pinned content digest for one component, if it has one.
+
+        A caller compares this against the digest of the content it is about to
+        execute. A mismatch means the component changed after the run was
+        admitted; ``None`` means the pin was recorded without a digest and the
+        comparison cannot be made.
+        """
+
+        for component in self.components:
+            if component.kind is kind and component.component_id == component_id:
+                return component.content_sha256
         return None
 
     def versions_for(self, kind: PinnedComponentKind) -> dict[str, Version]:
