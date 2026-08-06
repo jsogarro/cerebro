@@ -30,7 +30,12 @@ from .prompts import (
     RenderedPrompt,
     require_rendered_prompt,
 )
-from .secrets import MappingSecretProvider, NullSecretProvider, SecretProvider
+from .secrets import (
+    MappingSecretProvider,
+    NullSecretProvider,
+    SecretProvider,
+    validate_secret_provider,
+)
 from .spec import ToolCallContext, ToolHandler, ToolSpec
 
 __all__ = [
@@ -71,4 +76,5 @@ __all__ = [
     "ToolSpecError",
     "UnknownSecretError",
     "require_rendered_prompt",
+    "validate_secret_provider",
 ]

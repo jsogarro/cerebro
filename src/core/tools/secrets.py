@@ -109,4 +109,43 @@ class MappingSecretProvider:
             raise UnknownSecretError(f"no secret is held under {secret_id!r}") from None
 
 
-__all__ = ["MappingSecretProvider", "NullSecretProvider", "SecretProvider"]
+def validate_secret_provider(provider: SecretProvider) -> None:
+    """Check at start-up that a provider's contents can actually be redacted.
+
+    Call this once at boot. ``redact`` raises on any held value shorter than
+    :data:`~src.core.contracts.redaction.MIN_REDACTABLE_SECRET_LENGTH`, because
+    substring-matching a short value would scrub ordinary prose. Since the
+    boundary queries the provider on **every** redaction rather than
+    snapshotting it, one short value in the store does not fail once — it fails
+    every tool call, at redaction time, far from the misconfiguration that
+    caused it.
+
+    Surfacing it here turns that into a start-up configuration error, which is
+    where it can be read and fixed.
+
+    Raises:
+        ValueError: A held value is too short to redact by substring.
+        Exception: Whatever the provider raises. Propagating is deliberate — a
+            provider that cannot be queried at boot must not be treated as a
+            provider that holds nothing.
+    """
+
+    too_short = sorted(
+        value
+        for value in provider.secret_values()
+        if len(value) < MIN_REDACTABLE_SECRET_LENGTH
+    )
+    if too_short:
+        raise ValueError(
+            f"{len(too_short)} held secret value(s) are shorter than "
+            f"{MIN_REDACTABLE_SECRET_LENGTH} characters and cannot be redacted "
+            "by value; every tool call would fail at redaction time"
+        )
+
+
+__all__ = [
+    "MappingSecretProvider",
+    "NullSecretProvider",
+    "SecretProvider",
+    "validate_secret_provider",
+]

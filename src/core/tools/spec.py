@@ -15,6 +15,21 @@ at call time by a pattern that might miss it. The check recurses through nested
 models and containers, because a credential one level down is still a
 credential.
 
+**This is not the Wave 4 non-goal wearing a disguise**, and the distinction is
+worth stating because it looks like one at a glance. The non-goal rules out
+prompt wording, classifiers, and allowlists as *standalone authorization or
+security boundaries*. A name-shaped heuristic used at **runtime to decide
+whether to permit a call** would be exactly that. This runs at **registration**
+and decides nothing about any request: it forces a stronger *type*, and the
+type is what carries the guarantee. It is a lint over the structural fix, not a
+substitute for one.
+
+Its honest limit: it only recognizes credential parameters whose names are
+credential-shaped. ``upstream_credential`` is caught; ``pat``,
+``bearer_material``, and anything a team invents are not. This is a ratchet,
+not a guarantee — it converts "authors must remember" into "authors must
+remember less often."
+
 Two smaller requirements are enforced here for the same reason — an omission
 should not silently become a default:
 
