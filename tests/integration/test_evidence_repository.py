@@ -162,3 +162,76 @@ async def test_list_evidence_for_run_scopes_to_the_run(
     rows = await repo.list_evidence_for_run("run-1", organization_id=ORG_ID)
 
     assert [row.evidence_id for row in rows] == ["evidence-1"]
+
+
+@pytest.mark.asyncio
+async def test_evidence_cannot_reference_another_tenants_artifact(
+    repo: EvidenceRepository, db_session: AsyncSession
+) -> None:
+    """Corpus scenario crosstenant-02: an evidence row in tenant B's run
+    citing tenant A's artifact.
+
+    The digest cross-check is not a mitigation here -- artifacts are
+    content-addressed, so two tenants independently snapshotting the same
+    public source produce the same content_sha256. Naming the other
+    tenant's artifact_id requires no secret knowledge; the digest genuinely
+    agrees, so only an artifact lookup scoped to the requesting tenant can
+    catch this.
+    """
+    await seed_run_task_attempt(
+        db_session,
+        organization_id=OTHER_ORG_ID,
+        run_id="run-tenant-b",
+        task_id="task-tenant-b",
+        attempt_id="attempt-tenant-b",
+    )
+    borrowing = _make_evidence(
+        evidence_id="evidence-borrowed",
+        run_id="run-tenant-b",
+        task_id="task-tenant-b",
+        snapshot_artifact_id="artifact-1",  # belongs to ORG_ID, seeded above
+        content_sha256="a" * 64,  # genuinely agrees with the borrowed artifact
+    )
+
+    with pytest.raises(ValueError, match="does not exist"):
+        await repo.record_evidence(borrowing, organization_id=OTHER_ORG_ID)
+
+
+@pytest.mark.asyncio
+async def test_evidence_cannot_borrow_an_artifact_from_a_different_run(
+    repo: EvidenceRepository, db_session: AsyncSession
+) -> None:
+    """Corpus scenario poisoned-05: a tool output points its evidence
+    locator at an artifact that belongs to a different run -- same tenant,
+    wrong run. A provenance chain cannot borrow legitimacy from a record
+    outside its own run, even within one organization.
+    """
+    await seed_run_task_attempt(
+        db_session,
+        organization_id=ORG_ID,
+        run_id="run-2",
+        task_id="task-2",
+        attempt_id="attempt-2",
+    )
+    borrowing = _make_evidence(
+        evidence_id="evidence-borrowed",
+        run_id="run-2",
+        task_id="task-2",
+        snapshot_artifact_id="artifact-1",  # belongs to run-1, seeded above
+        content_sha256="a" * 64,
+    )
+
+    with pytest.raises(ValueError, match="does not exist"):
+        await repo.record_evidence(borrowing, organization_id=ORG_ID)
+
+
+@pytest.mark.asyncio
+async def test_evidence_can_still_reference_its_own_tenants_own_run_artifact(
+    repo: EvidenceRepository,
+) -> None:
+    """Control for the two scenarios above: a legitimate same-tenant,
+    same-run reference must keep working once the lookup is scoped.
+    """
+    row = await repo.record_evidence(_make_evidence(), organization_id=ORG_ID)
+
+    assert row.snapshot_artifact_id == "artifact-1"

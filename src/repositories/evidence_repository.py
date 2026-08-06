@@ -92,7 +92,11 @@ class EvidenceRepository:
                 f"{normalized_organization_id}"
             )
 
-        artifact = await self._get_artifact_row(evidence.snapshot_artifact_id)
+        artifact = await self._get_artifact_row(
+            evidence.snapshot_artifact_id,
+            organization_id=normalized_organization_id,
+            run_id=evidence.run_id,
+        )
         if artifact is None:
             raise ValueError(
                 f"snapshot artifact {evidence.snapshot_artifact_id!r} does not exist"
@@ -174,8 +178,30 @@ class EvidenceRepository:
         organization_id: uuid.UUID | None = row[0]
         return organization_id
 
-    async def _get_artifact_row(self, artifact_id: str) -> AgentArtifact | None:
-        query = select(AgentArtifact).where(AgentArtifact.artifact_id == artifact_id)
+    async def _get_artifact_row(
+        self, artifact_id: str, *, organization_id: uuid.UUID, run_id: str
+    ) -> AgentArtifact | None:
+        """Fetch the artifact an evidence row cites, scoped to its own tenant
+        and run.
+
+        Artifacts are content-addressed: two tenants independently
+        snapshotting the same public source produce the same
+        ``content_sha256``, so the digest cross-check in ``record_evidence``
+        cannot by itself catch a cross-tenant or cross-run reference -- it
+        would agree by construction. An unscoped lookup by ``artifact_id``
+        alone let evidence in one tenant's run cite another tenant's
+        artifact (or, within one tenant, another run's artifact), inheriting
+        that artifact's legitimacy without ever having acquired it. Scoping
+        this SELECT closes both: neither reference resolves, so both fail
+        the existing "does not exist" path rather than a new one -- this
+        deliberately does not distinguish "wrong tenant" from "wrong run"
+        from "never existed," so no read leaks which case applies.
+        """
+        query = select(AgentArtifact).where(
+            AgentArtifact.artifact_id == artifact_id,
+            AgentArtifact.organization_id == organization_id,
+            AgentArtifact.run_id == run_id,
+        )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
