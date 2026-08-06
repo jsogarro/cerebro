@@ -56,7 +56,11 @@ from src.core.acquisition.sources import (
     SourceLicense,
     SourceType,
 )
-from src.core.contracts.capabilities import CapabilityGrant, SensitivityClass
+from src.core.contracts.capabilities import (
+    CapabilityDecision,
+    CapabilityGrant,
+    SensitivityClass,
+)
 from src.core.contracts.provenance import ToolInvocation
 from src.core.contracts.trust import TrustClassification
 from src.core.tools.audit import NullEventPublisher, ToolAuditEvent
@@ -111,6 +115,7 @@ class _RecordingAuditStore:
         invocation: ToolInvocation,
         events: Sequence[ToolAuditEvent],
         organization_id: str | None,
+        capability_decision: CapabilityDecision | None,
     ) -> None:
         self.invocations.append(invocation)
 
