@@ -70,7 +70,7 @@ jobs:
           python-version: '3.11'
       
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           version: '0.4.18'
           enable-cache: true
@@ -164,7 +164,7 @@ jobs:
       
       - name: Notify deployment success
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.repos.createDeploymentStatus({
@@ -281,7 +281,7 @@ jobs:
       
       - name: Create GitHub Release
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const release = await github.rest.repos.createRelease({
@@ -336,7 +336,7 @@ jobs:
           fi
       
       - name: Notify rollback
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.create({
