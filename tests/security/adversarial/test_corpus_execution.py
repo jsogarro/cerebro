@@ -1,9 +1,10 @@
 """Run every scenario in the corpus against the real system, and record it.
 
-This is the wave's security gate: the point at which 46 scenarios authored
-against no implementation are executed against the boundary, the capability
-layer, the redaction contract, the acquisition seam, and the claim-support
-model that now exist.
+This is the wave's security gate: the point at which the 49 scenarios in
+``ALL_SCENARIOS``, authored against no implementation, are executed against the
+boundary, the capability layer, the redaction contract, the acquisition seam,
+and the claim-support model that now exist. (This module said "46" for as long
+as the corpus has had 49 members; the number is now taken from the corpus.)
 
 **How a defect is recorded.** A scenario whose guarantee is genuinely violated
 carries ``xfail(strict=True)`` with the reproduction in ``reason``. Strict is
@@ -15,7 +16,7 @@ this is that re-evaluation — the corpus files are not edited, so the drift
 between what its author expected and what is true is visible rather than
 smoothed away.
 
-**Five guards against a suite that proves nothing.**
+**Six guards against a suite that proves nothing.**
 
 1. ``test_every_scenario_has_an_exerciser`` — the harness cannot report health
    by simply not running anything. Every id in ``ALL_SCENARIOS`` must have an
@@ -40,12 +41,26 @@ smoothed away.
 5. ``test_no_exerciser_raises_instead_of_observing`` — every exerciser is run
    once *without* its xfail mark. A strict xfail turns an exception into a
    green defect report, so an exerciser that starts raising (because a control
-   stopped being reachable, say) would otherwise register as the defect it is
-   annotated for. This test is where that shows up red.
+   stopped being reachable, or because the function it calls changed signature)
+   would otherwise register as the defect it is annotated for. This test is
+   where that shows up red. **``strict=True`` converts a pass into a failure
+   and nothing else; it has never had anything to say about a raise.**
+6. ``test_every_named_covering_test_still_exists`` — where a scenario is
+   unrunnable here and its guarantee is proven in another suite, the pointer at
+   that suite is a resolvable node id in :data:`GUARANTEE_PROVEN_BY` rather than
+   a sentence in a docstring. Deleting or renaming a covering test turns the
+   corpus red instead of leaving it asserting coverage that is gone.
+
+Guards 2, 5 and 6 are three faces of one rule: **an outcome must be asserted
+from something observed, never inferred from a test result.** A control that is
+computed and not read, a defect record that cannot notice being fixed, and a
+coverage claim that cannot notice being deleted are the same mistake.
 """
 
 from __future__ import annotations
 
+from importlib import import_module
+from pathlib import Path
 from typing import Final
 
 import pytest
@@ -138,6 +153,48 @@ The mapping exists so that a guarantee this process cannot reach never reads as
 "unknown" in the in-process report when it is in fact known to be violated
 elsewhere. A defect recorded only where it cannot be re-run is a defect nobody
 will notice regressing.
+
+Its counterpart for guarantees that *hold* elsewhere is
+:data:`GUARANTEE_PROVEN_BY`, which names the covering tests rather than
+describing them.
+"""
+
+
+GUARANTEE_PROVEN_BY: Final[dict[str, tuple[str, ...]]] = {
+    "crosstenant-02-cross-tenant-evidence-artifact-link": (
+        "tests/security/adversarial/test_corpus_execution_persistence.py"
+        "::test_evidence_cannot_reference_another_tenants_artifact",
+    ),
+    "poisoned-05-cross-run-evidence-borrow": (
+        "tests/security/adversarial/test_corpus_execution_persistence.py"
+        "::test_evidence_cannot_reference_another_runs_artifact",
+    ),
+}
+"""For each in-process-unrunnable scenario, the tests that actually prove it.
+
+**Why a mapping and not a sentence.** Three of the five ``NOT_EXERCISABLE``
+exercisers say, in prose, that their guarantee is exercised somewhere else. That
+is a claim which can become false without anything going red: rename or delete
+the covering test and the corpus goes on asserting the coverage exists. It is
+the same shape as the defect this packet was sent to fix — an outcome inferred
+from a test result rather than asserted from an observed fact — and the same
+shape as a defect record that cannot notice being fixed, where an exerciser
+raising a ``TypeError`` still satisfies its own ``xfail(strict=True)``.
+
+So the pointer is data with an invariant test over it.
+:func:`test_every_named_covering_test_still_exists` resolves each entry to a
+real, collectible test function; deleting or renaming one turns the corpus red.
+
+**What the check does and does not catch**, stated because a conformance helper
+that silently checks nothing is worse than none. It catches a deleted module, a
+deleted or renamed function, and a function renamed out of pytest's
+``test_*`` discovery pattern. It does not catch a test that still exists but has
+been gutted, skipped, or had its assertion weakened — nothing short of mutation
+testing catches that, and the corpus does not claim it does.
+
+Entries are per-scenario tuples so a guarantee covered by several tests can name
+all of them. ``crosstenant-04`` has no entry: no test anywhere covers it, which
+is the honest state and is what its exerciser says.
 """
 
 
@@ -283,6 +340,54 @@ class TestTheHarnessCannotReportHealthByRunningNothing:
         assert CONTROL_FREE.isdisjoint(NOT_EXERCISABLE | set(DEFECTS)), (
             "a control-free pass is a pass; a scenario nobody runs and a "
             "scenario recorded as violated do not need one"
+        )
+
+    def test_every_named_covering_test_still_exists(self) -> None:
+        """A pointer at another suite's test must not be able to go stale.
+
+        Resolves each node id in :data:`GUARANTEE_PROVEN_BY` to a real function.
+        Deleting or renaming a covering test turns this red instead of leaving
+        the corpus asserting coverage that no longer exists.
+        """
+
+        repo_root = Path(__file__).resolve().parents[3]
+        for scenario_id, node_ids in GUARANTEE_PROVEN_BY.items():
+            assert node_ids, (
+                f"{scenario_id} has an empty covering-test tuple; a scenario "
+                "with no cover elsewhere simply has no entry here"
+            )
+            for node_id in node_ids:
+                module_path, _, qualname = node_id.partition("::")
+                assert qualname, f"{node_id} names no test function"
+                path = repo_root / module_path
+                assert path.is_file(), (
+                    f"{scenario_id} names {module_path}, which does not exist. "
+                    f"The corpus records this guarantee as proven there."
+                )
+                module = import_module(module_path[:-3].replace("/", "."))
+                target: object = module
+                for part in qualname.split("::"):
+                    assert hasattr(target, part), (
+                        f"{scenario_id} names {node_id}, but {part!r} is not "
+                        f"there any more. Either restore it, point at whatever "
+                        f"replaced it, or move the scenario out of "
+                        f"NOT_EXERCISABLE — but the corpus may not go on "
+                        f"claiming a cover that is gone."
+                    )
+                    target = getattr(target, part)
+                assert callable(target), f"{node_id} does not resolve to a test"
+                assert qualname.rsplit("::", 1)[-1].startswith("test_"), (
+                    f"{node_id} would not be collected by pytest: this "
+                    f"project's python_functions pattern is 'test_*', so a "
+                    f"function renamed off that prefix still exists and is "
+                    f"never run"
+                )
+
+    def test_every_covering_pointer_names_an_unrunnable_scenario(self) -> None:
+        assert set(GUARANTEE_PROVEN_BY) <= NOT_EXERCISABLE, (
+            "a scenario this process can run proves its own guarantee here; "
+            "pointing at another suite would let the in-process result rot "
+            "unnoticed"
         )
 
     def test_defects_proven_elsewhere_are_unrunnable_here(self) -> None:
