@@ -62,8 +62,11 @@ from src.models.execution_authority import (
 
 ORG_A = "11111111-1111-1111-1111-111111111111"
 ORG_B = "22222222-2222-2222-2222-222222222222"
-USER_A = "user-a"
-USER_B = "user-b"
+# User identifiers are UUIDs: research_projects.user_id is a uuid column with a
+# foreign key to users.id, so a value like "user-a" is one the database cannot
+# hold. Only their distinctness matters to anything asserted below.
+USER_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+USER_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 
 AUTHORITY_REFERENCE = ExecutionAuthorityReference(
     authority_id="authority-a", authority_version="1"
