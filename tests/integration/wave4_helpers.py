@@ -15,6 +15,8 @@ from src.core.contracts import (
     ArtifactStatus,
     Attempt,
     AttemptStatus,
+    Evidence,
+    ProducerKind,
     Run,
     RunStatus,
     Task,
@@ -22,6 +24,7 @@ from src.core.contracts import (
     TrustClassification,
 )
 from src.repositories.artifact_repository import ArtifactRepository
+from src.repositories.evidence_repository import EvidenceRepository
 from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 
 NOW = datetime(2026, 8, 6, tzinfo=UTC)
@@ -102,3 +105,37 @@ async def seed_artifact(
         created_at=NOW,
     )
     await artifact_repo.create_artifact(artifact, organization_id=organization_id)
+
+
+async def seed_evidence(
+    session: AsyncSession,
+    *,
+    organization_id: object,
+    evidence_id: str = "evidence-1",
+    run_id: str = "run-1",
+    task_id: str = "task-1",
+    snapshot_artifact_id: str = "artifact-1",
+    content_sha256: str = "a" * 64,
+    locator: str = "char:0-120",
+) -> None:
+    """Insert one evidence row via ``EvidenceRepository``.
+
+    ``producer_kind=SYSTEM`` with no ``prompt_binding`` keeps this a minimal
+    seed -- callers that need a model-produced row build one directly with
+    ``Evidence`` instead.
+    """
+    evidence_repo = EvidenceRepository(session)
+    evidence = Evidence(
+        evidence_id=evidence_id,
+        run_id=run_id,
+        task_id=task_id,
+        source_type="web_page",
+        source_uri="https://example.org/paper",
+        snapshot_artifact_id=snapshot_artifact_id,
+        content_sha256=content_sha256,
+        locator=locator,
+        trust=TrustClassification.EXTERNAL_UNTRUSTED,
+        producer_kind=ProducerKind.SYSTEM,
+        acquired_at=NOW,
+    )
+    await evidence_repo.record_evidence(evidence, organization_id=organization_id)

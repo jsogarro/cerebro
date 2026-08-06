@@ -24,7 +24,11 @@ from src.repositories.tenant_scope import (
     MissingOrganizationContextError,
     TenantMismatchError,
 )
-from tests.integration.wave4_helpers import seed_artifact, seed_run_task_attempt
+from tests.integration.wave4_helpers import (
+    seed_artifact,
+    seed_evidence,
+    seed_run_task_attempt,
+)
 
 pytestmark = [pytest.mark.integration]
 
@@ -70,6 +74,18 @@ async def repo_fixture(db_session: AsyncSession) -> ClaimSupportRepository:
 async def seeded_fixture(db_session: AsyncSession) -> None:
     await seed_run_task_attempt(db_session, organization_id=ORG_ID)
     await seed_artifact(db_session, organization_id=ORG_ID)
+    await seed_evidence(
+        db_session,
+        organization_id=ORG_ID,
+        evidence_id="evidence-1",
+        locator="char:0-120",
+    )
+    await seed_evidence(
+        db_session,
+        organization_id=ORG_ID,
+        evidence_id="evidence-2",
+        locator="char:120-240",
+    )
 
 
 @pytest.mark.asyncio
@@ -146,3 +162,81 @@ async def test_a_reevaluation_appends_a_new_row(repo: ClaimSupportRepository) ->
         "claim-support-2",
     ]
     assert [row.status for row in rows] == ["supported", "disputed"]
+
+
+@pytest.mark.asyncio
+async def test_record_claim_support_rejects_a_nonexistent_evidence_id(
+    repo: ClaimSupportRepository,
+) -> None:
+    """A claim cannot cite evidence that was never recorded. evidence_ids is
+    an evaluator-supplied field on the ClaimSupport contract with no
+    cross-table existence check above this repository -- record_claim_support
+    is the only place that ever has both the claim and the evidence rows in
+    hand.
+    """
+    claim = _make_claim(evidence_ids=("evidence-1", "evidence-missing"))
+
+    with pytest.raises(ValueError, match="does not exist"):
+        await repo.record_claim_support(claim, organization_id=ORG_ID)
+
+
+@pytest.mark.asyncio
+async def test_claim_support_cannot_cite_another_tenants_evidence(
+    repo: ClaimSupportRepository, db_session: AsyncSession
+) -> None:
+    """A claim in tenant B's run cannot borrow legitimacy from tenant A's
+    evidence -- the same shape as the evidence-to-artifact cross-tenant fix,
+    one table over. Unscoped, evidence_count would count a row nobody in
+    tenant B ever verified.
+    """
+    await seed_run_task_attempt(
+        db_session,
+        organization_id=OTHER_ORG_ID,
+        run_id="run-tenant-b",
+        task_id="task-tenant-b",
+        attempt_id="attempt-tenant-b",
+    )
+    claim = _make_claim(
+        run_id="run-tenant-b",
+        artifact_id="artifact-tenant-b",
+        evidence_ids=("evidence-1",),  # belongs to ORG_ID's run-1
+    )
+
+    with pytest.raises(ValueError, match="does not exist"):
+        await repo.record_claim_support(claim, organization_id=OTHER_ORG_ID)
+
+
+@pytest.mark.asyncio
+async def test_claim_support_cannot_borrow_evidence_from_a_different_run(
+    repo: ClaimSupportRepository, db_session: AsyncSession
+) -> None:
+    """Same tenant, wrong run -- mirrors the evidence-to-artifact fix's
+    cross-run case; a claim cannot borrow legitimacy from an evidence row
+    outside its own run either, even within one organization.
+    """
+    await seed_run_task_attempt(
+        db_session,
+        organization_id=ORG_ID,
+        run_id="run-2",
+        task_id="task-2",
+        attempt_id="attempt-2",
+    )
+    claim = _make_claim(
+        run_id="run-2",
+        artifact_id="artifact-run-2",
+        evidence_ids=("evidence-1",),  # belongs to run-1
+    )
+
+    with pytest.raises(ValueError, match="does not exist"):
+        await repo.record_claim_support(claim, organization_id=ORG_ID)
+
+
+@pytest.mark.asyncio
+async def test_claim_support_can_still_cite_its_own_tenants_own_run_evidence(
+    repo: ClaimSupportRepository,
+) -> None:
+    """Control: a legitimate same-tenant, same-run evidence reference must
+    keep working once citations are verified against the database."""
+    row = await repo.record_claim_support(_make_claim(), organization_id=ORG_ID)
+
+    assert row.evidence_ids == ["evidence-1", "evidence-2"]
