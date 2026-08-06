@@ -647,6 +647,36 @@ async def test_no_exerciser_raises_instead_of_observing(scenario: Scenario) -> N
     assert isinstance(observation, Observation)
 
 
+def test_a_fixed_defect_surfaces_here_rather_than_as_an_xpass() -> None:
+    """Pin how a scenario in ``DEFECTS`` reports that its defect is gone.
+
+    ``xfail(strict=True)`` is documented above as the thing that notices a fix:
+    the scenario xpasses and the suite goes red. **For the scenarios in
+    ``DEFECTS`` that is no longer the path**, and the difference is worth
+    pinning rather than discovering.
+
+    A violated scenario carries ``control=None``, because there is no pass to
+    justify and a control computed into a branch nothing reaches is what this
+    packet removed. So the first run in which such a guarantee *holds* builds
+    ``Observation(verdict=HELD, control=None)``, which raises — and a raise
+    satisfies ``strict=True`` exactly as a failure does. The fix is caught by
+    :func:`test_no_exerciser_raises_instead_of_observing`, not by an xpass.
+
+    Verified against the real thing rather than reasoned: stubbing
+    ``verify_project_access`` to refuse turns
+    ``test_scenario_guarantee_holds[crosstenant-03]`` green and
+    ``test_no_exerciser_raises_instead_of_observing[crosstenant-03]`` red.
+
+    That is still a red suite, which is what matters. But the message a reader
+    gets is about a missing control, so it has to say what that most likely
+    means. This test pins that it does.
+    """
+
+    with pytest.raises(ValueError, match="DEFECT HAS BEEN FIXED") as caught:
+        Observation(verdict=Verdict.HELD, evidence="the guarantee now holds")
+    assert "delete the entry from DEFECTS" in str(caught.value)
+
+
 def test_observation_requires_a_control_for_a_pass() -> None:
     """The control requirement is enforced, not merely documented."""
 

@@ -309,7 +309,12 @@ class Observation:
         if self.control is None:
             raise ValueError(
                 f"a {self.verdict.value} observation must carry the control that "
-                "shows the mechanism could have produced the opposite outcome"
+                "shows the mechanism could have produced the opposite outcome. "
+                "IF THIS SCENARIO IS RECORDED IN `DEFECTS`, THE LIKELY CAUSE IS "
+                "THAT ITS DEFECT HAS BEEN FIXED: a violated scenario carries no "
+                "control because there is no pass to justify, so the first "
+                "run in which the guarantee holds arrives here. Write the "
+                "control, delete the entry from DEFECTS, and drop the xfail."
             )
         if (
             not self.control.demonstrated
