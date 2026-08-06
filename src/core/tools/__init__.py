@@ -14,6 +14,7 @@ from .boundary import CancellationToken, Clock, IdFactory, ToolBoundary
 from .circuit import BreakerRegistry, BreakerState, CircuitBreaker
 from .errors import (
     CapabilityDecisionUnusableError,
+    IdempotencyConflictError,
     PromptBindingRefusedError,
     ToolBoundaryError,
     ToolNotRegisteredError,
@@ -50,6 +51,7 @@ __all__ = [
     "CircuitBreaker",
     "Clock",
     "IdFactory",
+    "IdempotencyConflictError",
     "MappingSecretProvider",
     "NullEventPublisher",
     "NullSecretProvider",
