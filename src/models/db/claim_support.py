@@ -183,6 +183,17 @@ class AgentClaimSupport(Base):
         ),
         Index("idx_agent_claim_support_org_run", "organization_id", "run_id"),
         Index("idx_agent_claim_support_claim", "claim_id", "evaluated_at"),
+        # The Wave 7 release-gate query: unsupported-claim ratio per run.
+        Index("idx_agent_claim_support_gate", "organization_id", "run_id", "status"),
+        # The latest verdict for one claim, without scanning every
+        # re-evaluation.
+        Index(
+            "idx_agent_claim_support_latest",
+            "run_id",
+            "artifact_id",
+            "claim_id",
+            "evaluated_at",
+        ),
     )
 
     def __repr__(self) -> str:

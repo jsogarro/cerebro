@@ -181,19 +181,24 @@ async def _seed_evidence(
     task_id: str,
     artifact_id: str,
     locator: str = "char:0-120",
+    locator_scheme: str = "char",
+    locator_start: int = 0,
+    locator_end: int = 120,
 ) -> None:
     await connection.execute(
         text(
             """
             INSERT INTO agent_evidence (
                 id, evidence_id, run_id, task_id, source_type, source_uri,
-                snapshot_artifact_id, content_sha256, locator, trust,
+                snapshot_artifact_id, content_sha256, locator, locator_scheme,
+                locator_start, locator_end, trust,
                 prompt_id, prompt_version, template_sha256, rendered_sha256,
                 parent_evidence_ids, acquired_at
             ) VALUES (
                 gen_random_uuid(), :evidence_id, :run_id, :task_id,
                 'web_page', 'https://example.org/paper', :artifact_id,
-                :digest, :locator, 'external_untrusted', 'prompt-1', '1.0',
+                :digest, :locator, :locator_scheme, :locator_start,
+                :locator_end, 'external_untrusted', 'prompt-1', '1.0',
                 :template_digest, :rendered_digest, '[]', now()
             )
             """
@@ -205,6 +210,9 @@ async def _seed_evidence(
             "artifact_id": artifact_id,
             "digest": "a" * 64,
             "locator": locator,
+            "locator_scheme": locator_scheme,
+            "locator_start": locator_start,
+            "locator_end": locator_end,
             "template_digest": "b" * 64,
             "rendered_digest": "c" * 64,
         },

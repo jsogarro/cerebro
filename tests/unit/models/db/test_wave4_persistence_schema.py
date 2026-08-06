@@ -198,9 +198,13 @@ def _make_invocation(**overrides: object) -> AgentToolInvocation:
         "idempotency_key": "invocation-key-1",
         "input": {"query": "graph neural networks"},
         "input_trust": TrustClassification.USER_SUPPLIED.value,
+        "input_sha256": "a" * 64,
         "output": {"results": []},
         "output_trust": TrustClassification.EXTERNAL_UNTRUSTED.value,
+        "output_sha256": "b" * 64,
         "capability_decision_effect": "allow",
+        "capability_grant_id": "grant-1",
+        "request_fingerprint": "c" * 64,
         "producer_kind": ProducerKind.SYSTEM.value,
         "requested_at": NOW,
         "completed_at": LATER,
@@ -221,6 +225,9 @@ def _make_evidence(**overrides: object) -> AgentEvidence:
         "snapshot_artifact_id": "artifact-1",
         "content_sha256": "a" * 64,
         "locator": "char:0-120",
+        "locator_scheme": "char",
+        "locator_start": 0,
+        "locator_end": 120,
         "trust": TrustClassification.EXTERNAL_UNTRUSTED.value,
         "prompt_id": "prompt-1",
         "prompt_version": "1.0",
@@ -542,6 +549,7 @@ def test_a_denied_decision_requires_a_denied_invocation_status(
     session.add(
         _make_invocation(
             capability_decision_effect="deny",
+            capability_denial_reason="no_matching_grant",
             status=ToolInvocationStatus.FAILED.value,
             error_code="denied",
         )
@@ -557,10 +565,12 @@ def test_a_denied_decision_with_a_denied_status_is_accepted(
     session.add(
         _make_invocation(
             capability_decision_effect="deny",
+            capability_denial_reason="no_matching_grant",
             status=ToolInvocationStatus.DENIED.value,
             error_code="capability_denied",
             output=None,
             output_trust=None,
+            output_sha256=None,
         )
     )
     session.flush()
@@ -584,6 +594,7 @@ def test_output_trust_may_be_absent(session: Session) -> None:
             status=ToolInvocationStatus.RUNNING.value,
             output=None,
             output_trust=None,
+            output_sha256=None,
             completed_at=None,
             error_code=None,
         )
@@ -594,6 +605,95 @@ def test_output_trust_may_be_absent(session: Session) -> None:
 def test_output_trust_domain_is_frozen_when_present(session: Session) -> None:
     _seed_run_task_attempt(session)
     session.add(_make_invocation(output_trust="teleported"))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_an_allow_decision_requires_a_named_grant(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(
+        _make_invocation(capability_decision_effect="allow", capability_grant_id=None)
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_deny_decision_may_still_name_the_furthest_matching_grant(
+    session: Session,
+) -> None:
+    """`decide_capability` reports the grant that got furthest even on a
+    denial, so a CHECK requiring `capability_grant_id IS NULL` on every
+    denial would reject a real, correctly-formed decision."""
+    _seed_run_task_attempt(session)
+    session.add(
+        _make_invocation(
+            capability_decision_effect="deny",
+            capability_denial_reason="approval_expired",
+            capability_grant_id="grant-1",
+            status=ToolInvocationStatus.DENIED.value,
+            output=None,
+            output_trust=None,
+            output_sha256=None,
+        )
+    )
+    session.flush()
+
+
+def test_an_allow_decision_cannot_carry_a_denial_reason(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(
+        _make_invocation(
+            capability_decision_effect="allow",
+            capability_denial_reason="no_matching_grant",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_deny_decision_cannot_cite_an_approval(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(
+        _make_invocation(
+            capability_decision_effect="deny",
+            capability_denial_reason="no_matching_grant",
+            capability_approval_id="approval-1",
+            status=ToolInvocationStatus.DENIED.value,
+            output=None,
+            output_trust=None,
+            output_sha256=None,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_completed_at_cannot_precede_requested_at(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_invocation(completed_at=NOW - timedelta(seconds=1)))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_input_digest_must_be_64_hex_characters(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_invocation(input_sha256="short"))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_output_digest_must_be_64_hex_characters_when_present(
+    session: Session,
+) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_invocation(output_sha256="short"))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_request_fingerprint_must_be_64_hex_characters(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_invocation(request_fingerprint="short"))
     with pytest.raises(IntegrityError):
         session.flush()
 
@@ -633,7 +733,14 @@ def test_a_different_locator_on_the_same_artifact_is_a_distinct_span(
     session.add(_make_artifact())
     session.flush()
     session.add(_make_evidence())
-    session.add(_make_evidence(evidence_id="evidence-2", locator="char:120-240"))
+    session.add(
+        _make_evidence(
+            evidence_id="evidence-2",
+            locator="char:120-240",
+            locator_start=120,
+            locator_end=240,
+        )
+    )
     session.flush()
 
 
@@ -642,6 +749,49 @@ def test_evidence_digest_must_be_64_hex_characters(session: Session) -> None:
     session.add(_make_artifact())
     session.flush()
     session.add(_make_evidence(content_sha256="short"))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_locator_scheme_domain_is_frozen(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(_make_evidence(locator_scheme="teleported"))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_locator_start_cannot_be_negative(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(_make_evidence(locator_start=-1))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_locator_span_must_be_half_open(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(_make_evidence(locator_start=10, locator_end=10))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_line_scheme_spans_are_one_based(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_artifact())
+    session.flush()
+    session.add(
+        _make_evidence(
+            locator="line:0-5",
+            locator_scheme="line",
+            locator_start=0,
+            locator_end=5,
+        )
+    )
     with pytest.raises(IntegrityError):
         session.flush()
 

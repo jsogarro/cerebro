@@ -15,6 +15,15 @@ on its own table). This repository is the only place both values are ever in
 hand together at write time, so it is where the check belongs:
 ``record_evidence`` fetches the referenced artifact and raises before the
 row is added if the digests disagree.
+
+**Locator denormalization.** ``AgentEvidence.locator_scheme``/``locator_start``/
+``locator_end`` are parsed out of ``evidence.locator`` here via
+``parse_locator`` and written alongside the raw string, so the grammar's own
+invariants become database CHECKs rather than only a Pydantic validator a
+raw-SQL write path could bypass. The ``Evidence`` contract already guarantees
+``evidence.locator`` parses (``validate_provenance_chain`` calls
+``parse_locator`` itself), so this re-parse cannot fail here — it exists to
+project the already-validated value onto queryable columns.
 """
 
 import uuid
@@ -23,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.contracts import Evidence
+from src.core.contracts.locators import parse_locator
 from src.models.db.artifact import AgentArtifact
 from src.models.db.evidence import AgentEvidence
 from src.models.db.run_lifecycle import AgentRun
@@ -96,6 +106,7 @@ class EvidenceRepository:
             )
 
         binding = evidence.prompt_binding
+        canonical_span = parse_locator(evidence.locator).canonical
         row = AgentEvidence(
             evidence_id=evidence.evidence_id,
             run_id=evidence.run_id,
@@ -106,6 +117,9 @@ class EvidenceRepository:
             snapshot_artifact_id=evidence.snapshot_artifact_id,
             content_sha256=evidence.content_sha256,
             locator=evidence.locator,
+            locator_scheme=canonical_span.scheme,
+            locator_start=canonical_span.start,
+            locator_end=canonical_span.end,
             trust=evidence.trust.value,
             prompt_id=binding.prompt_id,
             prompt_version=binding.prompt_version,

@@ -17,6 +17,13 @@ acquisition step that produced it, so the four binding columns are declared
 ``src.core.contracts.locators`` — the frozen grammar's own bound — so the
 column width cannot silently drift from the contract that defines it.
 
+``locator_scheme``/``locator_start``/``locator_end`` are the canonical span
+parsed out of ``locator`` by ``EvidenceRepository`` (via
+``src.core.contracts.locators.parse_locator``) and denormalized onto their
+own columns, so the grammar's own invariants — half-open, strictly
+increasing, 1-based line numbers — are database CHECKs rather than only a
+Pydantic validator a raw-SQL write path could bypass.
+
 The evidence/artifact digest agreement (``Evidence.content_sha256`` must
 match its ``snapshot_artifact_id``'s ``agent_artifacts.content_sha256``) is
 not expressible as a single-table CHECK; it is enforced by
@@ -28,6 +35,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -40,7 +48,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.core.contracts import TrustClassification
-from src.core.contracts.locators import MAX_LOCATOR_LENGTH
+from src.core.contracts.locators import LOCATOR_CANONICAL_SCHEMES, MAX_LOCATOR_LENGTH
 from src.models.db.append_only import register_append_only
 from src.models.db.base import UUID, Base
 from src.models.db.run_lifecycle import status_check
@@ -79,6 +87,9 @@ class AgentEvidence(Base):
     )
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     locator: Mapped[str] = mapped_column(String(MAX_LOCATOR_LENGTH), nullable=False)
+    locator_scheme: Mapped[str] = mapped_column(String(16), nullable=False)
+    locator_start: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    locator_end: Mapped[int] = mapped_column(BigInteger, nullable=False)
     trust: Mapped[str] = mapped_column(String(30), nullable=False)
 
     prompt_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -115,6 +126,24 @@ class AgentEvidence(Base):
         CheckConstraint("length(content_sha256) = 64", name="ck_agent_evidence_digest"),
         CheckConstraint(
             "length(locator) > 0", name="ck_agent_evidence_locator_present"
+        ),
+        CheckConstraint(
+            "locator_scheme IN ('"
+            + "', '".join(sorted(LOCATOR_CANONICAL_SCHEMES))
+            + "')",
+            name="ck_agent_evidence_locator_scheme",
+        ),
+        CheckConstraint(
+            "locator_start >= 0", name="ck_agent_evidence_locator_start_non_negative"
+        ),
+        CheckConstraint(
+            "locator_end > locator_start", name="ck_agent_evidence_locator_half_open"
+        ),
+        # `line` spans are 1-based per the frozen locator grammar; `bytes`
+        # and `char` are 0-based, so this only constrains the `line` scheme.
+        CheckConstraint(
+            "locator_scheme <> 'line' OR locator_start >= 1",
+            name="ck_agent_evidence_locator_line_one_based",
         ),
         status_check(
             column="trust", statuses=TrustClassification, name="ck_agent_evidence_trust"

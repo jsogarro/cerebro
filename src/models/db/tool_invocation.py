@@ -5,16 +5,33 @@ Mirrors ``src.core.contracts.provenance.ToolInvocation``. Rows are mutable
 ``requested`` -> ``running`` -> a terminal status on the same row, matching
 ``agent_task_attempts``.
 
-``capability_decision_effect`` and the nullable ``capability_grant_id`` /
-``capability_approval_id`` columns record the outcome of the capability check
+``capability_decision_effect``, the nullable ``capability_grant_id`` /
+``capability_approval_id`` / ``capability_denial_reason``, and
+``request_fingerprint`` columns record the outcome of the capability check
 that governed this invocation (``src.core.contracts.capabilities.
-CapabilityDecision``), so a denied decision can never coexist with a
-non-denied invocation status — ``ck_agent_tool_invocation_capability_denial``
-enforces that at the database level. The full decision — including its
-``denial_reason`` — is not duplicated here; the tool-execution boundary (Wave
-4 packet 4C) is expected to publish it through the run event stream via
-``RunEventRepository.append_event``, which is the one event mechanism this
-persistence layer supports.
+CapabilityDecision``). The CHECKs below are read directly off
+``CapabilityDecision.validate_effect_fields`` rather than a simplified
+biconditional on ``capability_grant_id``: an ``ALLOW`` decision always names
+a grant, but a ``DENY`` decision **may also** name one — ``decide_capability``
+reports the grant that got furthest through its checks even when it denies,
+because "your approval expired" is more actionable than "no matching grant".
+A CHECK requiring ``capability_grant_id IS NULL`` on every denial would
+therefore reject a real, correctly-formed denial. ``capability_denial_reason``
+is the one field that *is* a true biconditional on effect, and
+``capability_approval_id`` is one-directional (a denial never cites an
+approval; an allow may or may not, since approval is only required for
+sensitive sinks).
+
+The full decision is not otherwise duplicated here; the tool-execution
+boundary (Wave 4 packet 4C) is expected to publish it through the run event
+stream via ``RunEventRepository.append_event``, which is the one event
+mechanism this persistence layer supports.
+
+``input_sha256``/``output_sha256`` are ``boundary_digest`` over the
+**redacted** ``input``/``output`` JSON — computed by
+``ToolInvocationRepository``, not supplied by the ``ToolInvocation`` contract,
+which carries no digest fields of its own. ``request_fingerprint`` is copied
+from the governing ``CapabilityDecision.request_fingerprint``.
 """
 
 import uuid
@@ -81,8 +98,10 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
 
     input: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     input_trust: Mapped[str] = mapped_column(String(30), nullable=False)
+    input_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     output: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     output_trust: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    output_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     capability_decision_effect: Mapped[str] = mapped_column(String(10), nullable=False)
     capability_grant_id: Mapped[str | None] = mapped_column(
@@ -95,6 +114,10 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
         ForeignKey("agent_capability_approvals.approval_id"),
         nullable=True,
     )
+    capability_denial_reason: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
 
     error_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -148,6 +171,47 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
             "capability_decision_effect = 'allow' OR status = 'denied'",
             name="ck_agent_tool_invocation_capability_denial",
         ),
+        # An ALLOW decision always names the grant that permitted it.
+        CheckConstraint(
+            "capability_decision_effect <> 'allow' OR capability_grant_id IS NOT NULL",
+            name="ck_agent_tool_invocation_allow_requires_grant",
+        ),
+        # A DENY decision must say why; an ALLOW decision must not carry a
+        # denial reason. Together this is the true biconditional
+        # `CapabilityDecision.validate_effect_fields` enforces on
+        # `denial_reason` — unlike `grant_id`, which a denial may still name
+        # (the furthest-matching grant), `denial_reason` presence is a clean
+        # function of `effect` alone.
+        CheckConstraint(
+            "capability_decision_effect <> 'deny' OR capability_denial_reason IS NOT NULL",
+            name="ck_agent_tool_invocation_deny_requires_reason",
+        ),
+        CheckConstraint(
+            "capability_decision_effect = 'deny' OR capability_denial_reason IS NULL",
+            name="ck_agent_tool_invocation_allow_forbids_reason",
+        ),
+        # A DENY decision never cites an approval (the contract forbids it);
+        # an ALLOW decision may or may not, since approval is only required
+        # for sensitive sinks.
+        CheckConstraint(
+            "capability_decision_effect = 'allow' OR capability_approval_id IS NULL",
+            name="ck_agent_tool_invocation_deny_forbids_approval",
+        ),
+        CheckConstraint(
+            "completed_at IS NULL OR completed_at >= requested_at",
+            name="ck_agent_tool_invocation_completed_after_requested",
+        ),
+        CheckConstraint(
+            "length(input_sha256) = 64", name="ck_agent_tool_invocation_input_digest"
+        ),
+        CheckConstraint(
+            "output_sha256 IS NULL OR length(output_sha256) = 64",
+            name="ck_agent_tool_invocation_output_digest",
+        ),
+        CheckConstraint(
+            "length(request_fingerprint) = 64",
+            name="ck_agent_tool_invocation_request_fingerprint_digest",
+        ),
         Index(
             "idx_agent_tool_invocation_run_task_attempt",
             "run_id",
@@ -159,6 +223,16 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
             "organization_id",
             "status",
             "created_at",
+        ),
+        Index("idx_agent_tool_invocation_run_status", "run_id", "status"),
+        Index("idx_agent_tool_invocation_attempt", "attempt_id", "requested_at"),
+        # The security-review query: every denial for an org, most recent
+        # first.
+        Index(
+            "idx_agent_tool_invocation_denied",
+            "organization_id",
+            "capability_decision_effect",
+            "requested_at",
         ),
     )
 

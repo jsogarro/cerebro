@@ -15,6 +15,13 @@ method here therefore takes the governing ``CapabilityDecision`` as an
 explicit, separate argument, and ``ck_agent_tool_invocation_capability_denial``
 is what keeps a denied decision from ever being paired with a non-denied
 invocation status.
+
+``ToolInvocation`` also carries no digest fields — ``input_sha256`` and
+``output_sha256`` are computed here via ``boundary_digest`` over the
+redacted ``input``/``output`` JSON (the same digest function the redaction
+contract uses for every other boundary record), and
+``request_fingerprint``/``capability_denial_reason`` are copied from the
+governing ``CapabilityDecision`` rather than recomputed.
 """
 
 import uuid
@@ -22,7 +29,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.contracts import CapabilityDecision, ToolInvocation
+from src.core.contracts import CapabilityDecision, ToolInvocation, boundary_digest
 from src.models.db.tool_invocation import AgentToolInvocation
 from src.repositories.tenant_scope import (
     TenantMismatchError,
@@ -63,6 +70,7 @@ class ToolInvocationRepository:
         """
         normalized_organization_id = normalize_organization_id(organization_id)
         binding = invocation.prompt_binding
+        output_dict = dict(invocation.output) if invocation.output is not None else None
         row = AgentToolInvocation(
             tool_invocation_id=invocation.tool_invocation_id,
             run_id=invocation.run_id,
@@ -76,15 +84,25 @@ class ToolInvocationRepository:
             idempotency_key=invocation.idempotency_key,
             input=dict(invocation.input),
             input_trust=invocation.input_trust.value,
-            output=dict(invocation.output) if invocation.output is not None else None,
+            input_sha256=boundary_digest(dict(invocation.input)),
+            output=output_dict,
             output_trust=(
                 invocation.output_trust.value
                 if invocation.output_trust is not None
                 else None
             ),
+            output_sha256=(
+                boundary_digest(output_dict) if output_dict is not None else None
+            ),
             capability_decision_effect=capability_decision.effect.value,
             capability_grant_id=capability_decision.grant_id,
             capability_approval_id=capability_decision.approval_id,
+            capability_denial_reason=(
+                capability_decision.denial_reason.value
+                if capability_decision.denial_reason is not None
+                else None
+            ),
+            request_fingerprint=capability_decision.request_fingerprint,
             producer_kind=invocation.producer_kind.value,
             prompt_id=binding.prompt_id if binding else None,
             prompt_version=binding.prompt_version if binding else None,
@@ -126,12 +144,16 @@ class ToolInvocationRepository:
                 f"tool invocation {invocation.tool_invocation_id!r} does not "
                 f"belong to organization {normalized_organization_id}"
             )
+        output_dict = dict(invocation.output) if invocation.output is not None else None
         row.status = invocation.status.value
-        row.output = dict(invocation.output) if invocation.output is not None else None
+        row.output = output_dict
         row.output_trust = (
             invocation.output_trust.value
             if invocation.output_trust is not None
             else None
+        )
+        row.output_sha256 = (
+            boundary_digest(output_dict) if output_dict is not None else None
         )
         row.error_code = invocation.error_code
         row.status_reason = invocation.status_reason
