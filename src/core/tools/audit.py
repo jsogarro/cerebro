@@ -122,6 +122,24 @@ class ToolAuditStore(Protocol):
         contract still typecheck, and so an implementation that receives ``None``
         from somewhere else is not silently free to invent one. An adapter that
         wants to refuse ``None`` outright may now do so.
+
+        **One call, two writes — the adapter must dispatch.** An *allowed*
+        invocation reaches this method twice: once with
+        ``status=REQUESTED`` and once with its terminal status, and both
+        describe the **same row**. ``agent_tool_invocations`` is unique on
+        ``(attempt_id, idempotency_key)``, and Wave 3's
+        ``ToolInvocationRepository`` splits the two across
+        ``create_tool_invocation`` and ``record_transition`` accordingly. This
+        signature does not distinguish them, so the obvious adapter inserts
+        twice and fails on the unique constraint.
+
+        Stated here because the obvious adapter is the one somebody will write,
+        and because the denial and input-rejection paths **hide** the problem —
+        they terminate before the ``REQUESTED`` write and persist exactly once,
+        so an adapter tested only against refusals looks correct.
+        ``tests/integration/test_boundary_records_survive_postgres.py`` builds a
+        dispatching adapter and is the worked example; that is where this was
+        found.
         """
         ...
 
