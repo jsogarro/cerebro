@@ -21,13 +21,15 @@ except an easily-ignored `fallback: True` key buried in the payload — see
 "mcp_tools"` based solely on `success`, so a fabricated fallback and a real
 result are reported identically to the caller.
 
-`src/agents/integrations/mcp_integration.py` imports `MCPClient`
+`src/agents/integrations/mcp_integration.py` used to import `MCPClient`
 unconditionally at module level, and `MCPClient` imports `MCPServer`, which
 imports `fastmcp` — so merely importing this module (this whole test file
-included) requires the optional `[mcp]` extra to be installed, regardless of
-whether MCP is ever "enabled" for a given agent. `pytest.importorskip` below
-makes that hard dependency explicit instead of failing collection with a bare
-`ModuleNotFoundError` in an environment that only ran `uv sync --extra dev`.
+included) required the optional `[mcp]` extra, regardless of whether MCP was
+ever "enabled" for a given agent. This file was module-skipped by an
+`importorskip("fastmcp")` as a result, so none of the 23 tests below had ever
+executed in the environment the gate runs in. The import is now deferred to
+the one line that constructs a client, the gate is gone, and
+`tests/test_mcp_import_decoupling.py` keeps it that way.
 """
 
 from __future__ import annotations
@@ -37,11 +39,6 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-
-pytest.importorskip(
-    "fastmcp",
-    reason="fastmcp lives in optional [mcp] extra; install with `pip install -e .[mcp]`",
-)
 
 from src.agents.integrations.mcp_integration import MCPIntegration
 
@@ -423,14 +420,32 @@ class TestRealClientConstructionFailureBypassesTheFallbackEntirely:
     fallback machinery this file spends most of its other tests
     characterizing is only reachable at all when a caller injects its own
     `mcp_client`, which nothing in this repository does outside tests.
+
+    **These assertions no longer name the exception type.** They were written
+    against an environment where the optional `[mcp]` extra is installed, in
+    which the failure is fastmcp's `ValueError`; the gate environment has no
+    `fastmcp`, in which the same line raises `ModuleNotFoundError` from the
+    same place for the same reason. Pinning the type pinned the *environment*,
+    not the defect — and because the file was module-skipped, neither of these
+    tests had ever executed anywhere.
+
+    What is pinned instead is the defect itself, and more of it than before:
+    the exception escapes the caller, the fallback that `enable_fallback=True`
+    promises never runs, and the circuit breaker never counts the failure. All
+    three hold under either exception type.
     """
 
     @pytest.mark.asyncio
     async def test_constructing_a_real_client_raises_before_any_fallback(self) -> None:
         integration = MCPIntegration()  # no injected client; enable_fallback=True
 
-        with pytest.raises(ValueError, match=r"\*\*kwargs"):
+        with pytest.raises(Exception) as raised:
             await integration.search_academic_sources(query="q")
+
+        # The escape happens inside `initialize()`, i.e. before the method's
+        # own try/except — so it is not the "Academic search failed" error
+        # that the guarded path raises after a fallback attempt.
+        assert "Academic search failed" not in str(raised.value)
 
     @pytest.mark.asyncio
     async def test_the_failure_never_increments_the_circuit_breaker(self) -> None:
@@ -439,9 +454,10 @@ class TestRealClientConstructionFailureBypassesTheFallbackEntirely:
         """
         integration = MCPIntegration()
 
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception) as raised:
             await integration.search_academic_sources(query="q")
 
+        assert "Academic search failed" not in str(raised.value)
         assert integration._failure_count == 0
 
     def test_client_construction_is_not_inside_the_try_except_in_initialize(

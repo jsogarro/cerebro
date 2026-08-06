@@ -7,16 +7,19 @@ Security: Applies content sanitization at external source boundaries to
 defend against prompt injection via malicious titles/abstracts (Phase S3).
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from structlog import get_logger
 
-from src.mcp.client import MCPClient
-from src.mcp.server import MCPServerConfig
 from src.security.content_sanitizer import ContentSanitizer
+
+if TYPE_CHECKING:
+    from src.mcp.client import MCPClient
 
 logger = get_logger()
 
@@ -65,6 +68,14 @@ class MCPIntegration:
             return
 
         if not self._client:
+            # Imported here, not at module scope: `MCPClient` reaches
+            # `MCPServer` and therefore the optional `fastmcp` extra, and a
+            # caller that injects its own client never needs either. At module
+            # scope this coupling made the whole integration — and every test
+            # covering it — unimportable without an extra it does not use.
+            from src.mcp.client import MCPClient
+            from src.mcp.server import MCPServerConfig
+
             server_config = MCPServerConfig(
                 name=self.config.get("server_name", "research-mcp-server"),
                 port=self.config.get("server_port", 9000),
