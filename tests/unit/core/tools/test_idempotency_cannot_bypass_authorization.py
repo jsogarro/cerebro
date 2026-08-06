@@ -385,6 +385,68 @@ class TestAKeyIdentifiesOneRequestsContent:
 
         assert runs == [RUN_ID, "run-2"]
 
+    async def test_a_key_reused_for_a_different_tool_alone_is_a_conflict(
+        self, boundary_dependencies: dict[str, Any], echo_spec: ToolSpec
+    ) -> None:
+        """Isolates the tool-name comparison.
+
+        The escalation test above differs in tool, scope, *and* input at once,
+        so any one of the three checks catches it and none of them is
+        individually pinned — a mutation deleting just the tool-name comparison
+        survived. Here only the tool name differs, so only that check can
+        refuse. Two tools sharing a schema are still two different programs.
+        """
+
+        async def twin(args: EchoInput, context: ToolCallContext) -> dict[str, str]:
+            return {"echoed": f"twin:{args.query}"}
+
+        boundary = ToolBoundary(**boundary_dependencies)
+        boundary.register(echo_spec)
+        boundary.register(
+            ToolSpec(
+                name="echo_twin",
+                version="1.0.0",
+                sensitivity=SensitivityClass.READ_ONLY,
+                input_model=EchoInput,
+                output_model=EchoOutput,
+                timeout_seconds=5.0,
+                handler=twin,
+            )
+        )
+
+        await boundary.invoke(**invoke_kwargs(idempotency_key=SHARED_KEY))
+
+        with pytest.raises(IdempotencyConflictError, match="tool_name"):
+            await boundary.invoke(
+                **invoke_kwargs(
+                    tool_name="echo_twin",
+                    idempotency_key=SHARED_KEY,
+                    grants=[make_grant(tool_name="echo_twin")],
+                )
+            )
+
+    async def test_a_key_reused_under_a_different_scope_alone_is_a_conflict(
+        self, boundary: ToolBoundary
+    ) -> None:
+        """Isolates the capability-scope comparison, for the same reason.
+
+        Same tool, same version, same input — only the scope differs, and the
+        caller holds a valid grant for the new scope, so authorization allows
+        and the lookup is genuinely reached. A result produced under one scope
+        is not a result produced under another.
+        """
+
+        await boundary.invoke(**invoke_kwargs(idempotency_key=SHARED_KEY))
+
+        with pytest.raises(IdempotencyConflictError, match="capability_scope"):
+            await boundary.invoke(
+                **invoke_kwargs(
+                    capability_scope="scope-other",
+                    idempotency_key=SHARED_KEY,
+                    grants=[make_grant(capability_scope="scope-other")],
+                )
+            )
+
     async def test_a_key_reused_across_tool_versions_is_a_conflict(
         self, boundary_dependencies: dict[str, Any]
     ) -> None:
