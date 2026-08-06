@@ -306,6 +306,49 @@ class TestEveryCallIsCorrelatableToARun:
         assert store.invocations[-1].run_id.startswith("unbound-")
 
     @pytest.mark.asyncio
+    async def test_concurrent_calls_do_not_borrow_each_others_identity(self) -> None:
+        """One agent runs several of these operations against one integration,
+        so each result must report the identity of its own call.
+
+        **This test does not discriminate the implementation, and saying so is
+        the point.** An earlier version of this migration recorded the call's
+        identity on the instance for the result projection to read back. I
+        claimed that raced and wrote this test to prove it. It does not: the
+        write and the read were separated by no `await`, so asyncio could not
+        interleave between them, and checking out the pre-threading revision
+        shows this test passing against it.
+
+        The identity is threaded through the call anyway, because "correct as
+        long as nobody adds an await between these two lines" is an invariant
+        with nothing holding it up. The test is kept because the property is
+        worth pinning, not because it caught anything.
+        """
+
+        import asyncio
+
+        released = asyncio.Event()
+
+        async def _search(**kwargs: Any) -> dict[str, Any]:
+            if kwargs.get("query") == "bound":
+                await released.wait()
+            return {"success": True, "results": []}
+
+        client = _healthy_client()
+        client.search_academic = _search
+        integration = MCPIntegration(mcp_client=client)
+
+        bound_call = asyncio.create_task(
+            integration.search_academic_sources(query="bound", identity=_identity())
+        )
+        await asyncio.sleep(0)
+        unbound_result = await integration.search_academic_sources(query="unbound")
+        released.set()
+        bound_result = await bound_call
+
+        assert unbound_result["identity_bound"] is False
+        assert bound_result["identity_bound"] is True
+
+    @pytest.mark.asyncio
     async def test_a_bound_identity_says_so(self) -> None:
         client = _healthy_client()
         client.search_academic.return_value = {"success": True, "results": []}

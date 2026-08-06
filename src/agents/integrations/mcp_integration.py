@@ -130,7 +130,6 @@ class MCPIntegration:
         self._initialized = False
         self._identity = identity
         self._grants = list(grants) if grants is not None else None
-        self._last_identity_bound = identity.bound if identity is not None else True
 
         # S3: Content sanitizer for prompt injection defense at external boundaries
         self._content_sanitizer = ContentSanitizer(enable_logging=True)
@@ -215,7 +214,7 @@ class MCPIntegration:
         """Search academic databases through the boundary."""
 
         databases = databases or ["arxiv"]
-        outcome = await self._invoke(
+        outcome, call_identity = await self._invoke(
             TOOL_ACADEMIC_SEARCH,
             {
                 "query": query,
@@ -226,9 +225,10 @@ class MCPIntegration:
             identity=identity,
         )
         if outcome.succeeded:
-            return self._succeeded(outcome)
+            return self._succeeded(outcome, call_identity)
         return self._degraded(
             outcome,
+            call_identity,
             fallback=lambda: self._fallback_academic_search(
                 query, databases, max_results
             ),
@@ -249,15 +249,16 @@ class MCPIntegration:
     ) -> dict[str, Any]:
         """Format citations through the boundary."""
 
-        outcome = await self._invoke(
+        outcome, call_identity = await self._invoke(
             TOOL_FORMAT_CITATIONS,
             {"sources": sources, "style": style},
             identity=identity,
         )
         if outcome.succeeded:
-            return self._succeeded(outcome)
+            return self._succeeded(outcome, call_identity)
         return self._degraded(
             outcome,
+            call_identity,
             fallback=lambda: self._fallback_citation_formatting(sources, style),
             empty={
                 "formatted_citations": [],
@@ -276,15 +277,16 @@ class MCPIntegration:
     ) -> dict[str, Any]:
         """Perform statistical analysis through the boundary."""
 
-        outcome = await self._invoke(
+        outcome, call_identity = await self._invoke(
             TOOL_ANALYZE_STATISTICS,
             {"operation": operation, "data": data, **kwargs},
             identity=identity,
         )
         if outcome.succeeded:
-            return self._succeeded(outcome)
+            return self._succeeded(outcome, call_identity)
         return self._degraded(
             outcome,
+            call_identity,
             fallback=lambda: self._fallback_statistical_analysis(
                 operation, data, **kwargs
             ),
@@ -305,15 +307,16 @@ class MCPIntegration:
     ) -> dict[str, Any]:
         """Build a knowledge graph through the boundary."""
 
-        outcome = await self._invoke(
+        outcome, call_identity = await self._invoke(
             TOOL_BUILD_KNOWLEDGE_GRAPH,
             {"text": text, "entities": entities, "relationships": relationships},
             identity=identity,
         )
         if outcome.succeeded:
-            return self._succeeded(outcome)
+            return self._succeeded(outcome, call_identity)
         return self._degraded(
             outcome,
+            call_identity,
             fallback=lambda: self._fallback_knowledge_graph(
                 text, entities, relationships
             ),
@@ -359,7 +362,21 @@ class MCPIntegration:
         arguments: dict[str, Any],
         *,
         identity: ToolCallIdentity | None,
-    ) -> ToolOutcome:
+    ) -> tuple[ToolOutcome, ToolCallIdentity]:
+        """Run one mediated call and return its outcome with the identity used.
+
+        The identity is returned rather than stashed on ``self``. An earlier
+        version recorded it on the instance for the projection methods to read
+        back, and that is correct only because no ``await`` separates the write
+        from the read -- an invariant nothing holds up, in a class whose caller
+        routinely runs several of these operations concurrently against one
+        instance. Threading it through removes the invariant rather than
+        relying on it.
+
+        It was not a live race, and the test named for it does not catch one;
+        see that test's docstring.
+        """
+
         call_identity = (
             identity
             or self._identity
@@ -391,10 +408,11 @@ class MCPIntegration:
             output_trust=MCP_OUTPUT_TRUST,
             grants=grants,
         )
-        self._last_identity_bound = call_identity.bound
-        return outcome
+        return outcome, call_identity
 
-    def _succeeded(self, outcome: ToolOutcome) -> dict[str, Any]:
+    def _succeeded(
+        self, outcome: ToolOutcome, identity: ToolCallIdentity
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = dict(plain(outcome.unwrap()))
         payload.update(
             {
@@ -404,7 +422,7 @@ class MCPIntegration:
                 "data_source": "mcp_tools",
                 "tool_outcome": outcome.status.value,
                 "tool_invocation_id": outcome.invocation.tool_invocation_id,
-                "identity_bound": self._last_identity_bound,
+                "identity_bound": identity.bound,
             }
         )
         return payload
@@ -412,6 +430,7 @@ class MCPIntegration:
     def _degraded(
         self,
         outcome: ToolOutcome,
+        identity: ToolCallIdentity,
         *,
         fallback: Any,
         empty: dict[str, Any],
@@ -442,7 +461,7 @@ class MCPIntegration:
                 "detail": outcome.detail,
                 "retry": outcome.retry.value,
                 "tool_invocation_id": outcome.invocation.tool_invocation_id,
-                "identity_bound": self._last_identity_bound,
+                "identity_bound": identity.bound,
             }
         )
         return payload
