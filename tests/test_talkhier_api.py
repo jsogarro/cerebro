@@ -14,6 +14,8 @@ import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
+from src.agents.factory import AgentFactory
+from src.agents.models import AgentResult, AgentTask
 from src.api.services.talkhier_consensus_evaluator import TalkHierConsensusEvaluator
 from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
 from src.api.services.talkhier_session_coordinator import TalkHierSessionCoordinator
@@ -86,8 +88,45 @@ class TestTalkHierRoundExecutor:
         assert result["content"] == "high"
 
     @pytest.mark.asyncio
-    async def test_execute_round_records_metrics(self) -> None:
-        """Test executing a round updates session state and metrics."""
+    async def test_execute_round_records_metrics(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test executing a round updates session state and metrics.
+
+        Isolation: this round has a WORKER participant, so
+        ``TalkHierRoundExecutor._invoke_worker_agent`` resolves a real agent
+        through ``AgentFactory.create_agent`` and calls its real
+        ``execute()``. For an agent like ``LiteratureReviewAgent`` that
+        reaches a live provider (OpenRouter when
+        ``MULTI_PROVIDER_ROUTING_ENABLED`` is set, GeminiService otherwise)
+        unless the factory itself is pinned. Unmocked, this test measured
+        ~103s making real, paid calls to ``anthropic/claude-sonnet-4.6`` and
+        ``deepseek/deepseek-chat``. Patching ``AgentFactory.create_agent``
+        closes every route to a live provider regardless of which concrete
+        agent type gets resolved or how many internal LLM calls it would
+        otherwise make — a narrower patch of ``gemini_service`` alone (the
+        pattern used for the simpler finance agents in
+        ``tests/test_finance_agents.py``) would still leave
+        ``LiteratureReviewAgent``'s multi-step structured-generation path
+        free to reach a live provider on its own.
+        """
+
+        class _StubWorkerAgent:
+            async def execute(self, task: AgentTask) -> AgentResult:
+                return AgentResult(
+                    task_id=task.id,
+                    status="success",
+                    output={
+                        "content": "talkhier-isolation-stub: no live provider was called"
+                    },
+                    confidence=0.91,
+                    execution_time=0.0,
+                )
+
+        monkeypatch.setattr(
+            AgentFactory, "create_agent", lambda *args, **kwargs: _StubWorkerAgent()
+        )
+
         executor = TalkHierRoundExecutor()
         state_manager = TalkHierStateManager()
         session = TalkHierSession(
@@ -128,6 +167,13 @@ class TestTalkHierRoundExecutor:
         assert session.current_round == 1
         assert len(session.rounds) == 1
         assert state_manager.session_metrics["session-1"]["rounds_completed"] == 1
+        # Deterministic marker: live provider output could never match this
+        # exactly, so this assertion also guards against the isolation patch
+        # above being silently removed and the test going back onto a paid
+        # network call.
+        assert response.participant_responses["agent-1"]["content"] == (
+            "talkhier-isolation-stub: no live provider was called"
+        )
 
 
 class TestTalkHierConsensusEvaluator:

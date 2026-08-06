@@ -18,6 +18,7 @@ from .execution_plan import (
 )
 from .lifecycle import Run
 from .outcomes import EvaluationResult, EvaluationStatus, RunEvent
+from .pinning import PinnedComponentKind, PinnedComponentVersion, PinnedVersions
 from .provenance import (
     Artifact,
     ArtifactStatus,
@@ -34,6 +35,7 @@ from .states import (
     RunStatus,
     TaskStatus,
 )
+from .streaming import RunEventCursor, delivery_idempotency_key
 from .task_lifecycle import Attempt, Task
 
 __all__ = [
@@ -54,6 +56,9 @@ __all__ = [
     "ExecutionPlan",
     "FallbackMode",
     "InvalidTransitionError",
+    "PinnedComponentKind",
+    "PinnedComponentVersion",
+    "PinnedVersions",
     "PlanAmendment",
     "ProviderModelPolicy",
     "ProviderModelRoute",
@@ -62,6 +67,7 @@ __all__ = [
     "RoutingPolicy",
     "Run",
     "RunEvent",
+    "RunEventCursor",
     "RunStatus",
     "Task",
     "TaskStatus",
@@ -71,4 +77,5 @@ __all__ = [
     "WorkerAssignment",
     "WorkflowControlMode",
     "WorkflowDefinition",
+    "delivery_idempotency_key",
 ]

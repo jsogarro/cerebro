@@ -6,6 +6,7 @@ to various clients including web browsers and CLI tools.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 from uuid import UUID
 
@@ -15,11 +16,18 @@ from structlog import get_logger
 from src.api.websocket.auth import (
     WebSocketAuthError,
     authenticate_websocket_connection,
+    resolve_run_stream_entitlement,
     verify_project_access,
 )
 from src.api.websocket.connection_manager import websocket_manager
+from src.api.websocket.run_stream import (
+    RunEventStreamReader,
+    RunNotVisibleError,
+)
 from src.auth.jwt_service import JWTService
+from src.core.contracts import RunEventCursor
 from src.middleware.auth_middleware import get_jwt_service
+from src.models.db.session import get_session_factory
 from src.models.websocket_messages import (
     SubscriptionRequest,
     WSMessage,
@@ -433,6 +441,74 @@ async def cli_websocket_endpoint(
         # Clean up connection
         if client_id:
             await websocket_manager.disconnect(client_id)
+
+
+@router.websocket("/ws/runs/{run_id}")
+async def run_event_stream_endpoint(
+    websocket: WebSocket,
+    run_id: str,
+    token: str | None = Query(None, description="JWT authentication token"),
+    cursor: str | None = Query(
+        None, description="Opaque resume token from a previous connection"
+    ),
+    jwt_service: JWTService = Depends(get_jwt_service),
+) -> None:
+    """Stream one run's durable events, resuming from an optional cursor.
+
+    Additive endpoint: it does not change the message contract of ``/ws``,
+    ``/ws/projects/{project_id}``, or ``/ws/cli/{project_id}``. Frames here
+    come from ``agent_run_events`` rather than from in-process broadcasts, so
+    a client that reconnects with the ``cursor`` it last received gets exactly
+    the events it missed.
+
+    Delivery is at-least-once: a reconnect or a redelivery can repeat an
+    event. Clients must dedupe on each frame's ``idempotency_key``.
+    """
+    await websocket.accept()
+
+    try:
+        entitlement = await resolve_run_stream_entitlement(token, jwt_service)
+    except WebSocketAuthError as e:
+        logger.warning("Run stream authentication failed", error=e.message)
+        await websocket.close(code=e.code, reason=e.message)
+        return
+
+    try:
+        resume_cursor = RunEventCursor.decode(cursor) if cursor else None
+    except ValueError:
+        await websocket.close(code=1008, reason="Invalid resume cursor")
+        return
+
+    try:
+        session_factory = get_session_factory()
+    except Exception as e:
+        logger.warning("Run stream unavailable: no session factory", error=str(e))
+        await websocket.close(code=1011, reason="Run event stream unavailable")
+        return
+
+    reader = RunEventStreamReader(
+        session_factory=session_factory,
+        entitlement=entitlement,
+        destination="websocket",
+    )
+
+    try:
+        async for frame in reader.stream(run_id, cursor=resume_cursor):
+            await websocket.send_json(frame.to_message())
+        await websocket.close(code=1000, reason="Run stream complete")
+
+    except RunNotVisibleError:
+        # Same response for "no such run" and "another tenant's run" so the
+        # existence of other tenants' runs cannot be probed.
+        await websocket.close(code=1008, reason="Run not found")
+
+    except WebSocketDisconnect:
+        logger.info("Run stream client disconnected", run_id=run_id)
+
+    except Exception as e:
+        logger.error("Run stream error", run_id=run_id, error=str(e))
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1011, reason="Run stream error")
 
 
 # Health endpoint for WebSocket service
