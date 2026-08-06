@@ -49,6 +49,7 @@ from src.core.tools import (
     ToolOutcomeStatus,
     ToolSpec,
 )
+from src.core.tools.boundary import _REPLAYABLE_RECORD_STATUSES
 
 from .conftest import (
     RecordingAuditStore,
@@ -121,18 +122,26 @@ def deep_boundary(boundary_dependencies: dict[str, Any]) -> ToolBoundary:
     return boundary
 
 
-class TestAnUnauthorizedCallerLeavesNoTrace:
-    async def test_malformed_input_with_no_grant_writes_no_record(
+class TestAnUnauthorizedCallerLeavesNoUsableTrace:
+    async def test_malformed_input_with_no_grant_writes_only_a_denial(
         self,
         boundary: ToolBoundary,
         audit_store: RecordingAuditStore,
         publisher: RecordingPublisher,
     ) -> None:
-        """The central claim: no grant, no durable effect.
+        """The central claim, stated as what it actually is.
 
-        A caller with ``grants=[]`` has no authorization whatsoever. Before the
-        fix this call persisted a ``ToolInvocation`` and published its completed
-        event, both under a ``capability_scope`` the caller invented.
+        "An unauthorized caller writes nothing" would be the wrong property, and
+        the first draft of this test asserted it and failed: a denial is
+        *deliberately* recorded, because an audit trail with a hole where every
+        refused request should be is the trail an attacker would choose.
+
+        The security property is narrower and stronger. The only row an
+        ungranted caller can cause is a ``DENIED`` one, and ``DENIED`` is
+        excluded from ``_REPLAYABLE_RECORD_STATUSES`` — so it can never be
+        served as an answer to anybody, and it cannot occupy a key. Before the
+        fix the row was ``FAILED``/``invalid_input``, which *is* replay-eligible,
+        and that is exactly what made the key-poisoning consequence possible.
         """
 
         outcome = await boundary.invoke(
@@ -144,9 +153,15 @@ class TestAnUnauthorizedCallerLeavesNoTrace:
         )
 
         assert outcome.status is ToolOutcomeStatus.DENIED
-        assert audit_store.invocations == []
-        assert publisher.published == []
-        assert audit_store.calls == ["persist:denied", "publish:tool.invocation.completed"]
+        assert outcome.error_code == "capability_denied"
+        assert [i.status.value for i in audit_store.invocations] == ["denied"]
+        assert all(
+            invocation.status not in _REPLAYABLE_RECORD_STATUSES
+            for invocation in audit_store.invocations
+        )
+        assert [event.event_type for event in publisher.published] == [
+            "tool.invocation.completed"
+        ]
 
     async def test_an_unrepresentable_payload_with_no_grant_writes_no_record(
         self,
@@ -220,7 +235,12 @@ class TestAnUnauthorizedCallerIsToldNothingAboutTheTool:
 
         detail = outcome.detail or ""
         reason = outcome.invocation.status_reason or ""
-        for leak in ("query", "not_the_declared_field", "probe-value", "Field required"):
+        for leak in (
+            "query",
+            "not_the_declared_field",
+            "probe-value",
+            "Field required",
+        ):
             assert leak not in detail
             assert leak not in reason
 
@@ -289,7 +309,9 @@ class TestAnUnauthorizedCallerCannotPoisonAKey:
                 arguments=MALFORMED, idempotency_key=ATTACKER_KEY, grants=[]
             )
         )
-        legitimate = await boundary.invoke(**invoke_kwargs(idempotency_key=ATTACKER_KEY))
+        legitimate = await boundary.invoke(
+            **invoke_kwargs(idempotency_key=ATTACKER_KEY)
+        )
 
         assert legitimate.status is ToolOutcomeStatus.SUCCEEDED
         assert legitimate.invocation.error_code is None

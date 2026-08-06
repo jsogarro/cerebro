@@ -107,14 +107,21 @@ class ToolAuditStore(Protocol):
         ``ToolInvocation``, by design. The boundary holds the value; it had no
         way to hand it over.
 
-        **``None`` is a real case, not a defensive default.** Input validation
-        runs before authorization, and must: the capability request's
-        fingerprint covers the digest of the *validated* input, so there is
-        nothing to decide about until the arguments parse. The boundary still
-        records that rejection, deliberately. Exactly one persisted status
-        therefore carries no decision, and an adapter has to answer for it
-        rather than assume it away — see the packet handoff for why the DDL
-        cannot currently hold such a row.
+        **``None`` is no longer reachable from the boundary.** This paragraph
+        used to argue the opposite — that input validation "runs before
+        authorization, and must", because the capability request's fingerprint
+        covers the digest of the validated input — and concluded that exactly
+        one persisted status carries no decision. That was a description of a
+        defect, and the argument does not hold: the digest can be taken of the
+        redacted *raw* arguments, so the decision runs first and a rejected
+        input is now recorded under the decision that admitted the caller.
+        :class:`~src.core.tools.boundary.ToolBoundary` passes a decision on
+        every path that persists.
+
+        The parameter stays optional so that adapters written against the older
+        contract still typecheck, and so an implementation that receives ``None``
+        from somewhere else is not silently free to invent one. An adapter that
+        wants to refuse ``None`` outright may now do so.
         """
         ...
 
