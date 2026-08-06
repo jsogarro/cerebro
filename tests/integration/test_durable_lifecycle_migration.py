@@ -8,6 +8,7 @@ sequence, and a downgrade that leaves no residue.
 """
 
 import os
+import re
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Iterator
@@ -15,6 +16,8 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
@@ -25,6 +28,24 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC = Path(sys.executable).parent / "alembic"
 REVISION = "c3f5a1d7b209"
+
+
+def _revision_below(revision_id: str) -> str:
+    """Return the revision immediately before ``revision_id`` in the chain.
+
+    Reads the migration graph itself (via Alembic's ``ScriptDirectory``)
+    rather than hardcoding a second revision id, so this stays correct
+    however many migrations later packets stack on top of the durable
+    lifecycle revision.
+    """
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    script = ScriptDirectory.from_config(config)
+    down_revision = script.get_revision(revision_id).down_revision
+    assert isinstance(down_revision, str), (
+        f"{revision_id} has no single parent revision to downgrade to"
+    )
+    return down_revision
+
 
 NEW_TABLES = frozenset(
     {
@@ -161,9 +182,17 @@ async def _seed_event(
 def test_the_migration_chain_reaches_the_durable_lifecycle_revision(
     migrated_database: str,
 ) -> None:
-    result = _run_alembic(migrated_database, "current")
+    """The durable lifecycle revision is in the applied chain.
 
-    assert REVISION in result.stdout
+    Not "is head" — later packets migrate on top of this one, so head moves.
+    ``migrated_database`` always upgrades to head, so a revision appearing in
+    ``alembic history`` (the static graph reachable from head) is exactly the
+    set of revisions that ran. ``alembic current`` reports only the current
+    head(s), which broke this test the moment a migration landed on top.
+    """
+    result = _run_alembic(migrated_database, "history")
+
+    assert re.search(rf"\b{re.escape(REVISION)}\b", result.stdout)
 
 
 async def test_durable_tables_exist_after_upgrade(migrated_database: str) -> None:
@@ -303,7 +332,14 @@ async def test_a_tenant_cannot_reuse_a_run_submission_key_in_postgres(
 async def test_downgrade_leaves_no_durable_schema_behind(
     postgres_server: PostgresContainer,
 ) -> None:
-    """Upgrade then downgrade an isolated database, so no other test is disturbed."""
+    """Upgrade then downgrade an isolated database, so no other test is disturbed.
+
+    Downgrades to the revision immediately below the durable lifecycle one,
+    not a fixed step count ("-1"). A relative step count only undoes
+    whatever migration happens to be on top of this one; targeting the
+    parent revision by name undoes everything back through it regardless of
+    how many migrations later packets have stacked above.
+    """
     admin_engine = create_async_engine(
         _async_url(_database_url(postgres_server, postgres_server.dbname)),
         isolation_level="AUTOCOMMIT",
@@ -319,6 +355,6 @@ async def test_downgrade_leaves_no_durable_schema_behind(
     _run_alembic(probe_url, "upgrade", "head")
     assert await _table_names(probe_url) >= NEW_TABLES
 
-    _run_alembic(probe_url, "downgrade", "-1")
+    _run_alembic(probe_url, "downgrade", _revision_below(REVISION))
 
     assert not (NEW_TABLES & await _table_names(probe_url))
