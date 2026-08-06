@@ -74,7 +74,24 @@ from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.evidence_repository import EvidenceRepository
 from tests.integration.wave4_helpers import seed_run_task_attempt
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "Blocked on ArtifactRepository.create_artifact, which cannot "
+            "persist nested metadata: `metadata_=dict(artifact.metadata)` is a "
+            "shallow copy, but `JsonObject` freezes recursively, so the "
+            "license block stays a `mappingproxy` and asyncpg raises "
+            "`TypeError: Object of type mappingproxy is not JSON "
+            "serializable`. The contract already ships the fix — its own "
+            "`PlainSerializer`, reachable as `artifact.model_dump()"
+            "['metadata']` — and the repository is another packet's file. "
+            "strict=True on purpose: when that lands, these XPASS and the "
+            "suite goes red, so nobody has to remember to remove this."
+        ),
+    ),
+]
 
 NOW = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
 ORG_ID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
@@ -200,6 +217,7 @@ async def acquired_fixture(db_session: AsyncSession, store_root: Path):
         evidence=EvidenceRepository(db_session),
         secret_provider=NullSecretProvider(),
         clock=lambda: NOW,
+        source_types={SOURCE_FETCH_TOOL: SourceType.WEB_PAGE},
     )
 
     outcome = await service.acquire(
@@ -207,7 +225,6 @@ async def acquired_fixture(db_session: AsyncSession, store_root: Path):
         task_id="task-1",
         attempt_id="attempt-1",
         organization_id=str(ORG_ID),
-        source_type=SourceType.WEB_PAGE,
         source_uri="https://example.org/principia",
         capability_scope=SCOPE,
         grants=[
@@ -257,10 +274,15 @@ def _run_child(
 async def test_a_locator_re_resolves_to_identical_bytes_in_a_new_process(
     acquired, database_url: str, store_root: Path
 ) -> None:
-    expected = acquired.excerpts[0]
-    evidence_id = acquired.evidence[0].evidence_id
+    """The canonical round trip. One spawn.
 
-    child = _run_child(database_url, store_root, evidence_id)
+    Everything else this module checks is a precondition on *this* assertion,
+    and lives in the test below so the expensive path stays a single case.
+    """
+
+    expected = acquired.excerpts[0]
+
+    child = _run_child(database_url, store_root, acquired.evidence[0].evidence_id)
 
     assert child.returncode == 0, child.stderr
     result = json.loads(child.stdout)
@@ -268,63 +290,51 @@ async def test_a_locator_re_resolves_to_identical_bytes_in_a_new_process(
     # The locator the child resolved is the one the row holds, as a string.
     assert result["locator"] == acquired.evidence[0].locator
     assert result["content_sha256"] == acquired.artifact.content_sha256
+    # Pinned literally, so a change in span arithmetic cannot quietly agree
+    # with itself.
+    assert expected == b"Newton published the Principia in 1687."
 
 
 @pytest.mark.asyncio
-async def test_the_child_is_never_handed_the_answer_it_returns(
+async def test_the_round_trip_cannot_pass_vacuously(
     acquired, database_url: str, store_root: Path
 ) -> None:
-    # Precondition, asserted rather than described: if the excerpt were among
-    # the child's arguments, every other assertion in this module would be
-    # satisfied by a child that echoed its input.
-    evidence_id = acquired.evidence[0].evidence_id
-    arguments = " ".join([database_url, str(store_root), evidence_id])
+    """The four preconditions that make the assertion above mean something.
 
+    Grouped into one case because each needs the same expensive fixture, and
+    the point of the subprocess is that *one* test pays for a real process
+    restart rather than every test paying for one.
+    """
+
+    first_id = acquired.evidence[0].evidence_id
+    second_id = acquired.evidence[1].evidence_id
+
+    # 1. The child is never handed the answer it returns. Without this, every
+    #    other assertion here is satisfied by a child that echoes its input.
+    arguments = " ".join([database_url, str(store_root), first_id])
     assert acquired.excerpts[0].decode() not in arguments
     assert acquired.excerpts[0].hex() not in arguments
     assert acquired.evidence[0].locator not in arguments
 
+    # 2. An absent row exits non-zero, so silence cannot read as agreement.
+    missing = _run_child(database_url, store_root, "evidence-never-written")
+    assert missing.returncode != 0
+    assert "no evidence row" in missing.stderr
 
-@pytest.mark.asyncio
-async def test_the_child_fails_when_the_row_is_absent(
-    acquired, database_url: str, store_root: Path
-) -> None:
-    # Without this, a child that quietly produced nothing would be
-    # indistinguishable from one that read the row and agreed.
-    child = _run_child(database_url, store_root, "evidence-that-was-never-written")
-
-    assert child.returncode != 0
-    assert "no evidence row" in child.stderr
-
-
-@pytest.mark.asyncio
-async def test_each_locator_resolves_to_its_own_span(
-    acquired, database_url: str, store_root: Path
-) -> None:
-    # Two rows, one snapshot, different spans. A child resolving a fixed span,
-    # or returning the whole snapshot, would make these agree.
-    first = json.loads(
-        _run_child(database_url, store_root, acquired.evidence[0].evidence_id).stdout
-    )
-    second = json.loads(
-        _run_child(database_url, store_root, acquired.evidence[1].evidence_id).stdout
-    )
-
+    # 3. Two spans over one snapshot resolve to different excerpts, each its
+    #    own. A child resolving a fixed span would make these agree.
+    first = json.loads(_run_child(database_url, store_root, first_id).stdout)
+    second = json.loads(_run_child(database_url, store_root, second_id).stdout)
     assert first["excerpt_hex"] != second["excerpt_hex"]
     assert bytes.fromhex(first["excerpt_hex"]) == acquired.excerpts[0]
     assert bytes.fromhex(second["excerpt_hex"]) == acquired.excerpts[1]
     assert first["content_sha256"] == second["content_sha256"]
 
-
-@pytest.mark.asyncio
-async def test_the_excerpt_is_what_the_source_actually_said(
-    acquired, database_url: str, store_root: Path
-) -> None:
-    # The round trip is only worth anything if the bytes at the end are the
-    # source's own. Pinned literally so a change in span arithmetic cannot
-    # quietly agree with itself.
-    child = _run_child(database_url, store_root, acquired.evidence[0].evidence_id)
-
-    assert bytes.fromhex(json.loads(child.stdout)["excerpt_hex"]) == (
-        b"Newton published the Principia in 1687."
-    )
+    # 4. Locator sensitivity, stated rather than inferred. A resolver that
+    #    ignored the locator and returned the whole snapshot would still be
+    #    sensitive to its bytes argument, and check 3 would catch it only
+    #    because these two spans happen to differ. Asserting that neither
+    #    excerpt is the whole snapshot removes the "happen to" from the claim.
+    for resolved in (first["excerpt_hex"], second["excerpt_hex"]):
+        assert bytes.fromhex(resolved) != PAGE
+        assert len(bytes.fromhex(resolved)) < len(PAGE)

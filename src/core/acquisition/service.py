@@ -34,7 +34,7 @@ the quarantine.
 """
 
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -73,6 +73,7 @@ __all__ = [
     "ExcerptRequest",
     "PromptlessAcquisitionError",
     "SourceAcquisitionService",
+    "UndeclaredSourceTypeError",
 ]
 
 SNAPSHOT_ARTIFACT_KIND: Final[str] = "source_snapshot"
@@ -100,6 +101,17 @@ class PromptlessAcquisitionError(RuntimeError):
     to mint one here from the caller's own object — which is precisely the
     unverifiable, caller-supplied binding the renderer seam was built to
     eliminate. Failing is the only answer that does not reintroduce it.
+    """
+
+
+class UndeclaredSourceTypeError(ValueError):
+    """Raised when no source type can be established without guessing one.
+
+    Both cases it covers are refusals rather than defaults: a caller trying to
+    relabel a tool whose source type is registered, and a tool nobody has
+    registered invoked without a declaration. Defaulting either would mint a
+    trust label that no one chose, which is the failure the whole seam exists
+    to prevent.
     """
 
 
@@ -189,9 +201,18 @@ class SourceAcquisitionService:
         evidence: EvidenceRepository,
         secret_provider: SecretProvider,
         clock: Callable[[], datetime],
+        source_types: Mapping[str, SourceType] | None = None,
         id_factory: Callable[[], str] | None = None,
     ) -> None:
         """Wire the seam.
+
+        ``source_types`` maps a registered tool name to the kind of source that
+        tool acquires. It is what turns "a caller can lie about the source
+        type" into "a caller must invoke a different tool", which the
+        capability system already gates per task. Registering ``web_fetch`` as
+        ``web_page`` and the upload handler as ``uploaded_document`` means a
+        caller wanting the more trusted label has to hold a grant for the tool
+        that carries it.
 
         ``secret_provider`` is required rather than defaulted, for the reason
         packet 4A gave about ``redact``: an omitted set of held secrets
@@ -211,6 +232,7 @@ class SourceAcquisitionService:
         self._evidence = evidence
         self._secret_provider = secret_provider
         self._clock = clock
+        self._source_types = dict(source_types or {})
         self._id_factory = id_factory if id_factory is not None else _uuid4_hex
 
     async def acquire(
@@ -220,7 +242,6 @@ class SourceAcquisitionService:
         task_id: str,
         attempt_id: str,
         organization_id: str | None,
-        source_type: SourceType,
         source_uri: str,
         capability_scope: str,
         grants: Sequence[CapabilityGrant],
@@ -230,6 +251,7 @@ class SourceAcquisitionService:
         approvals: Sequence[ApprovalRef] = (),
         pinned_versions: PinnedVersions | None = None,
         tool_name: str = SOURCE_FETCH_TOOL,
+        source_type: SourceType | None = None,
         cancellation: CancellationToken | None = None,
     ) -> AcquisitionOutcome:
         """Acquire one source, snapshot it, and record the spans cited from it.
@@ -237,16 +259,27 @@ class SourceAcquisitionService:
         There is deliberately **no** trust parameter for the acquired content.
         ``input_trust`` describes the request being made — the label on the URI
         and any query that produced it — and is what a capability grant's
-        ``max_input_trust`` is compared against. The label written onto the
-        artifact and its evidence is derived from ``source_type`` alone.
+        ``max_input_trust`` is compared against.
+
+        The label written onto the artifact and its evidence comes from the
+        **tool's identity** wherever the tool is registered in ``source_types``,
+        read off the boundary-verified invocation record rather than off this
+        call's arguments. A caller cannot override a registered tool's source
+        type; passing one that disagrees is refused rather than preferred. So
+        the remaining way to obtain a different label is to invoke a different
+        tool, which requires a capability grant scoped to this task.
+
+        ``source_type`` is accepted only for tools ``source_types`` does not
+        cover — a generic fetcher serving several kinds of source. For those,
+        and only those, the declared type is trusted, and that is the honest
+        residual: the tier is still bounded, because no source type maps into
+        the trusted tier, but the rank rests on a declaration.
 
         Args:
             run_id: The durable run this evidence belongs to.
             task_id: The task within it.
             attempt_id: The attempt making the call.
             organization_id: The authenticated tenant boundary.
-            source_type: What kind of source this is. The sole input to the
-                trust assignment.
             source_uri: What to acquire.
             capability_scope: The scope whose grant must authorize the call.
             grants: The capability grants in force for this task.
@@ -261,7 +294,12 @@ class SourceAcquisitionService:
             approvals: Approvals available to the capability decision.
             pinned_versions: The run's pinned component versions, against which
                 the prompt's identity is checked.
-            tool_name: The registered acquisition tool to invoke.
+            tool_name: The registered acquisition tool to invoke. Its identity
+                is what decides the trust label whenever it is registered in
+                ``source_types``.
+            source_type: Declared kind of source. Permitted only for a tool
+                ``source_types`` does not cover; refused when it disagrees with
+                a registered tool's own type.
             cancellation: Cooperative cancellation for the call.
 
         Returns:
@@ -271,13 +309,17 @@ class SourceAcquisitionService:
         Raises:
             TypeError: ``source_type`` is not a
                 :class:`~src.core.acquisition.sources.SourceType`.
+            UndeclaredSourceTypeError: The tool is not registered in
+                ``source_types`` and no ``source_type`` was declared, or a
+                declared one contradicts the tool's registered type.
             PromptlessAcquisitionError: The boundary recorded no prompt binding
                 for a call that supplied one.
             UnresolvableLocatorError: A requested span does not resolve against
                 the acquired snapshot. Raised before anything is persisted.
         """
 
-        trust = trust_for_source(source_type)
+        requested_source_type = self._source_type_for(tool_name, source_type)
+        trust = trust_for_source(requested_source_type)
 
         outcome = await self._boundary.invoke(
             tool_name=tool_name,
@@ -286,7 +328,10 @@ class SourceAcquisitionService:
             attempt_id=attempt_id,
             organization_id=organization_id,
             capability_scope=capability_scope,
-            arguments={"source_uri": source_uri, "source_type": source_type.value},
+            arguments={
+                "source_uri": source_uri,
+                "source_type": requested_source_type.value,
+            },
             input_trust=input_trust,
             output_trust=trust,
             grants=grants,
@@ -302,6 +347,16 @@ class SourceAcquisitionService:
                 reason=_FAILURE_REASONS[outcome.status],
                 detail=outcome.detail,
             )
+
+        # Re-derived from the durable record rather than reused from above, so
+        # the label the artifact carries is sourced from the tool the boundary
+        # actually ran. They agree on every reachable path — the boundary looks
+        # the spec up by the name it was given — so this is a provenance
+        # choice, not a behavioral one.
+        acquired_source_type = self._source_type_for(
+            outcome.invocation.tool_name, source_type
+        )
+        trust = trust_for_source(acquired_source_type)
 
         try:
             handle = SourceFetchOutput.model_validate(
@@ -370,7 +425,7 @@ class SourceAcquisitionService:
             producer_kind=ProducerKind.SYSTEM,
             created_at=now,
             metadata=self._metadata(
-                source_type=source_type,
+                source_type=acquired_source_type,
                 source_uri=source_uri,
                 handle=handle,
                 invocation=outcome.invocation,
@@ -384,7 +439,7 @@ class SourceAcquisitionService:
                 evidence_id=self._id_factory(),
                 run_id=run_id,
                 task_id=task_id,
-                source_type=source_type.value,
+                source_type=acquired_source_type.value,
                 source_uri=source_uri,
                 snapshot_artifact_id=artifact.artifact_id,
                 content_sha256=artifact.content_sha256,
@@ -395,6 +450,12 @@ class SourceAcquisitionService:
                 # embedding — and slicing is not one; running it here would
                 # mark verbatim source text as model-shaped content.
                 trust=trust,
+                # Explicit, because `producer_kind` has no default: a default
+                # would let a caller forget both fields and record a
+                # model-directed acquisition as though it were deterministic.
+                # This evidence exists because a model turn chose to cite this
+                # span, so it says so and carries that turn's binding.
+                producer_kind=ProducerKind.MODEL_TURN,
                 prompt_binding=binding,
                 # Left unset, and the reason is a stated limit rather than a
                 # dropped link. This column is a foreign key to
@@ -466,6 +527,35 @@ class SourceAcquisitionService:
         )
         return redacted if isinstance(redacted, str) else text
 
+    def _source_type_for(
+        self, tool_name: str, declared: SourceType | None
+    ) -> SourceType:
+        """Return the source type for ``tool_name``, refusing a contradiction.
+
+        Deriving from tool identity is what moves the residual lie out of a
+        string a caller controls and into the capability system: obtaining a
+        different label now means invoking a different tool, and a grant is
+        scoped to one tool name per task.
+        """
+
+        registered = self._source_types.get(tool_name)
+        if registered is not None:
+            if declared is not None and declared is not registered:
+                raise UndeclaredSourceTypeError(
+                    f"tool {tool_name!r} acquires {registered.value!r}; a "
+                    f"caller may not relabel it {declared.value!r}. Invoke the "
+                    "tool that carries the label you need, which requires a "
+                    "grant for it."
+                )
+            return registered
+        if declared is None:
+            raise UndeclaredSourceTypeError(
+                f"tool {tool_name!r} is not registered in source_types and no "
+                "source_type was declared; refusing rather than defaulting a "
+                "trust label nobody chose"
+            )
+        return declared
+
     def _metadata(
         self,
         *,
@@ -487,17 +577,7 @@ class SourceAcquisitionService:
             "source_uri": source_uri,
             "final_uri": handle.final_uri,
             "byte_length": handle.byte_length,
-            # Flattened rather than nested under a "license" key. Nested
-            # mappings are currently unpersistable through
-            # `ArtifactRepository.create_artifact`, which shallow-copies a
-            # `JsonObject` that the contract freezes recursively, leaving
-            # inner levels as `mappingproxy` for asyncpg to reject. Flat keys
-            # also read better from SQL, so this is not purely a workaround —
-            # but the defect is real and reported rather than absorbed.
-            **{
-                f"license_{key}": value
-                for key, value in handle.license().as_metadata().items()
-            },
+            "license": handle.license().as_metadata(),
             "tool_invocation_id": invocation.tool_invocation_id,
             "tool_name": invocation.tool_name,
             "tool_version": invocation.tool_version,

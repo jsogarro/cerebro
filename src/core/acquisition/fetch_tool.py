@@ -71,6 +71,22 @@ class SourceFetchOutput(BaseModel):
     Everything here survives redaction intact and identifies the snapshot
     without reproducing it. ``content_sha256`` is the claim the acquisition
     service checks the store against; it is not taken on trust.
+
+    **``storage_uri`` must be credential-free — scheme and path, never a
+    presigned URL or a token-bearing query string.** This handle *does* cross
+    the boundary, so it is redacted like every other output, and redaction
+    mangles exactly the two shapes a credentialed URI takes:
+
+    ``https://KEYID:SECRET@bucket/obj`` becomes ``[REDACTED]bucket/obj`` (the
+    userinfo pattern), and ``https://store/obj?token=ghp_...`` becomes
+    ``...?token=[REDACTED]``. Both come back **unusable, silently**, because a
+    redacted string is still a string and nothing downstream can tell it was
+    altered — the snapshot would simply not be found. A store needing
+    credentials resolves them at read time through the secret provider.
+
+    ``test_the_acquisition_handle_survives_redaction_unchanged`` pins this as a
+    property of the seam, so swapping in a presigned store fails a test rather
+    than being rediscovered in production.
     """
 
     content_sha256: str = Field(min_length=64, max_length=64)

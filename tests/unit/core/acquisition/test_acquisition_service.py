@@ -32,6 +32,7 @@ from src.core.acquisition.service import (
     AcquisitionStatus,
     ExcerptRequest,
     SourceAcquisitionService,
+    UndeclaredSourceTypeError,
 )
 from src.core.acquisition.snapshots import FilesystemSnapshotStore
 from src.core.acquisition.sources import (
@@ -48,7 +49,7 @@ from src.core.contracts.provenance import (
     PromptBinding,
     ToolInvocation,
 )
-from src.core.contracts.redaction import REDACTION_MARKER, snapshot_digest
+from src.core.contracts.redaction import REDACTION_MARKER, redact, snapshot_digest
 from src.core.contracts.trust import TrustClassification
 from src.core.tools.audit import NullEventPublisher, ToolAuditEvent
 from src.core.tools.boundary import ToolBoundary
@@ -66,6 +67,8 @@ from src.core.tools.spec import ToolCallContext
 NOW = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
 ORG = "org-1"
 SCOPE = "research.acquire"
+UPLOAD_TOOL = "source.upload"
+UNREGISTERED_TOOL = "source.generic"
 PAGE = b"Newton published the Principia in 1687.\nIt reshaped mechanics.\n"
 
 
@@ -165,13 +168,13 @@ def prompt_fixture(registry: PromptRegistry) -> RenderedPrompt:
     )
 
 
-def _grant() -> CapabilityGrant:
+def _grant(tool_name: str = SOURCE_FETCH_TOOL) -> CapabilityGrant:
     return CapabilityGrant(
-        grant_id="grant-1",
+        grant_id=f"grant-{tool_name}",
         run_id="run-1",
         task_id="task-1",
         capability_scope=SCOPE,
-        tool_name=SOURCE_FETCH_TOOL,
+        tool_name=tool_name,
         tool_versions=("1.0.0",),
         sensitivity=SensitivityClass.READ_ONLY,
         # Tolerates the least-trusted input, so a denial in these tests is
@@ -191,6 +194,7 @@ def _build(
     secret_provider: Any = None,
     verifier: PromptIdentityVerifier | None | object = ...,
     timeout_seconds: float = 5.0,
+    source_types: Any = None,
 ) -> tuple[
     SourceAcquisitionService, FakeArtifactRepository, FakeEvidenceRepository, Any
 ]:
@@ -210,6 +214,18 @@ def _build(
             store=store, fetcher=fetcher, timeout_seconds=timeout_seconds
         )
     )
+    # A second acquisition tool whose identity carries a different source type,
+    # plus one nobody registers a source type for. Between them the derivation
+    # rule is exercised on all three of its paths.
+    for extra in (UPLOAD_TOOL, UNREGISTERED_TOOL):
+        boundary.register(
+            snapshot_fetch_tool(
+                store=store,
+                fetcher=fetcher,
+                timeout_seconds=timeout_seconds,
+                name=extra,
+            )
+        )
     artifacts = FakeArtifactRepository()
     evidence = FakeEvidenceRepository()
     service = SourceAcquisitionService(
@@ -219,6 +235,14 @@ def _build(
         evidence=evidence,  # type: ignore[arg-type]
         secret_provider=provider,
         clock=lambda: NOW,
+        source_types=(
+            {
+                SOURCE_FETCH_TOOL: SourceType.WEB_PAGE,
+                UPLOAD_TOOL: SourceType.UPLOADED_DOCUMENT,
+            }
+            if source_types is None
+            else source_types
+        ),
     )
     return service, artifacts, evidence, audit
 
@@ -248,13 +272,14 @@ async def _acquire(service: SourceAcquisitionService, **overrides: Any) -> Any:
         "task_id": "task-1",
         "attempt_id": "attempt-1",
         "organization_id": ORG,
-        "source_type": SourceType.WEB_PAGE,
         "source_uri": "https://example.org/principia",
         "capability_scope": SCOPE,
-        "grants": [_grant()],
         "excerpts": [ExcerptRequest("char", 0, 39)],
     }
     arguments.update(overrides)
+    arguments.setdefault(
+        "grants", [_grant(arguments.get("tool_name", SOURCE_FETCH_TOOL))]
+    )
     return await service.acquire(**arguments)
 
 
@@ -301,17 +326,70 @@ class TestIngestionTrust:
         )
 
     @pytest.mark.asyncio
-    async def test_the_source_type_decides_the_label(
+    async def test_the_tools_identity_decides_the_label(
         self, store: FilesystemSnapshotStore, registry: PromptRegistry, prompt: Any
     ) -> None:
+        # Same caller, same arguments, different tool. The label follows the
+        # tool, which is what a capability grant is scoped to.
         service, _, _, _ = _build(store=store, registry=registry, fetcher=_fetcher())
 
-        outcome = await _acquire(
-            service, prompt=prompt, source_type=SourceType.UPLOADED_DOCUMENT
-        )
+        outcome = await _acquire(service, prompt=prompt, tool_name=UPLOAD_TOOL)
 
         assert outcome.artifact is not None
         assert outcome.artifact.trust is TrustClassification.USER_SUPPLIED
+
+    @pytest.mark.asyncio
+    async def test_a_caller_cannot_relabel_a_registered_tool(
+        self, store: FilesystemSnapshotStore, registry: PromptRegistry, prompt: Any
+    ) -> None:
+        # This is what moves the residual lie into the capability system: the
+        # caller wanting the more trusted label must invoke the tool that
+        # carries it, and hold a grant for that tool.
+        service, artifacts, _, _ = _build(
+            store=store, registry=registry, fetcher=_fetcher()
+        )
+
+        with pytest.raises(UndeclaredSourceTypeError, match="may not relabel"):
+            await _acquire(
+                service, prompt=prompt, source_type=SourceType.UPLOADED_DOCUMENT
+            )
+
+        assert artifacts.created == []
+
+    @pytest.mark.asyncio
+    async def test_an_unregistered_tool_without_a_declared_type_is_refused(
+        self, store: FilesystemSnapshotStore, registry: PromptRegistry, prompt: Any
+    ) -> None:
+        # Fail closed rather than default. A defaulted label here is a trust
+        # assignment nobody made, which is the whole failure mode.
+        service, artifacts, _, _ = _build(
+            store=store, registry=registry, fetcher=_fetcher()
+        )
+
+        with pytest.raises(UndeclaredSourceTypeError, match="not registered"):
+            await _acquire(service, prompt=prompt, tool_name=UNREGISTERED_TOOL)
+
+        assert artifacts.created == []
+
+    @pytest.mark.asyncio
+    async def test_an_unregistered_tool_may_declare_its_source_type(
+        self, store: FilesystemSnapshotStore, registry: PromptRegistry, prompt: Any
+    ) -> None:
+        # The stated residual: a generic fetcher the mapping cannot cover is
+        # trusted about its own kind. The tier is still bounded, because no
+        # source type maps into the trusted tier — only the rank rests on a
+        # declaration.
+        service, _, _, _ = _build(store=store, registry=registry, fetcher=_fetcher())
+
+        outcome = await _acquire(
+            service,
+            prompt=prompt,
+            tool_name=UNREGISTERED_TOOL,
+            source_type=SourceType.ACADEMIC_PAPER,
+        )
+
+        assert outcome.artifact is not None
+        assert outcome.artifact.trust is TrustClassification.EXTERNAL_UNTRUSTED
 
     def test_acquire_exposes_no_parameter_for_content_trust(self) -> None:
         # Structural backstop for the behavioral test above. `input_trust`
@@ -331,7 +409,12 @@ class TestIngestionTrust:
         service, _, _, _ = _build(store=store, registry=registry, fetcher=_fetcher())
 
         with pytest.raises(TypeError, match="SourceType"):
-            await _acquire(service, prompt=prompt, source_type="web_page")
+            await _acquire(
+                service,
+                prompt=prompt,
+                tool_name=UNREGISTERED_TOOL,
+                source_type="web_page",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -485,11 +568,11 @@ class TestLicenseCapture:
         outcome = await _acquire(service, prompt=prompt)
 
         assert outcome.artifact is not None
-        assert outcome.artifact.metadata["license_identifier"] == "CC-BY-4.0"
-        assert outcome.artifact.metadata["license_declared_by"] == "http_header"
-        assert outcome.artifact.metadata["license_statement"] == (
-            "Creative Commons Attribution 4.0"
-        )
+        assert outcome.artifact.metadata["license"] == {
+            "identifier": "CC-BY-4.0",
+            "declared_by": "http_header",
+            "statement": "Creative Commons Attribution 4.0",
+        }
 
     @pytest.mark.asyncio
     async def test_a_source_declaring_nothing_is_recorded_as_undeclared(
@@ -502,9 +585,11 @@ class TestLicenseCapture:
         outcome = await _acquire(service, prompt=prompt)
 
         assert outcome.artifact is not None
-        assert outcome.artifact.metadata["license_declared_by"] == "undeclared"
-        assert outcome.artifact.metadata["license_identifier"] is None
-        assert outcome.artifact.metadata["license_statement"] is None
+        assert outcome.artifact.metadata["license"] == {
+            "identifier": None,
+            "declared_by": "undeclared",
+            "statement": None,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -689,3 +774,48 @@ class TestPromptIdentity:
             await _acquire(service, prompt=forged)
 
         assert artifacts.created == []
+
+
+class TestHandleRedactionStability:
+    """The handle crosses the boundary, so redaction must not alter it.
+
+    Packet 4A verified the failure mode this guards: a presigned or
+    token-bearing ``storage_uri`` comes back ``[REDACTED]bucket/obj`` or
+    ``...?token=[REDACTED]`` — **silently**, because a redacted string is still
+    a string, so the snapshot is simply never found and nothing reports why.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_acquisition_handle_survives_redaction_unchanged(
+        self, store: FilesystemSnapshotStore, registry: PromptRegistry, prompt: Any
+    ) -> None:
+        service, _, _, audit = _build(
+            store=store, registry=registry, fetcher=_fetcher()
+        )
+
+        await _acquire(service, prompt=prompt)
+
+        recorded = audit.invocations[-1].output
+        assert recorded is not None
+        assert redact(dict(recorded)) == dict(recorded)
+
+    def test_a_credentialed_storage_uri_would_not_survive_redaction(self) -> None:
+        # The precondition that makes the test above meaningful: redaction is
+        # genuinely capable of mangling a URI, so the assertion that it leaves
+        # this handle alone is a property of the handle's shape rather than of
+        # redaction being inert on strings.
+        presigned = "https://KEYID:SECRETVALUE@bucket.example.com/obj"
+        tokenized = "https://store.example.com/obj?token=ghp_0123456789abcdefghij"
+
+        assert redact({"storage_uri": presigned}) != {"storage_uri": presigned}
+        assert redact({"storage_uri": tokenized}) != {"storage_uri": tokenized}
+
+    def test_the_filesystem_store_produces_a_credential_free_uri(
+        self, store: FilesystemSnapshotStore
+    ) -> None:
+        uri = store.put(PAGE)
+
+        assert uri.startswith("file://")
+        assert "@" not in uri
+        assert "?" not in uri
+        assert redact({"storage_uri": uri}) == {"storage_uri": uri}
