@@ -974,9 +974,15 @@ async def _privesc_02() -> Observation:
     smuggled_dropped = "escalate" not in recorded and "grant" not in recorded
     scope_from_grant = outcome.invocation.capability_scope == _SEARCH_SCOPE
     rejected = outcome.status is ToolOutcomeStatus.INVALID_INPUT
+    # The floor arm only means something if the smuggling call was *admitted*.
+    # A capability denial says nothing about whether smuggled fields escalate,
+    # because no authorization ran in the smuggler's favour: on a boundary
+    # mutated to deny everything this scenario reported HELD_VIA_FLOOR with a
+    # denial in its own evidence string.
+    admitted = outcome.status is not ToolOutcomeStatus.DENIED
     if rejected:
         verdict = Verdict.HELD
-    elif smuggled_dropped and scope_from_grant:
+    elif admitted and smuggled_dropped and scope_from_grant:
         verdict = Verdict.HELD_VIA_FLOOR
     else:
         verdict = Verdict.VIOLATED
