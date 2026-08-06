@@ -73,32 +73,18 @@ Two of them are unrunnable *in this process only*; see
 """
 
 
-DEFECTS_PROVEN_ELSEWHERE: Final[dict[str, str]] = {
-    "crosstenant-02-cross-tenant-evidence-artifact-link": (
-        "Proven against a real Postgres in "
-        "test_corpus_execution_persistence.py::"
-        "test_evidence_cannot_reference_another_tenants_artifact. "
-        "EvidenceRepository._get_artifact_row selects by artifact_id alone, "
-        "with no organization or run filter, so an Evidence row in tenant A "
-        "may name tenant B's snapshot artifact. The digest cross-check that "
-        "does run is no mitigation: artifacts are content-addressed, so both "
-        "tenants acquiring the same public source produce the same digest."
-    ),
-    "poisoned-05-cross-run-evidence-borrow": (
-        "Proven against a real Postgres in "
-        "test_corpus_execution_persistence.py::"
-        "test_evidence_cannot_reference_another_runs_artifact. Same missing "
-        "check, reached through the poisoned tool-output path: an artifact "
-        "belonging to a different run is accepted as an evidence row's "
-        "snapshot."
-    ),
-}
-"""Scenarios this process cannot run that ARE proven defects in the DB suite.
+DEFECTS_PROVEN_ELSEWHERE: Final[dict[str, str]] = {}
+"""Scenarios unrunnable here that are known violations in the database suite.
 
-Listed so the in-process report does not read as "unknown" for two guarantees
-that are in fact known to be violated. Kept apart from :data:`DEFECTS` because
-this module has no way to reproduce them, and a defect recorded where it cannot
-be re-run is a defect nobody will notice regressing.
+Empty, and deliberately kept rather than deleted. It held
+``crosstenant-02`` and ``poisoned-05`` while the evidence write path let a row
+cite an artifact outside its own tenant or run; both now hold, and
+``test_corpus_execution_persistence.py`` carries them as plain assertions.
+
+The mapping exists so that a guarantee this process cannot reach never reads as
+"unknown" in the in-process report when it is in fact known to be violated
+elsewhere. A defect recorded only where it cannot be re-run is a defect nobody
+will notice regressing.
 """
 
 
@@ -126,18 +112,6 @@ DEFECTS: Final[dict[str, str]] = {
         "output recommending 'repeat_until context exhausted' is bounded by "
         "nothing the boundary owns."
     ),
-    "privesc-03-idempotency-key-scope-swap": (
-        "CRITICAL. ToolBoundary.invoke performs the idempotency lookup "
-        "(boundary.py:302) BEFORE the capability decision (boundary.py:331), "
-        "and ToolAuditStore.find_invocation is keyed on (run_id, "
-        "idempotency_key) alone. A caller-supplied idempotency_key that "
-        "collides with any prior terminal invocation in the same run returns "
-        "that invocation's SUCCEEDED outcome with decision=None -- no "
-        "authorization decision is made at all. Reproduce: call "
-        "academic_search with idempotency_key='k' and a matching grant, then "
-        "call delete_project with idempotency_key='k', "
-        "capability_scope='admin:delete_project' and NO grant -> SUCCEEDED."
-    ),
     "privesc-05-toctu-revoked-grant": (
         "Capability validity is never re-checked before the side effect "
         "lands. The boundary reads its clock once (boundary.py:267) and "
@@ -164,19 +138,16 @@ DEFECTS: Final[dict[str, str]] = {
         "merge), so packet 4-Sec's fix is NOT an ancestor of this tree."
     ),
     "crosstenant-05-idempotency-key-collision": (
-        "Idempotency dedup is not tenant-scoped. "
-        "InMemoryToolAuditStore.find_invocation accepts organization_id and "
-        "never reads it (mediation.py:283-292). Nothing at the boundary binds "
-        "a run_id to an organization either, so a caller naming another "
-        "tenant's run is not refused and is then served that tenant's "
-        "recorded outcome without executing."
-    ),
-    "replay-03-idempotency-key-with-mutated-input": (
-        "Same root cause as privesc-03. A key presented with different input "
-        "is a cache hit, not a conflict: the call returns SUCCEEDED carrying "
-        "the ORIGINAL input, and the handler is not re-entered. An "
-        "idempotency key is a slot that can be silently repointed at "
-        "different work."
+        "Idempotency dedup is not tenant-scoped, and 4C's reordering does not "
+        "reach it. InMemoryToolAuditStore.find_invocation accepts "
+        "organization_id and never reads it (mediation.py:283-292); nothing "
+        "at the boundary binds a run_id to an organization. Tenant B's "
+        "request is genuinely AUTHORIZED -- the grant matches run, task, tool "
+        "and scope, and organization_id is not an input to the capability "
+        "decision -- so it reaches the lookup, and _require_same_request "
+        "finds no mismatch because the two requests differ only in a field "
+        "neither check reads. Tenant B receives tenant A's invocation record "
+        "without the handler being re-entered."
     ),
     "oversized-01-oversized-query-string": (
         "No input size ceiling exists at any layer. A 2,000,000-character "
@@ -185,11 +156,6 @@ DEFECTS: Final[dict[str, str]] = {
         "timeout, a sensitivity, and SecretRef-typed credential fields -- but "
         "nothing about size -- so an unbounded field is what a tool author "
         "gets by omission."
-    ),
-    "oversized-02-deeply-nested-json": (
-        "No nesting-depth limit exists. A 400-level nested object is "
-        "validated, then walked recursively by _json_ready, again by redact, "
-        "again by canonical JSON serialization, and persisted."
     ),
     "oversized-03-oversized-retrieved-snapshot": (
         "FilesystemSnapshotStore.put has no maximum size, and neither the "
