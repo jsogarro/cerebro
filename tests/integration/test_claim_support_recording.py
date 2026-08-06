@@ -25,7 +25,11 @@ from src.core.contracts import (
 )
 from src.models.db.claim_support import AgentClaimSupport
 from src.repositories.claim_support_repository import ClaimSupportRepository
-from tests.integration.wave4_helpers import seed_artifact, seed_run_task_attempt
+from tests.integration.wave4_helpers import (
+    seed_artifact,
+    seed_evidence,
+    seed_run_task_attempt,
+)
 
 pytestmark = [pytest.mark.integration]
 
@@ -56,6 +60,22 @@ async def recorder_fixture(db_session: AsyncSession) -> ClaimSupportRecorder:
 async def seeded_fixture(db_session: AsyncSession) -> None:
     await seed_run_task_attempt(db_session, organization_id=ORG_ID)
     await seed_artifact(db_session, organization_id=ORG_ID)
+    # The verdicts built below cite evidence-1/evidence-2 by id; the
+    # repository now verifies those citations resolve to real rows in this
+    # organization and run, so they have to exist before a verdict can name
+    # them, the same way ARTIFACT_ID has to exist before a claim can name it.
+    await seed_evidence(
+        db_session,
+        organization_id=ORG_ID,
+        evidence_id="evidence-1",
+        locator="char:0-120",
+    )
+    await seed_evidence(
+        db_session,
+        organization_id=ORG_ID,
+        evidence_id="evidence-2",
+        locator="char:120-240",
+    )
 
 
 def _inventory(source: str = TWO_CLAIM_SOURCE):  # type: ignore[no-untyped-def]
