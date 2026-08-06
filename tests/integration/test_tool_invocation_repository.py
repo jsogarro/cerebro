@@ -140,6 +140,101 @@ async def test_nested_input_and_output_payloads_persist_and_read_back(
 
 
 @pytest.mark.asyncio
+async def test_an_invalid_input_row_persists_with_no_capability_decision(
+    repo: ToolInvocationRepository,
+) -> None:
+    """Input validation runs before authorization, and must: a request whose
+    input never parses has nothing for decide_capability to decide about and
+    no CapabilityRequest to fingerprint. capability_decision=None is legal
+    for exactly this case."""
+    invocation = _make_invocation(
+        status=ToolInvocationStatus.FAILED,
+        error_code="invalid_input",
+        output=None,
+        output_trust=None,
+    )
+
+    row = await repo.create_tool_invocation(
+        invocation, organization_id=ORG_ID, capability_decision=None
+    )
+    await repo.session.flush()
+
+    fetched = await repo.get_tool_invocation("invocation-1", organization_id=ORG_ID)
+
+    assert fetched is not None
+    assert fetched.capability_decision_effect is None
+    assert fetched.capability_grant_id is None
+    assert fetched.capability_approval_id is None
+    assert fetched.capability_denial_reason is None
+    assert fetched.request_fingerprint is None
+    assert row.error_code == "invalid_input"
+
+
+@pytest.mark.asyncio
+async def test_a_missing_decision_is_rejected_for_any_other_error_code(
+    repo: ToolInvocationRepository,
+) -> None:
+    """The repository fails closed itself, before ever reaching the
+    database: `error_code='invalid_input'` is the only door through which a
+    row may omit its capability decision."""
+    invocation = _make_invocation(
+        status=ToolInvocationStatus.FAILED,
+        error_code="timeout",
+        output=None,
+        output_trust=None,
+    )
+
+    with pytest.raises(ValueError, match="invalid_input"):
+        await repo.create_tool_invocation(
+            invocation, organization_id=ORG_ID, capability_decision=None
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_database_backstops_a_missing_decision_that_bypasses_the_repository(
+    repo: ToolInvocationRepository,
+) -> None:
+    """Proves ``ck_agent_tool_invocation_decision_pair_or_invalid_input``
+    at the database level, not just the repository's fail-closed guard: bypass
+    the repository's check the same way 4A's capability-grant backstop test
+    bypasses the Pydantic constructor, by inserting a row directly rather than
+    through ``create_tool_invocation``."""
+    from src.models.db.tool_invocation import AgentToolInvocation
+
+    row = AgentToolInvocation(
+        tool_invocation_id="invocation-bypass",
+        run_id="run-1",
+        task_id="task-1",
+        attempt_id="attempt-1",
+        tool_name="academic_search",
+        tool_version="1.0",
+        status=ToolInvocationStatus.FAILED.value,
+        capability_scope="search",
+        idempotency_key="invocation-key-bypass",
+        input={"query": "gnn"},
+        input_trust=TrustClassification.USER_SUPPLIED.value,
+        input_sha256="a" * 64,
+        output=None,
+        output_trust=None,
+        output_sha256=None,
+        capability_decision_effect=None,
+        capability_grant_id=None,
+        capability_approval_id=None,
+        capability_denial_reason=None,
+        request_fingerprint=None,
+        producer_kind="system",
+        error_code="timeout",
+        requested_at=NOW,
+        completed_at=NOW,
+        organization_id=ORG_ID,
+    )
+    repo.session.add(row)
+
+    with pytest.raises(IntegrityError):
+        await repo.session.flush()
+
+
+@pytest.mark.asyncio
 async def test_a_denied_decision_requires_a_denied_status(
     repo: ToolInvocationRepository,
 ) -> None:

@@ -313,11 +313,11 @@ def _create_tool_invocations() -> None:
         sa.Column("output", sa.JSON(), nullable=True),
         sa.Column("output_trust", sa.String(30), nullable=True),
         sa.Column("output_sha256", sa.String(64), nullable=True),
-        sa.Column("capability_decision_effect", sa.String(10), nullable=False),
+        sa.Column("capability_decision_effect", sa.String(10), nullable=True),
         sa.Column("capability_grant_id", sa.String(255), nullable=True),
         sa.Column("capability_approval_id", sa.String(255), nullable=True),
         sa.Column("capability_denial_reason", sa.String(64), nullable=True),
-        sa.Column("request_fingerprint", sa.String(64), nullable=False),
+        sa.Column("request_fingerprint", sa.String(64), nullable=True),
         sa.Column("error_code", sa.String(255), nullable=True),
         sa.Column("status_reason", sa.Text(), nullable=True),
         sa.Column("requested_at", sa.DateTime(timezone=True), nullable=False),
@@ -363,6 +363,7 @@ def _create_tool_invocations() -> None:
             name="ck_agent_tool_invocation_producer_kind_biconditional",
         ),
         sa.CheckConstraint(
+            "capability_decision_effect IS NULL OR "
             "capability_decision_effect IN ('allow', 'deny')",
             name="ck_agent_tool_invocation_capability_decision_effect",
         ),
@@ -399,8 +400,14 @@ def _create_tool_invocations() -> None:
             name="ck_agent_tool_invocation_output_digest",
         ),
         sa.CheckConstraint(
-            "length(request_fingerprint) = 64",
+            "request_fingerprint IS NULL OR length(request_fingerprint) = 64",
             name="ck_agent_tool_invocation_request_fingerprint_digest",
+        ),
+        sa.CheckConstraint(
+            "(capability_decision_effect IS NOT NULL AND request_fingerprint IS NOT NULL) "
+            "OR (capability_decision_effect IS NULL AND request_fingerprint IS NULL "
+            "AND error_code IS NOT NULL AND error_code = 'invalid_input')",
+            name="ck_agent_tool_invocation_decision_pair_or_invalid_input",
         ),
     )
     op.create_index(

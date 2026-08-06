@@ -716,6 +716,84 @@ def test_request_fingerprint_must_be_64_hex_characters(session: Session) -> None
         session.flush()
 
 
+def _make_invalid_input_invocation(**overrides: object) -> AgentToolInvocation:
+    """A row for the one status structurally excluded from having a capability
+    decision: input validation runs before authorization, so a request whose
+    input never parses has nothing for `decide_capability` to decide and no
+    `CapabilityRequest` to fingerprint."""
+    values: dict[str, object] = {
+        "status": ToolInvocationStatus.FAILED.value,
+        "error_code": "invalid_input",
+        "output": None,
+        "output_trust": None,
+        "output_sha256": None,
+        "capability_decision_effect": None,
+        "capability_grant_id": None,
+        "capability_approval_id": None,
+        "capability_denial_reason": None,
+        "request_fingerprint": None,
+    }
+    values.update(overrides)
+    return _make_invocation(**values)
+
+
+def test_an_invalid_input_row_with_no_decision_is_accepted(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(_make_invalid_input_invocation())
+    session.flush()
+
+
+def test_a_missing_decision_is_rejected_for_any_other_error_code(
+    session: Session,
+) -> None:
+    """The narrow pin: `error_code='invalid_input'` is the only door through
+    which a row may omit its capability decision. Any other error_code with
+    no decision must still be rejected."""
+    _seed_run_task_attempt(session)
+    session.add(_make_invalid_input_invocation(error_code="timeout"))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_missing_decision_is_rejected_when_error_code_is_also_absent(
+    session: Session,
+) -> None:
+    """The near-miss case: `error_code = 'invalid_input'` alone evaluates to
+    NULL (not FALSE) in SQL when error_code IS NULL, which combined with OR
+    would silently let a row with no error_code at all also skip the
+    decision. This is the case that would slip through a constraint that
+    checked `error_code = 'invalid_input'` without an explicit
+    `error_code IS NOT NULL` guard."""
+    _seed_run_task_attempt(session)
+    session.add(
+        _make_invalid_input_invocation(
+            error_code=None, status=ToolInvocationStatus.SUCCEEDED.value
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_decision_present_with_no_fingerprint_is_rejected(session: Session) -> None:
+    """The pairing must move together: a row cannot have a decision effect
+    without a request fingerprint, even outside the invalid_input case."""
+    _seed_run_task_attempt(session)
+    session.add(_make_invocation(request_fingerprint=None))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_fingerprint_present_with_no_decision_is_rejected(session: Session) -> None:
+    _seed_run_task_attempt(session)
+    session.add(
+        _make_invalid_input_invocation(
+            request_fingerprint="a" * 64,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
 # --- evidence: append-only + span uniqueness -----------------------------------
 
 
