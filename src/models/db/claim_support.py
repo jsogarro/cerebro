@@ -193,10 +193,16 @@ class AgentClaimSupport(Base):
             name="ck_agent_claim_support_reason_only_when_unsupported",
         ),
         # Mutation-checked and found unreachable, same as the evidence table's
-        # equivalent CHECK: `producer_kind_biconditional_check` only accepts
-        # 'system' or 'model_turn', so any other value fails both of its
-        # disjuncts regardless of prompt-binding state. Kept as defence in
-        # depth, same posture as (3) and (7) above.
+        # equivalent CHECK, and for the same reason: it depends on
+        # `producer_kind_biconditional_check`'s *disjunctive* form, under
+        # which any value other than 'system'/'model_turn' fails both
+        # disjuncts regardless of prompt-binding state. An equality-form
+        # biconditional (`(producer_kind = 'model_turn') = (rendered_sha256
+        # IS NOT NULL)`) has a hole here instead — confirmed: 4A's original
+        # DDL spec used exactly that form, and it wrongly accepts an invalid
+        # value when the prompt columns are NULL. Kept as defence in depth,
+        # same posture as (3) and (7) above, but load-bearing again if a
+        # future rewrite switches the biconditional to the equality form.
         status_check(
             column="producer_kind",
             statuses=ProducerKind,

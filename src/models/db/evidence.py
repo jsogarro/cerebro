@@ -160,12 +160,20 @@ class AgentEvidence(Base):
         status_check(
             column="trust", statuses=TrustClassification, name="ck_agent_evidence_trust"
         ),
-        # Mutation-checked and found unreachable: `producer_kind_biconditional_check`
-        # only accepts 'system' or 'model_turn' — any other value fails both of
-        # its disjuncts regardless of prompt-binding state, so this value-domain
-        # CHECK never independently fires. Kept as the same defence-in-depth
-        # posture as the claim-support CHECKs above: if the biconditional is
-        # ever relaxed, this is what still bounds the column's value set.
+        # Mutation-checked and found unreachable given
+        # `producer_kind_biconditional_check`'s *disjunctive* form — any value
+        # other than 'system'/'model_turn' fails both disjuncts regardless of
+        # prompt-binding state, so this value-domain CHECK never independently
+        # fires. This is specifically a property of the disjunct spelling: an
+        # equality-form biconditional such as
+        # `(producer_kind = 'model_turn') = (rendered_sha256 IS NOT NULL)` has
+        # a hole — an invalid value with NULL prompt columns satisfies
+        # `FALSE = FALSE` and is wrongly accepted (confirmed: 4A's original
+        # DDL spec used exactly this form). Kept as defence in depth, same
+        # posture as the claim-support CHECKs above — but note this one is
+        # unreachable *because of* the disjunct form, and would become
+        # load-bearing again if a future rewrite "simplified" the
+        # biconditional to the equality spelling.
         status_check(
             column="producer_kind",
             statuses=ProducerKind,

@@ -79,6 +79,11 @@ class AgentArtifact(BaseModel, OptionalPromptBindingMixin):
             statuses=TrustClassification,
             name="ck_agent_artifact_trust",
         ),
+        # Unreachable given `producer_kind_biconditional_check`'s disjunctive
+        # form (verified: same shared function as agent_evidence/
+        # agent_claim_supports, not a divergent copy) -- see the fuller note
+        # on those tables. Kept as defence in depth; would become load-bearing
+        # if the biconditional were ever rewritten in the equality form.
         status_check(
             column="producer_kind",
             statuses=ProducerKind,
