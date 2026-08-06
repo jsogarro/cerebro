@@ -10,7 +10,6 @@ SQLAlchemy ORM's ``before_update``/``before_delete`` hooks.
 """
 
 import os
-import re
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Iterator
@@ -48,6 +47,53 @@ def _revision_below(revision_id: str) -> str:
         f"{revision_id} has no single parent revision to downgrade to"
     )
     return down_revision
+
+
+def _is_ancestor_or_self(target_revision: str, from_revision: str) -> bool:
+    """Return whether ``target_revision`` is ``from_revision`` or one of its
+    ancestors, walking ``down_revision`` via Alembic's ``ScriptDirectory``.
+
+    Used to check a revision the database actually reports as applied
+    (``alembic_version``) against the target, rather than checking whether a
+    revision id merely exists as a file in ``versions/`` — ``alembic
+    history`` reads only the script directory and never touches the
+    database, so it would pass even against a database the migration never
+    ran against.
+    """
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    script = ScriptDirectory.from_config(config)
+    frontier: list[str] = [from_revision]
+    seen: set[str] = set()
+    while frontier:
+        revision = frontier.pop()
+        if revision in seen:
+            continue
+        seen.add(revision)
+        if revision == target_revision:
+            return True
+        down_revision = script.get_revision(revision).down_revision
+        if down_revision is None:
+            continue
+        if isinstance(down_revision, str):
+            frontier.append(down_revision)
+        else:
+            frontier.extend(rev for rev in down_revision if rev is not None)
+    return False
+
+
+async def _applied_revision(database_url: str) -> str:
+    """Return the revision id the database's ``alembic_version`` table
+    reports as currently applied — the actual observed state, not a file on
+    disk."""
+    engine = create_async_engine(_async_url(database_url))
+    try:
+        async with engine.connect() as connection:
+            result = await connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            )
+            return str(result.scalar_one())
+    finally:
+        await engine.dispose()
 
 
 NEW_TABLES = frozenset(
@@ -278,20 +324,23 @@ async def _seed_claim_support(
     )
 
 
-def test_the_migration_chain_reaches_the_wave4_persistence_revision(
+async def test_the_migration_chain_reaches_the_wave4_persistence_revision(
     migrated_database: str,
 ) -> None:
-    """The Wave 4 persistence revision is in the applied chain.
+    """The Wave 4 persistence revision is the applied revision, or an
+    ancestor of it.
 
-    Not "is head" — a later packet (4E, 4F) will migrate on top of this one.
-    ``alembic current`` reports only the current head(s), which would break
-    this test the moment that happens; ``alembic history`` is the static
-    graph reachable from head, which is exactly the set of revisions
-    ``migrated_database``'s ``upgrade head`` actually applied.
+    Not "is head" — a later packet (4E, 4F) will migrate on top of this one,
+    and asserting equality to head would break the moment that happens.
+    Reads the revision the database's own ``alembic_version`` table reports
+    as applied, then walks the migration graph backwards from it. ``alembic
+    history`` alone is not enough here: it reads only ``versions/`` and
+    never touches the database, so it would pass even against a database
+    this migration never ran against.
     """
-    result = _run_alembic(migrated_database, "history")
+    applied = await _applied_revision(migrated_database)
 
-    assert re.search(rf"\b{re.escape(REVISION)}\b", result.stdout)
+    assert _is_ancestor_or_self(REVISION, applied)
 
 
 async def test_wave4_tables_exist_after_upgrade(migrated_database: str) -> None:
