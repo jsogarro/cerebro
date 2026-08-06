@@ -66,13 +66,30 @@ class RecordingAuditStore:
     invocations: list[ToolInvocation] = field(default_factory=list)
     events: list[ToolAuditEvent] = field(default_factory=list)
     decisions: list[CapabilityDecision | None] = field(default_factory=list)
+    stored: dict[tuple[str, str | None, str], ToolInvocation] = field(
+        default_factory=dict
+    )
     replay: ToolInvocation | None = None
     fail_on_persist: bool = False
 
     async def find_invocation(
         self, *, run_id: str, organization_id: str | None, idempotency_key: str
     ) -> ToolInvocation | None:
-        return self.replay
+        """Look up by the key the real store is keyed on.
+
+        This used to return ``self.replay`` unconditionally, which made the
+        fake answer *every* lookup with the same record regardless of run or
+        key. That is not a faithful store, and a boundary that consulted the
+        key incorrectly would have looked identical against it — including the
+        authorization bypass these tests exist to prevent.
+
+        ``replay`` survives as an explicit override for tests that need to
+        force a hit without persisting one first.
+        """
+
+        if self.replay is not None:
+            return self.replay
+        return self.stored.get((run_id, organization_id, idempotency_key))
 
     async def persist(
         self,
@@ -89,6 +106,9 @@ class RecordingAuditStore:
         self.invocations.append(invocation)
         self.events.extend(events)
         self.decisions.append(capability_decision)
+        self.stored[
+            (invocation.run_id, organization_id, invocation.idempotency_key)
+        ] = invocation
 
 
 @dataclass(slots=True)
