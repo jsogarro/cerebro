@@ -27,17 +27,7 @@ from src.models.db.claim_support import AgentClaimSupport
 from src.repositories.claim_support_repository import ClaimSupportRepository
 from tests.integration.wave4_helpers import seed_artifact, seed_run_task_attempt
 
-pytestmark = [
-    pytest.mark.integration,
-]
-
-BLOCKED_ON_4B = pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason=(
-        "BLOCKED on ClaimSupportRepository, which packet 4B owns. Contract commit 1de2322 made ClaimSupport.prompt_binding optional so a deterministic producer can decline to name a prompt; record_claim_support still reads binding.prompt_id unguarded at claim_support_repository.py:86-89 and raises AttributeError on every producer_kind=system row. That is every fill-in verdict, so the whole no-claim-escapes mechanism is unwritable until 4B lands the None branch plus the nullable prompt-binding columns. strict=True so these turn red the moment the fix arrives and this marker has to be removed rather than lingering."
-    ),
-)
+pytestmark = [pytest.mark.integration]
 
 NOW = datetime(2026, 8, 6, tzinfo=UTC)
 ORG_ID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
@@ -85,7 +75,6 @@ def _resolve(source: str = TWO_CLAIM_SOURCE, verdicts=()):  # type: ignore[no-un
     )
 
 
-@BLOCKED_ON_4B
 @pytest.mark.asyncio
 async def test_one_row_lands_for_every_material_claim(
     recorder: ClaimSupportRecorder, db_session: AsyncSession
@@ -103,7 +92,6 @@ async def test_one_row_lands_for_every_material_claim(
     )
 
 
-@BLOCKED_ON_4B
 @pytest.mark.asyncio
 async def test_a_claim_no_evaluator_reached_is_durable_and_says_why(
     recorder: ClaimSupportRecorder, db_session: AsyncSession
@@ -145,7 +133,6 @@ async def test_a_claim_no_evaluator_reached_is_durable_and_says_why(
     assert {row.status for row in rows} == {"unsupported"}
 
 
-@BLOCKED_ON_4B
 @pytest.mark.asyncio
 async def test_evidence_count_agrees_with_evidence_ids_on_every_row(
     recorder: ClaimSupportRecorder, db_session: AsyncSession
@@ -177,7 +164,6 @@ async def test_evidence_count_agrees_with_evidence_ids_on_every_row(
         assert row.evidence_count == len(row.evidence_ids)
 
 
-@BLOCKED_ON_4B
 @pytest.mark.asyncio
 async def test_the_recorder_leaves_committing_to_the_caller(
     recorder: ClaimSupportRecorder, db_session: AsyncSession
