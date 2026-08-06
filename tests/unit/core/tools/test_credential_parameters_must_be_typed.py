@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from src.core.contracts.capabilities import SensitivityClass
 from src.core.contracts.redaction import REDACTION_MARKER, SecretRef
@@ -223,6 +223,81 @@ class TestTheNetStillCatchesWhatComesFromOutside:
         assert outcome.succeeded
         assert HELD not in str(outcome.unwrap())
         assert REDACTION_MARKER in str(outcome.unwrap())
+
+
+class TestAnInputModelCannotAdmitFieldsItDoesNotDeclare:
+    """The credential rule above is enforced over ``model_fields``.
+
+    A model configured ``extra="allow"`` accepts a field that is in no
+    ``model_fields`` entry, so a credential arrives by *not being declared* —
+    and the whole check above walks straight past it. The boundary then
+    serializes the validated model by iterating ``model_fields`` too, so the
+    field is absent from the record, from ``input_sha256``, from the approval
+    fingerprint that ``input_sha256`` binds, and from the derived idempotency
+    key, while still being readable from ``model_extra`` by a handler.
+
+    ``extra="ignore"`` — what a model gets by omission — is still permitted.
+    Under ``ignore`` the field cannot enter the validated object at all, so
+    nothing a handler can reach is missing from the record. What it does not
+    cover is the caller's *submission*, which is the non-guarantee this wave
+    already wrote down. ``allow`` is the strictly worse case and is what this
+    refuses.
+    """
+
+    def test_a_permissive_input_model_is_refused_at_registration(self) -> None:
+        class Open(BaseModel):
+            model_config = ConfigDict(extra="allow")
+
+            query: str
+
+        with pytest.raises(ToolSpecError, match="undeclared"):
+            spec_for(Open)
+
+    def test_the_credential_rule_can_no_longer_be_evaded_by_omission(self) -> None:
+        """The same model, named for what it buys an author.
+
+        ``Open`` declares no credential field, so ``_audit_credential_fields``
+        finds nothing to object to — and ``{"api_key": "sk-live-..."}``
+        validates against it, reaching a handler through ``model_extra``.
+        """
+
+        class Open(BaseModel):
+            model_config = ConfigDict(extra="allow")
+
+            query: str
+
+        assert Open.model_validate({"query": "q", "api_key": "sk-live-x"}).model_extra
+
+        with pytest.raises(ToolSpecError):
+            spec_for(Open)
+
+    def test_a_permissive_model_nested_one_level_down_is_refused_too(self) -> None:
+        class Open(BaseModel):
+            model_config = ConfigDict(extra="allow")
+
+            value: str
+
+        class Outer(BaseModel):
+            inner: Open
+
+        with pytest.raises(ToolSpecError, match=r"inner"):
+            spec_for(Outer)
+
+    def test_a_closed_model_is_accepted(self) -> None:
+        class Closed(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            query: str
+
+        assert spec_for(Closed).name == "t"
+
+    def test_the_default_configuration_is_still_accepted(self) -> None:
+        """``ignore`` drops the field before it can reach anything."""
+
+        class Default(BaseModel):
+            query: str
+
+        assert spec_for(Default).name == "t"
 
 
 class TestOtherOmissionsAreRefusedToo:

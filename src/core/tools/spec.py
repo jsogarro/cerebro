@@ -30,7 +30,15 @@ credential-shaped. ``upstream_credential`` is caught; ``pat``,
 not a guarantee — it converts "authors must remember" into "authors must
 remember less often."
 
-Two smaller requirements are enforced here for the same reason — an omission
+The lint has one more hole worth naming, and it is closed here too: the check
+walks ``model_fields``, so a schema that *admits fields it never declared* —
+``extra="allow"`` — evades it entirely. A credential then arrives by not being
+declared. Because the boundary also serializes a validated model over
+``model_fields``, such a field reaches a handler while being absent from the
+record, from ``input_sha256``, and from the approval binding ``input_sha256``
+carries. :func:`_reject_undeclared_field_admission` refuses that shape.
+
+Three smaller requirements are enforced here for the same reason — an omission
 should not silently become a default:
 
 - Every tool declares a **timeout**. There is no default deadline, because a
@@ -38,6 +46,8 @@ should not silently become a default:
 - Every tool declares a **sensitivity**. It is what the capability layer
   authorizes against, and guessing it would guess at whether a call can reach
   the world outside the run.
+- Every tool declares **its whole input schema**. A field the schema does not
+  name is a field nothing downstream can audit.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
@@ -149,6 +159,59 @@ def _audit_credential_fields(
             _audit_credential_fields(nested, tool_name=tool_name, seen=seen, path=where)
 
 
+def _reject_undeclared_field_admission(
+    model: type[BaseModel], *, tool_name: str, seen: set[type[BaseModel]], path: str
+) -> None:
+    """Reject an input schema that admits fields it does not declare.
+
+    The credential rule above is enforced over ``model_fields``, and so is the
+    boundary's serialization of a validated model. A model configured
+    ``extra="allow"`` accepts a field that appears in neither: it lands in
+    ``model_extra``, which means it is absent from ``redacted_input``, from
+    ``input_sha256``, from the approval binding ``input_sha256`` carries, and
+    from the derived idempotency key — while a handler can still read it and
+    forward it outbound. The audit record then denies material the call
+    carried, and two materially different requests share a digest.
+
+    So the credential rule is evadable by *omission*: declare no field named
+    ``api_key`` and one arrives anyway, past a check that only inspects what
+    was declared. This closes that, at the same registration-time point and
+    for the same reason as the timeout and the sensitivity — an omission must
+    not silently become a permission.
+
+    ``extra="ignore"``, which is what a model gets by omission, is still
+    accepted. Under ``ignore`` an undeclared field cannot enter the validated
+    object at all, so nothing a handler can reach is missing from the record.
+    What ``ignore`` does not cover is the caller's *submission*, which is a
+    stated non-guarantee of this layer rather than a hole in it; requiring
+    ``forbid`` everywhere would close that too, and is a larger change than
+    this one.
+    """
+
+    if model in seen:
+        return
+    seen.add(model)
+
+    if model.model_config.get("extra") == "allow":
+        where = f" at {path!r}" if path else ""
+        raise ToolSpecError(
+            f"tool {tool_name!r} declares input schema {model.__name__!r}"
+            f"{where} with extra='allow', so it admits undeclared fields. "
+            "The boundary records, hashes, and fingerprints a validated model "
+            "over its declared fields, so an undeclared field reaches a "
+            "handler while being invisible to the record, to input_sha256, "
+            "and to the approval that input_sha256 binds. Declare the field, "
+            "or close the model."
+        )
+
+    for field_name, field in model.model_fields.items():
+        nested_path = f"{path}.{field_name}" if path else field_name
+        for nested in _model_types(field.annotation):
+            _reject_undeclared_field_admission(
+                nested, tool_name=tool_name, seen=seen, path=nested_path
+            )
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class ToolSpec:
@@ -180,6 +243,9 @@ class ToolSpec:
                 f"{self.timeout_seconds!r}; every tool needs a deadline "
                 "somebody chose"
             )
+        _reject_undeclared_field_admission(
+            self.input_model, tool_name=self.name, seen=set(), path=""
+        )
         _audit_credential_fields(
             self.input_model, tool_name=self.name, seen=set(), path=""
         )
