@@ -188,13 +188,14 @@ async def test_the_recorder_leaves_committing_to_the_caller(
 async def test_a_fully_evaluated_resolution_persists_today(
     recorder: ClaimSupportRecorder, db_session: AsyncSession
 ) -> None:
-    """Keeps the write path covered while the fill-in path is blocked.
+    """Covers the all-evaluated path, where no row is the resolver's own.
 
-    Every claim here carries a ``model_turn`` verdict with a prompt binding, so
-    nothing reaches the unguarded read in ``record_claim_support``. Without
-    this, the four xfails above would leave the recorder with no green
-    persistence coverage at all, and a second unrelated regression in it would
-    be invisible until 4B's fix landed.
+    The tests above all persist at least one fill-in — ``producer_kind=system``
+    with no prompt binding — so they exercise the nullable branch of the
+    repository's prompt-binding write. This one exercises the other branch:
+    every row carries a binding. The two together are what the biconditional
+    means at the persistence layer, and a regression in either is invisible
+    from the other.
     """
     inventory = _inventory()
     verdicts = [
