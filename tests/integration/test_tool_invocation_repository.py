@@ -110,6 +110,36 @@ async def test_create_tool_invocation_persists_the_contract_fields(
 
 
 @pytest.mark.asyncio
+async def test_nested_input_and_output_payloads_persist_and_read_back(
+    repo: ToolInvocationRepository,
+) -> None:
+    """``JsonObject`` freezes recursively into ``MappingProxyType`` at every
+    nesting level, not just the top one. A shallow ``dict(invocation.input)``
+    only thaws the top level, leaving nested mappings as ``mappingproxy``
+    objects asyncpg cannot serialize -- this round-trips genuinely nested
+    input/output through a real INSERT and SELECT, which is the only place
+    the defect actually surfaced (constructing the contract, and even
+    computing its digest, both succeeded on the broken code)."""
+    nested_input = {"query": "gnn", "filters": {"year": {"gte": 2020}}}
+    nested_output = {"results": [{"id": 1, "meta": {"score": 0.9}}]}
+
+    row = await repo.create_tool_invocation(
+        _make_invocation(input=nested_input, output=nested_output),
+        organization_id=ORG_ID,
+        capability_decision=ALLOW_DECISION,
+    )
+    await repo.session.flush()
+
+    fetched = await repo.get_tool_invocation("invocation-1", organization_id=ORG_ID)
+
+    assert fetched is not None
+    assert fetched.input == nested_input
+    assert fetched.output == nested_output
+    assert row.input == nested_input
+    assert row.output == nested_output
+
+
+@pytest.mark.asyncio
 async def test_a_denied_decision_requires_a_denied_status(
     repo: ToolInvocationRepository,
 ) -> None:

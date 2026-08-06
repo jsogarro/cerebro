@@ -70,7 +70,17 @@ class ToolInvocationRepository:
         """
         normalized_organization_id = normalize_organization_id(organization_id)
         binding = invocation.prompt_binding
-        output_dict = dict(invocation.output) if invocation.output is not None else None
+        # `JsonObject`'s `AfterValidator` freezes recursively into
+        # `MappingProxyType` at every nesting level, not just the top one, so
+        # `dict(invocation.input)` only thaws the top level -- any nested
+        # mapping stays a `mappingproxy`, which asyncpg cannot serialize into
+        # the JSON column. `model_dump()` runs the field's `PlainSerializer`,
+        # which recursively produces plain dicts/lists at every level; using
+        # the same dumped value for both the row and the digest also means
+        # the digest is provably over what actually gets persisted.
+        dumped = invocation.model_dump()
+        input_payload = dumped["input"]
+        output_payload = dumped["output"]
         row = AgentToolInvocation(
             tool_invocation_id=invocation.tool_invocation_id,
             run_id=invocation.run_id,
@@ -82,17 +92,17 @@ class ToolInvocationRepository:
             status=invocation.status.value,
             capability_scope=invocation.capability_scope,
             idempotency_key=invocation.idempotency_key,
-            input=dict(invocation.input),
+            input=input_payload,
             input_trust=invocation.input_trust.value,
-            input_sha256=boundary_digest(dict(invocation.input)),
-            output=output_dict,
+            input_sha256=boundary_digest(input_payload),
+            output=output_payload,
             output_trust=(
                 invocation.output_trust.value
                 if invocation.output_trust is not None
                 else None
             ),
             output_sha256=(
-                boundary_digest(output_dict) if output_dict is not None else None
+                boundary_digest(output_payload) if output_payload is not None else None
             ),
             capability_decision_effect=capability_decision.effect.value,
             capability_grant_id=capability_decision.grant_id,
@@ -144,16 +154,18 @@ class ToolInvocationRepository:
                 f"tool invocation {invocation.tool_invocation_id!r} does not "
                 f"belong to organization {normalized_organization_id}"
             )
-        output_dict = dict(invocation.output) if invocation.output is not None else None
+        # See create_tool_invocation: model_dump() (not dict(...)) is what
+        # thaws every nesting level of a frozen JsonObject, not just the top.
+        output_payload = invocation.model_dump()["output"]
         row.status = invocation.status.value
-        row.output = output_dict
+        row.output = output_payload
         row.output_trust = (
             invocation.output_trust.value
             if invocation.output_trust is not None
             else None
         )
         row.output_sha256 = (
-            boundary_digest(output_dict) if output_dict is not None else None
+            boundary_digest(output_payload) if output_payload is not None else None
         )
         row.error_code = invocation.error_code
         row.status_reason = invocation.status_reason

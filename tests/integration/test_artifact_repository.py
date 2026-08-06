@@ -72,6 +72,34 @@ async def test_create_artifact_fails_closed_without_an_org_context(
 
 
 @pytest.mark.asyncio
+async def test_a_nested_metadata_payload_persists_and_reads_back(
+    repo: ArtifactRepository,
+) -> None:
+    """``JsonObject`` freezes recursively into ``MappingProxyType`` at every
+    nesting level, not just the top one. A shallow ``dict(artifact.metadata)``
+    only thaws the top level, leaving nested mappings as ``mappingproxy``
+    objects asyncpg cannot serialize -- this round-trips a genuinely nested
+    payload through a real INSERT and SELECT rather than asserting on the
+    Python object alone, which would not have caught the defect (only the
+    live INSERT failed; nothing about constructing the row raised)."""
+    nested_metadata = {
+        "license": {"spdx": "MIT", "url": "https://opensource.org/licenses/MIT"},
+        "n": 1,
+    }
+
+    row = await repo.create_artifact(
+        _make_artifact(metadata=nested_metadata), organization_id=ORG_ID
+    )
+    await repo.session.flush()
+
+    fetched = await repo.get_artifact("artifact-1", organization_id=ORG_ID)
+
+    assert fetched is not None
+    assert fetched.metadata_ == nested_metadata
+    assert row.metadata_ == nested_metadata
+
+
+@pytest.mark.asyncio
 async def test_record_status_transition_updates_the_existing_row(
     repo: ArtifactRepository,
 ) -> None:

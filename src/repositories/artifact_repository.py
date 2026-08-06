@@ -48,6 +48,13 @@ class ArtifactRepository:
         """
         normalized_organization_id = normalize_organization_id(organization_id)
         binding = artifact.prompt_binding
+        # `JsonObject`'s `AfterValidator` freezes recursively into
+        # `MappingProxyType` at every nesting level, not just the top one, so
+        # `dict(artifact.metadata)` only thaws the top level -- any nested
+        # mapping stays a `mappingproxy`, which asyncpg cannot serialize into
+        # the JSON column. `model_dump()` runs the field's `PlainSerializer`,
+        # which recursively produces plain dicts/lists at every level.
+        metadata = artifact.model_dump()["metadata"]
         row = AgentArtifact(
             artifact_id=artifact.artifact_id,
             run_id=artifact.run_id,
@@ -61,7 +68,7 @@ class ArtifactRepository:
             status=artifact.status.value,
             trust=artifact.trust.value,
             producer=artifact.producer,
-            metadata_=dict(artifact.metadata),
+            metadata_=metadata,
             producer_kind=artifact.producer_kind.value,
             prompt_id=binding.prompt_id if binding else None,
             prompt_version=binding.prompt_version if binding else None,
