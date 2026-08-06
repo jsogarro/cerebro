@@ -485,11 +485,11 @@ class TestLicenseCapture:
         outcome = await _acquire(service, prompt=prompt)
 
         assert outcome.artifact is not None
-        assert outcome.artifact.metadata["license"] == {
-            "identifier": "CC-BY-4.0",
-            "declared_by": "http_header",
-            "statement": "Creative Commons Attribution 4.0",
-        }
+        assert outcome.artifact.metadata["license_identifier"] == "CC-BY-4.0"
+        assert outcome.artifact.metadata["license_declared_by"] == "http_header"
+        assert outcome.artifact.metadata["license_statement"] == (
+            "Creative Commons Attribution 4.0"
+        )
 
     @pytest.mark.asyncio
     async def test_a_source_declaring_nothing_is_recorded_as_undeclared(
@@ -502,11 +502,9 @@ class TestLicenseCapture:
         outcome = await _acquire(service, prompt=prompt)
 
         assert outcome.artifact is not None
-        assert outcome.artifact.metadata["license"] == {
-            "identifier": None,
-            "declared_by": "undeclared",
-            "statement": None,
-        }
+        assert outcome.artifact.metadata["license_declared_by"] == "undeclared"
+        assert outcome.artifact.metadata["license_identifier"] is None
+        assert outcome.artifact.metadata["license_statement"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -396,7 +396,18 @@ class SourceAcquisitionService:
                 # mark verbatim source text as model-shaped content.
                 trust=trust,
                 prompt_binding=binding,
-                producer_tool_invocation_id=outcome.invocation.tool_invocation_id,
+                # Left unset, and the reason is a stated limit rather than a
+                # dropped link. This column is a foreign key to
+                # `agent_tool_invocations`, and nothing writes that table
+                # today: the boundary's audit-store protocol does not carry
+                # the `CapabilityDecision` that
+                # `ToolInvocationRepository.create_tool_invocation` requires,
+                # so no adapter between them can be written as both sides
+                # stand. Setting it produces a live foreign-key violation. The
+                # invocation id is recorded in the snapshot artifact's
+                # metadata meanwhile, so the provenance survives and the
+                # column can be backfilled once that seam is closed.
+                producer_tool_invocation_id=None,
                 acquired_at=now,
             )
             await self._evidence.record_evidence(
@@ -476,7 +487,17 @@ class SourceAcquisitionService:
             "source_uri": source_uri,
             "final_uri": handle.final_uri,
             "byte_length": handle.byte_length,
-            "license": handle.license().as_metadata(),
+            # Flattened rather than nested under a "license" key. Nested
+            # mappings are currently unpersistable through
+            # `ArtifactRepository.create_artifact`, which shallow-copies a
+            # `JsonObject` that the contract freezes recursively, leaving
+            # inner levels as `mappingproxy` for asyncpg to reject. Flat keys
+            # also read better from SQL, so this is not purely a workaround —
+            # but the defect is real and reported rather than absorbed.
+            **{
+                f"license_{key}": value
+                for key, value in handle.license().as_metadata().items()
+            },
             "tool_invocation_id": invocation.tool_invocation_id,
             "tool_name": invocation.tool_name,
             "tool_version": invocation.tool_version,
