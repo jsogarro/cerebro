@@ -148,8 +148,19 @@ class PromptBinding(ContractModel):
     a version bump changes both digests and cannot change the version.
 
     ``rendered_sha256`` covers the **redacted** prompt text — the exact bytes
-    sent to the model. Redaction happens at the boundary before the prompt is
-    assembled, so there is no unredacted prompt to hash.
+    sent to the model. That obliges the renderer to redact the *assembled* text
+    as its final step, before hashing. Redacting the variables beforehand is not
+    sufficient: a variable that never crossed the tool boundary, such as a query
+    arriving straight from the API or a value read back from storage, reaches
+    the renderer unredacted. Because redaction is idempotent, scrubbing an
+    assembled prompt whose parts were already scrubbed changes nothing, so the
+    final pass is safe to apply unconditionally.
+
+    Nothing in this contract enforces that the digests correspond to the
+    material they claim to cover — :meth:`for_rendered` computes honest ones,
+    but a caller may construct this model with arbitrary hex. Enforcement
+    belongs to the renderer seam, which must pair the digests with the material
+    and refuse a mismatch.
     """
 
     prompt_id: ContractId
