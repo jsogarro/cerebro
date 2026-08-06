@@ -36,19 +36,28 @@ async def set_postgres_tenant_context(
 ) -> None:
     """Set the transaction-local tenant context used by Postgres RLS policies.
 
+    Written as ``set_config(..., is_local => true)`` rather than ``SET LOCAL``.
+    The two are equivalent in effect — both scope the setting to the current
+    transaction, and both are read back by the ``current_setting(
+    'app.current_org_id', true)::uuid`` expression the RLS policies use — but
+    ``SET`` is utility syntax that takes no bind parameters, so
+    ``SET LOCAL app.current_org_id = :organization_id`` reaches Postgres as
+    ``SET LOCAL app.current_org_id = $1`` and fails with a syntax error. The
+    function form accepts the organization as a real parameter, which keeps
+    the tenant identifier off the statement text.
+
     No-op on non-Postgres dialects. RLS policies are Postgres-only — SQLite
-    test/dev databases don't enforce them, so silently skipping the
-    ``SET LOCAL`` statement lets local dev (``DATABASE_URL=sqlite+aiosqlite://``)
-    exercise the same code paths without tripping a syntax error. The tenant
-    boundary is still enforced at the repository layer (``user_id`` and
-    ``organization_id`` filters on every query).
+    test/dev databases don't enforce them, so silently skipping the statement
+    lets local dev (``DATABASE_URL=sqlite+aiosqlite://``) exercise the same
+    code paths. The tenant boundary is still enforced at the repository layer
+    (``user_id`` and ``organization_id`` filters on every query).
     """
     bind = session.get_bind()
     if bind.dialect.name != "postgresql":
         return
 
     await session.execute(
-        text("SET LOCAL app.current_org_id = :organization_id"),
+        text("SELECT set_config('app.current_org_id', :organization_id, true)"),
         {"organization_id": organization_id},
     )
 
