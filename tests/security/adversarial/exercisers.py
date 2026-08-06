@@ -63,7 +63,10 @@ from src.core.tools import (
     ToolOutcomeStatus,
     ToolSpec,
 )
-from src.core.tools.errors import ToolOutcomeNotSuccessfulError
+from src.core.tools.errors import (
+    IdempotencyConflictError,
+    ToolOutcomeNotSuccessfulError,
+)
 from src.security.content_sanitizer import ContentSanitizer
 
 from .harness import (
@@ -865,9 +868,9 @@ async def _poisoned_05() -> Observation:
             "path holds an AsyncSession (the boundary's only store is "
             "InMemoryToolAuditStore), so no evidence row is written by any "
             "mediated call. Exercised against a real Postgres in "
-            "test_corpus_execution_persistence.py, where it is a PROVEN "
-            "DEFECT: an artifact belonging to a different run is accepted as "
-            "an evidence row's snapshot."
+            "test_corpus_execution_persistence.py, where the guarantee now "
+            "HOLDS: the artifact lookup is scoped to the citing evidence's "
+            "own run, so a cross-run reference does not resolve."
         ),
     )
 
@@ -1000,30 +1003,60 @@ async def _privesc_03() -> Observation:
         grants=grants,
         idempotency_key=key,
     )
-    short_circuited = (
-        swapped.status is ToolOutcomeStatus.SUCCEEDED and swapped.decision is None
+    # Keyed on the effect, not on a signature detail. An earlier version of
+    # this predicate also required `swapped.decision is None`, which was true
+    # of the bypass at the time and stopped being true the moment a replayed
+    # result began carrying the current caller's decision. A predicate that
+    # reads an incidental property of one implementation stops detecting the
+    # thing it was written for without going red.
+    escalation_succeeded = (
+        swapped.status is ToolOutcomeStatus.SUCCEEDED
+        or wired.call_count(DELETE_PROJECT) > 0
+    )
+    # The control is a real repeat, not an assertion about one: the same key,
+    # the same tool, the same input, under the grant that authorized it.
+    replayed = await wired.boundary.invoke(
+        tool_name=ACADEMIC_SEARCH,
+        run_id=RUN_A,
+        task_id=TASK_A,
+        attempt_id=ATTEMPT_A,
+        organization_id=ORG_A,
+        capability_scope=_SEARCH_SCOPE,
+        arguments={"query": "transformer robustness"},
+        input_trust=TrustClassification.USER_SUPPLIED,
+        grants=grants,
+        idempotency_key=key,
     )
     return Observation(
-        verdict=Verdict.VIOLATED if short_circuited else Verdict.HELD,
+        verdict=Verdict.VIOLATED if escalation_succeeded else Verdict.HELD,
         evidence=(
             f"the key {key!r} was first used for an allowed academic_search "
             f"(status={first.status.value}). Re-presented for delete_project "
             f"at capability_scope='admin:delete_project' with no grant, the "
             f"call returned status={swapped.status.value}, "
-            f"decision={swapped.decision!r}, and the returned record names "
+            f"reason={_denial_reason(swapped)}, and the record names "
             f"tool={swapped.invocation.tool_name!r} / "
-            f"capability_scope={swapped.invocation.capability_scope!r}. "
-            "ToolBoundary.invoke performs the idempotency lookup "
-            "(boundary.py:302) BEFORE the capability decision "
-            "(boundary.py:331), and the lookup keys on (run_id, "
-            "idempotency_key) only — so a caller-supplied key that collides "
-            "with any prior terminal invocation in the same run returns a "
-            "success with no authorization decision at all."
+            f"capability_scope={swapped.invocation.capability_scope!r} — the "
+            f"tool the caller asked for, not the one the key was recorded "
+            f"against. delete_project was never reached "
+            f"(handler_invocations={wired.call_count(DELETE_PROJECT)}).\n\n"
+            "RESOLVED DIFFERENTLY FROM THE SCENARIO'S STATEMENT. The scenario "
+            "expects the key reuse to surface as a conflict, with the new "
+            "capability_scope then independently checked and denied. What "
+            "happens instead is that the dedup lookup now sits *after* the "
+            "capability decision (boundary.py:429), so an unauthorized caller "
+            "is denied before a conflict can arise — the escalating request "
+            "never reaches the lookup at all. That is stronger than the "
+            "stated resolution: the identity comparison closes the hole a "
+            "second way, but only the ordering makes the bypass unreachable."
         ),
         control=(
-            "not applicable — the guarantee did not hold"
-            if short_circuited
-            else "a distinct key was independently authorized"
+            f"the same key, tool, scope and input under the grant that "
+            f"authorized it still replays "
+            f"(status={replayed.status.value}, "
+            f"handler_invocations={wired.call_count(ACADEMIC_SEARCH)} for two "
+            "requests), so the denial above is authorization refusing an "
+            "escalation and not dedup having been switched off"
         ),
     )
 
@@ -1522,11 +1555,11 @@ async def _crosstenant_02() -> Observation:
     return Observation(
         verdict=Verdict.NOT_EXERCISABLE,
         evidence=(
-            "Not runnable in this process: no tool path holds an AsyncSession, so "
-            "no mediated call writes an evidence row. Exercised against a real "
-            "Postgres in test_corpus_execution_persistence.py, where it is a "
-            "PROVEN DEFECT — EvidenceRepository._get_artifact_row selects by "
-            "artifact_id alone, with no organization filter."
+            "Not runnable in this process: no tool path holds an AsyncSession, "
+            "so no mediated call writes an evidence row. Exercised against a "
+            "real Postgres in test_corpus_execution_persistence.py, where the "
+            "guarantee now HOLDS: EvidenceRepository._get_artifact_row is "
+            "scoped to the citing evidence's own organization and run."
         ),
     )
 
@@ -1606,20 +1639,39 @@ async def _crosstenant_05() -> Observation:
     before = wired.call_count(ACADEMIC_SEARCH)
     tenant_b = await call(ORG_B, "attempt-b")
     after = wired.call_count(ACADEMIC_SEARCH)
-    served_from_a = after == before and tenant_b.decision is None
+    # Keyed on the effect — the handler was not re-entered and tenant B holds
+    # tenant A's invocation record — rather than on `tenant_b.decision is
+    # None`, which is what this predicate used to read. That property was
+    # incidental to the old implementation: once a replayed result began
+    # carrying the current caller's decision, the predicate silently stopped
+    # detecting a violation that is still entirely present, and this scenario
+    # reported HELD while its own evidence string said tenant B had been
+    # served tenant A's result. A predicate that keys on a signature detail
+    # rather than on the effect stops working without going red.
+    served_from_a = (
+        after == before
+        and tenant_b.invocation.tool_invocation_id
+        == tenant_a.invocation.tool_invocation_id
+    )
     return Observation(
         verdict=Verdict.VIOLATED if served_from_a else Verdict.HELD,
         evidence=(
             f"tenant A executed the call (status={tenant_a.status.value}, "
             f"handler_invocations={before}); tenant B presenting the same key "
             f"was served tenant A's recorded outcome without executing "
-            f"(handler_invocations={after}, "
-            f"decision={tenant_b.decision!r}). "
+            f"(handler_invocations={after}, and tenant B's returned "
+            f"tool_invocation_id is tenant A's: "
+            f"{tenant_b.invocation.tool_invocation_id == tenant_a.invocation.tool_invocation_id}). "
             "InMemoryToolAuditStore.find_invocation accepts organization_id "
             "and never reads it (src/agents/tools/mediation.py:283-292); it "
             "matches on (run_id, idempotency_key) alone. Nothing at the "
             "boundary binds a run_id to an organization either, so a caller "
-            "naming another tenant's run is not refused."
+            "naming another tenant's run is not refused. The 4C reordering "
+            "does not touch this: tenant B's request is genuinely authorized "
+            "(the grant matches run, task, tool and scope; organization_id is "
+            "not an input to the capability decision at all), so it reaches "
+            "the lookup and _require_same_request finds no mismatch — the two "
+            "requests differ only in a field neither check reads."
         ),
         control=(
             "not applicable — the guarantee did not hold"
@@ -2026,32 +2078,57 @@ async def _replay_03() -> Observation:
 
     original = await call("transformer robustness survey", ATTEMPT_A)
     before = wired.call_count(ACADEMIC_SEARCH)
-    mutated = await call("DELETE all citations for project X", "attempt-2")
+
+    # The rejection is a raise, not a returned outcome, and it has to be
+    # caught here. Left uncaught it propagates out of the exerciser, pytest
+    # records the scenario as failing, and a strict xfail turns that into a
+    # green xfail — a defect report generated by the guarantee *working*.
+    # That is the same false-result shape as a test that fails in its fixture.
+    conflict: str | None = None
+    mutated: ToolOutcome | None = None
+    try:
+        mutated = await call("DELETE all citations for project X", "attempt-2")
+    except IdempotencyConflictError as error:
+        conflict = str(error)
     after = wired.call_count(ACADEMIC_SEARCH)
+
     served_stale = (
-        after == before
+        conflict is None
+        and mutated is not None
+        and after == before
         and mutated.status is ToolOutcomeStatus.SUCCEEDED
         and dict(mutated.invocation.input).get("query")
         == "transformer robustness survey"
     )
+    # The paired allow: the same key with the SAME input still replays, so the
+    # rejection above is the conflict check discriminating rather than the key
+    # having been invalidated by its first use.
+    replayed = await call("transformer robustness survey", ATTEMPT_A)
     return Observation(
         verdict=Verdict.VIOLATED if served_stale else Verdict.HELD,
         evidence=(
             f"the key {key!r} was recorded against "
-            f"{dict(original.invocation.input)!r}. Re-presented with "
-            f"{'DELETE all citations for project X'!r} it returned "
-            f"status={mutated.status.value} carrying the ORIGINAL input "
-            f"{dict(mutated.invocation.input)!r}, and the handler was not "
-            f"re-entered (handler_invocations {before} -> {after}). The "
-            "mismatch is neither detected nor rejected: "
-            "ToolAuditStore.find_invocation is keyed on (run_id, "
-            "idempotency_key) only, so the caller-supplied key repoints the "
-            "slot at different work with no conflict."
+            f"{dict(original.invocation.input)!r}. Re-presented with a "
+            f"different query it was rejected outright: "
+            f"IdempotencyConflictError({conflict!r}), and the handler was not "
+            f"re-entered (handler_invocations {before} -> {after}). This is "
+            "what the scenario asks for — 'a conflict, rejected outright, "
+            "never silently served the cached result or silently executed as "
+            "new, unaudited work under an old key'. "
+            "boundary._require_same_request compares the recorded tool name, "
+            "version, capability scope, and a digest recomputed from the "
+            "stored redacted input.\n\n"
+            "Worth noting for a caller: the rejection is an exception rather "
+            "than a DENIED outcome, so it is the one boundary refusal that "
+            "leaves no invocation record and that a caller handling only "
+            "ToolOutcome will not see."
         ),
         control=(
-            "not applicable — the guarantee did not hold"
-            if served_stale
-            else "the mismatched replay was rejected as a conflict"
+            f"the same key with the same input still replays "
+            f"(status={replayed.status.value}, handler_invocations "
+            f"{after} -> {wired.call_count(ACADEMIC_SEARCH)}), so the "
+            "rejection is the conflict check discriminating on content and "
+            "not the key being spent"
         ),
     )
 
@@ -2207,20 +2284,47 @@ async def _oversized_02() -> Observation:
         )
 
     deep = await call(node, "attempt-deep")
-    control = await call("not-an-object", "attempt-control")
+    # The control has to be a call that SUCCEEDS. It used to be a wrong-typed
+    # filter, which was a real discriminator while the deep payload was being
+    # accepted — but once the deep payload started returning INVALID_INPUT too,
+    # both arms read identically and the control stopped distinguishing "the
+    # depth was rejected" from "this tool rejects everything".
+    control = await call({"field": "value"}, "attempt-control")
     accepted = deep.status is ToolOutcomeStatus.SUCCEEDED
     return Observation(
         verdict=Verdict.VIOLATED if accepted else Verdict.HELD,
         evidence=(
-            f"a 400-level nested object was validated, walked by _json_ready, "
-            f"walked again by redact, canonicalized, hashed, and persisted "
-            f"(status={deep.status.value}). No nesting-depth limit exists at "
-            "the boundary, and every one of those steps is recursive."
+            f"a 400-level nested object now resolves to a recorded, denied "
+            f"outcome (status={deep.status.value}, "
+            f"error_code={deep.error_code!r}) instead of being accepted and "
+            f"persisted.\n\n"
+            "HOLDS FOR A DIFFERENT REASON THAN THE SCENARIO EXPECTS. The "
+            "scenario asks for a declared nesting-depth limit enforced before "
+            "any recursive step. There is still no depth limit and no size "
+            "ceiling anywhere — 4C deliberately deferred those to Wave 6. What "
+            "changed is where the guard sits: contract validation runs at the "
+            "input rather than at record construction, RecursionError is "
+            "caught, and the rejection path no longer re-walks the payload "
+            "that caused it. So the boundary now *fails closed* on depth "
+            "rather than crashing or accepting.\n\n"
+            "That resolves the part of my earlier report that mattered most — "
+            "the outcome used to depend on call-stack depth and interpreter "
+            "configuration, yielding acceptance, an uncatchable RecursionError "
+            "inside redact, or an uncaught ValidationError raised from "
+            "ToolInvocation construction outside the try/except. All three "
+            "now yield INVALID_INPUT. The absent ceiling remains a Wave 6 "
+            "item, and it is a resource-exhaustion concern rather than a "
+            "correctness one: the work is still done before the rejection."
         ),
         control=(
             "not applicable — the guarantee did not hold"
             if accepted
-            else f"a wrong-typed filter was rejected ({control.status.value})"
+            else (
+                f"a shallow, well-typed filter through the identical tool and "
+                f"grant SUCCEEDS ({control.status.value}), so the rejection "
+                "above is the depth being refused and not this tool refusing "
+                "every input"
+            )
         ),
     )
 

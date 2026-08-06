@@ -23,13 +23,23 @@ only ``live_eval``, so a default ``uv run pytest`` runs this module and starts a
 Postgres container. That is the existing convention rather than a choice made
 here, but it does mean adding this file moves the suite's totals.
 
-**Why the digests matching is not a mitigation.** ``record_evidence`` does
-compare ``Evidence.content_sha256`` against the referenced artifact's digest,
-and at first reading that looks like it would stop a cross-tenant reference.
-It does not: artifacts are content-addressed, so two tenants that acquire the
-same public source produce byte-identical content and therefore an identical
-digest. Pointing at the other tenant's row requires no secret knowledge — only
-fetching the same page.
+**Why the digests matching is not a mitigation**, which is what made this
+worth exercising at all. ``record_evidence`` does compare
+``Evidence.content_sha256`` against the referenced artifact's digest, and at
+first reading that looks like it would stop a cross-tenant reference. It does
+not: artifacts are content-addressed, so two tenants that acquire the same
+public source produce byte-identical content and therefore an identical digest.
+The check agrees by construction, and pointing at the other tenant's row
+requires no secret knowledge — only fetching the same page.
+
+**Both guarantees now hold.** They did not when this module was written: the
+artifact lookup selected on ``artifact_id`` alone. It is now scoped to the
+citing evidence's own organization *and* run, so neither reference resolves and
+both fail the pre-existing "does not exist" path — which deliberately does not
+distinguish wrong-tenant from wrong-run from never-existed, so no read leaks
+which case applies. The two tests below are kept as plain assertions rather
+than deleted: they are the regression cover for a hole that was invisible
+behind a digest check that looked like it was doing the work.
 """
 
 from __future__ import annotations
