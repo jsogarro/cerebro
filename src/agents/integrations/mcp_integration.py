@@ -1,21 +1,74 @@
 """MCP Integration for Agents.
 
-This module provides the integration layer between agents and MCP tools,
-enabling agents to use real external services in production.
+The integration layer between agents and MCP tools. Every operation runs
+through the tool boundary (:mod:`src.core.tools`); the specifications it is
+registered under are in :mod:`src.agents.integrations.mcp_tool_specs`.
 
-Security: Applies content sanitization at external source boundaries to
-defend against prompt injection via malicious titles/abstracts (Phase S3).
+Packet 4-Char characterized what this replaces, and the shape of the result is
+a direct answer to each finding:
+
+- ``data_source`` was computed as ``"mcp_tools" if success else "fallback"``,
+  checking only ``success`` and never ``fallback`` — and every fallback set
+  ``success: True``. A fabricated stand-in therefore reached the user labelled
+  as a real tool result. **A degraded result now reports ``success: False``.**
+  The flag is projected from a boundary outcome, and only the boundary can mint
+  a successful one, so the mislabelling is not corrected by a better
+  conditional — it is unrepresentable.
+- One flaky call and a sustained outage produced the identical value. They are
+  now distinct ``tool_outcome`` states carried to the caller.
+- Sanitization ran on academic search alone. It now runs inside every handler,
+  on the whole payload.
+- No public method threaded a run/task/attempt id. Every operation takes an
+  optional :class:`~src.agents.tools.mediation.ToolCallIdentity`, and a call
+  made without one is recorded and reported as uncorrelatable rather than
+  given a plausible identifier.
+- ``initialize()`` constructed ``MCPClient()`` before its own try/except, so a
+  construction failure escaped the fallback, the breaker, and the sanitizer
+  entirely — for every caller that does not inject a client, which is every
+  caller in production. Construction now happens inside the mediated handler,
+  where a failure is an ordinary recorded tool error.
+
+**What a degraded result still contains.** With ``enable_fallback`` on, the
+payload carries stand-in content so a partially-working pipeline keeps moving.
+Every level of it says so: ``success`` is ``False``, ``degraded`` is ``True``,
+``data_source`` is ``"fallback"``, ``fallback`` is ``True``, and each
+fabricated source carries ``source: "fallback"``. Deleting the fabrication
+outright is a separate decision from routing, and it is not this module's to
+make; what routing guarantees is that no consumer can mistake it for measured
+data by reading the flag it already reads.
 """
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from structlog import get_logger
 
+from src.agents.integrations.mcp_tool_specs import (
+    DEFAULT_MCP_TIMEOUT_SECONDS,
+    MCP_SENSITIVITY,
+    TOOL_ACADEMIC_SEARCH,
+    TOOL_ANALYZE_STATISTICS,
+    TOOL_BUILD_KNOWLEDGE_GRAPH,
+    TOOL_FORMAT_CITATIONS,
+    build_specs,
+)
+from src.agents.tools.mediation import (
+    InMemoryToolAuditStore,
+    ToolCallIdentity,
+    build_tool_boundary,
+    plain,
+    self_issued_grant,
+)
+from src.core.contracts.capabilities import CapabilityGrant
+from src.core.contracts.trust import TrustClassification
+from src.core.tools import (
+    ToolAuditStore,
+    ToolBoundary,
+    ToolOutcome,
+)
 from src.security.content_sanitizer import ContentSanitizer
 
 if TYPE_CHECKING:
@@ -23,12 +76,23 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+MCP_INPUT_TRUST = TrustClassification.USER_SUPPLIED
+"""Query strings and source lists originate with the user, not the system."""
+
+MCP_OUTPUT_TRUST = TrustClassification.EXTERNAL_UNTRUSTED
+"""Everything these tools return came from outside the tenant boundary.
+
+Declared rather than derived. The boundary would otherwise propagate the input
+label forward, and ``USER_SUPPLIED`` is a materially weaker statement about a
+paper abstract fetched from arxiv than ``EXTERNAL_UNTRUSTED`` is.
+"""
+
 
 class MCPIntegration:
     """Integration layer between agents and MCP tools.
 
-    Provides a production-ready interface for agents to access
-    external tools with proper error handling and fallback mechanisms.
+    Provides a production-ready interface for agents to access external tools,
+    with every call mediated and every degraded outcome explicit.
     """
 
     def __init__(
@@ -36,93 +100,108 @@ class MCPIntegration:
         mcp_client: MCPClient | None = None,
         config: dict[str, Any] | None = None,
         enable_fallback: bool = True,
+        *,
+        identity: ToolCallIdentity | None = None,
+        boundary: ToolBoundary | None = None,
+        audit_store: ToolAuditStore | None = None,
+        grants: Sequence[CapabilityGrant] | None = None,
     ):
         """Initialize MCP integration.
 
         Args:
-            mcp_client: Optional pre-configured MCP client
-            config: Configuration dictionary
-            enable_fallback: Whether to enable fallback when tools fail
+            mcp_client: Optional pre-configured MCP client.
+            config: Configuration dictionary.
+            enable_fallback: Whether a degraded result carries stand-in content.
+            identity: Default run/task/attempt correlation for calls that do
+                not supply their own.
+            boundary: An already-configured tool boundary. Supply one to share
+                breaker state and provenance with the rest of a run.
+            audit_store: Where invocations are recorded. Defaults to an
+                in-memory store, which is not durable — see
+                ``src/agents/tools/mediation.py``.
+            grants: Capability grants from a real issuer. Without them a
+                self-issued grant is minted per call, which is not
+                authorization; the same module says so at length.
 
         """
         self.config = config or {}
         self.enable_fallback = enable_fallback
         self._client = mcp_client
         self._initialized = False
-        self._tool_cache: dict[str, Any] = {}
-
-        # Circuit breaker settings
-        self._failure_count = 0
-        self._max_failures = self.config.get("max_failures", 5)
-        self._circuit_breaker_timeout = self.config.get("circuit_breaker_timeout", 60)
-        self._last_failure_time: float = 0
+        self._identity = identity
+        self._grants = list(grants) if grants is not None else None
+        self._last_identity_bound = identity.bound if identity is not None else True
 
         # S3: Content sanitizer for prompt injection defense at external boundaries
         self._content_sanitizer = ContentSanitizer(enable_logging=True)
 
+        self._boundary = boundary or build_tool_boundary(
+            audit_store=audit_store or InMemoryToolAuditStore()
+        )
+        for spec in build_specs(
+            client=self._connected_client,
+            sanitizer=self._content_sanitizer,
+            timeout_seconds=float(
+                self.config.get("tool_timeout_seconds", DEFAULT_MCP_TIMEOUT_SECONDS)
+            ),
+        ):
+            self._boundary.register(spec)
+
         logger.info("mcp_integration_initialized", fallback_enabled=enable_fallback)
 
-    async def initialize(self) -> None:
-        """Initialize the MCP client if not already done."""
-        if self._initialized:
-            return
+    @property
+    def boundary(self) -> ToolBoundary:
+        """The mediator every MCP operation in this integration runs through."""
 
-        if not self._client:
+        return self._boundary
+
+    async def initialize(self) -> None:
+        """Construct and health-check the client, if that has not happened.
+
+        Retained for callers that want to warm the client up front. It is no
+        longer a precondition of any operation: each handler obtains the client
+        itself, inside the boundary, so a construction failure is a mediated,
+        recorded, breaker-counted outcome instead of an exception thrown past
+        every protection this class offers.
+        """
+
+        try:
+            await self._connected_client()
+        except Exception as error:
+            logger.error("mcp_client_initialization_failed", error=str(error))
+            if not self.enable_fallback:
+                raise
+
+    async def _connected_client(self) -> MCPClient:
+        """Return the client, building and health-checking it on first use."""
+
+        if self._client is None:
             # Imported here, not at module scope: `MCPClient` reaches
             # `MCPServer` and therefore the optional `fastmcp` extra, and a
-            # caller that injects its own client never needs either. At module
-            # scope this coupling made the whole integration — and every test
-            # covering it — unimportable without an extra it does not use.
+            # caller that injects its own client never needs either.
             from src.mcp.client import MCPClient
             from src.mcp.server import MCPServerConfig
 
-            server_config = MCPServerConfig(
-                name=self.config.get("server_name", "research-mcp-server"),
-                port=self.config.get("server_port", 9000),
-                host=self.config.get("server_host", "localhost"),
+            self._client = MCPClient(
+                MCPServerConfig(
+                    name=self.config.get("server_name", "research-mcp-server"),
+                    port=self.config.get("server_port", 9000),
+                    host=self.config.get("server_host", "localhost"),
+                )
             )
-            self._client = MCPClient(server_config)
 
-        # Validate client health
-        try:
+        if not self._initialized:
             health = await self._client.health_check()
             if health.get("client") == "healthy":
                 self._initialized = True
                 logger.info("mcp_client_initialized")
             else:
                 logger.warning("mcp_client_health_check_failed", health=health)
-        except Exception as e:
-            logger.error("mcp_client_initialization_failed", error=str(e))
-            if not self.enable_fallback:
-                raise
+        return self._client
 
-    @asynccontextmanager
-    async def _circuit_breaker(self) -> AsyncIterator[None]:
-        """Circuit breaker pattern for tool execution."""
-        import time
-
-        current_time = time.time()
-
-        # Check if circuit breaker is open
-        if (
-            self._failure_count >= self._max_failures
-            and current_time - self._last_failure_time < self._circuit_breaker_timeout
-        ):
-            raise Exception("Circuit breaker is open - too many recent failures")
-
-        try:
-            yield
-            # Reset failure count on success
-            self._failure_count = 0
-        except Exception as e:
-            self._failure_count += 1
-            self._last_failure_time = float(current_time)
-            logger.warning(
-                "mcp_tool_execution_failed",
-                failure_count=self._failure_count,
-                error=str(e),
-            )
-            raise
+    # ------------------------------------------------------------------
+    # operations
+    # ------------------------------------------------------------------
 
     async def search_academic_sources(
         self,
@@ -130,289 +209,247 @@ class MCPIntegration:
         databases: list[str] | None = None,
         max_results: int = 20,
         filters: dict[str, Any] | None = None,
+        *,
+        identity: ToolCallIdentity | None = None,
     ) -> dict[str, Any]:
-        """Search academic databases using MCP tools.
+        """Search academic databases through the boundary."""
 
-        Args:
-            query: Search query
-            databases: List of databases to search
-            max_results: Maximum number of results
-            filters: Search filters
-
-        Returns:
-            Search results with metadata
-
-        """
-        await self.initialize()
-
-        databases = databases or ["arxiv", "pubmed"]
-        filters = filters or {}
-
-        try:
-            async with self._circuit_breaker():
-                if self._client is None:
-                    raise Exception("MCP client not initialized")
-                result = await self._client.search_academic(
-                    query=query,
-                    databases=databases,
-                    max_results=max_results,
-                )
-
-                if result.get("success"):
-                    # S3: Sanitize external sources at MCP boundary (prompt injection defense)
-                    raw_sources = result.get("results", [])
-                    sanitized_sources = self._sanitize_academic_sources(raw_sources)
-
-                    logger.info(
-                        "mcp_academic_search_succeeded",
-                        result_count=len(sanitized_sources),
-                        database_count=len(databases),
-                    )
-                    return {
-                        "success": True,
-                        "sources": sanitized_sources,
-                        "total_found": len(sanitized_sources),
-                        "databases_searched": databases,
-                        "search_strategy": f"Multi-database search across {', '.join(databases)}",
-                    }
-                raise Exception(
-                    f"Academic search failed: {result.get('error', 'Unknown error')}",
-                )
-
-        except Exception as e:
-            logger.error("mcp_academic_search_failed", error=str(e))
-            if self.enable_fallback:
-                return self._fallback_academic_search(query, databases, max_results)
-            raise
+        databases = databases or ["arxiv"]
+        outcome = await self._invoke(
+            TOOL_ACADEMIC_SEARCH,
+            {
+                "query": query,
+                "databases": databases,
+                "max_results": max_results,
+                "filters": filters or {},
+            },
+            identity=identity,
+        )
+        if outcome.succeeded:
+            return self._succeeded(outcome)
+        return self._degraded(
+            outcome,
+            fallback=lambda: self._fallback_academic_search(
+                query, databases, max_results
+            ),
+            empty={
+                "sources": [],
+                "total_found": 0,
+                "databases_searched": databases,
+                "search_strategy": "Unavailable",
+            },
+        )
 
     async def format_citations(
         self,
         sources: list[dict[str, Any]],
         style: str = "APA",
+        *,
+        identity: ToolCallIdentity | None = None,
     ) -> dict[str, Any]:
-        """Format citations using MCP citation tool.
+        """Format citations through the boundary."""
 
-        Args:
-            sources: List of source dictionaries
-            style: Citation style (APA, MLA, Chicago)
-
-        Returns:
-            Formatted citations
-
-        """
-        await self.initialize()
-
-        try:
-            async with self._circuit_breaker():
-                if self._client is None:
-                    raise Exception("MCP client not initialized")
-                result = await self._client.format_citations(
-                    sources=sources,
-                    style=style,
-                )
-
-                if result.get("success"):
-                    logger.info(
-                        "mcp_citation_formatting_succeeded",
-                        source_count=len(sources),
-                        style=style,
-                    )
-                    return {
-                        "success": True,
-                        "formatted_citations": result.get("citations", []),
-                        "style": style,
-                        "total_sources": len(sources),
-                    }
-                raise Exception(
-                    f"Citation formatting failed: {result.get('error', 'Unknown error')}",
-                )
-
-        except Exception as e:
-            logger.error("mcp_citation_formatting_failed", style=style, error=str(e))
-            if self.enable_fallback:
-                return self._fallback_citation_formatting(sources, style)
-            raise
+        outcome = await self._invoke(
+            TOOL_FORMAT_CITATIONS,
+            {"sources": sources, "style": style},
+            identity=identity,
+        )
+        if outcome.succeeded:
+            return self._succeeded(outcome)
+        return self._degraded(
+            outcome,
+            fallback=lambda: self._fallback_citation_formatting(sources, style),
+            empty={
+                "formatted_citations": [],
+                "style": style,
+                "total_sources": len(sources),
+            },
+        )
 
     async def analyze_statistics(
         self,
         operation: str,
         data: list[Any] | None = None,
+        *,
+        identity: ToolCallIdentity | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Perform statistical analysis using MCP statistics tool.
+        """Perform statistical analysis through the boundary."""
 
-        Args:
-            operation: Statistical operation to perform
-            data: Data for analysis
-            **kwargs: Additional parameters
-
-        Returns:
-            Statistical analysis results
-
-        """
-        await self.initialize()
-
-        try:
-            async with self._circuit_breaker():
-                if self._client is None:
-                    raise Exception("MCP client not initialized")
-                result = await self._client.analyze_statistics(
-                    operation=operation,
-                    data=data,
-                    **kwargs,
-                )
-
-                if result.get("success"):
-                    logger.info(
-                        "mcp_statistical_analysis_succeeded",
-                        operation=operation,
-                        data_points=len(data) if data else 0,
-                    )
-                    return {
-                        "success": True,
-                        "analysis": result.get("result", {}),
-                        "operation": operation,
-                        "data_points": len(data) if data else 0,
-                    }
-                raise Exception(
-                    f"Statistical analysis failed: {result.get('error', 'Unknown error')}",
-                )
-
-        except Exception as e:
-            logger.error(
-                "mcp_statistical_analysis_failed",
-                operation=operation,
-                error=str(e),
-            )
-            if self.enable_fallback:
-                return self._fallback_statistical_analysis(operation, data, **kwargs)
-            raise
+        outcome = await self._invoke(
+            TOOL_ANALYZE_STATISTICS,
+            {"operation": operation, "data": data, **kwargs},
+            identity=identity,
+        )
+        if outcome.succeeded:
+            return self._succeeded(outcome)
+        return self._degraded(
+            outcome,
+            fallback=lambda: self._fallback_statistical_analysis(
+                operation, data, **kwargs
+            ),
+            empty={
+                "analysis": {},
+                "operation": operation,
+                "data_points": len(data) if data else 0,
+            },
+        )
 
     async def build_knowledge_graph(
         self,
         text: str | None = None,
         entities: list[Any] | None = None,
         relationships: list[Any] | None = None,
+        *,
+        identity: ToolCallIdentity | None = None,
     ) -> dict[str, Any]:
-        """Build knowledge graph using MCP knowledge graph tool.
+        """Build a knowledge graph through the boundary."""
 
-        Args:
-            text: Text for entity extraction
-            entities: Pre-defined entities
-            relationships: Pre-defined relationships
-
-        Returns:
-            Knowledge graph data
-
-        """
-        await self.initialize()
-
-        try:
-            async with self._circuit_breaker():
-                if self._client is None:
-                    raise Exception("MCP client not initialized")
-                result = await self._client.build_knowledge_graph(
-                    text=text,
-                    entities=entities,
-                    relationships=relationships,
-                )
-
-                if result.get("success"):
-                    logger.info("mcp_knowledge_graph_build_succeeded")
-                    return {
-                        "success": True,
-                        "graph": result.get("graph", {}),
-                        "entities": result.get("entities", []),
-                        "relationships": result.get("relationships", []),
-                    }
-                raise Exception(
-                    f"Knowledge graph building failed: {result.get('error', 'Unknown error')}",
-                )
-
-        except Exception as e:
-            logger.error("mcp_knowledge_graph_build_failed", error=str(e))
-            if self.enable_fallback:
-                return self._fallback_knowledge_graph(text, entities, relationships)
-            raise
+        outcome = await self._invoke(
+            TOOL_BUILD_KNOWLEDGE_GRAPH,
+            {"text": text, "entities": entities, "relationships": relationships},
+            identity=identity,
+        )
+        if outcome.succeeded:
+            return self._succeeded(outcome)
+        return self._degraded(
+            outcome,
+            fallback=lambda: self._fallback_knowledge_graph(
+                text, entities, relationships
+            ),
+            empty={"graph": {}, "entities": [], "relationships": []},
+        )
 
     async def get_tool_status(self) -> dict[str, Any]:
-        """Get status of all available MCP tools.
-
-        Returns:
-            Tool status information
-
-        """
-        await self.initialize()
+        """Report what the integration can currently reach."""
 
         try:
-            if self._client is None:
-                raise Exception("MCP client not initialized")
-            health = await self._client.health_check()
-            available_tools = self._client.get_available_tools()
-
-            return {
-                "initialized": self._initialized,
-                "client_health": health,
-                "available_tools": available_tools,
-                "failure_count": self._failure_count,
-                "circuit_breaker_open": (
-                    self._failure_count >= self._max_failures
-                    and (asyncio.get_event_loop().time() - self._last_failure_time)
-                    < self._circuit_breaker_timeout
-                ),
-            }
-        except Exception as e:
-            logger.error("mcp_tool_status_get_failed", error=str(e))
+            connected = await self._connected_client()
+            health = await connected.health_check()
+            available_tools = connected.get_available_tools()
+        except Exception as error:
+            logger.error("mcp_tool_status_get_failed", error=str(error))
             return {
                 "initialized": False,
-                "error": str(e),
+                "error": str(error),
                 "fallback_enabled": self.enable_fallback,
+                "mediated": True,
             }
 
-    # S3: Content sanitization for prompt injection defense
+        return {
+            "initialized": self._initialized,
+            "client_health": health,
+            "available_tools": available_tools,
+            "mediated": True,
+            "registered_tools": [
+                TOOL_ACADEMIC_SEARCH,
+                TOOL_FORMAT_CITATIONS,
+                TOOL_ANALYZE_STATISTICS,
+                TOOL_BUILD_KNOWLEDGE_GRAPH,
+            ],
+        }
 
-    def _sanitize_academic_sources(
+    # ------------------------------------------------------------------
+    # mediation
+    # ------------------------------------------------------------------
+
+    async def _invoke(
         self,
-        sources: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Sanitize academic sources at the MCP boundary.
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        identity: ToolCallIdentity | None,
+    ) -> ToolOutcome:
+        call_identity = (
+            identity
+            or self._identity
+            or ToolCallIdentity.unbound(label=tool_name.replace(".", "-"))
+        )
+        now = datetime.now(UTC)
+        spec = self._boundary.specification(tool_name)
+        grants = self._grants
+        if grants is None:
+            grants = [
+                self_issued_grant(
+                    tool_name=spec.name,
+                    tool_version=spec.version,
+                    sensitivity=MCP_SENSITIVITY,
+                    input_trust=MCP_INPUT_TRUST,
+                    identity=call_identity,
+                    now=now,
+                )
+            ]
+        outcome = await self._boundary.invoke(
+            tool_name=tool_name,
+            run_id=call_identity.run_id,
+            task_id=call_identity.task_id,
+            attempt_id=call_identity.attempt_id,
+            organization_id=call_identity.organization_id,
+            capability_scope=grants[0].capability_scope if grants else "",
+            arguments=arguments,
+            input_trust=MCP_INPUT_TRUST,
+            output_trust=MCP_OUTPUT_TRUST,
+            grants=grants,
+        )
+        self._last_identity_bound = call_identity.bound
+        return outcome
 
-        Applies conservative sanitization to all string-valued fields (title,
-        abstract, authors, journal, etc.) to neutralize instruction-like
-        injection patterns while preserving legitimate academic text.
+    def _succeeded(self, outcome: ToolOutcome) -> dict[str, Any]:
+        payload: dict[str, Any] = dict(plain(outcome.unwrap()))
+        payload.update(
+            {
+                "success": True,
+                "degraded": False,
+                "fallback": False,
+                "data_source": "mcp_tools",
+                "tool_outcome": outcome.status.value,
+                "tool_invocation_id": outcome.invocation.tool_invocation_id,
+                "identity_bound": self._last_identity_bound,
+            }
+        )
+        return payload
 
-        Args:
-            sources: Raw source dicts from MCP (each has title, abstract, authors, etc.)
+    def _degraded(
+        self,
+        outcome: ToolOutcome,
+        *,
+        fallback: Any,
+        empty: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the one shape a non-success outcome may take.
 
-        Returns:
-            Sanitized source dicts with neutralization events logged
-
+        ``success`` is ``False`` on every branch. That is the whole fix for
+        4-Char's CRITICAL: the flag every downstream consumer already reads now
+        answers the question it was always assumed to answer.
         """
-        sanitized_sources = []
 
-        # Sanitize every string-valued field: any of them may reach a
-        # downstream prompt (author/journal names appear in citation and
-        # summary prompts), so do not assume which fields are "safe".
-        for source in sources:
-            sanitized_source = source.copy()
-            for key, value in source.items():
-                if isinstance(value, str):
-                    sanitized_source[key] = self._content_sanitizer.sanitize(
-                        value
-                    ).sanitized_text
-                elif isinstance(value, list):
-                    sanitized_source[key] = [
-                        self._content_sanitizer.sanitize(item).sanitized_text
-                        if isinstance(item, str)
-                        else item
-                        for item in value
-                    ]
+        logger.warning(
+            "mcp_tool_call_degraded",
+            tool=outcome.invocation.tool_name,
+            outcome=outcome.status.value,
+            error_code=outcome.error_code,
+            fallback_used=self.enable_fallback,
+        )
+        payload = dict(fallback()) if self.enable_fallback else dict(empty)
+        payload.update(
+            {
+                "success": False,
+                "degraded": True,
+                "fallback": self.enable_fallback,
+                "data_source": "fallback",
+                "tool_outcome": outcome.status.value,
+                "error_code": outcome.error_code,
+                "detail": outcome.detail,
+                "retry": outcome.retry.value,
+                "tool_invocation_id": outcome.invocation.tool_invocation_id,
+                "identity_bound": self._last_identity_bound,
+            }
+        )
+        return payload
 
-            sanitized_sources.append(sanitized_source)
-
-        return sanitized_sources
-
-    # Fallback implementations for when MCP tools are unavailable
+    # ------------------------------------------------------------------
+    # stand-in content for a degraded result
+    # ------------------------------------------------------------------
 
     def _fallback_academic_search(
         self,
@@ -420,14 +457,18 @@ class MCPIntegration:
         databases: list[str],
         max_results: int,
     ) -> dict[str, Any]:
-        """Fallback implementation for academic search."""
+        """Stand-in sources for a degraded search.
+
+        Every source carries ``source: "fallback"``, and the envelope this is
+        wrapped in reports ``success: False``. It is not a search result and
+        nothing downstream may treat it as one.
+        """
         logger.info(
             "mcp_academic_search_fallback_used",
             database_count=len(databases),
             max_results=max_results,
         )
 
-        # Generate mock results based on query
         mock_sources = []
         for i in range(min(max_results, 5)):
             mock_sources.append(
@@ -443,12 +484,10 @@ class MCPIntegration:
             )
 
         return {
-            "success": True,
             "sources": mock_sources,
             "total_found": len(mock_sources),
             "databases_searched": databases,
             "search_strategy": "Fallback search (MCP tools unavailable)",
-            "fallback": True,
         }
 
     def _fallback_citation_formatting(
@@ -456,7 +495,7 @@ class MCPIntegration:
         sources: list[dict[str, Any]],
         style: str,
     ) -> dict[str, Any]:
-        """Fallback implementation for citation formatting."""
+        """Stand-in citations for a degraded format call."""
         logger.info(
             "mcp_citation_formatting_fallback_used",
             source_count=len(sources),
@@ -475,11 +514,9 @@ class MCPIntegration:
             )
 
         return {
-            "success": True,
             "formatted_citations": formatted_citations,
             "style": style,
             "total_sources": len(sources),
-            "fallback": True,
         }
 
     def _fallback_statistical_analysis(
@@ -488,14 +525,19 @@ class MCPIntegration:
         data: list[Any] | None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Fallback implementation for statistical analysis."""
+        """Locally computed statistics for a degraded analysis call.
+
+        Unlike the other three, this one is genuinely computed rather than
+        invented — but it is still not what the caller asked for, and the
+        envelope still reports ``success: False``.
+        """
         logger.info(
             "mcp_statistical_analysis_fallback_used",
             operation=operation,
             data_points=len(data) if data else 0,
         )
 
-        result = {"operation": operation, "fallback": True}
+        result: dict[str, Any] = {"operation": operation, "fallback": True}
 
         if operation == "descriptive" and data:
             import statistics
@@ -512,7 +554,6 @@ class MCPIntegration:
             result["message"] = f"Basic {operation} analysis completed (fallback mode)"
 
         return {
-            "success": True,
             "analysis": result,
             "operation": operation,
             "data_points": len(data) if data else 0,
@@ -524,14 +565,13 @@ class MCPIntegration:
         entities: list[Any] | None,
         relationships: list[Any] | None,
     ) -> dict[str, Any]:
-        """Fallback implementation for knowledge graph building."""
+        """Stand-in graph for a degraded build call."""
         logger.info(
             "mcp_knowledge_graph_fallback_used",
             entity_count=len(entities) if entities else 0,
             relationship_count=len(relationships) if relationships else 0,
         )
 
-        # Simple entity extraction using basic patterns
         extracted_entities = []
         if text:
             words = text.split()
@@ -542,11 +582,9 @@ class MCPIntegration:
                     )
 
         return {
-            "success": True,
             "graph": {"nodes": len(extracted_entities), "edges": 0},
             "entities": extracted_entities,
             "relationships": relationships or [],
-            "fallback": True,
         }
 
 
@@ -566,15 +604,21 @@ def create_mcp_integrated_agent(
     """
     config = config or {}
 
-    # Create MCP integration
     mcp_config = config.get("mcp", {})
     mcp_integration = MCPIntegration(
         config=mcp_config,
         enable_fallback=mcp_config.get("enable_fallback", True),
     )
 
-    # Add MCP integration to agent config
     agent_config = config.copy()
     agent_config["mcp_integration"] = mcp_integration
 
     return agent_class(config=agent_config)
+
+
+__all__ = [
+    "MCP_INPUT_TRUST",
+    "MCP_OUTPUT_TRUST",
+    "MCPIntegration",
+    "create_mcp_integrated_agent",
+]
