@@ -5,6 +5,7 @@ This agent specializes in formatting citations and verifying sources.
 """
 
 import hashlib
+from datetime import UTC, datetime
 from typing import Any
 
 import orjson
@@ -73,9 +74,11 @@ class CitationAgent(LLMWorkerAgentBase):
                 citation_result, export_formats
             )
 
-            # Calculate confidence score with MCP data quality
+            # Calculate confidence score from actual formatting/verification counts
             confidence = self._calculate_confidence(
-                citation_result, sources, mcp_available=bool(self.mcp_integration)
+                citation_result,
+                sources,
+                verified_count=verification_result.get("verified_count", 0),
             )
 
             # Build enhanced output with MCP data
@@ -147,30 +150,30 @@ class CitationAgent(LLMWorkerAgentBase):
         self,
         citation_data: dict[str, Any],
         sources: list[dict[str, Any]],
-        mcp_available: bool = False,
+        verified_count: int,
     ) -> float:
-        """Calculate confidence score based on citation completeness and MCP integration."""
-        confidence = 0.5
+        """Calculate confidence as the average of two completeness counts.
 
-        # Check if all sources were formatted
-        formatted_count = len(citation_data.get("formatted_citations", []))
-        if formatted_count == len(sources):
-            confidence += 0.25
-        elif formatted_count > 0:
-            confidence += 0.15
+        This reports only what was actually measured: the fraction of
+        sources that were formatted, and the fraction that were verified by
+        ``_verify_sources_with_mcp`` (``verified_count`` is the caller's real
+        verification tally, not read from ``citation_data`` — the formatting
+        result's own ``verified_sources`` field is a same-named but distinct
+        value that some formatting paths set to ``len(sources)``
+        unconditionally, which would silently reintroduce an inflated score
+        under a different name). It no longer starts from a flat 0.5
+        baseline that credited every task regardless of outcome, and no
+        longer adds an MCP-availability bonus — MCP being configured is not
+        evidence the output is more correct.
+        """
+        total = len(sources)
+        if total == 0:
+            return 0.0
 
-        # Check verification status
-        verified = citation_data.get("verified_sources", 0)
-        if verified == len(sources):
-            confidence += 0.25
-        elif verified > 0:
-            confidence += 0.15
+        formatted_fraction = len(citation_data.get("formatted_citations", [])) / total
+        verified_fraction = verified_count / total
 
-        # MCP integration bonus
-        if mcp_available and citation_data.get("success"):
-            confidence += 0.1
-
-        return min(confidence, 1.0)
+        return (formatted_fraction + verified_fraction) / 2
 
     def _generate_cache_key(self, task: AgentTask) -> str:
         """Generate a cache key for the task."""
@@ -436,7 +439,7 @@ Return formatted citations as structured JSON."""
         if year:
             try:
                 year_int = int(year)
-                current_year = 2024
+                current_year = datetime.now(UTC).year
                 if year_int > current_year:
                     issues.append("Future publication year")
                     quality_score -= 0.1
@@ -447,19 +450,9 @@ Return formatted citations as structured JSON."""
                 issues.append("Invalid year format")
                 quality_score -= 0.1
 
-        # Check journal credibility (simple heuristic)
-        journal = source.get("journal", "").lower()
-        reputable_indicators = [
-            "nature",
-            "science",
-            "plos",
-            "ieee",
-            "acm",
-            "springer",
-            "elsevier",
-        ]
-        if any(indicator in journal for indicator in reputable_indicators):
-            quality_score += 0.1
+        # Journal-name substring matching is not a source-quality measurement
+        # and has been removed (it previously granted a quality bonus for any
+        # journal name containing e.g. "nature" or "science" as a substring).
 
         # Overall verification status
         verification_result["quality_score"] = quality_score
@@ -470,29 +463,30 @@ Return formatted citations as structured JSON."""
 
     async def _resolve_doi(self, doi: str) -> dict[str, Any]:
         """
-        Resolve DOI information.
+        Check DOI format. Does not resolve against a registry.
+
+        No DOI resolution service is wired up yet — that is Wave 4's tool
+        boundary to build. This performs a format check only and reports
+        honestly that resolution was not attempted, rather than fabricating
+        a resolved/verified result.
 
         Args:
             doi: DOI string
 
         Returns:
-            DOI resolution result
+            DOI format-check result. ``resolved`` is always ``False``.
         """
-        # Simple DOI validation
         if not doi or not doi.startswith("10."):
-            return {"resolved": False, "error": "Invalid DOI format"}
+            return {
+                "resolved": False,
+                "checked": "format_only",
+                "reason": "invalid_doi_format",
+            }
 
-        # In a real implementation, this would call CrossRef API
-        # For now, return mock data
         return {
-            "resolved": True,
-            "doi": doi,
-            "url": f"https://doi.org/{doi}",
-            "crossref_data": {
-                "status": "verified",
-                "publisher": "Mock Publisher",
-                "type": "journal-article",
-            },
+            "resolved": False,
+            "checked": "format_only",
+            "reason": "doi_resolution_unavailable",
         }
 
     async def _generate_bibliography_with_mcp(
@@ -573,8 +567,6 @@ Return formatted citations as structured JSON."""
         for format_type in export_formats:
             if format_type.lower() == "text":
                 exports["text"] = self._export_to_text(citations)
-            elif format_type.lower() == "bibtex":
-                exports["bibtex"] = await self._export_to_bibtex(citations)
             elif format_type.lower() == "json":
                 exports["json"] = self._export_to_json(citations)
             elif format_type.lower() == "csv":
@@ -598,19 +590,6 @@ Return formatted citations as structured JSON."""
             text_lines.append(f"{i}. {citation_text}")
 
         return "\\n".join(text_lines)
-
-    async def _export_to_bibtex(self, citations: list[Any]) -> str:
-        """Export citations to BibTeX format."""
-        if not self.mcp_integration:
-            return "% BibTeX export requires MCP integration"
-
-        try:
-            # Use MCP citation tool for BibTeX export
-            # This would be implemented in the MCP citation tool
-            return "% BibTeX export (placeholder - would use MCP tool)"
-        except Exception as e:
-            self.log_error(f"BibTeX export failed: {e}")
-            return f"% BibTeX export failed: {e}"
 
     def _export_to_json(self, citations: list[Any]) -> str:
         """Export citations to JSON format."""

@@ -891,7 +891,12 @@ Requirements:
                     "total_found": len(sources),
                     "databases_searched": ["gemini_knowledge"],
                     "search_strategy": "LLM-assisted source identification (Gemini)",
-                    "fallback": False,
+                    # This method IS the fallback (called when MCP tools are
+                    # unavailable, see call sites above), and these sources
+                    # are recalled from the model's training knowledge, not
+                    # retrieved from a database. Labeling that "not a
+                    # fallback" was the defect; this is the correct label.
+                    "fallback": True,
                 }
             self.log_warning(
                 f"Gemini returned no sources. Parsed keys: {list(parsed.keys())}"

@@ -4,7 +4,7 @@ Tests for Literature Review Agent.
 Following TDD principles - tests written before implementation.
 """
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -403,3 +403,60 @@ class TestLiteratureReviewAgent:
 
         assert len(result.output["sources_found"]) > 50
         assert "exhaustive" in result.output.get("search_strategy", "").lower()
+
+
+class TestFallbackAcademicSearchLabel:
+    """X8 (Packet 0 fabrication deletion): _fallback_academic_search must
+    label its own output honestly.
+
+    This method IS the fallback path (called from execute() only when MCP
+    tools are unavailable, per the call sites above it in the module). It
+    asks the model to recall papers from training knowledge rather than
+    retrieving them from a database. The pre-fix code set
+    ``"fallback": False`` on a successful Gemini-recall result, which
+    mislabeled model-recalled sources as if they came from a primary,
+    non-fallback path.
+    """
+
+    @pytest.mark.asyncio
+    async def test_gemini_recalled_sources_are_labeled_as_fallback(self):
+        from src.agents.literature_review_agent import LiteratureReviewAgent
+
+        agent = LiteratureReviewAgent()
+        task = AgentTask(
+            id="lit-fallback-001",
+            agent_type="literature_review",
+            input_data={"query": "attention mechanisms"},
+        )
+        content = (
+            '{"sources": [{"title": "Attention Is All You Need", '
+            '"authors": ["Vaswani"], "year": 2017}]}'
+        )
+
+        with patch.object(
+            agent,
+            "_generate_with_routing",
+            AsyncMock(return_value=(content, 0.9)),
+        ):
+            result = await agent._fallback_academic_search(
+                {"query": "attention mechanisms"}, task
+            )
+
+        assert result["success"] is True
+        assert len(result["sources"]) == 1
+        # The corrected label: this IS a fallback, and its sources are
+        # model-recalled, not retrieved.
+        assert result["fallback"] is True
+
+    @pytest.mark.asyncio
+    async def test_static_fallback_is_still_labeled_as_fallback(self):
+        """Unchanged control case: the last-resort static fallback was
+        already labeled correctly and must remain so."""
+        from src.agents.literature_review_agent import LiteratureReviewAgent
+
+        agent = LiteratureReviewAgent()
+
+        result = agent._static_fallback_sources("query", [])
+
+        assert result["fallback"] is True
+        assert result["success"] is False
