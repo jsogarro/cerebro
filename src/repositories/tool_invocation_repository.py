@@ -16,6 +16,16 @@ explicit, separate argument, and ``ck_agent_tool_invocation_capability_denial``
 is what keeps a denied decision from ever being paired with a non-denied
 invocation status.
 
+``capability_decision`` is ``None`` for exactly one case: input validation
+runs before authorization and must, so a request whose input never parses
+(``invocation.error_code == "invalid_input"``) never reaches
+``decide_capability`` and has no decision to carry. ``create_tool_invocation``
+rejects a ``None`` decision for any other ``error_code`` itself, fail-fast,
+rather than relying solely on
+``ck_agent_tool_invocation_decision_pair_or_invalid_input`` to catch
+it at the database — the same "raise here, backed by a DB CHECK" posture
+``tenant_scope`` uses elsewhere in this package.
+
 ``ToolInvocation`` also carries no digest fields — ``input_sha256`` and
 ``output_sha256`` are computed here via ``boundary_digest`` over the
 redacted ``input``/``output`` JSON (the same digest function the redaction
@@ -50,7 +60,7 @@ class ToolInvocationRepository:
         invocation: ToolInvocation,
         *,
         organization_id: OrganizationId,
-        capability_decision: CapabilityDecision,
+        capability_decision: CapabilityDecision | None,
     ) -> AgentToolInvocation:
         """Insert a new tool invocation row.
 
@@ -61,13 +71,25 @@ class ToolInvocationRepository:
                 this invocation. A ``DENY`` decision requires
                 ``invocation.status`` to be ``ToolInvocationStatus.DENIED`` —
                 enforced by ``ck_agent_tool_invocation_capability_denial``.
+                ``None`` is legal only when ``invocation.error_code`` is
+                ``"invalid_input"`` — input validation runs before
+                authorization, so that request never reached
+                ``decide_capability`` and has no decision to carry.
 
         Returns:
             The persisted row.
 
         Raises:
             MissingOrganizationContextError: No org context was supplied.
+            ValueError: ``capability_decision`` is ``None`` and
+                ``invocation.error_code`` is not ``"invalid_input"``.
         """
+        if capability_decision is None and invocation.error_code != "invalid_input":
+            raise ValueError(
+                "capability_decision may be None only when "
+                f"invocation.error_code == 'invalid_input'; got "
+                f"{invocation.error_code!r}"
+            )
         normalized_organization_id = normalize_organization_id(organization_id)
         binding = invocation.prompt_binding
         # `JsonObject`'s `AfterValidator` freezes recursively into
@@ -104,15 +126,32 @@ class ToolInvocationRepository:
             output_sha256=(
                 boundary_digest(output_payload) if output_payload is not None else None
             ),
-            capability_decision_effect=capability_decision.effect.value,
-            capability_grant_id=capability_decision.grant_id,
-            capability_approval_id=capability_decision.approval_id,
-            capability_denial_reason=(
-                capability_decision.denial_reason.value
-                if capability_decision.denial_reason is not None
+            capability_decision_effect=(
+                capability_decision.effect.value
+                if capability_decision is not None
                 else None
             ),
-            request_fingerprint=capability_decision.request_fingerprint,
+            capability_grant_id=(
+                capability_decision.grant_id
+                if capability_decision is not None
+                else None
+            ),
+            capability_approval_id=(
+                capability_decision.approval_id
+                if capability_decision is not None
+                else None
+            ),
+            capability_denial_reason=(
+                capability_decision.denial_reason.value
+                if capability_decision is not None
+                and capability_decision.denial_reason is not None
+                else None
+            ),
+            request_fingerprint=(
+                capability_decision.request_fingerprint
+                if capability_decision is not None
+                else None
+            ),
             producer_kind=invocation.producer_kind.value,
             prompt_id=binding.prompt_id if binding else None,
             prompt_version=binding.prompt_version if binding else None,

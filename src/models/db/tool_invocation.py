@@ -5,11 +5,11 @@ Mirrors ``src.core.contracts.provenance.ToolInvocation``. Rows are mutable
 ``requested`` -> ``running`` -> a terminal status on the same row, matching
 ``agent_task_attempts``.
 
-``capability_decision_effect``, the nullable ``capability_grant_id`` /
-``capability_approval_id`` / ``capability_denial_reason``, and
-``request_fingerprint`` columns record the outcome of the capability check
-that governed this invocation (``src.core.contracts.capabilities.
-CapabilityDecision``). The CHECKs below are read directly off
+``capability_decision_effect``, ``request_fingerprint``, and the nullable
+``capability_grant_id`` / ``capability_approval_id`` / ``capability_denial_reason``
+columns record the outcome of the capability check that governed this
+invocation (``src.core.contracts.capabilities.CapabilityDecision``). The
+CHECKs below are read directly off
 ``CapabilityDecision.validate_effect_fields`` rather than a simplified
 biconditional on ``capability_grant_id``: an ``ALLOW`` decision always names
 a grant, but a ``DENY`` decision **may also** name one — ``decide_capability``
@@ -21,6 +21,20 @@ is the one field that *is* a true biconditional on effect, and
 ``capability_approval_id`` is one-directional (a denial never cites an
 approval; an allow may or may not, since approval is only required for
 sensitive sinks).
+
+``capability_decision_effect`` and ``request_fingerprint`` are **nullable
+together**, for exactly one status: input validation runs before
+authorization and must, so a request whose input never parses (``error_code
+= 'invalid_input'``) never reaches ``decide_capability`` and has no
+``CapabilityRequest`` to fingerprint. Writing ``'allow'`` for that row would
+be fabrication — it would claim a capability decision authorized a call that
+was never authorized — and dropping the row reopens the audit hole this
+wave exists to close. A ``NULL`` decision on a row whose ``error_code`` says
+why is self-describing instead: it states, truthfully, that authorization
+was never reached. ``ck_agent_tool_invocation_decision_pair_or_invalid_input``
+pins this narrowly to that one ``error_code`` rather than a blanket "decision
+may be absent" escape hatch — a row cannot omit the decision by any other
+route.
 
 The full decision is not otherwise duplicated here; the tool-execution
 boundary (Wave 4 packet 4C) is expected to publish it through the run event
@@ -103,7 +117,9 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
     output_trust: Mapped[str | None] = mapped_column(String(30), nullable=True)
     output_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    capability_decision_effect: Mapped[str] = mapped_column(String(10), nullable=False)
+    capability_decision_effect: Mapped[str | None] = mapped_column(
+        String(10), nullable=True
+    )
     capability_grant_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("agent_capability_grants.grant_id"),
@@ -117,7 +133,7 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
     capability_denial_reason: Mapped[str | None] = mapped_column(
         String(64), nullable=True
     )
-    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     error_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -164,6 +180,7 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
             name="ck_agent_tool_invocation_producer_kind_biconditional"
         ),
         CheckConstraint(
+            f"capability_decision_effect IS NULL OR "
             f"capability_decision_effect IN {CAPABILITY_DECISION_EFFECTS_SQL}",
             name="ck_agent_tool_invocation_capability_decision_effect",
         ),
@@ -209,8 +226,23 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
             name="ck_agent_tool_invocation_output_digest",
         ),
         CheckConstraint(
-            "length(request_fingerprint) = 64",
+            "request_fingerprint IS NULL OR length(request_fingerprint) = 64",
             name="ck_agent_tool_invocation_request_fingerprint_digest",
+        ),
+        # A decision may be absent only for the one status that is
+        # structural, not an oversight: input validation runs before
+        # authorization, so a request whose input never parses has nothing
+        # for decide_capability to decide about and no CapabilityRequest to
+        # fingerprint. Pinned narrowly to error_code = 'invalid_input' --
+        # NOT NULL-checked explicitly on error_code first, because
+        # `error_code = 'invalid_input'` alone evaluates to NULL (not FALSE)
+        # when error_code IS NULL, which would let a row with no error_code
+        # at all also skip the decision undetected.
+        CheckConstraint(
+            "(capability_decision_effect IS NOT NULL AND request_fingerprint IS NOT NULL) "
+            "OR (capability_decision_effect IS NULL AND request_fingerprint IS NULL "
+            "AND error_code IS NOT NULL AND error_code = 'invalid_input')",
+            name="ck_agent_tool_invocation_decision_pair_or_invalid_input",
         ),
         Index(
             "idx_agent_tool_invocation_run_task_attempt",
