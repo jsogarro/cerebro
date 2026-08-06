@@ -304,6 +304,45 @@ class TestTheRecordedScopeComesFromTheGrant:
             for invocation in audit_store.invocations
         )
 
+    async def test_the_scope_recorded_is_the_grants_when_the_two_disagree(
+        self, boundary_dependencies: dict[str, Any], echo_spec: ToolSpec
+    ) -> None:
+        """Non-guarantee 7, made falsifiable.
+
+        Under ``decide_capability`` the request's scope and the grant's are
+        always equal on an ``ALLOW`` — its identity match requires it — so the
+        test above cannot distinguish a boundary that sources the recorded scope
+        from the authorizing grant from one that echoes back caller input. It
+        passes either way, which makes it worthless as evidence for the property
+        4A actually asked for.
+
+        Forcing them apart requires a decider that allows a pairing
+        ``decide_capability`` never would. What is asserted is not that this
+        pairing is legal — it is not — but *which of the two values the boundary
+        writes down* when it has both. A record whose scope is caller-supplied
+        is a record that attests to nothing.
+        """
+
+        grant = make_grant(capability_scope="scope-the-grant-authorized")
+
+        def decider(**kwargs: Any) -> CapabilityDecision:
+            return CapabilityDecision(
+                effect=CapabilityDecisionEffect.ALLOW,
+                request_fingerprint="a" * 64,
+                grant_id=GRANT_ID,
+                decided_at=NOW,
+            )
+
+        boundary_dependencies["decide"] = decider
+        built = ToolBoundary(**boundary_dependencies)
+        built.register(echo_spec)
+
+        outcome = await built.invoke(
+            **invoke_kwargs(grants=[grant], capability_scope="scope-the-caller-claimed")
+        )
+
+        assert outcome.invocation.capability_scope == "scope-the-grant-authorized"
+
     async def test_an_allow_naming_an_unresolvable_grant_executes_nothing(
         self, boundary_dependencies: dict[str, Any], echo_spec: ToolSpec
     ) -> None:
