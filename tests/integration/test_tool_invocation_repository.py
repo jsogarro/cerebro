@@ -18,6 +18,7 @@ from src.core.contracts import (
     ToolInvocationStatus,
     TrustClassification,
 )
+from src.models.db.tool_invocation import AgentToolInvocation
 from src.repositories.capability_repository import CapabilityRepository
 from src.repositories.tenant_scope import TenantMismatchError
 from src.repositories.tool_invocation_repository import ToolInvocationRepository
@@ -107,6 +108,42 @@ async def test_create_tool_invocation_persists_the_contract_fields(
     assert row.organization_id == ORG_ID
     assert row.capability_decision_effect == "allow"
     assert row.capability_grant_id == "grant-1"
+
+
+@pytest.mark.asyncio
+async def test_the_database_backstops_a_producer_kind_omitted_by_bypassing_the_repository(
+    repo: ToolInvocationRepository,
+) -> None:
+    """producer_kind carries no default at the database level either -- not
+    just on the Pydantic contract, which always supplies one. Bypasses both
+    the repository and the contract by constructing the ORM row directly."""
+    row = AgentToolInvocation(
+        tool_invocation_id="invocation-bypass",
+        run_id="run-1",
+        task_id="task-1",
+        attempt_id="attempt-1",
+        tool_name="academic_search",
+        tool_version="1.0",
+        status=ToolInvocationStatus.SUCCEEDED.value,
+        capability_scope="search",
+        idempotency_key="invocation-key-bypass",
+        input={"query": "gnn"},
+        input_trust=TrustClassification.USER_SUPPLIED.value,
+        input_sha256="a" * 64,
+        output={"results": []},
+        output_trust=TrustClassification.EXTERNAL_UNTRUSTED.value,
+        output_sha256="b" * 64,
+        capability_decision_effect="allow",
+        capability_grant_id="grant-1",
+        request_fingerprint="c" * 64,
+        requested_at=NOW,
+        completed_at=NOW,
+        organization_id=ORG_ID,
+    )
+    repo.session.add(row)
+
+    with pytest.raises(IntegrityError):
+        await repo.session.flush()
 
 
 @pytest.mark.asyncio

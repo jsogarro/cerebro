@@ -347,6 +347,45 @@ async def test_wave4_tables_exist_after_upgrade(migrated_database: str) -> None:
     assert await _table_names(migrated_database) >= NEW_TABLES
 
 
+async def test_producer_kind_carries_no_column_default_after_upgrade(
+    connection: AsyncConnection,
+) -> None:
+    """``producer_kind`` has no server default on any of the four provenance
+    tables in the schema Alembic actually produces.
+
+    The repository integration tests provision their schema via
+    ``Base.metadata.create_all()`` against the SQLAlchemy models, not via
+    this migration -- so they cannot catch a default that survives in the
+    migration's DDL alone (for example, a call site left pointing at the old
+    ``_optional_prompt_binding_columns()`` helper). This is the one place a
+    default could be reintroduced without any other Wave 4 test noticing.
+    """
+    rows = await connection.execute(
+        text(
+            "SELECT table_name, column_default FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND column_name = 'producer_kind' "
+            "AND table_name = ANY(:tables)"
+        ),
+        {
+            "tables": [
+                "agent_artifacts",
+                "agent_tool_invocations",
+                "agent_evidence",
+                "agent_claim_supports",
+            ]
+        },
+    )
+    defaults = dict(rows.all())
+
+    assert set(defaults) == {
+        "agent_artifacts",
+        "agent_tool_invocations",
+        "agent_evidence",
+        "agent_claim_supports",
+    }
+    assert all(value is None for value in defaults.values()), defaults
+
+
 async def test_every_wave4_table_enforces_tenant_row_level_security(
     connection: AsyncConnection,
 ) -> None:
