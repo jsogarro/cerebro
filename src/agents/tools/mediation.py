@@ -91,6 +91,16 @@ UNBOUND_RUN_PREFIX: Final[str] = "unbound-"
 """Marks a run identifier that was synthesized because none was supplied."""
 
 DEFAULT_GRANT_TTL: Final[timedelta] = timedelta(minutes=5)
+"""How long a self-issued grant stays valid.
+
+This must comfortably exceed the boundary's worst-case budget for a single
+call, not merely a single attempt. 4C does timeouts, retries and circuit
+breaking; if the window closed first, a later attempt would decide against a
+newer ``now`` and come back ``GRANT_EXPIRED`` -- which reads as a capability
+bug and is really a timeout. The relationship is asserted in
+``tests/test_tool_path_mediation.py`` rather than left to this number looking
+big enough.
+"""
 
 
 @final
@@ -156,30 +166,70 @@ class ToolCallIdentity:
         )
 
 
+@final
+@dataclass(frozen=True, slots=True)
+class SelfIssuedPolicy:
+    """A tool's declared ceilings, written once and never read off a call.
+
+    **Every field here must be a static declaration.** Packet 4A demonstrated
+    why against the committed contract: minting ``max_input_trust`` from the
+    invocation's own ``input_trust`` produces a check that cannot fail — all
+    five trust levels are allowed, including ``derived_untrusted``. Reproduced
+    before applying the correction:
+
+    ===========================  =================  ===============================
+    request ``input_trust``      ceiling from call  ceiling declared statically
+    ===========================  =================  ===============================
+    ``trusted_control``          allow              allow
+    ``application``              allow              allow
+    ``user_supplied``            allow              allow
+    ``external_untrusted``       allow              allow
+    ``derived_untrusted``        allow              **deny** ``input_trust_exceeds_grant``
+    ===========================  =================  ===============================
+
+    ``derived_untrusted`` is model-rewritten text. Letting it reach a network
+    tool means a model can put content it generated — from a poisoned source it
+    just read — into an outbound query. That is the indirect-injection path this
+    wave's threat model names, and a call-derived ceiling permits it while
+    appearing to run a capability check.
+
+    ``tool_versions`` has the same property: ``(spec.version,)`` taken from the
+    call can never mismatch, while a declared tuple can (verified:
+    ``tool_version_not_granted``).
+    """
+
+    sensitivity: SensitivityClass
+    max_input_trust: TrustClassification
+    tool_versions: tuple[str, ...]
+
+
 def self_issued_grant(
     *,
     tool_name: str,
-    tool_version: str,
-    sensitivity: SensitivityClass,
-    input_trust: TrustClassification,
+    policy: SelfIssuedPolicy,
     identity: ToolCallIdentity,
     now: datetime,
     ttl: timedelta = DEFAULT_GRANT_TTL,
 ) -> CapabilityGrant:
     """Mint the interim grant described in this module's docstring.
 
+    Takes a :class:`SelfIssuedPolicy` rather than loose values so that a caller
+    cannot pass the request's own parameters back in as its own ceiling. The
+    grant is then "a default policy nobody authorized" rather than a rubber
+    stamp shaped exactly like the request.
+
     Raises:
-        ValueError: ``sensitivity`` requires approval. A grant nobody issued
-            must never be what permits an external write or an exfiltration,
-            and refusing here is a check that survives someone forgetting the
-            rule — unlike a comment saying not to.
+        ValueError: the policy's ``sensitivity`` requires approval. A grant
+            nobody issued must never be what permits an external write or an
+            exfiltration, and refusing here fails earlier and names the tool.
+            The contract enforces the same thing independently — see the test.
     """
 
-    if sensitivity in APPROVAL_REQUIRED_SENSITIVITIES:
+    if policy.sensitivity in APPROVAL_REQUIRED_SENSITIVITIES:
         raise ValueError(
-            f"tool {tool_name!r} is {sensitivity.value}, which always requires "
-            "approval; a self-issued grant cannot authorize it. Inject a grant "
-            "from a real issuer instead."
+            f"tool {tool_name!r} is {policy.sensitivity.value}, which always "
+            "requires approval; a self-issued grant cannot authorize it. Inject "
+            "a grant from a real issuer instead."
         )
     return CapabilityGrant(
         grant_id=uuid.uuid4().hex,
@@ -187,9 +237,9 @@ def self_issued_grant(
         task_id=identity.task_id,
         capability_scope=f"{SELF_ISSUED_SCOPE_PREFIX}{tool_name}",
         tool_name=tool_name,
-        tool_versions=(tool_version,),
-        sensitivity=sensitivity,
-        max_input_trust=input_trust,
+        tool_versions=policy.tool_versions,
+        sensitivity=policy.sensitivity,
+        max_input_trust=policy.max_input_trust,
         requires_approval=False,
         issued_at=now,
         expires_at=now + ttl,
@@ -280,6 +330,7 @@ __all__ = [
     "SELF_ISSUED_SCOPE_PREFIX",
     "UNBOUND_RUN_PREFIX",
     "InMemoryToolAuditStore",
+    "SelfIssuedPolicy",
     "ToolCallIdentity",
     "build_tool_boundary",
     "plain",

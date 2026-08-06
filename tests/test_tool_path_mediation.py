@@ -499,6 +499,200 @@ class TestInternalToolsAreMediated:
 # ---------------------------------------------------------------------------
 
 
+class TestTheCapabilityCheckIsNotVacuous:
+    """A self-issued grant must be able to *refuse*.
+
+    Packet 4A caught the first version of this minting `max_input_trust` from
+    the invocation's own `input_trust`, which allows all five trust levels —
+    a check that appears to run and cannot fail. Reproduced against the
+    contract before the correction, and again in `SelfIssuedPolicy`'s
+    docstring. The ceilings are static per-tool declarations now, and these
+    tests are the ones that fail if anyone reads one off a call again.
+    """
+
+    @pytest.mark.asyncio
+    async def test_model_derived_input_is_refused_by_an_mcp_tool(self) -> None:
+        """The threat 4A named: a model putting text it generated from a
+        poisoned source into an outbound network query.
+        """
+        from src.core.contracts.trust import TrustClassification
+
+        client = _healthy_client()
+        client.search_academic.return_value = {"success": True, "results": []}
+        integration = MCPIntegration(mcp_client=client)
+
+        result = await integration.search_academic_sources(
+            query="rewritten by a model from a retrieved page",
+            identity=_identity(),
+            input_trust=TrustClassification.DERIVED_UNTRUSTED,
+        )
+
+        assert result["success"] is False
+        assert result["tool_outcome"] == ToolOutcomeStatus.DENIED.value
+        assert result["detail"] == "input_trust_exceeds_grant"
+        # The tool was never reached.
+        assert client.search_academic.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_input_at_or_below_the_ceiling_is_allowed(self) -> None:
+        """The other half — the ceiling must not refuse everything either."""
+
+        from src.core.contracts.trust import TrustClassification
+
+        client = _healthy_client()
+        client.search_academic.return_value = {"success": True, "results": []}
+        integration = MCPIntegration(mcp_client=client)
+
+        result = await integration.search_academic_sources(
+            query="a paper abstract",
+            identity=_identity(),
+            input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+        )
+
+        assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_document_derived_input_is_refused_by_an_internal_tool(self) -> None:
+        """An expression evaluator has no business evaluating a document."""
+
+        from src.core.contracts.trust import TrustClassification
+
+        registry = create_default_registry()
+
+        result = await registry.execute(
+            "arithmetic",
+            {"expression": "2 + 3"},
+            identity=_identity(),
+            input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+        )
+
+        assert result.success is False
+        assert "denied" in (result.error or "")
+
+    def test_a_declared_version_tuple_can_mismatch(self) -> None:
+        """`(spec.version,)` taken from the call can never mismatch either.
+
+        Verified against the contract: a declared tuple yields
+        `tool_version_not_granted`, a call-derived one always allows.
+        """
+        from src.agents.tools.mediation import SelfIssuedPolicy, self_issued_grant
+        from src.core.contracts.capabilities import (
+            CapabilityDecisionEffect,
+            CapabilityDenialReason,
+            CapabilityRequest,
+            SensitivityClass,
+            decide_capability,
+        )
+        from src.core.contracts.trust import TrustClassification
+
+        now = datetime.now(UTC)
+        grant = self_issued_grant(
+            tool_name="arithmetic",
+            policy=SelfIssuedPolicy(
+                sensitivity=SensitivityClass.READ_ONLY,
+                max_input_trust=TrustClassification.USER_SUPPLIED,
+                tool_versions=("1.0.0",),
+            ),
+            identity=_identity(),
+            now=now,
+        )
+        request = CapabilityRequest(
+            run_id="run-1",
+            task_id="task-1",
+            attempt_id="attempt-1",
+            tool_name="arithmetic",
+            tool_version="9.9.9",
+            capability_scope=grant.capability_scope,
+            sensitivity=SensitivityClass.READ_ONLY,
+            input_trust=TrustClassification.APPLICATION,
+            input_sha256="0" * 64,
+            requested_at=now,
+        )
+
+        decision = decide_capability(request=request, grants=[grant], now=now)
+
+        assert decision.effect is CapabilityDecisionEffect.DENY
+        assert decision.denial_reason is CapabilityDenialReason.TOOL_VERSION_NOT_GRANTED
+
+
+class TestTheGrantWindowOutlivesTheCallBudget:
+    """4A's hazard: if the grant expires inside the boundary's own budget, a
+    later attempt decides against a newer ``now`` and returns
+    ``GRANT_EXPIRED`` — which reads as a capability bug and is really a
+    timeout. Asserted as a relationship rather than trusting the number.
+    """
+
+    def test_the_ttl_comfortably_exceeds_the_slowest_declared_deadline(self) -> None:
+        from src.agents.integrations.mcp_tool_specs import (
+            DEFAULT_MCP_TIMEOUT_SECONDS,
+        )
+        from src.agents.tools.base_tool import DEFAULT_INTERNAL_TOOL_TIMEOUT_SECONDS
+        from src.agents.tools.mediation import DEFAULT_GRANT_TTL
+
+        slowest = max(
+            DEFAULT_MCP_TIMEOUT_SECONDS, DEFAULT_INTERNAL_TOOL_TIMEOUT_SECONDS
+        )
+
+        assert DEFAULT_GRANT_TTL.total_seconds() >= slowest * 4
+
+    def test_every_registered_tools_deadline_fits_inside_the_window(self) -> None:
+        """Checks the live registrations, not just the module defaults."""
+
+        from src.agents.tools.mediation import DEFAULT_GRANT_TTL
+
+        integration = MCPIntegration(mcp_client=_healthy_client())
+        registry = create_default_registry()
+
+        for boundary, names in (
+            (
+                integration.boundary,
+                [
+                    "mcp.academic_search",
+                    "mcp.format_citations",
+                    "mcp.analyze_statistics",
+                    "mcp.build_knowledge_graph",
+                ],
+            ),
+            (registry.boundary, ["arithmetic", "datetime_info", "unit_conversion"]),
+        ):
+            for name in names:
+                deadline = boundary.specification(name).timeout_seconds
+                assert deadline * 4 <= DEFAULT_GRANT_TTL.total_seconds(), name
+
+
+class TestReplayReadsTheRecordRatherThanRedeciding:
+    """4A's hazard: a grant minted at call time is not persisted, so a replay
+    cannot reconstruct it. Re-deciding would let a replay reach a different
+    outcome than the run it replays.
+
+    4C already gets this right — `find_invocation` and the replay return
+    happen *before* `decide` is reached — so this test guards the property
+    rather than establishing it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_replayed_call_does_not_reach_the_tool_or_a_new_decision(
+        self,
+    ) -> None:
+        store = InMemoryToolAuditStore()
+        client = _healthy_client()
+        client.search_academic.return_value = {"success": True, "results": []}
+        integration = MCPIntegration(mcp_client=client, audit_store=store)
+
+        first = await integration.search_academic_sources(
+            query="same", identity=_identity()
+        )
+        calls_after_first = client.search_academic.await_count
+
+        second = await integration.search_academic_sources(
+            query="same", identity=_identity()
+        )
+
+        assert client.search_academic.await_count == calls_after_first
+        assert second["tool_invocation_id"] == first["tool_invocation_id"]
+        assert second["success"] is True
+
+
 class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
     """The interim grant is minted per call. It must not authorize anything
     beyond the call it was minted for — otherwise "deny by default" would be
@@ -507,7 +701,7 @@ class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
 
     @pytest.mark.asyncio
     async def test_a_grant_does_not_authorize_a_different_tool(self) -> None:
-        from src.agents.tools.mediation import self_issued_grant
+        from src.agents.tools.mediation import SelfIssuedPolicy, self_issued_grant
         from src.core.contracts.capabilities import (
             CapabilityDecisionEffect,
             CapabilityRequest,
@@ -519,9 +713,11 @@ class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
         now = datetime.now(UTC)
         grant = self_issued_grant(
             tool_name="arithmetic",
-            tool_version="1.0.0",
-            sensitivity=SensitivityClass.READ_ONLY,
-            input_trust=TrustClassification.APPLICATION,
+            policy=SelfIssuedPolicy(
+                sensitivity=SensitivityClass.READ_ONLY,
+                max_input_trust=TrustClassification.APPLICATION,
+                tool_versions=("1.0.0",),
+            ),
             identity=_identity(),
             now=now,
             ttl=timedelta(minutes=5),
@@ -546,7 +742,7 @@ class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
 
     @pytest.mark.asyncio
     async def test_a_grant_does_not_authorize_a_different_run(self) -> None:
-        from src.agents.tools.mediation import self_issued_grant
+        from src.agents.tools.mediation import SelfIssuedPolicy, self_issued_grant
         from src.core.contracts.capabilities import (
             CapabilityDecisionEffect,
             CapabilityRequest,
@@ -558,9 +754,11 @@ class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
         now = datetime.now(UTC)
         grant = self_issued_grant(
             tool_name="arithmetic",
-            tool_version="1.0.0",
-            sensitivity=SensitivityClass.READ_ONLY,
-            input_trust=TrustClassification.APPLICATION,
+            policy=SelfIssuedPolicy(
+                sensitivity=SensitivityClass.READ_ONLY,
+                max_input_trust=TrustClassification.APPLICATION,
+                tool_versions=("1.0.0",),
+            ),
             identity=_identity(),
             now=now,
             ttl=timedelta(minutes=5),
@@ -608,16 +806,18 @@ class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
         tool was at fault, not by being what makes this true.
         """
 
-        from src.agents.tools.mediation import self_issued_grant
+        from src.agents.tools.mediation import SelfIssuedPolicy, self_issued_grant
         from src.core.contracts.capabilities import SensitivityClass
         from src.core.contracts.trust import TrustClassification
 
         with pytest.raises(ValueError, match="requires approval"):
             self_issued_grant(
                 tool_name="dangerous",
-                tool_version="1.0.0",
-                sensitivity=SensitivityClass[sensitivity_name],
-                input_trust=TrustClassification.APPLICATION,
+                policy=SelfIssuedPolicy(
+                    sensitivity=SensitivityClass[sensitivity_name],
+                    max_input_trust=TrustClassification.APPLICATION,
+                    tool_versions=("1.0.0",),
+                ),
                 identity=_identity(),
                 now=datetime.now(UTC),
             )
@@ -627,6 +827,7 @@ class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
 
         from src.agents.tools.mediation import (
             SELF_ISSUED_SCOPE_PREFIX,
+            SelfIssuedPolicy,
             self_issued_grant,
         )
         from src.core.contracts.capabilities import SensitivityClass
@@ -634,9 +835,11 @@ class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
 
         grant = self_issued_grant(
             tool_name="arithmetic",
-            tool_version="1.0.0",
-            sensitivity=SensitivityClass.READ_ONLY,
-            input_trust=TrustClassification.APPLICATION,
+            policy=SelfIssuedPolicy(
+                sensitivity=SensitivityClass.READ_ONLY,
+                max_input_trust=TrustClassification.APPLICATION,
+                tool_versions=("1.0.0",),
+            ),
             identity=_identity(),
             now=datetime.now(UTC),
             ttl=timedelta(minutes=5),

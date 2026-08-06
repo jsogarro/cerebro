@@ -35,6 +35,7 @@ from pydantic import BaseModel, JsonValue
 from src.agents.tools.base_tool import AgentTool, ToolResult
 from src.agents.tools.mediation import (
     InMemoryToolAuditStore,
+    SelfIssuedPolicy,
     ToolCallIdentity,
     build_tool_boundary,
     plain,
@@ -55,14 +56,24 @@ from src.core.tools import (
 INTERNAL_TOOL_SENSITIVITY = SensitivityClass.READ_ONLY
 """Pure-internal tools have no effect outside the run, by their own contract."""
 
-INTERNAL_TOOL_INPUT_TRUST = TrustClassification.APPLICATION
-"""Arguments reaching these tools come from the application, not a document.
+DEFAULT_INTERNAL_INPUT_TRUST = TrustClassification.APPLICATION
+"""The trust label a caller that does not state one is taken to be supplying.
 
-Stated rather than assumed: an agent that ever forwards retrieved document
-content into a tool argument is supplying ``EXTERNAL_UNTRUSTED`` input, and
-this constant would then be wrong. No current caller does — `execute` is
-reached only from tests today — but the label is the thing a future caller
-must revisit, so it is named here instead of inlined at the call.
+A *default*, not a constant: `execute` accepts `input_trust`, so a caller
+handling document-derived content can say so and be refused. Without that
+parameter the ceiling below could never be exceeded and the check would be
+decorative — which is the same defect, one level up, that packet 4A caught in
+the grant itself.
+"""
+
+INTERNAL_TOOL_MAX_INPUT_TRUST = TrustClassification.USER_SUPPLIED
+"""The ceiling declared for every pure-internal tool.
+
+Arguments to an expression evaluator or a unit converter should originate with
+the application or the user. Content lifted out of a retrieved document has no
+business being evaluated, so `external_untrusted` and `derived_untrusted` are
+refused. Declared here once, never read off the call — see
+`SelfIssuedPolicy`.
 """
 
 
@@ -116,6 +127,7 @@ class ToolRegistry:
         params: dict[str, Any],
         *,
         identity: ToolCallIdentity | None = None,
+        input_trust: TrustClassification = DEFAULT_INTERNAL_INPUT_TRUST,
         grants: Sequence[CapabilityGrant] | None = None,
     ) -> ToolResult:
         """Execute a tool by name, through the boundary.
@@ -144,9 +156,11 @@ class ToolRegistry:
             else [
                 self_issued_grant(
                     tool_name=spec.name,
-                    tool_version=spec.version,
-                    sensitivity=INTERNAL_TOOL_SENSITIVITY,
-                    input_trust=INTERNAL_TOOL_INPUT_TRUST,
+                    policy=SelfIssuedPolicy(
+                        sensitivity=INTERNAL_TOOL_SENSITIVITY,
+                        max_input_trust=INTERNAL_TOOL_MAX_INPUT_TRUST,
+                        tool_versions=(spec.version,),
+                    ),
                     identity=call_identity,
                     now=now,
                 )
@@ -164,7 +178,7 @@ class ToolRegistry:
                 if effective_grants
                 else "",
                 arguments=params,
-                input_trust=INTERNAL_TOOL_INPUT_TRUST,
+                input_trust=input_trust,
                 grants=effective_grants,
             )
         except ToolNotRegisteredError:  # pragma: no cover - guarded above
@@ -241,7 +255,8 @@ def create_default_registry(
 
 
 __all__ = [
-    "INTERNAL_TOOL_INPUT_TRUST",
+    "DEFAULT_INTERNAL_INPUT_TRUST",
+    "INTERNAL_TOOL_MAX_INPUT_TRUST",
     "INTERNAL_TOOL_SENSITIVITY",
     "InternalToolOutput",
     "ToolRegistry",

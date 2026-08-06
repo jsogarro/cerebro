@@ -194,7 +194,11 @@ class TestToolRegistryUnmediatedPath:
         is real, and a grant that names a different tool does not authorize
         this one.
         """
-        from src.agents.tools.mediation import ToolCallIdentity, self_issued_grant
+        from src.agents.tools.mediation import (
+            SelfIssuedPolicy,
+            ToolCallIdentity,
+            self_issued_grant,
+        )
         from src.core.contracts.capabilities import SensitivityClass
         from src.core.contracts.trust import TrustClassification
 
@@ -204,9 +208,11 @@ class TestToolRegistryUnmediatedPath:
         )
         wrong_grant = self_issued_grant(
             tool_name="datetime_info",
-            tool_version="1.0.0",
-            sensitivity=SensitivityClass.READ_ONLY,
-            input_trust=TrustClassification.APPLICATION,
+            policy=SelfIssuedPolicy(
+                sensitivity=SensitivityClass.READ_ONLY,
+                max_input_trust=TrustClassification.USER_SUPPLIED,
+                tool_versions=("1.0.0",),
+            ),
             identity=identity,
             now=datetime.now(UTC),
         )

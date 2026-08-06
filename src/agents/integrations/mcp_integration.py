@@ -57,6 +57,7 @@ from src.agents.integrations.mcp_tool_specs import (
 )
 from src.agents.tools.mediation import (
     InMemoryToolAuditStore,
+    SelfIssuedPolicy,
     ToolCallIdentity,
     build_tool_boundary,
     plain,
@@ -76,8 +77,27 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
-MCP_INPUT_TRUST = TrustClassification.USER_SUPPLIED
-"""Query strings and source lists originate with the user, not the system."""
+DEFAULT_MCP_INPUT_TRUST = TrustClassification.USER_SUPPLIED
+"""The trust label a caller that does not state one is taken to be supplying.
+
+A *default*, not a constant. Every operation accepts `input_trust`, so an agent
+forwarding text a model rewrote from a retrieved source can declare
+`derived_untrusted` and be refused by the ceiling below. Without that
+parameter the ceiling could never be exceeded and the check would be
+decorative.
+"""
+
+MCP_MAX_INPUT_TRUST = TrustClassification.EXTERNAL_UNTRUSTED
+"""The ceiling declared for every MCP operation.
+
+`derived_untrusted` is model-rewritten text. Letting it reach these tools means
+a model can put content it generated -- from a poisoned source it just read --
+into an outbound query, or into a graph and a statistics summary that feed the
+next prompt. That is the indirect-injection-to-exfiltration path this wave's
+threat model names. Declared statically here, never read off the call: packet
+4A demonstrated that a ceiling taken from the invocation allows all five trust
+levels and cannot fail.
+"""
 
 MCP_OUTPUT_TRUST = TrustClassification.EXTERNAL_UNTRUSTED
 """Everything these tools return came from outside the tenant boundary.
@@ -210,6 +230,7 @@ class MCPIntegration:
         filters: dict[str, Any] | None = None,
         *,
         identity: ToolCallIdentity | None = None,
+        input_trust: TrustClassification = DEFAULT_MCP_INPUT_TRUST,
     ) -> dict[str, Any]:
         """Search academic databases through the boundary."""
 
@@ -223,6 +244,7 @@ class MCPIntegration:
                 "filters": filters or {},
             },
             identity=identity,
+            input_trust=input_trust,
         )
         if outcome.succeeded:
             return self._succeeded(outcome, call_identity)
@@ -246,6 +268,7 @@ class MCPIntegration:
         style: str = "APA",
         *,
         identity: ToolCallIdentity | None = None,
+        input_trust: TrustClassification = DEFAULT_MCP_INPUT_TRUST,
     ) -> dict[str, Any]:
         """Format citations through the boundary."""
 
@@ -253,6 +276,7 @@ class MCPIntegration:
             TOOL_FORMAT_CITATIONS,
             {"sources": sources, "style": style},
             identity=identity,
+            input_trust=input_trust,
         )
         if outcome.succeeded:
             return self._succeeded(outcome, call_identity)
@@ -273,6 +297,7 @@ class MCPIntegration:
         data: list[Any] | None = None,
         *,
         identity: ToolCallIdentity | None = None,
+        input_trust: TrustClassification = DEFAULT_MCP_INPUT_TRUST,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Perform statistical analysis through the boundary."""
@@ -281,6 +306,7 @@ class MCPIntegration:
             TOOL_ANALYZE_STATISTICS,
             {"operation": operation, "data": data, **kwargs},
             identity=identity,
+            input_trust=input_trust,
         )
         if outcome.succeeded:
             return self._succeeded(outcome, call_identity)
@@ -304,6 +330,7 @@ class MCPIntegration:
         relationships: list[Any] | None = None,
         *,
         identity: ToolCallIdentity | None = None,
+        input_trust: TrustClassification = DEFAULT_MCP_INPUT_TRUST,
     ) -> dict[str, Any]:
         """Build a knowledge graph through the boundary."""
 
@@ -311,6 +338,7 @@ class MCPIntegration:
             TOOL_BUILD_KNOWLEDGE_GRAPH,
             {"text": text, "entities": entities, "relationships": relationships},
             identity=identity,
+            input_trust=input_trust,
         )
         if outcome.succeeded:
             return self._succeeded(outcome, call_identity)
@@ -362,6 +390,7 @@ class MCPIntegration:
         arguments: dict[str, Any],
         *,
         identity: ToolCallIdentity | None,
+        input_trust: TrustClassification,
     ) -> tuple[ToolOutcome, ToolCallIdentity]:
         """Run one mediated call and return its outcome with the identity used.
 
@@ -389,9 +418,11 @@ class MCPIntegration:
             grants = [
                 self_issued_grant(
                     tool_name=spec.name,
-                    tool_version=spec.version,
-                    sensitivity=MCP_SENSITIVITY,
-                    input_trust=MCP_INPUT_TRUST,
+                    policy=SelfIssuedPolicy(
+                        sensitivity=MCP_SENSITIVITY,
+                        max_input_trust=MCP_MAX_INPUT_TRUST,
+                        tool_versions=(spec.version,),
+                    ),
                     identity=call_identity,
                     now=now,
                 )
@@ -404,7 +435,7 @@ class MCPIntegration:
             organization_id=call_identity.organization_id,
             capability_scope=grants[0].capability_scope if grants else "",
             arguments=arguments,
-            input_trust=MCP_INPUT_TRUST,
+            input_trust=input_trust,
             output_trust=MCP_OUTPUT_TRUST,
             grants=grants,
         )
@@ -636,7 +667,8 @@ def create_mcp_integrated_agent(
 
 
 __all__ = [
-    "MCP_INPUT_TRUST",
+    "DEFAULT_MCP_INPUT_TRUST",
+    "MCP_MAX_INPUT_TRUST",
     "MCP_OUTPUT_TRUST",
     "MCPIntegration",
     "create_mcp_integrated_agent",
