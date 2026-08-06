@@ -103,28 +103,20 @@ def _audit_columns() -> list[sa.Column]:
     ]
 
 
-def _optional_prompt_binding_columns() -> list[sa.Column]:
-    """Nullable PromptBinding columns plus the producer_kind that gates them."""
-    return [
-        sa.Column(
-            "producer_kind", sa.String(20), nullable=False, server_default="system"
-        ),
-        sa.Column("prompt_id", sa.String(255), nullable=True),
-        sa.Column("prompt_version", sa.String(100), nullable=True),
-        sa.Column("template_sha256", sa.String(64), nullable=True),
-        sa.Column("rendered_sha256", sa.String(64), nullable=True),
-    ]
-
-
 def _no_default_prompt_binding_columns() -> list[sa.Column]:
     """Nullable PromptBinding columns plus a required, non-defaulted
     producer_kind.
 
-    Used by ``agent_evidence`` and ``agent_claim_supports``: a caller must
-    say explicitly whether a row is model-produced or deterministic. Unlike
-    ``_optional_prompt_binding_columns()``, ``producer_kind`` here carries no
-    server default, so a caller cannot omit it and have a deterministic
-    record silently pass as model-produced.
+    Used by all four provenance tables (``agent_artifacts``,
+    ``agent_tool_invocations``, ``agent_evidence``, ``agent_claim_supports``):
+    a caller must say explicitly whether a row is model-produced or
+    deterministic. ``producer_kind`` carries no server default anywhere, so a
+    caller cannot omit it and have a deterministic record silently pass as
+    model-produced -- a model judgment recorded as machine-derived is the
+    exact inversion of what prompt pinning protects. ``agent_artifacts`` and
+    ``agent_tool_invocations`` originally defaulted this to ``'system'``;
+    the default was removed for the same reason it was never given to
+    ``agent_evidence``/``agent_claim_supports`` in the first place.
     """
     return [
         sa.Column("producer_kind", sa.String(20), nullable=False),
@@ -250,7 +242,7 @@ def _create_artifacts() -> None:
         sa.Column("trust", sa.String(30), nullable=False),
         sa.Column("producer", sa.String(255), nullable=False),
         sa.Column("metadata", sa.JSON(), nullable=False),
-        *_optional_prompt_binding_columns(),
+        *_no_default_prompt_binding_columns(),
         _contract_version_column(),
         *_audit_columns(),
         sa.PrimaryKeyConstraint("id"),
@@ -322,7 +314,7 @@ def _create_tool_invocations() -> None:
         sa.Column("status_reason", sa.Text(), nullable=True),
         sa.Column("requested_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
-        *_optional_prompt_binding_columns(),
+        *_no_default_prompt_binding_columns(),
         _contract_version_column(),
         *_audit_columns(),
         sa.PrimaryKeyConstraint("id"),
