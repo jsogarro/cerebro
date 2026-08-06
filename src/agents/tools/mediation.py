@@ -21,26 +21,37 @@ identifier that would make an audit look complete.
 **Authorization.** Nothing in this repository issues capability grants. There
 is no issuer, no policy source, and no runtime grant writer. The choice was
 between denying every call — which would mediate the tool paths by switching
-them off — and minting a grant at the call site. This module mints one, scoped
-to the exact run, task, tool, and version, valid for minutes, and carrying a
-``self-issued:`` scope prefix so every call authorized by nobody is findable
-with one query.
+them off — and minting a grant at the call site. This module mints one, from a
+static per-tool :class:`SelfIssuedPolicy`, scoped to the exact run and task,
+valid for minutes, and carrying a ``self-issued:`` scope prefix.
 
 *A self-issued grant is not authorization.* What it buys is that the check
-runs, that a request which does not match is refused, and that the scope
-written to the record comes off a grant object rather than off the request.
-Those are real and testable. What it does not buy is any claim that an
+runs, that mismatched requests — wrong task, wrong run, wrong tool version,
+input trust above the tool's declared ceiling — are genuinely refused, and that
+the scope written to the record comes off a grant object rather than off the
+request. Those are real and testable. What it does not buy is any claim that an
 authority permitted the call. When an issuer exists, it injects grants and this
 function stops being reached.
 
-The narrow reason this is safe today: every tool routed here is
-``READ_ONLY``, and :data:`~src.core.contracts.capabilities.
-APPROVAL_REQUIRED_SENSITIVITIES` covers only ``EXTERNAL_WRITE`` and
-``EXFILTRATION``. A self-issued ``READ_ONLY`` grant therefore cannot waive an
-approval requirement, because at this sensitivity there is none to waive. The
-moment a tool at a higher sensitivity is registered, this function must not be
-what authorizes it — :func:`self_issued_grant` refuses outright rather than
-relying on anyone noticing.
+**Every field on the grant is a static declaration, never a value read off the
+call.** A ceiling minted from the invocation's own ``input_trust`` allows all
+five trust levels; a declared one refuses ``derived_untrusted``. The table in
+:class:`SelfIssuedPolicy` reproduces both. This is the difference between a
+default policy nobody has authorized and a rubber stamp shaped exactly like the
+request, and it is the whole reason the check is worth running.
+
+**The blast radius is bounded by the contract, not by discipline here.**
+:meth:`~src.core.contracts.capabilities.CapabilityGrant.validate_grant`
+*rejects at construction* any grant whose sensitivity is in
+:data:`~src.core.contracts.capabilities.APPROVAL_REQUIRED_SENSITIVITIES` with
+``requires_approval=False``. So this pattern **cannot** be extended to
+``EXTERNAL_WRITE`` or ``EXFILTRATION`` — not by accident, and not by a future
+maintainer who copies :func:`self_issued_grant`. Where it stops is exactly
+where a real issuer becomes mandatory. The local refusal in that function fails
+earlier and names the tool; it is not what makes this true.
+
+**Residual, unenforced:** nothing prevents a future issuer from minting grants
+under the reserved prefix. That is a review question, not a check.
 
 **Durability.** :class:`InMemoryToolAuditStore` satisfies 4C's
 ``ToolAuditStore`` protocol and keeps records for the lifetime of the process.
