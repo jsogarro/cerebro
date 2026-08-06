@@ -8,8 +8,11 @@ in-process exercisers say exactly that rather than claiming a pass. This module
 is where they are actually exercised, against the repository that would perform
 the check if one existed.
 
-It is integration-marked and therefore excluded from the default run, which is
-the same treatment every other repository test in this codebase gets.
+It carries the ``integration`` marker, like every other repository test here.
+Note that the marker does not exclude it: this project's ``addopts`` deselects
+only ``live_eval``, so a default ``uv run pytest`` runs this module and starts a
+Postgres container. That is the existing convention rather than a choice made
+here, but it does mean adding this file moves the suite's totals.
 
 **Why the digests matching is not a mitigation.** ``record_evidence`` does
 compare ``Evidence.content_sha256`` against the referenced artifact's digest,
