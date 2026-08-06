@@ -127,7 +127,7 @@ class TestMCPClient:
             f"<entry><title>{marker}</title>"
             f"<summary>{marker} abstract</summary>"
             "<published>2024-01-01T00:00:00Z</published>"
-            '<id>http://arxiv.org/abs/0000.00000</id>'
+            "<id>http://arxiv.org/abs/0000.00000</id>"
             "</entry></feed>"
         )
         response = MagicMock()
