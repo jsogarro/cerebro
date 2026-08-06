@@ -169,6 +169,14 @@ def is_credential_key(key: str) -> bool:
     return normalized.startswith("x") and normalized[1:] in _CREDENTIAL_KEY_NAMES
 
 
+# Transitional alias for branches created before this helper was made public.
+# A rename with no alias produces no merge conflict — the importing branch does
+# not touch this file — so the break surfaces only as an ImportError in the
+# module whose tests would otherwise have reported it. Remove once every wave
+# branch is integrated.
+_is_credential_key = is_credential_key
+
+
 MIN_REDACTABLE_SECRET_LENGTH: Final[int] = 8
 """Shortest held value that may be matched by substring.
 

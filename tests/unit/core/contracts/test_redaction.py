@@ -270,3 +270,17 @@ def test_credential_key_detection_is_public_so_callers_need_not_restate_it() -> 
     assert is_credential_key("api_key")
     assert is_credential_key("X-API-Key")
     assert not is_credential_key("query")
+
+
+def test_the_pre_rename_private_name_still_resolves() -> None:
+    """A rename with no alias breaks an in-flight branch silently.
+
+    Packet branches created before the rename import ``_is_credential_key``.
+    Because the rename lives in a file those branches do not touch, merging
+    produces **no conflict** — only an ImportError, in the one module whose
+    tests would then fail to load and report it. The alias costs two lines and
+    removes a trap that no merge would surface.
+    """
+    from src.core.contracts import redaction
+
+    assert redaction._is_credential_key is redaction.is_credential_key
