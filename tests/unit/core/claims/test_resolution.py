@@ -14,6 +14,7 @@ import pytest
 
 from src.core.claims import build_inventory
 from src.core.claims.resolution import (
+    RESOLVER_EVALUATOR_ID,
     ClaimSupportResolution,
     ClaimSupportResolver,
     ClaimVerdict,
@@ -25,6 +26,7 @@ from src.core.contracts import (
     AbsentEvidenceReason,
     ClaimSupport,
     ClaimSupportStatus,
+    ProducerKind,
     PromptBinding,
 )
 
@@ -79,6 +81,7 @@ def _verdict(claim_id: str, **overrides: object) -> ClaimVerdict:
         "explanation": "Table 3 reports the same figure.",
         "evaluator_id": "entailment-evaluator",
         "evaluator_version": "1.0",
+        "producer_kind": ProducerKind.MODEL_TURN,
         "prompt_binding": EVALUATOR_BINDING,
         "evaluated_at": NOW,
     }
@@ -136,6 +139,80 @@ def test_never_evaluated_is_distinguishable_from_evaluated_and_unsupported() -> 
     assert looked.absent_evidence_reason is AbsentEvidenceReason.NO_SOURCE_FOUND
     assert never_looked.absent_evidence_reason is AbsentEvidenceReason.NOT_ATTEMPTED
     assert looked.evaluator_id != never_looked.evaluator_id
+
+
+def test_a_fill_in_verdict_says_no_model_decided_it() -> None:
+    """The audit question is "was this judgment made by a model?".
+
+    A fill-in row is the resolver's own statement that nobody looked, so it
+    declares ``system`` and names no prompt. Until packet 4A amended the
+    contract, ``prompt_binding`` was required unconditionally and the only way
+    to write this row was to hash an invented template — every digest honest,
+    the identity a fabrication, and this question unanswerable from the record.
+    """
+    inventory = _inventory()
+
+    resolution = _resolver().resolve(
+        inventory=inventory, run_id=RUN_ID, verdicts=[], resolved_at=NOW
+    )
+
+    for support in resolution.supports:
+        assert support.producer_kind is ProducerKind.SYSTEM
+        assert support.prompt_binding is None
+        assert support.evaluator_id == RESOLVER_EVALUATOR_ID
+
+
+def test_a_deterministic_evaluator_may_return_a_verdict_with_no_prompt() -> None:
+    """Wave 5's schema, citation and numerical checks call no model at all.
+
+    They must be able to record a verdict without naming a prompt, or every one
+    of them inherits the fabrication this seam just stopped doing.
+    """
+    inventory = _inventory()
+    deterministic = _verdict(
+        inventory.claims[0].claim_id,
+        producer_kind=ProducerKind.SYSTEM,
+        prompt_binding=None,
+        evaluator_id="citation-resolution-check",
+        explanation="Every citation resolved to a snapshot.",
+    )
+
+    resolution = _resolver().resolve(
+        inventory=inventory,
+        run_id=RUN_ID,
+        verdicts=[deterministic],
+        resolved_at=NOW,
+    )
+
+    support = resolution.support_for(inventory.claims[0].claim_id)
+    assert support.producer_kind is ProducerKind.SYSTEM
+    assert support.prompt_binding is None
+    assert support.evaluator_id == "citation-resolution-check"
+
+
+def test_a_model_verdict_that_names_no_prompt_is_refused() -> None:
+    """The other half of the biconditional, which is the half that protects.
+
+    Making ``prompt_binding`` optional is only safe because declaring
+    ``model_turn`` still requires one. Without this, the amendment would have
+    turned a fabricated attribution into a missing one — and a model judgment
+    recorded as unattributable is exactly what D4b exists to prevent.
+    """
+    inventory = _inventory()
+    unattributed = _verdict(
+        inventory.claims[0].claim_id,
+        producer_kind=ProducerKind.MODEL_TURN,
+        prompt_binding=None,
+    )
+    assert unattributed.producer_kind is ProducerKind.MODEL_TURN
+
+    with pytest.raises(ValueError, match="model_turn"):
+        _resolver().resolve(
+            inventory=inventory,
+            run_id=RUN_ID,
+            verdicts=[unattributed],
+            resolved_at=NOW,
+        )
 
 
 def test_every_material_claim_appears_exactly_once() -> None:
@@ -338,6 +415,7 @@ def _support_for(claim_id: str) -> ClaimSupport:
         evidence_ids=("evidence-1",),
         evaluator_id="entailment-evaluator",
         evaluator_version="1.0",
+        producer_kind=ProducerKind.MODEL_TURN,
         prompt_binding=EVALUATOR_BINDING,
         explanation="Because the source says so.",
         evaluated_at=NOW,

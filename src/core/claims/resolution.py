@@ -41,6 +41,7 @@ from src.core.contracts import (
     AbsentEvidenceReason,
     ClaimSupport,
     ClaimSupportStatus,
+    ProducerKind,
     PromptBinding,
 )
 
@@ -66,21 +67,22 @@ checker would make the audit trail claim a judgment that was never made.
 
 RESOLVER_EVALUATOR_VERSION: Final[str] = "1.0"
 
-_UNEVALUATED_RULE: Final[str] = (
-    "A material claim that no evaluator returned a verdict for is recorded as "
-    "$status with absent_evidence_reason $reason, so that a claim nobody "
-    "examined stays distinguishable from one examined and found unsupported. "
-    "Claim: $claim_id"
+_UNEVALUATED_EXPLANATION: Final[str] = (
+    "No evaluator returned a verdict for this claim, so it is recorded as "
+    "unsupported with absent_evidence_reason not_attempted rather than left "
+    "out of the record."
 )
-"""The deterministic decision text a fill-in verdict is derived from.
+"""Why a fill-in row exists, in the row itself.
 
-This stands where an evaluator's prompt stands. It is not sent to a model —
-nothing about this decision involves one — and the digests on the resulting
-:class:`~src.core.contracts.provenance.PromptBinding` hash this rule and the
-text it produced, so the identity is honest about what actually decided the
-row. See the handoff note on ``ClaimSupport.prompt_binding`` being required
-unconditionally: a deterministic evaluator has no prompt, and this is the
-narrowest way to satisfy the contract without inventing one.
+A fill-in verdict is ``producer_kind=system`` and carries **no**
+``prompt_binding``: no model decided it, and the contract now lets a
+deterministic producer say so rather than forcing it to name a prompt it never
+had. An earlier revision of this module satisfied the then-unconditional
+requirement by hashing an invented "decision template" — honest digests over a
+text no model ever saw. That made ``prompt_binding`` mean two different things
+across tables and left the one question a claim-support audit asks — *was this
+judgment made by a model?* — unanswerable. Packet 4A amended the contract
+instead.
 """
 
 
@@ -109,6 +111,13 @@ class ClaimVerdict:
     or restating which run and artifact it was called for. Those are the
     resolver's, which is also what stops an evaluator writing a row for a claim
     the inventory never listed.
+
+    ``producer_kind`` is required and ``prompt_binding`` is not, mirroring the
+    contract: a deterministic evaluator — the schema, citation-resolution, and
+    numerical checks Wave 5 builds — declares ``system`` and names no prompt,
+    and a model-mediated one declares ``model_turn`` and must name one. The
+    biconditional is enforced by :class:`ClaimSupport`, so a verdict that gets
+    the pair wrong fails at construction rather than being written.
     """
 
     claim_id: str
@@ -116,8 +125,9 @@ class ClaimVerdict:
     explanation: str
     evaluator_id: str
     evaluator_version: str
-    prompt_binding: PromptBinding
+    producer_kind: ProducerKind
     evaluated_at: datetime
+    prompt_binding: PromptBinding | None = None
     evidence_ids: tuple[str, ...] = ()
     absent_evidence_reason: AbsentEvidenceReason | None = None
 
@@ -317,6 +327,7 @@ class ClaimSupportResolver:
             absent_evidence_reason=verdict.absent_evidence_reason,
             evaluator_id=verdict.evaluator_id,
             evaluator_version=verdict.evaluator_version,
+            producer_kind=verdict.producer_kind,
             prompt_binding=verdict.prompt_binding,
             explanation=verdict.explanation,
             evaluated_at=verdict.evaluated_at,
@@ -332,7 +343,6 @@ class ClaimSupportResolver:
     ) -> ClaimSupport:
         """Record the claim nobody reached, as itself rather than as a gap."""
 
-        explanation = _render_unevaluated_rule(claim.claim_id)
         return ClaimSupport(
             claim_support_id=self._id_factory(),
             run_id=run_id,
@@ -344,20 +354,7 @@ class ClaimSupportResolver:
             absent_evidence_reason=AbsentEvidenceReason.NOT_ATTEMPTED,
             evaluator_id=RESOLVER_EVALUATOR_ID,
             evaluator_version=RESOLVER_EVALUATOR_VERSION,
-            prompt_binding=PromptBinding.for_rendered(
-                prompt_id=RESOLVER_EVALUATOR_ID,
-                prompt_version=RESOLVER_EVALUATOR_VERSION,
-                template_source=_UNEVALUATED_RULE,
-                rendered_text=explanation,
-            ),
-            explanation=explanation,
+            producer_kind=ProducerKind.SYSTEM,
+            explanation=_UNEVALUATED_EXPLANATION,
             evaluated_at=resolved_at,
         )
-
-
-def _render_unevaluated_rule(claim_id: str) -> str:
-    return (
-        _UNEVALUATED_RULE.replace("$status", ClaimSupportStatus.UNSUPPORTED.value)
-        .replace("$reason", AbsentEvidenceReason.NOT_ATTEMPTED.value)
-        .replace("$claim_id", claim_id)
-    )

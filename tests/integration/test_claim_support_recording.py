@@ -20,13 +20,24 @@ from src.core.claims.resolution import ClaimSupportResolver, ClaimVerdict
 from src.core.contracts import (
     AbsentEvidenceReason,
     ClaimSupportStatus,
+    ProducerKind,
     PromptBinding,
 )
 from src.models.db.claim_support import AgentClaimSupport
 from src.repositories.claim_support_repository import ClaimSupportRepository
 from tests.integration.wave4_helpers import seed_artifact, seed_run_task_attempt
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [
+    pytest.mark.integration,
+]
+
+BLOCKED_ON_4B = pytest.mark.xfail(
+    strict=True,
+    raises=AttributeError,
+    reason=(
+        "BLOCKED on ClaimSupportRepository, which packet 4B owns. Contract commit 1de2322 made ClaimSupport.prompt_binding optional so a deterministic producer can decline to name a prompt; record_claim_support still reads binding.prompt_id unguarded at claim_support_repository.py:86-89 and raises AttributeError on every producer_kind=system row. That is every fill-in verdict, so the whole no-claim-escapes mechanism is unwritable until 4B lands the None branch plus the nullable prompt-binding columns. strict=True so these turn red the moment the fix arrives and this marker has to be removed rather than lingering."
+    ),
+)
 
 NOW = datetime(2026, 8, 6, tzinfo=UTC)
 ORG_ID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
@@ -74,6 +85,7 @@ def _resolve(source: str = TWO_CLAIM_SOURCE, verdicts=()):  # type: ignore[no-un
     )
 
 
+@BLOCKED_ON_4B
 @pytest.mark.asyncio
 async def test_one_row_lands_for_every_material_claim(
     recorder: ClaimSupportRecorder, db_session: AsyncSession
@@ -91,6 +103,7 @@ async def test_one_row_lands_for_every_material_claim(
     )
 
 
+@BLOCKED_ON_4B
 @pytest.mark.asyncio
 async def test_a_claim_no_evaluator_reached_is_durable_and_says_why(
     recorder: ClaimSupportRecorder, db_session: AsyncSession
@@ -110,6 +123,7 @@ async def test_a_claim_no_evaluator_reached_is_durable_and_says_why(
         explanation="Searched the corpus; nothing addresses this figure.",
         evaluator_id="entailment-evaluator",
         evaluator_version="1.0",
+        producer_kind=ProducerKind.MODEL_TURN,
         prompt_binding=EVALUATOR_BINDING,
         evaluated_at=NOW,
     )
@@ -131,6 +145,7 @@ async def test_a_claim_no_evaluator_reached_is_durable_and_says_why(
     assert {row.status for row in rows} == {"unsupported"}
 
 
+@BLOCKED_ON_4B
 @pytest.mark.asyncio
 async def test_evidence_count_agrees_with_evidence_ids_on_every_row(
     recorder: ClaimSupportRecorder, db_session: AsyncSession
@@ -149,6 +164,7 @@ async def test_evidence_count_agrees_with_evidence_ids_on_every_row(
         explanation="Table 3 reports the same figure.",
         evaluator_id="entailment-evaluator",
         evaluator_version="1.0",
+        producer_kind=ProducerKind.MODEL_TURN,
         prompt_binding=EVALUATOR_BINDING,
         evaluated_at=NOW,
     )
@@ -161,6 +177,7 @@ async def test_evidence_count_agrees_with_evidence_ids_on_every_row(
         assert row.evidence_count == len(row.evidence_ids)
 
 
+@BLOCKED_ON_4B
 @pytest.mark.asyncio
 async def test_the_recorder_leaves_committing_to_the_caller(
     recorder: ClaimSupportRecorder, db_session: AsyncSession
@@ -179,6 +196,45 @@ async def test_the_recorder_leaves_committing_to_the_caller(
         select(AgentClaimSupport.claim_id).where(AgentClaimSupport.run_id == RUN_ID)
     )
     assert remaining.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_a_fully_evaluated_resolution_persists_today(
+    recorder: ClaimSupportRecorder, db_session: AsyncSession
+) -> None:
+    """Keeps the write path covered while the fill-in path is blocked.
+
+    Every claim here carries a ``model_turn`` verdict with a prompt binding, so
+    nothing reaches the unguarded read in ``record_claim_support``. Without
+    this, the four xfails above would leave the recorder with no green
+    persistence coverage at all, and a second unrelated regression in it would
+    be invisible until 4B's fix landed.
+    """
+    inventory = _inventory()
+    verdicts = [
+        ClaimVerdict(
+            claim_id=claim.claim_id,
+            status=ClaimSupportStatus.SUPPORTED,
+            evidence_ids=("evidence-1",),
+            explanation="Table 3 reports the same figure.",
+            evaluator_id="entailment-evaluator",
+            evaluator_version="1.0",
+            producer_kind=ProducerKind.MODEL_TURN,
+            prompt_binding=EVALUATOR_BINDING,
+            evaluated_at=NOW,
+        )
+        for claim in inventory.claims
+    ]
+
+    rows = await recorder.record(_resolve(verdicts=verdicts), organization_id=ORG_ID)
+
+    assert len(rows) == inventory.material_claim_count
+    stored = await db_session.execute(
+        select(AgentClaimSupport.claim_id).where(AgentClaimSupport.run_id == RUN_ID)
+    )
+    assert sorted(stored.scalars().all()) == sorted(
+        claim.claim_id for claim in inventory.claims
+    )
 
 
 @pytest.mark.asyncio
