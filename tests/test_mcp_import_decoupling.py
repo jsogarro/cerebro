@@ -109,6 +109,27 @@ class TestNetworkToolsDoNotRequireScipy:
 
         _import_with_banned("src.mcp.tools", {"scipy", "fastmcp"})
 
+    @pytest.mark.parametrize(
+        "name", ["AcademicSearchTool", "CitationTool", "KnowledgeGraphTool"]
+    )
+    def test_resolving_an_export_by_name_does_not_import_scipy(self, name: str) -> None:
+        """The form `src/mcp/client.py` actually uses.
+
+        Importing the package and importing a submodule both leave the lazy
+        `__getattr__` untouched, so neither proves anything about it — a
+        mutation that made `__getattr__` pull `statistics_tool` on every
+        lookup survived both of the tests above. This is the one that fails.
+        """
+
+        script = textwrap.dedent(_POISON).format(
+            banned={"scipy", "fastmcp"}, subject=f"src.mcp.tools.{name}"
+        )
+        script += f"\nfrom src.mcp.tools import {name}\nassert {name} is not None\n"
+        completed = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
+        )
+        assert completed.returncode == 0, completed.stderr
+
     def test_the_package_still_exposes_statistics_tool(self) -> None:
         """Laziness must not become absence.
 

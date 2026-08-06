@@ -541,16 +541,28 @@ class TestTheSelfIssuedGrantIsScopedAndNotAWildcard:
         assert decision.effect is CapabilityDecisionEffect.DENY
 
     @pytest.mark.parametrize("sensitivity_name", ["EXTERNAL_WRITE", "EXFILTRATION"])
-    def test_it_refuses_to_authorize_a_sink_that_requires_approval(
+    def test_no_self_issued_grant_exists_for_a_sink_that_requires_approval(
         self, sensitivity_name: str
     ) -> None:
-        """The one guard that makes the interim grant defensible.
+        """The property that makes the interim grant defensible.
 
         A self-issued grant is safe at ``READ_ONLY`` only because no approval
-        requirement exists to waive at that sensitivity. The moment a tool
-        declares a sink that does require approval, the grant nobody issued
-        must not be what permits it — and that has to be a refusal in code, not
-        a rule in a docstring, because the rule is what gets forgotten.
+        requirement exists to waive at that sensitivity. At a sink that does
+        require approval, no such grant may come into existence.
+
+        **This is enforced twice, and the redundancy is deliberate.**
+        `self_issued_grant` refuses first, with an error naming the tool. If
+        that refusal were deleted, `CapabilityGrant`'s own frozen validator
+        would still reject the object ("a external_write sink always requires
+        approval; a grant cannot waive it"), because packet 4A made a grant
+        that waives approval unconstructable.
+
+        Verified by removing the local refusal and re-running: the call still
+        raises. A mutation test against the local guard therefore *survives*,
+        and that is the correct outcome rather than a coverage gap — the
+        property holds one layer down, in a file this packet may not modify.
+        The local check earns its place by failing earlier and by saying which
+        tool was at fault, not by being what makes this true.
         """
 
         from src.agents.tools.mediation import self_issued_grant
