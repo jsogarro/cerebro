@@ -262,7 +262,8 @@ async def test_main_lifespan_warms_authority_and_restores_active_executions(
             resolved = resolver.resolve(
                 ExecutionAuthorityReference(
                     authority_id="lifespan-restart-authority", authority_version="1"
-                )
+                ),
+                organization_id=ORG_ID,
             )
             assert resolved.run.run_id == run_id
 

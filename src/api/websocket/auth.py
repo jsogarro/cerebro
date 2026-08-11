@@ -4,7 +4,11 @@ WebSocket authentication utilities.
 This module provides authentication and authorization for WebSocket connections.
 """
 
+from dataclasses import dataclass
+from uuid import UUID
+
 from jose import JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
 from src.api.websocket.run_stream import (
@@ -13,8 +17,24 @@ from src.api.websocket.run_stream import (
 )
 from src.auth.jwt_service import JWTService
 from src.core.config import settings
+from src.repositories.research_repository import ResearchRepository
 
 logger = get_logger()
+
+
+@dataclass(frozen=True)
+class WebSocketPrincipal:
+    """Who a WebSocket connection is, and which tenant it may read.
+
+    ``organization_id`` is the tenant boundary and is derived from the
+    authenticated token's claim only — never from a path parameter or query
+    string. Both fields are ``None`` for a connection admitted by the
+    explicit anonymous-development opt-in, which carries no claims at all.
+    """
+
+    user_id: str | None
+    organization_id: str | None
+    client_type: str
 
 
 class WebSocketAuthError(Exception):
@@ -26,24 +46,25 @@ class WebSocketAuthError(Exception):
         super().__init__(message)
 
 
-async def verify_websocket_token(
+async def verify_websocket_claims(
     token: str | None,
     jwt_service: JWTService,
-) -> str | None:
-    """
-    Verify JWT token for WebSocket authentication.
+) -> tuple[str | None, str | None]:
+    """Validate a WebSocket token and return ``(user_id, organization_id)``.
+
+    Both values are ``None`` for a connection admitted by the explicit
+    anonymous-development opt-in. ``organization_id`` alone is ``None`` for a
+    token that carries no tenant claim; callers that scope anything by tenant
+    must treat that as unauthorized rather than as unscoped.
 
     Args:
-        token: JWT token string
+        token: JWT token string.
         jwt_service: Shared JWT service (same one used by HTTP middleware)
             so that WebSocket and HTTP requests validate tokens against the
             same RSA key pair and blacklist.
 
-    Returns:
-        User ID if token is valid, None otherwise
-
     Raises:
-        WebSocketAuthError: If authentication fails
+        WebSocketAuthError: If authentication fails.
     """
     if not token:
         # Anonymous access is a narrow, explicit local-development opt-in.
@@ -56,7 +77,7 @@ async def verify_websocket_token(
             logger.warning(
                 "Allowing anonymous WebSocket connection by explicit development opt-in"
             )
-            return None
+            return None, None
 
         raise WebSocketAuthError("Authentication token required")
 
@@ -73,12 +94,14 @@ async def verify_websocket_token(
         if not user_id:
             raise WebSocketAuthError("Invalid token: missing user ID")
 
+        organization_id = token_payload.organization_id
+
         logger.info(
             "WebSocket authentication successful",
             user_id=user_id,
         )
 
-        return str(user_id)
+        return str(user_id), str(organization_id) if organization_id else None
 
     except WebSocketAuthError:
         raise
@@ -98,16 +121,49 @@ async def verify_websocket_token(
         raise WebSocketAuthError("Authentication failed") from e
 
 
-async def verify_project_access(user_id: str | None, project_id: str) -> bool:
+async def verify_websocket_token(
+    token: str | None,
+    jwt_service: JWTService,
+) -> str | None:
+    """Verify a WebSocket token and return its user id.
+
+    Retained for callers that need identity but no tenant scope; see
+    :func:`verify_websocket_claims` for the full claim set.
     """
-    Verify that a user has access to a specific project.
+    user_id, _ = await verify_websocket_claims(token, jwt_service)
+    return user_id
+
+
+async def verify_project_access(
+    user_id: str | None,
+    project_id: str,
+    *,
+    organization_id: str | None,
+    session: AsyncSession | None,
+) -> bool:
+    """Verify that a caller may read a specific project's live updates.
+
+    Access is the project actually existing inside the caller's tenant
+    organization and belonging to the caller — exactly the boundary the HTTP
+    project endpoints apply, read through the same org-filtered repository
+    query. The repository ``organization_id`` filter is the enforcement;
+    Postgres row-level security is not a boundary here (no
+    ``FORCE ROW LEVEL SECURITY``, and the application connects as the table
+    owner, so policies are bypassed).
+
+    Fails closed on every missing input. A caller with no user identity, no
+    tenant claim, or no database session cannot be shown to own anything, and
+    "cannot prove" is denied rather than allowed. A project outside the
+    caller's tenant is indistinguishable from a project that does not exist.
 
     Args:
-        user_id: User ID (None for anonymous users)
-        project_id: Project ID to check access for
+        user_id: Authenticated user id, or ``None`` for an anonymous caller.
+        project_id: The project the connection wants to subscribe to.
+        organization_id: The caller's tenant claim, from its token only.
+        session: Database session used to resolve project ownership.
 
     Returns:
-        True if user has access, False otherwise
+        True only if the project resolves inside the caller's boundary.
     """
     # Match the explicit anonymous-development opt-in used by token
     # verification. Merely selecting the development environment must not
@@ -118,10 +174,39 @@ async def verify_project_access(user_id: str | None, project_id: str) -> bool:
     ):
         return True
 
-    # TODO: Implement proper project access control
-    # This would typically check database for user-project relationships
-    # For now, authenticated users can access any project
-    return user_id is not None
+    if not user_id or not organization_id or session is None:
+        logger.warning(
+            "Denying WebSocket project access without a complete tenant context",
+            project_id=project_id,
+            has_user=bool(user_id),
+            has_organization=bool(organization_id),
+            has_session=session is not None,
+        )
+        return False
+
+    try:
+        project_uuid = UUID(project_id)
+        organization_uuid = UUID(organization_id)
+    except (ValueError, AttributeError, TypeError):
+        logger.warning(
+            "Denying WebSocket project access for an unusable identifier",
+            project_id=project_id,
+        )
+        return False
+
+    project = await ResearchRepository(session).get_for_user(
+        project_uuid,
+        user_id=user_id,
+        organization_id=organization_uuid,
+    )
+    if project is None:
+        logger.warning(
+            "Denying WebSocket project access outside the caller's boundary",
+            project_id=project_id,
+            user_id=user_id,
+        )
+        return False
+    return True
 
 
 async def resolve_run_stream_entitlement(
@@ -206,10 +291,25 @@ async def authenticate_websocket_connection(
     Raises:
         WebSocketAuthError: If authentication fails
     """
-    # Authenticate user
-    user_id = await verify_websocket_token(token, jwt_service)
+    principal = await authenticate_websocket_principal(token, user_agent, jwt_service)
+    return principal.user_id, principal.client_type
 
-    # Determine client type
+
+async def authenticate_websocket_principal(
+    token: str | None,
+    user_agent: str | None,
+    jwt_service: JWTService,
+) -> WebSocketPrincipal:
+    """Authenticate a connection and carry its tenant claim forward.
+
+    Used by endpoints that authorize against a tenant boundary, so the
+    organization claim comes from the same single token validation as the
+    user id rather than from a second, separately-decoded copy.
+
+    Raises:
+        WebSocketAuthError: If authentication fails.
+    """
+    user_id, organization_id = await verify_websocket_claims(token, jwt_service)
     client_type = extract_client_type(user_agent)
 
     logger.info(
@@ -218,4 +318,8 @@ async def authenticate_websocket_connection(
         client_type=client_type,
     )
 
-    return user_id, client_type
+    return WebSocketPrincipal(
+        user_id=user_id,
+        organization_id=organization_id,
+        client_type=client_type,
+    )

@@ -39,6 +39,12 @@ from src.core.contracts import (
     RoutingEdge,
     WorkerAssignment,
 )
+from src.middleware.tenant_context import TenantContext
+
+# The query routes require an authenticated tenant.
+PLAN_TENANT = TenantContext(
+    user_id="user-1", organization_id="11111111-1111-1111-1111-111111111111"
+)
 
 
 def _plan(
@@ -235,11 +241,13 @@ class TestRecordedPlanExposure:
 
         class _Service:
             async def get_execution_status(
-                self, execution_id: str
+                self, execution_id: str, *, organization_id: str | None = None
             ) -> ExecutionStatus | None:
                 return status if execution_id == "execution-1" else None
 
-        response = await query_api.get_execution_status("execution-1", _Service())
+        response = await query_api.get_execution_status(
+            "execution-1", _Service(), PLAN_TENANT
+        )
 
         assert response["execution_plan"] == {
             "execution_plan_id": "plan-1",
@@ -269,11 +277,13 @@ class TestRecordedPlanExposure:
 
         class _Service:
             async def get_execution_status(
-                self, execution_id: str
+                self, execution_id: str, *, organization_id: str | None = None
             ) -> ExecutionStatus | None:
                 return status if execution_id == "execution-2" else None
 
-        response = await query_api.get_execution_status("execution-2", _Service())
+        response = await query_api.get_execution_status(
+            "execution-2", _Service(), PLAN_TENANT
+        )
 
         assert response["execution_plan"] is None
 

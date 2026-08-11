@@ -242,10 +242,10 @@ async def test_replayed_admission_does_not_double_execute_supervisor(
     )
 
     execution_id_1 = await service.start_research_execution(
-        project, authority_reference=reference
+        project, authority_reference=reference, organization_id=ORG_ID
     )
     execution_id_2 = await service.start_research_execution(
-        project, authority_reference=reference
+        project, authority_reference=reference, organization_id=ORG_ID
     )
     # One run, one execution: the replay is handed the existing handle rather
     # than a second one that would have to be reconciled against it later.
@@ -328,7 +328,7 @@ async def test_replayed_admission_after_a_restart_resumes_rather_than_restarts(
     )
     project = make_project()
     execution_id = await service_a.start_research_execution(
-        project, authority_reference=reference
+        project, authority_reference=reference, organization_id=ORG_ID
     )
     await asyncio.wait_for(supervisor_started.wait(), timeout=5)
 
@@ -346,7 +346,7 @@ async def test_replayed_admission_after_a_restart_resumes_rather_than_restarts(
     assert execution_id in service_b.active_executions
 
     replayed = await service_b.start_research_execution(
-        project, authority_reference=reference
+        project, authority_reference=reference, organization_id=ORG_ID
     )
 
     assert replayed == execution_id

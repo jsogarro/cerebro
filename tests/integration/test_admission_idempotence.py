@@ -129,8 +129,12 @@ async def test_concurrent_identical_admissions_execute_the_run_once(
     project = make_project()
 
     first, second = await asyncio.gather(
-        service.start_research_execution(project, authority_reference=reference),
-        service.start_research_execution(project, authority_reference=reference),
+        service.start_research_execution(
+            project, authority_reference=reference, organization_id=ORG_ID
+        ),
+        service.start_research_execution(
+            project, authority_reference=reference, organization_id=ORG_ID
+        ),
     )
 
     assert first == second
@@ -176,7 +180,7 @@ async def test_replaying_a_terminal_run_after_restart_returns_the_recorded_outco
     bridge_a = _CountingBridge({"result": "the first answer"})
     service_a = _service(session_factory, resolver, bridge_a)
     execution_id_a = await service_a.start_research_execution(
-        project, authority_reference=reference
+        project, authority_reference=reference, organization_id=ORG_ID
     )
     execution_a = await _await_settled(service_a, execution_id_a)
     assert execution_a.status == "completed"
@@ -187,7 +191,7 @@ async def test_replaying_a_terminal_run_after_restart_returns_the_recorded_outco
     bridge_b = _CountingBridge({"result": "a second answer that must never exist"})
     service_b = _service(session_factory, resolver, bridge_b)
     execution_id_b = await service_b.start_research_execution(
-        project, authority_reference=reference
+        project, authority_reference=reference, organization_id=ORG_ID
     )
 
     assert bridge_b.admit_calls == 0
@@ -196,7 +200,9 @@ async def test_replaying_a_terminal_run_after_restart_returns_the_recorded_outco
     # replaying caller gets the same handle it had before the restart.
     assert execution_id_b == execution_id_a
 
-    replayed = await service_b.get_execution_status(execution_id_b)
+    replayed = await service_b.get_execution_status(
+        execution_id_b, organization_id=ORG_ID
+    )
     assert replayed is not None
     assert replayed.status == "completed"
     assert replayed.run_id == run_id
@@ -237,7 +243,7 @@ async def test_an_unreadable_database_refuses_admission_rather_than_guessing(
     bridge_a = _CountingBridge()
     service_a = _service(session_factory, resolver, bridge_a)
     execution_id = await service_a.start_research_execution(
-        project, authority_reference=reference
+        project, authority_reference=reference, organization_id=ORG_ID
     )
     await _await_settled(service_a, execution_id)
     await service_a.close()
@@ -255,7 +261,9 @@ async def test_an_unreadable_database_refuses_admission_rather_than_guessing(
     service_b = _service(session_factory, resolver, bridge_b)
 
     with pytest.raises(RunAdmissionError):
-        await service_b.start_research_execution(project, authority_reference=reference)
+        await service_b.start_research_execution(
+            project, authority_reference=reference, organization_id=ORG_ID
+        )
 
     assert bridge_b.admit_calls == 0
     assert bridge_b.execute_calls == 0
@@ -298,8 +306,12 @@ async def test_cross_process_duplicate_admission_coalesces_instead_of_raising(
     service_b = _service(session_factory, resolver, bridge_b)
 
     results = await asyncio.gather(
-        service_a.start_research_execution(project, authority_reference=reference),
-        service_b.start_research_execution(project, authority_reference=reference),
+        service_a.start_research_execution(
+            project, authority_reference=reference, organization_id=ORG_ID
+        ),
+        service_b.start_research_execution(
+            project, authority_reference=reference, organization_id=ORG_ID
+        ),
         return_exceptions=True,
     )
 
@@ -375,7 +387,7 @@ async def test_replay_after_the_in_process_index_is_evicted_does_not_re_execute(
     bridge = _CountingBridge({"result": "the only answer"})
     service = _service(session_factory, resolver, bridge)
     execution_id = await service.start_research_execution(
-        project, authority_reference=reference
+        project, authority_reference=reference, organization_id=ORG_ID
     )
     await _await_settled(service, execution_id)
 
@@ -383,14 +395,16 @@ async def test_replay_after_the_in_process_index_is_evicted_does_not_re_execute(
     assert execution_id not in service.active_executions
 
     replayed_execution_id = await service.start_research_execution(
-        project, authority_reference=reference
+        project, authority_reference=reference, organization_id=ORG_ID
     )
 
     assert bridge.admit_calls == 1
     assert bridge.execute_calls == 1
     assert replayed_execution_id == execution_id
 
-    replayed = await service.get_execution_status(replayed_execution_id)
+    replayed = await service.get_execution_status(
+        replayed_execution_id, organization_id=ORG_ID
+    )
     assert replayed is not None
     assert replayed.status == "completed"
     assert replayed.final_output == {"result": "the only answer"}

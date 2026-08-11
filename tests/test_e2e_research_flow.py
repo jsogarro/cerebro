@@ -318,16 +318,22 @@ class TestResearchFlow:
 
     @pytest.mark.asyncio
     async def test_intelligent_query_endpoint(self, client: AsyncClient) -> None:
-        """Routed research queries now require a resolvable execution
-        authority reference; this app instance has no lifespan-injected
-        resolver, so the endpoint correctly fails closed before dispatch
-        rather than returning a fabricated pending/running/completed state."""
+        """Routed research queries require an authenticated tenant.
+
+        This previously asserted 422 (no resolvable execution authority),
+        which was the first gate an anonymous caller met. Authority
+        resolution is now scoped to the caller's organization, so the
+        endpoint rejects the unauthenticated request outright and never
+        reaches authority resolution at all. The assertion is stronger:
+        it pins that an anonymous caller is refused before any execution
+        machinery is consulted, rather than pinning how far in it got.
+        """
         r = await client.post(
             "/api/v1/query/research",
             json={"query": "AI safety research overview", "domains": ["AI"]},
         )
-        assert r.status_code == 422
-        assert r.json()["error"]["code"] == "EXECUTION_AUTHORITY_REQUIRED"
+        assert r.status_code == 401
+        assert r.json()["error"]["code"] == "AUTHENTICATION_REQUIRED"
 
     @pytest.mark.skip(reason=_AUTH_RLS_SKIP_REASON)
     @pytest.mark.asyncio

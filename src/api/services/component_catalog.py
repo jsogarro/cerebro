@@ -79,6 +79,7 @@ class ResearchWorkflowBackend(Protocol):
         context: dict[str, Any] | None = None,
         *,
         authority_reference: ExecutionAuthorityReference | None = None,
+        organization_id: str | None = None,
     ) -> str: ...
 
 
@@ -108,6 +109,7 @@ ResearchWorkflow = Callable[
         ResearchProject,
         dict[str, Any] | None,
         ExecutionAuthorityReference | None,
+        str | None,
     ],
     Awaitable[str],
 ]
@@ -131,6 +133,7 @@ async def execute_routed_research(
     project: ResearchProject,
     context: dict[str, Any] | None,
     authority_reference: ExecutionAuthorityReference | None,
+    organization_id: str | None = None,
 ) -> str:
     """Preserve the routed-research workflow call shape."""
 
@@ -140,6 +143,7 @@ async def execute_routed_research(
         project,
         context,
         authority_reference=authority_reference,
+        organization_id=organization_id,
     )
 
 

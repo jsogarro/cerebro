@@ -138,7 +138,8 @@ async def test_a_cold_start_can_resolve_the_authority_an_admitted_run_pinned(
     restored = cold_resolver.resolve(
         ExecutionAuthorityReference(
             authority_id="cold-start-pinned-authority", authority_version="1"
-        )
+        ),
+        organization_id=ORG_ID,
     )
     assert restored.run.run_id == run_id
     assert restored.run.workflow_definition_version == (
@@ -174,6 +175,7 @@ async def test_admission_through_the_public_entry_point_pins_the_run(
         authority_reference=ExecutionAuthorityReference(
             authority_id="public-entry-pinned-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
 
     async with session_factory() as session:

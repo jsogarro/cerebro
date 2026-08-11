@@ -79,6 +79,7 @@ from .execution_authority_resolver import (
     ExecutionAuthorityResolver,
     ExecutionAuthorityUnavailableError,
     serialize_execution_authority_binding,
+    tenant_owns_authority,
 )
 
 if TYPE_CHECKING:
@@ -245,6 +246,14 @@ class ExecutionStatus:
     status: str  # pending, running, completed, failed
     progress_percentage: float = 0.0
     current_phase: str = "initialization"
+
+    # The tenant that owns this execution, so a reader can be scoped to it.
+    # ``active_executions`` is one process-wide dictionary holding every
+    # tenant's runs, including the outputs materialized from persistence;
+    # without an owner recorded here a read by execution id has nothing to
+    # filter on. ``None`` means the owner is unknown, which every scoped
+    # reader must treat as not visible rather than as visible to all.
+    organization_id: str | None = None
 
     # Results
     agent_results: dict[str, Any] = field(default_factory=dict)
@@ -695,7 +704,7 @@ class DirectExecutionService:
             # this run after all, and the failure is a genuine one — fail
             # closed exactly as before rather than guessing.
             winner_execution_id = await self._durably_recorded_execution_id(
-                binding.run.run_id
+                binding.run.run_id, organization_id=binding.run.tenant_id
             )
             if winner_execution_id is not None:
                 logger.info(
@@ -1306,6 +1315,9 @@ class DirectExecutionService:
             started_at=run_row.started_at or run_row.created_at,
             completed_at=run_row.completed_at,
             run_id=run_row.run_id,
+            organization_id=str(run_row.organization_id)
+            if run_row.organization_id
+            else None,
         )
         if run_row.status == RunStatus.SUCCEEDED.value:
             execution_status.progress_percentage = 100.0
@@ -1346,6 +1358,7 @@ class DirectExecutionService:
         execution_policy: RoutingExecutionPolicy | None = None,
         fixture_result: dict[str, Any] | None = None,
         authority_reference: ExecutionAuthorityReference | None = None,
+        organization_id: str | None = None,
     ) -> str:
         """
         Start direct research execution using MASR routing.
@@ -1367,18 +1380,25 @@ class DirectExecutionService:
         Args:
             project: Research project to execute
             context: Additional execution context
+            organization_id: The caller's authenticated tenant. Required to
+                resolve any authority; a caller without one can start
+                nothing.
 
         Returns:
             Execution ID for tracking progress
 
         Raises:
+            ExecutionAuthorityUnavailableError: The caller's organization
+                does not own the referenced authority, or supplied none.
             RunAdmissionError: Persistence is configured and the admission
                 write did not land; no execution was started.
         """
         if self.closed:
             raise RuntimeError("Direct execution service is closed")
 
-        binding = self._resolve_execution_authority(authority_reference)
+        binding = self._resolve_execution_authority(
+            authority_reference, organization_id=organization_id
+        )
         run_id = binding.run.run_id
 
         locally_known_execution_id = self._locally_known_execution_id(run_id)
@@ -1396,7 +1416,9 @@ class DirectExecutionService:
         reservation.add_done_callback(_discard_unretrieved_admission_error)
         self._admissions_in_flight[run_id] = reservation
         try:
-            execution_id = await self._durably_recorded_execution_id(run_id)
+            execution_id = await self._durably_recorded_execution_id(
+                run_id, organization_id=binding.run.tenant_id
+            )
             if execution_id is None:
                 execution_id = await self._admit_new_execution(
                     project,
@@ -1452,12 +1474,21 @@ class DirectExecutionService:
         settled.set_result(replayed_execution_id)
         return settled
 
-    async def _durably_recorded_execution_id(self, run_id: str) -> str | None:
+    async def _durably_recorded_execution_id(
+        self, run_id: str, *, organization_id: str
+    ) -> str | None:
         """Rehydrate an already-admitted run from persistence, if one exists.
 
         Unlike :meth:`restore_active_executions` this deliberately includes
         terminal runs: the whole point is to answer a replay with the outcome
         the database recorded instead of running the work again.
+
+        ``organization_id`` is the tenant the admitting authority belongs to.
+        A durable run recorded under a different organization is treated as
+        no run at all: this method materializes ``final_output`` and
+        ``agent_results`` into ``active_executions``, so coalescing onto a
+        foreign run would publish another tenant's output under a handle this
+        caller holds.
         """
         if not self.session_factory:
             return None
@@ -1466,6 +1497,14 @@ class DirectExecutionService:
                 lifecycle_repo = RunLifecycleRepository(session)
                 run_row = await lifecycle_repo.get_run(run_id)
                 if run_row is None:
+                    return None
+                if not tenant_owns_authority(
+                    organization_id, str(run_row.organization_id)
+                ):
+                    logger.warning(
+                        "durable_admission_lookup_cross_tenant",
+                        run_id=run_id,
+                    )
                     return None
                 execution_status = await self._rehydrate_execution(
                     lifecycle_repo, run_row
@@ -1536,6 +1575,7 @@ class DirectExecutionService:
             status="pending",
             current_phase="initialization",
             execution_plan=execution_plan,
+            organization_id=binding.run.tenant_id,
         )
 
         try:
@@ -1580,8 +1620,16 @@ class DirectExecutionService:
     def _resolve_execution_authority(
         self,
         authority_reference: ExecutionAuthorityReference | None,
+        *,
+        organization_id: str | None,
     ) -> ExecutionAuthorityBinding:
-        """Resolve authority before MASR, state mutation, or task creation."""
+        """Resolve authority before MASR, state mutation, or task creation.
+
+        ``organization_id`` is the caller's authenticated tenant and is
+        required: every durable write below takes its organization from
+        ``binding.run.tenant_id``, so resolving an authority the caller does
+        not own would run — and persist — work as another tenant.
+        """
 
         if authority_reference is None:
             raise ExecutionAuthorityRequiredError("execution authority is required")
@@ -1589,7 +1637,9 @@ class DirectExecutionService:
             raise ExecutionAuthorityUnavailableError(
                 "execution authority is unavailable"
             )
-        return self.execution_authority_resolver.resolve(authority_reference)
+        return self.execution_authority_resolver.resolve(
+            authority_reference, organization_id=organization_id
+        )
 
     async def _propose_routing(
         self,
@@ -1845,14 +1895,39 @@ class DirectExecutionService:
             # Final progress update
             await self._publish_progress_update(execution_status)
 
-    async def get_execution_status(self, execution_id: str) -> ExecutionStatus | None:
-        """Get current status of execution."""
-        return self.active_executions.get(execution_id)
+    def _visible_execution(
+        self, execution_id: str, organization_id: str | None
+    ) -> ExecutionStatus | None:
+        """Return an execution only when the caller's tenant owns it.
 
-    async def get_execution_results(self, execution_id: str) -> dict[str, Any] | None:
-        """Get results of completed execution."""
-
+        ``active_executions`` holds every tenant's runs in one process-wide
+        dictionary, and an execution id is the only thing a reader supplies,
+        so the owner check is the whole boundary. Missing tenant context, an
+        execution with no recorded owner, and an execution owned by another
+        tenant are all reported identically as "not found", so the id space
+        cannot be probed.
+        """
         execution = self.active_executions.get(execution_id)
+        if execution is None:
+            return None
+        if organization_id is None or execution.organization_id is None:
+            return None
+        if not tenant_owns_authority(execution.organization_id, organization_id):
+            return None
+        return execution
+
+    async def get_execution_status(
+        self, execution_id: str, *, organization_id: str | None = None
+    ) -> ExecutionStatus | None:
+        """Get current status of an execution inside the caller's tenant."""
+        return self._visible_execution(execution_id, organization_id)
+
+    async def get_execution_results(
+        self, execution_id: str, *, organization_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Get results of a completed execution inside the caller's tenant."""
+
+        execution = self._visible_execution(execution_id, organization_id)
         if not execution:
             return None
 

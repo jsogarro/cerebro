@@ -135,6 +135,11 @@ def _project() -> ResearchProject:
     )
 
 
+# Authority resolution is tenant-scoped, so starting an execution names the
+# organization that owns the binding ``_binding`` builds.
+OWNING_ORGANIZATION = "tenant-1"
+
+
 def _service(
     *, resolver: object | None = None
 ) -> tuple[DirectExecutionService, AsyncMock]:
@@ -180,6 +185,7 @@ async def test_unknown_authority_fails_before_masr_state_or_task_creation() -> N
             authority_reference=ExecutionAuthorityReference(
                 authority_id="unknown", authority_version="1"
             ),
+            organization_id=OWNING_ORGANIZATION,
         )
 
     router.route.assert_not_called()
@@ -194,7 +200,7 @@ async def test_valid_authority_resolves_routes_and_compiles_once_before_recordin
 ) -> None:
     binding = _binding()
     resolver = Mock()
-    resolver.resolve.side_effect = lambda reference: binding
+    resolver.resolve.side_effect = lambda reference, organization_id=None: binding
     service, router = _service(resolver=resolver)
     events: list[str] = []
     router.route.side_effect = lambda **_kwargs: events.append("route") or _Decision()
@@ -205,13 +211,16 @@ async def test_valid_authority_resolves_routes_and_compiles_once_before_recordin
         )
     )
     monkeypatch.setattr(service.execution_plan_compiler, "compile", compile_spy)
-    resolver.resolve.side_effect = lambda reference: events.append("resolve") or binding
+    resolver.resolve.side_effect = lambda reference, organization_id=None: (
+        events.append("resolve") or binding
+    )
 
     execution_id = await service.start_research_execution(
         _project(),
         authority_reference=ExecutionAuthorityReference(
             authority_id="authority-1", authority_version="1"
         ),
+        organization_id=OWNING_ORGANIZATION,
     )
 
     router.route.assert_awaited_once()
@@ -238,6 +247,7 @@ async def test_compiler_mismatch_fails_before_state_or_task_creation() -> None:
             authority_reference=ExecutionAuthorityReference(
                 authority_id="authority-1", authority_version="1"
             ),
+            organization_id=OWNING_ORGANIZATION,
         )
 
     router.route.assert_awaited_once()
