@@ -240,7 +240,7 @@ def _build(
     registry: PromptRegistry,
     fetcher: Any,
     secret_provider: Any = None,
-    verifier: PromptIdentityVerifier | None | object = ...,
+    verifier: PromptIdentityVerifier | object | None = ...,
     timeout_seconds: float = 5.0,
     source_types: Any = None,
 ) -> tuple[
