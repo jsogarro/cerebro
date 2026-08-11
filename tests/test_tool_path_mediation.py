@@ -720,23 +720,33 @@ class TestThePersistedRecordCarriesItsCapabilityDecision:
         )
 
     @pytest.mark.asyncio
-    async def test_a_malformed_request_persists_no_decision_because_none_exists(
+    async def test_a_malformed_request_persists_the_decision_that_admitted_it(
         self,
     ) -> None:
-        """The one invocation for which there is genuinely no decision.
+        """Reversed: this used to assert `store.decisions[-1] is None`.
 
-        Input validation runs *before* authorization, and it must: the
-        capability request's fingerprint includes the digest of the validated
-        input, so there is nothing to decide about until the arguments parse.
-        The boundary still records the rejection — deliberately, since an audit
-        trail with a hole where every malformed request should be is the trail
-        an attacker would prefer.
+        The old assertion, and the docstring above it, described input
+        validation running *before* authorization as a necessity — "there is
+        nothing to decide about until the arguments parse". That was the defect,
+        not a constraint. The digest a `CapabilityRequest` is fingerprinted over
+        can be taken of the redacted *raw* arguments, so the decision can and
+        now does run first; what could not be done before the input is prepared
+        is only the fingerprint, not the decision.
 
-        So `persist` carries `CapabilityDecision | None`, and `None` is a real
-        case rather than a defensive default. **The adapter is still blocked
-        for this one status** — see the packet handoff; the resolution is in
-        4B's DDL, not here.
+        While `decision=None` held, a caller with no grant at all could reach
+        this path, read the tool's input schema out of `ToolOutcome.detail`, and
+        write a replay-eligible row under an idempotency key of its own
+        choosing. The rejection itself is unchanged and still recorded; it now
+        names the decision that admitted the caller.
+
+        Consequence for 4B: `capability_decision=None` is no longer reachable
+        from the boundary, so `ck_agent_tool_invocation_decision_pair_or_
+        invalid_input` and `create_tool_invocation`'s matching `ValueError` guard
+        a case nothing produces. They are now belt-and-braces rather than the
+        load-bearing carve-out they were written as.
         """
+
+        from src.core.contracts.capabilities import CapabilityDecisionEffect
 
         store = InMemoryToolAuditStore()
         registry = create_default_registry(audit_store=store)
@@ -748,7 +758,10 @@ class TestThePersistedRecordCarriesItsCapabilityDecision:
         assert result.success is False
         assert store.invocations[-1].status is ToolInvocationStatus.FAILED
         assert store.invocations[-1].error_code == "invalid_input"
-        assert store.decisions[-1] is None
+        decision = store.decisions[-1]
+        assert decision is not None
+        assert decision.effect is CapabilityDecisionEffect.ALLOW
+        assert all(recorded is not None for recorded in store.decisions)
 
     @pytest.mark.asyncio
     async def test_the_requested_record_carries_the_decision_too(self) -> None:

@@ -23,13 +23,37 @@ assertion a future edit could delete without anything noticing:
   parameter of any public method, so a caller cannot supply a stale instant and
   revive an expired approval.
 - The persisted ``capability_scope`` is read off the grant the decision named,
-  never off the caller's request.
+  never off the caller's request. This holds on *every* path that writes a
+  record, including a rejected input — it did not, and the gap is described
+  below.
+
+**Authorization precedes every durable effect.** :meth:`ToolBoundary.invoke`
+prepares the caller's input first, because a ``CapabilityRequest`` cannot be
+fingerprinted without a digest of it. Preparing it writes nothing, publishes
+nothing, and returns nothing. Every path then reaches ``self._decide`` before
+any record is persisted, any event is published, or any ``ToolOutcome`` is
+returned, and a denial takes precedence over a schema rejection.
+
+That ordering replaces one where a malformed or unrepresentable payload
+returned a recorded ``INVALID_INPUT`` outcome with ``decision=None`` — so a
+caller holding no grant at all could read the tool's input schema back out of
+``ToolOutcome.detail``, write a durable row under an idempotency key of its own
+choosing carrying a ``capability_scope`` it invented, and (because that row
+records as ``FAILED``, which is replay-eligible) leave it where a later
+*authorized* call presenting the same key was answered with a raised
+``IdempotencyConflictError`` instead of its result. The check was individually
+correct and sat in the wrong place relative to what it guards.
 
 **Fail closed, and never into a value.** A denial, a timeout, an open breaker,
 and a tool that raised are four distinct outcomes, none of which carries a
 result body. Where the boundary cannot form a defensible answer at all — a
 decision naming a grant nobody supplied — it raises rather than returning
-anything a caller could mistake for one.
+anything a caller could mistake for one. A raise is the fourth distinct
+outcome: it persists nothing and publishes nothing, which is why the paths that
+raise *before* a decision (an unregistered tool, a prompt whose identity cannot
+be checked, a naive clock) do not weaken the ordering guarantee above. What
+they do disclose is stated in the packet handoff rather than left to be
+inferred.
 """
 
 import asyncio
@@ -113,8 +137,21 @@ denial under a key, and the authorized caller who later presents that key is
 handed the refusal instead of their result. Authorization is fresh every time,
 so its outcome must be too.
 
-The rest are records of a call that actually reached the tool, which is exactly
-what an idempotency key exists to avoid repeating.
+The rest are records whose outcome is a property of the request rather than of
+the caller: presenting the same key for the same content gets the same answer,
+which is exactly what an idempotency key exists to provide.
+
+Two of them did *not* reach the tool, so an earlier version of this docstring —
+"records of a call that actually reached the tool" — was wrong about them.
+``INVALID_INPUT`` and ``CIRCUIT_OPEN`` both record as ``FAILED``. Keeping
+``INVALID_INPUT`` is deliberate: a payload that does not parse does not parse on
+the retry either, so replaying is the same answer, and excluding it would send
+an identical repeat down the execute path to collide with
+``UniqueConstraint(attempt_id, idempotency_key)``. ``CIRCUIT_OPEN`` is the
+uncomfortable one — it is ``RETRIABLE``, yet a key that recorded it is answered
+from that record even after the breaker closes. That is a live defect, reported
+rather than fixed here because it belongs with the breaker's own semantics and
+not with this packet's ordering change.
 """
 
 _FAILED_STATUS_BY_ERROR_CODE: Final[dict[str, ToolOutcomeStatus]] = {
@@ -154,6 +191,37 @@ class CancellationToken:
 
     async def wait(self) -> None:
         await self._event.wait()
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class _AcceptedInput:
+    """A payload that parsed, serialized, redacted and hashed."""
+
+    validated_input: BaseModel
+    redacted_input: Mapping[str, JsonValue]
+    input_sha256: str
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class _RejectedInput:
+    """A payload that did not, and the redacted reason it did not.
+
+    It still carries a redacted payload and a digest, because the call is
+    authorized before it is refused and the refusal is recorded. It carries no
+    ``validated_input`` field at all, which is the point: there is no way to
+    reach :meth:`ToolBoundary._run_tool` holding one of these, so the branch
+    that stops an unusable payload from reaching a handler is a type distinction
+    rather than a ``None`` check some later edit could drop.
+    """
+
+    redacted_input: Mapping[str, JsonValue]
+    input_sha256: str
+    reason: str
+
+
+_PreparedInput = _AcceptedInput | _RejectedInput
 
 
 @final
@@ -283,63 +351,23 @@ class ToolBoundary:
         verified_prompt = self._verify_prompt(prompt, pinned_versions)
         secret_values = self._secret_provider.secret_values()
 
-        try:
-            validated_input = spec.input_model.model_validate(dict(arguments))
-        except ValidationError as error:
-            return await self._reject_input(
-                spec=spec,
-                arguments=arguments,
-                error=error,
-                run_id=run_id,
-                task_id=task_id,
-                attempt_id=attempt_id,
-                organization_id=organization_id,
-                capability_scope=capability_scope,
-                idempotency_key=idempotency_key,
-                input_trust=input_trust,
-                prompt=verified_prompt,
-                now=now,
-                secret_values=secret_values,
-            )
-
-        # Preparing the input for the record runs three separate recursive walks
-        # over the caller's structure — serialize, redact, hash — and then a
-        # fourth when the contract validates it into `ToolInvocation`. All four
-        # can fail on a structure the boundary cannot represent, and all four
-        # used to sit outside any guard, so the same payload escaped as a
-        # `RecursionError`, as a `ValidationError`, or not at all depending on
-        # stack depth and interpreter configuration.
-        #
-        # `_ensure_representable` runs the contract's own validation here, at the
-        # point where the input is the suspect, so the record construction later
-        # cannot fail for a reason that belongs to this one.
-        try:
-            redacted_input = _redact_object(_json_ready(validated_input), secret_values)
-            _ensure_representable(redacted_input)
-            input_sha256 = boundary_digest(redacted_input)
-        except (ValidationError, RecursionError) as error:
-            return await self._reject_input(
-                spec=spec,
-                arguments=arguments,
-                error=error,
-                run_id=run_id,
-                task_id=task_id,
-                attempt_id=attempt_id,
-                organization_id=organization_id,
-                capability_scope=capability_scope,
-                idempotency_key=idempotency_key,
-                input_trust=input_trust,
-                prompt=verified_prompt,
-                now=now,
-                secret_values=secret_values,
-            )
+        # Preparing the input comes first and *only* first: it computes values,
+        # and on no path does it write, publish, or return. A capability request
+        # cannot be built without `input_sha256`, so the digest has to exist
+        # before a decision can be made — but a rejection discovered while
+        # computing it is carried forward as data rather than acted on here.
+        # Acting on it here is precisely the defect: two `return` statements
+        # stood between this point and `self._decide`.
+        prepared = self._prepare_input(
+            spec=spec, arguments=arguments, secret_values=secret_values
+        )
         effective_key = idempotency_key or self._derive_idempotency_key(
             spec=spec,
             run_id=run_id,
             task_id=task_id,
             attempt_id=attempt_id,
             capability_scope=capability_scope,
-            input_sha256=input_sha256,
+            input_sha256=prepared.input_sha256,
         )
 
         call = _Call(
@@ -351,7 +379,7 @@ class ToolBoundary:
             organization_id=organization_id,
             capability_scope=capability_scope,
             idempotency_key=effective_key,
-            redacted_input=redacted_input,
+            redacted_input=prepared.redacted_input,
             input_trust=input_trust,
             producer_kind=(
                 ProducerKind.SYSTEM
@@ -373,7 +401,7 @@ class ToolBoundary:
                 capability_scope=capability_scope,
                 sensitivity=spec.sensitivity,
                 input_trust=input_trust,
-                input_sha256=input_sha256,
+                input_sha256=prepared.input_sha256,
                 requested_at=now,
             ),
             grants=grants,
@@ -388,6 +416,15 @@ class ToolBoundary:
             # this mistake in the existing integration, where `data_source` was
             # computed from a success flag alone and so mislabelled a
             # fabricated fallback as a real tool result.
+            #
+            # A denial outranks a schema rejection, and the precedence is the
+            # disclosure control. `detail` here names the authorization reason
+            # and nothing else — never the pydantic report, which lists the
+            # tool's field names, their types, and the caller's own values back
+            # to a caller that was never permitted to call the tool. A caller
+            # who could tell "denied" from "denied, and by the way your third
+            # argument is the wrong type" would have a schema oracle for every
+            # tool it cannot reach.
             return await self._terminate(
                 call,
                 status=ToolOutcomeStatus.DENIED,
@@ -420,8 +457,12 @@ class ToolBoundary:
         # reached. A check placed after a `return` is not a check.
         #
         # Comparing the recorded request's identity (below) closes the same hole
-        # a second way, but only this ordering makes the bypass unreachable: no
-        # path returns a result before a decision has been made.
+        # a second way, but only this ordering makes the bypass unreachable.
+        # Two later `return`s were found still standing above `self._decide`,
+        # on the input-rejection paths, which is why the invariant is now stated
+        # as a property of `invoke` as a whole and pinned by
+        # `test_authorization_precedes_every_effect.py` rather than asserted in
+        # a comment next to one of the returns it is about.
         replayed = await self._audit_store.find_invocation(
             run_id=run_id,
             organization_id=organization_id,
@@ -432,9 +473,26 @@ class ToolBoundary:
                 replayed,
                 spec=spec,
                 capability_scope=call.capability_scope,
-                input_sha256=input_sha256,
+                input_sha256=prepared.input_sha256,
             )
             return self._replay(replayed, decision=decision)
+
+        if isinstance(prepared, _RejectedInput):
+            # The input rejection lands here, after authorization and after
+            # dedup but before the breaker. After dedup, so an authorized
+            # caller repeating one malformed request is answered from its own
+            # record instead of being told its key conflicts with itself.
+            # Before the breaker, because a payload that cannot parse cannot
+            # parse whatever the dependency's health is, and `CIRCUIT_OPEN` is
+            # `RETRIABLE` — telling a caller to retry a permanently invalid
+            # request is the wrong answer, not merely a less precise one.
+            return await self._terminate(
+                call,
+                status=ToolOutcomeStatus.INVALID_INPUT,
+                completed_at=now,
+                decision=decision,
+                detail=prepared.reason,
+            )
 
         breaker = self._breakers.for_tool(spec.name)
         if not breaker.allows(now):
@@ -458,7 +516,7 @@ class ToolBoundary:
                 status=ToolInvocationStatus.REQUESTED,
                 capability_scope=call.capability_scope,
                 idempotency_key=effective_key,
-                input=redacted_input,
+                input=prepared.redacted_input,
                 input_trust=input_trust,
                 producer_kind=call.producer_kind,
                 prompt_binding=(
@@ -472,7 +530,7 @@ class ToolBoundary:
                 "tool_version": spec.version,
                 "capability_scope": call.capability_scope,
                 "grant_id": grant.grant_id,
-                "input_sha256": input_sha256,
+                "input_sha256": prepared.input_sha256,
                 "input_trust": input_trust.value,
             },
             decision=decision,
@@ -480,7 +538,7 @@ class ToolBoundary:
 
         return await self._run_tool(
             call,
-            validated_input=validated_input,
+            validated_input=prepared.validated_input,
             declared_output_trust=output_trust,
             decision=decision,
             cancellation=cancellation,
@@ -644,76 +702,99 @@ class ToolBoundary:
         )
 
     # ------------------------------------------------------------------
-    # recording
+    # input preparation
     # ------------------------------------------------------------------
 
-    async def _reject_input(
+    def _prepare_input(
         self,
         *,
         spec: ToolSpec,
         arguments: Mapping[str, Any],
-        error: ValidationError | RecursionError,
-        run_id: str,
-        task_id: str,
-        attempt_id: str,
-        organization_id: str | None,
-        capability_scope: str,
-        idempotency_key: str | None,
-        input_trust: TrustClassification,
-        prompt: RenderedPrompt | None,
-        now: datetime,
         secret_values: frozenset[str],
-    ) -> ToolOutcome:
-        """Record an invocation whose arguments never passed the input schema.
+    ) -> _PreparedInput:
+        """Parse, serialize, redact and hash the caller's payload.
 
-        Recorded rather than raised. A rejected call is a real thing that
-        happened to a run, and an audit trail with a hole where every malformed
-        request should be is exactly the trail an attacker would prefer.
+        Deliberately **not** a coroutine and deliberately without access to the
+        audit store: it returns a value on every path, including the ones where
+        the payload is unusable, and there is no branch through it that could
+        persist, publish, or answer the caller. That is what lets it run before
+        the capability decision without the decision being skippable — the
+        digest a :class:`CapabilityRequest` needs has to be computed first, and
+        computing it is all this does.
+
+        Preparing the input runs three separate recursive walks over the
+        caller's structure — serialize, redact, hash — and then a fourth when
+        the contract validates it into ``ToolInvocation``. All four can fail on
+        a structure the boundary cannot represent, and all four used to sit
+        outside any guard, so the same payload escaped as a ``RecursionError``,
+        as a ``ValidationError``, or not at all depending on stack depth and
+        interpreter configuration. ``_ensure_representable`` runs the contract's
+        own validation here, at the point where the input is the suspect, so
+        record construction later cannot fail for a reason that belongs here.
         """
 
-        # This path walks the caller's structure too, so it can fail in exactly
-        # the way it exists to report. When it does, the record keeps a flat
-        # marker in place of the payload: the offending value is by definition
-        # the thing that cannot be stored, and a rejection that cannot be
-        # written leaves no trace of the request at all.
+        try:
+            validated = spec.input_model.model_validate(dict(arguments))
+        except ValidationError as schema_error:
+            return self._reject(
+                arguments=arguments, error=schema_error, secret_values=secret_values
+            )
+
+        try:
+            redacted = _redact_object(_json_ready(validated), secret_values)
+            _ensure_representable(redacted)
+            digest = boundary_digest(redacted)
+        except (ValidationError, RecursionError) as representation_error:
+            return self._reject(
+                arguments=arguments,
+                error=representation_error,
+                secret_values=secret_values,
+            )
+
+        return _AcceptedInput(
+            validated_input=validated, redacted_input=redacted, input_sha256=digest
+        )
+
+    def _reject(
+        self,
+        *,
+        arguments: Mapping[str, Any],
+        error: ValidationError | RecursionError,
+        secret_values: frozenset[str],
+    ) -> _RejectedInput:
+        """Describe an unusable payload well enough to authorize and record it.
+
+        A rejection is carried, not acted on. It still needs a redacted payload
+        and a digest, because the request is authorized before it is refused and
+        a ``CapabilityRequest`` is fingerprinted over the digest — and because
+        the eventual record must say what was submitted. An audit trail with a
+        hole where every malformed request should be is exactly the trail an
+        attacker would prefer.
+
+        This path walks the caller's structure too, so it can fail in exactly
+        the way it exists to report. When it does, a flat marker stands in for
+        the payload: the offending value is by definition the thing that cannot
+        be stored. The digest is taken *inside* the guard, since hashing is one
+        of the walks that can fail.
+        """
+
         try:
             redacted = _redact_object(dict(arguments), secret_values)
             _ensure_representable(redacted)
+            digest = boundary_digest(redacted)
         except (ValidationError, RecursionError):
             redacted = _unprocessable_input()
+            digest = boundary_digest(redacted)
 
-        call = _Call(
-            spec=spec,
-            tool_invocation_id=self._id_factory(),
-            run_id=run_id,
-            task_id=task_id,
-            attempt_id=attempt_id,
-            organization_id=organization_id,
-            capability_scope=capability_scope,
-            idempotency_key=idempotency_key
-            or self._derive_idempotency_key(
-                spec=spec,
-                run_id=run_id,
-                task_id=task_id,
-                attempt_id=attempt_id,
-                capability_scope=capability_scope,
-                input_sha256=boundary_digest(redacted),
-            ),
+        return _RejectedInput(
             redacted_input=redacted,
-            input_trust=input_trust,
-            producer_kind=(
-                ProducerKind.SYSTEM if prompt is None else ProducerKind.MODEL_TURN
-            ),
-            prompt=prompt,
-            requested_at=now,
-            secret_values=secret_values,
+            input_sha256=digest,
+            reason=_redact_text(str(error), secret_values) or "",
         )
-        return await self._terminate(
-            call,
-            status=ToolOutcomeStatus.INVALID_INPUT,
-            completed_at=now,
-            detail=_redact_text(str(error), secret_values),
-        )
+
+    # ------------------------------------------------------------------
+    # recording
+    # ------------------------------------------------------------------
 
     async def _terminate(
         self,
