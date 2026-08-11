@@ -20,6 +20,7 @@ from src.models.db.capability import AgentCapabilityApproval, AgentCapabilityGra
 from src.repositories.tenant_scope import (
     TenantMismatchError,
     normalize_organization_id,
+    scope_to_organization,
 )
 
 OrganizationId = uuid.UUID | str | None
@@ -90,11 +91,9 @@ class CapabilityRepository:
             AgentCapabilityGrant.run_id == run_id,
             AgentCapabilityGrant.task_id == task_id,
         )
-        if organization_id is not None:
-            query = query.where(
-                AgentCapabilityGrant.organization_id
-                == normalize_organization_id(organization_id)
-            )
+        query = scope_to_organization(
+            query, AgentCapabilityGrant.organization_id, organization_id
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
@@ -104,11 +103,9 @@ class CapabilityRepository:
         query = select(AgentCapabilityGrant).where(
             AgentCapabilityGrant.grant_id == grant_id
         )
-        if organization_id is not None:
-            query = query.where(
-                AgentCapabilityGrant.organization_id
-                == normalize_organization_id(organization_id)
-            )
+        query = scope_to_organization(
+            query, AgentCapabilityGrant.organization_id, organization_id
+        )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
@@ -164,11 +161,9 @@ class CapabilityRepository:
         query = select(AgentCapabilityApproval).where(
             AgentCapabilityApproval.grant_id == grant_id
         )
-        if organization_id is not None:
-            query = query.where(
-                AgentCapabilityApproval.organization_id
-                == normalize_organization_id(organization_id)
-            )
+        query = scope_to_organization(
+            query, AgentCapabilityApproval.organization_id, organization_id
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

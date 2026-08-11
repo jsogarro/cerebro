@@ -39,6 +39,7 @@ from src.repositories.tenant_scope import (
     TenantMismatchError,
     get_run_organization_id,
     normalize_organization_id,
+    scope_to_organization,
 )
 
 OrganizationId = uuid.UUID | str | None
@@ -131,11 +132,9 @@ class ClaimSupportRepository:
         query = select(AgentClaimSupport).where(
             AgentClaimSupport.claim_support_id == claim_support_id
         )
-        if organization_id is not None:
-            query = query.where(
-                AgentClaimSupport.organization_id
-                == normalize_organization_id(organization_id)
-            )
+        query = scope_to_organization(
+            query, AgentClaimSupport.organization_id, organization_id
+        )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
@@ -153,11 +152,9 @@ class ClaimSupportRepository:
             .where(AgentClaimSupport.claim_id == claim_id)
             .order_by(AgentClaimSupport.evaluated_at)
         )
-        if organization_id is not None:
-            query = query.where(
-                AgentClaimSupport.organization_id
-                == normalize_organization_id(organization_id)
-            )
+        query = scope_to_organization(
+            query, AgentClaimSupport.organization_id, organization_id
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

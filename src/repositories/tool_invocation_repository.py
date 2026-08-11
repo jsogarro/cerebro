@@ -44,6 +44,7 @@ from src.models.db.tool_invocation import AgentToolInvocation
 from src.repositories.tenant_scope import (
     TenantMismatchError,
     normalize_organization_id,
+    scope_to_organization,
 )
 
 OrganizationId = uuid.UUID | str | None
@@ -228,11 +229,9 @@ class ToolInvocationRepository:
             .where(AgentToolInvocation.attempt_id == attempt_id)
             .order_by(AgentToolInvocation.requested_at)
         )
-        if organization_id is not None:
-            query = query.where(
-                AgentToolInvocation.organization_id
-                == normalize_organization_id(organization_id)
-            )
+        query = scope_to_organization(
+            query, AgentToolInvocation.organization_id, organization_id
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
@@ -242,11 +241,9 @@ class ToolInvocationRepository:
         query = select(AgentToolInvocation).where(
             AgentToolInvocation.tool_invocation_id == tool_invocation_id
         )
-        if organization_id is not None:
-            query = query.where(
-                AgentToolInvocation.organization_id
-                == normalize_organization_id(organization_id)
-            )
+        query = scope_to_organization(
+            query, AgentToolInvocation.organization_id, organization_id
+        )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
