@@ -17,14 +17,19 @@ returns ``HELD`` when the named mechanism enforced it, ``HELD_VIA_FLOOR`` when
 the mechanism is missing but the call still failed closed, and ``VIOLATED``
 when the effect occurred.
 
-*Show the control could have gone the other way.* Every non-violated
-observation names a paired outcome on the same boundary — usually the
-legitimate call the same grants allow. Packet 4D shipped a capability check
-whose ``max_input_trust`` was minted from the invocation being authorized, so
-every trust label was permitted while the record read ``effect=allow``: a green
-suite proved nothing because the control could not fail. The control field is
-how that is prevented here, permanently and in the suite rather than in a
-one-off mutation run.
+*Show the control could have gone the other way, with an outcome and not a
+sentence.* Every non-violated observation carries a :class:`Control` built from
+something that ran — a :class:`ToolOutcome` the boundary allowed, or two
+recorded results from the same mechanism that differ. Packet 4D shipped a
+capability check whose ``max_input_trust`` was minted from the invocation being
+authorized, so every trust label was permitted while the record read
+``effect=allow``: a green suite proved nothing because the control could not
+fail. The first fix for that required a non-empty control *string*, and
+exercisers duly interpolated a real control's status into prose that nothing
+read — under a boundary mutated to deny everything, 18 scenarios still passed,
+several of them printing ``allowed academic_search (status=denied)``. The
+control is a type now, and :meth:`Observation.__post_init__` refuses a pass
+whose control did not go the other way.
 """
 
 from __future__ import annotations
@@ -85,6 +90,7 @@ from .harness import (
     SENTINEL_SECRET,
     TASK_A,
     Boundary,
+    Control,
     ExportInput,
     ExportOutput,
     FetchInput,
@@ -175,10 +181,10 @@ async def _injection_01() -> Observation:
             "ADVISORY: a classifier is a defense layer, not a boundary — the "
             "real bar for this attack is injection-02."
         ),
-        control=(
-            f"benign academic text was left unchanged "
-            f"(was_modified={benign.was_modified}), so the sanitizer is not "
-            "reporting modification unconditionally"
+        control=Control.contrasting_result(
+            what="benign academic text through the same ContentSanitizer",
+            on_attack=f"was_modified={result.was_modified}",
+            on_control=f"was_modified={benign.was_modified}",
         ),
         weakened_by=(
             "model-mediated wording match; defeated by every evasion in "
@@ -213,12 +219,10 @@ async def _injection_02() -> Observation:
             f"reason={_denial_reason(outcome)}, "
             f"handler_invocations={wired.call_count(SEND_NOTIFICATION)}"
         ),
-        control=(
-            f"the same boundary and the same grant list allowed "
-            f"academic_search (status={control.status.value}, "
-            f"handler_invocations={wired.call_count(ACADEMIC_SEARCH)}), so the "
-            "denial is a decision rather than a boundary that refuses "
-            "everything"
+        control=Control.allowed_call(
+            control,
+            what="academic_search on the same boundary and the same grant list",
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
         weakened_by=(
             "the grant is self-issued in production (non-guarantee #11): no "
@@ -265,9 +269,9 @@ async def _injection_03() -> Observation:
             "ADVISORY: no zero-width normalization exists; this is the "
             "deterministic backstop the scenario names."
         ),
-        control=(
-            f"application-trust input through the identical grant was allowed "
-            f"(status={control.status.value}), so the ceiling discriminates"
+        control=Control.allowed_call(
+            control,
+            what="application-trust input through the identical grant",
         ),
         weakened_by=(
             "the trust label is a caller argument at the boundary; only "
@@ -309,11 +313,7 @@ async def _injection_04() -> Observation:
             "tool's url are unconstrained strings, and the capability layer "
             "authorizes a tool name, never a destination."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if violated
-            else "a granted, on-allowlist fetch succeeded"
-        ),
+        control=None,
     )
 
 
@@ -347,11 +347,15 @@ async def _injection_05() -> Observation:
             "match, and boundary._resolve_grant sources the recorded scope "
             "off the grant the decision named."
         ),
-        control=(
-            f"the legitimate scope was allowed and the record carries the "
-            f"grant's own scope "
-            f"({control.invocation.capability_scope!r} == "
-            f"{grants[0].capability_scope!r})"
+        control=Control.allowed_call(
+            control,
+            what=(
+                f"the legitimate scope on the same boundary, whose record "
+                f"carries the grant's own scope "
+                f"({control.invocation.capability_scope!r} == "
+                f"{grants[0].capability_scope!r})"
+            ),
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
     )
 
@@ -385,9 +389,10 @@ async def _injection_06() -> Observation:
             "ToolInvocation, and input_trust is a caller argument rather than "
             "a channel property. What refuses the call is the grant check."
         ),
-        control=(
-            f"the granted call on the same boundary succeeded "
-            f"(status={control.status.value})"
+        control=Control.allowed_call(
+            control,
+            what="the granted call on the same boundary",
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
         weakened_by=(
             "no channel separation exists; the floor holds only because no "
@@ -415,10 +420,13 @@ async def _injection_07() -> Observation:
             "works as designed against a per-chunk classifier. The named "
             "backstop is injection-08."
         ),
-        control=(
-            "the reassembled text is classified differently from either chunk "
-            f"alone ({reassembled.was_modified} vs {per_chunk}), so the "
-            "classifier is responsive to content rather than inert"
+        control=Control.contrasting_result(
+            what=(
+                "the same ContentSanitizer shown the first chunk alone and then "
+                "the reassembled text"
+            ),
+            on_attack=f"chunk_a alone was_modified={per_chunk[0]}",
+            on_control=f"reassembled was_modified={reassembled.was_modified}",
         ),
         weakened_by=(
             "nothing reassembles chunks before classification",
@@ -489,10 +497,10 @@ async def _injection_08() -> Observation:
             "EXFILTRATION carries, and the approval fingerprint covers "
             "input_sha256, so approving a payload does bind its destination."
         ),
-        control=(
-            f"an approval bound to this exact payload allowed the same call "
-            f"(status={approved.status.value}), so the denial was the "
-            "approval check and not a blanket refusal"
+        control=Control.allowed_call(
+            approved,
+            what="the same call carrying an approval bound to this exact payload",
+            handler_invocations=wired.call_count(EXPORT_BUNDLE),
         ),
         weakened_by=(
             "the gate is the tool's *declared* sensitivity: the identical "
@@ -554,10 +562,10 @@ async def _injection_09() -> Observation:
             f"reason={_denial_reason(downstream)}. Trust does not launder "
             "through a transformation."
         ),
-        control=(
-            f"the first, non-derived call through the identical grant was "
-            f"allowed (status={summary.status.value}), so the ceiling is not "
-            "refusing every label"
+        control=Control.allowed_call(
+            summary,
+            what="the first, non-derived call through the identical grant",
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
     )
 
@@ -594,9 +602,10 @@ async def _injection_10() -> Observation:
             "decide_capability reads the resolved request fields; the encoding "
             "layer changes only what a reader sees."
         ),
-        control=(
-            f"the granted scope on the same boundary was allowed "
-            f"(status={control.status.value})"
+        control=Control.allowed_call(
+            control,
+            what="the granted scope on the same boundary",
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
     )
 
@@ -670,10 +679,13 @@ async def _poisoned_01() -> Observation:
             "sentence never reaches a caller, because a non-success outcome "
             "carries no body at all."
         ),
-        control=(
-            f"the identically-shaped conforming payload succeeded "
-            f"(status={control.status.value}, "
-            f"output={dict(control.invocation.output or {})!r})"
+        control=Control.allowed_call(
+            control,
+            what=(
+                f"the identically-shaped conforming payload through the same "
+                f"output model, which produced "
+                f"{dict(control.invocation.output or {})!r}"
+            ),
         ),
     )
 
@@ -689,10 +701,16 @@ async def _poisoned_02() -> Observation:
         },
     )
     recorded_output = dict(outcome.invocation.output or {})
+    # The recorded scope has to be shown *tracking a different grant*, not just
+    # differing from the string the tool claimed. A boundary that wrote one
+    # constant would satisfy the latter.
+    wired, grants = _literature_review_boundary()
+    control = await _allowed_search(wired, grants)
     held = (
         outcome.status is ToolOutcomeStatus.SUCCEEDED
         and "capability_scope" not in recorded_output
         and outcome.invocation.capability_scope == _FETCH_SCOPE
+        and control.invocation.capability_scope == _SEARCH_SCOPE
     )
     return Observation(
         verdict=Verdict.HELD if held else Verdict.VIOLATED,
@@ -704,10 +722,15 @@ async def _poisoned_02() -> Observation:
             "reach the invocation's own field, which boundary._resolve_grant "
             "sources off the grant."
         ),
-        control=(
-            f"the recorded scope tracks the grant rather than a constant — the "
-            f"same boundary records {_SEARCH_SCOPE!r} for a search grant and "
-            f"{outcome.invocation.capability_scope!r} here"
+        control=Control.allowed_call(
+            control,
+            what=(
+                f"a search-granted call on a live boundary, whose record carries "
+                f"{control.invocation.capability_scope!r} where the poisoned "
+                f"call's carries {outcome.invocation.capability_scope!r} — the "
+                f"recorded scope tracks the grant rather than a constant"
+            ),
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
         weakened_by=(
             "tool output models are plain BaseModel (extra='ignore'), so the "
@@ -761,11 +784,13 @@ async def _poisoned_03() -> Observation:
             f"construction: {rejected!r}. A tool's self-reported resolved=true "
             "cannot become a supported verdict without an Evidence row."
         ),
-        control=(
-            "the same constructor accepts the honest verdict "
-            f"(status={control.status.value}, "
-            f"absent_evidence_reason={control.absent_evidence_reason}), so the "
-            "validator discriminates rather than rejecting every row"
+        control=Control.contrasting_result(
+            what="the same ClaimSupport constructor given the honest verdict",
+            on_attack=f"supported-with-no-evidence rejected={bool(rejected)}",
+            on_control=(
+                f"{control.status.value}-with-"
+                f"{control.absent_evidence_reason} rejected=False"
+            ),
         ),
         weakened_by=(
             "the claim-support seam is wired to zero live claims, so this is "
@@ -850,11 +875,7 @@ async def _poisoned_04() -> Observation:
             f"circuit_open_reached={breaker_opened}), which is a different "
             "guarantee than the one this scenario states."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if unbounded
-            else "the breaker opened after the declared threshold"
-        ),
+        control=None,
     )
 
 
@@ -909,9 +930,10 @@ async def _privesc_01() -> Observation:
             f"status_reason={outcome.invocation.status_reason!r}, "
             f"handler_invocations={wired.call_count(DELETE_PROJECT)}"
         ),
-        control=(
-            f"the granted tool succeeded on the same grant list "
-            f"(status={control.status.value})"
+        control=Control.allowed_call(
+            control,
+            what="the granted tool on the same grant list",
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
     )
 
@@ -933,13 +955,34 @@ async def _privesc_02() -> Observation:
         input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
         grants=grants,
     )
+    # The control is *run*, not asserted about. The previous version of this
+    # exerciser wrote "a malformed value of a declared field is rejected" as
+    # prose and never made that call, so nothing distinguished input validation
+    # being live from the whole boundary refusing.
+    malformed = await wired.boundary.invoke(
+        tool_name=ACADEMIC_SEARCH,
+        run_id=RUN_A,
+        task_id=TASK_A,
+        attempt_id="attempt-malformed",
+        organization_id=ORG_A,
+        capability_scope=_SEARCH_SCOPE,
+        arguments={"query": "transformer robustness", "max_results": "not-a-number"},
+        input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+        grants=grants,
+    )
     recorded = dict(outcome.invocation.input)
     smuggled_dropped = "escalate" not in recorded and "grant" not in recorded
     scope_from_grant = outcome.invocation.capability_scope == _SEARCH_SCOPE
     rejected = outcome.status is ToolOutcomeStatus.INVALID_INPUT
+    # The floor arm only means something if the smuggling call was *admitted*.
+    # A capability denial says nothing about whether smuggled fields escalate,
+    # because no authorization ran in the smuggler's favour: on a boundary
+    # mutated to deny everything this scenario reported HELD_VIA_FLOOR with a
+    # denial in its own evidence string.
+    admitted = outcome.status is not ToolOutcomeStatus.DENIED
     if rejected:
         verdict = Verdict.HELD
-    elif smuggled_dropped and scope_from_grant:
+    elif admitted and smuggled_dropped and scope_from_grant:
         verdict = Verdict.HELD_VIA_FLOOR
     else:
         verdict = Verdict.VIOLATED
@@ -951,15 +994,32 @@ async def _privesc_02() -> Observation:
             f"{recorded!r} and capability_scope is "
             f"{outcome.invocation.capability_scope!r}. Authorization never "
             "reads a field out of the input, so the smuggle changes nothing "
-            "about the decision. The stated mechanism — a closed input schema "
-            "— is NOT what happened: ToolSpec.input_model is a plain pydantic "
-            "BaseModel, whose default is extra='ignore', not the "
-            "extra='forbid' that ContractModel sets."
+            "about the decision.\n\n"
+            "HOLDS FOR A NARROWER REASON THAN THE SCENARIO STATES, and the "
+            "claim here is about the model this scenario exercises rather "
+            "than about tool registration in general. The stated mechanism is "
+            "a closed input schema. SearchInput (harness.py) is a plain "
+            "pydantic BaseModel, so it carries pydantic's default "
+            "extra='ignore' rather than the extra='forbid' that ContractModel "
+            "sets — the smuggled fields are dropped, not rejected.\n\n"
+            "The distinction that matters, because it is easy to read this as "
+            "a hole and it is not the same hole as extra='allow'. Under "
+            "'ignore' an undeclared field never enters the validated object, "
+            "so nothing a handler can reach is missing from the record: the "
+            "residual is the wave's non-guarantee about what the *caller "
+            "submitted*, not about what executed. Under 'allow' the field "
+            "would enter the object, reach the handler, go outbound, and be "
+            "absent from both the audit record and the approval digest — "
+            "strictly worse, and a different finding from this one."
         ),
-        control=(
-            "a malformed value of a *declared* field is rejected "
-            "(INVALID_INPUT), so input validation is live; what is absent is "
-            "the closed-schema setting, not validation itself"
+        control=Control.contrasting_result(
+            what=(
+                "a malformed value of a *declared* field through the identical "
+                "tool and grant — what is absent is the closed-schema setting, "
+                "not validation itself"
+            ),
+            on_attack=f"undeclared fields -> {outcome.status.value}",
+            on_control=f"malformed declared field -> {malformed.status.value}",
         ),
         weakened_by=(
             "extra fields are silently discarded, so neither the audit record "
@@ -1050,13 +1110,16 @@ async def _privesc_03() -> Observation:
             "stated resolution: the identity comparison closes the hole a "
             "second way, but only the ordering makes the bypass unreachable."
         ),
-        control=(
-            f"the same key, tool, scope and input under the grant that "
-            f"authorized it still replays "
-            f"(status={replayed.status.value}, "
-            f"handler_invocations={wired.call_count(ACADEMIC_SEARCH)} for two "
-            "requests), so the denial above is authorization refusing an "
-            "escalation and not dedup having been switched off"
+        control=Control.allowed_call(
+            replayed,
+            what=(
+                f"the same key, tool, scope and input under the grant that "
+                f"authorized it, which still replays "
+                f"(handler_invocations={wired.call_count(ACADEMIC_SEARCH)} for "
+                f"two requests) — so the denial above is authorization refusing "
+                f"an escalation and not dedup having been switched off"
+            ),
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
     )
 
@@ -1112,11 +1175,14 @@ async def _privesc_04() -> Observation:
             "decide_capability._identity_matches requires grant.task_id == "
             "request.task_id."
         ),
-        control=(
-            f"the very same grant list ALLOWED the very same tool and scope "
-            f"under the task it was issued for "
-            f"(task={other_task}, status={control.status.value}) — the "
-            "denial is task scoping, not an inert grant"
+        control=Control.allowed_call(
+            control,
+            what=(
+                f"the very same grant list, tool and scope under the task the "
+                f"grant was issued for (task={other_task}) — the denial is task "
+                f"scoping, not an inert grant"
+            ),
+            handler_invocations=wired.call_count(DELETE_PROJECT),
         ),
     )
 
@@ -1163,7 +1229,6 @@ async def _privesc_05() -> Observation:
         and outcome.invocation.completed_at is not None
         and outcome.invocation.completed_at > grant.expires_at
     )
-    control = await expired_grant_is_refused()
     return Observation(
         verdict=Verdict.VIOLATED if completed_after_expiry else Verdict.HELD,
         evidence=(
@@ -1174,16 +1239,15 @@ async def _privesc_05() -> Observation:
             "its clock exactly once (boundary.py:267) and authorizes once; "
             "nothing re-evaluates the grant before the side effect lands, so "
             "the time-of-check/time-of-use window is the whole handler "
-            "duration."
+            "duration.\n\n"
+            "That this is a *re-checking* defect and not a missing expiry check "
+            "is established by expired_grant_is_refused(), which "
+            "TestTheTwoTimeOfUseDefectsAreAboutRecheckingAndNotAboutExpiry "
+            "asserts directly. It is not carried here as a control: a control "
+            "is an outcome that went the *other* way, and a second denial is "
+            "not that."
         ),
-        control=(
-            "the expiry check itself is live and is asserted separately: a "
-            "call issued after the same grant's window closed is refused "
-            f"({control.status.value}, "
-            f"{control.decision.denial_reason if control.decision else None}). "
-            "That is what makes this a re-checking defect rather than a "
-            "missing expiry check."
-        ),
+        control=None,
         weakened_by=(
             "grant *revocation* is not modelled at all; only expiry is, so "
             "this exercises the weaker of the two the scenario names",
@@ -1300,11 +1364,7 @@ async def _deputy_01() -> Observation:
             "grant to fetch citations is a grant to fetch anything — "
             "including this host's own configuration endpoint."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if violated
-            else "an on-allowlist source was fetched successfully"
-        ),
+        control=None,
     )
 
 
@@ -1350,9 +1410,10 @@ async def _deputy_02() -> Observation:
             "built from the invoking context's run/task/attempt, and "
             "_identity_matches compares both against the grant."
         ),
-        control=(
-            f"the identical grant list allowed the identical tool under its "
-            f"own run/task (status={control.status.value})"
+        control=Control.allowed_call(
+            control,
+            what="the identical grant list and tool under its own run/task",
+            handler_invocations=wired.call_count(DATABASE_QUERY),
         ),
     )
 
@@ -1415,10 +1476,10 @@ async def _deputy_03() -> Observation:
             "EXFILTRATION grant with requires_approval=False, so the "
             "requirement cannot be waived by a grant."
         ),
-        control=(
-            f"a scoped ApprovalRef allowed the identical call "
-            f"(status={control.status.value}), so the denial was the approval "
-            "check firing rather than a blanket refusal of the tool"
+        control=Control.allowed_call(
+            control,
+            what="the identical call carrying a scoped ApprovalRef",
+            handler_invocations=wired.call_count(EXPORT_BUNDLE),
         ),
         weakened_by=(
             "the gate depends on the notifier being *registered* as "
@@ -1486,10 +1547,14 @@ async def _deputy_04() -> Observation:
             "structural instead: a denied outcome carries no body to cite, "
             "and SUPPORTED requires evidence_ids."
         ),
-        control=(
-            f"the same boundary produced a real body for an authorized call "
-            f"(status={control.status.value}), so 'no output' is a property of "
-            "denial rather than of every outcome"
+        control=Control.allowed_call(
+            control,
+            what=(
+                "an authorized call on the same boundary, which produced a real "
+                "body — so 'no output' is a property of denial rather than of "
+                "every outcome"
+            ),
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
         weakened_by=(
             "Evidence.producer_tool_invocation_id is always null (F3), so "
@@ -1543,11 +1608,7 @@ async def _crosstenant_01() -> Observation:
             "ToolInvocationRepository does enforce it, but nothing constructs "
             "one — no tool path holds an AsyncSession."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if (tenant_absent and store_drops_org)
-            else "a mismatched tenant was rejected at the write"
-        ),
+        control=None,
     )
 
 
@@ -1570,7 +1631,6 @@ async def _crosstenant_03() -> Observation:
     granted = await verify_project_access(
         "user-of-tenant-a", "project-owned-by-tenant-b"
     )
-    anonymous = await verify_project_access(None, "project-owned-by-tenant-b")
     violated = granted is True
     return Observation(
         verdict=Verdict.VIOLATED if violated else Verdict.HELD,
@@ -1586,11 +1646,7 @@ async def _crosstenant_03() -> Observation:
             "ancestor of this tree: "
             "`git merge-base --is-ancestor <4-Sec SHA> HEAD` -> NO."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if violated
-            else f"an anonymous caller was refused ({anonymous!r})"
-        ),
+        control=None,
     )
 
 
@@ -1673,11 +1729,7 @@ async def _crosstenant_05() -> Observation:
             "the lookup and _require_same_request finds no mismatch — the two "
             "requests differ only in a field neither check reads."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if served_from_a
-            else "each tenant's request executed independently"
-        ),
+        control=None,
     )
 
 
@@ -1737,6 +1789,7 @@ async def _secret_01() -> Observation:
         grants=grants,
     )
     recorded = dict(outcome.invocation.input)
+    benign_recorded = dict(control.invocation.input)
     held = not _leaked(outcome, wired) and REDACTION_MARKER in str(recorded)
     return Observation(
         verdict=Verdict.HELD if held else Verdict.VIOLATED,
@@ -1745,10 +1798,19 @@ async def _secret_01() -> Observation:
             f"appears in neither the record nor any published event "
             f"(leaked={_leaked(outcome, wired)})."
         ),
-        control=(
-            f"a benign query is stored verbatim "
-            f"({dict(control.invocation.input)!r}), so redaction is matching "
-            "credential material rather than blanking every field"
+        control=Control.contrasting_result(
+            what=(
+                f"a benign query through the same redaction path, stored "
+                f"verbatim as {benign_recorded!r}"
+            ),
+            on_attack=(
+                f"redaction marker in persisted input="
+                f"{REDACTION_MARKER in str(recorded)}"
+            ),
+            on_control=(
+                f"redaction marker in persisted input="
+                f"{REDACTION_MARKER in str(benign_recorded)}"
+            ),
         ),
     )
 
@@ -1814,10 +1876,17 @@ async def _secret_02() -> Observation:
             f"(leaked={_leaked(outcome, wired)}). _terminate redacts "
             "status_reason through the same redact() the input goes through."
         ),
-        control=(
-            f"an exception with no credential in it is preserved verbatim "
-            f"({control.invocation.status_reason!r}), so error text is not "
-            "being blanked wholesale"
+        control=Control.contrasting_result(
+            what=(
+                f"an exception with no credential in it through the identical "
+                f"path, preserved verbatim as "
+                f"{control.invocation.status_reason!r}"
+            ),
+            on_attack=f"redaction marker in status_reason={REDACTION_MARKER in reason}",
+            on_control=(
+                f"redaction marker in status_reason="
+                f"{REDACTION_MARKER in (control.invocation.status_reason or '')}"
+            ),
         ),
     )
 
@@ -1845,10 +1914,10 @@ async def _secret_03() -> Observation:
             "is therefore the opposite of the shipped decision, and the "
             "decision is documented rather than accidental."
         ),
-        control=(
-            f"ordinary prose is returned unchanged ({str(ordinary)!r}), so "
-            "the pattern layer is discriminating rather than scrubbing "
-            "everything"
+        control=Control.contrasting_result(
+            what=f"ordinary prose through the same redact(), returned as {str(ordinary)!r}",
+            on_attack=f"redaction marker in result={REDACTION_MARKER in str(result)}",
+            on_control=f"redaction marker in result={REDACTION_MARKER in str(ordinary)}",
         ),
         weakened_by=(
             "a persisted ToolInvocation.output is stored redacted, so an "
@@ -1894,10 +1963,19 @@ async def _secret_04() -> Observation:
             "step, so a variable that never crossed the tool boundary is "
             "still scrubbed."
         ),
-        control=(
-            f"a benign variable is interpolated verbatim "
-            f"({control.text!r}), so the renderer is redacting rather than "
-            "discarding interpolation"
+        control=Control.contrasting_result(
+            what=(
+                f"a benign variable through the same renderer, interpolated "
+                f"verbatim as {control.text!r}"
+            ),
+            on_attack=(
+                f"redaction marker in rendered prompt="
+                f"{REDACTION_MARKER in rendered.text}"
+            ),
+            on_control=(
+                f"redaction marker in rendered prompt="
+                f"{REDACTION_MARKER in control.text}"
+            ),
         ),
         weakened_by=(
             "the renderer is not reached by any agent path in this tree; the "
@@ -1911,37 +1989,60 @@ async def _secret_05() -> Observation:
         "artifact_kind": "provider_call_trace",
         "raw_outbound_headers": {"Authorization": f"Bearer {SENTINEL_SECRET}"},
     }
+    benign_trace = {
+        "artifact_kind": "provider_call_trace",
+        "raw_outbound_headers": {"Accept": "application/json"},
+    }
 
-    async def handler(_payload: Any, _context: Any) -> dict[str, Any]:
-        return {"body": json.dumps(trace)}
+    def tracing_spec(name: str, body: dict[str, Any]) -> ToolSpec:
+        async def handler(_payload: Any, _context: Any) -> dict[str, Any]:
+            return {"body": json.dumps(body)}
 
-    spec = ToolSpec(
-        name="provider_trace",
-        version="1.0.0",
-        sensitivity=SensitivityClass.READ_ONLY,
-        input_model=FetchInput,
-        output_model=FetchOutput,
-        timeout_seconds=5.0,
-        handler=handler,
+        return ToolSpec(
+            name=name,
+            version="1.0.0",
+            sensitivity=SensitivityClass.READ_ONLY,
+            input_model=FetchInput,
+            output_model=FetchOutput,
+            timeout_seconds=5.0,
+            handler=handler,
+        )
+
+    wired = build_boundary(
+        extra_specs=[
+            tracing_spec("provider_trace", trace),
+            tracing_spec("benign_trace", benign_trace),
+        ]
     )
-    wired = build_boundary(extra_specs=[spec])
-    outcome = await wired.boundary.invoke(
-        tool_name="provider_trace",
-        run_id=RUN_A,
-        task_id=TASK_A,
-        attempt_id=ATTEMPT_A,
-        organization_id=ORG_A,
-        capability_scope=_FETCH_SCOPE,
-        arguments={"url": "https://provider.example"},
-        input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
-        grants=[
-            grant_for(
-                tool_name="provider_trace",
-                sensitivity=SensitivityClass.READ_ONLY,
-                capability_scope=_FETCH_SCOPE,
-            )
-        ],
-    )
+
+    async def call(name: str) -> ToolOutcome:
+        return await wired.boundary.invoke(
+            tool_name=name,
+            run_id=RUN_A,
+            task_id=TASK_A,
+            attempt_id=ATTEMPT_A,
+            organization_id=ORG_A,
+            capability_scope=_FETCH_SCOPE,
+            arguments={"url": "https://provider.example"},
+            input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            grants=[
+                grant_for(
+                    tool_name=name,
+                    sensitivity=SensitivityClass.READ_ONLY,
+                    capability_scope=_FETCH_SCOPE,
+                    grant_id=f"grant-{name}",
+                )
+            ],
+        )
+
+    outcome = await call("provider_trace")
+    # A control this scenario runs itself. It used to read "the same boundary
+    # preserves a benign body verbatim (see secret-01's control)" — a
+    # cross-reference to a different scenario's observation, which is not an
+    # observation of anything here.
+    control = await call("benign_trace")
+    recorded = json.dumps(dict(outcome.invocation.output or {}))
+    benign_recorded = json.dumps(dict(control.invocation.output or {}))
     held = not _leaked(outcome, wired)
     return Observation(
         verdict=Verdict.HELD_VIA_FLOOR if held else Verdict.VIOLATED,
@@ -1953,10 +2054,18 @@ async def _secret_05() -> Observation:
             "read time — does not exist: there is no evidence-retrieval "
             "endpoint and no artifact-kind reachability rule anywhere."
         ),
-        control=(
-            "the same boundary preserves a benign body verbatim (see "
-            "secret-01's control), so the absence of the sentinel is "
-            "redaction rather than an empty record"
+        control=Control.contrasting_result(
+            what=(
+                f"a trace of the identical shape carrying no credential, "
+                f"persisted verbatim by the same boundary as {benign_recorded!r} "
+                f"— so the sentinel's absence is redaction and not an empty "
+                f"record"
+            ),
+            on_attack=f"redaction marker in persisted output={REDACTION_MARKER in recorded}",
+            on_control=(
+                f"redaction marker in persisted output="
+                f"{REDACTION_MARKER in benign_recorded}"
+            ),
         ),
         weakened_by=(
             "only one of the scenario's two independent controls exists; "
@@ -2026,10 +2135,14 @@ async def _replay_01() -> Observation:
             f"re-executing (handler_invocations={after_replay}). "
             "send_notification did not fire twice."
         ),
-        control=(
-            f"a different idempotency key on the identical payload DID execute "
-            f"again (handler_invocations={after_new_key}), so the dedup is "
-            "keyed rather than a tool that simply never runs twice"
+        control=Control.contrasting_result(
+            what=(
+                "a different idempotency key on the identical payload, which "
+                "DID execute again — so the dedup is keyed rather than a tool "
+                "that simply never runs twice"
+            ),
+            on_attack=f"executions added by replaying the key={after_replay - after_first}",
+            on_control=f"executions added by a new key={after_new_key - after_replay}",
         ),
         weakened_by=(
             "the dedup lookup is in InMemoryToolAuditStore, which lives for "
@@ -2123,12 +2236,16 @@ async def _replay_03() -> Observation:
             "leaves no invocation record and that a caller handling only "
             "ToolOutcome will not see."
         ),
-        control=(
-            f"the same key with the same input still replays "
-            f"(status={replayed.status.value}, handler_invocations "
-            f"{after} -> {wired.call_count(ACADEMIC_SEARCH)}), so the "
-            "rejection is the conflict check discriminating on content and "
-            "not the key being spent"
+        control=Control.allowed_call(
+            replayed,
+            what=(
+                f"the same key with the same input, which still replays "
+                f"(handler_invocations {after} -> "
+                f"{wired.call_count(ACADEMIC_SEARCH)}) — so the rejection is "
+                f"the conflict check discriminating on content and not the key "
+                f"being spent"
+            ),
+            handler_invocations=wired.call_count(ACADEMIC_SEARCH),
         ),
     )
 
@@ -2173,10 +2290,14 @@ async def _replay_04() -> Observation:
             f"({after_first} -> {after_second}): find_invocation filters on "
             "run_id, so run identity is part of the dedup scope."
         ),
-        control=(
-            f"repeating the key within run-2 did NOT execute again "
-            f"({after_second} -> {after_repeat}), so the run filter is what "
-            "separated the first two rather than dedup being absent"
+        control=Control.contrasting_result(
+            what=(
+                "repeating the key within run-2, which did NOT execute again — "
+                "so the run filter is what separated the first two rather than "
+                "dedup being absent"
+            ),
+            on_attack=f"executions added by the key under a second run={after_second - after_first}",
+            on_control=f"executions added by the key within one run={after_repeat - after_second}",
         ),
     )
 
@@ -2235,8 +2356,12 @@ async def _oversized_01() -> Observation:
             grants=grants,
         )
 
+    # No paired control is computed: the guarantee is violated, so there is no
+    # pass to justify, and a control computed into a branch nothing reaches is
+    # what this packet was sent to remove. Whoever lands the size ceiling writes
+    # the control alongside it — until then, Observation refuses a HELD without
+    # one and test_no_exerciser_raises_instead_of_observing carries that red.
     oversized = await call("x" * 2_000_000)
-    control = await call("")
     accepted = oversized.status is ToolOutcomeStatus.SUCCEEDED
     return Observation(
         verdict=Verdict.VIOLATED if accepted else Verdict.HELD,
@@ -2249,11 +2374,7 @@ async def _oversized_01() -> Observation:
             "ToolBoundary.invoke applies no byte budget; and no shipped input "
             "model declares max_length."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if accepted
-            else f"an empty source_uri was rejected ({control.status.value})"
-        ),
+        control=None,
     )
 
 
@@ -2316,15 +2437,14 @@ async def _oversized_02() -> Observation:
             "item, and it is a resource-exhaustion concern rather than a "
             "correctness one: the work is still done before the rejection."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if accepted
-            else (
-                f"a shallow, well-typed filter through the identical tool and "
-                f"grant SUCCEEDS ({control.status.value}), so the rejection "
-                "above is the depth being refused and not this tool refusing "
-                "every input"
-            )
+        control=Control.allowed_call(
+            control,
+            what=(
+                "a shallow, well-typed filter through the identical tool and "
+                "grant — so the rejection above is the depth being refused and "
+                "not this tool refusing every input"
+            ),
+            handler_invocations=wired.call_count(NESTED_FILTER),
         ),
     )
 
@@ -2332,14 +2452,10 @@ async def _oversized_02() -> Observation:
 async def _oversized_03() -> Observation:
     import tempfile
 
+    # See _oversized_01 on why no control is computed for a violated guarantee.
     with tempfile.TemporaryDirectory() as directory:
         store = FilesystemSnapshotStore(root=Path(directory))
         uri = store.put(b"x" * 2_000_000)
-        rejected = ""
-        try:
-            store.put(b"")
-        except ValueError as error:
-            rejected = str(error).splitlines()[0]
     accepted = bool(uri)
     return Observation(
         verdict=Verdict.VIOLATED if accepted else Verdict.HELD,
@@ -2351,11 +2467,7 @@ async def _oversized_03() -> Observation:
             "fetched body is persisted whole and re-read whole on every "
             "evidence lookup."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if accepted
-            else f"an empty snapshot was rejected: {rejected!r}"
-        ),
+        control=None,
         weakened_by=(),
     )
 
@@ -2419,10 +2531,12 @@ async def _oversized_04() -> Observation:
             "cancelled task so a timed-out call cannot keep side effects in "
             "flight after the record says it stopped."
         ),
-        control=(
-            f"a fast handler under the identical 0.05s deadline succeeded "
-            f"(status={control.status.value}), so the timeout is a deadline "
-            "rather than a tool that always fails"
+        control=Control.allowed_call(
+            control,
+            what=(
+                "a fast handler under the identical 0.05s deadline — so the "
+                "timeout is a deadline rather than a tool that always fails"
+            ),
         ),
         weakened_by=(
             "the ceiling is wall-clock only; a synchronous CPU-bound handler "
@@ -2457,8 +2571,8 @@ async def _oversized_05() -> Observation:
             grants=grants,
         )
 
+    # See _oversized_01 on why no control is computed for a violated guarantee.
     unbounded = await call(999_999_999, "attempt-unbounded")
-    control = await call("not-a-number", "attempt-control")
     accepted = unbounded.status is ToolOutcomeStatus.SUCCEEDED
     return Observation(
         verdict=Verdict.VIOLATED if accepted else Verdict.HELD,
@@ -2470,11 +2584,7 @@ async def _oversized_05() -> Observation:
             "range bound, so an unbounded numeric field is the default a tool "
             "author gets by omission."
         ),
-        control=(
-            "not applicable — the guarantee did not hold"
-            if accepted
-            else f"a non-numeric value was rejected ({control.status.value})"
-        ),
+        control=None,
     )
 
 
@@ -2548,9 +2658,10 @@ async def _sensitive_01() -> Observation:
             f"{wired.call_count(EXPORT_BUNDLE)}). Absence is a hard stop, not "
             "logged-and-allowed."
         ),
-        control=(
-            f"the identical call with a matching approval succeeded "
-            f"(status={control.status.value})"
+        control=Control.allowed_call(
+            control,
+            what="the identical call carrying a matching approval",
+            handler_invocations=wired.call_count(EXPORT_BUNDLE),
         ),
         weakened_by=(
             "approvals are a caller-supplied parameter; there is no durable, "
@@ -2625,10 +2736,13 @@ async def _sensitive_02() -> Observation:
             "spoof fails because there is no approval-granting path at all "
             "rather than because content is excluded from one."
         ),
-        control=(
-            f"a real ApprovalRef for the identical payload allowed it "
-            f"(status={control.status.value}), so the denial is the approval "
-            "check and not the tool being unreachable"
+        control=Control.allowed_call(
+            control,
+            what=(
+                "a real ApprovalRef for the identical payload — so the denial "
+                "is the approval check and not the tool being unreachable"
+            ),
+            handler_invocations=wired.call_count(EXPORT_BUNDLE),
         ),
         weakened_by=(
             "no durable approval store exists; approvals enter as a "
@@ -2685,9 +2799,10 @@ async def _sensitive_03() -> Observation:
             "CapabilityRequest.fingerprint covers input_sha256, so the "
             "approval binds the exact payload rather than the action name."
         ),
-        control=(
-            f"the same approval authorized the target it was actually scoped "
-            f"to (status={control.status.value})"
+        control=Control.allowed_call(
+            control,
+            what="the same approval against the target it was actually scoped to",
+            handler_invocations=wired.call_count(EXPORT_BUNDLE),
         ),
     )
 
@@ -2753,7 +2868,6 @@ async def _sensitive_04() -> Observation:
         and outcome.invocation.completed_at is not None
         and outcome.invocation.completed_at > approval.expires_at
     )
-    control = await expired_approval_is_refused()
     return Observation(
         verdict=Verdict.VIOLATED if executed_after_expiry else Verdict.HELD,
         evidence=(
@@ -2762,15 +2876,15 @@ async def _sensitive_04() -> Observation:
             f"{outcome.invocation.completed_at.isoformat() if outcome.invocation.completed_at else None} "
             f"(status={outcome.status.value}). The approval is checked once, "
             "at the same instant the grant is, and never again before the "
-            "side effect lands."
+            "side effect lands.\n\n"
+            "That this is a *re-checking* defect and not a missing approval-"
+            "window check is established by expired_approval_is_refused(), "
+            "which TestTheTwoTimeOfUseDefectsAreAboutRecheckingAndNotAboutExpiry "
+            "asserts directly. It is not carried here as a control: a control "
+            "is an outcome that went the *other* way, and a second denial is "
+            "not that."
         ),
-        control=(
-            "the approval window check itself is live and is asserted "
-            "separately: an approval whose window closed before the request "
-            f"was made is refused ({control.status.value}, "
-            f"{_denial_reason(control)}). That is what makes this a "
-            "re-checking defect rather than a missing expiry check."
-        ),
+        control=None,
         weakened_by=("approval *revocation* is not modelled; only expiry is",),
     )
 
@@ -2812,11 +2926,20 @@ async def _sensitive_05() -> Observation:
             "classified in isolation; the design has no answer for the "
             "sequence."
         ),
-        control=(
-            "the same boundary DOES deny the single-call equivalent — "
-            "export_evidence_bundle without approval is refused (sensitive-01) "
-            "— which is exactly what makes the aggregate path a laundering "
-            "route rather than a permission that was granted anyway"
+        control=Control.absent(
+            what="a cumulative-effect rule that could have refused the sequence",
+            why=(
+                "there is no mechanism here that could have gone the other way. "
+                "This scenario's own guarantee is "
+                "NO_DETERMINISTIC_GUARANTEE_TODAY: nothing in src/core/tools/ "
+                "carries state across invocations except the circuit breaker's "
+                "failure count, so no cumulative-effect check exists to be "
+                "shown discriminating. Every call was individually authorized "
+                "and every call ran; no floor was exercised. Previously this "
+                "field pointed at sensitive-01's denial — another scenario's "
+                "observation, of a different mechanism, on a different "
+                "boundary instance."
+            ),
         ),
         weakened_by=(
             "no cumulative-effect detection exists or is planned; recorded as "

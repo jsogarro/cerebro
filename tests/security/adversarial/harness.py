@@ -25,14 +25,32 @@ information a reader needs, so :class:`Verdict` keeps them apart:
     There is nothing to run it against. Recorded with the reason, never
     silently converted into a pass.
 
-**Every non-violated observation carries a control.** A scenario asserting "the
-capability check denies" proves nothing if the same boundary denies everything —
-a control that cannot succeed is indistinguishable from one that correctly
-refuses. So :class:`Observation` requires ``control``: a paired,
-same-boundary, same-grant call that was *allowed*, or the equivalent
-demonstration that the mechanism under test has a reachable success path. The
-suite asserts the field is populated, so an exerciser cannot report a pass
-without having shown the other half.
+**Every non-violated observation carries a control, and the control carries an
+outcome rather than a sentence.** A scenario asserting "the capability check
+denies" proves nothing if the same boundary denies everything — a control that
+cannot succeed is indistinguishable from one that correctly refuses. So
+:class:`Observation` requires :class:`Control`: a paired, same-boundary,
+same-grant call that was *allowed*, or the equivalent demonstration that the
+mechanism under test discriminated.
+
+**Why this is a type and not a string.** The first version of this file
+required ``control`` to be a non-empty ``str``, and every exerciser duly
+computed a real control call and then interpolated its status into prose. That
+requirement checks that a *sentence exists*. Mutating ``_identity_matches`` to
+``return False and (...)`` — a boundary that denies literally everything — left
+18 of the corpus's scenarios still reporting their expected verdict, several of
+them printing ``the same boundary ... allowed academic_search (status=denied)``.
+The sentence and the fact disagreed, silently, in the mechanism built to stop
+exactly that.
+
+:class:`Control` therefore stores *the outcome it observed* — a status, a
+handler-invocation count, a pair of recorded results — and derives its English
+from those fields via :meth:`Control.sentence`. "The control went the other way"
+becomes :attr:`Control.demonstrated`, which
+:meth:`Observation.__post_init__` refuses to accept as false. There is no way to
+satisfy it by writing a better string, and when a sibling change moves an
+outcome the refusal names the observed value rather than quietly re-wording
+itself.
 """
 
 from __future__ import annotations
@@ -58,6 +76,8 @@ from src.core.tools import (
     NullEventPublisher,
     ToolBoundary,
     ToolCallContext,
+    ToolOutcome,
+    ToolOutcomeStatus,
     ToolSpec,
 )
 
@@ -66,6 +86,8 @@ __all__ = [
     "ORG_B",
     "SENTINEL_SECRET",
     "Boundary",
+    "Control",
+    "ControlKind",
     "MutableClock",
     "Observation",
     "Verdict",
@@ -84,6 +106,182 @@ class Verdict(StrEnum):
     NOT_EXERCISABLE = "not_exercisable"
 
 
+class ControlKind(StrEnum):
+    """How a scenario showed its mechanism could have gone the other way.
+
+    ``ALLOWED_CALL``
+        A second, real call on the *same* boundary and the *same* grant list
+        that the boundary **allowed**. This is the strongest form and the only
+        one a capability-mediated guarantee may use: it cannot be constructed
+        without a :class:`~src.core.tools.ToolOutcome`, and a boundary that
+        refuses everything cannot produce one.
+    ``CONTRASTING_RESULT``
+        The mechanism under test is not the capability layer — a sanitizer, the
+        redaction contract, a model validator, the idempotency ledger — so the
+        demonstration is that the same mechanism recorded *different* results
+        for the attack input and a benign one. Satisfied only when the two
+        recorded values actually differ.
+    ``NO_CAPABILITY_CONTROL``
+        Declared absence. There is no mechanism whose opposite outcome could be
+        reached, so nothing is claimed. Never counts as a demonstration; the
+        scenarios allowed to use it are pinned by id in the suite, so the set of
+        passes standing on nothing stays visible and cannot grow quietly.
+    """
+
+    ALLOWED_CALL = "allowed_call"
+    CONTRASTING_RESULT = "contrasting_result"
+    NO_CAPABILITY_CONTROL = "no_capability_control"
+
+
+def _render(value: object) -> str:
+    """Render a recorded value for a control, stably and readably."""
+
+    if isinstance(value, StrEnum):
+        return value.value
+    return repr(value)
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class Control:
+    """The outcome a scenario observed on the other side of its mechanism.
+
+    Constructed only through the three factories below, each of which reads its
+    fields off something that actually ran. :attr:`demonstrated` is computed
+    from those fields; :meth:`sentence` is *derived* from them. Nothing here can
+    be satisfied by asserting a nicer string.
+    """
+
+    kind: ControlKind
+    what: str
+    """What the paired observation was, in the scenario's own terms."""
+
+    observed: str = ""
+    """The control side's recorded result."""
+
+    counterpart: str = ""
+    """The attack side's recorded result — ``CONTRASTING_RESULT`` only."""
+
+    handler_invocations: int | None = None
+    """How many times the allowed call's handler ran, when the scenario knows."""
+
+    why_absent: str = ""
+    """Why no control exists — ``NO_CAPABILITY_CONTROL`` only."""
+
+    def __post_init__(self) -> None:
+        if not self.what.strip():
+            raise ValueError("a control names what was paired against")
+        if (
+            self.kind is ControlKind.NO_CAPABILITY_CONTROL
+            and not self.why_absent.strip()
+        ):
+            raise ValueError(
+                "a declared-absent control states why no opposite outcome is "
+                "reachable; 'there was no time' is not a reason"
+            )
+
+    @classmethod
+    def allowed_call(
+        cls,
+        outcome: ToolOutcome,
+        *,
+        what: str,
+        handler_invocations: int | None = None,
+    ) -> Control:
+        """Record a paired call the boundary allowed.
+
+        Takes the :class:`ToolOutcome` rather than its status, so the control
+        cannot be written without the call having been made.
+        """
+
+        return cls(
+            kind=ControlKind.ALLOWED_CALL,
+            what=what,
+            observed=outcome.status.value,
+            handler_invocations=handler_invocations,
+        )
+
+    @classmethod
+    def contrasting_result(
+        cls, *, what: str, on_attack: object, on_control: object
+    ) -> Control:
+        """Record the same mechanism producing two different results."""
+
+        return cls(
+            kind=ControlKind.CONTRASTING_RESULT,
+            what=what,
+            observed=_render(on_control),
+            counterpart=_render(on_attack),
+        )
+
+    @classmethod
+    def absent(cls, *, what: str, why: str) -> Control:
+        """Declare that no opposite outcome is reachable, and say why."""
+
+        return cls(kind=ControlKind.NO_CAPABILITY_CONTROL, what=what, why_absent=why)
+
+    @property
+    def demonstrated(self) -> bool:
+        """Whether the mechanism was observed producing the opposite outcome."""
+
+        if self.kind is ControlKind.ALLOWED_CALL:
+            return self.observed == ToolOutcomeStatus.SUCCEEDED.value and (
+                self.handler_invocations is None or self.handler_invocations > 0
+            )
+        if self.kind is ControlKind.CONTRASTING_RESULT:
+            return bool(self.observed) and self.observed != self.counterpart
+        return False
+
+    @property
+    def diagnosis(self) -> str:
+        """Why :attr:`demonstrated` is false, in terms a reader can act on."""
+
+        if self.kind is ControlKind.ALLOWED_CALL:
+            if self.observed != ToolOutcomeStatus.SUCCEEDED.value:
+                return (
+                    f"the paired call was expected to be ALLOWED and came back "
+                    f"status={self.observed}. Either the mechanism under test "
+                    f"now refuses this call too — in which case the verdict "
+                    f"above is a denial on a boundary that denies everything — "
+                    f"or the control itself needs rewiring."
+                )
+            return (
+                f"the paired call succeeded but its handler ran "
+                f"{self.handler_invocations} time(s), so nothing was actually "
+                f"reached"
+            )
+        if self.kind is ControlKind.CONTRASTING_RESULT:
+            return (
+                f"the mechanism recorded the same result for the attack input "
+                f"and the benign one ({self.counterpart!r} vs {self.observed!r}), "
+                f"so it is not discriminating — it is answering unconditionally"
+            )
+        return self.why_absent
+
+    def sentence(self) -> str:
+        """The human-readable control, derived from what was recorded."""
+
+        if self.kind is ControlKind.ALLOWED_CALL:
+            reached = (
+                ""
+                if self.handler_invocations is None
+                else f", handler_invocations={self.handler_invocations}"
+            )
+            return (
+                f"{self.what} — the boundary ALLOWED it "
+                f"(status={self.observed}{reached}), so the outcome above is a "
+                f"decision rather than a boundary that refuses everything"
+            )
+        if self.kind is ControlKind.CONTRASTING_RESULT:
+            return (
+                f"{self.what} — the same mechanism recorded "
+                f"{self.counterpart} for the attack input and {self.observed} "
+                f"for the benign one, so it discriminates rather than answering "
+                f"unconditionally"
+            )
+        return f"{self.what} — no control exists: {self.why_absent}"
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class Observation:
@@ -91,25 +289,68 @@ class Observation:
 
     verdict: Verdict
     evidence: str
-    control: str = ""
-    """Proof the mechanism under test had a reachable opposite outcome.
+    control: Control | None = None
+    """The opposite outcome the mechanism under test was observed producing.
 
-    Required for :attr:`Verdict.HELD` and :attr:`Verdict.HELD_VIA_FLOOR`; the
-    suite asserts it. A denial observed on a boundary that denies everything is
-    not evidence of a working check.
+    Required for :attr:`Verdict.HELD` and :attr:`Verdict.HELD_VIA_FLOOR`, and
+    required to be :attr:`Control.demonstrated` unless it explicitly declares
+    itself absent. A denial observed on a boundary that denies everything is not
+    evidence of a working check, and neither is a sentence saying it was.
     """
 
     weakened_by: tuple[str, ...] = ()
-    """Why this pass is worth less than it reads — one entry per reason."""
+    """Why this pass is worth less than it reads — one entry per reason.
+
+    Unlike :attr:`control` this is irreducibly prose: "the grant is self-issued"
+    names no outcome a machine can compare. What *is* checkable is that each
+    entry says something, and that is enforced below — the suite's ADVISORY
+    guard tests ``assert observation.weakened_by``, which is a tuple-truthiness
+    check that ``("",)`` satisfies. That is the same "a sentence exists" shape
+    this module was rewritten to remove from :attr:`control`, so the blank case
+    is closed here rather than left as the one place it still worked.
+
+    This does not make a caveat load-bearing the way a control is. It closes the
+    floor, and the distinction is worth keeping straight.
+    """
 
     def __post_init__(self) -> None:
         if not self.evidence.strip():
             raise ValueError("an observation states its evidence")
-        if self.verdict in _CONTROL_REQUIRED and not self.control.strip():
+        for index, reason in enumerate(self.weakened_by):
+            if not reason.strip():
+                raise ValueError(
+                    f"weakened_by[{index}] is blank. An observation that says it "
+                    "is worth less than it reads has to say why; an empty "
+                    "string satisfies the suite's ADVISORY guard while stating "
+                    "nothing."
+                )
+        if self.verdict not in _CONTROL_REQUIRED:
+            return
+        if self.control is None:
             raise ValueError(
-                f"a {self.verdict.value} observation must name the control that "
-                "shows the mechanism could have produced the opposite outcome"
+                f"a {self.verdict.value} observation must carry the control that "
+                "shows the mechanism could have produced the opposite outcome. "
+                "IF THIS SCENARIO IS RECORDED IN `DEFECTS`, THE LIKELY CAUSE IS "
+                "THAT ITS DEFECT HAS BEEN FIXED: a violated scenario carries no "
+                "control because there is no pass to justify, so the first "
+                "run in which the guarantee holds arrives here. Write the "
+                "control, delete the entry from DEFECTS, and drop the xfail."
             )
+        if (
+            not self.control.demonstrated
+            and self.control.kind is not ControlKind.NO_CAPABILITY_CONTROL
+        ):
+            raise ValueError(
+                f"a {self.verdict.value} observation was reported, but its "
+                f"control did not go the other way: {self.control.diagnosis} "
+                f"(control: {self.control.what})"
+            )
+
+    @property
+    def control_sentence(self) -> str:
+        """The control as prose, or an explicit note that there is none."""
+
+        return "" if self.control is None else self.control.sentence()
 
 
 _CONTROL_REQUIRED: Final[frozenset[Verdict]] = frozenset(
