@@ -4,6 +4,7 @@ Tests for MCP tools.
 Following TDD principles - tests written before implementation.
 """
 
+import importlib.util
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -340,13 +341,22 @@ class TestCitationTool:
         assert "@article" in result["bibtex"]
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("scipy") is None,
+    reason="StatisticsTool depends on scipy, declared in the [stats] extra",
+)
 class TestStatisticsTool:
-    """Test cases for Statistics Tool."""
+    """Test cases for Statistics Tool.
 
-    # StatisticsTool depends on scipy (declared in pyproject.toml [stats]
-    # extra). Skip the whole class cleanly when the optional dep isn't
-    # installed instead of erroring at import time.
-    pytest.importorskip("scipy")
+    The scipy guard is a class decorator, not a ``pytest.importorskip`` in the
+    class body. A class body executes at *import*, so the call that used to sit
+    here raised ``Skipped`` during collection of the **module** and took all
+    four classes with it — including three that have nothing to do with scipy.
+    The comment above it said it skipped "the whole class cleanly", which is an
+    intent the code did not implement, and nothing went red to say so: a module
+    that collects zero tests reports no failures for the same reason a passing
+    one does.
+    """
 
     @pytest.mark.asyncio
     async def test_descriptive_statistics(self):
