@@ -684,6 +684,21 @@ class ToolBoundary:
                 timeout=spec.timeout_seconds,
                 return_when=asyncio.FIRST_COMPLETED,
             )
+        except BaseException:
+            # The enclosing coroutine is being torn down -- most often an
+            # external cancellation, which arrives here rather than through
+            # the token. Nothing below runs, so without this the handler task
+            # outlives the call that started it: the boundary records
+            # CANCELLED and the tool goes on to complete its side effect,
+            # which for an external write is the effect happening after the
+            # system reported that it would not.
+            #
+            # Requested synchronously rather than awaited. Awaiting during an
+            # unwind is how a cleanup path acquires its own second failure
+            # mode; `cancel()` is delivered at the handler's next suspension
+            # point either way.
+            handler_task.cancel()
+            raise
         finally:
             if cancel_task is not None and not cancel_task.done():
                 await _abandon(cancel_task)

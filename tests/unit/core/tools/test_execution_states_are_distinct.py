@@ -122,6 +122,60 @@ class TestEachFailureIsItsOwnState:
         assert outcome.error_code == "cancelled"
         assert outcome.retry is RetryDisposition.TERMINAL
 
+    async def test_an_externally_cancelled_call_does_not_leave_the_tool_running(
+        self, boundary_dependencies: dict[str, Any]
+    ) -> None:
+        """Cancelling the caller must reach the handler, not just the record.
+
+        ``_call_handler`` races the handler against a deadline and the
+        cancellation token inside ``asyncio.wait``. When the *enclosing*
+        coroutine is cancelled — ``asyncio.wait_for`` around ``invoke``, or a
+        request task being torn down — the ``CancelledError`` propagates
+        straight out and the handler task is never cancelled. The boundary
+        still writes an honest CANCELLED record, so from the outside the call
+        looks stopped while the tool goes on running: for an EXTERNAL_WRITE or
+        EXFILTRATION tool that is the side effect happening after the system
+        reported it would not.
+
+        Asserted on the handler's own view rather than on the record, because
+        the record was never the part that was wrong.
+        """
+
+        started = asyncio.Event()
+        reached_side_effect: list[str] = []
+        saw_cancellation: list[str] = []
+
+        async def slow_writer(
+            args: EchoInput, context: ToolCallContext
+        ) -> Mapping[str, Any]:
+            started.set()
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                saw_cancellation.append("cancelled")
+                raise
+            reached_side_effect.append("wrote")
+            return {"echoed": "never"}
+
+        boundary = build(boundary_dependencies, name=SLOW_TOOL, handler=slow_writer)
+
+        call = asyncio.ensure_future(
+            boundary.invoke(**invoke_kwargs(tool_name=SLOW_TOOL))
+        )
+        await started.wait()
+        call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+
+        # Give any orphaned handler the chance to finish its sleep and run on.
+        await asyncio.sleep(0)
+
+        assert saw_cancellation == ["cancelled"], (
+            "the handler never saw a cancellation: the boundary recorded "
+            "CANCELLED and left the tool running"
+        )
+        assert reached_side_effect == []
+
     async def test_cancellation_before_dispatch_never_starts_the_tool(
         self, boundary_dependencies: dict[str, Any]
     ) -> None:
