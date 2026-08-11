@@ -24,6 +24,23 @@ is JSON-representability, which is the failure mode that matters for something
 about to be persisted. They do not constrain the *shape* of a source or a
 citation, so ``INVALID_OUTPUT`` on this path means "unserializable", not
 "malformed".
+
+**Input models are closed, and the asymmetry is the point.** They used to share
+the permissive base, which meant an undeclared field passed validation, landed
+in ``model_extra``, and — for ``analyze_statistics`` — was forwarded to the
+outbound client as a keyword argument, while being absent from the record, from
+``input_sha256``, and from the approval binding ``input_sha256`` carries. Two
+calls differing only in smuggled material produced the same digest and the same
+idempotency key, so one could be served the other's recorded output.
+
+The forward-compatibility argument that justifies permissive *outputs* does not
+transfer to *inputs*: an upstream server adds response fields, it does not
+invent request parameters this repository then has to accept sight-unseen. The
+input parameters are published — ``statistics_analyzer`` names ``operation``,
+``data``, ``group1``, ``group2``, ``x``, ``y``, ``plot_type`` in its metadata —
+so they are declared here rather than admitted anonymously. An undeclared field
+is now ``INVALID_INPUT``: refused before the network, and recorded with the
+offending field visible.
 """
 
 from __future__ import annotations
@@ -77,53 +94,79 @@ by the breaker, and returned as a typed degraded state.
 """
 
 
-class _Permissive(BaseModel):
+class _PermissiveOutput(BaseModel):
+    """What comes back: unknown fields tolerated, JSON-representability forced."""
+
     model_config = ConfigDict(extra="allow")
 
 
-class AcademicSearchInput(_Permissive):
+class _ClosedInput(BaseModel):
+    """What goes out: nothing this file did not declare.
+
+    ``ToolSpec`` refuses a permissive input model at registration, so this base
+    is what makes the four specifications constructible — the enforcement is
+    not here, and a future model that forgets to inherit it is refused rather
+    than silently reopened.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AcademicSearchInput(_ClosedInput):
     query: str
     databases: list[str] = Field(default_factory=list)
     max_results: int = 20
     filters: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-class AcademicSearchOutput(_Permissive):
+class AcademicSearchOutput(_PermissiveOutput):
     sources: list[dict[str, JsonValue]] = Field(default_factory=list)
     total_found: int = 0
     databases_searched: list[str] = Field(default_factory=list)
     search_strategy: str = ""
 
 
-class FormatCitationsInput(_Permissive):
+class FormatCitationsInput(_ClosedInput):
     sources: list[dict[str, JsonValue]] = Field(default_factory=list)
     style: str = "APA"
 
 
-class FormatCitationsOutput(_Permissive):
+class FormatCitationsOutput(_PermissiveOutput):
     formatted_citations: list[JsonValue] = Field(default_factory=list)
     style: str = "APA"
     total_sources: int = 0
 
 
-class AnalyzeStatisticsInput(_Permissive):
+class AnalyzeStatisticsInput(_ClosedInput):
+    """The parameter set ``statistics_analyzer`` publishes, declared.
+
+    ``group1``/``group2`` serve ``t_test``, ``x``/``y`` serve ``correlation``,
+    and ``plot_type`` serves ``plot``. They used to travel as ``model_extra``,
+    which is how they reached the client without reaching the record.
+    """
+
     operation: str
     data: list[JsonValue] | None = None
+    group1: list[JsonValue] | None = None
+    group2: list[JsonValue] | None = None
+    x: list[JsonValue] | None = None
+    y: list[JsonValue] | None = None
+    plot_type: str | None = None
 
 
-class AnalyzeStatisticsOutput(_Permissive):
+class AnalyzeStatisticsOutput(_PermissiveOutput):
     analysis: dict[str, JsonValue] = Field(default_factory=dict)
     operation: str = ""
     data_points: int = 0
 
 
-class BuildKnowledgeGraphInput(_Permissive):
+class BuildKnowledgeGraphInput(_ClosedInput):
     text: str | None = None
     entities: list[JsonValue] | None = None
     relationships: list[JsonValue] | None = None
 
 
-class BuildKnowledgeGraphOutput(_Permissive):
+class BuildKnowledgeGraphOutput(_PermissiveOutput):
     graph: dict[str, JsonValue] = Field(default_factory=dict)
     entities: list[JsonValue] = Field(default_factory=list)
     relationships: list[JsonValue] = Field(default_factory=list)
@@ -224,14 +267,23 @@ def build_specs(
     ) -> dict[str, JsonValue]:
         assert isinstance(params, AnalyzeStatisticsInput)
         connected = await client()
-        extras = {
-            key: value
-            for key, value in (params.model_extra or {}).items()
-            if key not in {"operation", "data"}
+        # Omitted rather than sent as ``None``: the upstream tool reads these
+        # with ``kwargs.get(name, [])``, so passing an absent parameter
+        # explicitly is not the same call as not passing it.
+        optional = {
+            name: value
+            for name, value in (
+                ("group1", params.group1),
+                ("group2", params.group2),
+                ("x", params.x),
+                ("y", params.y),
+                ("plot_type", params.plot_type),
+            )
+            if value is not None
         }
         result = _require_success(
             await connected.analyze_statistics(
-                operation=params.operation, data=params.data, **extras
+                operation=params.operation, data=params.data, **optional
             ),
             operation="statistical analysis",
         )
