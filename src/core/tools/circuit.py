@@ -103,6 +103,22 @@ class CircuitBreaker:
         self._opened_at = None
         self._half_open_in_flight = False
 
+    def record_abandoned(self) -> None:
+        """Give back the trial slot for a probe that was withdrawn.
+
+        Cancellation is silent about the dependency's health, so this must not
+        count as a failure — but it is conclusive about *occupancy*: the probe
+        is over, and the slot it consumed has to go back or no later caller can
+        ever take it.
+
+        Keeping health and occupancy separate is the whole point. Routing a
+        cancelled probe through :meth:`record_failure` would reopen the breaker
+        on a request the caller merely withdrew, and routing it through
+        :meth:`record_success` would close a breaker on no evidence at all.
+        """
+
+        self._half_open_in_flight = False
+
     def record_failure(self, now: datetime) -> None:
         """Count a failure, opening once the threshold is reached.
 

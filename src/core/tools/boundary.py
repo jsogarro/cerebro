@@ -572,6 +572,10 @@ class ToolBoundary:
                 spec, validated_input, context, cancellation
             )
         except asyncio.CancelledError:
+            # Give the half-open trial slot back before unwinding. The call is
+            # over either way, and a slot consumed by a probe nobody is waiting
+            # for any more is a slot no later caller can ever take.
+            breaker.record_abandoned()
             # An external cancellation still leaves a durable record. Shielded
             # so the write survives the unwinding, then re-raised: swallowing
             # CancelledError would break the caller's own cancellation.
@@ -622,9 +626,14 @@ class ToolBoundary:
                 ),
             )
 
-        if status is not ToolOutcomeStatus.CANCELLED:
+        if status is ToolOutcomeStatus.CANCELLED:
             # A withdrawn request says nothing about the dependency's health,
             # so cancellation alone must not push the breaker toward opening.
+            # It is conclusive about the trial slot, though: the probe is over,
+            # and holding the slot would refuse every later call for the
+            # lifetime of the process.
+            breaker.record_abandoned()
+        else:
             breaker.record_failure(completed_at)
 
         return await self._terminate(
