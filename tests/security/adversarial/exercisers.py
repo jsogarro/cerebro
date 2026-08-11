@@ -1626,27 +1626,25 @@ async def _crosstenant_02() -> Observation:
 
 
 async def _crosstenant_03() -> Observation:
-    from src.api.websocket.auth import verify_project_access
-
-    granted = await verify_project_access(
-        "user-of-tenant-a", "project-owned-by-tenant-b"
-    )
-    violated = granted is True
     return Observation(
-        verdict=Verdict.VIOLATED if violated else Verdict.HELD,
+        verdict=Verdict.NOT_EXERCISABLE,
         evidence=(
-            "verify_project_access('user-of-tenant-a', "
-            f"'project-owned-by-tenant-b') returned {granted!r}. The function "
-            "takes no organization or tenant parameter and its body is still "
-            "`return user_id is not None` "
-            "(src/api/websocket/auth.py:101-124), guarded by a live TODO. It "
-            "is reached from src/api/routes/websocket.py:211 and :345. "
-            "`git log -1 -- src/api/websocket/auth.py` on this branch is "
-            "6419b1f (the Wave 3 merge), so packet 4-Sec's fix is not an "
-            "ancestor of this tree: "
-            "`git merge-base --is-ancestor <4-Sec SHA> HEAD` -> NO."
+            "Was reproducible here, and is not any more. verify_project_access "
+            "no longer answers from its arguments alone: it requires the "
+            "caller's organization claim and a database session as keyword-only "
+            "parameters, and resolves the project through "
+            "ResearchRepository.get_for_user filtered by both "
+            "(src/api/websocket/auth.py). Deciding it needs a live project row "
+            "owned by a specific tenant, which the in-process harness has no "
+            "session to create. The two-positional-argument call this exerciser "
+            "used to make now raises TypeError rather than returning True -- "
+            "and a raise satisfies xfail(strict=True), so keeping the old "
+            "reproduction would have let this scenario go on reciting a reason "
+            "that had become false. Proven instead by the eight database-backed "
+            "tests named in GUARANTEE_PROVEN_BY, which are resolved by "
+            "test_every_named_covering_test_still_exists rather than asserted "
+            "in prose."
         ),
-        control=None,
     )
 
 

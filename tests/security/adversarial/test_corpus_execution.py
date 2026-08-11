@@ -86,6 +86,7 @@ NOT_EXERCISABLE: Final[frozenset[str]] = frozenset(
     {
         "poisoned-05-cross-run-evidence-borrow",
         "crosstenant-02-cross-tenant-evidence-artifact-link",
+        "crosstenant-03-unscoped-read-by-id",
         "crosstenant-04-ws-subscription-cross-tenant-run",
         "replay-02-event-log-replay-duplicate-side-effect",
         "replay-05-stale-ws-cursor-resume-duplicate-effect",
@@ -93,12 +94,23 @@ NOT_EXERCISABLE: Final[frozenset[str]] = frozenset(
 )
 """Scenarios with nothing to run against, pinned so the set cannot grow quietly.
 
-Each one's exerciser states its reason. All five are the wave's already known
+Each one's exerciser states its reason. Five are the wave's already known
 limits — no tool path holds an ``AsyncSession``, and no Wave 4 event consumer
 exists — rather than anything discovered here.
 
-Two of them are unrunnable *in this process only*; see
-:data:`DEFECTS_PROVEN_ELSEWHERE`.
+``crosstenant-03`` is the exception and arrived by the opposite route: it was a
+reproducible defect here until the tenant-scoping change landed on ``main``.
+Deciding it now needs a project row owned by a particular tenant, so the
+in-process harness cannot reach it, and it moved out of :data:`DEFECTS` rather
+than being deleted. **It did not have to go red to stop being true** — the
+two-argument call its exerciser made now raises ``TypeError``, and a raise
+satisfies ``xfail(strict=True)``, so the scenario would have gone on reciting a
+reason that had become false. What caught it was
+``test_no_exerciser_raises_instead_of_observing``, which runs every exerciser
+once without its mark.
+
+Three of them are unrunnable *in this process only*; their cover is named in
+:data:`GUARANTEE_PROVEN_BY` and :data:`DEFECTS_PROVEN_ELSEWHERE`.
 """
 
 
@@ -169,10 +181,27 @@ GUARANTEE_PROVEN_BY: Final[dict[str, tuple[str, ...]]] = {
         "tests/security/adversarial/test_corpus_execution_persistence.py"
         "::test_evidence_cannot_reference_another_runs_artifact",
     ),
+    "crosstenant-03-unscoped-read-by-id": (
+        "tests/test_cross_tenant_authorization.py::test_project_owner_may_subscribe",
+        "tests/test_cross_tenant_authorization.py"
+        "::test_another_tenant_may_not_subscribe_to_a_project",
+        "tests/test_cross_tenant_authorization.py"
+        "::test_same_user_id_in_another_organization_may_not_subscribe",
+        "tests/test_cross_tenant_authorization.py"
+        "::test_another_user_in_the_same_organization_may_not_subscribe",
+        "tests/test_cross_tenant_authorization.py"
+        "::test_missing_tenant_claim_denies_project_access",
+        "tests/test_cross_tenant_authorization.py"
+        "::test_missing_session_denies_project_access",
+        "tests/test_cross_tenant_authorization.py"
+        "::test_anonymous_caller_denied_project_access",
+        "tests/test_cross_tenant_authorization.py"
+        "::test_explicit_development_opt_in_still_allows_project_access",
+    ),
 }
 """For each in-process-unrunnable scenario, the tests that actually prove it.
 
-**Why a mapping and not a sentence.** Three of the five ``NOT_EXERCISABLE``
+**Why a mapping and not a sentence.** Four of the six ``NOT_EXERCISABLE``
 exercisers say, in prose, that their guarantee is exercised somewhere else. That
 is a claim which can become false without anything going red: rename or delete
 the covering test and the corpus goes on asserting the coverage exists. It is
@@ -238,15 +267,6 @@ DEFECTS: Final[dict[str, str]] = {
         "from any mediated call. ToolInvocationRepository does enforce it, "
         "but nothing constructs one."
     ),
-    "crosstenant-03-unscoped-read-by-id": (
-        "CRITICAL, pre-existing and still live on this branch. "
-        "verify_project_access (src/api/websocket/auth.py:101-124) takes no "
-        "organization parameter and returns `user_id is not None`, so any "
-        "authenticated user is authorized for any project. Reached from "
-        "src/api/routes/websocket.py:211 and :345. `git log -1 -- "
-        "src/api/websocket/auth.py` on this branch is 6419b1f (the Wave 3 "
-        "merge), so packet 4-Sec's fix is NOT an ancestor of this tree."
-    ),
     "crosstenant-05-idempotency-key-collision": (
         "Idempotency dedup is not tenant-scoped, and 4C's reordering does not "
         "reach it. InMemoryToolAuditStore.find_invocation accepts "
@@ -263,9 +283,9 @@ DEFECTS: Final[dict[str, str]] = {
         "No input size ceiling exists at any layer. A 2,000,000-character "
         "source_uri on the shipped SourceFetchInput model is validated, "
         "hashed, redacted, and persisted. ToolSpec.__post_init__ requires a "
-        "timeout, a sensitivity, and SecretRef-typed credential fields -- but "
-        "nothing about size -- so an unbounded field is what a tool author "
-        "gets by omission."
+        "name, a version, a timeout, an input model that admits no undeclared "
+        "fields, and SecretRef-typed credential fields -- but nothing about "
+        "size -- so an unbounded field is what a tool author gets by omission."
     ),
     "oversized-03-oversized-retrieved-snapshot": (
         "FilesystemSnapshotStore.put has no maximum size, and neither the "
