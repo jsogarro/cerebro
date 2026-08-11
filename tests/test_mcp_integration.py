@@ -1,6 +1,13 @@
 """
 Integration tests for MCP server and tools.
+
+This file is module-skipped without the optional `[mcp]` extra, so nothing in
+it executes in the environment the gate runs in. Treat every test here as
+unverified by CI, and assume any network call it makes is live the first time
+someone installs the extra — `test_academic_search` was exactly that.
 """
+
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -96,14 +103,50 @@ class TestMCPClient:
 
     @pytest.mark.asyncio
     async def test_academic_search(self):
-        """Test academic search through client."""
+        """Test academic search through client.
+
+        `httpx.AsyncClient.get` is fully replaced for the duration of this
+        test. As written before, this test constructed a real `MCPClient` and
+        called arXiv with nothing patched anywhere in its body — a live network
+        call on every run. It never fired only because the module-level
+        `importorskip("fastmcp")` above skips this whole file in every
+        environment the gate runs in, and because constructing an `MCPClient`
+        raises under the fastmcp version the `[mcp]` extra resolves to (see
+        `MCPServer.register_tool`, which builds a `**kwargs` tool wrapper that
+        fastmcp >= 3.4 rejects). **Fixing that incompatibility would have armed
+        this call.** It is mocked now so it cannot be.
+
+        The response carries a marker string no real arXiv record could
+        contain, and it is asserted — so a future edit that drops the patch
+        fails loudly rather than passing quietly against the live service.
+        """
+        marker = "zz-live-network-guard-marker-6d1b8f"
+        arxiv_feed = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<feed xmlns="http://www.w3.org/2005/Atom">'
+            f"<entry><title>{marker}</title>"
+            f"<summary>{marker} abstract</summary>"
+            "<published>2024-01-01T00:00:00Z</published>"
+            "<id>http://arxiv.org/abs/0000.00000</id>"
+            "</entry></feed>"
+        )
+        response = MagicMock()
+        response.status_code = 200
+        response.text = arxiv_feed
+        response.json.return_value = {}
+
         client = MCPClient()
 
-        result = await client.search_academic(
-            query="test query", databases=["arxiv"], max_results=5
-        )
+        with patch(
+            "httpx.AsyncClient.get", new=AsyncMock(return_value=response)
+        ) as mocked_get:
+            result = await client.search_academic(
+                query="test query", databases=["arxiv"], max_results=5
+            )
 
         assert "success" in result
+        assert mocked_get.await_count >= 1
+        assert marker in str(result)
 
     @pytest.mark.asyncio
     async def test_citation_formatting(self):

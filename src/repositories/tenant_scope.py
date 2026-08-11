@@ -14,6 +14,64 @@ silently unscoped write, and there is no system/no-org escape hatch.
 """
 
 import uuid
+from typing import Any, TypeVar
+
+from sqlalchemy import Select, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
+
+from src.models.db.run_lifecycle import AgentRun
+
+_SelectT = TypeVar("_SelectT", bound=Select[Any])
+
+
+def scope_to_organization(
+    query: _SelectT,
+    column: InstrumentedAttribute[uuid.UUID | None],
+    organization_id: uuid.UUID | str | None,
+) -> _SelectT:
+    """Filter ``query`` to one tenant, or leave it unscoped when there is none.
+
+    Reads are permissive by design — a boot-time recovery scan legitimately
+    has no org context and passes ``None`` — which is the opposite default to
+    the write path, where :func:`normalize_organization_id` fails closed. That
+    asymmetry is deliberate and is exactly why it should be written once: read
+    scoping spelled out at each call site is ten chances to write the
+    permissive branch where the strict one belongs, in a codebase that has
+    shipped that bug before.
+    """
+
+    if organization_id is None:
+        return query
+    return query.where(column == normalize_organization_id(organization_id))  # type: ignore[return-value]
+
+
+async def get_run_organization_id(
+    session: AsyncSession, run_id: str
+) -> uuid.UUID | None:
+    """Return the organization that owns ``run_id``, or ``None`` if unknown.
+
+    Every repository that attaches a child row to a run has to answer this
+    same question before it can check that the child's tenant matches the
+    run's. It lived as a byte-identical private method on three of them, which
+    is the shape this module exists to prevent: a fix to the lookup — a join
+    condition, a soft-delete filter, a change to how a run is identified —
+    would have had to be made three times or silently disagree between
+    evidence, claim support, and run events.
+
+    ``None`` means the run has no organization recorded or does not exist.
+    Both are the caller's to interpret, because "no such run" and "a run
+    predating the tenant boundary" are refused for different reasons.
+    """
+
+    result = await session.execute(
+        select(AgentRun.organization_id).where(AgentRun.run_id == run_id)
+    )
+    row = result.first()
+    if row is None:
+        return None
+    organization_id: uuid.UUID | None = row[0]
+    return organization_id
 
 
 class MissingOrganizationContextError(ValueError):
@@ -85,5 +143,7 @@ __all__ = [
     "MissingOrganizationContextError",
     "TenantMismatchError",
     "enforce_tenant_identity",
+    "get_run_organization_id",
     "normalize_organization_id",
+    "scope_to_organization",
 ]

@@ -16,6 +16,7 @@ from src.agents.comparative_similarity_analyzer import SimilarityAnalyzer
 from src.agents.comparative_theory_extractor import TheoryExtractor
 from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
+from src.agents.tools.mediation import ToolCallIdentity
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_comparative_agent_prompt
@@ -118,12 +119,12 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
             # Step 2: Perform statistical analysis using MCP tools
             statistical_analysis = await self._perform_statistical_comparison(
-                task.input_data
+                task.input_data, task
             )
 
             # Step 3: Build knowledge graph for relationship analysis
             relationship_graph = await self._build_comparison_knowledge_graph(
-                task.input_data, comparative_research
+                task.input_data, comparative_research, task
             )
 
             # Step 4: Generate analysis using Gemini with MCP-enhanced data
@@ -200,6 +201,11 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                         relationship_graph.get("entities", [])
                     ),
                 },
+                # `success` is now the tool boundary's answer rather than a
+                # flag every fallback set to True, so "any of the three
+                # succeeded" finally means what it says. It stays an `any`
+                # because this output genuinely is MCP-enhanced when one of the
+                # three answered, and degraded only when none did.
                 "data_source": (
                     "mcp_enhanced"
                     if any(
@@ -495,7 +501,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         )
 
     async def _perform_statistical_comparison(
-        self, input_data: dict[str, Any]
+        self, input_data: dict[str, Any], task: AgentTask | None = None
     ) -> dict[str, Any]:
         """
         Perform statistical analysis of comparison data using MCP statistics tool.
@@ -519,7 +525,9 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             # Perform descriptive statistics if numerical data available
             if comparison_data:
                 descriptive_result = await self.mcp_integration.analyze_statistics(
-                    operation="descriptive", data=list(comparison_data.values())
+                    operation="descriptive",
+                    data=list(comparison_data.values()),
+                    identity=ToolCallIdentity.from_agent_task(task),
                 )
                 if descriptive_result.get("success"):
                     tests_performed.append("descriptive_statistics")
@@ -528,7 +536,9 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             criteria = input_data.get("criteria", [])
             if len(criteria) >= 2 and comparison_data:
                 correlation_result = await self.mcp_integration.analyze_statistics(
-                    operation="correlation", variables=criteria[:2]
+                    operation="correlation",
+                    variables=criteria[:2],
+                    identity=ToolCallIdentity.from_agent_task(task),
                 )
                 if correlation_result.get("success"):
                     tests_performed.append("correlation_analysis")
@@ -550,7 +560,10 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             return self._fallback_statistical_analysis(input_data)
 
     async def _build_comparison_knowledge_graph(
-        self, input_data: dict[str, Any], research_data: dict[str, Any]
+        self,
+        input_data: dict[str, Any],
+        research_data: dict[str, Any],
+        task: AgentTask | None = None,
     ) -> dict[str, Any]:
         """
         Build knowledge graph for comparison relationships using MCP tools.
@@ -580,7 +593,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         try:
             result = await self.mcp_integration.build_knowledge_graph(
-                text=text_for_analysis
+                text=text_for_analysis, identity=ToolCallIdentity.from_agent_task(task)
             )
 
             if result.get("success"):

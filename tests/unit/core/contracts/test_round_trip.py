@@ -8,17 +8,26 @@ import pytest
 from pydantic import ValidationError
 
 from src.core.contracts import (
+    ApprovalRef,
     Artifact,
     ArtifactStatus,
     Attempt,
+    CapabilityDecision,
+    CapabilityDecisionEffect,
+    CapabilityDenialReason,
+    CapabilityGrant,
+    CapabilityRequest,
     ClaimSupport,
     ClaimSupportStatus,
     EvaluationResult,
     EvaluationStatus,
     Evidence,
+    ProducerKind,
+    PromptBinding,
     RoutingPolicy,
     Run,
     RunEvent,
+    SensitivityClass,
     Task,
     ToolInvocation,
     ToolInvocationStatus,
@@ -30,6 +39,25 @@ from src.core.contracts.base import ContractModel
 
 NOW = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
 SHA256 = "a" * 64
+LATER = datetime(2026, 7, 26, 13, 0, tzinfo=UTC)
+PROMPT_BINDING = PromptBinding.for_rendered(
+    prompt_id="agent.literature_review",
+    prompt_version="1.0.0",
+    template_source="Review {topic}.",
+    rendered_text="Review inflation.",
+)
+CAPABILITY_REQUEST = CapabilityRequest(
+    run_id="run-001",
+    task_id="task-001",
+    attempt_id="attempt-001",
+    tool_name="web-search",
+    tool_version="1.0.0",
+    capability_scope="research:read",
+    sensitivity=SensitivityClass.READ_ONLY,
+    input_trust=TrustClassification.USER_SUPPLIED,
+    input_sha256=SHA256,
+    requested_at=NOW,
+)
 
 
 def _contract_examples() -> tuple[ContractModel, ...]:
@@ -118,6 +146,7 @@ def _contract_examples() -> tuple[ContractModel, ...]:
             status=ArtifactStatus.FINAL,
             trust=TrustClassification.EXTERNAL_UNTRUSTED,
             producer="tool:web-search",
+            producer_kind=ProducerKind.SYSTEM,
             created_at=NOW,
         ),
         Evidence(
@@ -128,8 +157,10 @@ def _contract_examples() -> tuple[ContractModel, ...]:
             source_uri="https://example.test/source",
             snapshot_artifact_id="artifact-001",
             content_sha256=SHA256,
-            locator="paragraph=4",
+            locator="bytes:2048-3072|xpath:/html/body/div[1]/p[4]",
             trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            producer_kind=ProducerKind.MODEL_TURN,
+            prompt_binding=PROMPT_BINDING,
             producer_tool_invocation_id="tool-001",
             acquired_at=NOW,
         ),
@@ -143,6 +174,8 @@ def _contract_examples() -> tuple[ContractModel, ...]:
             evidence_ids=("evidence-001",),
             evaluator_id="claim-entailment",
             evaluator_version="1.0.0",
+            producer_kind=ProducerKind.MODEL_TURN,
+            prompt_binding=PROMPT_BINDING,
             explanation="The source states the compared values.",
             evaluated_at=NOW,
         ),
@@ -173,6 +206,35 @@ def _contract_examples() -> tuple[ContractModel, ...]:
             correlation_id="request-001",
             payload={"task_type": "source_discovery"},
         ),
+        PROMPT_BINDING,
+        CapabilityGrant(
+            grant_id="grant-001",
+            run_id="run-001",
+            task_id="task-001",
+            capability_scope="research:read",
+            tool_name="web-search",
+            tool_versions=("1.0.0",),
+            sensitivity=SensitivityClass.READ_ONLY,
+            max_input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            requires_approval=False,
+            issued_at=NOW,
+            expires_at=LATER,
+        ),
+        CAPABILITY_REQUEST,
+        ApprovalRef(
+            approval_id="approval-001",
+            grant_id="grant-001",
+            request_fingerprint=CAPABILITY_REQUEST.fingerprint(),
+            approved_by="user-001",
+            approved_at=NOW,
+            expires_at=LATER,
+        ),
+        CapabilityDecision(
+            effect=CapabilityDecisionEffect.DENY,
+            request_fingerprint=CAPABILITY_REQUEST.fingerprint(),
+            denial_reason=CapabilityDenialReason.NO_MATCHING_GRANT,
+            decided_at=NOW,
+        ),
     )
 
 
@@ -191,6 +253,11 @@ def test_all_canonical_contracts_round_trip_deterministically() -> None:
         "Artifact",
         "EvaluationResult",
         "RunEvent",
+        "PromptBinding",
+        "CapabilityGrant",
+        "CapabilityRequest",
+        "ApprovalRef",
+        "CapabilityDecision",
     }
 
     for contract in examples:

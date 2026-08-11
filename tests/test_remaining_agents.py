@@ -241,7 +241,21 @@ class TestCitationAgent:
         assert "bibliography" in result.output
         assert len(result.output["formatted_citations"]) == 2
         assert result.output["citation_style"] == "APA"
-        assert result.confidence > 0.7
+        # Confidence is now the average of two honest completeness
+        # fractions: both sources were formatted (2/2), but zero were
+        # verified (0/2) -- these fixtures use the singular "author" key,
+        # which _verify_single_source's required-fields check does not
+        # recognize (it checks "authors"), so both sources are missing a
+        # required field and fail verification. (2/2 + 0/2) / 2 = 0.5.
+        #
+        # This assertion previously read `> 0.7`, which the pre-fix
+        # _calculate_confidence satisfied via a flat 0.5 baseline plus a
+        # +0.25 all-formatted bonus regardless of verification outcome
+        # (0.75 total) -- crediting confidence for zero real verification.
+        # The rewritten assertion is stronger: it pins the exact honest
+        # value rather than a loose floor, and that value now actually
+        # reflects that verification failed for both sources.
+        assert result.confidence == pytest.approx(0.5)
 
     @pytest.mark.asyncio
     async def test_validate_result(self):

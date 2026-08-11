@@ -36,6 +36,22 @@ def test_agent_selector_preserves_worker_definition_metadata() -> None:
     assert definitions["citation"].quality_score == 0.85
 
 
+def test_citation_worker_no_longer_advertises_unimplemented_plagiarism_check() -> None:
+    """Packet 0 (X5): "plagiarism_check" named a capability with no
+    implementation anywhere in the repo (src.qa's PlagiarismDetector was a
+    stub, and it has since been deleted). Advertising it let callers select
+    the citation worker for a capability it could never perform."""
+    selector = ResearchAgentSelector()
+
+    definitions = selector.build_worker_definitions()
+
+    assert "plagiarism_check" not in definitions["citation"].capabilities
+    assert definitions["citation"].capabilities == [
+        "citation_formatting",
+        "source_verification",
+    ]
+
+
 def test_research_supervisor_registers_workers_from_agent_selector() -> None:
     supervisor = ResearchSupervisor()
 

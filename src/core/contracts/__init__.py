@@ -1,5 +1,16 @@
 """Canonical, versioned agent-system contract namespace."""
 
+from .capabilities import (
+    APPROVAL_REQUIRED_SENSITIVITIES,
+    ApprovalRef,
+    CapabilityDecision,
+    CapabilityDecisionEffect,
+    CapabilityDenialReason,
+    CapabilityGrant,
+    CapabilityRequest,
+    SensitivityClass,
+    decide_capability,
+)
 from .definitions import RoutingPolicy, WorkflowControlMode, WorkflowDefinition
 from .execution_plan import (
     COLLABORATION_MODE_SUPPORT,
@@ -17,17 +28,36 @@ from .execution_plan import (
     WorkerAssignment,
 )
 from .lifecycle import Run
+from .locators import (
+    LOCATOR_ANNOTATION_SCHEMES,
+    LOCATOR_CANONICAL_SCHEMES,
+    InvalidLocatorError,
+    canonical_span,
+    parse_locator,
+)
 from .outcomes import EvaluationResult, EvaluationStatus, RunEvent
 from .pinning import PinnedComponentKind, PinnedComponentVersion, PinnedVersions
 from .provenance import (
+    EVIDENCE_BEARING_STATUSES,
+    AbsentEvidenceReason,
     Artifact,
     ArtifactStatus,
     ClaimSupport,
     ClaimSupportStatus,
     Evidence,
+    ProducerKind,
+    PromptBinding,
     ToolInvocation,
     ToolInvocationStatus,
-    TrustClassification,
+)
+from .redaction import (
+    MIN_REDACTABLE_SECRET_LENGTH,
+    REDACTION_MARKER,
+    SecretRef,
+    boundary_digest,
+    is_credential_key,
+    redact,
+    snapshot_digest,
 )
 from .states import (
     AttemptStatus,
@@ -37,14 +67,33 @@ from .states import (
 )
 from .streaming import RunEventCursor, delivery_idempotency_key
 from .task_lifecycle import Attempt, Task
+from .trust import (
+    TrustClassification,
+    at_least_as_trusted,
+    propagate_trust,
+    trust_rank,
+)
 
 __all__ = [
+    "APPROVAL_REQUIRED_SENSITIVITIES",
     "COLLABORATION_MODE_SUPPORT",
+    "EVIDENCE_BEARING_STATUSES",
+    "LOCATOR_ANNOTATION_SCHEMES",
+    "LOCATOR_CANONICAL_SCHEMES",
+    "MIN_REDACTABLE_SECRET_LENGTH",
+    "REDACTION_MARKER",
+    "AbsentEvidenceReason",
     "AmendmentValidationStatus",
+    "ApprovalRef",
     "Artifact",
     "ArtifactStatus",
     "Attempt",
     "AttemptStatus",
+    "CapabilityDecision",
+    "CapabilityDecisionEffect",
+    "CapabilityDenialReason",
+    "CapabilityGrant",
+    "CapabilityRequest",
     "ClaimSupport",
     "ClaimSupportStatus",
     "CollaborationMode",
@@ -55,11 +104,14 @@ __all__ = [
     "ExecutionBudget",
     "ExecutionPlan",
     "FallbackMode",
+    "InvalidLocatorError",
     "InvalidTransitionError",
     "PinnedComponentKind",
     "PinnedComponentVersion",
     "PinnedVersions",
     "PlanAmendment",
+    "ProducerKind",
+    "PromptBinding",
     "ProviderModelPolicy",
     "ProviderModelRoute",
     "RoutingDecision",
@@ -69,6 +121,8 @@ __all__ = [
     "RunEvent",
     "RunEventCursor",
     "RunStatus",
+    "SecretRef",
+    "SensitivityClass",
     "Task",
     "TaskStatus",
     "ToolInvocation",
@@ -77,5 +131,15 @@ __all__ = [
     "WorkerAssignment",
     "WorkflowControlMode",
     "WorkflowDefinition",
+    "at_least_as_trusted",
+    "boundary_digest",
+    "canonical_span",
+    "decide_capability",
     "delivery_idempotency_key",
+    "is_credential_key",
+    "parse_locator",
+    "propagate_trust",
+    "redact",
+    "snapshot_digest",
+    "trust_rank",
 ]

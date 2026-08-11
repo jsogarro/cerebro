@@ -7,9 +7,12 @@ import pytest
 from pydantic import ValidationError
 
 from src.core.contracts import (
+    EVIDENCE_BEARING_STATUSES,
     ClaimSupport,
     ClaimSupportStatus,
     Evidence,
+    ProducerKind,
+    PromptBinding,
     Run,
     RunEvent,
     Task,
@@ -19,6 +22,12 @@ from src.core.contracts import (
 )
 
 NOW = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
+PROMPT_BINDING = PromptBinding.for_rendered(
+    prompt_id="agent.citation",
+    prompt_version="1.0.0",
+    template_source="Judge {claim}.",
+    rendered_text="Judge the compared values.",
+)
 
 
 def _run_payload() -> dict[str, Any]:
@@ -87,19 +96,23 @@ def test_evidence_requires_a_sha256_content_hash() -> None:
             source_uri="https://example.test/source",
             snapshot_artifact_id="artifact-001",
             content_sha256="not-a-hash",
-            locator="paragraph=4",
+            locator="bytes:0-512",
             trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            producer_kind=ProducerKind.MODEL_TURN,
+            prompt_binding=PROMPT_BINDING,
             acquired_at=NOW,
         )
 
 
-@pytest.mark.parametrize(
-    "status",
-    [ClaimSupportStatus.SUPPORTED, ClaimSupportStatus.CONTRADICTED],
-)
+@pytest.mark.parametrize("status", sorted(EVIDENCE_BEARING_STATUSES))
 def test_material_claim_judgments_require_evidence(
     status: ClaimSupportStatus,
 ) -> None:
+    """Every verdict but ``unsupported`` is meaningless without evidence.
+
+    Derived from ``EVIDENCE_BEARING_STATUSES`` rather than listed literally, so
+    a future state added to the enum cannot quietly escape this invariant.
+    """
     with pytest.raises(ValidationError, match="evidence"):
         ClaimSupport(
             claim_support_id="support-001",
@@ -111,6 +124,8 @@ def test_material_claim_judgments_require_evidence(
             evidence_ids=(),
             evaluator_id="claim-evaluator",
             evaluator_version="1.0.0",
+            producer_kind=ProducerKind.MODEL_TURN,
+            prompt_binding=PROMPT_BINDING,
             explanation="No evidence supplied.",
             evaluated_at=NOW,
         )

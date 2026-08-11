@@ -77,7 +77,6 @@ class ResearchAgentSelector:
                 capabilities=[
                     "citation_formatting",
                     "source_verification",
-                    "plagiarism_check",
                 ],
                 required_for=["research", "academic_writing"],
                 optimal_for=["publication_prep", "academic_validation"],

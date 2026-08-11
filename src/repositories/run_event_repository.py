@@ -24,6 +24,7 @@ from src.models.db.run_event import AgentRunEvent, AgentRunEventOutbox
 from src.models.db.run_lifecycle import AgentRun
 from src.repositories.tenant_scope import (
     TenantMismatchError,
+    get_run_organization_id,
     normalize_organization_id,
 )
 
@@ -77,7 +78,7 @@ class RunEventRepository:
             ValueError: The run does not exist.
         """
         normalized_organization_id = normalize_organization_id(organization_id)
-        run_organization_id = await self._get_run_organization_id(run_id)
+        run_organization_id = await get_run_organization_id(self.session, run_id)
         if run_organization_id is None:
             raise ValueError(f"run {run_id!r} does not exist")
         if run_organization_id != normalized_organization_id:
@@ -206,15 +207,6 @@ class RunEventRepository:
         if row is None:
             raise ValueError(f"run {run_id!r} does not exist")
         return int(row[0])
-
-    async def _get_run_organization_id(self, run_id: str) -> uuid.UUID | None:
-        query = select(AgentRun.organization_id).where(AgentRun.run_id == run_id)
-        result = await self.session.execute(query)
-        row = result.first()
-        if row is None:
-            return None
-        organization_id: uuid.UUID | None = row[0]
-        return organization_id
 
 
 __all__ = ["RunEventRepository"]

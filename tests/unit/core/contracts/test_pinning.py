@@ -134,3 +134,59 @@ def test_empty_component_set_is_allowed_and_still_pins_the_core_versions() -> No
     assert pinned.components == ()
     assert pinned.routing_policy_version == "1"
     assert pinned.versions_for(PinnedComponentKind.PROMPT) == {}
+
+
+def test_a_pin_may_carry_the_content_digest_of_what_it_pinned() -> None:
+    """A declared version cannot detect an edit that skipped the version bump.
+
+    Prompts resolve at runtime by agent type, and their declared versions are a
+    hand-maintained table. Recording the digest of the pinned content alongside
+    the version is what makes drift between admission and execution detectable
+    rather than merely unlikely.
+    """
+    pinned = PinnedComponentVersion(
+        kind=PinnedComponentKind.PROMPT,
+        component_id="agent.literature_review",
+        version="1.0.0",
+        content_sha256="b" * 64,
+    )
+
+    assert pinned.content_sha256 == "b" * 64
+
+
+def test_a_pin_without_a_digest_is_still_valid_but_unverifiable() -> None:
+    assert PROMPT_PIN.content_sha256 is None
+
+
+def test_a_malformed_digest_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="String should match pattern"):
+        PinnedComponentVersion(
+            kind=PinnedComponentKind.PROMPT,
+            component_id="agent.literature_review",
+            version="1.0.0",
+            content_sha256="not-a-digest",
+        )
+
+
+def test_the_pinned_digest_is_retrievable_for_drift_comparison() -> None:
+    pinned = PinnedVersions(
+        workflow_definition_id="workflow.research",
+        workflow_definition_version="1.0.0",
+        routing_policy_id="routing.default",
+        routing_policy_version="1.0.0",
+        event_envelope_version="1.0",
+        components=(
+            PinnedComponentVersion(
+                kind=PinnedComponentKind.PROMPT,
+                component_id="agent.literature_review",
+                version="1.0.0",
+                content_sha256="c" * 64,
+            ),
+        ),
+    )
+
+    assert (
+        pinned.content_hash_of(PinnedComponentKind.PROMPT, "agent.literature_review")
+        == "c" * 64
+    )
+    assert pinned.content_hash_of(PinnedComponentKind.PROMPT, "absent") is None

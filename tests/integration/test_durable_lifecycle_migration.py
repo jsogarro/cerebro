@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
@@ -25,6 +27,71 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC = Path(sys.executable).parent / "alembic"
 REVISION = "c3f5a1d7b209"
+
+
+def _revision_below(revision_id: str) -> str:
+    """Return the revision immediately before ``revision_id`` in the chain.
+
+    Reads the migration graph itself (via Alembic's ``ScriptDirectory``)
+    rather than hardcoding a second revision id, so this stays correct
+    however many migrations later packets stack on top of the durable
+    lifecycle revision.
+    """
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    script = ScriptDirectory.from_config(config)
+    down_revision = script.get_revision(revision_id).down_revision
+    assert isinstance(down_revision, str), (
+        f"{revision_id} has no single parent revision to downgrade to"
+    )
+    return down_revision
+
+
+def _is_ancestor_or_self(target_revision: str, from_revision: str) -> bool:
+    """Return whether ``target_revision`` is ``from_revision`` or one of its
+    ancestors, walking ``down_revision`` via Alembic's ``ScriptDirectory``.
+
+    Used to check a revision the database actually reports as applied
+    (``alembic_version``) against the target, rather than checking whether a
+    revision id merely exists as a file in ``versions/`` — ``alembic
+    history`` reads only the script directory and never touches the
+    database, so it would pass even against a database the migration never
+    ran against.
+    """
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    script = ScriptDirectory.from_config(config)
+    frontier: list[str] = [from_revision]
+    seen: set[str] = set()
+    while frontier:
+        revision = frontier.pop()
+        if revision in seen:
+            continue
+        seen.add(revision)
+        if revision == target_revision:
+            return True
+        down_revision = script.get_revision(revision).down_revision
+        if down_revision is None:
+            continue
+        if isinstance(down_revision, str):
+            frontier.append(down_revision)
+        else:
+            frontier.extend(rev for rev in down_revision if rev is not None)
+    return False
+
+
+async def _applied_revision(database_url: str) -> str:
+    """Return the revision id the database's ``alembic_version`` table
+    reports as currently applied — the actual observed state, not a file on
+    disk."""
+    engine = create_async_engine(_async_url(database_url))
+    try:
+        async with engine.connect() as connection:
+            result = await connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            )
+            return str(result.scalar_one())
+    finally:
+        await engine.dispose()
+
 
 NEW_TABLES = frozenset(
     {
@@ -158,12 +225,25 @@ async def _seed_event(
     )
 
 
-def test_the_migration_chain_reaches_the_durable_lifecycle_revision(
+async def test_the_migration_chain_reaches_the_durable_lifecycle_revision(
     migrated_database: str,
 ) -> None:
-    result = _run_alembic(migrated_database, "current")
+    """The durable lifecycle revision is the applied revision, or an ancestor
+    of it.
 
-    assert REVISION in result.stdout
+    Not "is head" — later packets migrate on top of this one, so head moves,
+    and asserting equality to head broke the moment a migration landed on
+    top. Reads the revision the database's own ``alembic_version`` table
+    reports as applied (the actual observed state), then walks the
+    migration graph backwards from it to confirm the target revision is
+    that revision or one of its ancestors. ``alembic history`` alone is not
+    enough here: it reads only ``versions/`` and never touches the
+    database, so it would pass even against a database this migration never
+    ran against.
+    """
+    applied = await _applied_revision(migrated_database)
+
+    assert _is_ancestor_or_self(REVISION, applied)
 
 
 async def test_durable_tables_exist_after_upgrade(migrated_database: str) -> None:
@@ -303,7 +383,14 @@ async def test_a_tenant_cannot_reuse_a_run_submission_key_in_postgres(
 async def test_downgrade_leaves_no_durable_schema_behind(
     postgres_server: PostgresContainer,
 ) -> None:
-    """Upgrade then downgrade an isolated database, so no other test is disturbed."""
+    """Upgrade then downgrade an isolated database, so no other test is disturbed.
+
+    Downgrades to the revision immediately below the durable lifecycle one,
+    not a fixed step count ("-1"). A relative step count only undoes
+    whatever migration happens to be on top of this one; targeting the
+    parent revision by name undoes everything back through it regardless of
+    how many migrations later packets have stacked above.
+    """
     admin_engine = create_async_engine(
         _async_url(_database_url(postgres_server, postgres_server.dbname)),
         isolation_level="AUTOCOMMIT",
@@ -319,6 +406,6 @@ async def test_downgrade_leaves_no_durable_schema_behind(
     _run_alembic(probe_url, "upgrade", "head")
     assert await _table_names(probe_url) >= NEW_TABLES
 
-    _run_alembic(probe_url, "downgrade", "-1")
+    _run_alembic(probe_url, "downgrade", _revision_below(REVISION))
 
     assert not (NEW_TABLES & await _table_names(probe_url))
