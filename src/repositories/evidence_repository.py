@@ -35,9 +35,9 @@ from src.core.contracts import Evidence
 from src.core.contracts.locators import parse_locator
 from src.models.db.artifact import AgentArtifact
 from src.models.db.evidence import AgentEvidence
-from src.models.db.run_lifecycle import AgentRun
 from src.repositories.tenant_scope import (
     TenantMismatchError,
+    get_run_organization_id,
     normalize_organization_id,
 )
 
@@ -83,7 +83,9 @@ class EvidenceRepository:
                 with the referenced artifact's ``content_sha256``.
         """
         normalized_organization_id = normalize_organization_id(organization_id)
-        run_organization_id = await self._get_run_organization_id(evidence.run_id)
+        run_organization_id = await get_run_organization_id(
+            self.session, evidence.run_id
+        )
         if run_organization_id is None:
             raise ValueError(f"run {evidence.run_id!r} does not exist")
         if run_organization_id != normalized_organization_id:
@@ -168,15 +170,6 @@ class EvidenceRepository:
             )
         result = await self.session.execute(query)
         return list(result.scalars().all())
-
-    async def _get_run_organization_id(self, run_id: str) -> uuid.UUID | None:
-        query = select(AgentRun.organization_id).where(AgentRun.run_id == run_id)
-        result = await self.session.execute(query)
-        row = result.first()
-        if row is None:
-            return None
-        organization_id: uuid.UUID | None = row[0]
-        return organization_id
 
     async def _get_artifact_row(
         self, artifact_id: str, *, organization_id: uuid.UUID, run_id: str

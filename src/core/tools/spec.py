@@ -58,27 +58,10 @@ from pydantic import AliasChoices, AliasPath, BaseModel
 from pydantic.fields import FieldInfo
 
 from src.core.contracts.capabilities import SensitivityClass
-from src.core.contracts.redaction import SecretRef
+from src.core.contracts.redaction import SecretRef, is_credential_key
 
 from .errors import ToolSpecError
 from .outcome import RetryDisposition
-
-try:
-    from src.core.contracts.redaction import (  # type: ignore[attr-defined]
-        is_credential_key,
-    )
-except ImportError:  # pragma: no cover - whichever branch this tree is on
-    # The contract fix that makes this public renames the private name outright
-    # rather than aliasing it, so *neither* spelling works on both branches.
-    # This bridge exists because the failure it prevents is a silent one: the
-    # rename lives in a file this package does not touch, so integrating the two
-    # branches produces no merge conflict — just an ImportError at runtime, in a
-    # module whose tests would no longer import either.
-    #
-    # Collapse to the public import once the contract change is integrated.
-    from src.core.contracts.redaction import (  # type: ignore[attr-defined,no-redef]
-        _is_credential_key as is_credential_key,
-    )
 
 _is_credential_name: Final = is_credential_key
 """Reuse redaction's own key-name test rather than restating the list.

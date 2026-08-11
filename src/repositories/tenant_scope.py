@@ -15,6 +15,39 @@ silently unscoped write, and there is no system/no-org escape hatch.
 
 import uuid
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models.db.run_lifecycle import AgentRun
+
+
+async def get_run_organization_id(
+    session: AsyncSession, run_id: str
+) -> uuid.UUID | None:
+    """Return the organization that owns ``run_id``, or ``None`` if unknown.
+
+    Every repository that attaches a child row to a run has to answer this
+    same question before it can check that the child's tenant matches the
+    run's. It lived as a byte-identical private method on three of them, which
+    is the shape this module exists to prevent: a fix to the lookup — a join
+    condition, a soft-delete filter, a change to how a run is identified —
+    would have had to be made three times or silently disagree between
+    evidence, claim support, and run events.
+
+    ``None`` means the run has no organization recorded or does not exist.
+    Both are the caller's to interpret, because "no such run" and "a run
+    predating the tenant boundary" are refused for different reasons.
+    """
+
+    result = await session.execute(
+        select(AgentRun.organization_id).where(AgentRun.run_id == run_id)
+    )
+    row = result.first()
+    if row is None:
+        return None
+    organization_id: uuid.UUID | None = row[0]
+    return organization_id
+
 
 class MissingOrganizationContextError(ValueError):
     """Raised when a write is attempted without an authenticated org context.
