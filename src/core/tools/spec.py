@@ -54,7 +54,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, final, get_args
 
-from pydantic import BaseModel
+from pydantic import AliasChoices, AliasPath, BaseModel
+from pydantic.fields import FieldInfo
 
 from src.core.contracts.capabilities import SensitivityClass
 from src.core.contracts.redaction import SecretRef
@@ -136,6 +137,37 @@ def _is_secret_ref_only(annotation: object) -> bool:
     return all(_is_secret_ref_only(arg) for arg in args)
 
 
+def _field_names_a_caller_can_use(field_name: str, field: FieldInfo) -> tuple[str, ...]:
+    """Every name this field is known by, not just its Python attribute.
+
+    ``model_fields`` is keyed by attribute name, so a field declared
+    ``key: str = Field(alias="api_key")`` reads as an ordinary string to a
+    check that looks only at the key — while every caller submits it, and
+    every schema documents it, as ``api_key``. Judging the attribute alone
+    makes the credential rule evadable by renaming a variable.
+
+    Validation and serialization aliases are both included, and for different
+    reasons: the validation alias is the name a credential *arrives* under,
+    and the serialization alias is the name it is *recorded* under. An
+    ``AliasChoices`` contributes each of its options, since a caller may use
+    any of them; an ``AliasPath`` contributes its leading string key.
+    """
+
+    names = [field_name]
+    for candidate in (field.alias, field.validation_alias, field.serialization_alias):
+        if candidate is None:
+            continue
+        if isinstance(candidate, str):
+            names.append(candidate)
+        elif isinstance(candidate, AliasChoices):
+            names.extend(
+                choice for choice in candidate.choices if isinstance(choice, str)
+            )
+        elif isinstance(candidate, AliasPath):
+            names.extend(part for part in candidate.path if isinstance(part, str))
+    return tuple(names)
+
+
 def _audit_credential_fields(
     model: type[BaseModel], *, tool_name: str, seen: set[type[BaseModel]], path: str
 ) -> None:
@@ -148,9 +180,21 @@ def _audit_credential_fields(
     for field_name, field in model.model_fields.items():
         where = f"{path}.{field_name}" if path else field_name
         annotation = field.annotation
-        if _is_credential_name(field_name) and not _is_secret_ref_only(annotation):
+        credential_names = [
+            name
+            for name in _field_names_a_caller_can_use(field_name, field)
+            if _is_credential_name(name)
+        ]
+        if credential_names and not _is_secret_ref_only(annotation):
+            # Name the alias when that is what made it a credential, so the
+            # author is not left looking at an attribute that reads innocently.
+            via = (
+                ""
+                if credential_names == [field_name]
+                else f", reachable as {credential_names[0]!r},"
+            )
             raise ToolSpecError(
-                f"tool {tool_name!r} declares credential field {where!r} as "
+                f"tool {tool_name!r} declares credential field {where!r}{via} as "
                 f"{annotation!r}. A credential parameter must be typed "
                 "SecretRef so a literal cannot type-check; pattern redaction "
                 "is a defense layer, not a substitute for the barrier."

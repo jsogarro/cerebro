@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.contracts.capabilities import SensitivityClass
 from src.core.contracts.redaction import REDACTION_MARKER, SecretRef
@@ -93,6 +93,53 @@ class TestALiteralCredentialCannotBeDeclared:
 
         with pytest.raises(ToolSpecError):
             spec_for(Bad)
+
+    def test_an_alias_cannot_smuggle_a_credential_past_the_rule(self) -> None:
+        """The name a caller sends is the name the rule has to judge.
+
+        ``model_fields`` is keyed by attribute name, so a field named ``key``
+        aliased to ``api_key`` reads as an ordinary string to a check that
+        looks only at the attribute — while every caller submits it, and every
+        piece of documentation names it, as ``api_key``. The barrier is not
+        "a field spelled like a credential in Python source" but "a parameter
+        through which a credential arrives".
+        """
+
+        class Bad(BaseModel):
+            key: str = Field(alias="api_key")
+
+        with pytest.raises(ToolSpecError, match="must be typed"):
+            spec_for(Bad)
+
+    def test_a_validation_alias_is_judged_too(self) -> None:
+        class Bad(BaseModel):
+            opaque: str = Field(validation_alias="password")
+
+        with pytest.raises(ToolSpecError, match="must be typed"):
+            spec_for(Bad)
+
+    def test_a_serialization_alias_is_judged_too(self) -> None:
+        """The record is written under the serialization alias."""
+
+        class Bad(BaseModel):
+            opaque: str = Field(serialization_alias="client_secret")
+
+        with pytest.raises(ToolSpecError, match="must be typed"):
+            spec_for(Bad)
+
+    def test_an_alias_on_a_secret_ref_is_still_accepted(self) -> None:
+        """Aliasing is not the problem; aliasing past the type is."""
+
+        class Good(BaseModel):
+            key: SecretRef = Field(alias="api_key")
+
+        assert spec_for(Good).name == "t"
+
+    def test_a_harmless_alias_is_untouched(self) -> None:
+        class Fine(BaseModel):
+            query_text: str = Field(alias="query")
+
+        assert spec_for(Fine).name == "t"
 
     def test_a_secret_ref_is_accepted(self) -> None:
         class Good(BaseModel):
