@@ -708,6 +708,60 @@ def test_a_deny_decision_may_still_name_the_furthest_matching_grant(
     session.flush()
 
 
+def test_a_succeeded_invocation_cannot_have_skipped_the_decision(
+    session: Session,
+) -> None:
+    """A success is the one status that cannot predate authorization.
+
+    ``ck_agent_tool_invocation_capability_denial`` is written
+    ``capability_decision_effect = 'allow' OR status = 'denied'``, which is
+    ``NULL OR FALSE`` — that is, ``NULL`` — for a row carrying no decision,
+    and a CHECK only rejects ``FALSE``. So the constraint that reads as "a
+    success was authorized" abstains on exactly the rows that skipped
+    authorization.
+
+    ``ck_..._decision_pair_or_invalid_input`` does confine a decision-less row
+    to ``error_code = 'invalid_input'``, but says nothing about its status, so
+    a row could claim to have both failed validation and succeeded.
+    """
+
+    _seed_run_task_attempt(session)
+    session.add(
+        _make_invocation(
+            capability_decision_effect=None,
+            capability_grant_id=None,
+            capability_denial_reason=None,
+            request_fingerprint=None,
+            error_code="invalid_input",
+            status=ToolInvocationStatus.SUCCEEDED.value,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_decision_less_invalid_input_row_is_still_allowed_to_fail(
+    session: Session,
+) -> None:
+    """The legitimate shape the constraint above must not disturb."""
+
+    _seed_run_task_attempt(session)
+    session.add(
+        _make_invocation(
+            capability_decision_effect=None,
+            capability_grant_id=None,
+            capability_denial_reason=None,
+            request_fingerprint=None,
+            error_code="invalid_input",
+            status=ToolInvocationStatus.FAILED.value,
+            output=None,
+            output_trust=None,
+            output_sha256=None,
+        )
+    )
+    session.flush()
+
+
 def test_a_deny_decision_requires_a_denial_reason(session: Session) -> None:
     _seed_run_task_attempt(session)
     session.add(

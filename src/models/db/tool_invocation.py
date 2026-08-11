@@ -188,6 +188,23 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
             "capability_decision_effect = 'allow' OR status = 'denied'",
             name="ck_agent_tool_invocation_capability_denial",
         ),
+        # A success is the one status that cannot predate authorization.
+        # The constraint above abstains here rather than rejecting: with no
+        # decision it reads `NULL OR FALSE`, which is NULL, and a CHECK only
+        # rejects FALSE -- so the rule that reads as "a success was
+        # authorized" says nothing about exactly the rows that skipped
+        # authorization. The pairing constraint below confines a
+        # decision-less row to error_code = 'invalid_input' but says nothing
+        # about its status, so without this a row could claim to have both
+        # failed validation and succeeded.
+        # Spelled with an explicit IS NOT NULL for the same reason as that
+        # constraint, and portably: Postgres wants IS NOT DISTINCT FROM where
+        # SQLite wants IS, and this form needs neither.
+        CheckConstraint(
+            "status <> 'succeeded' OR (capability_decision_effect IS NOT NULL "
+            "AND capability_decision_effect = 'allow')",
+            name="ck_agent_tool_invocation_success_requires_allow",
+        ),
         # An ALLOW decision always names the grant that permitted it.
         CheckConstraint(
             "capability_decision_effect <> 'allow' OR capability_grant_id IS NOT NULL",

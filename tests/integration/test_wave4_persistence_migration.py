@@ -19,10 +19,13 @@ import pytest
 import pytest_asyncio
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import text
+from sqlalchemy import CheckConstraint, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from testcontainers.postgres import PostgresContainer
+
+from src.models.db import *  # noqa: F403  (register every table on Base.metadata)
+from src.models.db.base import Base
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
@@ -384,6 +387,52 @@ async def test_producer_kind_carries_no_column_default_after_upgrade(
         "agent_claim_supports",
     }
     assert all(value is None for value in defaults.values()), defaults
+
+
+async def test_the_migration_declares_every_check_the_orm_does(
+    connection: AsyncConnection,
+) -> None:
+    """The migration and the models must not drift apart silently.
+
+    The unit schema suite builds these tables with ``Base.metadata.create_all``
+    and proves what the *ORM* declares; production builds them from this
+    migration. Nothing until now compared the two, so a CHECK added to one and
+    forgotten in the other would leave the fast suite green and the deployed
+    database unguarded — a constraint that exists in every test and in no
+    running system. This repository has been bitten by that divergence three
+    times.
+
+    Names rather than expressions, deliberately: Postgres normalizes a CHECK
+    body (reformatting, casts, parenthesization), so comparing text would fail
+    on rewordings that change nothing and teach the reader to ignore it. A
+    name is stable and is what a migration author actually forgets to copy.
+    """
+
+    declared = {
+        (table.name, constraint.name)
+        for table in Base.metadata.tables.values()
+        if table.name in NEW_TABLES
+        for constraint in table.constraints
+        if isinstance(constraint, CheckConstraint) and constraint.name
+    }
+
+    rows = await connection.execute(
+        text(
+            "SELECT rel.relname, con.conname "
+            "FROM pg_constraint con "
+            "JOIN pg_class rel ON rel.oid = con.conrelid "
+            "JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace "
+            "WHERE con.contype = 'c' AND nsp.nspname = 'public'"
+        )
+    )
+    migrated = {(row[0], row[1]) for row in rows if row[0] in NEW_TABLES}
+
+    missing = declared - migrated
+    assert not missing, (
+        f"{len(missing)} CHECK constraint(s) are declared on the ORM models "
+        f"but absent from the migrated database: {sorted(missing)}. The unit "
+        "schema suite passes on create_all and would not notice."
+    )
 
 
 async def test_every_wave4_table_enforces_tenant_row_level_security(

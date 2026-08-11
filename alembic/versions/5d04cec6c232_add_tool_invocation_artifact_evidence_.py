@@ -364,6 +364,11 @@ def _create_tool_invocations() -> None:
             name="ck_agent_tool_invocation_capability_denial",
         ),
         sa.CheckConstraint(
+            "status <> 'succeeded' OR (capability_decision_effect IS NOT NULL "
+            "AND capability_decision_effect = 'allow')",
+            name="ck_agent_tool_invocation_success_requires_allow",
+        ),
+        sa.CheckConstraint(
             "capability_decision_effect <> 'allow' OR capability_grant_id IS NOT NULL",
             name="ck_agent_tool_invocation_allow_requires_grant",
         ),
