@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.services.agent_execution_service import AgentExecutionService
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.agent_api_models import (
     AgentExecutionResponse,
     AgentType,
@@ -50,8 +51,14 @@ class TestIntelligentQueryAPI:
                 started_at=datetime.now(),
             )
         )
+        # The query routes require an authenticated tenant; these tests are
+        # about routing behaviour, so the tenant is supplied directly.
         app.dependency_overrides[get_application_direct_execution_service] = lambda: (
             mock_service
+        )
+        app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+            user_id="user-1",
+            organization_id="11111111-1111-1111-1111-111111111111",
         )
         try:
             with TestClient(app) as client:
@@ -61,6 +68,7 @@ class TestIntelligentQueryAPI:
                 get_application_direct_execution_service,
                 None,
             )
+            app.dependency_overrides.pop(get_tenant_context, None)
 
     def test_intelligent_research_query(self, client: TestClient) -> None:
         """Test primary intelligent research endpoint."""

@@ -166,6 +166,11 @@ TEST_AUTHORITY_REFERENCE = ExecutionAuthorityReference(
     authority_id="test-authority", authority_version="1"
 )
 
+# Authority resolution and every execution read are tenant-scoped. This is the
+# organization ``_authority_binding``'s run belongs to, so these tests act as
+# the tenant that owns the work rather than as an unscoped caller.
+TEST_ORGANIZATION_ID = "tenant-1"
+
 
 def _configure_test_authority(
     service: DirectExecutionService,
@@ -178,6 +183,7 @@ def _configure_test_authority(
 
     async def start_with_test_authority(*args: Any, **kwargs: Any) -> str:
         kwargs.setdefault("authority_reference", TEST_AUTHORITY_REFERENCE)
+        kwargs.setdefault("organization_id", TEST_ORGANIZATION_ID)
         return await original_start(*args, **kwargs)
 
     service.start_research_execution = start_with_test_authority  # type: ignore[method-assign]
@@ -358,7 +364,9 @@ class TestDirectExecutionService:
 
         execution_id = await execution_service.start_research_execution(sample_project)
 
-        status = await execution_service.get_execution_status(execution_id)
+        status = await execution_service.get_execution_status(
+            execution_id, organization_id=TEST_ORGANIZATION_ID
+        )
         assert status is not None
         assert status.execution_id == execution_id
         assert status.project_id == str(sample_project.id)
@@ -367,7 +375,9 @@ class TestDirectExecutionService:
     async def test_get_execution_status_nonexistent(self, execution_service):
         """Test getting status for non-existent execution."""
 
-        status = await execution_service.get_execution_status("nonexistent-id")
+        status = await execution_service.get_execution_status(
+            "nonexistent-id", organization_id=TEST_ORGANIZATION_ID
+        )
         assert status is None
 
     @pytest.mark.asyncio
@@ -431,7 +441,9 @@ class TestDirectExecutionService:
         # Wait for execution
         await asyncio.sleep(0.1)
 
-        results = await execution_service.get_execution_results(execution_id)
+        results = await execution_service.get_execution_results(
+            execution_id, organization_id=TEST_ORGANIZATION_ID
+        )
         assert results is not None
 
     @pytest.mark.asyncio

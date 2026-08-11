@@ -23,6 +23,7 @@ from ...ai_brain.router.masr import RoutingStrategy
 from ...core.kernel import ResearchKernel
 from ...core.observability import set_llm_request_estimated_cost
 from ...core.pii_redactor import redact_pii
+from ...middleware.tenant_context import TenantContext, get_tenant_context
 from ...models.execution_authority import ExecutionAuthorityReference
 from ...models.research_project import ResearchDepth, ResearchQuery
 from ..services.execution_authority_resolver import ExecutionAuthorityError
@@ -180,6 +181,7 @@ async def intelligent_research_query(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> IntelligentQueryResponse:
     """
     Primary research endpoint using MASR intelligent routing.
@@ -227,12 +229,14 @@ async def intelligent_research_query(
                 "api_endpoint": "intelligent_research_query",
             },
             authority_reference=request.authority_reference,
+            organization_id=tenant_context.organization_id,
         )
 
         # Get execution status for response
         execution_status = await get_kernel_execution_status(
             execution_service,
             execution_id,
+            organization_id=tenant_context.organization_id,
         )
 
         response = IntelligentQueryResponse(
@@ -293,6 +297,7 @@ async def intelligent_analysis_query(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> IntelligentQueryResponse:
     """
     Analysis-focused endpoint using MASR intelligent routing.
@@ -329,7 +334,7 @@ async def intelligent_analysis_query(
         )
 
         return await intelligent_research_query(
-            intelligent_request, background_tasks, execution_service
+            intelligent_request, background_tasks, execution_service, tenant_context
         )
 
     except Exception as e:
@@ -347,6 +352,7 @@ async def intelligent_synthesis_query(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> IntelligentQueryResponse:
     """
     Synthesis-focused endpoint using MASR intelligent routing.
@@ -380,7 +386,7 @@ async def intelligent_synthesis_query(
         )
 
         return await intelligent_research_query(
-            intelligent_request, background_tasks, execution_service
+            intelligent_request, background_tasks, execution_service, tenant_context
         )
 
     except Exception as e:
@@ -427,18 +433,24 @@ async def get_execution_status(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     """
     Get real-time status of intelligent query execution.
 
     Provides progress updates from MASR routing through supervisor coordination
     to final agent execution and result synthesis.
+
+    Scoped to the caller's tenant: an execution belonging to another
+    organization is reported as not found, exactly like an execution id that
+    was never issued.
     """
     try:
         execution_service = _resolved_research_kernel(execution_service)
         exec_status = await get_kernel_execution_status(
             execution_service,
             execution_id,
+            organization_id=tenant_context.organization_id,
         )
 
         if not exec_status:
@@ -477,14 +489,20 @@ async def get_execution_results(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
-    """Get results from completed intelligent query execution."""
+    """Get results from a completed execution inside the caller's tenant.
+
+    An execution belonging to another organization is reported as not found,
+    exactly like an execution id that was never issued.
+    """
 
     try:
         execution_service = _resolved_research_kernel(execution_service)
         results = await get_kernel_execution_results(
             execution_service,
             execution_id,
+            organization_id=tenant_context.organization_id,
         )
 
         if not results:
@@ -570,6 +588,7 @@ async def intelligent_literature_query(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> IntelligentQueryResponse:
     """
     Literature-focused query with MASR intelligent routing.
@@ -592,7 +611,7 @@ async def intelligent_literature_query(
     )
 
     return await intelligent_research_query(
-        request, BackgroundTasks(), execution_service
+        request, BackgroundTasks(), execution_service, tenant_context
     )
 
 
@@ -604,6 +623,7 @@ async def intelligent_methodology_query(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> IntelligentQueryResponse:
     """
     Methodology-focused query with MASR intelligent routing.
@@ -625,7 +645,7 @@ async def intelligent_methodology_query(
     )
 
     return await intelligent_research_query(
-        request, BackgroundTasks(), execution_service
+        request, BackgroundTasks(), execution_service, tenant_context
     )
 
 
@@ -639,6 +659,7 @@ async def intelligent_comparison_query(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> IntelligentQueryResponse:
     """
     Comparison-focused query with MASR intelligent routing.
@@ -660,7 +681,7 @@ async def intelligent_comparison_query(
     )
 
     return await intelligent_research_query(
-        request, BackgroundTasks(), execution_service
+        request, BackgroundTasks(), execution_service, tenant_context
     )
 
 

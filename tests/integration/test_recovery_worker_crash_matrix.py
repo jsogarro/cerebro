@@ -82,6 +82,7 @@ async def test_crash_before_admission_leaves_nothing_to_resurrect(
                 authority_id="worker-crash-pre-admission-authority",
                 authority_version="1",
             ),
+            organization_id=ORG_ID,
         )
 
     assert service.active_executions == {}
@@ -286,6 +287,7 @@ async def test_worker_crash_mid_flight_recovers_as_active_never_fabricating_succ
         authority_reference=ExecutionAuthorityReference(
             authority_id="worker-crash-mid-flight-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
     await asyncio.wait_for(supervisor_started.wait(), timeout=5)
 

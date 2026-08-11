@@ -107,6 +107,7 @@ async def test_admission_fails_closed_when_a_configured_database_is_unreachable(
             authority_reference=ExecutionAuthorityReference(
                 authority_id="db-down-fixture-authority", authority_version="1"
             ),
+            organization_id=ORG_ID,
         )
 
     # Nothing was started, so nothing can later claim an outcome.
@@ -147,6 +148,7 @@ async def test_execution_completes_in_memory_when_no_database_is_configured() ->
         authority_reference=ExecutionAuthorityReference(
             authority_id="no-db-fixture-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
 
     for _ in range(50):
@@ -436,6 +438,7 @@ async def test_workflow_does_not_report_success_the_database_refused(
         authority_reference=ExecutionAuthorityReference(
             authority_id="db-down-workflow-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
 
     execution = service.active_executions[execution_id]

@@ -29,10 +29,16 @@ from src.core.kernel import (
     ResearchKernel,
     TypedRegistry,
 )
+from src.middleware.tenant_context import TenantContext
 from src.models.agent_api_models import (
     AgentExecutionRequest,
     AgentExecutionResponse,
     AgentType,
+)
+
+# The query routes require an authenticated tenant and scope their reads to it.
+TENANT = TenantContext(
+    user_id="user-1", organization_id="11111111-1111-1111-1111-111111111111"
 )
 
 
@@ -55,11 +61,16 @@ class _DirectExecutionBackend:
         self,
         project: object,
         context: dict[str, Any] | None = None,
+        *,
+        authority_reference: object | None = None,
+        organization_id: str | None = None,
     ) -> str:
         self.calls.append(("start", project, context))
         return "kernel-execution"
 
-    async def get_execution_status(self, execution_id: str) -> SimpleNamespace | None:
+    async def get_execution_status(
+        self, execution_id: str, *, organization_id: str | None = None
+    ) -> SimpleNamespace | None:
         self.calls.append(("status", execution_id, None))
         if execution_id == "missing":
             return None
@@ -77,7 +88,9 @@ class _DirectExecutionBackend:
             started_at=datetime(2026, 7, 27, tzinfo=UTC),
         )
 
-    async def get_execution_results(self, execution_id: str) -> dict[str, Any] | None:
+    async def get_execution_results(
+        self, execution_id: str, *, organization_id: str | None = None
+    ) -> dict[str, Any] | None:
         self.calls.append(("results", execution_id, None))
         if execution_id == "missing":
             return None
@@ -121,6 +134,7 @@ async def test_query_adapter_executes_through_composed_application_kernel() -> N
         query_api.IntelligentQueryRequest(query="Use the composed kernel."),
         background_tasks=BackgroundTasks(),
         execution_service=kernel,
+        tenant_context=TENANT,
     )
 
     assert isinstance(kernel, ResearchKernel)
@@ -151,8 +165,8 @@ async def test_query_operation_adapter_preserves_success_and_not_found_contracts
     backend = _DirectExecutionBackend()
     kernel = compose_application_research_kernel(backend)
 
-    status = await query_api.get_execution_status("kernel-execution", kernel)
-    results = await query_api.get_execution_results("kernel-execution", kernel)
+    status = await query_api.get_execution_status("kernel-execution", kernel, TENANT)
+    results = await query_api.get_execution_results("kernel-execution", kernel, TENANT)
     resumed = await query_api.resume_execution(str(UUID(int=1)), kernel)
 
     assert status["status"] == "running"
@@ -166,12 +180,12 @@ async def test_query_operation_adapter_preserves_success_and_not_found_contracts
     }
 
     with pytest.raises(HTTPException) as missing_status:
-        await query_api.get_execution_status("missing", kernel)
+        await query_api.get_execution_status("missing", kernel, TENANT)
     assert missing_status.value.status_code == 404
     assert missing_status.value.detail == "Execution missing not found"
 
     with pytest.raises(HTTPException) as missing_results:
-        await query_api.get_execution_results("missing", kernel)
+        await query_api.get_execution_results("missing", kernel, TENANT)
     assert missing_results.value.status_code == 404
     assert (
         missing_results.value.detail == "Execution missing not found or not completed"

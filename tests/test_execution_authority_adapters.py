@@ -32,10 +32,19 @@ from src.core.contracts import (
     WorkerAssignment,
 )
 from src.core.kernel import TypedRegistry
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.execution_authority import (
     ExecutionAuthorityBinding,
     ExecutionAuthorityReference,
 )
+
+# The query routes require an authenticated tenant, and authority resolution
+# is scoped to it. ``create_for_test`` bindings carry this tenant.
+OWNING_ORGANIZATION = "tenant-1"
+
+
+def _tenant_override() -> TenantContext:
+    return TenantContext(user_id="user-1", organization_id=OWNING_ORGANIZATION)
 
 
 class _RoutedBackend:
@@ -43,15 +52,18 @@ class _RoutedBackend:
         self.error = error
         self.start_research_execution = AsyncMock(side_effect=self._start)
 
-    async def _start(self, project, context, *, authority_reference=None):
+    async def _start(
+        self, project, context, *, authority_reference=None, organization_id=None
+    ):
         if self.error:
             raise self.error
         assert authority_reference == ExecutionAuthorityReference(
             authority_id="authority-1", authority_version="1"
         )
+        assert organization_id == OWNING_ORGANIZATION
         return "execution-1"
 
-    async def get_execution_status(self, execution_id):
+    async def get_execution_status(self, execution_id, *, organization_id=None):
         return SimpleNamespace(
             status="pending",
             routing_decision={},
@@ -62,7 +74,7 @@ class _RoutedBackend:
             started_at=datetime(2026, 7, 28, tzinfo=UTC),
         )
 
-    async def get_execution_results(self, execution_id):
+    async def get_execution_results(self, execution_id, *, organization_id=None):
         return None
 
     async def resume_execution(self, project_id):
@@ -173,6 +185,7 @@ def test_routed_query_authority_rejections_are_typed_422_before_execution(error,
     test_app.dependency_overrides[query_api.get_application_research_kernel] = lambda: (
         compose_application_research_kernel(backend)
     )
+    test_app.dependency_overrides[get_tenant_context] = _tenant_override
 
     response = TestClient(test_app).post(
         "/api/v1/query/research",
@@ -191,6 +204,7 @@ def test_routed_query_forwards_opaque_reference_and_preserves_response_shape():
     test_app.dependency_overrides[query_api.get_application_research_kernel] = lambda: (
         compose_application_research_kernel(backend)
     )
+    test_app.dependency_overrides[get_tenant_context] = _tenant_override
 
     response = TestClient(test_app).post(
         "/api/v1/query/research",
@@ -228,7 +242,10 @@ def test_lifespan_uses_precomposed_authority_for_routed_query_once(
     resolver = MappingExecutionAuthorityResolver({("authority-1", "1"): binding})
     resolve = resolver.resolve
     resolve_spy = Mock(
-        side_effect=lambda reference: events.append("resolve") or resolve(reference)
+        side_effect=lambda reference, organization_id=None: (
+            events.append("resolve")
+            or resolve(reference, organization_id=organization_id)
+        )
     )
     monkeypatch.setattr(resolver, "resolve", resolve_spy)
     router = SimpleNamespace(
@@ -299,6 +316,7 @@ def test_lifespan_uses_precomposed_authority_for_routed_query_once(
 
     test_app = FastAPI(lifespan=main.lifespan)
     test_app.include_router(query_api.router)
+    test_app.dependency_overrides[get_tenant_context] = _tenant_override
     test_app.state.execution_authority_resolver = resolver
 
     with TestClient(test_app) as client:

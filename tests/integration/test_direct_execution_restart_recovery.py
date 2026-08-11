@@ -209,6 +209,7 @@ async def test_restart_recovers_non_terminal_run_into_active_executions(
         authority_reference=ExecutionAuthorityReference(
             authority_id="restart-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
 
     # Wait until the run has genuinely reached "running" and been persisted
@@ -292,6 +293,7 @@ async def test_restart_does_not_recover_terminal_runs(
         authority_reference=ExecutionAuthorityReference(
             authority_id="restart-authority", authority_version="1"
         ),
+        organization_id=ORG_ID,
     )
     for _ in range(50):
         if service_a.active_executions[execution_id].status == "completed":

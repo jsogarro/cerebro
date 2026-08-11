@@ -146,7 +146,8 @@ async def test_register_persists_and_caches_so_resolve_succeeds(
     )
 
     resolved = resolver.resolve(
-        ExecutionAuthorityReference(authority_id="authority-1", authority_version="1")
+        ExecutionAuthorityReference(authority_id="authority-1", authority_version="1"),
+        organization_id=str(ORG_ID),
     )
     assert resolved.run.run_id == binding.run.run_id
     assert resolved.workers == binding.workers
@@ -177,14 +178,16 @@ async def test_warm_from_snapshots_rebuilds_the_cache_after_a_restart(
         restarted.resolve(
             ExecutionAuthorityReference(
                 authority_id="authority-1", authority_version="1"
-            )
+            ),
+            organization_id=str(ORG_ID),
         )
 
     loaded_count = await restarted.warm_from_snapshots(db_session)
 
     assert loaded_count == 1
     resolved = restarted.resolve(
-        ExecutionAuthorityReference(authority_id="authority-1", authority_version="1")
+        ExecutionAuthorityReference(authority_id="authority-1", authority_version="1"),
+        organization_id=str(ORG_ID),
     )
     assert resolved.run.run_id == binding.run.run_id
     assert resolved.provider_model_policy == binding.provider_model_policy
@@ -258,7 +261,8 @@ async def test_warm_from_snapshots_loads_every_persisted_binding(
         resolver.resolve(
             ExecutionAuthorityReference(
                 authority_id="authority-1", authority_version="1"
-            )
+            ),
+            organization_id=str(ORG_ID),
         ).run.run_id
         == "run-a"
     )
@@ -266,7 +270,8 @@ async def test_warm_from_snapshots_loads_every_persisted_binding(
         resolver.resolve(
             ExecutionAuthorityReference(
                 authority_id="authority-2", authority_version="1"
-            )
+            ),
+            organization_id=str(ORG_ID),
         ).run.run_id
         == "run-b"
     )

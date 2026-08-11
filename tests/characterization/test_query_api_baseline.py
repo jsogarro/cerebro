@@ -8,11 +8,20 @@ from fastapi import BackgroundTasks, HTTPException
 
 from src.api.routes import query_api
 from src.api.services.direct_execution_service import ExecutionStatus
+from src.middleware.tenant_context import TenantContext
+
+# These characterization tests now run as an authenticated tenant, because
+# the query routes require one. The service stub records the organization it
+# is called with so the pinned behaviour includes that scoping.
+TENANT = TenantContext(
+    user_id="user-1", organization_id="11111111-1111-1111-1111-111111111111"
+)
 
 
 class _QueryService:
     def __init__(self) -> None:
         self.started: list[tuple[object, dict[str, object]]] = []
+        self.organizations: list[str | None] = []
         self.status = ExecutionStatus(
             execution_id="execution-1",
             project_id="00000000-0000-0000-0000-000000000001",
@@ -25,14 +34,19 @@ class _QueryService:
             started_at=datetime(2026, 7, 26, tzinfo=UTC),
         )
 
-    async def start_research_execution(self, project, context):
+    async def start_research_execution(
+        self, project, context, *, organization_id=None, **kwargs
+    ):
         self.started.append((project, context))
+        self.organizations.append(organization_id)
         return self.status.execution_id
 
-    async def get_execution_status(self, execution_id):
+    async def get_execution_status(self, execution_id, *, organization_id=None):
+        self.organizations.append(organization_id)
         return self.status if execution_id == self.status.execution_id else None
 
-    async def get_execution_results(self, execution_id):
+    async def get_execution_results(self, execution_id, *, organization_id=None):
+        self.organizations.append(organization_id)
         if execution_id == self.status.execution_id:
             return {"output": "legacy-result"}
         return None
@@ -52,7 +66,7 @@ async def test_research_pins_placeholder_metrics_and_ignored_execution_options()
     )
 
     response = await query_api.intelligent_research_query(
-        request, BackgroundTasks(), service
+        request, BackgroundTasks(), service, TENANT
     )
 
     assert response.status == "running"
@@ -78,6 +92,7 @@ async def test_analyze_and_synthesize_translate_to_research_context():
         ),
         BackgroundTasks(),
         service,
+        TENANT,
     )
     await query_api.intelligent_synthesis_query(
         query_api.SynthesisRequest(
@@ -85,6 +100,7 @@ async def test_analyze_and_synthesize_translate_to_research_context():
         ),
         BackgroundTasks(),
         service,
+        TENANT,
     )
 
     assert service.started[0][1]["api_endpoint"] == "intelligent_research_query"
@@ -102,12 +118,14 @@ async def test_methodology_and_comparison_wrappers_pin_exact_context():
         research_type="mixed",
         domains=["education"],
         execution_service=service,
+        tenant_context=TENANT,
     )
     comparison = await query_api.intelligent_comparison_query(
         query="Compare the documented outcomes across cohorts.",
         comparison_focus="findings",
         domains=["healthcare"],
         execution_service=service,
+        tenant_context=TENANT,
     )
 
     methodology_project, methodology_context = service.started[0]
@@ -144,8 +162,8 @@ async def test_methodology_and_comparison_wrappers_pin_exact_context():
 async def test_execution_status_results_and_resume_pin_legacy_error_details():
     service = _QueryService()
 
-    status = await query_api.get_execution_status("execution-1", service)
-    results = await query_api.get_execution_results("execution-1", service)
+    status = await query_api.get_execution_status("execution-1", service, TENANT)
+    results = await query_api.get_execution_results("execution-1", service, TENANT)
     resumed = await query_api.resume_execution(str(UUID(int=1)), service)
 
     assert status["status"] == "running"
@@ -163,7 +181,7 @@ async def test_execution_status_results_and_resume_pin_legacy_error_details():
     assert invalid.value.status_code == 400
 
     with pytest.raises(HTTPException, match="not found") as missing:
-        await query_api.get_execution_results("missing", service)
+        await query_api.get_execution_results("missing", service, TENANT)
     assert missing.value.status_code == 404
 
 

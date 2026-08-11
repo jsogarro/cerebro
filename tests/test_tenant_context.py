@@ -75,7 +75,12 @@ async def test_set_postgres_tenant_context_sets_transaction_local_var() -> None:
 
     assert len(session.executed) == 1
     statement, parameters = session.executed[0]
-    assert "SET LOCAL app.current_org_id" in str(statement)
+    # `SET` is utility syntax and takes no bind parameters, so the setting has
+    # to go through `set_config`. Asserted here only as a shape check — that
+    # the statement is actually accepted by Postgres is covered by
+    # tests/integration/test_tenant_context_postgres.py, which executes it.
+    assert "set_config('app.current_org_id'" in str(statement)
+    assert "SET LOCAL" not in str(statement)
     assert parameters == {"organization_id": "org-456"}
 
 
@@ -94,12 +99,12 @@ async def test_get_tenant_context_returns_context_and_sets_db_var() -> None:
 
 @pytest.mark.asyncio
 async def test_set_postgres_tenant_context_skips_non_postgres_dialects() -> None:
-    """SET LOCAL is a Postgres-only statement — skip on SQLite/MySQL/etc.
+    """``set_config`` is Postgres-only — skip on SQLite/MySQL/etc.
 
     Local dev and the smoke-test script run against ``sqlite+aiosqlite://``,
-    which rejects ``SET LOCAL`` with a syntax error. The tenant boundary is
-    still enforced at the repository layer, so silently skipping the RLS
-    primitive here is safe — Postgres-only behavior degrades to ``None``.
+    which has no such function. The tenant boundary is still enforced at the
+    repository layer, so silently skipping the RLS primitive here is safe —
+    Postgres-only behavior degrades to ``None``.
     """
     session = _CapturingSession(dialect_name="sqlite")
 

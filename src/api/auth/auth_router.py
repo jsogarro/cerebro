@@ -4,7 +4,7 @@ Authentication API endpoints.
 Provides user registration, login, token management, and password reset.
 """
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import redis.asyncio as redis
 import structlog
@@ -63,6 +63,30 @@ async def get_password_service() -> PasswordService:
     )
 
 
+def provisioned_organization_id(user: User) -> UUID:
+    """Return the user's tenant organization, assigning one if it has none.
+
+    Every tenant-scoped surface fails closed without an ``organization_id``
+    claim, so a user with no organization can reach none of them. Users
+    created before the boundary existed have ``organization_id`` NULL; they
+    are given one here, on the next authentication, rather than by a
+    backfill migration that would have to invent the same value anyway.
+
+    The organization is a fresh UUID, never derived from the free-text
+    ``organization`` profile field. Deriving it from client-supplied text
+    would let anyone join an existing tenant by typing its name; joining an
+    existing organization is an administrative action this module does not
+    provide.
+
+    The caller is responsible for committing: a newly assigned organization
+    must be durable before it is minted into a token.
+    """
+    if user.organization_id is None:
+        user.organization_id = uuid4()
+        logger.info("Provisioned tenant organization for user", user_id=str(user.id))
+    return user.organization_id
+
+
 @router.post(
     "/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
 )
@@ -118,13 +142,17 @@ async def register(
         # Hash password
         hashed_password = password_service.hash_password(request.password)
 
-        # Create user
+        # Create user. Every account gets its own tenant organization at
+        # creation: the token's organization claim is what every
+        # tenant-scoped surface authorizes against, and an account without
+        # one can reach none of them.
         user = User.create_with_password(
             email=request.email,
             username=request.username,
             password=request.password,
             full_name=request.full_name,
             organization=request.organization,
+            organization_id=uuid4(),
         )
 
         # Save user
@@ -141,6 +169,7 @@ async def register(
             email=user.email,
             roles=[user.role] if user.role else ["user"],
             permissions=[],
+            organization_id=str(provisioned_organization_id(user)),
         )
 
         # Send verification email (in background)
@@ -188,8 +217,11 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled"
         )
 
-    # Update login info
+    # Update login info. Accounts created before the tenant boundary
+    # existed have no organization; give them one here so the token they
+    # are about to receive can carry the claim every scoped surface needs.
     user.record_login()
+    organization_id = provisioned_organization_id(user)
     await db.commit()
     await db.refresh(user)  # Refresh to keep user attached after commit
 
@@ -212,6 +244,7 @@ async def login(
         roles=roles,
         permissions=permissions,
         device_id=device_id,
+        organization_id=str(organization_id),
     )
 
     logger.info(

@@ -60,7 +60,7 @@ class ResearchProject(BaseModel):
         Float, nullable=True, comment="Overall quality score (0.0 to 1.0)"
     )
 
-    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(DBUUID(), nullable=False, index=True)
 
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         DBUUID(),
