@@ -183,6 +183,28 @@ async def connection_fixture(migrated_database: str) -> AsyncIterator[AsyncConne
     await engine.dispose()
 
 
+async def _count_recorded_under(
+    connection: AsyncConnection, *, attempt_id: str, idempotency_key: str
+) -> int:
+    """Count durable rows under one ``(attempt_id, idempotency_key)`` pair.
+
+    Bound parameters rather than interpolated literals, matching
+    ``_recorded_under`` in ``test_boundary_records_survive_postgres.py``. Two
+    call sites here asked the same question with the values spliced into the
+    SQL text; a third would have copied it again, and the interpolated form is
+    the weaker of the two patterns this change introduced.
+    """
+
+    result = await connection.execute(
+        text(
+            "SELECT count(*) FROM agent_tool_invocations "
+            "WHERE attempt_id = :attempt_id AND idempotency_key = :key"
+        ),
+        {"attempt_id": attempt_id, "key": idempotency_key},
+    )
+    return int(result.scalar_one())
+
+
 async def _seed_run(connection: AsyncConnection, run_id: str) -> None:
     await connection.execute(
         text(
@@ -709,15 +731,11 @@ async def test_postgres_admits_repeated_refusals_under_one_idempotency_key(
             idempotency_key="one-derived-key",
         )
 
-    stored = await connection.execute(
-        text(
-            "SELECT count(*) FROM agent_tool_invocations "
-            "WHERE attempt_id = 'attempt-denial' "
-            "AND idempotency_key = 'one-derived-key'"
-        )
+    stored = await _count_recorded_under(
+        connection, attempt_id="attempt-denial", idempotency_key="one-derived-key"
     )
 
-    assert stored.scalar_one() == 3
+    assert stored == 3
 
 
 async def test_postgres_still_refuses_a_reused_key_for_work_that_ran(
@@ -798,15 +816,11 @@ async def test_a_denied_key_stays_available_to_the_authorized_caller(
         grant_id="grant-mixed",
     )
 
-    stored = await connection.execute(
-        text(
-            "SELECT count(*) FROM agent_tool_invocations "
-            "WHERE attempt_id = 'attempt-mixed' "
-            "AND idempotency_key = 'victim-chosen-key'"
-        )
+    stored = await _count_recorded_under(
+        connection, attempt_id="attempt-mixed", idempotency_key="victim-chosen-key"
     )
 
-    assert stored.scalar_one() == 2
+    assert stored == 2
 
 
 async def test_every_wave4_table_enforces_tenant_row_level_security(
