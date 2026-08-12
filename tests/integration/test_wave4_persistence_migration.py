@@ -183,6 +183,28 @@ async def connection_fixture(migrated_database: str) -> AsyncIterator[AsyncConne
     await engine.dispose()
 
 
+async def _count_recorded_under(
+    connection: AsyncConnection, *, attempt_id: str, idempotency_key: str
+) -> int:
+    """Count durable rows under one ``(attempt_id, idempotency_key)`` pair.
+
+    Bound parameters rather than interpolated literals, matching
+    ``_recorded_under`` in ``test_boundary_records_survive_postgres.py``. Two
+    call sites here asked the same question with the values spliced into the
+    SQL text; a third would have copied it again, and the interpolated form is
+    the weaker of the two patterns this change introduced.
+    """
+
+    result = await connection.execute(
+        text(
+            "SELECT count(*) FROM agent_tool_invocations "
+            "WHERE attempt_id = :attempt_id AND idempotency_key = :key"
+        ),
+        {"attempt_id": attempt_id, "key": idempotency_key},
+    )
+    return int(result.scalar_one())
+
+
 async def _seed_run(connection: AsyncConnection, run_id: str) -> None:
     await connection.execute(
         text(
@@ -219,6 +241,145 @@ async def _seed_task(connection: AsyncConnection, *, task_id: str, run_id: str) 
             """
         ),
         {"task_id": task_id, "run_id": run_id, "idempotency_key": f"key-{task_id}"},
+    )
+
+
+async def _seed_attempt(
+    connection: AsyncConnection, *, attempt_id: str, task_id: str, run_id: str
+) -> None:
+    await connection.execute(
+        text(
+            """
+            INSERT INTO agent_task_attempts (
+                id, attempt_id, task_id, run_id, ordinal, idempotency_key,
+                status, created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(), :attempt_id, :task_id, :run_id, 1,
+                :idempotency_key, 'created', now(), now()
+            )
+            """
+        ),
+        {
+            "attempt_id": attempt_id,
+            "task_id": task_id,
+            "run_id": run_id,
+            "idempotency_key": f"key-{attempt_id}",
+        },
+    )
+
+
+async def _seed_grant(
+    connection: AsyncConnection, *, grant_id: str, run_id: str, task_id: str
+) -> None:
+    await connection.execute(
+        text(
+            """
+            INSERT INTO agent_capability_grants (
+                id, grant_id, run_id, task_id, capability_scope, tool_name,
+                tool_versions, sensitivity, max_input_trust, requires_approval,
+                issued_at, expires_at, created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(), :grant_id, :run_id, :task_id, 'search',
+                'academic_search', '["1.0"]', 'read_only', 'user_supplied',
+                false, now(), now() + interval '1 day', now(), now()
+            )
+            """
+        ),
+        {"grant_id": grant_id, "run_id": run_id, "task_id": task_id},
+    )
+
+
+async def _seed_invocation(
+    connection: AsyncConnection,
+    *,
+    invocation_id: str,
+    run_id: str,
+    task_id: str,
+    attempt_id: str,
+    idempotency_key: str,
+    status: str,
+    effect: str,
+    denial_reason: str | None = None,
+    grant_id: str | None = None,
+) -> None:
+    """Insert one tool invocation by raw SQL, bypassing the ORM entirely.
+
+    The point of this file is what the *migrated database* enforces. Going
+    through the models would test the models' opinion of the migration, which
+    is the thing being cross-checked rather than the thing to trust.
+    """
+    await connection.execute(
+        text(
+            "INSERT INTO agent_tool_invocations ("
+            "id, tool_invocation_id, run_id, task_id, attempt_id, tool_name, "
+            "tool_version, status, capability_scope, idempotency_key, "
+            '"input", input_trust, input_sha256, producer_kind, '
+            "capability_decision_effect, capability_denial_reason, "
+            "capability_grant_id, request_fingerprint, "
+            "requested_at, created_at, updated_at) VALUES ("
+            "gen_random_uuid(), :invocation_id, :run_id, :task_id, :attempt_id, "
+            "'academic_search', '1.0', :status, 'search', :idempotency_key, "
+            "'{}', 'user_supplied', :digest, 'system', :effect, :denial_reason, "
+            ":grant_id, :fingerprint, now(), now(), now())"
+        ),
+        {
+            "invocation_id": invocation_id,
+            "run_id": run_id,
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": status,
+            "idempotency_key": idempotency_key,
+            "digest": "a" * 64,
+            "effect": effect,
+            "denial_reason": denial_reason,
+            "grant_id": grant_id,
+            "fingerprint": "c" * 64,
+        },
+    )
+
+
+async def _seed_denial(
+    connection: AsyncConnection,
+    *,
+    invocation_id: str,
+    run_id: str,
+    task_id: str,
+    attempt_id: str,
+    idempotency_key: str,
+) -> None:
+    await _seed_invocation(
+        connection,
+        invocation_id=invocation_id,
+        run_id=run_id,
+        task_id=task_id,
+        attempt_id=attempt_id,
+        idempotency_key=idempotency_key,
+        status="denied",
+        effect="deny",
+        denial_reason="no_matching_grant",
+    )
+
+
+async def _seed_success(
+    connection: AsyncConnection,
+    *,
+    invocation_id: str,
+    run_id: str,
+    task_id: str,
+    attempt_id: str,
+    idempotency_key: str,
+    grant_id: str,
+) -> None:
+    await _seed_invocation(
+        connection,
+        invocation_id=invocation_id,
+        run_id=run_id,
+        task_id=task_id,
+        attempt_id=attempt_id,
+        idempotency_key=idempotency_key,
+        status="succeeded",
+        effect="allow",
+        grant_id=grant_id,
     )
 
 
@@ -433,6 +594,233 @@ async def test_the_migration_declares_every_check_the_orm_does(
         f"but absent from the migrated database: {sorted(missing)}. The unit "
         "schema suite passes on create_all and would not notice."
     )
+
+
+async def test_the_migration_declares_every_unique_index_the_orm_does(
+    connection: AsyncConnection,
+) -> None:
+    """The same parity check, extended to indexes — because uniqueness moved.
+
+    The CHECK-name comparison above was the whole of the ORM/migration parity
+    guard, and it could not see this change at all: ``(attempt_id,
+    idempotency_key)`` uniqueness is now a *partial unique index*, since a
+    table constraint carries no predicate. A unique index declared on the
+    models and forgotten in the migration would leave the fast suite green
+    and the deployed database unguarded, which is exactly the divergence the
+    CHECK test was written for.
+
+    **Unique indexes only, and the restriction is deliberate rather than
+    convenient.** Extended to all indexes this fails today for a reason that
+    predates this change: the Wave 4 models declare 24 single-column
+    ``index=True`` indexes (``ix_agent_artifacts_run_id`` and its siblings on
+    every Wave 4 table) that the migration never creates — it creates
+    differently-named composite indexes instead. That gap is real and is
+    recorded here rather than silently accommodated, but it is a query-plan
+    divergence with no correctness consequence, and closing 24 of them is not
+    this change's scope. A unique index is the case where a missing index
+    means a rule the database does not enforce.
+
+    Names rather than definitions: Postgres normalizes an index definition,
+    and a name is what a migration author forgets to copy. The predicate
+    itself is proven separately, and behaviourally.
+    """
+
+    declared = {
+        (table.name, index.name)
+        for table in Base.metadata.tables.values()
+        if table.name in NEW_TABLES
+        for index in table.indexes
+        if index.name and index.unique
+    }
+
+    rows = await connection.execute(
+        text("SELECT tablename, indexname FROM pg_indexes WHERE schemaname='public'")
+    )
+    migrated = {(row[0], row[1]) for row in rows if row[0] in NEW_TABLES}
+
+    assert declared, "no unique index was collected, so this test proves nothing"
+
+    missing = declared - migrated
+    assert not missing, (
+        f"{len(missing)} unique index(es) are declared on the ORM models but "
+        f"absent from the migrated database: {sorted(missing)}. The unit "
+        "schema suite passes on create_all and would not notice."
+    )
+
+
+async def test_the_migrated_idempotency_index_is_unique_and_excludes_denials(
+    connection: AsyncConnection,
+) -> None:
+    """Read the predicate out of the database that has it.
+
+    An index of the right name over the right columns with *no* predicate is
+    the pre-change behaviour wearing the new name, and the parity test above
+    would pass on it. This is the assertion that the migration shipped the
+    partial index and not merely a renamed one.
+    """
+
+    row = await connection.execute(
+        text(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname='public' "
+            "AND tablename='agent_tool_invocations' "
+            "AND indexname='uq_agent_tool_invocation_idempotency'"
+        )
+    )
+    definition = row.scalar_one()
+
+    assert "CREATE UNIQUE INDEX" in definition
+    assert "(attempt_id, idempotency_key)" in definition
+    assert "WHERE" in definition
+    assert "denied" in definition
+
+
+async def test_the_migrated_database_has_the_plain_lookup_index(
+    connection: AsyncConnection,
+) -> None:
+    """Named separately because the parity test above cannot see it.
+
+    That test compares *unique* indexes only, for reasons it states, so a
+    migration that dropped the non-unique lookup index would pass every other
+    check here. The index matters: the replay lookup reads ``(attempt_id,
+    idempotency_key)`` on every mediated call and must see denied rows, which
+    the partial unique index does not cover, and the unconditional constraint
+    that used to back this lookup for free is gone.
+    """
+
+    row = await connection.execute(
+        text(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname='public' "
+            "AND tablename='agent_tool_invocations' "
+            "AND indexname='ix_agent_tool_invocation_idempotency_lookup'"
+        )
+    )
+    definition = row.scalar_one()
+
+    assert "UNIQUE" not in definition
+    assert "(attempt_id, idempotency_key)" in definition
+    assert "WHERE" not in definition
+
+
+async def test_postgres_admits_repeated_refusals_under_one_idempotency_key(
+    connection: AsyncConnection,
+) -> None:
+    """Two denials, one key, two rows — enforced by the real server.
+
+    The SQLite characterization proves what SQLAlchemy declares. This proves
+    what Postgres does, which is the only thing a deployment experiences: an
+    idempotency key reserves one unit of work, and a refusal is a decision
+    about a call that never ran.
+    """
+
+    await _seed_run(connection, "run-denial")
+    await _seed_task(connection, task_id="task-denial", run_id="run-denial")
+    await _seed_attempt(
+        connection,
+        attempt_id="attempt-denial",
+        task_id="task-denial",
+        run_id="run-denial",
+    )
+
+    for ordinal in (1, 2, 3):
+        await _seed_denial(
+            connection,
+            invocation_id=f"denied-{ordinal}",
+            run_id="run-denial",
+            task_id="task-denial",
+            attempt_id="attempt-denial",
+            idempotency_key="one-derived-key",
+        )
+
+    stored = await _count_recorded_under(
+        connection, attempt_id="attempt-denial", idempotency_key="one-derived-key"
+    )
+
+    assert stored == 3
+
+
+async def test_postgres_still_refuses_a_reused_key_for_work_that_ran(
+    connection: AsyncConnection,
+) -> None:
+    """The half of the constraint that must survive the narrowing.
+
+    Excluding denials is the change; excluding anything else would be a
+    regression, and a partial index whose predicate is wrong in the other
+    direction (say ``status = 'denied'``, or no predicate at all on the
+    inverse) would let one unit of work be recorded twice under one key.
+    """
+
+    await _seed_run(connection, "run-work")
+    await _seed_task(connection, task_id="task-work", run_id="run-work")
+    await _seed_attempt(
+        connection, attempt_id="attempt-work", task_id="task-work", run_id="run-work"
+    )
+    await _seed_grant(
+        connection, grant_id="grant-work", run_id="run-work", task_id="task-work"
+    )
+    await _seed_success(
+        connection,
+        invocation_id="succeeded-1",
+        run_id="run-work",
+        task_id="task-work",
+        attempt_id="attempt-work",
+        idempotency_key="one-derived-key",
+        grant_id="grant-work",
+    )
+
+    with pytest.raises(IntegrityError):
+        await _seed_success(
+            connection,
+            invocation_id="succeeded-2",
+            run_id="run-work",
+            task_id="task-work",
+            attempt_id="attempt-work",
+            idempotency_key="one-derived-key",
+            grant_id="grant-work",
+        )
+
+
+async def test_a_denied_key_stays_available_to_the_authorized_caller(
+    connection: AsyncConnection,
+) -> None:
+    """The victim case, at the level that produced it.
+
+    A refusal followed by a real call under the same key. The insert that
+    used to raise here is the *authorized* one, and it raised at a caller who
+    then had no record of its own call either.
+    """
+
+    await _seed_run(connection, "run-mixed")
+    await _seed_task(connection, task_id="task-mixed", run_id="run-mixed")
+    await _seed_attempt(
+        connection, attempt_id="attempt-mixed", task_id="task-mixed", run_id="run-mixed"
+    )
+    await _seed_grant(
+        connection, grant_id="grant-mixed", run_id="run-mixed", task_id="task-mixed"
+    )
+    await _seed_denial(
+        connection,
+        invocation_id="denied-first",
+        run_id="run-mixed",
+        task_id="task-mixed",
+        attempt_id="attempt-mixed",
+        idempotency_key="victim-chosen-key",
+    )
+
+    await _seed_success(
+        connection,
+        invocation_id="allowed-second",
+        run_id="run-mixed",
+        task_id="task-mixed",
+        attempt_id="attempt-mixed",
+        idempotency_key="victim-chosen-key",
+        grant_id="grant-mixed",
+    )
+
+    stored = await _count_recorded_under(
+        connection, attempt_id="attempt-mixed", idempotency_key="victim-chosen-key"
+    )
+
+    assert stored == 2
 
 
 async def test_every_wave4_table_enforces_tenant_row_level_security(

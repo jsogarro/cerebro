@@ -60,7 +60,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -153,10 +153,58 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
     )
 
     __table_args__ = (
-        UniqueConstraint(
+        # An idempotency key reserves one unit of *work*. A refusal is not
+        # work — it is a decision event about a call that never ran — so a
+        # denied row does not occupy the key, and the uniqueness predicate
+        # says exactly that.
+        #
+        # This was an unconditional `UniqueConstraint` until two proven
+        # defects were reproduced against real Postgres, both of which become
+        # live `IntegrityError`s out of `ToolBoundary.invoke` the moment a
+        # session-backed audit store is wired (`_record` does not swallow a
+        # persistence failure, by design — the REQUESTED write precedes
+        # execution, so swallowing it would let a tool run with no durable
+        # record):
+        #
+        #   1. Calling ANY tool twice with no grant collides with itself.
+        #      `_derive_idempotency_key` covers tool name and version, run,
+        #      task, attempt, capability scope and input digest — never the
+        #      grants, the caller, or the decision — so two identical
+        #      refusals derive one key, and the denial path persists
+        #      unconditionally because it terminates above the dedup lookup.
+        #      A repeated attack on a tool the caller cannot reach left one
+        #      row where forensics needs N.
+        #   2. A denied row bricked the key for a later *authorized* caller,
+        #      who was neither served from the record (DENIED is excluded
+        #      from `_REPLAYABLE_RECORD_STATUSES`, correctly — one caller's
+        #      refusal must never become another's answer) nor able to write
+        #      its own. The `IntegrityError` surfaced at the victim.
+        #
+        # Namespacing the key by decision effect would not have worked: the
+        # derivation reads no grant and no caller, so two identical ungranted
+        # calls derive the identical key and would simply collide inside the
+        # "denied" namespace instead.
+        #
+        # A unique *index* rather than a unique *constraint* because a table
+        # constraint cannot carry a predicate. The predicate is given to both
+        # dialects: SQLite is what the fast schema suite builds on, and a
+        # PostgreSQL-only predicate would degrade to an unconditional unique
+        # index there — characterizing a schema the deployment does not have.
+        Index(
+            "uq_agent_tool_invocation_idempotency",
             "attempt_id",
             "idempotency_key",
-            name="uq_agent_tool_invocation_idempotency",
+            unique=True,
+            postgresql_where=text("status <> 'denied'"),
+            sqlite_where=text("status <> 'denied'"),
+        ),
+        # The replay lookup reads this pair and must see denied rows too, so
+        # the partial unique index above cannot serve it. The unconditional
+        # constraint used to provide this index for free.
+        Index(
+            "ix_agent_tool_invocation_idempotency_lookup",
+            "attempt_id",
+            "idempotency_key",
         ),
         status_check(
             column="status",

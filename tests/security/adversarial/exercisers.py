@@ -1675,12 +1675,28 @@ async def _crosstenant_05() -> Observation:
     ]
     shared_key = "template-generated-key-shared-by-both"
 
-    async def call(org: str, attempt: str) -> ToolOutcome:
+    # Both tenants call under ONE attempt, and the shared attempt is the
+    # point. This reproduction used to vary `attempt_id` alongside the
+    # organization ("attempt-a" / "attempt-b") while its own evidence claimed
+    # "the two requests differ only in a field neither check reads" — which
+    # was false, and became load-bearing the moment `find_invocation` was
+    # corrected to be attempt-scoped (uniqueness in `agent_tool_invocations`
+    # is `(attempt_id, idempotency_key)`, so a run-scoped lookup was coarser
+    # than its own storage). Under that correction the old two-attempt
+    # reproduction stops reproducing and this scenario flips to HELD — while
+    # the tenant hole it is about is entirely untouched, because nothing here
+    # ever read `organization_id`. A scenario that reports a live defect as
+    # closed because an unrelated fix perturbed an incidental field is worse
+    # than no scenario. Holding the attempt fixed isolates the organization as
+    # the only difference, which is what the evidence always claimed and is
+    # also the more faithful attack: nothing binds a run or an attempt to an
+    # organization, so naming another tenant's attempt is not refused either.
+    async def call(org: str) -> ToolOutcome:
         return await wired.boundary.invoke(
             tool_name=ACADEMIC_SEARCH,
             run_id=RUN_A,
             task_id=TASK_A,
-            attempt_id=attempt,
+            attempt_id=ATTEMPT_A,
             organization_id=org,
             capability_scope=_SEARCH_SCOPE,
             arguments={"query": "standard-search"},
@@ -1689,9 +1705,9 @@ async def _crosstenant_05() -> Observation:
             idempotency_key=shared_key,
         )
 
-    tenant_a = await call(ORG_A, "attempt-a")
+    tenant_a = await call(ORG_A)
     before = wired.call_count(ACADEMIC_SEARCH)
-    tenant_b = await call(ORG_B, "attempt-b")
+    tenant_b = await call(ORG_B)
     after = wired.call_count(ACADEMIC_SEARCH)
     # Keyed on the effect — the handler was not re-entered and tenant B holds
     # tenant A's invocation record — rather than on `tenant_b.decision is
@@ -1717,10 +1733,14 @@ async def _crosstenant_05() -> Observation:
             f"tool_invocation_id is tenant A's: "
             f"{tenant_b.invocation.tool_invocation_id == tenant_a.invocation.tool_invocation_id}). "
             "InMemoryToolAuditStore.find_invocation accepts organization_id "
-            "and never reads it (src/agents/tools/mediation.py:283-292); it "
-            "matches on (run_id, idempotency_key) alone. Nothing at the "
-            "boundary binds a run_id to an organization either, so a caller "
-            "naming another tenant's run is not refused. The 4C reordering "
+            "and never reads it (src/agents/tools/mediation.py); it matches "
+            "on (run_id, attempt_id, idempotency_key) — the attempt joined "
+            "that tuple when the lookup was corrected to match the durable "
+            "table's uniqueness scope, and the tenant did not. Nothing at the "
+            "boundary binds a run_id or an attempt_id to an organization "
+            "either, so a caller naming another tenant's run is not refused. "
+            "Both calls here therefore share one run, one task and one "
+            "attempt, and differ in the organization alone. The 4C reordering "
             "does not touch this: tenant B's request is genuinely authorized "
             "(the grant matches run, task, tool and scope; organization_id is "
             "not an input to the capability decision at all), so it reaches "

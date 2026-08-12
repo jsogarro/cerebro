@@ -109,7 +109,12 @@ class PostgresAuditStore:
     inserted: set[str] = field(default_factory=set)
 
     async def find_invocation(
-        self, *, run_id: str, organization_id: str | None, idempotency_key: str
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
     ) -> ToolInvocation | None:
         return None
 
@@ -127,7 +132,8 @@ class PostgresAuditStore:
         allowed call persists **twice** — a ``REQUESTED`` row, then the terminal
         state — and ``ToolInvocationRepository`` splits those across
         ``create_tool_invocation`` and ``record_transition`` because they are one
-        row (``UniqueConstraint(attempt_id, idempotency_key)``). But
+        row (unique on ``(attempt_id, idempotency_key)`` for every row that is
+        not a refusal — the index is partial). But
         ``ToolAuditStore.persist`` is a *single* method with nothing in its
         signature or its docstring distinguishing the two, so the obvious
         adapter inserts twice and hits the unique violation. The denial and
@@ -227,6 +233,27 @@ def call_kwargs(**overrides: Any) -> dict[str, Any]:
     }
     base.update(overrides)
     return base
+
+
+async def _recorded_under(
+    session: AsyncSession, idempotency_key: str, *, attempt_id: str = ATTEMPT_ID
+) -> int:
+    """Count durable rows under one ``(attempt_id, idempotency_key)`` pair.
+
+    Read back by raw SQL rather than from the outcomes the boundary returned:
+    an outcome is what ``invoke`` said happened, and the whole subject here is
+    whether the database agreed. Both are needed — the flush is what used to
+    raise, and it raised *after* the outcome was already formed.
+    """
+
+    result = await session.execute(
+        text(
+            "SELECT count(*) FROM agent_tool_invocations "
+            "WHERE attempt_id = :attempt_id AND idempotency_key = :key"
+        ),
+        {"attempt_id": attempt_id, "key": idempotency_key},
+    )
+    return int(result.scalar_one())
 
 
 def granted() -> list[CapabilityGrant]:
@@ -486,36 +513,56 @@ class TestTheConstraintCanActuallyReject:
         assert stored.one() == (None, "failed")
 
 
-class TestADefectThisFixDidNotIntroduceAndDoesNotFix:
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "PROVEN DEFECT, PRE-EXISTING at 477d77a, reproduced against real "
-            "Postgres. A refused call terminates BEFORE the dedup lookup -- "
-            "deliberately, since denial precedence is the disclosure control -- "
-            "so it persists unconditionally. The derived idempotency key does "
-            "not depend on `grants`, and DENIED is excluded from "
-            "_REPLAYABLE_RECORD_STATUSES, so a second identical refusal in the "
-            "same attempt inserts a second row under the same "
-            "(attempt_id, idempotency_key) and violates "
-            "uq_agent_tool_invocation_idempotency. Calling ANY tool twice with "
-            "no grant is enough. Verified pre-existing by checking out "
-            "477d77a's boundary.py (positive control: _reject_input present, "
-            "_RejectedInput absent) -- pre-fix the colliding pair is "
-            "invalid_input/invalid_input, post-fix it is denied/denied. Only "
-            "the status changed; the collision did not. Fixing it means "
-            "deciding whether a repeated refusal is one durable event or many, "
-            "which is 4B's DDL question, not this packet's ordering one."
-        ),
-    )
-    @pytest.mark.asyncio
-    async def test_a_repeated_refusal_collides_on_the_idempotency_key(
-        self, boundary: ToolBoundary
-    ) -> None:
-        """Two identical ungranted calls. The second cannot be written.
+class TestARefusalDoesNotOccupyAnIdempotencyKey:
+    """Two defects that were recorded here as strict xfails, now fixed.
 
-        Recorded rather than fixed, and recorded as a *test* rather than a note
-        so that whoever resolves it finds a red marker instead of prose.
+    Both were proven against real Postgres, both predate the 4C reordering
+    (verified by checking out ``477d77a``'s ``boundary.py`` with a positive
+    control on the checkout — ``_reject_input`` present, ``_RejectedInput``
+    absent — and observing an identical ``IntegrityError`` before and after),
+    and both were left unfixed because the resolution was a DDL question
+    rather than an ordering one: *is a repeated refusal one durable event or
+    many?*
+
+    **It is many.** An idempotency key reserves one unit of work; a refusal
+    is a decision about a call that never ran. So
+    ``uq_agent_tool_invocation_idempotency`` is now a partial unique index
+    over ``(attempt_id, idempotency_key)`` ``WHERE status <> 'denied'``, plus
+    a plain index on the pair for the lookup that must still see denials.
+
+    **Why not namespace the key by decision effect**, which is the other
+    obvious repair: ``_derive_idempotency_key`` covers tool name and version,
+    run, task, attempt, capability scope and input digest — no grant, no
+    caller, no decision. Two identical ungranted calls therefore derive the
+    *identical* key and would collide inside the ``denied`` namespace just as
+    they did outside it. **And why not make ``_record`` fail-open:** the
+    ``REQUESTED`` write precedes execution, so swallowing a persistence
+    failure would let a tool run with no durable record at all.
+
+    These were never merely theoretical. ``ToolBoundary._record`` does not
+    swallow persistence failures, so each was a live ``IntegrityError`` out
+    of ``invoke()`` waiting for the first session-backed audit store to be
+    wired.
+    """
+
+    @pytest.mark.asyncio
+    async def test_repeated_refusals_are_each_durably_recorded(
+        self, boundary: ToolBoundary, db_session: AsyncSession
+    ) -> None:
+        """Calling any tool twice with no grant. Both refusals persist.
+
+        This is the whole reproduction: no unusual arguments, no chosen key,
+        no second attempt. A refused call terminates *before* the dedup
+        lookup — deliberately, since denial precedence is the disclosure
+        control — so it persists unconditionally, and the derived key does
+        not depend on ``grants``. The second insert used to violate the
+        unconditional constraint, which meant a repeated attempt on a tool
+        the caller cannot reach left one row where forensics needs a count.
+
+        Asserting the row count rather than only the two outcomes: both calls
+        returned ``DENIED`` even when the second row could not be written,
+        because the ``IntegrityError`` was raised by the *flush*, so outcome
+        status alone never distinguished the fixed state from the broken one.
         """
 
         first = await boundary.invoke(**call_kwargs())
@@ -524,39 +571,67 @@ class TestADefectThisFixDidNotIntroduceAndDoesNotFix:
         second = await boundary.invoke(**call_kwargs())
         assert second.status is ToolOutcomeStatus.DENIED
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "PROVEN DEFECT, PRE-EXISTING at 477d77a, reproduced against real "
-            "Postgres. A DENIED row occupies its idempotency key but is excluded "
-            "from _REPLAYABLE_RECORD_STATUSES, so a later AUTHORIZED call under "
-            "that key is neither served from the record nor able to write its "
-            "own: the replay branch is skipped, the call executes, and the "
-            "REQUESTED insert violates uq_agent_tool_invocation_idempotency "
-            "(attempt_id, idempotency_key). The IntegrityError surfaces at the "
-            "legitimate caller, who also gets no record of their own call. "
-            "Verified pre-existing by checking out 477d77a's boundary.py with a "
-            "positive control on the checkout (_reject_input present, "
-            "_RejectedInput absent): identical IntegrityError before and after. "
-            "The exclusion of DENIED is correct and must stay -- one caller's "
-            "refusal must never become another's answer. What is missing is a "
-            "rule for a key whose only occupant is a non-answer. That is 4B's "
-            "DDL question plus the store adapter, not this packet's ordering "
-            "one, and fixing it here would mean either serving a denial as a "
-            "result or letting an unaudited second row exist."
-        ),
-    )
-    @pytest.mark.asyncio
-    async def test_a_denial_bricks_the_key_for_the_authorized_caller(
-        self, boundary: ToolBoundary
-    ) -> None:
-        """The sequence the in-memory store cannot fail on.
+        assert first.invocation.idempotency_key == second.invocation.idempotency_key, (
+            "the reproduction is vacuous unless both refusals derived one key"
+        )
+        assert first.invocation.tool_invocation_id != (
+            second.invocation.tool_invocation_id
+        )
+        assert await _recorded_under(db_session, first.invocation.idempotency_key) == 2
 
-        ``RecordingAuditStore.persist`` assigns into a dict, so the second write
-        silently overwrites the first and
-        ``test_an_authorized_caller_is_not_served_an_earlier_denial`` passes --
-        a control that cannot fail, because the constraint that would fail it is
-        not in the loop. That unit test still passes; this one raises.
+    @pytest.mark.asyncio
+    async def test_n_refusals_are_n_durable_rows(
+        self, boundary: ToolBoundary, db_session: AsyncSession
+    ) -> None:
+        """The forensic property, stated as a count rather than a pair.
+
+        Two rows could be an off-by-one in the predicate as easily as a
+        working exclusion. A refusal is an event, and repeated refusals of
+        the same call are the signal that something is trying repeatedly.
+        """
+
+        outcomes = [await boundary.invoke(**call_kwargs()) for _ in range(5)]
+
+        assert all(outcome.status is ToolOutcomeStatus.DENIED for outcome in outcomes)
+        assert len({outcome.invocation.idempotency_key for outcome in outcomes}) == 1
+        assert (
+            await _recorded_under(db_session, outcomes[0].invocation.idempotency_key)
+            == 5
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_denial_does_not_brick_the_key_for_the_authorized_caller(
+        self, boundary: ToolBoundary, db_session: AsyncSession
+    ) -> None:
+        """The case with a victim: a refusal, then a legitimate call.
+
+        A ``DENIED`` row occupied its idempotency key while being excluded
+        from ``_REPLAYABLE_RECORD_STATUSES`` — an exclusion that is correct
+        and must stay, since one caller's refusal must never become another's
+        answer. So a later authorized caller presenting that key was neither
+        served from the record nor able to write its own: the ``REQUESTED``
+        insert violated the constraint, the ``IntegrityError`` surfaced at
+        the *legitimate* caller, and it got no record of its own call either.
+
+        **What this test shows, corrected.** The xfail this replaces claimed
+        the replay branch was skipped *because* ``DENIED`` is excluded from
+        ``_REPLAYABLE_RECORD_STATUSES``. The outcome was real but that
+        mechanism is not what this test exercises and never was:
+        ``PostgresAuditStore.find_invocation`` above returns ``None``
+        unconditionally and says so, so no lookup here ever returns a record
+        and the status filter is never consulted. What is actually
+        demonstrated is the DDL: the denied row no longer occupies the key,
+        so the authorized caller's own ``REQUESTED`` and terminal writes
+        land. The exclusion is proven where it can be — against a store that
+        really does return the record, in
+        ``tests/unit/core/tools/test_idempotency_cannot_bypass_authorization.py``.
+
+        The unit-level sibling of this sequence cannot fail:
+        ``RecordingAuditStore.persist`` assigns into a dict, so the second
+        write silently overwrites the first and
+        ``test_an_authorized_caller_is_not_served_an_earlier_denial`` passes
+        whether or not the constraint would have admitted the row. That test
+        still passes; this one is the one with the constraint in the loop.
         """
 
         denied = await boundary.invoke(**call_kwargs(idempotency_key=SHARED_KEY))
@@ -567,3 +642,14 @@ class TestADefectThisFixDidNotIntroduceAndDoesNotFix:
         )
 
         assert allowed.succeeded
+        assert await _recorded_under(db_session, SHARED_KEY) == 2
+
+        row = await ToolInvocationRepository(db_session).get_tool_invocation(
+            allowed.invocation.tool_invocation_id, organization_id=ORG_ID
+        )
+        assert row is not None, (
+            "the authorized caller must end up with a record of its own call, "
+            "which is the half of this defect that was silent"
+        )
+        assert row.status == "succeeded"
+        assert row.capability_decision_effect == "allow"

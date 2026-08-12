@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import Engine, Table, UniqueConstraint, create_engine
+from sqlalchemy import Engine, Index, Table, UniqueConstraint, create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -73,6 +73,26 @@ def _unique_scopes(table: Table) -> set[frozenset[str]]:
         for constraint in table.constraints
         if isinstance(constraint, UniqueConstraint)
     }
+
+
+def _index_scopes(table: Table, *, unique: bool) -> set[frozenset[str]]:
+    """Uniqueness can also be declared as an index, and a *partial* one can
+    only be declared that way — a table constraint carries no predicate."""
+    return {
+        frozenset(column.name for column in index.columns)
+        for index in table.indexes
+        if bool(index.unique) is unique
+    }
+
+
+def _index_named(table: Table, name: str) -> Index:
+    for index in table.indexes:
+        if index.name == name:
+            return index
+    raise AssertionError(
+        f"{table.name} declares no index named {name!r}; "
+        f"it has {sorted(str(index.name) for index in table.indexes)}"
+    )
 
 
 # --- fixture builders --------------------------------------------------------
@@ -588,8 +608,53 @@ def test_a_model_produced_invocation_cannot_omit_producer_kind(
 
 
 def test_tool_invocation_idempotency_scope_is_frozen() -> None:
-    assert frozenset({"attempt_id", "idempotency_key"}) in _unique_scopes(
-        AgentToolInvocation.__table__
+    """The scope is still ``(attempt_id, idempotency_key)`` — but partial.
+
+    Declared as a unique *index* rather than a unique *constraint*, because a
+    table constraint carries no predicate and the predicate is the point: an
+    idempotency key reserves one unit of work, and a refusal is a decision
+    event rather than work. Asserting the absence of the unconditional
+    constraint too, because leaving both in place would reinstate exactly the
+    behaviour the partial index exists to remove while this test still passed
+    on the index alone.
+    """
+
+    pair = frozenset({"attempt_id", "idempotency_key"})
+    table = AgentToolInvocation.__table__
+
+    assert pair in _index_scopes(table, unique=True)
+    assert pair not in _unique_scopes(table)
+
+
+def test_the_idempotency_uniqueness_predicate_excludes_denied_rows() -> None:
+    """And says so to both dialects this schema is built on.
+
+    The unit suite runs on SQLite and production runs on PostgreSQL. A
+    predicate given only to PostgreSQL would silently degrade to an
+    unconditional unique index under ``create_all``, so every SQLite-backed
+    test in this file would be characterizing a schema the deployment does
+    not have — which is the divergence class this module exists to catch.
+    """
+
+    index = _index_named(
+        AgentToolInvocation.__table__, "uq_agent_tool_invocation_idempotency"
+    )
+
+    assert index.unique is True
+    assert str(index.dialect_options["postgresql"]["where"]) == "status <> 'denied'"
+    assert str(index.dialect_options["sqlite"]["where"]) == "status <> 'denied'"
+
+
+def test_the_idempotency_pair_keeps_a_plain_lookup_index() -> None:
+    """The replay lookup reads this pair on every mediated call.
+
+    The unique constraint used to provide the backing index for free. A
+    partial unique index cannot serve a lookup that must also see denied
+    rows, so the non-unique index is not redundant with it.
+    """
+
+    assert frozenset({"attempt_id", "idempotency_key"}) in _index_scopes(
+        AgentToolInvocation.__table__, unique=False
     )
 
 
@@ -602,6 +667,66 @@ def test_an_attempt_cannot_reuse_an_invocation_idempotency_key(
     session.add(_make_invocation(tool_invocation_id="invocation-2"))
     with pytest.raises(IntegrityError):
         session.flush()
+
+
+def _denied(**overrides: object) -> AgentToolInvocation:
+    """A refusal, which is the row the uniqueness predicate excludes."""
+
+    values: dict[str, object] = {
+        "status": ToolInvocationStatus.DENIED.value,
+        "error_code": "capability_denied",
+        "capability_decision_effect": "deny",
+        "capability_denial_reason": "no_matching_grant",
+        "capability_grant_id": None,
+        "output": None,
+        "output_trust": None,
+        "output_sha256": None,
+    }
+    values.update(overrides)
+    return _make_invocation(**values)
+
+
+def test_two_denied_invocations_may_share_an_idempotency_key(
+    session: Session,
+) -> None:
+    """N refusals are N rows, which is the forensic property.
+
+    Under the old unconditional constraint the second refusal could not be
+    written at all: calling any tool twice with no grant derives the same key
+    (``_derive_idempotency_key`` reads tool, run, task, attempt, scope and
+    input digest — never the grants, the caller, or the decision), and the
+    denial path persists unconditionally because it terminates above the
+    dedup lookup. The second insert raised, so a repeated attack on a tool
+    the caller cannot reach left one row instead of a count.
+    """
+
+    _seed_run_task_attempt(session)
+    session.add(_denied())
+    session.flush()
+    session.add(_denied(tool_invocation_id="invocation-2"))
+    session.flush()
+
+    assert session.query(AgentToolInvocation).count() == 2
+
+
+def test_a_denial_does_not_reserve_the_key_against_a_later_real_call(
+    session: Session,
+) -> None:
+    """The other half, and the one with a victim.
+
+    A refused call and a later authorized call can derive the same key —
+    nothing in the derivation distinguishes them — so under the old
+    constraint the *authorized* caller's ``REQUESTED`` insert was the one
+    that raised, and it got no record of its own call either.
+    """
+
+    _seed_run_task_attempt(session)
+    session.add(_denied())
+    session.flush()
+    session.add(_make_invocation(tool_invocation_id="invocation-2"))
+    session.flush()
+
+    assert session.query(AgentToolInvocation).count() == 2
 
 
 def test_capability_decision_effect_domain_is_frozen(session: Session) -> None:

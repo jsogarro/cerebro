@@ -72,13 +72,34 @@ class ToolAuditStore(Protocol):
     """Durable storage for invocations and their events, in one transaction."""
 
     async def find_invocation(
-        self, *, run_id: str, organization_id: str | None, idempotency_key: str
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
     ) -> ToolInvocation | None:
         """Return a previously recorded terminal invocation, if one exists.
 
         This is what makes a retried call idempotent: a second request bearing
         an idempotency key that already reached a terminal state returns that
         recorded outcome rather than executing the tool again.
+
+        **``attempt_id`` is required, and its absence was a defect.** This
+        lookup must be scoped exactly as the storage is:
+        ``agent_tool_invocations`` is unique on ``(attempt_id,
+        idempotency_key)``, and this signature was ``(run_id,
+        organization_id, idempotency_key)`` — coarser than what it reads. A
+        caller-supplied key from one attempt therefore replayed into the
+        next, so a deliberate retry at the attempt level was answered with
+        the previous attempt's result and the tool never ran.
+
+        ``_derive_idempotency_key`` includes ``attempt_id`` for exactly that
+        reason, but a caller-supplied key skips the derivation, leaving this
+        lookup as the only place the rule could hold. It is also unsound in
+        the other direction against a real store: two attempts legitimately
+        hold two rows under one key, and a run-scoped query has two answers
+        to a question that admits one.
         """
         ...
 
@@ -127,7 +148,10 @@ class ToolAuditStore(Protocol):
         invocation reaches this method twice: once with
         ``status=REQUESTED`` and once with its terminal status, and both
         describe the **same row**. ``agent_tool_invocations`` is unique on
-        ``(attempt_id, idempotency_key)``, and Wave 3's
+        ``(attempt_id, idempotency_key)`` for every row that is not a
+        refusal — the index is partial, ``WHERE status <> 'denied'``, because
+        an idempotency key reserves one unit of work and a denial is a
+        decision about a call that never ran — and Wave 3's
         ``ToolInvocationRepository`` splits the two across
         ``create_tool_invocation`` and ``record_transition`` accordingly. This
         signature does not distinguish them, so the obvious adapter inserts

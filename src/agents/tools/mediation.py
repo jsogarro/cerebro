@@ -281,11 +281,24 @@ class InMemoryToolAuditStore:
     """
 
     async def find_invocation(
-        self, *, run_id: str, organization_id: str | None, idempotency_key: str
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
     ) -> ToolInvocation | None:
+        """Match the durable store's scope: run, attempt, and key.
+
+        ``attempt_id`` is part of the match because uniqueness in
+        ``agent_tool_invocations`` is attempt-scoped. Matching on the run
+        alone made a caller-supplied key from one attempt replay into the
+        next, which defeats the point of an attempt-level retry.
+        """
         for recorded in reversed(self.invocations):
             if (
                 recorded.run_id == run_id
+                and recorded.attempt_id == attempt_id
                 and recorded.idempotency_key == idempotency_key
             ):
                 return recorded

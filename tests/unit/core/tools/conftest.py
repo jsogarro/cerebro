@@ -66,14 +66,19 @@ class RecordingAuditStore:
     invocations: list[ToolInvocation] = field(default_factory=list)
     events: list[ToolAuditEvent] = field(default_factory=list)
     decisions: list[CapabilityDecision | None] = field(default_factory=list)
-    stored: dict[tuple[str, str | None, str], ToolInvocation] = field(
+    stored: dict[tuple[str, str, str | None, str], ToolInvocation] = field(
         default_factory=dict
     )
     replay: ToolInvocation | None = None
     fail_on_persist: bool = False
 
     async def find_invocation(
-        self, *, run_id: str, organization_id: str | None, idempotency_key: str
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
     ) -> ToolInvocation | None:
         """Look up by the key the real store is keyed on.
 
@@ -83,13 +88,19 @@ class RecordingAuditStore:
         key incorrectly would have looked identical against it — including the
         authorization bypass these tests exist to prevent.
 
+        ``attempt_id`` joined the tuple for the same reason: the durable
+        table is unique on ``(attempt_id, idempotency_key)``, so a fake keyed
+        on the run alone is coarser than the thing it stands in for, and a
+        caller-supplied key replaying across attempts looks correct against
+        it.
+
         ``replay`` survives as an explicit override for tests that need to
         force a hit without persisting one first.
         """
 
         if self.replay is not None:
             return self.replay
-        return self.stored.get((run_id, organization_id, idempotency_key))
+        return self.stored.get((run_id, attempt_id, organization_id, idempotency_key))
 
     async def persist(
         self,
@@ -107,7 +118,12 @@ class RecordingAuditStore:
         self.events.extend(events)
         self.decisions.append(capability_decision)
         self.stored[
-            (invocation.run_id, organization_id, invocation.idempotency_key)
+            (
+                invocation.run_id,
+                invocation.attempt_id,
+                organization_id,
+                invocation.idempotency_key,
+            )
         ] = invocation
 
 
