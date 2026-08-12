@@ -16,11 +16,18 @@ subtly wrong. The identity comparison then sits on top of it as the thing that
 distinguishes a genuine retry from a collision.
 
 **Why a conflict raises instead of being recorded.** `agent_tool_invocations`
-carries `UniqueConstraint(attempt_id, idempotency_key)`, so a conflict cannot
-be written as a second row under that key — the key already belongs to a
-different request. It is also the "asked to do something that cannot be done
-safely" class rather than the "here is what happened to your call" class: there
-is no defensible result to return and nothing safe to record.
+is unique on `(attempt_id, idempotency_key)` for every row that is not a
+refusal, so a conflict cannot be written as a second row under that key — the
+key already belongs to a different request. It is also the "asked to do
+something that cannot be done safely" class rather than the "here is what
+happened to your call" class: there is no defensible result to return and
+nothing safe to record.
+
+The uniqueness is a *partial* index (`WHERE status <> 'denied'`) because a
+key reserves one unit of work and a refusal is a decision about a call that
+never ran. That narrowing does not loosen anything here: a denial is never
+replayable (see `TestARecordedDenialIsNotAnAnswerForSomeoneElse`), so a
+denied row neither answers a later request nor blocks one.
 
 Scenario ids refer to the adversarial corpus in `tests/security/adversarial/`.
 """
@@ -40,6 +47,7 @@ from src.core.tools import (
 )
 
 from .conftest import (
+    ATTEMPT_ID,
     RUN_ID,
     EchoInput,
     EchoOutput,
@@ -385,6 +393,59 @@ class TestAKeyIdentifiesOneRequestsContent:
 
         assert runs == [RUN_ID, "run-2"]
 
+    async def test_the_same_key_under_a_different_attempt_is_independent(
+        self, boundary_dependencies: dict[str, Any], echo_spec: ToolSpec
+    ) -> None:
+        """The dedup scope must match the uniqueness scope, and it did not.
+
+        ``agent_tool_invocations`` is unique on ``(attempt_id,
+        idempotency_key)`` — ``attempt_id``, not ``run_id``. But
+        ``ToolAuditStore.find_invocation`` took ``(run_id, organization_id,
+        idempotency_key)`` and no attempt, so the lookup was *coarser* than
+        the storage it was reading. A caller-supplied key from attempt 1
+        replayed into attempt 2: the retry was answered with the previous
+        attempt's result and the handler never ran.
+
+        That is precisely what an attempt is for. ``_derive_idempotency_key``
+        includes ``attempt_id`` exactly so "a deliberate retry at the attempt
+        level is a genuinely new invocation rather than a replay of the
+        previous attempt's result" — but a *caller-supplied* key skips the
+        derivation entirely, so the only thing that could enforce the same
+        rule for it was the lookup, and the lookup could not see the attempt.
+
+        A run-scoped lookup over attempt-scoped storage is also unsound in
+        the other direction once a real store is wired: two different
+        attempts legitimately hold two rows under one key, and a lookup
+        keyed on the run alone has two answers to a question that admits
+        one.
+        """
+
+        attempts: list[str] = []
+
+        async def counting(args: EchoInput, context: ToolCallContext) -> dict[str, str]:
+            attempts.append(context.attempt_id)
+            return {"echoed": args.query}
+
+        boundary = ToolBoundary(**boundary_dependencies)
+        boundary.register(
+            ToolSpec(
+                name="echo",
+                version="1.0.0",
+                sensitivity=SensitivityClass.READ_ONLY,
+                input_model=EchoInput,
+                output_model=EchoOutput,
+                timeout_seconds=5.0,
+                handler=counting,
+            )
+        )
+
+        await boundary.invoke(**invoke_kwargs(idempotency_key=SHARED_KEY))
+        await boundary.invoke(
+            **invoke_kwargs(idempotency_key=SHARED_KEY, attempt_id="attempt-2")
+        )
+
+        assert attempts == [ATTEMPT_ID, "attempt-2"]
+
     async def test_a_key_reused_for_a_different_tool_alone_is_a_conflict(
         self, boundary_dependencies: dict[str, Any], echo_spec: ToolSpec
     ) -> None:
@@ -474,8 +535,8 @@ class TestAKeyIdentifiesOneRequestsContent:
         )
 
         first = await boundary.invoke(**invoke_kwargs(idempotency_key=SHARED_KEY))
-        store.stored[(RUN_ID, "org-1", SHARED_KEY)] = first.invocation.model_copy(
-            update={"tool_version": "2.0.0"}
+        store.stored[(RUN_ID, ATTEMPT_ID, "org-1", SHARED_KEY)] = (
+            first.invocation.model_copy(update={"tool_version": "2.0.0"})
         )
 
         with pytest.raises(IdempotencyConflictError):

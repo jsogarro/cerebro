@@ -465,6 +465,7 @@ class ToolBoundary:
         # a comment next to one of the returns it is about.
         replayed = await self._audit_store.find_invocation(
             run_id=run_id,
+            attempt_id=attempt_id,
             organization_id=organization_id,
             idempotency_key=effective_key,
         )

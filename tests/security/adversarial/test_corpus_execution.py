@@ -270,8 +270,11 @@ DEFECTS: Final[dict[str, str]] = {
     "crosstenant-05-idempotency-key-collision": (
         "Idempotency dedup is not tenant-scoped, and 4C's reordering does not "
         "reach it. InMemoryToolAuditStore.find_invocation accepts "
-        "organization_id and never reads it (mediation.py:283-292); nothing "
-        "at the boundary binds a run_id to an organization. Tenant B's "
+        "organization_id and never reads it (mediation.py); it matches on "
+        "(run_id, attempt_id, idempotency_key) -- the attempt joined that "
+        "tuple when the lookup was corrected to match the durable table's "
+        "uniqueness scope, and the tenant did not. Nothing at the boundary "
+        "binds a run_id or an attempt_id to an organization. Tenant B's "
         "request is genuinely AUTHORIZED -- the grant matches run, task, tool "
         "and scope, and organization_id is not an input to the capability "
         "decision -- so it reaches the lookup, and _require_same_request "

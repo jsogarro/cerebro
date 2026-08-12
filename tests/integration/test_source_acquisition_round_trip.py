@@ -105,7 +105,12 @@ class _RecordingAuditStore:
         self.invocations: list[ToolInvocation] = []
 
     async def find_invocation(
-        self, *, run_id: str, organization_id: str | None, idempotency_key: str
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
     ) -> ToolInvocation | None:
         return None
 
