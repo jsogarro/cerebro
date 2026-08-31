@@ -49,7 +49,7 @@ class JWTService:
 
     def __init__(
         self,
-        redis_client: redis.Redis | None = None,
+        redis_client: redis.Redis[Any] | None = None,
         private_key_path: str | None = None,
         public_key_path: str | None = None,
     ):
