@@ -305,7 +305,7 @@ class SecurityAlert(BaseModel):
 
     # Alert metadata
     alert_metadata: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="Additional alert metadata"
+        "metadata", JSON, nullable=True, comment="Additional alert metadata"
     )
 
     # Relationships

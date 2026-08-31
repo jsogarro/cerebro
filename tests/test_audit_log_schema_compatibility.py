@@ -18,6 +18,15 @@ def test_event_metadata_uses_the_historical_metadata_column() -> None:
     assert "event_metadata" not in AuditLog.__table__.columns
 
 
+def test_alert_metadata_uses_the_historical_metadata_column() -> None:
+    """Keep the Python alert_metadata API backed by security_alerts.metadata."""
+    mapped_column = SecurityAlert.__mapper__.attrs.alert_metadata.columns[0]
+
+    assert mapped_column is SecurityAlert.__table__.columns["metadata"]
+    assert mapped_column.name == "metadata"
+    assert "alert_metadata" not in SecurityAlert.__table__.columns
+
+
 def test_audit_event_type_enum_persists_lowercase_values() -> None:
     """Bind the PostgreSQL enum to the live schema's lowercase values."""
     event_type_enum = AuditLog.__table__.columns["event_type"].type
