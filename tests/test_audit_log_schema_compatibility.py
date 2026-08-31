@@ -1,6 +1,12 @@
 """Compatibility contracts for the historical audit log schema."""
 
 from src.models.db.audit_log import AuditLog
+from src.models.db.security_alert import (
+    AlertSeverity,
+    AlertStatus,
+    AlertType,
+    SecurityAlert,
+)
 
 
 def test_event_metadata_uses_the_historical_metadata_column() -> None:
@@ -70,3 +76,24 @@ def test_audit_severity_enum_persists_lowercase_values() -> None:
     severity_enum = AuditLog.__table__.columns["severity"].type
 
     assert severity_enum.enums == ["info", "warning", "error", "critical"]
+
+
+def test_security_alert_type_enum_persists_lowercase_values() -> None:
+    """Bind alert types to the live PostgreSQL enum labels."""
+    alert_type_enum = SecurityAlert.__table__.columns["alert_type"].type
+
+    assert alert_type_enum.enums == [member.value for member in AlertType]
+
+
+def test_security_alert_severity_enum_persists_lowercase_values() -> None:
+    """Bind alert severities to the live PostgreSQL enum labels."""
+    severity_enum = SecurityAlert.__table__.columns["severity"].type
+
+    assert severity_enum.enums == [member.value for member in AlertSeverity]
+
+
+def test_security_alert_status_enum_persists_lowercase_values() -> None:
+    """Bind alert statuses to the live PostgreSQL enum labels."""
+    status_enum = SecurityAlert.__table__.columns["status"].type
+
+    assert status_enum.enums == [member.value for member in AlertStatus]
