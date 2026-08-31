@@ -366,23 +366,27 @@ class JWTService:
             if payload.get("token_type") != token_type:
                 raise JWTError(f"Invalid token type. Expected {token_type}")
 
+            jti = payload.get("jti")
+            if not jti:
+                raise JWTError("Token missing jti")
+
             # Check blacklist. A token cannot be admitted while the revocation
             # store is unavailable; treating that failure as an invalid token
             # would hide an infrastructure outage and invite fail-open workarounds.
-            if verify_blacklist and self.redis_client:
-                jti = payload.get("jti")
-                if jti:
-                    try:
-                        is_blacklisted = await self._is_token_blacklisted(jti)
-                    except Exception as exc:
-                        logger.error(
-                            "Token blacklist store unavailable", error=str(exc)
-                        )
-                        raise JWTServiceUnavailableError(
-                            "Token blacklist store unavailable"
-                        ) from exc
-                    if is_blacklisted:
-                        raise JWTError("Token has been revoked")
+            if verify_blacklist:
+                if self.redis_client is None:
+                    raise JWTServiceUnavailableError(
+                        "Token blacklist store unavailable"
+                    )
+                try:
+                    is_blacklisted = await self._is_token_blacklisted(jti)
+                except Exception as exc:
+                    logger.error("Token blacklist store unavailable", error=str(exc))
+                    raise JWTServiceUnavailableError(
+                        "Token blacklist store unavailable"
+                    ) from exc
+                if is_blacklisted:
+                    raise JWTError("Token has been revoked")
 
             # Create token payload
             return TokenPayload(

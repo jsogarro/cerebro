@@ -134,7 +134,11 @@ async def test_two_production_workers_share_signing_and_verification_keys(
         user_id="worker-shared-user",
         email="worker@example.test",
     )
-    payload = await verifier.validate_token(token_pair.access_token)
+    # This contract proves cross-worker cryptographic verification only. The
+    # revocation-store contract is exercised separately by JWT auth tests.
+    payload = await verifier.validate_token(
+        token_pair.access_token, verify_blacklist=False
+    )
 
     assert payload.sub == "worker-shared-user"
 
