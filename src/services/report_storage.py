@@ -92,15 +92,16 @@ class ReportStorageService:
                     report_dir,
                 )
             else:
-                db_report = await self.report_repo.get_report_with_formats(
+                existing_report = await self.report_repo.get_report_with_formats(
                     report_id,
                     organization_id=organization_id,
                     user_id=user_id,
                 )
-                if db_report is None:
+                if existing_report is None:
                     raise ReportStorageError(
                         f"Report {report_id} not found in the requested tenant"
                     )
+                db_report = existing_report
                 if db_report.generation_status not in {"pending", "generating"}:
                     raise ReportStorageError(
                         f"Report {report_id} is not pending generation"
@@ -516,7 +517,7 @@ class ReportStorageService:
     ) -> dict[str, Any]:
         """Get storage usage statistics."""
         stats = await self.report_repo.get_report_statistics(
-            user_id=user_id,
+            user_id=UUID(str(user_id)) if user_id is not None else None,
             days=days,
             organization_id=organization_id,
         )

@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql import Select
 from structlog import get_logger
 
 from src.models.db.generated_report import GeneratedReport, ReportFormat
@@ -79,7 +80,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         *,
         organization_id: UUID | str,
         user_id: UUID | str | None = None,
-    ):
+    ) -> Select[tuple[GeneratedReport]]:
         """Build a report query with mandatory tenant isolation."""
         organization_uuid = _normalize_uuid(organization_id, "organization_id")
         query = select(GeneratedReport).where(
