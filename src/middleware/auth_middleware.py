@@ -156,13 +156,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.token_payload = None
         request.state.organization_id = None
 
-        if (
-            request.method.upper() == "OPTIONS"
-            and request.headers.get("origin")
-            and request.headers.get("access-control-request-method")
-        ):
-            return await call_next(request)
-
         route_signature = (request.method.upper(), request.url.path)
         if route_signature in PUBLIC_ROUTE_ALLOWLIST:
             return await call_next(request)

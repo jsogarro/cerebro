@@ -439,15 +439,6 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 app.add_middleware(
     IdempotencyMiddleware,
     store=ResilientIdempotencyStore(RedisIdempotencyStore(settings.REDIS_URL)),
@@ -475,6 +466,17 @@ app.middleware("http")(
         # for non-development deployments where HTTPS is the expected scheme.
         hsts_enabled=settings.ENVIRONMENT != "development"
     )
+)
+
+# CORS must be the outermost application middleware. It terminates genuine
+# browser preflights before authentication, while AuthMiddleware remains the
+# exact public-route boundary for every other request, including OPTIONS.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Mount Prometheus metrics endpoint

@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from jose import JWTError
@@ -134,6 +135,17 @@ def _production_app() -> FastAPI:
     from src.api.main import app
 
     return app
+
+
+def test_cors_is_outermost_so_auth_handles_every_non_preflight_request() -> None:
+    app = _production_app()
+
+    middleware_classes = [middleware.cls for middleware in app.user_middleware]
+
+    assert middleware_classes[0] is CORSMiddleware
+    assert middleware_classes.index(CORSMiddleware) < middleware_classes.index(
+        AuthMiddleware
+    )
 
 
 @contextmanager
@@ -287,7 +299,7 @@ def test_non_preflight_options_request_remains_protected() -> None:
         )
 
     assert response.status_code == 401
-    assert "access-control-allow-origin" not in response.headers
+    assert response.headers["www-authenticate"] == "Bearer"
     assert service.calls == []
 
 
