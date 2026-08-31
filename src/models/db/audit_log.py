@@ -203,7 +203,7 @@ class AuditLog(BaseModel):
     )
 
     event_metadata: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="Additional event metadata"
+        "metadata", JSON, nullable=True, comment="Additional event metadata"
     )
 
     is_suspicious: Mapped[bool] = mapped_column(
