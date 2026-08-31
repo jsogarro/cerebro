@@ -105,14 +105,22 @@ class AuditLog(BaseModel):
     __tablename__ = "audit_logs"
 
     event_type: Mapped[AuditEventType] = mapped_column(
-        ENUM(AuditEventType, name="audit_event_type"),
+        ENUM(
+            AuditEventType,
+            name="audit_event_type",
+            values_callable=lambda enum_class: [member.value for member in enum_class],
+        ),
         nullable=False,
         index=True,
         comment="Type of audit event",
     )
 
     severity: Mapped[AuditSeverity] = mapped_column(
-        ENUM(AuditSeverity, name="audit_severity"),
+        ENUM(
+            AuditSeverity,
+            name="audit_severity",
+            values_callable=lambda enum_class: [member.value for member in enum_class],
+        ),
         nullable=False,
         default=AuditSeverity.INFO,
         index=True,
