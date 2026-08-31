@@ -371,6 +371,13 @@ class TestTheFallbackApparatusIsReachableWhenClientConstructionFails:
     production.
     """
 
+    @pytest.fixture(autouse=True)
+    def fail_mcp_client_construction(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _fail(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("MCP client construction failed")
+
+        monkeypatch.setattr("src.mcp.client.MCPClient", _fail)
+
     @pytest.mark.asyncio
     async def test_construction_failure_becomes_a_degraded_result_not_an_escape(
         self,
