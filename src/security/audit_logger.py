@@ -494,9 +494,8 @@ class AuditLogger:
         alert = SecurityAlert.create_alert(
             alert_type=alert_type,
             title=f"{alert_type.value.replace('_', ' ').title()} Detected",
-            description=log_entry.get(
-                "description", f"Security event: {alert_type.value}"
-            ),
+            description=log_entry.get("description")
+            or f"Security event: {alert_type.value}",
             severity=severity,
             user_id=log_entry.get("user_id"),
             ip_address=log_entry.get("ip_address"),

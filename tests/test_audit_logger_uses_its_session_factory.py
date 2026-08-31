@@ -180,6 +180,9 @@ async def test_unauthorized_event_persists_json_safe_alert_and_event_metadata() 
     assert alert_log["action"] == "GET /api/v1/agents"
     assert alert_log["metadata"] == expected_metadata
     assert datetime.fromisoformat(alert_log["created_at"]).tzinfo is not None
+    alerts = [row for row in session_factory.rows if isinstance(row, SecurityAlert)]
+    assert len(alerts) == 1
+    assert alerts[0].description == "Security event: unauthorized_api_access"
     assert logger.metrics["alerts_generated"] == 1
     assert logger.metrics["events_flushed"] == 1
 
