@@ -50,27 +50,14 @@ services:
       retries: 12
       start_period: 30s
 
-  # MCP Server
+  # FastMCP HTTP server
   mcp-server:
     build:
       context: .
       dockerfile: Dockerfile
       target: development
-    # The development image's entrypoint is the API migration hook. MCP has
-    # no database ownership, so it must not inherit that hook. The source
-    # module currently exposes the FastMCP object through MCPServer but its
-    # public run() method is only a logging placeholder; invoke the real
-    # FastMCP HTTP transport here until that source entrypoint is revised in a
-    # separately owned packet.
     entrypoint: []
     command:
-      - uv
-      - run
-      - --no-project
-      - --with
-      - "fastmcp>=2.0.0"
-      - --with
-      - "structlog>=24.4.0"
       - python
       - -c
       - |

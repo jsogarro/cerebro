@@ -17,6 +17,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_PATH = REPO_ROOT / "docker-compose.yml"
+DOCKERFILE_PATH = REPO_ROOT / "Dockerfile"
 ENTRYPOINT_PATH = REPO_ROOT / "docker" / "entrypoint.sh"
 NGINX_PATH = REPO_ROOT / "docker" / "nginx" / "nginx.conf"
 
@@ -122,20 +123,29 @@ def test_api_uses_the_migration_entrypoint_and_explicit_uvicorn_command() -> Non
 
 
 def test_mcp_uses_a_real_http_server_without_running_database_migrations() -> None:
-    """MCP must bind its published port and must not run the API migration hook."""
+    """MCP must use the installed runtime and must not run API migrations."""
 
     mcp = _compose_services()["mcp-server"]
     command = _command_text(mcp["command"])
 
     assert mcp["entrypoint"] == []
-    assert "uv run" in command
-    assert "fastmcp" in command
+    assert command.startswith("python -c ")
+    assert "uv run" not in command
+    assert "--with" not in command
     assert "from src.mcp.server import MCPServer" in command
     assert ".mcp.run(" in command
     assert 'transport="http"' in command
     assert 'host="0.0.0.0"' in command
     assert "MCP_PORT" in command
     assert "DATABASE_URL" not in mcp.get("environment", [])
+
+
+def test_development_image_installs_the_mcp_extra_at_build_time() -> None:
+    """The development image supplies MCP dependencies before container start."""
+
+    dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
+
+    assert 'RUN uv pip install -e ".[dev,mcp]"' in dockerfile
 
 
 def test_mcp_local_defaults_do_not_require_provider_credentials() -> None:

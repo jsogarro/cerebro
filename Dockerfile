@@ -32,8 +32,8 @@ FROM base as development
 COPY pyproject.toml .
 COPY README.md .
 
-# Install all dependencies including dev
-RUN uv pip install -e ".[dev]"
+# Install all dependencies including dev and MCP support
+RUN uv pip install -e ".[dev,mcp]"
 
 # Copy application code
 COPY src/ ./src/
