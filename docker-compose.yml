@@ -80,8 +80,6 @@ services:
       - LOG_LEVEL=DEBUG
       - MCP_HOST=0.0.0.0
       - MCP_PORT=9000
-    ports:
-      - "${MCP_HOST_PORT:-9000}:9000"
     depends_on:
       redis:
         condition: service_healthy

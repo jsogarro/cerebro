@@ -161,15 +161,23 @@ def test_mcp_local_defaults_do_not_require_provider_credentials() -> None:
     assert "GEMINI_API_KEY=${GEMINI_API_KEY:-}" in environment
 
 
-def test_nginx_only_names_default_services_and_uses_mcp_path_without_rewriting() -> (
-    None
-):
-    """nginx must load with the default topology and preserve MCP URLs."""
+def test_mcp_is_internal_only_and_keeps_its_process_healthcheck() -> None:
+    """MCP stays on the Compose network without a host-published port."""
+
+    mcp = _compose_services()["mcp-server"]
+
+    assert "ports" not in mcp
+    healthcheck = mcp["healthcheck"]
+    assert "socket" in _command_text(healthcheck["test"])
+    assert "9000" in _command_text(healthcheck["test"])
+
+
+def test_nginx_does_not_expose_mcp_or_define_an_mcp_upstream() -> None:
+    """nginx must not provide a public MCP route or upstream."""
 
     targets = _nginx_upstream_targets()
     expected_targets = {
         ("api", 8000),
-        ("mcp-server", 9000),
         ("web", 8080),
     }
     actual_targets = {
@@ -180,9 +188,9 @@ def test_nginx_only_names_default_services_and_uses_mcp_path_without_rewriting()
     assert "temporal-ui" not in NGINX_PATH.read_text(encoding="utf-8")
 
     nginx = NGINX_PATH.read_text(encoding="utf-8")
-    assert re.search(r"location\s+/mcp\s*\{", nginx)
-    assert "proxy_pass http://mcp_server;" in nginx
-    assert "proxy_pass http://mcp_server/;" not in nginx
+    assert "mcp_server" not in targets
+    assert not re.search(r"location\s+/mcp(?:/|\s|\{)", nginx)
+    assert "proxy_pass http://mcp_server" not in nginx
 
 
 def _run_entrypoint(

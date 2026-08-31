@@ -57,7 +57,6 @@ class MCPServerConfig(BaseModel):
     version: str = "1.0.0"
     host: str = "localhost"
     port: int = 8765
-    auth_enabled: bool = False
     max_concurrent_tools: int = 10
 
 
