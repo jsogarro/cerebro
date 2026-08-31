@@ -46,9 +46,11 @@ class AuditTrailMiddleware:
         """Map the request to an existing audit event type."""
         path = request.url.path.rstrip("/")
         if path.endswith("/auth/login"):
+            if status_code is None:
+                return AuditEventType.DATA_ACCESSED
             return (
                 AuditEventType.LOGIN_SUCCESS
-                if status_code is None or status_code < 400
+                if status_code < 400
                 else AuditEventType.LOGIN_FAILED
             )
         if path.endswith("/auth/logout"):
@@ -93,9 +95,11 @@ class AuditTrailMiddleware:
             event_type=self._event_type(request, status_code),
             action=f"{request.method} {request.url.path}",
             request=request,
-            result=("admitted" if phase == "admission" else "success")
-            if status_code is None or status_code < 400
-            else "failure",
+            result=(
+                ("admitted" if phase == "admission" else "success")
+                if status_code is None or status_code < 400
+                else "failure"
+            ),
             severity=(
                 AuditSeverity.INFO
                 if status_code is None

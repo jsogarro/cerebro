@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
+from src.models.db.audit_log import AuditEventType
 from src.security.audit_logger import AuditLogger
 from src.security.audit_middleware import AuditTrailMiddleware
 
@@ -30,6 +31,41 @@ class _FailingSession:
 class _FailingSessionFactory:
     def __call__(self) -> _FailingSession:
         return _FailingSession()
+
+
+class _RecordingAuditLogger:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    async def log_event(self, **kwargs: Any) -> None:
+        self.events.append(kwargs)
+
+    async def flush_buffer(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_login_admission_is_not_recorded_as_login_success() -> None:
+    """Only a completed login request can produce a login-success event."""
+    app = FastAPI()
+    app.middleware("http")(AuditTrailMiddleware())
+    audit_logger = _RecordingAuditLogger()
+    app.state.audit_logger = audit_logger
+
+    @app.post("/auth/login")
+    async def login() -> dict[str, bool]:
+        return {"ok": True}
+
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/auth/login")
+
+    assert response.status_code == 200
+    assert audit_logger.events[0]["metadata"]["phase"] == "admission"
+    assert audit_logger.events[0]["event_type"] == AuditEventType.DATA_ACCESSED
+    assert audit_logger.events[0]["event_type"] != AuditEventType.LOGIN_SUCCESS
+    assert audit_logger.events[1]["metadata"]["phase"] == "outcome"
+    assert audit_logger.events[1]["event_type"] == AuditEventType.LOGIN_SUCCESS
 
 
 @pytest.mark.asyncio
