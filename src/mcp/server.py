@@ -5,7 +5,7 @@ Provides the main MCP server that manages and exposes tools.
 """
 
 import inspect
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from pydantic import BaseModel
 from structlog import get_logger
@@ -114,8 +114,9 @@ class MCPServer:
         # flexible for BaseMCPTool while exposing the typed, named contract
         # described by the platform metadata to the MCP runtime.
         signature, annotations = _signature_for_metadata(metadata.parameters)
-        tool_wrapper.__signature__ = signature
-        tool_wrapper.__annotations__ = annotations
+        tool_wrapper_with_metadata = cast(Any, tool_wrapper)
+        tool_wrapper_with_metadata.__signature__ = signature
+        tool_wrapper_with_metadata.__annotations__ = annotations
 
         _decorated_tool = self.mcp.tool(
             name=metadata.name, description=metadata.description
