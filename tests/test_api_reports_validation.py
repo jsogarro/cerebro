@@ -1,6 +1,7 @@
 """Validation tests for report API request models."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -17,6 +18,24 @@ from src.models.db.session import get_session
 AUTH_USER_ID = uuid4()
 AUTH_ORG_ID = uuid4()
 AUTH_TOKEN = "test-token"
+
+
+class _SuccessfulDurableAuditLogger:
+    """In-memory durable audit double for the lifespan-free test client."""
+
+    def __init__(self) -> None:
+        self.pending_events: list[dict[str, Any]] = []
+        self.persisted_events: list[dict[str, Any]] = []
+
+    async def log_event(self, **event: Any) -> str:
+        """Buffer an audit event and return a deterministic event identifier."""
+        self.pending_events.append(event)
+        return f"test-audit-event-{len(self.pending_events)}"
+
+    async def flush_buffer(self) -> None:
+        """Model a successful durable flush."""
+        self.persisted_events.extend(self.pending_events)
+        self.pending_events.clear()
 
 
 class _TestJWTService:
@@ -75,12 +94,19 @@ class TestReportsAPIValidation:
         app.dependency_overrides[get_session] = override_session
         app.dependency_overrides[get_tenant_context] = override_tenant_context
         app.dependency_overrides[get_jwt_service] = _TestJWTService
+        missing = object()
+        previous_audit_logger = getattr(app.state, "audit_logger", missing)
+        app.state.audit_logger = _SuccessfulDurableAuditLogger()
         try:
             yield TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
         finally:
             app.dependency_overrides.pop(get_session, None)
             app.dependency_overrides.pop(get_tenant_context, None)
             app.dependency_overrides.pop(get_jwt_service, None)
+            if previous_audit_logger is missing:
+                delattr(app.state, "audit_logger")
+            else:
+                app.state.audit_logger = previous_audit_logger
 
     def test_validation_errors(self, client: TestClient) -> None:
         """Test request validation errors."""
