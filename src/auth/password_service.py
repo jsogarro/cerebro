@@ -19,6 +19,15 @@ from passlib.context import CryptContext
 logger = structlog.get_logger(__name__)
 
 
+class PasswordHistoryStoreUnavailableError(RuntimeError):
+    """Raised when password history has no Redis store to use.
+
+    Password history is an authentication control. Without its store, an
+    empty read or a successful write cannot be distinguished from an
+    unchecked or unrecorded operation, so history operations fail closed.
+    """
+
+
 class PasswordService:
     """
     Secure password management service.
@@ -251,6 +260,16 @@ class PasswordService:
             # Fail open - don't block on API failure
             return False
 
+    def _require_history_store(self) -> redis.Redis[Any]:
+        """Return Redis for history operations or raise instead of guessing."""
+        if self.redis_client is None:
+            raise PasswordHistoryStoreUnavailableError(
+                "password history requires an injected Redis client; refusing "
+                "to treat missing history as empty or report an unwritten "
+                "password"
+            )
+        return self.redis_client
+
     async def add_to_password_history(self, user_id: str, password_hash: str) -> None:
         """
         Add password to user's password history.
@@ -258,20 +277,23 @@ class PasswordService:
         Args:
             user_id: User identifier
             password_hash: Hashed password
+
+        Raises:
+            PasswordHistoryStoreUnavailableError: If no Redis client was
+                injected for password-history storage.
         """
-        if not self.redis_client:
-            return
+        store = self._require_history_store()
 
         history_key = f"{self.history_prefix}{user_id}"
 
         # Add to history list
-        await self.redis_client.lpush(history_key, password_hash)
+        await store.lpush(history_key, password_hash)
 
         # Trim to limit
-        await self.redis_client.ltrim(history_key, 0, self.password_history_limit - 1)
+        await store.ltrim(history_key, 0, self.password_history_limit - 1)
 
         # Set expiration (1 year)
-        await self.redis_client.expire(history_key, 365 * 24 * 3600)
+        await store.expire(history_key, 365 * 24 * 3600)
 
     async def check_password_history(self, user_id: str, password: str) -> bool:
         """
@@ -283,12 +305,17 @@ class PasswordService:
 
         Returns:
             True if password was recently used
+
+        Raises:
+            PasswordHistoryStoreUnavailableError: If no Redis client was
+                injected for password-history storage. Returning ``False``
+                without a store would incorrectly report an unchecked
+                password as unused.
         """
-        if not self.redis_client:
-            return False
+        store = self._require_history_store()
 
         history_key = f"{self.history_prefix}{user_id}"
-        history = await self.redis_client.lrange(history_key, 0, -1)
+        history = await store.lrange(history_key, 0, -1)
 
         for old_hash in history:
             if isinstance(old_hash, bytes):
