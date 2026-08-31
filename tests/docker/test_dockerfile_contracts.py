@@ -105,6 +105,41 @@ class TestRootDockerfileContract:
             in content
         )
 
+    def test_production_contains_migration_inputs(self, content: str) -> None:
+        production = content.split(
+            "FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as production",
+            maxsplit=1,
+        )[1]
+
+        assert "COPY alembic/ ./alembic/" in production
+        assert "COPY alembic.ini ." in production
+        assert "COPY docker/entrypoint.sh /entrypoint.sh" in production
+
+    def test_production_runs_migrations_before_uvicorn(self, content: str) -> None:
+        production = content.split(
+            "FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as production",
+            maxsplit=1,
+        )[1]
+
+        entrypoint_index = production.index('ENTRYPOINT ["/entrypoint.sh"]')
+        cmd_index = production.index(
+            'CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]'
+        )
+        assert entrypoint_index < cmd_index
+
+    def test_production_entrypoint_is_available_to_non_root_user(
+        self, content: str
+    ) -> None:
+        production = content.split(
+            "FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as production",
+            maxsplit=1,
+        )[1]
+
+        assert "RUN chmod +x /entrypoint.sh" in production
+        assert production.index("RUN chmod +x /entrypoint.sh") < production.index(
+            "USER app"
+        )
+
     def test_development_cmd_unchanged(self, content: str) -> None:
         assert (
             'CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]'
