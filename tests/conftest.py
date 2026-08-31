@@ -5,6 +5,7 @@ Pytest configuration and fixtures for Research Platform tests.
 import asyncio
 import os
 from collections.abc import AsyncGenerator, Generator
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -19,6 +20,51 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["REDIS_URL"] = "redis://localhost:6379/15"
 os.environ["SECRET_KEY"] = "test-secret-key-that-is-at-least-32-characters-long"
 os.environ["ENABLE_RATE_LIMITING"] = "false"
+
+
+class _SuccessfulDurableAuditLogger:
+    """In-memory durable double for clients that bypass application lifespan."""
+
+    def __init__(self) -> None:
+        self.pending_events: list[dict[str, Any]] = []
+        self.persisted_events: list[dict[str, Any]] = []
+
+    async def log_event(self, **event: Any) -> str:
+        """Buffer an event and return a deterministic test identifier."""
+        self.pending_events.append(event)
+        return (
+            f"test-audit-event-{len(self.persisted_events) + len(self.pending_events)}"
+        )
+
+    async def flush_buffer(self) -> None:
+        """Model a successful durable flush for the mounted middleware."""
+        self.persisted_events.extend(self.pending_events)
+        self.pending_events.clear()
+
+
+@pytest.fixture(autouse=True)
+def install_test_audit_logger() -> Generator[None, None, None]:
+    """Provide audit state for raw ASGI clients without weakening production.
+
+    FastAPI's lifespan installs the production logger, but many test clients
+    intentionally bypass lifespan. Install a fresh successful double for each
+    test so those clients exercise the real audit middleware. Tests covering
+    missing or failing audit stores can replace or remove ``app.state`` during
+    the test; the previous state is restored during fixture teardown.
+    """
+    from src.api.main import app
+
+    missing = object()
+    previous = getattr(app.state, "audit_logger", missing)
+    app.state.audit_logger = _SuccessfulDurableAuditLogger()
+    try:
+        yield
+    finally:
+        if previous is missing:
+            if hasattr(app.state, "audit_logger"):
+                delattr(app.state, "audit_logger")
+        else:
+            app.state.audit_logger = previous
 
 
 @pytest.fixture(scope="session")
