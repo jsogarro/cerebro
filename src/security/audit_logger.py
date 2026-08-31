@@ -5,6 +5,8 @@ Provides comprehensive audit logging for security events, user actions,
 and system activities with async database persistence.
 """
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import threading
@@ -13,11 +15,15 @@ from typing import Any
 
 import structlog
 from fastapi import Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.models.db.audit_log import AuditEventType, AuditLog, AuditSeverity
 from src.models.db.security_alert import AlertSeverity, AlertType, SecurityAlert
 from src.services.cache.cache_manager import CacheManager
+
+
+class AuditPersistenceError(RuntimeError):
+    """Raised when a buffered audit event cannot reach durable storage."""
 
 
 class AuditLogger:
@@ -35,6 +41,7 @@ class AuditLogger:
         buffer_size: int = 1000,
         flush_interval: int = 5,
         alert_threshold: dict[str, int] | None = None,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
     ):
         """
         Initialize audit logger.
@@ -45,8 +52,12 @@ class AuditLogger:
             buffer_size: Size of log buffer before flush
             flush_interval: Seconds between buffer flushes
             alert_threshold: Thresholds for generating alerts
+            session_factory: Factory used to open a fresh session per flush.
+                Application-wide loggers must use this instead of sharing one
+                ``AsyncSession`` across concurrent requests.
         """
         self.db_session = db_session
+        self.session_factory = session_factory
         self.cache = cache_manager
         self.buffer_size = buffer_size
         self.flush_interval = flush_interval
@@ -142,16 +153,41 @@ class AuditLogger:
         user_agent = None
         request_id = None
 
+        request_metadata: dict[str, Any] = {}
+
         if request:
             ip_address = request.client.host if request.client else None
             user_agent = request.headers.get("User-Agent")
             request_id = request.headers.get("X-Request-ID")
 
             # Extract user info from request state if available
-            if hasattr(request.state, "user"):
-                user_id = user_id or getattr(request.state.user, "id", None)
-                username = username or getattr(request.state.user, "username", None)
-                email = email or getattr(request.state.user, "email", None)
+            request_user = getattr(request.state, "user", None)
+            if request_user is not None:
+                user_id = user_id or getattr(request_user, "id", None)
+                username = username or getattr(request_user, "username", None)
+                email = email or getattr(request_user, "email", None)
+
+            # Auth middleware initializes ``organization_id`` and
+            # ``token_payload`` on request state. Dependencies may populate
+            # either value later, so prefer the resolved state and fall back
+            # to the authenticated token/user conventions used elsewhere.
+            organization_id = getattr(request.state, "organization_id", None)
+            if organization_id is None:
+                token_payload = getattr(request.state, "token_payload", None)
+                organization_id = getattr(token_payload, "organization_id", None)
+            if organization_id is None and request_user is not None:
+                organization_id = getattr(request_user, "organization_id", None)
+            if organization_id is not None:
+                request_metadata["organization_id"] = str(organization_id)
+
+        event_metadata = dict(metadata or {})
+        event_metadata.update(
+            {
+                key: value
+                for key, value in request_metadata.items()
+                if key not in event_metadata
+            }
+        )
 
         # Create audit log entry
         log_entry = {
@@ -168,7 +204,7 @@ class AuditLogger:
             "ip_address": ip_address,
             "user_agent": user_agent,
             "request_id": request_id,
-            "metadata": metadata or {},
+            "metadata": event_metadata,
             "created_at": datetime.now(UTC),
             **kwargs,
         }
@@ -180,7 +216,7 @@ class AuditLogger:
 
             # Flush if buffer is full
             if len(self.log_buffer) >= self.buffer_size:
-                task = asyncio.create_task(self.flush_buffer())
+                task = asyncio.create_task(self._flush_in_background())
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
 
@@ -202,8 +238,24 @@ class AuditLogger:
         return event_id
 
     async def flush_buffer(self) -> None:
-        """Flush log buffer to database."""
-        if not self.db_session:
+        """Flush buffered events to durable storage.
+
+        A logger without a session or session factory cannot persist an audit
+        event. It therefore raises an explicit error instead of returning as
+        though the buffer had been written. Failed writes are restored to the
+        buffer so a later retry can recover them.
+        """
+        if self.session_factory is None and self.db_session is None:
+            with self.buffer_lock:
+                pending = len(self.log_buffer)
+            if pending:
+                self.metrics["errors"] += 1
+                message = (
+                    "Audit persistence unavailable: no database session factory "
+                    f"is configured for {pending} buffered event(s)"
+                )
+                self.logger.error(message, buffered_events=pending)
+                raise AuditPersistenceError(message)
             return
 
         # Get logs to flush
@@ -215,12 +267,20 @@ class AuditLogger:
             self.log_buffer.clear()
 
         try:
-            # Batch insert to database
-            for log_entry in logs_to_flush:
-                audit_log = AuditLog(**log_entry)
-                self.db_session.add(audit_log)
+            if self.session_factory is not None:
+                # The application-wide logger is shared across requests;
+                # AsyncSession is not safe to share, so each flush owns a
+                # fresh session from the injected factory.
+                async with self.session_factory() as session:
+                    for log_entry in logs_to_flush:
+                        session.add(AuditLog(**self._as_columns(log_entry)))
+                    await session.commit()
+            else:
+                assert self.db_session is not None
+                for log_entry in logs_to_flush:
+                    self.db_session.add(AuditLog(**self._as_columns(log_entry)))
+                await self.db_session.commit()
 
-            await self.db_session.commit()
             self.metrics["events_flushed"] += len(logs_to_flush)
 
             self.logger.debug(f"Flushed {len(logs_to_flush)} audit logs to database")
@@ -232,6 +292,24 @@ class AuditLogger:
             # Try to restore logs to buffer on error
             with self.buffer_lock:
                 self.log_buffer.extend(logs_to_flush)
+
+            raise AuditPersistenceError("Failed to persist audit events") from e
+
+    async def _flush_in_background(self) -> None:
+        """Flush a full buffer without leaking a task exception."""
+        try:
+            await self.flush_buffer()
+        except AuditPersistenceError:
+            # The failure is already counted and logged by ``flush_buffer``.
+            return
+
+    @staticmethod
+    def _as_columns(log_entry: dict[str, Any]) -> dict[str, Any]:
+        """Map the public metadata argument to the ORM attribute name."""
+        entry = dict(log_entry)
+        if "metadata" in entry:
+            entry["event_metadata"] = entry.pop("metadata")
+        return entry
 
     async def _periodic_flush(self) -> None:
         """Periodically flush log buffer."""
@@ -319,8 +397,7 @@ class AuditLogger:
             if cached_count is not None and isinstance(cached_count, dict):
                 return int(cached_count.get("count", 0))
 
-        # Query database if session available
-        if self.db_session:
+        if self.db_session or self.session_factory:
             from sqlalchemy import func, select
 
             since = datetime.now(UTC) - timedelta(minutes=minutes)
@@ -336,8 +413,14 @@ class AuditLogger:
             else:  # IP address
                 query = query.where(AuditLog.ip_address == identifier)
 
-            result = await self.db_session.execute(query)
-            count = result.scalar() or 0
+            if self.db_session:
+                result = await self.db_session.execute(query)
+                count = result.scalar() or 0
+            else:
+                assert self.session_factory is not None
+                async with self.session_factory() as session:
+                    result = await session.execute(query)
+                    count = result.scalar() or 0
 
             # Cache the result
             if self.cache:
@@ -361,8 +444,14 @@ class AuditLogger:
             severity: Alert severity
             alert_type: Specific alert type
         """
-        if not self.db_session:
-            return
+        if self.session_factory is None and self.db_session is None:
+            message = (
+                "Audit persistence unavailable: cannot generate a security "
+                "alert without a database session factory"
+            )
+            self.metrics["errors"] += 1
+            self.logger.error(message)
+            raise AuditPersistenceError(message)
 
         # Map audit event to alert type if not specified
         if not alert_type:
@@ -397,8 +486,14 @@ class AuditLogger:
             auto_remediate=severity == AlertSeverity.CRITICAL,
         )
 
-        self.db_session.add(alert)
-        await self.db_session.commit()
+        if self.session_factory is not None:
+            async with self.session_factory() as session:
+                session.add(alert)
+                await session.commit()
+        else:
+            assert self.db_session is not None
+            self.db_session.add(alert)
+            await self.db_session.commit()
 
         self.metrics["alerts_generated"] += 1
 
@@ -438,9 +533,6 @@ class AuditLogger:
         Returns:
             List of audit logs
         """
-        if not self.db_session:
-            return []
-
         from sqlalchemy import select
 
         query = select(AuditLog)
@@ -471,8 +563,16 @@ class AuditLogger:
         query = query.order_by(AuditLog.created_at.desc())
         query = query.limit(limit).offset(offset)
 
-        query_result = await self.db_session.execute(query)
-        return list(query_result.scalars().all())
+        if self.db_session:
+            query_result = await self.db_session.execute(query)
+            return list(query_result.scalars().all())
+
+        if self.session_factory:
+            async with self.session_factory() as session:
+                query_result = await session.execute(query)
+                return list(query_result.scalars().all())
+
+        return []
 
     async def generate_compliance_report(
         self, start_date: datetime, end_date: datetime, compliance_type: str = "gdpr"
