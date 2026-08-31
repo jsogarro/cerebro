@@ -84,6 +84,40 @@ class _StubJWTService:
         return self.payload
 
 
+class _SuccessfulDurableAuditLogger:
+    """In-memory durable audit double for clients that skip application lifespan."""
+
+    def __init__(self) -> None:
+        self.pending_events: list[dict[str, Any]] = []
+        self.persisted_events: list[dict[str, Any]] = []
+
+    async def log_event(self, **event: Any) -> str:
+        self.pending_events.append(event)
+        return f"test-audit-event-{len(self.pending_events)}"
+
+    async def flush_buffer(self) -> None:
+        self.persisted_events.extend(self.pending_events)
+        self.pending_events.clear()
+
+
+@contextmanager
+def _override_audit_logger(
+    app: FastAPI,
+) -> Iterator[_SuccessfulDurableAuditLogger]:
+    """Provide durable audit state while a test client bypasses lifespan."""
+    audit_logger = _SuccessfulDurableAuditLogger()
+    missing = object()
+    previous = getattr(app.state, "audit_logger", missing)
+    app.state.audit_logger = audit_logger
+    try:
+        yield audit_logger
+    finally:
+        if previous is missing:
+            delattr(app.state, "audit_logger")
+        else:
+            app.state.audit_logger = previous
+
+
 @contextmanager
 def _override_jwt_service(
     app: FastAPI, service_factory: Callable[[], Any]
@@ -105,11 +139,12 @@ def _production_app() -> FastAPI:
 @contextmanager
 def _client(app: FastAPI) -> Iterator[TestClient]:
     """Use the real ASGI stack without requiring external lifespan services."""
-    client = TestClient(app)
-    try:
-        yield client
-    finally:
-        client.close()
+    with _override_audit_logger(app):
+        client = TestClient(app)
+        try:
+            yield client
+        finally:
+            client.close()
 
 
 async def _fake_session() -> AsyncIterator[None]:
