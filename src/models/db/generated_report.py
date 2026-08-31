@@ -25,6 +25,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID  # noqa: N811
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.models.db.base import UUID as DBUUID
 from src.models.db.base import BaseModel
 
 
@@ -45,6 +46,12 @@ class GeneratedReport(BaseModel):
     )
     user_id: Mapped[UUID | None] = mapped_column(
         PostgresUUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    organization_id: Mapped[UUID] = mapped_column(
+        DBUUID(),
+        nullable=False,
+        index=True,
+        comment="Tenant organization boundary identifier",
     )
 
     # Report metadata
@@ -202,6 +209,7 @@ class GeneratedReport(BaseModel):
             "project_id": str(self.project_id) if self.project_id else None,
             "workflow_id": self.workflow_id,
             "user_id": str(self.user_id) if self.user_id else None,
+            "organization_id": str(self.organization_id),
             "title": self.title,
             "report_type": self.report_type,
             "query": self.query,
@@ -252,12 +260,14 @@ class GeneratedReport(BaseModel):
         report_data: dict[str, Any],
         user_id: UUID | None = None,
         project_id: UUID | None = None,
+        organization_id: UUID | None = None,
     ) -> GeneratedReport:
         """Create GeneratedReport from report data dictionary."""
         return cls(
             project_id=project_id,
             workflow_id=report_data.get("workflow_id"),
             user_id=user_id,
+            organization_id=organization_id,
             title=report_data.get("title", "Untitled Report"),
             report_type=report_data.get("type", "comprehensive"),
             query=report_data.get("query", ""),

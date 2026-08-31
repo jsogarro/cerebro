@@ -8,6 +8,7 @@ following functional programming principles with pure data operations.
 import hashlib
 import os
 import shutil
+import time
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -60,6 +61,9 @@ class ReportStorageService:
         outputs: dict[ReportFormatEnum, ReportOutput],
         user_id: UUID | None = None,
         project_id: UUID | None = None,
+        *,
+        organization_id: UUID | str,
+        existing_report_id: UUID | None = None,
     ) -> GeneratedReport:
         """
         Store a generated report with all its format outputs.
@@ -76,36 +80,67 @@ class ReportStorageService:
         try:
             logger.info(f"Storing report: {report.id}")
 
-            # Create report directory
-            report_dir = self._create_report_directory(report.id)
+            report_id = existing_report_id or UUID(report.id)
+            report_dir = self._create_report_directory(str(report_id))
 
-            # Create database record
-            db_report = await self._create_report_record(
-                report, user_id, project_id, report_dir
-            )
+            if existing_report_id is None:
+                db_report = await self._create_report_record(
+                    report,
+                    user_id,
+                    project_id,
+                    organization_id,
+                    report_dir,
+                )
+            else:
+                db_report = await self.report_repo.get_report_with_formats(
+                    report_id,
+                    organization_id=organization_id,
+                    user_id=user_id,
+                )
+                if db_report is None:
+                    raise ReportStorageError(
+                        f"Report {report_id} not found in the requested tenant"
+                    )
+                if db_report.generation_status not in {"pending", "generating"}:
+                    raise ReportStorageError(
+                        f"Report {report_id} is not pending generation"
+                    )
+
+                await self.report_repo.update_report(
+                    report_id,
+                    self._report_metadata(report, report_dir),
+                    organization_id=organization_id,
+                    user_id=user_id,
+                )
 
             # Store format files
             file_sizes = {}
             formats_generated = []
 
             for format_enum, output in outputs.items():
-                try:
-                    await self._store_format_file(
-                        db_report.id, format_enum, output, report_dir
-                    )
-                    file_sizes[format_enum.value] = (
-                        len(output.content)
-                        if isinstance(output.content, (str, bytes))
-                        else 0
-                    )
-                    formats_generated.append(format_enum.value)
-                except Exception as e:
-                    logger.error(f"Failed to store format {format_enum}: {e}")
-                    # Continue with other formats
+                await self._store_format_file(
+                    db_report.id,
+                    format_enum,
+                    output,
+                    report_dir,
+                    organization_id=organization_id,
+                    user_id=user_id,
+                )
+                file_sizes[format_enum.value] = (
+                    len(output.content)
+                    if isinstance(output.content, (str, bytes))
+                    else 0
+                )
+                formats_generated.append(format_enum.value)
 
             # Update report with completion details
             await self.report_repo.mark_report_completed(
-                db_report.id, formats_generated, file_sizes, storage_path=report_dir
+                db_report.id,
+                formats_generated,
+                file_sizes,
+                storage_path=report_dir,
+                organization_id=organization_id,
+                user_id=user_id,
             )
 
             logger.info(
@@ -128,6 +163,7 @@ class ReportStorageService:
         report: Report,
         user_id: UUID | None,
         project_id: UUID | None,
+        organization_id: UUID | str,
         storage_path: str,
     ) -> GeneratedReport:
         """Create database record for the report."""
@@ -137,9 +173,10 @@ class ReportStorageService:
             query=report.query,
             user_id=user_id,
             project_id=project_id,
+            organization_id=organization_id,
             workflow_id=report.metadata.workflow_id,
             domains=report.domains,
-            configuration=report.configuration.dict(),
+            configuration=report.configuration.model_dump(mode="json"),
             quality_score=report.metadata.quality_score,
             confidence_score=report.metadata.confidence_score,
             total_sources=report.metadata.total_sources,
@@ -155,12 +192,37 @@ class ReportStorageService:
             generation_time_seconds=report.metadata.generation_time_seconds,
         )
 
+    def _report_metadata(self, report: Report, storage_path: str) -> dict[str, Any]:
+        """Build fields copied from a generated report into its pending row."""
+        return {
+            "title": report.title,
+            "report_type": report.configuration.type.value,
+            "query": report.query,
+            "domains": report.domains,
+            "configuration": report.configuration.model_dump(mode="json"),
+            "quality_score": report.metadata.quality_score,
+            "confidence_score": report.metadata.confidence_score,
+            "total_sources": report.metadata.total_sources,
+            "total_citations": report.metadata.total_citations,
+            "word_count": report.metadata.word_count,
+            "page_count": report.metadata.page_count,
+            "agents_used": report.metadata.agents_used,
+            "storage_path": storage_path,
+            "executive_summary": report.executive_summary,
+            "content_preview": self._extract_content_preview(report),
+            "key_findings": self._extract_key_findings(report),
+            "generation_time_seconds": report.metadata.generation_time_seconds,
+        }
+
     async def _store_format_file(
         self,
         report_id: UUID,
         format_enum: ReportFormatEnum,
         output: ReportOutput,
         report_dir: str,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
     ) -> ReportFormat:
         """Store a single format file."""
         format_type = format_enum.value
@@ -191,7 +253,8 @@ class ReportStorageService:
         file_hash = hashlib.sha256(content_bytes).hexdigest()
 
         # Create database record
-        return await self.format_repo.create_format(
+        format_started = time.perf_counter()
+        format_record = await self.format_repo.create_format(
             report_id=report_id,
             format_type=format_type,
             mime_type=output.mime_type,
@@ -201,8 +264,13 @@ class ReportStorageService:
             encoding=output.encoding,
             file_size=len(content_bytes),
             file_hash=file_hash,
-            generation_time_ms=0,  # Would be populated if we tracked per-format timing
+            generation_time_ms=max(
+                1, round((time.perf_counter() - format_started) * 1000)
+            ),
+            organization_id=organization_id,
+            user_id=user_id,
         )
+        return format_record
 
     def _prepare_content_for_storage(self, content: Any, encoding: str) -> bytes:
         """Prepare content for file storage."""
@@ -267,12 +335,27 @@ class ReportStorageService:
 
         return findings
 
-    async def retrieve_report(self, report_id: UUID) -> GeneratedReport | None:
+    async def retrieve_report(
+        self,
+        report_id: UUID,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> GeneratedReport | None:
         """Retrieve a report with all format information."""
-        return await self.report_repo.get_report_with_formats(report_id)
+        return await self.report_repo.get_report_with_formats(
+            report_id,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
 
     async def retrieve_report_content(
-        self, report_id: UUID, format_type: str
+        self,
+        report_id: UUID,
+        format_type: str,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
     ) -> tuple[bytes, str] | None:
         """
         Retrieve content for a specific report format.
@@ -285,7 +368,10 @@ class ReportStorageService:
             Tuple of (content_bytes, mime_type) or None if not found
         """
         report_format = await self.format_repo.get_by_report_and_format(
-            report_id, format_type
+            report_id,
+            format_type,
+            organization_id=organization_id,
+            user_id=user_id,
         )
 
         if not report_format:
@@ -301,16 +387,36 @@ class ReportStorageService:
             return None
 
     async def list_user_reports(
-        self, user_id: UUID, limit: int = 50, status_filter: str | None = None
+        self,
+        user_id: UUID,
+        limit: int = 50,
+        status_filter: str | None = None,
+        *,
+        organization_id: UUID | str,
     ) -> list[GeneratedReport]:
         """List reports for a user."""
-        return await self.report_repo.get_by_user_id(user_id, limit, status_filter)
+        return await self.report_repo.get_by_user_id(
+            user_id,
+            limit,
+            status_filter,
+            organization_id=organization_id,
+        )
 
     async def list_project_reports(
-        self, project_id: UUID, limit: int | None = None
+        self,
+        project_id: UUID,
+        limit: int | None = None,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
     ) -> list[GeneratedReport]:
         """List reports for a project."""
-        return await self.report_repo.get_by_project_id(project_id, limit)
+        return await self.report_repo.get_by_project_id(
+            project_id,
+            limit,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
 
     async def search_reports(
         self,
@@ -319,6 +425,8 @@ class ReportStorageService:
         filters: dict[str, Any] | None = None,
         limit: int = 50,
         offset: int = 0,
+        *,
+        organization_id: UUID | str,
     ) -> tuple[list[GeneratedReport], int]:
         """Search reports with various filters."""
         filters = filters or {}
@@ -330,9 +438,18 @@ class ReportStorageService:
             min_quality_score=filters.get("min_quality_score"),
             limit=limit,
             offset=offset,
+            organization_id=organization_id,
         )
 
-    async def delete_report(self, report_id: UUID, delete_files: bool = True) -> bool:
+    async def delete_report(
+        self,
+        report_id: UUID,
+        delete_files: bool = True,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+        deleted_by: str | None = None,
+    ) -> bool:
         """
         Delete a report and optionally its files.
 
@@ -344,7 +461,11 @@ class ReportStorageService:
             True if deletion successful
         """
         try:
-            report = await self.report_repo.get(report_id)
+            report = await self.report_repo.get_report_with_formats(
+                report_id,
+                organization_id=organization_id,
+                user_id=user_id,
+            )
             if not report:
                 return False
 
@@ -358,22 +479,47 @@ class ReportStorageService:
                 logger.info(f"Deleted files for report {report_id}")
 
             # Delete database records (formats will be cascade deleted)
-            await self.report_repo.delete(report_id)
+            deleted = await self.report_repo.delete_report(
+                report_id,
+                organization_id=organization_id,
+                user_id=user_id,
+                deleted_by=deleted_by,
+            )
 
             logger.info(f"Deleted report {report_id}")
-            return True
+            return deleted
 
         except Exception as e:
             logger.error(f"Failed to delete report {report_id}: {e}")
             raise ReportStorageError(f"Deletion failed: {e}") from e
 
-    async def update_report_access(self, report_id: UUID) -> None:
+    async def update_report_access(
+        self,
+        report_id: UUID,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> None:
         """Update access statistics for a report."""
-        await self.report_repo.increment_access_count(report_id)
+        await self.report_repo.increment_access_count(
+            report_id,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
 
-    async def get_storage_statistics(self) -> dict[str, Any]:
+    async def get_storage_statistics(
+        self,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+        days: int = 30,
+    ) -> dict[str, Any]:
         """Get storage usage statistics."""
-        stats = await self.report_repo.get_report_statistics()
+        stats = await self.report_repo.get_report_statistics(
+            user_id=user_id,
+            days=days,
+            organization_id=organization_id,
+        )
 
         # Add file system statistics
         try:
@@ -416,7 +562,12 @@ class ReportStorageService:
         }
 
     async def cleanup_old_reports(
-        self, days_old: int = 90, keep_public: bool = True, dry_run: bool = True
+        self,
+        days_old: int = 90,
+        keep_public: bool = True,
+        dry_run: bool = True,
+        *,
+        organization_id: UUID | str,
     ) -> dict[str, Any]:
         """
         Clean up old reports and return statistics.
@@ -430,7 +581,10 @@ class ReportStorageService:
             Cleanup statistics
         """
         deleted_count, deleted_ids = await self.report_repo.cleanup_old_reports(
-            days_old, keep_public, dry_run
+            days_old,
+            keep_public,
+            dry_run,
+            organization_id=organization_id,
         )
 
         # Also cleanup orphaned format files
@@ -448,9 +602,19 @@ class ReportStorageService:
             "cleanup_date": datetime.now(UTC).isoformat(),
         }
 
-    async def verify_report_integrity(self, report_id: UUID) -> dict[str, Any]:
+    async def verify_report_integrity(
+        self,
+        report_id: UUID,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> dict[str, Any]:
         """Verify the integrity of a report and its files."""
-        report = await self.retrieve_report(report_id)
+        report = await self.retrieve_report(
+            report_id,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
         if not report:
             return {"status": "error", "message": "Report not found"}
 
@@ -477,7 +641,9 @@ class ReportStorageService:
                 # Verify hash if available
                 if format_obj.file_hash:
                     is_valid = await self.format_repo.verify_format_integrity(
-                        format_obj.id
+                        format_obj.id,
+                        organization_id=organization_id,
+                        user_id=user_id,
                     )
                     if is_valid:
                         integrity_results["formats_valid"] += 1

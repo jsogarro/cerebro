@@ -1,9 +1,37 @@
 """Validation tests for report API request models."""
 
-from unittest.mock import MagicMock, patch
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.middleware.tenant_context import TenantContext, get_tenant_context
+from src.models.db.generated_report import GeneratedReport
+from src.models.db.session import get_session
+
+AUTH_USER_ID = uuid4()
+AUTH_ORG_ID = uuid4()
+
+
+def _pending_report() -> MagicMock:
+    """Return the persisted row a valid generate request should expose."""
+    report = MagicMock(spec=GeneratedReport)
+    report.id = uuid4()
+    report.title = "Test Report"
+    report.query = "Test query"
+    report.report_type = "comprehensive"
+    report.generation_status = "pending"
+    report.formats = []
+    report.word_count = 0
+    report.page_count = 0
+    report.quality_score = 0.0
+    report.confidence_score = 0.0
+    report.created_at = datetime.now()
+    report.generation_time_seconds = None
+    return report
 
 
 class TestReportsAPIValidation:
@@ -14,7 +42,23 @@ class TestReportsAPIValidation:
         """Create test client."""
         from src.api.main import app
 
-        return TestClient(app)
+        session = AsyncMock(spec=AsyncSession)
+
+        async def override_session():
+            yield session
+
+        async def override_tenant_context() -> TenantContext:
+            return TenantContext(
+                user_id=str(AUTH_USER_ID), organization_id=str(AUTH_ORG_ID)
+            )
+
+        app.dependency_overrides[get_session] = override_session
+        app.dependency_overrides[get_tenant_context] = override_tenant_context
+        try:
+            yield TestClient(app)
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+            app.dependency_overrides.pop(get_tenant_context, None)
 
     def test_validation_errors(self, client: TestClient) -> None:
         """Test request validation errors."""
@@ -47,14 +91,23 @@ class TestReportsAPIValidation:
         }
 
         with patch("src.api.routes.reports.get_report_services") as mock_services:
+            mock_repo = MagicMock()
+            mock_repo.create_report = AsyncMock(return_value=_pending_report())
+            mock_repo.get_report_with_formats = AsyncMock(
+                return_value=mock_repo.create_report.return_value
+            )
             mock_services.return_value = (
                 MagicMock(),
                 MagicMock(),
-                MagicMock(),
+                mock_repo,
                 MagicMock(),
             )
 
-            response = client.post("/api/v1/reports/generate", json=request_data)
+            with patch(
+                "src.api.routes.reports._generate_report_task",
+                new=AsyncMock(),
+            ):
+                response = client.post("/api/v1/reports/generate", json=request_data)
 
             assert response.status_code == 202
 
@@ -68,14 +121,23 @@ class TestReportsAPIValidation:
         }
 
         with patch("src.api.routes.reports.get_report_services") as mock_services:
+            mock_repo = MagicMock()
+            mock_repo.create_report = AsyncMock(return_value=_pending_report())
+            mock_repo.get_report_with_formats = AsyncMock(
+                return_value=mock_repo.create_report.return_value
+            )
             mock_services.return_value = (
                 MagicMock(),
                 MagicMock(),
-                MagicMock(),
+                mock_repo,
                 MagicMock(),
             )
 
-            response = client.post("/api/v1/reports/generate", json=request_data)
+            with patch(
+                "src.api.routes.reports._generate_report_task",
+                new=AsyncMock(),
+            ):
+                response = client.post("/api/v1/reports/generate", json=request_data)
 
             assert response.status_code == 202
 
@@ -88,13 +150,22 @@ class TestReportsAPIValidation:
         }
 
         with patch("src.api.routes.reports.get_report_services") as mock_services:
+            mock_repo = MagicMock()
+            mock_repo.create_report = AsyncMock(return_value=_pending_report())
+            mock_repo.get_report_with_formats = AsyncMock(
+                return_value=mock_repo.create_report.return_value
+            )
             mock_services.return_value = (
                 MagicMock(),
                 MagicMock(),
-                MagicMock(),
+                mock_repo,
                 MagicMock(),
             )
 
-            response = client.post("/api/v1/reports/generate", json=request_data)
+            with patch(
+                "src.api.routes.reports._generate_report_task",
+                new=AsyncMock(),
+            ):
+                response = client.post("/api/v1/reports/generate", json=request_data)
 
             assert response.status_code == 202
