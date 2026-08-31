@@ -3,13 +3,32 @@ Tests for supervisor coordination, orchestration, and real-time endpoints.
 """
 
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.auth.models import TokenPayload
+from src.middleware.auth_middleware import get_jwt_service
 from src.models.supervisor_api_models import SupervisionStrategy
+
+
+class _TestJWTService:
+    """Return a valid identity for handler tests after the WS boundary."""
+
+    async def validate_token(self, token: str) -> TokenPayload:
+        assert token == "test-token"
+        now = datetime.now(UTC)
+        return TokenPayload(
+            sub="test-user",
+            email="test@example.com",
+            organization_id="test-org",
+            jti="test-jti",
+            iat=now,
+            exp=now + timedelta(minutes=5),
+        )
 
 
 @pytest.fixture
@@ -22,6 +41,7 @@ def app() -> FastAPI:
     app.dependency_overrides[
         supervisor_api.get_application_supervisor_coordination_service
     ] = lambda: supervisor_api.supervisor_service
+    app.dependency_overrides[get_jwt_service] = _TestJWTService
     return app
 
 
@@ -317,7 +337,7 @@ class TestWebSocketEndpoints:
         with (
             TestClient(app) as client,
             client.websocket_connect(
-                "/api/v1/supervisors/research/ws?client_id=test-client"
+                "/api/v1/supervisors/research/ws?client_id=test-client&token=test-token"
             ) as websocket,
         ):
             data = websocket.receive_json()
@@ -333,7 +353,7 @@ class TestWebSocketEndpoints:
         with (
             TestClient(app) as client,
             client.websocket_connect(
-                "/api/v1/supervisors/coordination/ws?coordination_id=test-coord"
+                "/api/v1/supervisors/coordination/ws?coordination_id=test-coord&token=test-token"
             ) as websocket,
         ):
             data = websocket.receive_json()

@@ -25,6 +25,7 @@ from structlog import get_logger
 
 from src.api.services.talkhier_session_manager import TalkHierSessionManager
 from src.api.services.talkhier_session_service import TalkHierSessionService
+from src.api.websocket.auth import require_authenticated_websocket
 from src.api.websocket.connection_manager import ConnectionManager
 from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
 from src.core.pii_redactor import redact_pii
@@ -626,7 +627,10 @@ async def get_protocol_analytics(
 # ================================
 
 
-@router.websocket("/sessions/{session_id}/live")
+@router.websocket(
+    "/sessions/{session_id}/live",
+    dependencies=[Depends(require_authenticated_websocket)],
+)
 async def websocket_session_updates(websocket: WebSocket, session_id: str) -> None:
     """
     WebSocket endpoint for real-time session updates
@@ -706,7 +710,10 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
             await connection_manager.disconnect(connection_id)
 
 
-@router.websocket("/interactive")
+@router.websocket(
+    "/interactive",
+    dependencies=[Depends(require_authenticated_websocket)],
+)
 async def websocket_interactive_session(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for interactive TalkHier dialogue
@@ -806,7 +813,10 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
             await connection_manager.disconnect(connection_id)
 
 
-@router.websocket("/coordination")
+@router.websocket(
+    "/coordination",
+    dependencies=[Depends(require_authenticated_websocket)],
+)
 async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for multi-session coordination monitoring

@@ -492,32 +492,28 @@ class TestTalkHierAPIIntegration:
 
     @pytest.fixture
     def client(self) -> Iterator[TestClient]:
-        """Create test client"""
+        """Create a real ASGI client without persistence-dependent lifespan."""
         from src.api.main import app
 
-        with TestClient(app) as client:
+        client = TestClient(app)
+        try:
             yield client
+        finally:
+            client.close()
 
     def test_list_protocols(self, client: TestClient) -> None:
-        """Test protocol listing endpoint"""
+        """Unauthenticated protocol listing is rejected at the app boundary."""
         response = client.get("/api/v1/talkhier/protocols")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert "protocols" in data
-        assert "default_protocol" in data
-        assert "recommended_protocols" in data
-        assert len(data["protocols"]) >= 5
+        assert response.status_code == 401
+        assert response.json()["error"]["message"] == "Authentication required"
 
     def test_health_check(self, client: TestClient) -> None:
-        """Test health check endpoint"""
+        """TalkHier health is protected because only global probes are public."""
         response = client.get("/api/v1/talkhier/health")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] in ["healthy", "unhealthy"]
-        assert data["service"] == "TalkHier Protocol API"
-        assert "timestamp" in data
+        assert response.status_code == 401
+        assert response.json()["error"]["message"] == "Authentication required"
 
 
 @pytest.mark.asyncio

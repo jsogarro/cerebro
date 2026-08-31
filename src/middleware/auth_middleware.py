@@ -4,18 +4,23 @@ Authentication middleware for request authentication and authorization.
 Provides JWT validation, user context injection, and permission checking.
 """
 
-from collections.abc import Callable
-from typing import Any
+import inspect
+from collections.abc import Awaitable, Callable
+from typing import Any, Final, cast
 
 import redis.asyncio as redis
 import structlog
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import HTTPConnection
 from starlette.responses import Response
 
-from src.auth.jwt_service import JWTService
+from src.api.middleware.error_envelope import build_error_payload
+from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
 from src.auth.models import TokenPayload
 from src.core.config import settings
 from src.models.db.session import get_session
@@ -26,6 +31,91 @@ logger = structlog.get_logger(__name__)
 
 # Security scheme
 security = HTTPBearer(auto_error=False)
+
+
+class AuthenticationServiceUnavailableError(RuntimeError):
+    """Raised when the service needed to validate a credential is unavailable."""
+
+
+# Preserve the existing import name for callers that use this compatibility
+# exception directly.
+AuthenticationServiceUnavailable = AuthenticationServiceUnavailableError
+
+
+# This is deliberately a method-and-path allowlist. Prefixes and wildcard
+# exclusions make newly mounted routes public by accident, so they are not
+# supported by the boundary.
+PUBLIC_ROUTE_ALLOWLIST: Final[dict[tuple[str, str], str]] = {
+    ("GET", "/health"): "liveness and process health probe",
+    ("GET", "/live"): "liveness probe",
+    ("GET", "/ready"): "readiness probe",
+    ("GET", "/ws/health"): "WebSocket service health probe",
+    ("POST", "/api/v1/auth/login"): "authentication bootstrap",
+    ("POST", "/api/v1/auth/register"): "authentication bootstrap",
+    ("POST", "/api/v1/auth/forgot-password"): "password recovery bootstrap",
+    ("POST", "/api/v1/auth/reset-password"): "password recovery bootstrap",
+    ("GET", "/api/v1/auth/verify-email"): "email verification bootstrap",
+}
+
+
+def _set_request_identity(request: Request, token_payload: TokenPayload) -> None:
+    """Expose the validated identity to audit, rate-limit, and tenant code."""
+    request.state.user = token_payload.sub
+    request.state.user_id = token_payload.sub
+    request.state.token_payload = token_payload
+    request.state.organization_id = token_payload.organization_id
+
+
+def _authentication_response(
+    status_code: int,
+    message: str,
+) -> JSONResponse:
+    """Build an auth response without invoking route validation or handlers."""
+    headers = {"WWW-Authenticate": "Bearer"} if status_code == 401 else None
+    code = (
+        "AUTHENTICATION_REQUIRED"
+        if status_code == 401
+        else "AUTHENTICATION_SERVICE_UNAVAILABLE"
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content=build_error_payload(code=code, message=message),
+        headers=headers,
+    )
+
+
+def _extract_bearer_token(request: Request) -> str | None:
+    """Return a bearer token only for an explicitly bearer authorization header."""
+    header = request.headers.get("authorization")
+    if not header:
+        return None
+
+    scheme, separator, token = header.partition(" ")
+    if not separator or scheme.lower() != "bearer" or not token:
+        return None
+    return token
+
+
+async def resolve_jwt_service(connection: HTTPConnection) -> JWTService:
+    """Resolve JWT validation while honoring FastAPI test overrides."""
+    dependency_overrides = getattr(connection.app, "dependency_overrides", {})
+    service_factory: Callable[..., Any] = dependency_overrides.get(
+        get_jwt_service, get_jwt_service
+    )
+
+    try:
+        service = service_factory()
+        if inspect.isawaitable(service):
+            service = await service
+    except Exception as exc:
+        logger.error("Authentication service unavailable", error=str(exc))
+        raise AuthenticationServiceUnavailableError from exc
+
+    if service is None or not callable(getattr(service, "validate_token", None)):
+        logger.error("Authentication service has no token validator")
+        raise AuthenticationServiceUnavailableError
+
+    return cast(JWTService, service)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -39,25 +129,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         Initialize authentication middleware.
 
-        Args:
-            app: FastAPI application
-            exclude_paths: Paths to exclude from authentication
+        ``exclude_paths`` is retained only for constructor compatibility. The
+        boundary intentionally ignores it: public access is defined by the
+        exact :data:`PUBLIC_ROUTE_ALLOWLIST` above.
         """
         super().__init__(app)
-        self.exclude_paths = exclude_paths or [
-            "/health",
-            "/ready",
-            "/docs",
-            "/openapi.json",
-            "/auth/login",
-            "/auth/register",
-            "/auth/forgot-password",
-            "/auth/reset-password",
-            "/auth/verify-email",
-        ]
+        self.exclude_paths = exclude_paths
 
     async def dispatch(
-        self, request: Request, call_next: Callable[..., Any]
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         """
         Process request with authentication.
@@ -69,16 +149,36 @@ class AuthMiddleware(BaseHTTPMiddleware):
         Returns:
             Response from endpoint
         """
-        # NOTE: This middleware no longer performs JWT validation directly.
-        # JWT validation happens via the get_current_token dependency in endpoints.
-        # This allows test fixtures to override the JWT service via dependency_overrides.
-        # The middleware just ensures request.state attributes are initialized.
-
-        # Initialize request state (endpoints may set these via dependencies)
+        # Initialize state for both public and protected requests. Protected
+        # requests replace these values only after a successful JWT validation.
         request.state.user = None
+        request.state.user_id = None
         request.state.token_payload = None
         request.state.organization_id = None
 
+        route_signature = (request.method.upper(), request.url.path)
+        if route_signature in PUBLIC_ROUTE_ALLOWLIST:
+            return await call_next(request)
+
+        token = _extract_bearer_token(request)
+        if token is None:
+            return _authentication_response(401, "Authentication required")
+
+        try:
+            jwt_service = await resolve_jwt_service(request)
+            token_payload = await jwt_service.validate_token(token)
+        except (
+            AuthenticationServiceUnavailableError,
+            JWTServiceUnavailableError,
+        ):
+            return _authentication_response(503, "Authentication service unavailable")
+        except JWTError:
+            return _authentication_response(401, "Invalid authentication token")
+        except Exception as exc:
+            logger.error("Authentication validation unavailable", error=str(exc))
+            return _authentication_response(503, "Authentication service unavailable")
+
+        _set_request_identity(request, token_payload)
         response: Response = await call_next(request)
         return response
 
@@ -89,15 +189,20 @@ async def get_jwt_service() -> JWTService:
 
     This is a dependency that can be overridden in tests.
     """
-    redis_client = await redis.from_url(settings.REDIS_URL)
-    return JWTService(
-        redis_client=redis_client,
-        private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-        public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-    )
+    try:
+        redis_client = await redis.from_url(settings.REDIS_URL)
+        return JWTService(
+            redis_client=redis_client,
+            private_key_path=settings.JWT_PRIVATE_KEY_PATH,
+            public_key_path=settings.JWT_PUBLIC_KEY_PATH,
+        )
+    except Exception as exc:
+        logger.error("Authentication service initialization failed", error=str(exc))
+        raise AuthenticationServiceUnavailableError from exc
 
 
 async def get_current_token(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> TokenPayload:
@@ -114,6 +219,10 @@ async def get_current_token(
     Raises:
         HTTPException: If token is invalid or missing
     """
+    cached_payload = getattr(request.state, "token_payload", None)
+    if isinstance(cached_payload, TokenPayload):
+        return cached_payload
+
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -126,15 +235,29 @@ async def get_current_token(
     try:
         # Validate token using injected JWT service
         token_payload = await jwt_service.validate_token(token)
-        return token_payload
 
-    except Exception as e:
+    except JWTError as e:
         logger.warning("Token validation failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from e
+    except JWTServiceUnavailableError as e:
+        logger.error("Authentication service unavailable", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable",
+        ) from e
+    except Exception as e:
+        logger.error("Authentication service unavailable", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable",
+        ) from e
+
+    _set_request_identity(request, token_payload)
+    return token_payload
 
 
 async def get_current_user(

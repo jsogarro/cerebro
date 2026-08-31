@@ -9,7 +9,7 @@ import pytest
 import redis.asyncio as redis
 from jose import JWTError, jwt
 
-from src.auth.jwt_service import JWTService
+from src.auth.jwt_service import JWTService, JWTServiceUnavailable
 from src.auth.models import TokenPair, TokenPayload
 
 
@@ -189,6 +189,19 @@ class TestJWTService:
 
         # Try to validate blacklisted token
         with pytest.raises(JWTError, match="Token has been revoked"):
+            await jwt_service.validate_token(token_pair.access_token)
+
+    @pytest.mark.asyncio
+    async def test_validate_token_fails_closed_when_blacklist_store_is_unavailable(
+        self, jwt_service, redis_mock
+    ):
+        """Token validation must not admit a token when Redis cannot be checked."""
+        token_pair = await jwt_service.generate_token_pair(
+            user_id="test-user-123", email="test@example.com"
+        )
+        redis_mock.exists.side_effect = ConnectionError("redis unavailable")
+
+        with pytest.raises(JWTServiceUnavailable):
             await jwt_service.validate_token(token_pair.access_token)
 
     @pytest.mark.asyncio
