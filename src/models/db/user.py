@@ -78,41 +78,13 @@ class User(BaseModel):
 
     api_rate_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Relationships removed: user_id is now a plain string, not a FK
-
-    api_keys = relationship(
-        "APIKey", back_populates="user", lazy="dynamic", cascade="all, delete-orphan"
-    )
-
     # Authentication relationships
-    password_history = relationship(
-        "PasswordHistory",
-        back_populates="user",
-        lazy="dynamic",
-        cascade="all, delete-orphan",
-        order_by="desc(PasswordHistory.created_at)",
-    )
-
-    sessions = relationship(
-        "UserSession",
-        back_populates="user",
-        lazy="dynamic",
-        cascade="all, delete-orphan",
-    )
-
     audit_logs = relationship("AuditLog", back_populates="user", lazy="dynamic")
 
     oauth_accounts = relationship(
         "OAuthAccount",
         back_populates="user",
         lazy="dynamic",
-        cascade="all, delete-orphan",
-    )
-
-    mfa_settings = relationship(
-        "MFASettings",
-        back_populates="user",
-        uselist=False,
         cascade="all, delete-orphan",
     )
 
@@ -247,9 +219,9 @@ class User(BaseModel):
             "username": self.username,
             "full_name": self.full_name,
             "organization": self.organization,
-            "organization_id": str(self.organization_id)
-            if self.organization_id
-            else None,
+            "organization_id": (
+                str(self.organization_id) if self.organization_id else None
+            ),
             "role": self.role,
             "is_active": self.is_active,
             "is_verified": self.is_verified,
