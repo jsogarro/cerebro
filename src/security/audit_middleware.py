@@ -42,13 +42,13 @@ class AuditTrailMiddleware:
         return audit_logger
 
     @staticmethod
-    def _event_type(request: Request, status_code: int) -> AuditEventType:
+    def _event_type(request: Request, status_code: int | None) -> AuditEventType:
         """Map the request to an existing audit event type."""
         path = request.url.path.rstrip("/")
         if path.endswith("/auth/login"):
             return (
                 AuditEventType.LOGIN_SUCCESS
-                if status_code < 400
+                if status_code is None or status_code < 400
                 else AuditEventType.LOGIN_FAILED
             )
         if path.endswith("/auth/logout"):
@@ -76,20 +76,32 @@ class AuditTrailMiddleware:
         self,
         audit_logger: AuditLogger,
         request: Request,
-        status_code: int,
+        *,
+        phase: str,
+        status_code: int | None = None,
     ) -> None:
-        """Record and durably flush one request event."""
+        """Record and durably flush one request lifecycle event."""
+        metadata: dict[str, Any] = {
+            "method": request.method,
+            "path": request.url.path,
+            "phase": phase,
+        }
+        if status_code is not None:
+            metadata["status_code"] = status_code
+
         await audit_logger.log_event(
             event_type=self._event_type(request, status_code),
             action=f"{request.method} {request.url.path}",
             request=request,
-            result="success" if status_code < 400 else "failure",
-            severity=self._severity(status_code),
-            metadata={
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": status_code,
-            },
+            result=("admitted" if phase == "admission" else "success")
+            if status_code is None or status_code < 400
+            else "failure",
+            severity=(
+                AuditSeverity.INFO
+                if status_code is None
+                else self._severity(status_code)
+            ),
+            metadata=metadata,
         )
         await audit_logger.flush_buffer()
 
@@ -111,26 +123,41 @@ class AuditTrailMiddleware:
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         """Audit the response while preserving the endpoint's own behavior."""
-        response = await call_next(request)
-
         if request.url.path in _UNAUDITED_PATHS:
-            return response
+            return await call_next(request)
 
         audit_logger = self._logger_for(request)
         if audit_logger is None:
             # A request made before lifespan startup (for example, a direct
-            # ASGI test client) has no logger. Do not pretend it was audited;
-            # make the missing control observable to that caller instead.
-            response.headers["X-Audit-Status"] = "unavailable"
+            # ASGI test client) has no logger. Do not admit it without a
+            # durable audit record.
             logger.error(
                 "audit_logger_unavailable",
                 path=request.url.path,
                 method=request.method,
             )
-            return response
+            return self._audit_failure_response()
 
         try:
-            await self._record(audit_logger, request, response.status_code)
+            await self._record(audit_logger, request, phase="admission")
+        except Exception as exc:
+            logger.error(
+                "audit_admission_persistence_failed",
+                path=request.url.path,
+                method=request.method,
+                error=type(exc).__name__,
+            )
+            return self._audit_failure_response()
+
+        response = await call_next(request)
+
+        try:
+            await self._record(
+                audit_logger,
+                request,
+                phase="outcome",
+                status_code=response.status_code,
+            )
         except Exception as exc:
             logger.error(
                 "audit_event_persistence_failed",

@@ -75,15 +75,26 @@ async def test_real_app_request_has_security_headers_and_persists_audit_row() ->
 
     audit_rows = [row for row in session_factory.rows if isinstance(row, AuditLog)]
     alert_rows = [row for row in session_factory.rows if isinstance(row, SecurityAlert)]
-    assert len(audit_rows) == 1
+    assert len(audit_rows) == 2
     assert len(alert_rows) == 1
-    row = audit_rows[0]
-    assert row.event_type is AuditEventType.UNAUTHORIZED_ACCESS
-    assert row.action == "GET /this-route-does-not-exist"
-    assert row.request_id == "request-123"
-    assert row.event_metadata == {
+    admission, outcome = audit_rows
+    assert admission.event_type is AuditEventType.DATA_ACCESSED
+    assert admission.action == "GET /this-route-does-not-exist"
+    assert admission.result == "admitted"
+    assert admission.request_id == "request-123"
+    assert admission.event_metadata == {
         "method": "GET",
         "path": "/this-route-does-not-exist",
+        "phase": "admission",
+    }
+    assert outcome.event_type is AuditEventType.UNAUTHORIZED_ACCESS
+    assert outcome.action == "GET /this-route-does-not-exist"
+    assert outcome.result == "failure"
+    assert outcome.request_id == "request-123"
+    assert outcome.event_metadata == {
+        "method": "GET",
+        "path": "/this-route-does-not-exist",
+        "phase": "outcome",
         "status_code": 401,
     }
 
