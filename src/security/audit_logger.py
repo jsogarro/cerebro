@@ -10,8 +10,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from typing import Any
+from uuid import UUID
 
 import structlog
 from fastapi import Request
@@ -24,6 +27,21 @@ from src.services.cache.cache_manager import CacheManager
 
 class AuditPersistenceError(RuntimeError):
     """Raised when a buffered audit event cannot reach durable storage."""
+
+
+def _json_safe_value(value: Any) -> Any:
+    """Convert nested audit evidence into values accepted by PostgreSQL JSON."""
+    if isinstance(value, Enum):
+        return _json_safe_value(value.value)
+    if isinstance(value, (datetime, UUID)):
+        return value.isoformat() if isinstance(value, datetime) else str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe_value(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
 
 
 class AuditLogger:
@@ -308,7 +326,7 @@ class AuditLogger:
         """Map the public metadata argument to the ORM attribute name."""
         entry = dict(log_entry)
         if "metadata" in entry:
-            entry["event_metadata"] = entry.pop("metadata")
+            entry["event_metadata"] = _json_safe_value(entry.pop("metadata"))
         return entry
 
     async def _periodic_flush(self) -> None:
@@ -482,7 +500,7 @@ class AuditLogger:
             severity=severity,
             user_id=log_entry.get("user_id"),
             ip_address=log_entry.get("ip_address"),
-            evidence={"audit_log": log_entry},
+            evidence={"audit_log": _json_safe_value(log_entry)},
             auto_remediate=severity == AlertSeverity.CRITICAL,
         )
 
