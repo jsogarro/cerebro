@@ -27,9 +27,9 @@ WS_BASE_URL = "ws://localhost:8000"
 VALID_PASSWORD = "Xy9!zAbCdEfG"
 
 
-async def create_authenticated_user() -> tuple[str, str]:
+async def create_authenticated_user() -> tuple[str, str, str]:
     """
-    Helper to create and authenticate a user, returning (email, access_token).
+    Helper to create and authenticate a user, returning (email, access_token, user_id).
     """
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
         email = f"wsuser_{uuid.uuid4().hex[:8]}@example.com"
@@ -48,7 +48,8 @@ async def create_authenticated_user() -> tuple[str, str]:
         )
         register_data = register_response.json()
         access_token = register_data["tokens"]["access_token"]
-        return email, access_token
+        user_id = register_data["user"]["id"]
+        return email, access_token, user_id
 
 
 @pytest.mark.asyncio
@@ -61,7 +62,7 @@ class TestWebSocketE2E:
 
         Server accepts WS, authenticates token, sends welcome message.
         """
-        _email, access_token = await create_authenticated_user()
+        _email, access_token, _user_id = await create_authenticated_user()
 
         async with (
             httpx.AsyncClient() as http_client,
@@ -135,7 +136,7 @@ class TestWebSocketE2E:
 
         Both connections should succeed.
         """
-        _email, access_token = await create_authenticated_user()
+        _email, access_token, _user_id = await create_authenticated_user()
 
         # First connection
         async with (
@@ -163,9 +164,6 @@ class TestWebSocketE2E:
             await ws.send_json({"type": "heartbeat"})
             await ws.close()
 
-    @pytest.mark.skip(
-        reason="Skip: needs tenant-claim fix from parallel PR - project creation will fail with 500"
-    )
     async def test_websocket_project_progress_subscription(self):
         """
         Subscribe to project-specific progress updates via /ws/projects/{project_id}.
@@ -173,11 +171,8 @@ class TestWebSocketE2E:
         1. Create a research project via API
         2. Connect to project WebSocket endpoint
         3. Verify connection and ability to receive progress events
-
-        SKIPPED: Current codebase has a tenant-claim bug that causes project
-        creation to return 500. This test should be enabled once the fix lands.
         """
-        _email, access_token = await create_authenticated_user()
+        _email, access_token, user_id = await create_authenticated_user()
 
         # Create a project
         async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
@@ -186,7 +181,11 @@ class TestWebSocketE2E:
                 headers={"Authorization": f"Bearer {access_token}"},
                 json={
                     "title": f"WS Test Project {uuid.uuid4().hex[:6]}",
-                    "description": "Project to test WebSocket progress events",
+                    "user_id": user_id,
+                    "query": {
+                        "text": "Project to test WebSocket progress events",
+                        "domains": ["research"],
+                    },
                 },
             )
             assert project_response.status_code == 201, (
@@ -222,7 +221,7 @@ class TestWebSocketE2E:
 
         No exceptions should be raised during normal close flow.
         """
-        _email, access_token = await create_authenticated_user()
+        _email, access_token, _user_id = await create_authenticated_user()
 
         async with (
             httpx.AsyncClient() as http_client,
@@ -264,7 +263,7 @@ class TestWebSocketE2E:
 
         Send a subscription request and verify the server acknowledges it.
         """
-        _email, access_token = await create_authenticated_user()
+        _email, access_token, _user_id = await create_authenticated_user()
 
         async with (
             httpx.AsyncClient() as http_client,
