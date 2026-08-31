@@ -329,13 +329,14 @@ async def generate_report(
             generation_status="pending",
             created_by=str(authenticated_user_id),
         )
-        db_report = await report_repo.get_report_with_formats(
+        reloaded_report = await report_repo.get_report_with_formats(
             db_report.id,
             organization_id=organization_id,
             user_id=authenticated_user_id,
         )
-        if db_report is None:
+        if reloaded_report is None:
             raise RuntimeError("Persisted report could not be reloaded")
+        db_report = reloaded_report
 
         # Add background task for generation
         background_tasks.add_task(
