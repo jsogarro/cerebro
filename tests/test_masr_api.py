@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,7 +13,30 @@ from fastapi.testclient import TestClient
 from src.ai_brain.router.masr import MASRouter
 from src.api.routes.masr_api import get_masr_routing_service, router
 from src.api.services.masr_routing_service import MASRRoutingService
+from src.auth.models import TokenPayload
+from src.middleware.auth_middleware import get_jwt_service
 from src.models.masr_api_models import RoutingDecisionResponse
+
+AUTH_USER_ID = "user-1"
+AUTH_ORG_ID = "11111111-1111-1111-1111-111111111111"
+AUTH_TOKEN = "test-token"
+
+
+class _TestJWTService:
+    """Return the fixture tenant identity at the application auth boundary."""
+
+    async def validate_token(self, token: str) -> TokenPayload:
+        """Validate the deterministic test bearer token."""
+        assert token == AUTH_TOKEN
+        now = datetime.now(UTC)
+        return TokenPayload(
+            sub=AUTH_USER_ID,
+            email="test@example.com",
+            organization_id=AUTH_ORG_ID,
+            jti="test-jti",
+            iat=now,
+            exp=now + timedelta(minutes=5),
+        )
 
 
 @pytest.fixture
@@ -25,12 +49,14 @@ def client(routing_service: MASRRoutingService) -> Iterator[TestClient]:
     from src.api.main import app
 
     app.dependency_overrides[get_masr_routing_service] = lambda: routing_service
+    app.dependency_overrides[get_jwt_service] = _TestJWTService
     try:
         # Deliberately do not enter lifespan: the dependency override supplies
         # the service, while the real app supplies the canonical handlers.
-        yield TestClient(app)
+        yield TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
     finally:
         app.dependency_overrides.pop(get_masr_routing_service, None)
+        app.dependency_overrides.pop(get_jwt_service, None)
 
 
 def _decision() -> RoutingDecisionResponse:
