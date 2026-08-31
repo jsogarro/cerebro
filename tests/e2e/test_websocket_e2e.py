@@ -97,27 +97,29 @@ class TestWebSocketE2E:
         `ENVIRONMENT` is not an authorization control, so selecting the dev
         environment must not silently bypass authentication.
 
-        The server always accepts the WS handshake before evaluating auth
-        (src/api/routes/websocket.py) so it can return a proper close code
-        instead of an HTTP-level rejection. With the opt-in unset (as in
-        this suite's environment), the connection is accepted and then
-        closed with code 1008 ("Authentication token required").
+        The fail-closed boundary may reject the handshake at HTTP level or
+        accept it and close with code 1008 ("Authentication token required").
+        Neither path may reach the WebSocket handler.
         """
         # httpx_ws/anyio run the connection in a TaskGroup, so the
         # WebSocketDisconnect raised by receive_json() surfaces wrapped in a
         # BaseExceptionGroup rather than directly — catch it with `except*`.
         disconnect: WebSocketDisconnect | None = None
         try:
-            async with (
-                httpx.AsyncClient() as http_client,
-                aconnect_ws(
-                    f"{WS_BASE_URL}/ws",
-                    http_client,
-                ) as ws,
-            ):
-                await ws.receive_json()
-        except* WebSocketDisconnect as eg:
-            disconnect = eg.exceptions[0]
+            try:
+                async with (
+                    httpx.AsyncClient() as http_client,
+                    aconnect_ws(
+                        f"{WS_BASE_URL}/ws",
+                        http_client,
+                    ) as ws,
+                ):
+                    await ws.receive_json()
+            except* WebSocketDisconnect as eg:
+                disconnect = eg.exceptions[0]
+        except WebSocketUpgradeError as error:
+            assert error.response.status_code in {401, 403}
+            return
 
         assert disconnect is not None, (
             "Expected the server to accept then close the connection with "
