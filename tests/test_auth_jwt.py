@@ -293,6 +293,18 @@ class TestJWTService:
         redis_mock.setex.assert_called()
 
     @pytest.mark.asyncio
+    async def test_revoke_token_fails_without_blacklist_store(self):
+        """Revocation must fail when no blacklist store is configured."""
+        service = JWTService(redis_client=None)
+        token_pair = await service.generate_token_pair(
+            user_id="test-user-123", email="test@example.com"
+        )
+
+        success = await service.revoke_token(token_pair.access_token)
+
+        assert success is False
+
+    @pytest.mark.asyncio
     async def test_revoke_all_user_tokens(self, jwt_service, redis_mock):
         """Test revoking all user tokens."""
         # Mock Redis scan to return some keys

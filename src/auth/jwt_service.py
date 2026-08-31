@@ -484,6 +484,9 @@ class JWTService:
             if not jti:
                 return False
 
+            if self.redis_client is None:
+                return False
+
             # Add to blacklist
             if self.redis_client:
                 # Calculate remaining TTL
