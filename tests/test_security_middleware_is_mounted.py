@@ -9,13 +9,14 @@ import pytest
 from httpx import ASGITransport
 
 from src.models.db.audit_log import AuditEventType, AuditLog
+from src.models.db.security_alert import SecurityAlert
 from src.security.audit_logger import AuditLogger
 
 
 class _RecordingSession:
     """Async-session fake used to observe rows created by a real request."""
 
-    def __init__(self, rows: list[AuditLog]) -> None:
+    def __init__(self, rows: list[AuditLog | SecurityAlert]) -> None:
         self.rows = rows
 
     async def __aenter__(self) -> _RecordingSession:
@@ -24,7 +25,7 @@ class _RecordingSession:
     async def __aexit__(self, *_args: Any) -> None:
         return None
 
-    def add(self, row: AuditLog) -> None:
+    def add(self, row: AuditLog | SecurityAlert) -> None:
         self.rows.append(row)
 
     async def commit(self) -> None:
@@ -35,7 +36,7 @@ class _RecordingSessionFactory:
     """Callable session factory with in-memory committed rows."""
 
     def __init__(self) -> None:
-        self.rows: list[AuditLog] = []
+        self.rows: list[AuditLog | SecurityAlert] = []
 
     def __call__(self) -> _RecordingSession:
         return _RecordingSession(self.rows)
@@ -43,7 +44,7 @@ class _RecordingSessionFactory:
 
 @pytest.mark.asyncio
 async def test_real_app_request_has_security_headers_and_persists_audit_row() -> None:
-    """The app entrypoint must reach both controls on an HTTP error response."""
+    """The app entrypoint must reach both controls on an auth failure."""
     from src.api.main import app
 
     session_factory = _RecordingSessionFactory()
@@ -66,21 +67,24 @@ async def test_real_app_request_has_security_headers_and_persists_audit_row() ->
         else:
             app.state.audit_logger = previous
 
-    assert response.status_code == 404
+    assert response.status_code == 401
     assert response.headers["X-Frame-Options"] == "DENY"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
     assert "default-src 'self'" in response.headers["Content-Security-Policy"]
 
-    assert len(session_factory.rows) == 1
-    row = session_factory.rows[0]
-    assert row.event_type is AuditEventType.DATA_ACCESSED
+    audit_rows = [row for row in session_factory.rows if isinstance(row, AuditLog)]
+    alert_rows = [row for row in session_factory.rows if isinstance(row, SecurityAlert)]
+    assert len(audit_rows) == 1
+    assert len(alert_rows) == 1
+    row = audit_rows[0]
+    assert row.event_type is AuditEventType.UNAUTHORIZED_ACCESS
     assert row.action == "GET /this-route-does-not-exist"
     assert row.request_id == "request-123"
     assert row.event_metadata == {
         "method": "GET",
         "path": "/this-route-does-not-exist",
-        "status_code": 404,
+        "status_code": 401,
     }
 
 

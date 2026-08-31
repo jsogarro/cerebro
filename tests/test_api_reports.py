@@ -5,7 +5,7 @@ This module tests the REST API endpoints for report generation,
 retrieval, and management functionality.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -13,12 +13,32 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.models import TokenPayload
+from src.middleware.auth_middleware import get_jwt_service
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.generated_report import GeneratedReport
 from src.models.db.session import get_session
 
 AUTH_USER_ID = uuid4()
 AUTH_ORG_ID = uuid4()
+AUTH_TOKEN = "test-token"
+
+
+class _TestJWTService:
+    """Return the fixture tenant identity at the application auth boundary."""
+
+    async def validate_token(self, token: str) -> TokenPayload:
+        """Validate the deterministic test bearer token."""
+        assert token == AUTH_TOKEN
+        now = datetime.now(UTC)
+        return TokenPayload(
+            sub=str(AUTH_USER_ID),
+            email="test@example.com",
+            organization_id=str(AUTH_ORG_ID),
+            jti="test-jti",
+            iat=now,
+            exp=now + timedelta(minutes=5),
+        )
 
 
 class TestReportsAPI:
@@ -41,11 +61,13 @@ class TestReportsAPI:
 
         app.dependency_overrides[get_session] = override_session
         app.dependency_overrides[get_tenant_context] = override_tenant_context
+        app.dependency_overrides[get_jwt_service] = _TestJWTService
         try:
-            yield TestClient(app)
+            yield TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
         finally:
             app.dependency_overrides.pop(get_session, None)
             app.dependency_overrides.pop(get_tenant_context, None)
+            app.dependency_overrides.pop(get_jwt_service, None)
 
     def test_create_report_endpoint(self, client: TestClient) -> None:
         """Test report creation endpoint."""
