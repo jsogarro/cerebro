@@ -45,6 +45,10 @@ _TERMINAL_STATUSES: Final[tuple[str, ...]] = tuple(
         ToolInvocationStatus.DENIED,
     )
 )
+_PENDING_STATUSES: Final[tuple[str, ...]] = tuple(
+    status.value
+    for status in (ToolInvocationStatus.REQUESTED, ToolInvocationStatus.RUNNING)
+)
 
 
 class SessionToolAuditStore:
@@ -87,6 +91,48 @@ class SessionToolAuditStore:
                 AgentToolInvocation.attempt_id == attempt_id,
                 AgentToolInvocation.idempotency_key == idempotency_key,
                 AgentToolInvocation.status.in_(_TERMINAL_STATUSES),
+            )
+            query = scope_to_organization(
+                query,
+                AgentToolInvocation.organization_id,
+                normalized_organization_id,
+            )
+            query = query.order_by(
+                AgentToolInvocation.requested_at.desc(),
+                AgentToolInvocation.created_at.desc(),
+            ).limit(1)
+            result = await session.execute(query)
+            row = result.scalars().first()
+            return None if row is None else self._to_contract(row)
+
+    async def find_pending_invocation(
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+    ) -> ToolInvocation | None:
+        """Find admitted work that has not reached a terminal state.
+
+        This is intentionally separate from ``find_invocation``.  A terminal
+        row is replayable; a pending row reserves the idempotency key and is
+        reported as ``IN_PROGRESS`` so a retry cannot execute the handler a
+        second time.
+        """
+
+        normalized_organization_id = _normalize_durable_context(
+            run_id=run_id,
+            task_id=None,
+            attempt_id=attempt_id,
+            organization_id=organization_id,
+        )
+        async with self.session_factory() as session:
+            query = select(AgentToolInvocation).where(
+                AgentToolInvocation.run_id == run_id,
+                AgentToolInvocation.attempt_id == attempt_id,
+                AgentToolInvocation.idempotency_key == idempotency_key,
+                AgentToolInvocation.status.in_(_PENDING_STATUSES),
             )
             query = scope_to_organization(
                 query,

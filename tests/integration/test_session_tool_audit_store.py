@@ -50,6 +50,7 @@ from src.core.tools import (
     ToolAuditEvent,
     ToolBoundary,
     ToolCallContext,
+    ToolOutcomeStatus,
     ToolSpec,
 )
 from src.models.db.run_event import AgentRunEvent
@@ -103,6 +104,36 @@ class DatabaseObservingPublisher:
                 self.observed.append((event.event_type, result.scalar_one_or_none()))
 
 
+@dataclass(slots=True)
+class CrashBeforeTerminalPersistStore:
+    """Commit REQUESTED, then simulate a process crash before terminal write."""
+
+    inner: SessionToolAuditStore
+
+    async def find_invocation(self, **kwargs: Any) -> ToolInvocation | None:
+        return await self.inner.find_invocation(**kwargs)
+
+    async def find_pending_invocation(self, **kwargs: Any) -> ToolInvocation | None:
+        return await self.inner.find_pending_invocation(**kwargs)
+
+    async def persist(
+        self,
+        *,
+        invocation: ToolInvocation,
+        events: Sequence[ToolAuditEvent],
+        organization_id: str | None,
+        capability_decision: CapabilityDecision | None,
+    ) -> None:
+        if invocation.status is ToolInvocationStatus.SUCCEEDED:
+            raise RuntimeError("simulated crash before terminal persist")
+        await self.inner.persist(
+            invocation=invocation,
+            events=events,
+            organization_id=organization_id,
+            capability_decision=capability_decision,
+        )
+
+
 @pytest_asyncio.fixture(name="session_factory")
 async def session_factory_fixture(
     test_engine: AsyncEngine,
@@ -146,8 +177,9 @@ async def store_fixture(
 
 
 def _boundary(
-    store: SessionToolAuditStore,
+    store: Any,
     publisher: Any | None = None,
+    handler: Any = search,
 ) -> ToolBoundary:
     boundary = ToolBoundary(
         secret_provider=MappingSecretProvider({}),
@@ -163,7 +195,7 @@ def _boundary(
             input_model=SearchInput,
             output_model=SearchOutput,
             timeout_seconds=5.0,
-            handler=search,  # type: ignore[arg-type]
+            handler=handler,  # type: ignore[arg-type]
         )
     )
     return boundary
@@ -483,6 +515,44 @@ async def test_a_terminal_invocation_is_replayable_and_tenant_scoped(
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_a_committed_requested_row_makes_retry_in_progress_without_duplicate_work(
+    store: SessionToolAuditStore,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    handler_calls: list[str] = []
+
+    async def counting_search(
+        args: SearchInput, context: ToolCallContext
+    ) -> dict[str, Any]:
+        handler_calls.append("called")
+        return {"hits": 1}
+
+    crashing_store = CrashBeforeTerminalPersistStore(store)
+    boundary = _boundary(crashing_store, handler=counting_search)
+    kwargs = _call_kwargs(grants=_grants(), idempotency_key="crash-retry-key")
+
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        await boundary.invoke(**kwargs)
+
+    retry = await boundary.invoke(**kwargs)
+
+    assert retry.status is ToolOutcomeStatus.IN_PROGRESS
+    assert retry.retry.value == "retriable"
+    assert retry.invocation.output is None
+    assert handler_calls == ["called"]
+
+    async with session_factory() as session:
+        invocations = list((await session.scalars(select(AgentToolInvocation))).all())
+        events = list((await session.scalars(select(AgentRunEvent))).all())
+
+    assert len(invocations) == 1
+    assert retry.invocation.tool_invocation_id == invocations[0].tool_invocation_id
+    assert invocations[0].status == ToolInvocationStatus.REQUESTED.value
+    assert [event.event_type for event in events] == [EVENT_REQUESTED]
+    assert len({event.deduplication_key for event in events}) == 1
 
     terminal = _requested_invocation(status=ToolInvocationStatus.SUCCEEDED)
     await store.persist(

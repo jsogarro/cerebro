@@ -77,7 +77,7 @@ from src.core.contracts.capabilities import (
     CapabilityGrant,
     SensitivityClass,
 )
-from src.core.contracts.provenance import ToolInvocation
+from src.core.contracts.provenance import ToolInvocation, ToolInvocationStatus
 from src.core.contracts.trust import TrustClassification
 from src.core.tools import (
     NullEventPublisher,
@@ -326,6 +326,34 @@ class InMemoryToolAuditStore:
                 recorded.run_id == run_id
                 and recorded.attempt_id == attempt_id
                 and recorded.idempotency_key == idempotency_key
+                and recorded.status
+                in {
+                    ToolInvocationStatus.SUCCEEDED,
+                    ToolInvocationStatus.FAILED,
+                    ToolInvocationStatus.CANCELLED,
+                    ToolInvocationStatus.TIMED_OUT,
+                    ToolInvocationStatus.DENIED,
+                }
+            ):
+                return recorded
+        return None
+
+    async def find_pending_invocation(
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+    ) -> ToolInvocation | None:
+        """Return a request that was admitted but has not terminated."""
+        for recorded in reversed(self.invocations):
+            if (
+                recorded.run_id == run_id
+                and recorded.attempt_id == attempt_id
+                and recorded.idempotency_key == idempotency_key
+                and recorded.status
+                in {ToolInvocationStatus.REQUESTED, ToolInvocationStatus.RUNNING}
             ):
                 return recorded
         return None

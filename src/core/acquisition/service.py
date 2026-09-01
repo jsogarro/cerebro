@@ -79,6 +79,7 @@ __all__ = [
 SNAPSHOT_ARTIFACT_KIND: Final[str] = "source_snapshot"
 
 _FAILURE_REASONS: Final[dict[ToolOutcomeStatus, AbsentEvidenceReason]] = {
+    ToolOutcomeStatus.IN_PROGRESS: AbsentEvidenceReason.RETRIEVAL_FAILED,
     ToolOutcomeStatus.DENIED: AbsentEvidenceReason.CAPABILITY_DENIED,
     ToolOutcomeStatus.TIMED_OUT: AbsentEvidenceReason.RETRIEVAL_FAILED,
     ToolOutcomeStatus.CIRCUIT_OPEN: AbsentEvidenceReason.RETRIEVAL_FAILED,

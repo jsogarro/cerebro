@@ -88,6 +88,7 @@ from src.core.contracts.trust import TrustClassification, propagate_trust
 from .audit import (
     EVENT_COMPLETED,
     EVENT_REQUESTED,
+    PendingToolAuditStore,
     ToolAuditEvent,
     ToolAuditStore,
     ToolEventPublisher,
@@ -477,6 +478,34 @@ class ToolBoundary:
                 input_sha256=prepared.input_sha256,
             )
             return self._replay(replayed, decision=decision)
+
+        # A terminal replay answers a completed request. A committed
+        # nonterminal row answers a different question: whether this retry is
+        # allowed to start a second unit of work. It is not. Only stores that
+        # implement the optional recovery seam can answer it; older adapters
+        # remain valid and retain their prior behavior until upgraded.
+        if isinstance(self._audit_store, PendingToolAuditStore):
+            pending = await self._audit_store.find_pending_invocation(
+                run_id=run_id,
+                attempt_id=attempt_id,
+                organization_id=organization_id,
+                idempotency_key=effective_key,
+            )
+            if pending is not None:
+                self._require_same_request(
+                    pending,
+                    spec=spec,
+                    capability_scope=call.capability_scope,
+                    input_sha256=prepared.input_sha256,
+                )
+                return ToolOutcome(
+                    mint=_OUTCOME_MINT,
+                    status=ToolOutcomeStatus.IN_PROGRESS,
+                    invocation=pending,
+                    retry=RetryDisposition.RETRIABLE,
+                    decision=decision,
+                    detail="invocation is already in progress; retry later",
+                )
 
         if isinstance(prepared, _RejectedInput):
             # The input rejection lands here, after authorization and after

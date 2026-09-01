@@ -169,6 +169,29 @@ class ToolAuditStore(Protocol):
 
 
 @runtime_checkable
+class PendingToolAuditStore(Protocol):
+    """Optional lookup for work that was admitted but has not terminated.
+
+    A terminal replay is an answer.  A nonterminal row is a reservation for
+    work that may still be running, so callers must not execute the same
+    idempotency key again.  This capability is optional to preserve the
+    boundary's compatibility with older in-memory and test adapters; durable
+    stores that can recover after a process restart implement it.
+    """
+
+    async def find_pending_invocation(
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+    ) -> ToolInvocation | None:
+        """Return an authorized request that has not reached a terminal state."""
+        ...
+
+
+@runtime_checkable
 class ToolEventPublisher(Protocol):
     """Delivery of already-durable events to live subscribers."""
 
@@ -196,6 +219,7 @@ __all__ = [
     "EVENT_TYPE_VERSION",
     "TOOL_INVOCATION_AGGREGATE",
     "NullEventPublisher",
+    "PendingToolAuditStore",
     "ToolAuditEvent",
     "ToolAuditStore",
     "ToolEventPublisher",
