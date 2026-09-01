@@ -7,7 +7,7 @@ the Temporal workflow system.
 
 import asyncio
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -40,7 +40,9 @@ from src.api.services.direct_execution_service import (
 from src.api.services.execution_authority_resolver import (
     MappingExecutionAuthorityResolver,
 )
+from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY, PlanCapabilityIssuer
 from src.core.contracts import (
+    CapabilityGrant,
     ExecutionBudget,
     FallbackMode,
     ProviderModelPolicy,
@@ -54,6 +56,7 @@ from src.core.kernel import (
 )
 from src.core.kernel.component_keys import SUPERVISOR_KEYS
 from src.models.db.base import Base
+from src.models.db.capability import AgentCapabilityGrant
 from src.models.db.run_lifecycle import AgentRun, AgentRunTask, AgentTaskAttempt
 from src.models.execution_authority import (
     ExecutionAuthorityBinding,
@@ -65,6 +68,7 @@ from src.models.research_project import (
     ResearchQuery,
     ResearchScope,
 )
+from src.repositories.capability_repository import CapabilityRepository
 from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 
 
@@ -419,6 +423,136 @@ class TestDirectExecutionService:
                 ATTEMPT_ID_CONTEXT_KEY: attempt_row.attempt_id,
                 ORGANIZATION_ID_CONTEXT_KEY: str(run_row.organization_id),
             }
+        finally:
+            await service.close()
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_admission_persists_binding_grants_with_durable_identity_before_execution(
+        self,
+    ):
+        organization_id = "00000000-0000-0000-0000-0000000000ac"
+        raw_binding = _authority_binding()
+        workers = tuple(
+            worker.model_copy(
+                update={
+                    "permission_scopes": (f"{worker.worker_id}:read",),
+                    "tool_allowlist": (f"{worker.worker_id}:search",),
+                }
+            )
+            for worker in raw_binding.workers
+        )
+        binding = replace(
+            raw_binding,
+            run=raw_binding.run.model_copy(
+                update={
+                    "tenant_id": organization_id,
+                    "idempotency_key": "capability-admission-key",
+                }
+            ),
+            workers=workers,
+            budget=raw_binding.budget.model_copy(update={"max_tool_invocations": 3}),
+        )
+        project = ResearchProject(
+            title="Plan grant project",
+            query=ResearchQuery(
+                text="Check plan grants",
+                domains=["research"],
+                depth_level=ResearchDepth.COMPREHENSIVE,
+            ),
+            user_id="test-user-123",
+            scope=ResearchScope(max_sources=1),
+        )
+        execution_status = ExecutionStatus(
+            execution_id="exec-plan-grants",
+            project_id=str(project.id),
+            status="pending",
+            # Admission authority, not this optional compiled-plan cache, is
+            # the source of capability grants.
+            execution_plan=None,
+            organization_id=organization_id,
+        )
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        tables = [
+            AgentRun.__table__,
+            AgentRunTask.__table__,
+            AgentTaskAttempt.__table__,
+            AgentCapabilityGrant.__table__,
+        ]
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all, tables=tables)
+
+        bridge = AsyncMock()
+        service = DirectExecutionService(
+            masr_router=AsyncMock(),
+            supervisor_bridge=bridge,
+            supervisor_factory=Mock(),
+            session_factory=session_factory,
+            capability_issuer=PlanCapabilityIssuer(),
+        )
+        service._persist_config_snapshot = AsyncMock()
+        service._append_event = AsyncMock()
+        try:
+            await service._admit_run(execution_status, binding, project)
+
+            async with session_factory() as session:
+                lifecycle_repo = RunLifecycleRepository(session)
+                run_row = await lifecycle_repo.get_run(
+                    binding.run.run_id, organization_id=organization_id
+                )
+                assert run_row is not None
+                task_rows = await lifecycle_repo.get_tasks_for_run(
+                    binding.run.run_id, organization_id=organization_id
+                )
+                assert len(task_rows) == 1
+                task_row = task_rows[0]
+                grants = await CapabilityRepository(session).list_grants_for_task(
+                    run_row.run_id,
+                    task_row.task_id,
+                    organization_id=organization_id,
+                )
+
+            assert len(grants) == sum(
+                len(worker.tool_allowlist) for worker in binding.workers
+            )
+            durable_grant_ids = {grant.grant_id for grant in grants}
+            assert len(durable_grant_ids) == len(grants) > 0
+            assert durable_grant_ids == {
+                grant.grant_id for grant in execution_status.capability_grants
+            }
+            assert {(grant.run_id, grant.task_id) for grant in grants} == {
+                (run_row.run_id, task_row.task_id)
+            }
+            assert {str(grant.organization_id) for grant in grants} == {organization_id}
+            assert {(grant.capability_scope, grant.tool_name) for grant in grants} == {
+                (f"plan-issued:{worker.worker_id}:search", f"{worker.worker_id}:search")
+                for worker in binding.workers
+            }
+            expected_ttl = timedelta(
+                seconds=(
+                    binding.budget.max_attempts_per_task
+                    * binding.budget.task_timeout_seconds
+                )
+            )
+            assert all(
+                grant.expires_at - grant.issued_at == expected_ttl for grant in grants
+            )
+            assert all(
+                isinstance(grant, CapabilityGrant)
+                for grant in execution_status.capability_grants
+            )
+            assert {
+                (grant.capability_scope, grant.tool_name)
+                for grant in execution_status.capability_grants
+            } == {(grant.capability_scope, grant.tool_name) for grant in grants}
+            context = service._durable_agent_task_context(execution_status)
+            assert context[CAPABILITY_GRANTS_CONTEXT_KEY] == (
+                execution_status.capability_grants
+            )
+            bridge.execute_execution_plan.assert_not_called()
         finally:
             await service.close()
             await engine.dispose()

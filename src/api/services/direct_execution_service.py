@@ -30,6 +30,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.core.telemetry import count_tokens, telemetry_enabled
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
+from src.repositories.capability_repository import CapabilityRepository
 from src.repositories.checkpoint_repository import CheckpointRepository
 from src.repositories.run_config_snapshot_repository import (
     RunConfigSnapshotRepository,
@@ -56,9 +57,11 @@ from ...ai_brain.router.outcome_recorder import (
 from ...ai_brain.router.routing_types import (
     RoutingExecutionPolicy,
 )
+from ...core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY, PlanCapabilityIssuer
 from ...core.contracts import (
     Attempt,
     AttemptStatus,
+    CapabilityGrant,
     ExecutionPlan,
     InvalidTransitionError,
     PinnedVersions,
@@ -294,6 +297,14 @@ class ExecutionStatus:
     # session factory (most unit tests) or whose admission write failed.
     run_id: str | None = None
 
+    # Capability contracts issued from the immutable admitted plan and
+    # persisted with the lifecycle rows. Kept as contracts so a later tool
+    # boundary can consume exactly what admission wrote, rather than
+    # reconstructing authority from invocation data.
+    capability_grants: tuple[CapabilityGrant, ...] = field(
+        default_factory=tuple, repr=False
+    )
+
     # The terminal status this execution really reached, set only while the
     # durable layer has not accepted it yet. ``status`` deliberately stays
     # non-terminal until then, so a reader is never told the run finished on
@@ -336,6 +347,7 @@ class DirectExecutionService:
         supervisor_registry: TypedRegistry | None = None,
         execution_authority_resolver: ExecutionAuthorityResolver | None = None,
         execution_plan_compiler: ExecutionPlanCompiler | None = None,
+        capability_issuer: PlanCapabilityIssuer | None = None,
     ):
         """Initialize direct execution service."""
 
@@ -394,6 +406,7 @@ class DirectExecutionService:
         self.execution_plan_compiler = (
             execution_plan_compiler or ExecutionPlanCompiler()
         )
+        self.capability_issuer = capability_issuer or PlanCapabilityIssuer()
 
         # Execution tracking
         self.active_executions: dict[str, ExecutionStatus] = {}
@@ -620,7 +633,7 @@ class DirectExecutionService:
     @staticmethod
     def _durable_agent_task_context(
         execution_status: ExecutionStatus,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Return the complete lifecycle identity admitted for this execution.
 
         The plan-facing ``AgentTask`` has a process-local id of its own.  Tool
@@ -634,12 +647,15 @@ class DirectExecutionService:
             or execution_status._attempt is None
         ):
             return {}
-        return {
+        context: dict[str, Any] = {
             RUN_ID_CONTEXT_KEY: execution_status._run.run_id,
             TASK_ID_CONTEXT_KEY: execution_status._task.task_id,
             ATTEMPT_ID_CONTEXT_KEY: execution_status._attempt.attempt_id,
             ORGANIZATION_ID_CONTEXT_KEY: execution_status._run.tenant_id,
         }
+        if execution_status.capability_grants:
+            context[CAPABILITY_GRANTS_CONTEXT_KEY] = execution_status.capability_grants
+        return context
 
     async def _admit_run(
         self,
@@ -687,40 +703,59 @@ class DirectExecutionService:
             ready_task = task.transition_to(TaskStatus.READY, at=now)
 
             async with self.session_factory() as session:
-                repo = RunLifecycleRepository(session)
-                await repo.create_run(
-                    binding.run, organization_id=binding.run.tenant_id
-                )
-                await repo.record_run_transition(
-                    queued_run, organization_id=binding.run.tenant_id
-                )
-                await repo.create_task(task, organization_id=binding.run.tenant_id)
-                await repo.record_task_transition(
-                    ready_task, organization_id=binding.run.tenant_id
-                )
-                await repo.create_attempt(
-                    attempt,
-                    run_id=binding.run.run_id,
-                    organization_id=binding.run.tenant_id,
-                )
-                await self._persist_config_snapshot(session, binding)
-                await self._append_event(
-                    session,
-                    run=queued_run,
-                    event_type="run.admitted",
-                    payload={
-                        "execution_id": execution_status.execution_id,
-                        "task_id": task.task_id,
-                        "attempt_id": attempt.attempt_id,
-                    },
-                    occurred_at=now,
-                )
-                await session.commit()
+                try:
+                    repo = RunLifecycleRepository(session)
+                    await repo.create_run(
+                        binding.run, organization_id=binding.run.tenant_id
+                    )
+                    await repo.record_run_transition(
+                        queued_run, organization_id=binding.run.tenant_id
+                    )
+                    await repo.create_task(
+                        task, organization_id=binding.run.tenant_id
+                    )
+                    await repo.record_task_transition(
+                        ready_task, organization_id=binding.run.tenant_id
+                    )
+                    await repo.create_attempt(
+                        attempt,
+                        run_id=binding.run.run_id,
+                        organization_id=binding.run.tenant_id,
+                    )
+                    capability_grants = self.capability_issuer.issue(
+                        binding,
+                        run_id=queued_run.run_id,
+                        task_id=task.task_id,
+                        issued_at=now,
+                    )
+                    capability_repo = CapabilityRepository(session)
+                    for grant in capability_grants:
+                        await capability_repo.create_grant(
+                            grant,
+                            organization_id=queued_run.tenant_id,
+                        )
+                    await self._persist_config_snapshot(session, binding)
+                    await self._append_event(
+                        session,
+                        run=queued_run,
+                        event_type="run.admitted",
+                        payload={
+                            "execution_id": execution_status.execution_id,
+                            "task_id": task.task_id,
+                            "attempt_id": attempt.attempt_id,
+                        },
+                        occurred_at=now,
+                    )
+                    await session.commit()
+                except BaseException:
+                    await session.rollback()
+                    raise
 
             execution_status.run_id = queued_run.run_id
             execution_status._run = queued_run
             execution_status._task = ready_task
             execution_status._attempt = attempt
+            execution_status.capability_grants = capability_grants
             self._execution_ids_by_run_id[queued_run.run_id] = (
                 execution_status.execution_id
             )
