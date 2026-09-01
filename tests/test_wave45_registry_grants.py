@@ -8,10 +8,9 @@ from src.agents.tools.mediation import ToolCallIdentity
 from src.agents.tools.registry import ToolRegistry
 from src.core.contracts import CapabilityGrant, SensitivityClass, TrustClassification
 
-NOW = datetime.now(UTC)
-
 
 def grant(tool_name: str, scope: str) -> CapabilityGrant:
+    now = datetime.now(UTC)
     return CapabilityGrant(
         grant_id=f"grant-{tool_name}",
         run_id="run-1",
@@ -22,8 +21,8 @@ def grant(tool_name: str, scope: str) -> CapabilityGrant:
         sensitivity=SensitivityClass.READ_ONLY,
         max_input_trust=TrustClassification.APPLICATION,
         requires_approval=False,
-        issued_at=NOW - timedelta(minutes=1),
-        expires_at=NOW + timedelta(minutes=5),
+        issued_at=now - timedelta(minutes=1),
+        expires_at=now + timedelta(minutes=5),
     )
 
 

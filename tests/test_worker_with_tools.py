@@ -16,8 +16,6 @@ from src.core.config import settings
 from src.core.contracts import CapabilityGrant, SensitivityClass, TrustClassification
 from src.core.tools import ToolOutcome
 
-NOW = datetime.now(UTC)
-
 
 def _tool_call_response(name: str, arguments: dict[str, object]) -> str:
     """Build the exact response envelope the worker is expected to accept."""
@@ -37,6 +35,7 @@ def _task_with_context(context: dict[str, object] | None = None) -> AgentTask:
 
 
 def _arithmetic_grant() -> CapabilityGrant:
+    now = datetime.now(UTC)
     return CapabilityGrant(
         grant_id="grant-arithmetic",
         run_id="run-from-context",
@@ -47,8 +46,8 @@ def _arithmetic_grant() -> CapabilityGrant:
         sensitivity=SensitivityClass.READ_ONLY,
         max_input_trust=TrustClassification.APPLICATION,
         requires_approval=False,
-        issued_at=NOW - timedelta(minutes=1),
-        expires_at=NOW + timedelta(minutes=5),
+        issued_at=now - timedelta(minutes=1),
+        expires_at=now + timedelta(minutes=5),
     )
 
 
