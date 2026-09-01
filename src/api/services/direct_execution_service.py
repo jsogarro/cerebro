@@ -653,8 +653,7 @@ class DirectExecutionService:
             ATTEMPT_ID_CONTEXT_KEY: execution_status._attempt.attempt_id,
             ORGANIZATION_ID_CONTEXT_KEY: execution_status._run.tenant_id,
         }
-        if execution_status.capability_grants:
-            context[CAPABILITY_GRANTS_CONTEXT_KEY] = execution_status.capability_grants
+        context[CAPABILITY_GRANTS_CONTEXT_KEY] = execution_status.capability_grants
         return context
 
     async def _admit_run(
@@ -1357,6 +1356,7 @@ class DirectExecutionService:
             The rebuilt status, or ``None`` for a run with no task row (there
             is no execution identity to recover without one).
         """
+        organization_id = run_row.organization_id
         tasks = await lifecycle_repo.get_tasks_for_run(
             run_row.run_id, organization_id=run_row.organization_id
         )
@@ -1368,20 +1368,123 @@ class DirectExecutionService:
         attempts = await lifecycle_repo.get_attempts_for_task(
             task_row.task_id, organization_id=run_row.organization_id
         )
-        journaled = attempts[-1].journaled_result if attempts else None
+        if not attempts:
+            return None
+        attempt_row = attempts[-1]
+
+        capability_rows = await CapabilityRepository(
+            lifecycle_repo.session
+        ).list_grants_for_task(
+            run_row.run_id,
+            task_row.task_id,
+            organization_id=organization_id,
+        )
+        def aware(value: datetime | None) -> datetime | None:
+            if value is None or value.tzinfo is not None:
+                return value
+            return value.replace(tzinfo=UTC)
+
+        try:
+            run = Run.model_validate(
+                {
+                    "run_id": run_row.run_id,
+                    "tenant_id": run_row.tenant_id,
+                    "workflow_definition_id": run_row.workflow_definition_id,
+                    "workflow_definition_version": run_row.workflow_definition_version,
+                    "routing_policy_id": run_row.routing_policy_id,
+                    "routing_policy_version": run_row.routing_policy_version,
+                    "idempotency_key": run_row.idempotency_key,
+                    "requested_by": run_row.requested_by,
+                    "status": run_row.status,
+                    "created_at": aware(run_row.created_at),
+                    "updated_at": aware(run_row.updated_at),
+                    "started_at": aware(run_row.started_at),
+                    "completed_at": aware(run_row.completed_at),
+                    "status_reason": run_row.status_reason,
+                    "cancellation_requested_at": aware(run_row.cancellation_requested_at),
+                    "cancellation_reason": run_row.cancellation_reason,
+                }
+            )
+            task = Task.model_validate(
+                {
+                    "task_id": task_row.task_id,
+                    "run_id": task_row.run_id,
+                    "task_key": task_row.task_key,
+                    "task_type": task_row.task_type,
+                    "objective": task_row.objective,
+                    "idempotency_key": task_row.idempotency_key,
+                    "dependency_ids": tuple(task_row.dependency_ids or ()),
+                    "assigned_worker_type": task_row.assigned_worker_type,
+                    "input": task_input,
+                    "status": task_row.status,
+                    "created_at": aware(task_row.created_at),
+                    "updated_at": aware(task_row.updated_at),
+                    "started_at": aware(task_row.started_at),
+                    "completed_at": aware(task_row.completed_at),
+                    "status_reason": task_row.status_reason,
+                    "cancellation_requested_at": aware(task_row.cancellation_requested_at),
+                    "cancellation_reason": task_row.cancellation_reason,
+                }
+            )
+            attempt = Attempt.model_validate(
+                {
+                    "attempt_id": attempt_row.attempt_id,
+                    "task_id": attempt_row.task_id,
+                    "ordinal": attempt_row.ordinal,
+                    "idempotency_key": attempt_row.idempotency_key,
+                    "executor_id": attempt_row.executor_id,
+                    "status": attempt_row.status,
+                    "created_at": aware(attempt_row.created_at),
+                    "updated_at": aware(attempt_row.updated_at),
+                    "started_at": aware(attempt_row.started_at),
+                    "completed_at": aware(attempt_row.completed_at),
+                    "status_reason": attempt_row.status_reason,
+                    "cancellation_requested_at": aware(attempt_row.cancellation_requested_at),
+                    "cancellation_reason": attempt_row.cancellation_reason,
+                }
+            )
+            capability_grants = tuple(
+                CapabilityGrant.model_validate(
+                    {
+                        "grant_id": row.grant_id,
+                        "run_id": row.run_id,
+                        "task_id": row.task_id,
+                        "capability_scope": row.capability_scope,
+                        "tool_name": row.tool_name,
+                        "tool_versions": tuple(row.tool_versions or ()),
+                        "sensitivity": row.sensitivity,
+                        "max_input_trust": row.max_input_trust,
+                        "requires_approval": row.requires_approval,
+                        "issued_at": aware(row.issued_at),
+                        "expires_at": aware(row.expires_at),
+                    }
+                )
+                for row in capability_rows
+            )
+        except (TypeError, ValueError):
+            return None
+
+        journaled = attempt_row.journaled_result
+        started_at = aware(run_row.started_at) or aware(run_row.created_at)
+        if started_at is None:
+            return None
 
         execution_status = ExecutionStatus(
             execution_id=task_row.task_key,
             project_id=task_input.get("project_id", ""),
             status=_RUN_STATUS_TO_EXECUTION_STATUS.get(run_row.status, run_row.status),
             current_phase=run_row.status,
-            started_at=run_row.started_at or run_row.created_at,
-            completed_at=run_row.completed_at,
+            started_at=started_at,
+            completed_at=aware(run_row.completed_at),
             run_id=run_row.run_id,
             organization_id=str(run_row.organization_id)
             if run_row.organization_id
             else None,
         )
+        execution_status._run = run
+        execution_status._task = task
+        execution_status._attempt = attempt
+        execution_status.capability_grants = capability_grants
         if run_row.status == RunStatus.SUCCEEDED.value:
             execution_status.progress_percentage = 100.0
         if journaled:

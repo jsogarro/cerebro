@@ -422,6 +422,7 @@ class TestDirectExecutionService:
                 TASK_ID_CONTEXT_KEY: task_row.task_id,
                 ATTEMPT_ID_CONTEXT_KEY: attempt_row.attempt_id,
                 ORGANIZATION_ID_CONTEXT_KEY: str(run_row.organization_id),
+                "capability_grants": (),
             }
         finally:
             await service.close()
