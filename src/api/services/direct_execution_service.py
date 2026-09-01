@@ -15,8 +15,11 @@ Key Features:
 
 import asyncio
 import copy
+import hashlib
+import json
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -30,8 +33,10 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.core.telemetry import count_tokens, telemetry_enabled
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
+from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.capability_repository import CapabilityRepository
 from src.repositories.checkpoint_repository import CheckpointRepository
+from src.repositories.claim_support_repository import ClaimSupportRepository
 from src.repositories.run_config_snapshot_repository import (
     RunConfigSnapshotRepository,
 )
@@ -58,17 +63,24 @@ from ...ai_brain.router.routing_types import (
     RoutingExecutionPolicy,
 )
 from ...core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY, PlanCapabilityIssuer
+from ...core.claims import build_inventory
+from ...core.claims.recording import ClaimSupportRecorder
+from ...core.claims.resolution import ClaimSupportResolver
 from ...core.contracts import (
+    Artifact,
+    ArtifactStatus,
     Attempt,
     AttemptStatus,
     CapabilityGrant,
     ExecutionPlan,
     InvalidTransitionError,
     PinnedVersions,
+    ProducerKind,
     Run,
     RunStatus,
     Task,
     TaskStatus,
+    TrustClassification,
 )
 from ...core.contracts.states import TERMINAL_ATTEMPT_STATUSES, TERMINAL_RUN_STATUSES
 from ...core.kernel import (
@@ -119,6 +131,42 @@ _RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
 # about it: the ``@retry`` decorator, and the failure path's decision about
 # whether a terminal FAILED may be persisted yet.
 _WORKFLOW_MAX_ATTEMPTS = 3
+
+
+_FINAL_REPORT_ARTIFACT_KIND = "research_report"
+_FINAL_REPORT_MEDIA_TYPE = "application/json"
+_FINAL_REPORT_STORAGE_URI_PREFIX = "memory://artifacts"
+_FINAL_REPORT_CONTENT_METADATA_KEY = "content"
+
+
+def _canonical_json(value: Any) -> str:
+    """Serialize a report value deterministically, or fail closed."""
+
+    try:
+        serialized = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        # ``ensure_ascii=False`` can leave lone surrogates in the returned
+        # string. Verify UTF-8 encodability before the digest is constructed.
+        serialized.encode("utf-8")
+        return serialized
+    except (OverflowError, RecursionError, TypeError, UnicodeError, ValueError) as exc:
+        raise ValueError(
+            "final_output cannot be persisted as a JSON final report"
+        ) from exc
+
+
+def _journalable_value(value: Any) -> Any:
+    """Return a JSON-safe journal value, or ``None`` for an unreadable value."""
+
+    try:
+        return json.loads(_canonical_json(value))
+    except (TypeError, ValueError):
+        return None
 
 
 # Observable ``current_phase`` for an execution whose real outcome is known
@@ -178,6 +226,14 @@ class DurableWriteOutcome(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+@dataclass(frozen=True)
+class _FinalReport:
+    """The immutable report contract and exact text it stores for claims."""
+
+    artifact: Artifact
+    text: str
+
+
 @dataclass
 class _DurableTransition:
     """One fully planned lifecycle write, ready to commit or re-commit.
@@ -195,6 +251,7 @@ class _DurableTransition:
     payload: dict[str, Any]
     occurred_at: datetime
     journaled_result: dict[str, Any] | None = None
+    final_report: _FinalReport | None = None
 
 
 @dataclass
@@ -876,6 +933,79 @@ class DirectExecutionService:
             destinations=("redis",),
         )
 
+    @staticmethod
+    def _final_report_artifact_id(run: Run, task: Task, attempt: Attempt) -> str:
+        """Derive one stable artifact identity for this terminal attempt."""
+        scope = "\x00".join(
+            (
+                run.tenant_id,
+                run.run_id,
+                task.task_id,
+                attempt.attempt_id,
+                _FINAL_REPORT_ARTIFACT_KIND,
+            )
+        )
+        return "final-report-" + hashlib.sha256(scope.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _claim_support_id_factory(artifact_id: str) -> Callable[[], str]:
+        """Return a deterministic id allocator for one inventory."""
+        sequence = 0
+
+        def allocate() -> str:
+            nonlocal sequence
+            sequence += 1
+            return f"{artifact_id}:support-{sequence}"
+
+        return allocate
+
+    def _build_final_report(
+        self,
+        execution_status: ExecutionStatus,
+        *,
+        run: Run,
+        task: Task | None,
+        attempt: Attempt | None,
+        occurred_at: datetime,
+    ) -> _FinalReport:
+        """Build a durable, inspectable report without writing anything."""
+        if execution_status.final_output is None:
+            raise ValueError("cannot persist a successful run without final_output")
+        if task is None or attempt is None:
+            raise ValueError(
+                "cannot persist a final report without task and attempt identity"
+            )
+
+        text = _canonical_json(execution_status.final_output)
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        artifact_id = self._final_report_artifact_id(run, task, attempt)
+        artifact = Artifact(
+            artifact_id=artifact_id,
+            run_id=run.run_id,
+            task_id=task.task_id,
+            attempt_id=attempt.attempt_id,
+            kind=_FINAL_REPORT_ARTIFACT_KIND,
+            media_type=_FINAL_REPORT_MEDIA_TYPE,
+            storage_uri=f"{_FINAL_REPORT_STORAGE_URI_PREFIX}/{artifact_id}",
+            content_sha256=digest,
+            status=ArtifactStatus.FINAL,
+            trust=TrustClassification.DERIVED_UNTRUSTED,
+            producer="direct_execution_service",
+            producer_kind=ProducerKind.SYSTEM,
+            created_at=occurred_at,
+            metadata={
+                _FINAL_REPORT_CONTENT_METADATA_KEY: text,
+                "content_encoding": "utf-8",
+                "serialization": "canonical_json",
+                "source": "final_output",
+                "tenant_id": run.tenant_id,
+                "run_id": run.run_id,
+                "task_id": task.task_id,
+                "attempt_id": attempt.attempt_id,
+            },
+        )
+        return _FinalReport(artifact=artifact, text=text)
+
     async def _persist_transition(
         self,
         execution_status: ExecutionStatus,
@@ -930,11 +1060,21 @@ class DirectExecutionService:
             )
             return DurableWriteOutcome.REJECTED
 
+        final_report = None
+        if run.status is RunStatus.SUCCEEDED:
+            final_report = self._build_final_report(
+                execution_status,
+                run=run,
+                task=task,
+                attempt=attempt,
+                occurred_at=now,
+            )
+
         journaled_result = None
         if attempt is not None and attempt.status in TERMINAL_ATTEMPT_STATUSES:
             journaled_result = {
-                "final_output": execution_status.final_output,
-                "agent_results": execution_status.agent_results,
+                "final_output": _journalable_value(execution_status.final_output),
+                "agent_results": _journalable_value(execution_status.agent_results),
                 "errors": list(execution_status.errors),
             }
         transition = _DurableTransition(
@@ -945,6 +1085,7 @@ class DirectExecutionService:
             payload=payload,
             occurred_at=now,
             journaled_result=journaled_result,
+            final_report=final_report,
         )
 
         if await self._commit_transition(transition):
@@ -1004,30 +1145,84 @@ class DirectExecutionService:
         for attempt_number in range(1, self.durable_write_max_attempts + 1):
             try:
                 async with self.session_factory() as session:
-                    repo = RunLifecycleRepository(session)
-                    await repo.record_run_transition(run, organization_id=run.tenant_id)
-                    if transition.task is not None:
-                        await repo.record_task_transition(
-                            transition.task, organization_id=run.tenant_id
+                    try:
+                        repo = RunLifecycleRepository(session)
+                        await repo.record_run_transition(
+                            run, organization_id=run.tenant_id
                         )
-                    if transition.attempt is not None:
-                        await repo.record_attempt_transition(
-                            transition.attempt, organization_id=run.tenant_id
-                        )
-                        if transition.journaled_result is not None:
-                            await repo.write_journaled_result(
-                                transition.attempt.attempt_id,
-                                organization_id=run.tenant_id,
-                                result=transition.journaled_result,
+                        if transition.task is not None:
+                            await repo.record_task_transition(
+                                transition.task, organization_id=run.tenant_id
                             )
-                    await self._append_event(
-                        session,
-                        run=run,
-                        event_type=transition.event_type,
-                        payload=transition.payload,
-                        occurred_at=transition.occurred_at,
-                    )
-                    await session.commit()
+                        if transition.attempt is not None:
+                            await repo.record_attempt_transition(
+                                transition.attempt, organization_id=run.tenant_id
+                            )
+                            if transition.journaled_result is not None:
+                                await repo.write_journaled_result(
+                                    transition.attempt.attempt_id,
+                                    organization_id=run.tenant_id,
+                                    result=transition.journaled_result,
+                                )
+
+                        if transition.final_report is not None:
+                            artifact = await ArtifactRepository(
+                                session
+                            ).create_artifact(
+                                transition.final_report.artifact,
+                                organization_id=run.tenant_id,
+                            )
+                            report_text = artifact.metadata_.get(
+                                _FINAL_REPORT_CONTENT_METADATA_KEY
+                            )
+                            if not isinstance(report_text, str):
+                                raise ValueError(
+                                    "persisted final report has no inspectable text"
+                                )
+                            if report_text != transition.final_report.text:
+                                raise ValueError(
+                                    "persisted final report text does not match the "
+                                    "final_output serialization"
+                                )
+                            if (
+                                hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+                                != artifact.content_sha256
+                            ):
+                                raise ValueError(
+                                    "persisted final report text does not match its "
+                                    "content digest"
+                                )
+
+                            inventory = build_inventory(
+                                artifact_id=artifact.artifact_id,
+                                artifact_kind=artifact.kind,
+                                source=report_text,
+                            )
+                            resolution = ClaimSupportResolver(
+                                id_factory=self._claim_support_id_factory(
+                                    artifact.artifact_id
+                                )
+                            ).resolve(
+                                inventory=inventory,
+                                run_id=run.run_id,
+                                verdicts=(),
+                                resolved_at=transition.occurred_at,
+                            )
+                            await ClaimSupportRecorder(
+                                ClaimSupportRepository(session)
+                            ).record(resolution, organization_id=run.tenant_id)
+
+                        await self._append_event(
+                            session,
+                            run=run,
+                            event_type=transition.event_type,
+                            payload=transition.payload,
+                            occurred_at=transition.occurred_at,
+                        )
+                        await session.commit()
+                    except BaseException:
+                        await session.rollback()
+                        raise
                 return True
             except Exception as exc:
                 last_error = exc
