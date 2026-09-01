@@ -176,6 +176,39 @@ class TestEachFailureIsItsOwnState:
         )
         assert reached_side_effect == []
 
+    async def test_external_cancellation_settles_handler_before_cancel_record(
+        self,
+        boundary_dependencies: dict[str, Any],
+        audit_store: RecordingAuditStore,
+    ) -> None:
+        """A handler that suppresses cancellation cannot outlive its record."""
+
+        started = asyncio.Event()
+
+        async def cleanup_writer(
+            args: EchoInput, context: ToolCallContext
+        ) -> Mapping[str, Any]:
+            started.set()
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                audit_store.calls.append("handler-cleanup")
+                return {"echoed": "cleanup"}
+            raise AssertionError("the handler should have been cancelled")
+
+        boundary = build(boundary_dependencies, name=SLOW_TOOL, handler=cleanup_writer)
+        call = asyncio.create_task(
+            boundary.invoke(**invoke_kwargs(tool_name=SLOW_TOOL))
+        )
+        await started.wait()
+        call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+
+        assert audit_store.calls.index("handler-cleanup") < audit_store.calls.index(
+            "persist:cancelled"
+        )
+
     async def test_cancellation_before_dispatch_never_starts_the_tool(
         self, boundary_dependencies: dict[str, Any]
     ) -> None:

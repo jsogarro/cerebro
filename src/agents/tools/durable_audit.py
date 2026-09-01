@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Final, Literal, cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.core.contracts import (
@@ -25,6 +26,7 @@ from src.core.contracts import (
     TrustClassification,
 )
 from src.core.tools.audit import ToolAuditEvent
+from src.core.tools.errors import ToolInvocationConflictError
 from src.models.db.run_lifecycle import AgentRun, AgentRunTask, AgentTaskAttempt
 from src.models.db.tool_invocation import AgentToolInvocation
 from src.repositories.run_event_repository import RunEventRepository
@@ -35,14 +37,13 @@ from src.repositories.tenant_scope import (
 )
 from src.repositories.tool_invocation_repository import ToolInvocationRepository
 
-_TERMINAL_STATUSES: Final[tuple[str, ...]] = tuple(
+_REPLAYABLE_TERMINAL_STATUSES: Final[tuple[str, ...]] = tuple(
     status.value
     for status in (
         ToolInvocationStatus.SUCCEEDED,
         ToolInvocationStatus.FAILED,
         ToolInvocationStatus.CANCELLED,
         ToolInvocationStatus.TIMED_OUT,
-        ToolInvocationStatus.DENIED,
     )
 )
 _PENDING_STATUSES: Final[tuple[str, ...]] = tuple(
@@ -75,8 +76,9 @@ class SessionToolAuditStore:
         This is a read, so an unknown or differently owned run/attempt is a
         no-match and returns ``None`` rather than raising the persistence
         path's durable-parent error.
-        ``DENIED`` is included as a terminal record; the boundary separately
-        decides that denied records are not replayable.
+        ``DENIED`` is deliberately excluded. Refusal rows remain available
+        through the repository and event stream, but they must not shadow a
+        completed invocation that used the same key.
         """
 
         normalized_organization_id = _normalize_durable_context(
@@ -90,7 +92,7 @@ class SessionToolAuditStore:
                 AgentToolInvocation.run_id == run_id,
                 AgentToolInvocation.attempt_id == attempt_id,
                 AgentToolInvocation.idempotency_key == idempotency_key,
-                AgentToolInvocation.status.in_(_TERMINAL_STATUSES),
+                AgentToolInvocation.status.in_(_REPLAYABLE_TERMINAL_STATUSES),
             )
             query = scope_to_organization(
                 query,
@@ -188,11 +190,31 @@ class SessionToolAuditStore:
                     organization_id=normalized_organization_id,
                 )
                 if existing is None:
-                    await invocation_repository.create_tool_invocation(
-                        invocation,
-                        organization_id=normalized_organization_id,
-                        capability_decision=capability_decision,
-                    )
+                    try:
+                        await invocation_repository.create_tool_invocation(
+                            invocation,
+                            organization_id=normalized_organization_id,
+                            capability_decision=capability_decision,
+                        )
+                    except IntegrityError as error:
+                        # The partial idempotency index is the cross-process
+                        # reservation primitive. A read-before-write check
+                        # cannot close that race, so reload the row after the
+                        # losing transaction is rolled back and let the
+                        # boundary return a replay or IN_PROGRESS outcome.
+                        await session.rollback()
+                        conflict = await _find_by_idempotency_key(
+                            session,
+                            run_id=invocation.run_id,
+                            attempt_id=invocation.attempt_id,
+                            idempotency_key=invocation.idempotency_key,
+                            organization_id=normalized_organization_id,
+                        )
+                        if conflict is None:
+                            raise
+                        raise ToolInvocationConflictError(
+                            self._to_contract(conflict)
+                        ) from error
                 else:
                     self._assert_transition_identity(existing, invocation)
                     await invocation_repository.record_transition(
@@ -471,6 +493,27 @@ async def _require_durable_parent_context(
         raise ValueError(
             f"attempt_id {attempt_id!r} is not a durable attempt in this run and organization"
         )
+
+
+async def _find_by_idempotency_key(
+    session: AsyncSession,
+    *,
+    run_id: str,
+    attempt_id: str,
+    idempotency_key: str,
+    organization_id: uuid.UUID,
+) -> AgentToolInvocation | None:
+    """Reload a non-denied reservation after an idempotency conflict."""
+
+    query = select(AgentToolInvocation).where(
+        AgentToolInvocation.run_id == run_id,
+        AgentToolInvocation.attempt_id == attempt_id,
+        AgentToolInvocation.idempotency_key == idempotency_key,
+        AgentToolInvocation.status != ToolInvocationStatus.DENIED.value,
+        AgentToolInvocation.organization_id == organization_id,
+    )
+    result = await session.execute(query.limit(1))
+    return result.scalars().first()
 
 
 __all__ = ["SessionToolAuditStore"]

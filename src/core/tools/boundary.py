@@ -98,6 +98,7 @@ from .errors import (
     CapabilityDecisionUnusableError,
     IdempotencyConflictError,
     PromptBindingRefusedError,
+    ToolInvocationConflictError,
     ToolNotRegisteredError,
     ToolSpecError,
 )
@@ -498,14 +499,7 @@ class ToolBoundary:
                     capability_scope=call.capability_scope,
                     input_sha256=prepared.input_sha256,
                 )
-                return ToolOutcome(
-                    mint=_OUTCOME_MINT,
-                    status=ToolOutcomeStatus.IN_PROGRESS,
-                    invocation=pending,
-                    retry=RetryDisposition.RETRIABLE,
-                    decision=decision,
-                    detail="invocation is already in progress; retry later",
-                )
+                return self._in_progress(pending, decision=decision)
 
         if isinstance(prepared, _RejectedInput):
             # The input rejection lands here, after authorization and after
@@ -534,37 +528,54 @@ class ToolBoundary:
                 detail=f"circuit open for {spec.name!r}",
             )
 
-        await self._record(
-            call,
-            invocation=ToolInvocation(
-                tool_invocation_id=call.tool_invocation_id,
-                run_id=run_id,
-                task_id=task_id,
-                attempt_id=attempt_id,
-                tool_name=spec.name,
-                tool_version=spec.version,
-                status=ToolInvocationStatus.REQUESTED,
-                capability_scope=call.capability_scope,
-                idempotency_key=effective_key,
-                input=prepared.redacted_input,
-                input_trust=input_trust,
-                producer_kind=call.producer_kind,
-                prompt_binding=(
-                    None if verified_prompt is None else verified_prompt.binding
-                ),
-                requested_at=now,
+        requested_invocation = ToolInvocation(
+            tool_invocation_id=call.tool_invocation_id,
+            run_id=run_id,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            tool_name=spec.name,
+            tool_version=spec.version,
+            status=ToolInvocationStatus.REQUESTED,
+            capability_scope=call.capability_scope,
+            idempotency_key=effective_key,
+            input=prepared.redacted_input,
+            input_trust=input_trust,
+            producer_kind=call.producer_kind,
+            prompt_binding=(
+                None if verified_prompt is None else verified_prompt.binding
             ),
-            event_type=EVENT_REQUESTED,
-            payload={
-                "tool_name": spec.name,
-                "tool_version": spec.version,
-                "capability_scope": call.capability_scope,
-                "grant_id": grant.grant_id,
-                "input_sha256": prepared.input_sha256,
-                "input_trust": input_trust.value,
-            },
-            decision=decision,
+            requested_at=now,
         )
+        try:
+            await self._record(
+                call,
+                invocation=requested_invocation,
+                event_type=EVENT_REQUESTED,
+                payload={
+                    "tool_name": spec.name,
+                    "tool_version": spec.version,
+                    "capability_scope": call.capability_scope,
+                    "grant_id": grant.grant_id,
+                    "input_sha256": prepared.input_sha256,
+                    "input_trust": input_trust.value,
+                },
+                decision=decision,
+            )
+        except ToolInvocationConflictError as conflict:
+            self._require_same_request(
+                conflict.invocation,
+                spec=spec,
+                capability_scope=call.capability_scope,
+                input_sha256=prepared.input_sha256,
+            )
+            if conflict.invocation.status in _REPLAYABLE_RECORD_STATUSES:
+                return self._replay(conflict.invocation, decision=decision)
+            if conflict.invocation.status in {
+                ToolInvocationStatus.REQUESTED,
+                ToolInvocationStatus.RUNNING,
+            }:
+                return self._in_progress(conflict.invocation, decision=decision)
+            raise
 
         return await self._run_tool(
             call,
@@ -723,11 +734,12 @@ class ToolBoundary:
             # which for an external write is the effect happening after the
             # system reported that it would not.
             #
-            # Requested synchronously rather than awaited. Awaiting during an
-            # unwind is how a cleanup path acquires its own second failure
-            # mode; `cancel()` is delivered at the handler's next suspension
-            # point either way.
-            handler_task.cancel()
+            # Settle the handler before propagating the cancellation. A
+            # handler is allowed to catch CancelledError for cleanup; merely
+            # calling `cancel()` and recording CANCELLED would let that
+            # cleanup continue after the durable record claimed the call had
+            # ended.
+            await _abandon(handler_task)
             raise
         finally:
             if cancel_task is not None and not cancel_task.done():
@@ -1106,6 +1118,21 @@ class ToolBoundary:
             retry=RETRY_DISPOSITIONS[status],
             decision=decision,
             detail=recorded.status_reason,
+        )
+
+    @staticmethod
+    def _in_progress(
+        invocation: ToolInvocation, *, decision: CapabilityDecision
+    ) -> ToolOutcome:
+        """Return a retryable view of a committed nonterminal invocation."""
+
+        return ToolOutcome(
+            mint=_OUTCOME_MINT,
+            status=ToolOutcomeStatus.IN_PROGRESS,
+            invocation=invocation,
+            retry=RetryDisposition.RETRIABLE,
+            decision=decision,
+            detail="invocation is already in progress; retry later",
         )
 
 

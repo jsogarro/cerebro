@@ -14,6 +14,7 @@ family, and remain outside this packet.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -126,6 +127,40 @@ class CrashBeforeTerminalPersistStore:
     ) -> None:
         if invocation.status is ToolInvocationStatus.SUCCEEDED:
             raise RuntimeError("simulated crash before terminal persist")
+        await self.inner.persist(
+            invocation=invocation,
+            events=events,
+            organization_id=organization_id,
+            capability_decision=capability_decision,
+        )
+
+
+@dataclass(slots=True)
+class CoordinatedLookupStore:
+    """Hold two callers at lookup points so their first writes race."""
+
+    inner: SessionToolAuditStore
+    terminal_barrier: asyncio.Barrier
+    pending_barrier: asyncio.Barrier
+
+    async def find_invocation(self, **kwargs: Any) -> ToolInvocation | None:
+        found = await self.inner.find_invocation(**kwargs)
+        await self.terminal_barrier.wait()
+        return found
+
+    async def find_pending_invocation(self, **kwargs: Any) -> ToolInvocation | None:
+        found = await self.inner.find_pending_invocation(**kwargs)
+        await self.pending_barrier.wait()
+        return found
+
+    async def persist(
+        self,
+        *,
+        invocation: ToolInvocation,
+        events: Sequence[ToolAuditEvent],
+        organization_id: str | None,
+        capability_decision: CapabilityDecision | None,
+    ) -> None:
         await self.inner.persist(
             invocation=invocation,
             events=events,
@@ -515,6 +550,84 @@ async def test_a_terminal_invocation_is_replayable_and_tenant_scoped(
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_a_denial_cannot_shadow_an_existing_terminal_invocation(
+    store: SessionToolAuditStore,
+) -> None:
+    handler_calls: list[str] = []
+
+    async def counting_search(
+        args: SearchInput, context: ToolCallContext
+    ) -> dict[str, Any]:
+        handler_calls.append("called")
+        return {"hits": 1}
+
+    boundary = _boundary(store, handler=counting_search)
+    key = "terminal-before-denial"
+    first = await boundary.invoke(**_call_kwargs(grants=_grants(), idempotency_key=key))
+    denied = await boundary.invoke(**_call_kwargs(idempotency_key=key))
+    replayed = await boundary.invoke(
+        **_call_kwargs(grants=_grants(), idempotency_key=key)
+    )
+
+    assert first.status is ToolOutcomeStatus.SUCCEEDED
+    assert denied.status is ToolOutcomeStatus.DENIED
+    assert replayed.status is ToolOutcomeStatus.SUCCEEDED
+    assert replayed.invocation.tool_invocation_id == first.invocation.tool_invocation_id
+    assert handler_calls == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_writers_resolve_to_one_invocation_and_one_execution(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    inner = SessionToolAuditStore(session_factory)
+    store = CoordinatedLookupStore(
+        inner=inner,
+        terminal_barrier=asyncio.Barrier(2),
+        pending_barrier=asyncio.Barrier(2),
+    )
+    handler_started = asyncio.Event()
+    release_handler = asyncio.Event()
+    handler_calls: list[str] = []
+
+    async def blocking_search(
+        args: SearchInput, context: ToolCallContext
+    ) -> dict[str, Any]:
+        handler_calls.append("called")
+        handler_started.set()
+        await release_handler.wait()
+        return {"hits": 1}
+
+    first_boundary = _boundary(store, handler=blocking_search)
+    second_boundary = _boundary(store, handler=blocking_search)
+    kwargs = _call_kwargs(grants=_grants(), idempotency_key="concurrent-key")
+    calls = [
+        asyncio.create_task(first_boundary.invoke(**kwargs)),
+        asyncio.create_task(second_boundary.invoke(**kwargs)),
+    ]
+
+    await handler_started.wait()
+    done, waiting = await asyncio.wait(
+        calls, return_when=asyncio.FIRST_COMPLETED, timeout=5.0
+    )
+    assert len(done) == 1
+    early = next(iter(done)).result()
+    assert early.status is ToolOutcomeStatus.IN_PROGRESS
+    assert len(waiting) == 1
+
+    release_handler.set()
+    late = await next(iter(waiting))
+    assert late.status is ToolOutcomeStatus.SUCCEEDED
+    assert handler_calls == ["called"]
+
+    async with session_factory() as session:
+        invocations = list((await session.scalars(select(AgentToolInvocation))).all())
+        events = list((await session.scalars(select(AgentRunEvent))).all())
+    assert len(invocations) == 1
+    assert len(events) == 2
 
 
 @pytest.mark.asyncio

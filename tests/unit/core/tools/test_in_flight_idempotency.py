@@ -198,3 +198,84 @@ async def test_in_memory_terminal_lookup_does_not_return_a_pending_row() -> None
         )
         == pending
     )
+
+
+@pytest.mark.asyncio
+async def test_in_memory_lookup_is_tenant_scoped_and_denials_do_not_shadow_success() -> (
+    None
+):
+    store = InMemoryToolAuditStore()
+    terminal = ToolInvocation(
+        tool_invocation_id="terminal-invocation",
+        run_id=RUN_ID,
+        task_id=TASK_ID,
+        attempt_id=ATTEMPT_ID,
+        tool_name=TOOL_NAME,
+        tool_version=TOOL_VERSION,
+        status=ToolInvocationStatus.SUCCEEDED,
+        capability_scope=SCOPE,
+        idempotency_key="shared-key",
+        input={"query": "hello"},
+        input_trust=TrustClassification.USER_SUPPLIED,
+        output={"echoed": "hello"},
+        output_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+        producer_kind=ProducerKind.SYSTEM,
+        requested_at=NOW,
+        completed_at=NOW,
+    )
+    denied = terminal.model_copy(
+        update={
+            "tool_invocation_id": "denied-invocation",
+            "status": ToolInvocationStatus.DENIED,
+            "output": None,
+            "output_trust": None,
+            "error_code": "capability_denied",
+        }
+    )
+    pending = _pending_invocation(invocation_id="pending-invocation")
+
+    await store.persist(
+        invocation=terminal,
+        events=(),
+        organization_id=ORG_ID,
+        capability_decision=None,
+    )
+    await store.persist(
+        invocation=denied,
+        events=(),
+        organization_id=ORG_ID,
+        capability_decision=None,
+    )
+    await store.persist(
+        invocation=pending,
+        events=(),
+        organization_id=ORG_ID,
+        capability_decision=None,
+    )
+
+    assert (
+        await store.find_invocation(
+            run_id=RUN_ID,
+            attempt_id=ATTEMPT_ID,
+            organization_id=ORG_ID,
+            idempotency_key="shared-key",
+        )
+    ) == terminal
+    assert (
+        await store.find_invocation(
+            run_id=RUN_ID,
+            attempt_id=ATTEMPT_ID,
+            organization_id="other-org",
+            idempotency_key="shared-key",
+        )
+        is None
+    )
+    assert (
+        await store.find_pending_invocation(
+            run_id=RUN_ID,
+            attempt_id=ATTEMPT_ID,
+            organization_id="other-org",
+            idempotency_key=pending.idempotency_key,
+        )
+        is None
+    )

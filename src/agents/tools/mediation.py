@@ -126,6 +126,24 @@ bug and is really a timeout. The relationship is asserted in
 big enough.
 """
 
+_REPLAYABLE_TERMINAL_STATUSES: Final[frozenset[ToolInvocationStatus]] = frozenset(
+    {
+        ToolInvocationStatus.SUCCEEDED,
+        ToolInvocationStatus.FAILED,
+        ToolInvocationStatus.CANCELLED,
+        ToolInvocationStatus.TIMED_OUT,
+    }
+)
+_PENDING_STATUSES: Final[frozenset[ToolInvocationStatus]] = frozenset(
+    {ToolInvocationStatus.REQUESTED, ToolInvocationStatus.RUNNING}
+)
+
+
+def _organization_key(organization_id: str | None) -> str | None:
+    """Normalize the in-memory tenant key without weakening its scope."""
+
+    return None if organization_id is None else str(organization_id)
+
 
 @final
 @dataclass(frozen=True, slots=True)
@@ -305,6 +323,9 @@ class InMemoryToolAuditStore:
     the invocation contract and must not start looking like it is. ``None``
     entries are the malformed-request rows, which have no decision to record.
     """
+    _organization_by_invocation: dict[str, str | None] = field(
+        default_factory=dict, repr=False
+    )
 
     async def find_invocation(
         self,
@@ -326,14 +347,9 @@ class InMemoryToolAuditStore:
                 recorded.run_id == run_id
                 and recorded.attempt_id == attempt_id
                 and recorded.idempotency_key == idempotency_key
-                and recorded.status
-                in {
-                    ToolInvocationStatus.SUCCEEDED,
-                    ToolInvocationStatus.FAILED,
-                    ToolInvocationStatus.CANCELLED,
-                    ToolInvocationStatus.TIMED_OUT,
-                    ToolInvocationStatus.DENIED,
-                }
+                and recorded.status in _REPLAYABLE_TERMINAL_STATUSES
+                and self._organization_by_invocation.get(recorded.tool_invocation_id)
+                == _organization_key(organization_id)
             ):
                 return recorded
         return None
@@ -352,8 +368,9 @@ class InMemoryToolAuditStore:
                 recorded.run_id == run_id
                 and recorded.attempt_id == attempt_id
                 and recorded.idempotency_key == idempotency_key
-                and recorded.status
-                in {ToolInvocationStatus.REQUESTED, ToolInvocationStatus.RUNNING}
+                and recorded.status in _PENDING_STATUSES
+                and self._organization_by_invocation.get(recorded.tool_invocation_id)
+                == _organization_key(organization_id)
             ):
                 return recorded
         return None
@@ -369,6 +386,9 @@ class InMemoryToolAuditStore:
         self.invocations.append(invocation)
         self.events.extend(events)
         self.decisions.append(capability_decision)
+        self._organization_by_invocation[invocation.tool_invocation_id] = (
+            _organization_key(organization_id)
+        )
 
 
 def build_tool_boundary(
