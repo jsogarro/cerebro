@@ -265,4 +265,4 @@ async def test_live_websocket_rejects_foreign_session_before_registration() -> N
         await talkhier_api.websocket_session_updates(websocket, "session-owned")
 
     register.assert_not_awaited()
-    websocket.close.assert_awaited_once()
+    websocket.close.assert_awaited_once_with(code=1008, reason="Session not found")

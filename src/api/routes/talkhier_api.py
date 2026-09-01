@@ -753,6 +753,13 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
 
     except WebSocketDisconnect:
         pass
+    except ValueError as e:
+        logger.warning(
+            "talkhier_session_websocket_access_denied",
+            session_id=session_id,
+            error=str(e),
+        )
+        await websocket.close(code=1008, reason="Session not found")
     except Exception as e:
         logger.error(
             "talkhier_session_websocket_error",
@@ -867,6 +874,13 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         pass
+    except ValueError as e:
+        logger.warning(
+            "talkhier_interactive_session_access_denied",
+            session_id=session_id,
+            error=str(e),
+        )
+        await websocket.close(code=1008, reason="Session not found")
     except Exception as e:
         logger.error(
             "talkhier_interactive_session_error",
@@ -960,6 +974,13 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         pass
+    except ValueError as e:
+        logger.warning(
+            "talkhier_coordination_monitoring_access_denied",
+            coordination_id=coordination_id,
+            error=str(e),
+        )
+        await websocket.close(code=1008, reason="Coordination not found")
     except Exception as e:
         logger.error(
             "talkhier_coordination_monitoring_error",
