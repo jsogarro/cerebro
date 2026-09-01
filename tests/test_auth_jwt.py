@@ -3,7 +3,7 @@ Tests for JWT authentication service.
 """
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import redis.asyncio as redis
@@ -17,8 +17,10 @@ from src.auth.models import TokenPair, TokenPayload
 async def redis_mock():
     """Mock Redis client."""
     mock = AsyncMock(spec=redis.Redis)
+    mock.set = AsyncMock()
     mock.setex = AsyncMock()
     mock.get = AsyncMock()
+    mock.get.return_value = None
     mock.delete = AsyncMock()
     mock.exists = AsyncMock(return_value=0)
     mock.scan = AsyncMock(return_value=(0, []))
@@ -118,10 +120,11 @@ class TestJWTService:
             organization_id="org-789",
         )
 
-        redis_mock.get.return_value = (
+        redis_mock.get.side_effect = [
+            None,
             '{"user_id": "test-user-123", "device_id": "device-123", '
-            '"organization_id": "org-789"}'
-        )
+            '"organization_id": "org-789"}',
+        ]
 
         new_pair = await jwt_service.refresh_tokens(
             initial_pair.refresh_token, device_id="device-123"
@@ -248,9 +251,10 @@ class TestJWTService:
         )
 
         # Mock refresh token in Redis
-        redis_mock.get.return_value = (
-            '{"user_id": "test-user-123", "device_id": "device-123"}'
-        )
+        redis_mock.get.side_effect = [
+            None,
+            '{"user_id": "test-user-123", "device_id": "device-123"}',
+        ]
 
         # Refresh tokens
         new_pair = await jwt_service.refresh_tokens(
@@ -319,6 +323,55 @@ class TestJWTService:
 
         assert count == 1
         redis_mock.delete.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_revoke_all_invalidates_old_access_tokens_but_not_new_tokens(
+        self, jwt_service, redis_mock
+    ):
+        """User-level revocation rejects old tokens while allowing new sessions."""
+        marker: int | None = None
+
+        async def store_marker(key: str, value: str) -> bool:
+            nonlocal marker
+            assert key == f"{jwt_service.user_revocation_prefix}test-user-123"
+            marker = int(value)
+            return True
+
+        async def read_marker(key: str) -> str | None:
+            assert key == f"{jwt_service.user_revocation_prefix}test-user-123"
+            return str(marker) if marker is not None else None
+
+        redis_mock.set.side_effect = store_marker
+        redis_mock.get.side_effect = read_marker
+        redis_mock.scan.return_value = (0, [])
+
+        with patch("src.auth.jwt_service.time.time_ns", side_effect=[100, 200, 300]):
+            old_tokens = await jwt_service.generate_token_pair(
+                user_id="test-user-123", email="test@example.com"
+            )
+            await jwt_service.revoke_all_user_tokens("test-user-123")
+            new_tokens = await jwt_service.generate_token_pair(
+                user_id="test-user-123", email="test@example.com"
+            )
+
+        with pytest.raises(JWTError, match="Token has been revoked"):
+            await jwt_service.validate_token(old_tokens.access_token)
+
+        validated_new_token = await jwt_service.validate_token(new_tokens.access_token)
+
+        assert validated_new_token.sub == "test-user-123"
+        assert marker == 200
+        redis_mock.set.assert_awaited_once_with(
+            f"{jwt_service.user_revocation_prefix}test-user-123", "200"
+        )
+
+    @pytest.mark.asyncio
+    async def test_revoke_all_fails_closed_without_revocation_store(self):
+        """All-session revocation must not report success without Redis."""
+        service = JWTService(redis_client=None)
+
+        with pytest.raises(JWTServiceUnavailable, match="revocation store"):
+            await service.revoke_all_user_tokens("test-user-123")
 
     @pytest.mark.asyncio
     async def test_get_active_sessions(self, jwt_service, redis_mock):

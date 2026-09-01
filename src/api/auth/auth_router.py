@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.jwt_service import JWTService
+from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
 from src.auth.models import (
     AuthResponse,
     ChangePasswordRequest,
@@ -25,7 +25,10 @@ from src.auth.models import (
     TokenPair,
     UserResponse,
 )
-from src.auth.password_service import PasswordService
+from src.auth.password_service import (
+    PasswordService,
+    PasswordTokenStoreUnavailableError,
+)
 from src.core.config import settings
 from src.middleware.auth_middleware import get_current_user
 from src.models.db.session import get_session
@@ -155,13 +158,30 @@ async def register(
             organization_id=uuid4(),
         )
 
-        # Save user
+        # Save the user enough to obtain its UUID before issuing a
+        # verification token. The token is persisted for the configured
+        # delivery integration; this route does not claim that an email was
+        # sent because Cerebro does not provide an email provider.
         db.add(user)
+        await db.flush()
+        verification_token = password_service.generate_verification_token()
+        try:
+            await password_service.store_verification_token(
+                str(user.id), verification_token
+            )
+        except PasswordTokenStoreUnavailableError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Email verification service unavailable",
+            ) from exc
+
+        # Add to password history before committing the account so a missing
+        # authentication store cannot leave a partially provisioned user.
+        await password_service.add_to_password_history(str(user.id), hashed_password)
+
         await db.commit()
         await db.refresh(user)
-
-        # Add password to history
-        await password_service.add_to_password_history(str(user.id), hashed_password)
 
         # Generate tokens
         tokens = await jwt_service.generate_token_pair(
@@ -276,6 +296,12 @@ async def refresh_tokens(
         logger.info("Tokens refreshed successfully")
         return new_tokens
 
+    except JWTServiceUnavailableError as e:
+        logger.warning("Token refresh service unavailable", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable",
+        ) from e
     except Exception as e:
         logger.warning("Token refresh failed", error=str(e))
         raise HTTPException(
@@ -302,6 +328,10 @@ async def logout(
         logger.info("User logged out successfully")
     else:
         logger.warning("Failed to revoke token during logout")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable",
+        )
 
 
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
@@ -314,30 +344,48 @@ async def forgot_password(
     """
     Request password reset.
 
-    Sends a password reset email with a secure token.
+    Accepts a password recovery request and persists a secure token. Email
+    delivery is intentionally outside this application because no provider is
+    configured here.
     """
-    # Get user
-    user_repo = UserRepository(db)
-    user = await user_repo.get_by_email(request.email)
+    async with password_service:
+        try:
+            # Check availability before looking up the email so an outage
+            # cannot reveal whether an account exists.
+            await password_service.ensure_token_store_available()
+        except PasswordTokenStoreUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Password recovery service unavailable",
+            ) from exc
 
-    # Always return success to prevent email enumeration
-    if user and user.is_active:
-        # Generate reset token
-        token = password_service.generate_reset_token()
+        # Get user
+        user_repo = UserRepository(db)
+        user = await user_repo.get_by_email(request.email)
 
-        # Store token
-        await password_service.store_reset_token(
-            str(user.id),
-            token,
-            expires_in=3600,  # 1 hour
-        )
+        # Keep the response generic for unknown or inactive accounts. A real
+        # token is persisted for active accounts; no delivery success is
+        # claimed because no email provider is wired into this application.
+        if user and user.is_active:
+            token = password_service.generate_reset_token()
 
-        # Send reset email (in background)
-        # background_tasks.add_task(send_reset_email, user.email, token)
+            try:
+                await password_service.store_reset_token(
+                    str(user.id),
+                    token,
+                    expires_in=3600,  # 1 hour
+                )
+            except PasswordTokenStoreUnavailableError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Password recovery service unavailable",
+                ) from exc
 
-        logger.info("Password reset requested", user_id=str(user.id), email=user.email)
+            logger.info(
+                "Password reset requested", user_id=str(user.id), email=user.email
+            )
 
-    return {"message": "If the email exists, a password reset link has been sent"}
+    return {"message": "If the email exists, the recovery request was accepted"}
 
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
@@ -353,7 +401,13 @@ async def reset_password(
     """
     async with password_service:
         # Validate token
-        user_id = await password_service.validate_reset_token(request.token)
+        try:
+            user_id = await password_service.validate_reset_token(request.token)
+        except PasswordTokenStoreUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Password recovery service unavailable",
+            ) from exc
 
         if not user_id:
             raise HTTPException(
@@ -481,14 +535,44 @@ async def change_password(
 async def verify_email(
     token: str,
     db: AsyncSession = Depends(get_session),
+    password_service: PasswordService = Depends(get_password_service),
 ) -> dict[str, str]:
     """
     Verify email address with token.
 
     Confirms the user's email address using the verification token.
     """
-    # In production, validate token and get user ID
-    # For now, this is a placeholder
+    async with password_service:
+        try:
+            user_id = await password_service.validate_verification_token(token)
+        except PasswordTokenStoreUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Email verification service unavailable",
+            ) from exc
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token",
+        )
+
+    try:
+        parsed_user_id = UUID(user_id)
+    except (AttributeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token",
+        ) from exc
+
+    user = await UserRepository(db).verify_email(parsed_user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token",
+        )
+
+    await db.commit()
 
     return {"message": "Email verified successfully"}
 
@@ -561,7 +645,13 @@ async def revoke_all_sessions(
 
     Logs out the user from all devices and sessions.
     """
-    count = await jwt_service.revoke_all_user_tokens(str(current_user.id))
+    try:
+        count = await jwt_service.revoke_all_user_tokens(str(current_user.id))
+    except JWTServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable",
+        ) from exc
 
     logger.info("All sessions revoked", user_id=str(current_user.id), count=count)
 

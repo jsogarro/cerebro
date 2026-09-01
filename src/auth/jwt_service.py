@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -91,6 +92,7 @@ class JWTService:
         # Token blacklist prefix in Redis
         self.blacklist_prefix = "blacklist:token:"
         self.refresh_token_prefix = "refresh:token:"
+        self.user_revocation_prefix = "blacklist:user:"
 
     def _load_or_generate_private_key(self, key_path: str | None = None) -> str:
         """Load or generate RSA private key.
@@ -265,7 +267,7 @@ class JWTService:
         now = datetime.now(UTC)
 
         # Base payload
-        base_payload = {
+        base_payload: dict[str, Any] = {
             "sub": user_id,
             "email": email,
             "roles": roles or [],
@@ -279,6 +281,12 @@ class JWTService:
         # Add additional claims
         if additional_claims:
             base_payload.update(additional_claims)
+
+        # ``iat`` is encoded by python-jose with second-level precision. Keep
+        # a high-resolution issuance marker so a user-wide revocation has an
+        # unambiguous boundary for tokens minted immediately afterwards.
+        issued_at_ns = time.time_ns()
+        base_payload["iat_ns"] = issued_at_ns
 
         # Access token payload
         access_payload = {
@@ -296,6 +304,7 @@ class JWTService:
             "token_type": "refresh",
             "device_id": device_id,
             "organization_id": organization_id,
+            "iat_ns": issued_at_ns,
         }
 
         # Generate tokens
@@ -386,6 +395,23 @@ class JWTService:
                         "Token blacklist store unavailable"
                     ) from exc
                 if is_blacklisted:
+                    raise JWTError("Token has been revoked")
+
+                subject = payload.get("sub")
+                if not isinstance(subject, str) or not subject:
+                    raise JWTError("Token missing subject")
+                try:
+                    user_revoked = await self._is_user_token_revoked(subject, payload)
+                except (JWTServiceUnavailableError, JWTError):
+                    raise
+                except Exception as exc:
+                    logger.error(
+                        "User token revocation store unavailable", error=str(exc)
+                    )
+                    raise JWTServiceUnavailableError(
+                        "Token blacklist store unavailable"
+                    ) from exc
+                if user_revoked:
                     raise JWTError("Token has been revoked")
 
             # Create token payload
@@ -518,36 +544,103 @@ class JWTService:
         Returns:
             Number of tokens revoked
         """
-        if not self.redis_client:
-            return 0
+        if self.redis_client is None:
+            raise JWTServiceUnavailableError("Token revocation store unavailable")
 
         count = 0
 
-        # Find all refresh tokens for user
-        pattern = f"{self.refresh_token_prefix}*"
-        cursor = 0
+        try:
+            # This durable boundary invalidates already-issued access and
+            # refresh tokens. Per-JTI blacklist entries remain the mechanism
+            # for single-token logout.
+            revocation_marker = time.time_ns()
+            marker_key = f"{self.user_revocation_prefix}{user_id}"
+            stored = await self.redis_client.set(marker_key, str(revocation_marker))
+            if not stored:
+                raise JWTServiceUnavailableError(
+                    "Token revocation marker could not be stored"
+                )
 
-        while True:
-            cursor, keys = await self.redis_client.scan(
-                cursor, match=pattern, count=100
+            # Find all refresh tokens for user and remove their durable
+            # session records. The marker above is authoritative for access
+            # tokens, which do not have a server-side record.
+            pattern = f"{self.refresh_token_prefix}*"
+            cursor = 0
+
+            while True:
+                cursor, keys = await self.redis_client.scan(
+                    cursor, match=pattern, count=100
+                )
+
+                for key in keys:
+                    data = await self.redis_client.get(key)
+                    if data:
+                        try:
+                            token_data = deserialize_from_cache(data)
+                            if token_data.get("user_id") == user_id:
+                                await self.redis_client.delete(key)
+                                count += 1
+                        except json.JSONDecodeError:
+                            continue
+
+                if cursor == 0:
+                    break
+        except JWTServiceUnavailableError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "Failed to revoke all user tokens", user_id=user_id, error=str(exc)
             )
-
-            for key in keys:
-                data = await self.redis_client.get(key)
-                if data:
-                    try:
-                        token_data = deserialize_from_cache(data)
-                        if token_data.get("user_id") == user_id:
-                            await self.redis_client.delete(key)
-                            count += 1
-                    except json.JSONDecodeError:
-                        continue
-
-            if cursor == 0:
-                break
+            raise JWTServiceUnavailableError(
+                "Token revocation store unavailable"
+            ) from exc
 
         logger.info("Revoked all user tokens", user_id=user_id, count=count)
         return count
+
+    async def _is_user_token_revoked(
+        self, user_id: str, payload: dict[str, Any]
+    ) -> bool:
+        """Check the durable user-wide revocation boundary for a token."""
+        if self.redis_client is None:
+            return False
+
+        marker_key = f"{self.user_revocation_prefix}{user_id}"
+        marker = await self.redis_client.get(marker_key)
+        if marker is None:
+            return False
+
+        if isinstance(marker, bytes):
+            try:
+                marker = marker.decode()
+            except UnicodeDecodeError as exc:
+                raise JWTServiceUnavailableError(
+                    "Token revocation marker is invalid"
+                ) from exc
+
+        try:
+            revoked_before_ns = int(marker)
+        except (TypeError, ValueError) as exc:
+            raise JWTServiceUnavailableError(
+                "Token revocation marker is invalid"
+            ) from exc
+
+        issued_at_ns = payload.get("iat_ns")
+        if issued_at_ns is None:
+            issued_at = payload.get("iat")
+            if issued_at is None:
+                raise JWTError("Token missing issued-at timestamp")
+            try:
+                # Tokens created before the high-resolution claim was added
+                # remain compatible with the revocation boundary.
+                issued_at_ns = int(float(issued_at) * 1_000_000_000)
+            except (TypeError, ValueError) as exc:
+                raise JWTError("Token has invalid issued-at timestamp") from exc
+
+        try:
+            return int(issued_at_ns) <= revoked_before_ns
+        except (TypeError, ValueError) as exc:
+            raise JWTError("Token has invalid issued-at timestamp") from exc
 
     async def _is_token_blacklisted(self, jti: str) -> bool:
         """
