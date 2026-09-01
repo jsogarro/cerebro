@@ -648,6 +648,11 @@ class ToolBoundary:
                 await asyncio.shield(requested_record)
             except _RequestedPublicationError:
                 pass
+            except asyncio.CancelledError:
+                # A publisher may use CancelledError to reject the requested
+                # event. It is still an admission failure that must be
+                # settled before preserving the cancellation for the caller.
+                pass
             except Exception:
                 # A persistence failure means there is no confirmed requested
                 # row to settle. Preserve the caller's cancellation; the store

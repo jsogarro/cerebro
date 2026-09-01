@@ -79,7 +79,7 @@ class CoordinatedPublisher:
 
     calls: list[str]
     block_requested_publish: bool = False
-    failures: dict[str, Exception] = field(default_factory=dict)
+    failures: dict[str, BaseException] = field(default_factory=dict)
     requested_publish_started: asyncio.Event = field(default_factory=asyncio.Event)
     release_requested_publish: asyncio.Event = field(default_factory=asyncio.Event)
     published: list[ToolAuditEvent] = field(default_factory=list)
@@ -196,6 +196,41 @@ async def test_external_cancellation_during_requested_publish_is_settled_after_a
 
     with pytest.raises(asyncio.CancelledError):
         await call
+
+    assert handler_calls == []
+    assert [invocation.status for invocation in durable.invocations] == [
+        ToolInvocationStatus.REQUESTED,
+        ToolInvocationStatus.CANCELLED,
+    ]
+    assert calls == [
+        "persist:requested",
+        f"publish:{EVENT_REQUESTED}",
+        "persist:cancelled",
+        f"publish:{EVENT_COMPLETED}",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_requested_publication_cancellation_is_settled_as_terminal_cancellation(
+    boundary_dependencies: dict[str, Any], echo_spec: Any
+) -> None:
+    calls: list[str] = []
+    durable = RecordingAuditStore(calls=calls)
+    publisher = CoordinatedPublisher(
+        calls=calls,
+        failures={EVENT_REQUESTED: asyncio.CancelledError()},
+    )
+    handler_calls: list[str] = []
+    boundary = _boundary_with_handler(
+        boundary_dependencies,
+        echo_spec,
+        store=durable,
+        publisher=publisher,
+        handler=lambda args, context: _recording_handler(handler_calls, args, context),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await boundary.invoke(**invoke_kwargs(idempotency_key="publisher-cancel-key"))
 
     assert handler_calls == []
     assert [invocation.status for invocation in durable.invocations] == [
