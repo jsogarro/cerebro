@@ -15,6 +15,8 @@ nobody supplied. None of those can be turned into a result without inventing
 one, so none of them is returned as a result. They fail loudly and closed.
 """
 
+from src.core.contracts.provenance import ToolInvocation
+
 
 class ToolBoundaryError(Exception):
     """Base class for every failure the boundary refuses to paper over."""
@@ -58,6 +60,24 @@ class IdempotencyConflictError(ToolBoundaryError):
     """
 
 
+class ToolInvocationConflictError(ToolBoundaryError):
+    """A concurrent caller already reserved or completed this invocation.
+
+    The durable store raises this only after the database's idempotency index
+    has rejected a competing first write and the existing row has been
+    reloaded. The boundary can then return the same safe result as a normal
+    terminal or pending lookup, without publishing an event for the losing
+    caller's unpersisted invocation.
+    """
+
+    def __init__(self, invocation: ToolInvocation) -> None:
+        self.invocation = invocation
+        super().__init__(
+            "another caller already recorded this tool invocation under the "
+            f"idempotency key {invocation.idempotency_key!r}"
+        )
+
+
 class UnknownSecretError(ToolBoundaryError):
     """A :class:`~src.core.contracts.redaction.SecretRef` names no held secret.
 
@@ -90,6 +110,7 @@ __all__ = [
     "IdempotencyConflictError",
     "PromptBindingRefusedError",
     "ToolBoundaryError",
+    "ToolInvocationConflictError",
     "ToolNotRegisteredError",
     "ToolOutcomeNotSuccessfulError",
     "ToolSpecError",

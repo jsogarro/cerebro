@@ -22,6 +22,7 @@ payload that was malformed for some unrelated reason.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -30,12 +31,15 @@ from pydantic import BaseModel, ValidationError
 
 from src.agents.integrations.mcp_integration import MCPIntegration
 from src.agents.integrations.mcp_tool_specs import (
+    TOOL_ANALYZE_STATISTICS,
+    TOOL_VERSION,
     AcademicSearchInput,
     AnalyzeStatisticsInput,
     BuildKnowledgeGraphInput,
     FormatCitationsInput,
 )
 from src.agents.tools.mediation import InMemoryToolAuditStore, ToolCallIdentity
+from src.core.contracts import CapabilityGrant, SensitivityClass, TrustClassification
 from src.core.contracts.provenance import ToolInvocationStatus
 from src.core.contracts.redaction import REDACTION_MARKER, boundary_digest
 
@@ -63,6 +67,29 @@ def _identity(attempt: str) -> ToolCallIdentity:
     )
 
 
+def _grant() -> CapabilityGrant:
+    now = datetime.now(UTC)
+    return CapabilityGrant(
+        grant_id="grant-mcp-analyze-statistics",
+        run_id="run-1",
+        task_id="task-1",
+        capability_scope="scope-mcp-analyze-statistics",
+        tool_name=TOOL_ANALYZE_STATISTICS,
+        tool_versions=(TOOL_VERSION,),
+        sensitivity=SensitivityClass.READ_ONLY,
+        max_input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+        requires_approval=False,
+        issued_at=now - timedelta(minutes=1),
+        expires_at=now + timedelta(minutes=5),
+    )
+
+
+def _integration(
+    *, client: AsyncMock, store: InMemoryToolAuditStore | None = None
+) -> MCPIntegration:
+    return MCPIntegration(mcp_client=client, audit_store=store, grants=(_grant(),))
+
+
 def _dumped(store: InMemoryToolAuditStore) -> str:
     return str([record.model_dump(mode="json") for record in store.invocations])
 
@@ -73,7 +100,7 @@ class TestTheRecordDescribesTheCallThatWasMade:
     ) -> None:
         store = InMemoryToolAuditStore()
         client = _client()
-        integration = MCPIntegration(mcp_client=client, audit_store=store)
+        integration = _integration(client=client, store=store)
 
         benign = await integration.analyze_statistics(
             **BENIGN, identity=_identity("benign")
@@ -98,7 +125,7 @@ class TestTheRecordDescribesTheCallThatWasMade:
         """Not merely dropped. An operator must be able to see it was sent."""
 
         store = InMemoryToolAuditStore()
-        integration = MCPIntegration(mcp_client=_client(), audit_store=store)
+        integration = _integration(client=_client(), store=store)
 
         await integration.analyze_statistics(
             **BENIGN,
@@ -110,7 +137,7 @@ class TestTheRecordDescribesTheCallThatWasMade:
 
     async def test_the_refused_call_is_recorded_as_a_bad_input(self) -> None:
         store = InMemoryToolAuditStore()
-        integration = MCPIntegration(mcp_client=_client(), audit_store=store)
+        integration = _integration(client=_client(), store=store)
 
         await integration.analyze_statistics(
             **BENIGN,
@@ -129,7 +156,7 @@ class TestAnUndeclaredCredentialCannotReachTheOutboundCall:
     ) -> None:
         store = InMemoryToolAuditStore()
         client = _client()
-        integration = MCPIntegration(mcp_client=client, audit_store=store)
+        integration = _integration(client=client, store=store)
 
         benign = await integration.analyze_statistics(
             **BENIGN, identity=_identity("benign")
@@ -161,7 +188,7 @@ class TestAnUndeclaredCredentialCannotReachTheOutboundCall:
         """
 
         store = InMemoryToolAuditStore()
-        integration = MCPIntegration(mcp_client=_client(), audit_store=store)
+        integration = _integration(client=_client(), store=store)
 
         await integration.analyze_statistics(
             **BENIGN, api_key=SMUGGLED_KEY, identity=_identity("smuggled")
@@ -186,7 +213,7 @@ class TestReplayCannotServeADifferentRequest:
 
         store = InMemoryToolAuditStore()
         client = _client()
-        integration = MCPIntegration(mcp_client=client, audit_store=store)
+        integration = _integration(client=client, store=store)
         identity = _identity("shared")
 
         benign = await integration.analyze_statistics(**BENIGN, identity=identity)
@@ -235,7 +262,7 @@ class TestTheParametersTheUpstreamToolPublishesStillWork:
 
     async def test_correlation_parameters_reach_the_client(self) -> None:
         client = _client()
-        integration = MCPIntegration(mcp_client=client)
+        integration = _integration(client=client)
 
         await integration.analyze_statistics(
             "correlation", x=[1.0, 2.0], y=[3.0, 4.0], identity=_identity("corr")
@@ -247,7 +274,7 @@ class TestTheParametersTheUpstreamToolPublishesStillWork:
 
     async def test_the_declared_parameters_are_in_the_record(self) -> None:
         store = InMemoryToolAuditStore()
-        integration = MCPIntegration(mcp_client=_client(), audit_store=store)
+        integration = _integration(client=_client(), store=store)
 
         await integration.analyze_statistics(
             "t_test",

@@ -8,12 +8,15 @@ event lands in the same transaction as its outbox row.
 
 import asyncio
 import dataclasses
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from tenacity import wait_none
@@ -22,11 +25,18 @@ from src.ai_brain.router.routing_types import (
     RoutingExecutionPolicy,
     RoutingStrategy,
 )
-from src.api.services.direct_execution_service import DirectExecutionService
+from src.api.services.direct_execution_service import (
+    DirectExecutionService,
+    DurableWriteOutcome,
+    ExecutionStatus,
+)
 from src.api.services.execution_authority_resolver import (
     MappingExecutionAuthorityResolver,
 )
+from src.core.claims import build_inventory
 from src.core.contracts import (
+    AbsentEvidenceReason,
+    ClaimSupportStatus,
     ExecutionBudget,
     FallbackMode,
     ProviderModelPolicy,
@@ -34,7 +44,14 @@ from src.core.contracts import (
     RoutingEdge,
     WorkerAssignment,
 )
-from src.core.contracts.states import TERMINAL_ATTEMPT_STATUSES, TERMINAL_RUN_STATUSES
+from src.core.contracts.states import (
+    TERMINAL_ATTEMPT_STATUSES,
+    TERMINAL_RUN_STATUSES,
+    AttemptStatus,
+    RunStatus,
+    TaskStatus,
+)
+from src.models.db.claim_support import AgentClaimSupport
 from src.models.execution_authority import (
     ExecutionAuthorityBinding,
     ExecutionAuthorityReference,
@@ -45,6 +62,8 @@ from src.models.research_project import (
     ResearchQuery,
     ResearchScope,
 )
+from src.repositories.artifact_repository import ArtifactRepository
+from src.repositories.claim_support_repository import ClaimSupportRepository
 from src.repositories.run_event_repository import RunEventRepository
 from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 
@@ -52,6 +71,29 @@ pytestmark = [pytest.mark.integration]
 
 ORG_ID = "00000000-0000-0000-0000-0000000000cd"
 NOW = datetime(2026, 8, 4, tzinfo=UTC)
+
+
+@dataclass
+class _AmbiguousCommitState:
+    raise_after_next_commit: bool = False
+    raised_count: int = 0
+
+
+class _AmbiguousCommitSession(AsyncSession):
+    """Delegate a commit fully, then inject one ambiguous outcome."""
+
+    def __init__(
+        self, *args: Any, commit_state: _AmbiguousCommitState, **kwargs: Any
+    ) -> None:
+        self._commit_state = commit_state
+        super().__init__(*args, **kwargs)
+
+    async def commit(self) -> None:
+        await super().commit()
+        if self._commit_state.raise_after_next_commit:
+            self._commit_state.raise_after_next_commit = False
+            self._commit_state.raised_count += 1
+            raise RuntimeError("ambiguous commit result")
 
 
 # Mirrors ``tests/test_direct_execution_service.py``'s ``_FakeRoutingDecision``
@@ -291,6 +333,573 @@ async def test_fixture_mode_run_persists_to_succeeded_with_journaled_result(
 
 
 @pytest.mark.asyncio
+async def test_successful_fixture_run_records_content_bound_report_claims(
+    test_engine: AsyncEngine,
+) -> None:
+    """A successful run records one complete claim resolution for its report."""
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "persist-run-final-report"
+    binding = _make_binding(run_id)
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): binding}
+    )
+    service = _make_service(session_factory=session_factory, resolver=resolver)
+    project = _project()
+    fixture_payload = {
+        "report": (
+            "The protocol reduces median latency by twenty percent. "
+            "The protocol improves reliability across three regions."
+        ),
+        "sources": ["s1"],
+    }
+
+    execution_id = await service.start_research_execution(
+        project,
+        execution_policy=RoutingExecutionPolicy.fixture(),
+        fixture_result=fixture_payload,
+        authority_reference=ExecutionAuthorityReference(
+            authority_id="persistence-authority", authority_version="1"
+        ),
+        organization_id=ORG_ID,
+    )
+
+    for _ in range(100):
+        if service.active_executions[execution_id].status in ("completed", "failed"):
+            break
+        await asyncio.sleep(0.02)
+    assert service.active_executions[execution_id].status == "completed"
+
+    report_text = json.dumps(
+        fixture_payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    report_digest = hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+
+    async with session_factory() as session:
+        lifecycle_repo = RunLifecycleRepository(session)
+        run_row = await lifecycle_repo.get_run(run_id, organization_id=ORG_ID)
+        assert run_row is not None
+        task_rows = await lifecycle_repo.get_tasks_for_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert len(task_rows) == 1
+        task_row = task_rows[0]
+        attempt_rows = await lifecycle_repo.get_attempts_for_task(
+            task_row.task_id, organization_id=ORG_ID
+        )
+        assert len(attempt_rows) == 1
+        attempt_row = attempt_rows[0]
+
+        artifacts = await ArtifactRepository(session).list_artifacts_for_run(
+            run_id, organization_id=ORG_ID
+        )
+        supports = (
+            (
+                await session.execute(
+                    select(AgentClaimSupport)
+                    .where(AgentClaimSupport.run_id == run_id)
+                    .order_by(AgentClaimSupport.claim_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    # RED on the pre-D1 implementation: both collections are empty because
+    # the terminal path has no report/claim write at all.
+    assert len(artifacts) == 1
+    artifact = artifacts[0]
+    assert artifact.organization_id is not None
+    assert str(artifact.organization_id) == ORG_ID
+    assert artifact.run_id == run_id
+    assert artifact.task_id == task_row.task_id
+    assert artifact.attempt_id == attempt_row.attempt_id
+    assert artifact.kind == "research_report"
+    assert artifact.media_type == "application/json"
+    assert artifact.storage_uri == f"memory://artifacts/{artifact.artifact_id}"
+    assert artifact.content_sha256 == report_digest
+    assert artifact.metadata_["content"] == report_text
+    assert artifact.metadata_["serialization"] == "canonical_json"
+    assert artifact.metadata_["content_encoding"] == "utf-8"
+    assert artifact.metadata_["source"] == "final_output"
+
+    inventory = build_inventory(
+        artifact_id=artifact.artifact_id,
+        artifact_kind=artifact.kind,
+        source=artifact.metadata_["content"],
+    )
+    assert inventory.material_claim_count >= 2
+    assert len(supports) == inventory.material_claim_count
+    supports_by_claim = {support.claim_id: support for support in supports}
+    assert set(supports_by_claim) == {claim.claim_id for claim in inventory.claims}
+    for claim in inventory.claims:
+        support = supports_by_claim[claim.claim_id]
+        assert support.organization_id is not None
+        assert str(support.organization_id) == ORG_ID
+        assert support.run_id == run_id
+        assert support.artifact_id == artifact.artifact_id
+        assert support.claim_text == claim.text
+        assert support.status == ClaimSupportStatus.UNSUPPORTED.value
+        assert (
+            support.absent_evidence_reason == AbsentEvidenceReason.NOT_ATTEMPTED.value
+        )
+
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_terminal_transition_reconciles_after_ambiguous_commit(
+    test_engine: AsyncEngine,
+) -> None:
+    """A post-commit error is reconciled without duplicating terminal rows."""
+    commit_state = _AmbiguousCommitState()
+    session_factory = sessionmaker(
+        test_engine,
+        class_=_AmbiguousCommitSession,
+        expire_on_commit=False,
+        commit_state=commit_state,
+    )
+    run_id = "persist-run-ambiguous-terminal"
+    binding = _make_binding(run_id)
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): binding}
+    )
+    service = _make_service(session_factory=session_factory, resolver=resolver)
+    service.durable_write_max_attempts = 2
+    service.durable_write_retry_seconds = 0
+    service.durable_reconcile_interval_seconds = 60.0
+    project = _project()
+    fixture_payload = {
+        "report": (
+            "The protocol reduces median latency by twenty percent. "
+            "The protocol improves reliability across three regions."
+        ),
+        "sources": ["s1"],
+    }
+    execution_status = ExecutionStatus(
+        execution_id="exec-ambiguous-terminal",
+        project_id=str(project.id),
+        status="pending",
+    )
+
+    await service._admit_run(execution_status, binding, project)
+    assert (
+        await service._persist_transition(
+            execution_status,
+            run_target=RunStatus.RUNNING,
+            task_target=TaskStatus.RUNNING,
+            attempt_target=AttemptStatus.RUNNING,
+            event_type="run.started",
+            payload={},
+        )
+        is DurableWriteOutcome.RECORDED
+    )
+
+    execution_status.final_output = fixture_payload
+    execution_status.agent_results = fixture_payload
+    commit_state.raise_after_next_commit = True
+    terminal_outcome = await service._persist_transition(
+        execution_status,
+        run_target=RunStatus.SUCCEEDED,
+        task_target=TaskStatus.SUCCEEDED,
+        attempt_target=AttemptStatus.SUCCEEDED,
+        event_type="run.succeeded",
+        payload={"fixture_mode": True},
+    )
+    service._settle_terminal_state(
+        execution_status,
+        outcome=terminal_outcome,
+        status="completed",
+        phase="completed",
+        progress=100.0,
+    )
+    await service.close()
+
+    assert commit_state.raised_count == 1
+    assert terminal_outcome is DurableWriteOutcome.RECORDED
+    assert execution_status.status == "completed"
+    assert execution_status.unconfirmed_terminal_status is None
+    assert service._pending_terminal_outcomes == {}
+
+    report_text = json.dumps(
+        fixture_payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    report_digest = hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+
+    async with session_factory() as session:
+        lifecycle_repo = RunLifecycleRepository(session)
+        run_row = await lifecycle_repo.get_run(run_id, organization_id=ORG_ID)
+        assert run_row is not None
+        assert run_row.status == RunStatus.SUCCEEDED.value
+        task_rows = await lifecycle_repo.get_tasks_for_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert len(task_rows) == 1
+        task_row = task_rows[0]
+        attempt_rows = await lifecycle_repo.get_attempts_for_task(
+            task_row.task_id, organization_id=ORG_ID
+        )
+        assert len(attempt_rows) == 1
+        attempt_row = attempt_rows[0]
+        assert attempt_row.status == AttemptStatus.SUCCEEDED.value
+
+        artifacts = await ArtifactRepository(session).list_artifacts_for_run(
+            run_id, organization_id=ORG_ID
+        )
+        supports = (
+            (
+                await session.execute(
+                    select(AgentClaimSupport).where(AgentClaimSupport.run_id == run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        events = await RunEventRepository(session).read_events_after(
+            run_id, after_sequence=0, organization_id=ORG_ID
+        )
+
+    assert len(artifacts) == 1
+    artifact = artifacts[0]
+    assert artifact.organization_id is not None
+    assert str(artifact.organization_id) == ORG_ID
+    assert artifact.run_id == run_id
+    assert artifact.task_id == task_row.task_id
+    assert artifact.attempt_id == attempt_row.attempt_id
+    assert artifact.content_sha256 == report_digest
+    assert artifact.metadata_["content"] == report_text
+
+    inventory = build_inventory(
+        artifact_id=artifact.artifact_id,
+        artifact_kind=artifact.kind,
+        source=report_text,
+    )
+    assert len(supports) == inventory.material_claim_count
+    supports_by_claim = {support.claim_id: support for support in supports}
+    assert set(supports_by_claim) == {claim.claim_id for claim in inventory.claims}
+    for claim in inventory.claims:
+        support = supports_by_claim[claim.claim_id]
+        assert support.organization_id is not None
+        assert str(support.organization_id) == ORG_ID
+        assert support.run_id == run_id
+        assert support.artifact_id == artifact.artifact_id
+        assert support.claim_text == claim.text
+
+    assert [event.event_type for event in events] == [
+        "run.admitted",
+        "run.started",
+        "run.succeeded",
+    ]
+    terminal_events = [event for event in events if event.event_type == "run.succeeded"]
+    assert len(terminal_events) == 1
+    assert terminal_events[0].event_id == terminal_events[0].deduplication_key
+
+
+@pytest.mark.asyncio
+async def test_nonterminal_transition_reconciles_after_ambiguous_commit(
+    test_engine: AsyncEngine,
+) -> None:
+    """A post-commit error does not duplicate a non-terminal transition."""
+    commit_state = _AmbiguousCommitState()
+    session_factory = sessionmaker(
+        test_engine,
+        class_=_AmbiguousCommitSession,
+        expire_on_commit=False,
+        commit_state=commit_state,
+    )
+    run_id = "persist-run-ambiguous-started"
+    binding = _make_binding(run_id)
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): binding}
+    )
+    service = _make_service(session_factory=session_factory, resolver=resolver)
+    service.durable_write_max_attempts = 2
+    service.durable_write_retry_seconds = 0
+    project = _project()
+    execution_status = ExecutionStatus(
+        execution_id="exec-ambiguous-started",
+        project_id=str(project.id),
+        status="pending",
+    )
+
+    await service._admit_run(execution_status, binding, project)
+    commit_state.raise_after_next_commit = True
+    outcome = await service._persist_transition(
+        execution_status,
+        run_target=RunStatus.RUNNING,
+        task_target=TaskStatus.RUNNING,
+        attempt_target=AttemptStatus.RUNNING,
+        event_type="run.started",
+        payload={},
+    )
+    await service.close()
+
+    assert commit_state.raised_count == 1
+    assert outcome is DurableWriteOutcome.RECORDED
+
+    async with session_factory() as session:
+        lifecycle_repo = RunLifecycleRepository(session)
+        run_row = await lifecycle_repo.get_run(run_id, organization_id=ORG_ID)
+        assert run_row is not None
+        assert run_row.status == RunStatus.RUNNING.value
+        task_rows = await lifecycle_repo.get_tasks_for_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert len(task_rows) == 1
+        assert task_rows[0].status == TaskStatus.RUNNING.value
+        attempt_rows = await lifecycle_repo.get_attempts_for_task(
+            task_rows[0].task_id, organization_id=ORG_ID
+        )
+        assert len(attempt_rows) == 1
+        assert attempt_rows[0].status == AttemptStatus.RUNNING.value
+        events = await RunEventRepository(session).read_events_after(
+            run_id, after_sequence=0, organization_id=ORG_ID
+        )
+
+    assert [event.event_type for event in events] == [
+        "run.admitted",
+        "run.started",
+    ]
+    started_events = [event for event in events if event.event_type == "run.started"]
+    assert len(started_events) == 1
+    assert started_events[0].event_id == started_events[0].deduplication_key
+    assert len({event.deduplication_key for event in events}) == len(events)
+
+
+@pytest.mark.asyncio
+async def test_final_report_and_claims_roll_back_with_terminal_transition(
+    test_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure after a support flush leaves no terminal or partial rows."""
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "persist-run-final-report-rollback"
+    binding = _make_binding(run_id)
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): binding}
+    )
+    service = _make_service(session_factory=session_factory, resolver=resolver)
+    service.durable_write_max_attempts = 1
+    service.durable_reconcile_interval_seconds = 60.0
+    project = _project()
+    fixture_payload = {
+        "report": (
+            "The protocol reduces median latency by twenty percent. "
+            "The protocol improves reliability across three regions."
+        )
+    }
+    original_record = ClaimSupportRepository.record_claim_support
+    record_calls = 0
+
+    async def record_then_fail(
+        repository: ClaimSupportRepository,
+        claim: Any,
+        *,
+        organization_id: Any,
+    ) -> Any:
+        nonlocal record_calls
+        record_calls += 1
+        row = await original_record(repository, claim, organization_id=organization_id)
+        if record_calls >= 2:
+            raise RuntimeError("simulated claim-support recorder failure")
+        return row
+
+    monkeypatch.setattr(
+        ClaimSupportRepository, "record_claim_support", record_then_fail
+    )
+
+    execution_id = await service.start_research_execution(
+        project,
+        execution_policy=RoutingExecutionPolicy.fixture(),
+        fixture_result=fixture_payload,
+        authority_reference=ExecutionAuthorityReference(
+            authority_id="persistence-authority", authority_version="1"
+        ),
+        organization_id=ORG_ID,
+    )
+
+    for _ in range(100):
+        execution = service.active_executions[execution_id]
+        if execution.unconfirmed_terminal_status == "completed":
+            break
+        await asyncio.sleep(0.02)
+
+    execution = service.active_executions[execution_id]
+    assert record_calls >= 2
+    assert execution.status == "running"
+    assert execution.unconfirmed_terminal_status == "completed"
+
+    async with session_factory() as session:
+        lifecycle_repo = RunLifecycleRepository(session)
+        run_row = await lifecycle_repo.get_run(run_id, organization_id=ORG_ID)
+        assert run_row is not None
+        assert run_row.status == "running"
+        task_rows = await lifecycle_repo.get_tasks_for_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert len(task_rows) == 1
+        assert task_rows[0].status == "running"
+        attempt_rows = await lifecycle_repo.get_attempts_for_task(
+            task_rows[0].task_id, organization_id=ORG_ID
+        )
+        assert len(attempt_rows) == 1
+        assert attempt_rows[0].status == "running"
+
+        artifacts = await ArtifactRepository(session).list_artifacts_for_run(
+            run_id, organization_id=ORG_ID
+        )
+        supports = (
+            (
+                await session.execute(
+                    select(AgentClaimSupport).where(AgentClaimSupport.run_id == run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        events = await RunEventRepository(session).read_events_after(
+            run_id, after_sequence=0, organization_id=ORG_ID
+        )
+
+    assert artifacts == []
+    assert supports == []
+    assert [event.event_type for event in events] == [
+        "run.admitted",
+        "run.started",
+    ]
+
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_fixture_execution_without_session_factory_stays_memory_only() -> None:
+    """D1 persistence must not make the existing no-session path required."""
+    run_id = "persist-run-memory-only"
+    binding = _make_binding(run_id)
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): binding}
+    )
+    service = _make_service(session_factory=None, resolver=resolver)
+    project = _project()
+    fixture_payload = {
+        "report": "The memory-only path continues to return its fixture result."
+    }
+
+    execution_id = await service.start_research_execution(
+        project,
+        execution_policy=RoutingExecutionPolicy.fixture(),
+        fixture_result=fixture_payload,
+        authority_reference=ExecutionAuthorityReference(
+            authority_id="persistence-authority", authority_version="1"
+        ),
+        organization_id=ORG_ID,
+    )
+
+    for _ in range(100):
+        if service.active_executions[execution_id].status in ("completed", "failed"):
+            break
+        await asyncio.sleep(0.02)
+
+    execution = service.active_executions[execution_id]
+    assert execution.status == "completed"
+    assert execution.final_output == fixture_payload
+    assert execution.run_id is None
+
+    await service.close()
+
+
+@pytest.mark.parametrize(
+    "final_output",
+    [None, {"report": object()}],
+    ids=["absent", "unserializable"],
+)
+@pytest.mark.asyncio
+async def test_successful_transition_rejects_an_unreadable_final_output(
+    test_engine: AsyncEngine, final_output: Any
+) -> None:
+    """An unreadable result cannot create a successful report or transition."""
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "persist-run-unreadable-final-report"
+    binding = _make_binding(run_id)
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): binding}
+    )
+    service = _make_service(session_factory=session_factory, resolver=resolver)
+    project = _project()
+    execution_status = ExecutionStatus(
+        execution_id="exec-unreadable-final-report",
+        project_id=str(project.id),
+        status="pending",
+    )
+
+    await service._admit_run(execution_status, binding, project)
+    await service._persist_transition(
+        execution_status,
+        run_target=RunStatus.RUNNING,
+        task_target=TaskStatus.RUNNING,
+        attempt_target=AttemptStatus.RUNNING,
+        event_type="run.started",
+        payload={},
+    )
+    execution_status.final_output = final_output
+
+    with pytest.raises(ValueError, match="final_output"):
+        await service._persist_transition(
+            execution_status,
+            run_target=RunStatus.SUCCEEDED,
+            task_target=TaskStatus.SUCCEEDED,
+            attempt_target=AttemptStatus.SUCCEEDED,
+            event_type="run.succeeded",
+            payload={},
+        )
+
+    async with session_factory() as session:
+        run_row = await RunLifecycleRepository(session).get_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert run_row is not None
+        assert run_row.status == RunStatus.RUNNING.value
+        assert (
+            await ArtifactRepository(session).list_artifacts_for_run(
+                run_id, organization_id=ORG_ID
+            )
+            == []
+        )
+        supports = (
+            (
+                await session.execute(
+                    select(AgentClaimSupport).where(AgentClaimSupport.run_id == run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        events = await RunEventRepository(session).read_events_after(
+            run_id, after_sequence=0, organization_id=ORG_ID
+        )
+
+    assert supports == []
+    assert [event.event_type for event in events] == [
+        "run.admitted",
+        "run.started",
+    ]
+
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_execution_failure_persists_run_as_failed_with_reason(
     test_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -354,6 +963,22 @@ async def test_execution_failure_persists_run_as_failed_with_reason(
         assert run_row.status == "failed"
         assert run_row.status_reason
         assert "supervisor exploded" in run_row.status_reason
+        assert (
+            await ArtifactRepository(session).list_artifacts_for_run(
+                run_id, organization_id=ORG_ID
+            )
+            == []
+        )
+        supports = (
+            (
+                await session.execute(
+                    select(AgentClaimSupport).where(AgentClaimSupport.run_id == run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert supports == []
 
         events = await RunEventRepository(session).read_events_after(
             run_id, after_sequence=0, organization_id=ORG_ID
@@ -417,6 +1042,22 @@ async def test_cancellation_persists_run_as_cancelling_not_cancelled(
         assert run_row.status == "cancelling"
         assert run_row.status not in {s.value for s in TERMINAL_RUN_STATUSES}
         assert run_row.cancellation_requested_at is not None
+        assert (
+            await ArtifactRepository(session).list_artifacts_for_run(
+                run_id, organization_id=ORG_ID
+            )
+            == []
+        )
+        supports = (
+            (
+                await session.execute(
+                    select(AgentClaimSupport).where(AgentClaimSupport.run_id == run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert supports == []
 
         events = await RunEventRepository(session).read_events_after(
             run_id, after_sequence=0, organization_id=ORG_ID

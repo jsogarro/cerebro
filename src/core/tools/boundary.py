@@ -60,8 +60,8 @@ import asyncio
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, replace
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 from typing import Any, Final, cast, final
 
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
@@ -88,6 +88,9 @@ from src.core.contracts.trust import TrustClassification, propagate_trust
 from .audit import (
     EVENT_COMPLETED,
     EVENT_REQUESTED,
+    LeaseAwareToolAuditStore,
+    PendingToolAuditStore,
+    ToolAdmissionStore,
     ToolAuditEvent,
     ToolAuditStore,
     ToolEventPublisher,
@@ -97,6 +100,7 @@ from .errors import (
     CapabilityDecisionUnusableError,
     IdempotencyConflictError,
     PromptBindingRefusedError,
+    ToolInvocationConflictError,
     ToolNotRegisteredError,
     ToolSpecError,
 )
@@ -163,6 +167,14 @@ _FAILED_STATUS_BY_ERROR_CODE: Final[dict[str, ToolOutcomeStatus]] = {
         ToolOutcomeStatus.FAILED,
     )
 }
+
+
+class _RequestedPublicationError(Exception):
+    """The requested record was persisted, but its event was not published."""
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(f"{type(cause).__name__}: {cause}")
+        self.cause = cause
 
 
 @final
@@ -243,6 +255,33 @@ class _Call:
     prompt: RenderedPrompt | None
     requested_at: datetime
     secret_values: frozenset[str]
+    lease_owner_id: str
+    lease_duration: timedelta
+    lease_expires_at: datetime
+
+
+@final
+@dataclass(slots=True)
+class _LeaseMonitor:
+    """Lifecycle state shared by the heartbeat and the active invocation."""
+
+    admitted: asyncio.Event = field(default_factory=asyncio.Event)
+    stop: asyncio.Event = field(default_factory=asyncio.Event)
+    lost: asyncio.Event = field(default_factory=asyncio.Event)
+    failure_detail: str | None = None
+    task: asyncio.Task[None] | None = None
+
+
+@final
+class _LeaseRenewalFailureError(RuntimeError):
+    """The active call lost its durable lease and must not return output."""
+
+
+_LEASE_GRACE_MIN_SECONDS: Final[float] = 1.0
+_LEASE_GRACE_RATIO: Final[float] = 0.25
+_LEASE_HEARTBEAT_MIN_SECONDS: Final[float] = 0.01
+_LEASE_HEARTBEAT_MAX_SECONDS: Final[float] = 0.25
+_HANDLER_CANCELLATION_GRACE_SECONDS: Final[float] = 0.05
 
 
 @final
@@ -370,9 +409,11 @@ class ToolBoundary:
             input_sha256=prepared.input_sha256,
         )
 
+        tool_invocation_id = self._id_factory()
+        lease_duration = _lease_duration(spec.timeout_seconds)
         call = _Call(
             spec=spec,
-            tool_invocation_id=self._id_factory(),
+            tool_invocation_id=tool_invocation_id,
             run_id=run_id,
             task_id=task_id,
             attempt_id=attempt_id,
@@ -389,6 +430,9 @@ class ToolBoundary:
             prompt=verified_prompt,
             requested_at=now,
             secret_values=secret_values,
+            lease_owner_id=tool_invocation_id,
+            lease_duration=lease_duration,
+            lease_expires_at=now + lease_duration,
         )
 
         decision = self._decide(
@@ -463,20 +507,71 @@ class ToolBoundary:
         # as a property of `invoke` as a whole and pinned by
         # `test_authorization_precedes_every_effect.py` rather than asserted in
         # a comment next to one of the returns it is about.
-        replayed = await self._audit_store.find_invocation(
-            run_id=run_id,
-            attempt_id=attempt_id,
-            organization_id=organization_id,
-            idempotency_key=effective_key,
-        )
-        if replayed is not None and replayed.status in _REPLAYABLE_RECORD_STATUSES:
-            self._require_same_request(
-                replayed,
-                spec=spec,
-                capability_scope=call.capability_scope,
-                input_sha256=prepared.input_sha256,
+        if isinstance(self._audit_store, LeaseAwareToolAuditStore):
+            # The lease-aware seam is the single lookup for both terminal
+            # replay and pending recovery. In particular, a stale request is
+            # terminalized by the store before this call sees it; executing
+            # after a lease expires would duplicate a side effect whose result
+            # is no longer knowable.
+            recovered = await self._audit_store.reconcile_pending_invocation(
+                run_id=run_id,
+                attempt_id=attempt_id,
+                organization_id=organization_id,
+                idempotency_key=effective_key,
+                now=now,
             )
-            return self._replay(replayed, decision=decision)
+            if recovered is not None:
+                self._require_same_request(
+                    recovered,
+                    spec=spec,
+                    capability_scope=call.capability_scope,
+                    input_sha256=prepared.input_sha256,
+                )
+                if recovered.status in _REPLAYABLE_RECORD_STATUSES:
+                    return self._replay(recovered, decision=decision)
+                if recovered.status in {
+                    ToolInvocationStatus.REQUESTED,
+                    ToolInvocationStatus.RUNNING,
+                }:
+                    return self._in_progress(recovered, decision=decision)
+
+        else:
+            replayed = await self._audit_store.find_invocation(
+                run_id=run_id,
+                attempt_id=attempt_id,
+                organization_id=organization_id,
+                idempotency_key=effective_key,
+            )
+            if replayed is not None and replayed.status in _REPLAYABLE_RECORD_STATUSES:
+                self._require_same_request(
+                    replayed,
+                    spec=spec,
+                    capability_scope=call.capability_scope,
+                    input_sha256=prepared.input_sha256,
+                )
+                return self._replay(replayed, decision=decision)
+
+            # A terminal replay answers a completed request. A committed
+            # nonterminal row answers a different question: whether this retry
+            # is allowed to start a second unit of work. It is not. Only stores
+            # that implement the optional recovery seam can answer it; older
+            # adapters remain valid and retain their prior behavior until
+            # upgraded.
+            if isinstance(self._audit_store, PendingToolAuditStore):
+                pending = await self._audit_store.find_pending_invocation(
+                    run_id=run_id,
+                    attempt_id=attempt_id,
+                    organization_id=organization_id,
+                    idempotency_key=effective_key,
+                )
+                if pending is not None:
+                    self._require_same_request(
+                        pending,
+                        spec=spec,
+                        capability_scope=call.capability_scope,
+                        input_sha256=prepared.input_sha256,
+                    )
+                    return self._in_progress(pending, decision=decision)
 
         if isinstance(prepared, _RejectedInput):
             # The input rejection lands here, after authorization and after
@@ -505,45 +600,135 @@ class ToolBoundary:
                 detail=f"circuit open for {spec.name!r}",
             )
 
-        await self._record(
-            call,
-            invocation=ToolInvocation(
-                tool_invocation_id=call.tool_invocation_id,
-                run_id=run_id,
-                task_id=task_id,
-                attempt_id=attempt_id,
-                tool_name=spec.name,
-                tool_version=spec.version,
-                status=ToolInvocationStatus.REQUESTED,
-                capability_scope=call.capability_scope,
-                idempotency_key=effective_key,
-                input=prepared.redacted_input,
-                input_trust=input_trust,
-                producer_kind=call.producer_kind,
-                prompt_binding=(
-                    None if verified_prompt is None else verified_prompt.binding
-                ),
-                requested_at=now,
+        requested_invocation = ToolInvocation(
+            tool_invocation_id=call.tool_invocation_id,
+            run_id=run_id,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            tool_name=spec.name,
+            tool_version=spec.version,
+            status=ToolInvocationStatus.REQUESTED,
+            capability_scope=call.capability_scope,
+            idempotency_key=effective_key,
+            input=prepared.redacted_input,
+            input_trust=input_trust,
+            producer_kind=call.producer_kind,
+            prompt_binding=(
+                None if verified_prompt is None else verified_prompt.binding
             ),
-            event_type=EVENT_REQUESTED,
-            payload={
-                "tool_name": spec.name,
-                "tool_version": spec.version,
-                "capability_scope": call.capability_scope,
-                "grant_id": grant.grant_id,
-                "input_sha256": prepared.input_sha256,
-                "input_trust": input_trust.value,
-            },
-            decision=decision,
+            requested_at=now,
+            lease_owner_id=call.lease_owner_id,
+            lease_expires_at=call.lease_expires_at,
         )
+        if isinstance(self._audit_store, ToolAdmissionStore):
+            existing = await self._audit_store.reserve_invocation(
+                invocation=requested_invocation,
+                organization_id=organization_id,
+            )
+            if existing is not None:
+                self._require_same_request(
+                    existing,
+                    spec=spec,
+                    capability_scope=call.capability_scope,
+                    input_sha256=prepared.input_sha256,
+                )
+                if existing.status in _REPLAYABLE_RECORD_STATUSES:
+                    return self._replay(existing, decision=decision)
+                if existing.status in {
+                    ToolInvocationStatus.REQUESTED,
+                    ToolInvocationStatus.RUNNING,
+                }:
+                    return self._in_progress(existing, decision=decision)
+                raise ToolInvocationConflictError(existing)
 
-        return await self._run_tool(
-            call,
-            validated_input=prepared.validated_input,
-            declared_output_trust=output_trust,
-            decision=decision,
-            cancellation=cancellation,
+        lease_monitor = self._start_lease_monitor(call)
+        requested_record = asyncio.create_task(
+            self._record(
+                call,
+                invocation=requested_invocation,
+                event_type=EVENT_REQUESTED,
+                payload={
+                    "tool_name": spec.name,
+                    "tool_version": spec.version,
+                    "capability_scope": call.capability_scope,
+                    "grant_id": grant.grant_id,
+                    "input_sha256": prepared.input_sha256,
+                    "input_trust": input_trust.value,
+                },
+                decision=decision,
+                wrap_publication_failure=True,
+                lease_monitor=lease_monitor,
+            )
         )
+        try:
+            try:
+                await asyncio.shield(requested_record)
+            except asyncio.CancelledError:
+                # The requested row is the idempotency reservation. It must finish
+                # its persist-and-publish admission before cancellation can unwind,
+                # otherwise a durable REQUESTED row can be left without a terminal
+                # outcome (or the request can be retried while its reservation is
+                # still in flight). The cancellation wins over an admission
+                # publication error: the reservation is settled as CANCELLED and
+                # the caller's cancellation is re-raised.
+                try:
+                    await asyncio.shield(requested_record)
+                except _RequestedPublicationError:
+                    pass
+                except asyncio.CancelledError:
+                    # A publisher may use CancelledError to reject the requested
+                    # event. It is still an admission failure that must be
+                    # settled before preserving the cancellation for the caller.
+                    pass
+                except Exception:
+                    # A persistence failure means there is no confirmed requested
+                    # row to settle. Preserve the caller's cancellation; the store
+                    # owns the failed admission's rollback semantics.
+                    pass
+                await asyncio.shield(
+                    self._terminate(
+                        call,
+                        status=ToolOutcomeStatus.CANCELLED,
+                        completed_at=self._now(),
+                        decision=decision,
+                        detail="cancelled during admission",
+                    )
+                )
+                raise
+            except _RequestedPublicationError as publication_error:
+                return await self._terminate(
+                    call,
+                    status=ToolOutcomeStatus.FAILED,
+                    completed_at=self._now(),
+                    decision=decision,
+                    detail=str(publication_error),
+                )
+            except ToolInvocationConflictError as conflict:
+                self._require_same_request(
+                    conflict.invocation,
+                    spec=spec,
+                    capability_scope=call.capability_scope,
+                    input_sha256=prepared.input_sha256,
+                )
+                if conflict.invocation.status in _REPLAYABLE_RECORD_STATUSES:
+                    return self._replay(conflict.invocation, decision=decision)
+                if conflict.invocation.status in {
+                    ToolInvocationStatus.REQUESTED,
+                    ToolInvocationStatus.RUNNING,
+                }:
+                    return self._in_progress(conflict.invocation, decision=decision)
+                raise
+
+            return await self._run_tool(
+                call,
+                validated_input=prepared.validated_input,
+                declared_output_trust=output_trust,
+                decision=decision,
+                cancellation=cancellation,
+                lease_monitor=lease_monitor,
+            )
+        finally:
+            await self._stop_lease_monitor(lease_monitor)
 
     # ------------------------------------------------------------------
     # execution
@@ -557,6 +742,7 @@ class ToolBoundary:
         declared_output_trust: TrustClassification | None,
         decision: CapabilityDecision,
         cancellation: CancellationToken | None,
+        lease_monitor: _LeaseMonitor | None,
     ) -> ToolOutcome:
         spec = call.spec
         breaker = self._breakers.for_tool(spec.name)
@@ -570,7 +756,11 @@ class ToolBoundary:
 
         try:
             status, payload, detail, error = await self._call_handler(
-                spec, validated_input, context, cancellation
+                spec,
+                validated_input,
+                context,
+                cancellation,
+                lease_monitor,
             )
         except asyncio.CancelledError:
             # Give the half-open trial slot back before unwinding. The call is
@@ -590,6 +780,12 @@ class ToolBoundary:
                 )
             )
             raise
+
+        if lease_monitor is not None and lease_monitor.lost.is_set():
+            status = ToolOutcomeStatus.FAILED
+            payload = None
+            detail = lease_monitor.failure_detail or "durable lease renewal failed"
+            error = _LeaseRenewalFailureError(detail)
 
         completed_at = self._now()
 
@@ -644,7 +840,11 @@ class ToolBoundary:
             decision=decision,
             detail=detail,
             retry=(
-                spec.disposition_for(error)
+                (
+                    RetryDisposition.TERMINAL
+                    if isinstance(error, _LeaseRenewalFailureError)
+                    else spec.disposition_for(error)
+                )
                 if error is not None and status is ToolOutcomeStatus.FAILED
                 else None
             ),
@@ -656,6 +856,7 @@ class ToolBoundary:
         validated_input: BaseModel,
         context: ToolCallContext,
         cancellation: CancellationToken | None,
+        lease_monitor: _LeaseMonitor | None,
     ) -> tuple[
         ToolOutcomeStatus, Mapping[str, Any] | None, str | None, BaseException | None
     ]:
@@ -670,14 +871,27 @@ class ToolBoundary:
         if cancellation is not None and cancellation.cancelled:
             return ToolOutcomeStatus.CANCELLED, None, "cancelled before dispatch", None
 
+        if lease_monitor is not None and lease_monitor.lost.is_set():
+            detail = lease_monitor.failure_detail or "durable lease renewal failed"
+            return (
+                ToolOutcomeStatus.FAILED,
+                None,
+                detail,
+                _LeaseRenewalFailureError(detail),
+            )
+
         handler_task: asyncio.Task[Mapping[str, Any]] = asyncio.ensure_future(
             spec.handler(validated_input, context)
         )
         watchers: list[asyncio.Future[Any]] = [handler_task]
         cancel_task: asyncio.Task[None] | None = None
+        lease_lost_task: asyncio.Task[bool] | None = None
         if cancellation is not None:
             cancel_task = asyncio.ensure_future(cancellation.wait())
             watchers.append(cancel_task)
+        if lease_monitor is not None:
+            lease_lost_task = asyncio.ensure_future(lease_monitor.lost.wait())
+            watchers.append(lease_lost_task)
 
         try:
             done, _pending = await asyncio.wait(
@@ -694,15 +908,30 @@ class ToolBoundary:
             # which for an external write is the effect happening after the
             # system reported that it would not.
             #
-            # Requested synchronously rather than awaited. Awaiting during an
-            # unwind is how a cleanup path acquires its own second failure
-            # mode; `cancel()` is delivered at the handler's next suspension
-            # point either way.
-            handler_task.cancel()
+            # Settle the handler before propagating the cancellation. A
+            # handler is allowed to catch CancelledError for cleanup; merely
+            # calling `cancel()` and recording CANCELLED would let that
+            # cleanup continue after the durable record claimed the call had
+            # ended.
+            await _abandon(handler_task)
             raise
         finally:
             if cancel_task is not None and not cancel_task.done():
                 await _abandon(cancel_task)
+            if lease_lost_task is not None and not lease_lost_task.done():
+                await _abandon(lease_lost_task)
+
+        if lease_monitor is not None and (
+            lease_lost_task in done or lease_monitor.lost.is_set()
+        ):
+            await _abandon(handler_task)
+            detail = lease_monitor.failure_detail or "durable lease renewal failed"
+            return (
+                ToolOutcomeStatus.FAILED,
+                None,
+                detail,
+                _LeaseRenewalFailureError(detail),
+            )
 
         if handler_task in done:
             error = handler_task.exception()
@@ -725,6 +954,101 @@ class ToolBoundary:
             f"exceeded {spec.timeout_seconds}s deadline",
             None,
         )
+
+    def _start_lease_monitor(self, call: _Call) -> _LeaseMonitor | None:
+        """Start renewal only for stores that can durably enforce the lease."""
+
+        if not isinstance(self._audit_store, LeaseAwareToolAuditStore):
+            return None
+        monitor = _LeaseMonitor()
+        monitor.task = asyncio.create_task(
+            self._lease_heartbeat(self._audit_store, call, monitor)
+        )
+        return monitor
+
+    async def _stop_lease_monitor(self, monitor: _LeaseMonitor | None) -> None:
+        """Stop and await the heartbeat after the invocation is settled."""
+
+        if monitor is None or monitor.task is None:
+            return
+        monitor.stop.set()
+        monitor.task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await monitor.task
+
+    async def _lease_heartbeat(
+        self,
+        store: LeaseAwareToolAuditStore,
+        call: _Call,
+        monitor: _LeaseMonitor,
+    ) -> None:
+        """Renew a live invocation until settlement or a lease failure."""
+
+        while not monitor.admitted.is_set():
+            admitted = asyncio.ensure_future(monitor.admitted.wait())
+            stopped = asyncio.ensure_future(monitor.stop.wait())
+            try:
+                done, _pending = await asyncio.wait(
+                    (admitted, stopped), return_when=asyncio.FIRST_COMPLETED
+                )
+            except asyncio.CancelledError:
+                return
+            finally:
+                for task in (admitted, stopped):
+                    if not task.done():
+                        task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await task
+
+            if stopped in done or monitor.stop.is_set():
+                return
+
+        interval = min(
+            max(
+                _LEASE_HEARTBEAT_MIN_SECONDS,
+                call.spec.timeout_seconds / 3,
+            ),
+            _LEASE_HEARTBEAT_MAX_SECONDS,
+        )
+        while not monitor.stop.is_set():
+            try:
+                await asyncio.wait_for(monitor.stop.wait(), timeout=interval)
+                return
+            except TimeoutError:
+                pass
+
+            if monitor.stop.is_set():
+                return
+
+            try:
+                now = self._now()
+                renewed = await store.renew_invocation_lease(
+                    tool_invocation_id=call.tool_invocation_id,
+                    run_id=call.run_id,
+                    attempt_id=call.attempt_id,
+                    organization_id=call.organization_id,
+                    idempotency_key=call.idempotency_key,
+                    lease_owner_id=call.lease_owner_id,
+                    now=now,
+                    lease_expires_at=now + call.lease_duration,
+                )
+            except asyncio.CancelledError:
+                if monitor.stop.is_set():
+                    return
+                monitor.failure_detail = "durable lease renewal was cancelled"
+                monitor.lost.set()
+                return
+            except Exception as error:
+                monitor.failure_detail = (
+                    f"durable lease renewal raised {type(error).__name__}"
+                )
+                monitor.lost.set()
+                return
+
+            if not renewed:
+                monitor.failure_detail = "durable lease renewal was rejected"
+                monitor.lost.set()
+                return
 
     # ------------------------------------------------------------------
     # input preparation
@@ -858,19 +1182,58 @@ class ToolBoundary:
             requested_at=call.requested_at,
             completed_at=completed_at,
         )
-        await self._record(
-            call,
-            invocation=invocation,
-            event_type=EVENT_COMPLETED,
-            payload={
-                "tool_name": call.spec.name,
-                "tool_version": call.spec.version,
-                "outcome": status.value,
-                "error_code": invocation.error_code,
-                "capability_scope": call.capability_scope,
-            },
-            decision=decision,
+        terminal_record = asyncio.create_task(
+            self._record(
+                call,
+                invocation=invocation,
+                event_type=EVENT_COMPLETED,
+                payload={
+                    "tool_name": call.spec.name,
+                    "tool_version": call.spec.version,
+                    "outcome": status.value,
+                    "error_code": invocation.error_code,
+                    "capability_scope": call.capability_scope,
+                },
+                decision=decision,
+            )
         )
+        try:
+            await asyncio.shield(terminal_record)
+        except asyncio.CancelledError:
+            # A caller can cancel while the durable terminal transition is in
+            # flight. Keep the record task alive and wait for its result before
+            # propagating cancellation; otherwise a REQUESTED row can outlive
+            # the call that already told the handler to stop.
+            if not terminal_record.done():
+                await asyncio.shield(terminal_record)
+            raise
+        except ToolInvocationConflictError as conflict:
+            # A lease recovery may have terminalized this invocation while the
+            # original handler was unwinding. The durable row is authoritative;
+            # never return the late worker's output or overwrite the recovery
+            # event. Replaying the fenced row also keeps the result fail-closed
+            # when the recovery outcome is ``unknown_after_lease_expired``.
+            self._require_same_request(
+                conflict.invocation,
+                spec=call.spec,
+                capability_scope=call.capability_scope,
+                input_sha256=boundary_digest(call.redacted_input),
+            )
+            if (
+                decision is not None
+                and conflict.invocation.status in _REPLAYABLE_RECORD_STATUSES
+            ):
+                return self._replay(conflict.invocation, decision=decision)
+            if (
+                conflict.invocation.status
+                in {
+                    ToolInvocationStatus.REQUESTED,
+                    ToolInvocationStatus.RUNNING,
+                }
+                and decision is not None
+            ):
+                return self._in_progress(conflict.invocation, decision=decision)
+            raise
         return ToolOutcome(
             mint=_OUTCOME_MINT,
             status=status,
@@ -888,6 +1251,8 @@ class ToolBoundary:
         event_type: str,
         payload: Mapping[str, JsonValue],
         decision: CapabilityDecision | None,
+        wrap_publication_failure: bool = False,
+        lease_monitor: _LeaseMonitor | None = None,
     ) -> None:
         """Persist the record and its event, then publish. Never the reverse.
 
@@ -920,7 +1285,17 @@ class ToolBoundary:
             organization_id=call.organization_id,
             capability_decision=decision,
         )
-        await self._event_publisher.publish((event,))
+        if (
+            lease_monitor is not None
+            and invocation.status is ToolInvocationStatus.REQUESTED
+        ):
+            lease_monitor.admitted.set()
+        try:
+            await self._event_publisher.publish((event,))
+        except Exception as error:
+            if wrap_publication_failure:
+                raise _RequestedPublicationError(error) from error
+            raise
 
     # ------------------------------------------------------------------
     # helpers
@@ -1079,6 +1454,21 @@ class ToolBoundary:
             detail=recorded.status_reason,
         )
 
+    @staticmethod
+    def _in_progress(
+        invocation: ToolInvocation, *, decision: CapabilityDecision
+    ) -> ToolOutcome:
+        """Return a retryable view of a committed nonterminal invocation."""
+
+        return ToolOutcome(
+            mint=_OUTCOME_MINT,
+            status=ToolOutcomeStatus.IN_PROGRESS,
+            invocation=invocation,
+            retry=RetryDisposition.RETRIABLE,
+            decision=decision,
+            detail="invocation is already in progress; retry later",
+        )
+
 
 def _outcome_status_of(recorded: ToolInvocation) -> ToolOutcomeStatus:
     """Recover the finer outcome state from a durable record."""
@@ -1096,17 +1486,53 @@ def _outcome_status_of(recorded: ToolInvocation) -> ToolOutcomeStatus:
     )
 
 
-async def _abandon(task: asyncio.Future[Any]) -> None:
-    """Cancel a task that lost its race and wait for it to actually stop.
+def _lease_duration(timeout_seconds: float) -> timedelta:
+    """Give a lease the tool deadline plus a bounded safety grace period."""
 
-    Waiting matters: returning while the handler is still running would let a
-    timed-out call keep its side effects in flight after the boundary has
-    already recorded it as timed out.
+    grace_seconds = max(
+        _LEASE_GRACE_MIN_SECONDS,
+        timeout_seconds * _LEASE_GRACE_RATIO,
+    )
+    return timedelta(seconds=timeout_seconds + grace_seconds)
+
+
+async def _abandon(task: asyncio.Future[Any]) -> None:
+    """Cancel a task and give cooperative cleanup a bounded grace period.
+
+    Python cannot forcibly stop a coroutine that suppresses cancellation. An
+    unbounded await here would therefore let one cancellation-resistant tool
+    hold the boundary open forever, preventing its durable terminal state and
+    lease recovery. After the grace period the task is quarantined: its result
+    or exception is consumed when it eventually finishes, while the boundary's
+    terminal record and the durable lease fence prevent that late result from
+    becoming an outcome.
     """
 
+    if task.done():
+        if not task.cancelled():
+            with suppress(BaseException):
+                task.exception()
+        return
+
     task.cancel()
-    with suppress(asyncio.CancelledError, Exception):
-        await task
+    done, _pending = await asyncio.wait(
+        (task,), timeout=_HANDLER_CANCELLATION_GRACE_SECONDS
+    )
+    if done:
+        with suppress(BaseException):
+            task.exception()
+        return
+
+    task.add_done_callback(_consume_abandoned_task)
+
+
+def _consume_abandoned_task(task: asyncio.Future[Any]) -> None:
+    """Consume a quarantined task's eventual result or exception."""
+
+    if task.cancelled():
+        return
+    with suppress(BaseException):
+        task.exception()
 
 
 def _json_ready(value: Any) -> Any:

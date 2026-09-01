@@ -77,7 +77,7 @@ from src.core.contracts.capabilities import (
     CapabilityGrant,
     SensitivityClass,
 )
-from src.core.contracts.provenance import ToolInvocation
+from src.core.contracts.provenance import ToolInvocation, ToolInvocationStatus
 from src.core.contracts.trust import TrustClassification
 from src.core.tools import (
     NullEventPublisher,
@@ -102,6 +102,18 @@ so anything downstream can trust them.
 UNBOUND_RUN_PREFIX: Final[str] = "unbound-"
 """Marks a run identifier that was synthesized because none was supplied."""
 
+RUN_ID_CONTEXT_KEY: Final[str] = "run_id"
+"""Context key carrying the durable run identifier for an agent task."""
+
+TASK_ID_CONTEXT_KEY: Final[str] = "task_id"
+"""Context key carrying the durable task identifier for an agent task."""
+
+ATTEMPT_ID_CONTEXT_KEY: Final[str] = "attempt_id"
+"""Context key carrying the durable attempt identifier for an agent task."""
+
+ORGANIZATION_ID_CONTEXT_KEY: Final[str] = "organization_id"
+"""Context key carrying the durable organization identifier for an agent task."""
+
 DEFAULT_GRANT_TTL: Final[timedelta] = timedelta(minutes=5)
 """How long a self-issued grant stays valid.
 
@@ -113,6 +125,24 @@ bug and is really a timeout. The relationship is asserted in
 ``tests/test_tool_path_mediation.py`` rather than left to this number looking
 big enough.
 """
+
+_REPLAYABLE_TERMINAL_STATUSES: Final[frozenset[ToolInvocationStatus]] = frozenset(
+    {
+        ToolInvocationStatus.SUCCEEDED,
+        ToolInvocationStatus.FAILED,
+        ToolInvocationStatus.CANCELLED,
+        ToolInvocationStatus.TIMED_OUT,
+    }
+)
+_PENDING_STATUSES: Final[frozenset[ToolInvocationStatus]] = frozenset(
+    {ToolInvocationStatus.REQUESTED, ToolInvocationStatus.RUNNING}
+)
+
+
+def _organization_key(organization_id: str | None) -> str | None:
+    """Normalize the in-memory tenant key without weakening its scope."""
+
+    return None if organization_id is None else str(organization_id)
 
 
 @final
@@ -132,6 +162,20 @@ class ToolCallIdentity:
     identity are precisely the ones whose records an audit would otherwise
     read as complete.
     """
+
+    @property
+    def durable(self) -> bool:
+        """Whether this identity has the complete caller-supplied scope.
+
+        ``bound`` only says that a caller supplied an identity-shaped value.
+        A durable identity additionally needs every lifecycle identifier and
+        its organization boundary; synthesized or partially scoped identities
+        must remain distinguishable from one that can resolve to durable rows.
+        """
+
+        return self.bound and all(
+            (self.run_id, self.task_id, self.attempt_id, self.organization_id)
+        )
 
     @classmethod
     def unbound(cls, *, label: str) -> ToolCallIdentity:
@@ -159,20 +203,20 @@ class ToolCallIdentity:
         correlated records.
         """
 
-        task_id = str(getattr(task, "id", "") or "")
+        context = getattr(task, "context", None) or {}
+        task_id = str(context.get(TASK_ID_CONTEXT_KEY) or getattr(task, "id", "") or "")
         if not task_id:
             return cls.unbound(label="agent-task")
-        context = getattr(task, "context", None) or {}
-        run_id = str(context.get("run_id") or task_id)
-        attempt_id = str(context.get("attempt_id") or task_id)
+        run_id = str(context.get(RUN_ID_CONTEXT_KEY) or task_id)
+        attempt_id = str(context.get(ATTEMPT_ID_CONTEXT_KEY) or task_id)
         return cls(
             run_id=run_id,
             task_id=task_id,
             attempt_id=attempt_id,
             organization_id=organization_id
             or (
-                str(context["organization_id"])
-                if context.get("organization_id")
+                str(context[ORGANIZATION_ID_CONTEXT_KEY])
+                if context.get(ORGANIZATION_ID_CONTEXT_KEY)
                 else None
             ),
         )
@@ -279,6 +323,55 @@ class InMemoryToolAuditStore:
     the invocation contract and must not start looking like it is. ``None``
     entries are the malformed-request rows, which have no decision to record.
     """
+    _organization_by_invocation: dict[str, str | None] = field(
+        default_factory=dict, repr=False
+    )
+    _reservations: dict[tuple[str, str, str | None, str], ToolInvocation] = field(
+        default_factory=dict, repr=False
+    )
+
+    @staticmethod
+    def _reservation_key(
+        invocation: ToolInvocation, organization_id: str | None
+    ) -> tuple[str, str, str | None, str]:
+        return (
+            invocation.run_id,
+            invocation.attempt_id,
+            _organization_key(organization_id),
+            invocation.idempotency_key,
+        )
+
+    async def reserve_invocation(
+        self,
+        *,
+        invocation: ToolInvocation,
+        organization_id: str | None,
+    ) -> ToolInvocation | None:
+        """Atomically claim a request key before the boundary dispatches.
+
+        This method intentionally has no await point before the dictionary
+        claim.  A single asyncio event loop cannot interleave another task in
+        that synchronous section, so the first caller wins without holding a
+        lock around persistence or handler execution.
+        """
+
+        key = self._reservation_key(invocation, organization_id)
+        existing = self._reservations.get(key)
+        if existing is not None:
+            return existing
+
+        for recorded in reversed(self.invocations):
+            if (
+                self._reservation_key(recorded, organization_id) == key
+                and recorded.status in _REPLAYABLE_TERMINAL_STATUSES | _PENDING_STATUSES
+                and self._organization_by_invocation.get(recorded.tool_invocation_id)
+                == _organization_key(organization_id)
+            ):
+                self._reservations[key] = recorded
+                return recorded
+
+        self._reservations[key] = invocation
+        return None
 
     async def find_invocation(
         self,
@@ -300,6 +393,30 @@ class InMemoryToolAuditStore:
                 recorded.run_id == run_id
                 and recorded.attempt_id == attempt_id
                 and recorded.idempotency_key == idempotency_key
+                and recorded.status in _REPLAYABLE_TERMINAL_STATUSES
+                and self._organization_by_invocation.get(recorded.tool_invocation_id)
+                == _organization_key(organization_id)
+            ):
+                return recorded
+        return None
+
+    async def find_pending_invocation(
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+    ) -> ToolInvocation | None:
+        """Return a request that was admitted but has not terminated."""
+        for recorded in reversed(self.invocations):
+            if (
+                recorded.run_id == run_id
+                and recorded.attempt_id == attempt_id
+                and recorded.idempotency_key == idempotency_key
+                and recorded.status in _PENDING_STATUSES
+                and self._organization_by_invocation.get(recorded.tool_invocation_id)
+                == _organization_key(organization_id)
             ):
                 return recorded
         return None
@@ -315,6 +432,13 @@ class InMemoryToolAuditStore:
         self.invocations.append(invocation)
         self.events.extend(events)
         self.decisions.append(capability_decision)
+        self._organization_by_invocation[invocation.tool_invocation_id] = (
+            _organization_key(organization_id)
+        )
+        if invocation.status in _REPLAYABLE_TERMINAL_STATUSES | _PENDING_STATUSES:
+            self._reservations[self._reservation_key(invocation, organization_id)] = (
+                invocation
+            )
 
 
 def build_tool_boundary(
@@ -360,8 +484,12 @@ def plain(value: Any) -> Any:
 
 
 __all__ = [
+    "ATTEMPT_ID_CONTEXT_KEY",
     "DEFAULT_GRANT_TTL",
+    "ORGANIZATION_ID_CONTEXT_KEY",
+    "RUN_ID_CONTEXT_KEY",
     "SELF_ISSUED_SCOPE_PREFIX",
+    "TASK_ID_CONTEXT_KEY",
     "UNBOUND_RUN_PREFIX",
     "InMemoryToolAuditStore",
     "SelfIssuedPolicy",

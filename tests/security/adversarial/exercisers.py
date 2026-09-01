@@ -1675,22 +1675,10 @@ async def _crosstenant_05() -> Observation:
     ]
     shared_key = "template-generated-key-shared-by-both"
 
-    # Both tenants call under ONE attempt, and the shared attempt is the
-    # point. This reproduction used to vary `attempt_id` alongside the
-    # organization ("attempt-a" / "attempt-b") while its own evidence claimed
-    # "the two requests differ only in a field neither check reads" — which
-    # was false, and became load-bearing the moment `find_invocation` was
-    # corrected to be attempt-scoped (uniqueness in `agent_tool_invocations`
-    # is `(attempt_id, idempotency_key)`, so a run-scoped lookup was coarser
-    # than its own storage). Under that correction the old two-attempt
-    # reproduction stops reproducing and this scenario flips to HELD — while
-    # the tenant hole it is about is entirely untouched, because nothing here
-    # ever read `organization_id`. A scenario that reports a live defect as
-    # closed because an unrelated fix perturbed an incidental field is worse
-    # than no scenario. Holding the attempt fixed isolates the organization as
-    # the only difference, which is what the evidence always claimed and is
-    # also the more faithful attack: nothing binds a run or an attempt to an
-    # organization, so naming another tenant's attempt is not refused either.
+    # Both tenants call under one run, task, and attempt so organization is the
+    # only field that changes in the attack. A same-tenant repeat below is the
+    # control: it must replay the tenant's own record rather than execute a
+    # third time.
     async def call(org: str) -> ToolOutcome:
         return await wired.boundary.invoke(
             tool_name=ACADEMIC_SEARCH,
@@ -1706,48 +1694,57 @@ async def _crosstenant_05() -> Observation:
         )
 
     tenant_a = await call(ORG_A)
-    before = wired.call_count(ACADEMIC_SEARCH)
+    after_tenant_a = wired.call_count(ACADEMIC_SEARCH)
     tenant_b = await call(ORG_B)
-    after = wired.call_count(ACADEMIC_SEARCH)
-    # Keyed on the effect — the handler was not re-entered and tenant B holds
-    # tenant A's invocation record — rather than on `tenant_b.decision is
-    # None`, which is what this predicate used to read. That property was
-    # incidental to the old implementation: once a replayed result began
-    # carrying the current caller's decision, the predicate silently stopped
-    # detecting a violation that is still entirely present, and this scenario
-    # reported HELD while its own evidence string said tenant B had been
-    # served tenant A's result. A predicate that keys on a signature detail
-    # rather than on the effect stops working without going red.
-    served_from_a = (
-        after == before
+    after_tenant_b = wired.call_count(ACADEMIC_SEARCH)
+    tenant_b_replay = await call(ORG_B)
+    after_tenant_b_replay = wired.call_count(ACADEMIC_SEARCH)
+
+    cross_tenant_independent = (
+        tenant_a.status is ToolOutcomeStatus.SUCCEEDED
+        and tenant_b.status is ToolOutcomeStatus.SUCCEEDED
+        and after_tenant_b == after_tenant_a + 1
         and tenant_b.invocation.tool_invocation_id
-        == tenant_a.invocation.tool_invocation_id
+        != tenant_a.invocation.tool_invocation_id
     )
+    same_tenant_replay = (
+        tenant_b_replay.status is ToolOutcomeStatus.SUCCEEDED
+        and after_tenant_b_replay == after_tenant_b
+        and tenant_b_replay.invocation.tool_invocation_id
+        == tenant_b.invocation.tool_invocation_id
+    )
+    held = cross_tenant_independent and same_tenant_replay
     return Observation(
-        verdict=Verdict.VIOLATED if served_from_a else Verdict.HELD,
+        verdict=Verdict.HELD if held else Verdict.VIOLATED,
         evidence=(
-            f"tenant A executed the call (status={tenant_a.status.value}, "
-            f"handler_invocations={before}); tenant B presenting the same key "
-            f"was served tenant A's recorded outcome without executing "
-            f"(handler_invocations={after}, and tenant B's returned "
-            f"tool_invocation_id is tenant A's: "
-            f"{tenant_b.invocation.tool_invocation_id == tenant_a.invocation.tool_invocation_id}). "
-            "InMemoryToolAuditStore.find_invocation accepts organization_id "
-            "and never reads it (src/agents/tools/mediation.py); it matches "
-            "on (run_id, attempt_id, idempotency_key) — the attempt joined "
-            "that tuple when the lookup was corrected to match the durable "
-            "table's uniqueness scope, and the tenant did not. Nothing at the "
-            "boundary binds a run_id or an attempt_id to an organization "
-            "either, so a caller naming another tenant's run is not refused. "
-            "Both calls here therefore share one run, one task and one "
-            "attempt, and differ in the organization alone. The 4C reordering "
-            "does not touch this: tenant B's request is genuinely authorized "
-            "(the grant matches run, task, tool and scope; organization_id is "
-            "not an input to the capability decision at all), so it reaches "
-            "the lookup and _require_same_request finds no mismatch — the two "
-            "requests differ only in a field neither check reads."
+            f"tenant A's call returned status={tenant_a.status.value} and "
+            f"executed (handler_invocations={after_tenant_a}); tenant B's "
+            f"request with the same key returned status={tenant_b.status.value} "
+            f"and executed independently (handler_invocations={after_tenant_b}, "
+            f"distinct invocation="
+            f"{tenant_b.invocation.tool_invocation_id != tenant_a.invocation.tool_invocation_id}); "
+            f"a repeat by tenant B returned status={tenant_b_replay.status.value} "
+            f"and replayed tenant B's own record without a third execution "
+            f"(handler_invocations={after_tenant_b_replay}). "
+            "InMemoryToolAuditStore scopes both its reservation key and replay "
+            "lookup by organization_id as well as run, attempt, and key, so a "
+            "shared key from a public template is independent across tenants "
+            "while remaining idempotent within one tenant."
         ),
-        control=None,
+        control=Control.contrasting_result(
+            what=(
+                "the same idempotency key repeated by tenant B after its "
+                "cross-tenant call, using the same boundary and grants"
+            ),
+            on_attack=(
+                f"handler executions added by tenant B's cross-tenant request="
+                f"{after_tenant_b - after_tenant_a}"
+            ),
+            on_control=(
+                f"handler executions added by tenant B's same-tenant replay="
+                f"{after_tenant_b_replay - after_tenant_b}"
+            ),
+        ),
     )
 
 

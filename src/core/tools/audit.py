@@ -169,6 +169,108 @@ class ToolAuditStore(Protocol):
 
 
 @runtime_checkable
+class ToolAdmissionStore(Protocol):
+    """Optional atomic admission for a first requested invocation.
+
+    ``None`` means this caller reserved the request.  An existing pending or
+    terminal invocation means another caller already owns the key, so the
+    boundary can validate its identity and return ``IN_PROGRESS`` or replay
+    the terminal result without dispatching a handler.  Stores that do not
+    implement this seam keep the older lookup-then-persist behavior.
+
+    The reservation itself must be atomic in the adapter.  In-memory
+    implementations can provide that guarantee by doing the lookup and claim
+    without an ``await`` point; durable implementations should use their
+    datastore's uniqueness/transaction primitive.
+    """
+
+    async def reserve_invocation(
+        self,
+        *,
+        invocation: ToolInvocation,
+        organization_id: str | None,
+    ) -> ToolInvocation | None:
+        """Claim the invocation key or return the existing owner."""
+        ...
+
+
+@runtime_checkable
+class PendingToolAuditStore(Protocol):
+    """Optional lookup for work that was admitted but has not terminated.
+
+    A terminal replay is an answer.  A nonterminal row is a reservation for
+    work that may still be running, so callers must not execute the same
+    idempotency key again.  This capability is optional to preserve the
+    boundary's compatibility with older in-memory and test adapters; durable
+    stores that can recover after a process restart implement it.
+    """
+
+    async def find_pending_invocation(
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+    ) -> ToolInvocation | None:
+        """Return an authorized request that has not reached a terminal state."""
+        ...
+
+
+@runtime_checkable
+class LeaseAwareToolAuditStore(PendingToolAuditStore, Protocol):
+    """Optional durable recovery and renewal operations for leased tool work.
+
+    ``reconcile_pending_invocation`` atomically retrieves the exact durable
+    invocation identified by ``run_id``, ``attempt_id``, ``organization_id``,
+    and ``idempotency_key`` at the caller-injected aware ``now``. It returns
+    ``None`` when no non-denied reservation exists. If the reservation is
+    pending and its lease is live, it returns the pending
+    :class:`ToolInvocation` with lease fields reconstructed. If the lease is
+    expired, missing, or from a legacy row with ``NULL`` lease fields, it must
+    transition that row to a replayable terminal failure, clear lease fields,
+    leave output empty, append the terminal tool event, and commit the state
+    transition and event in one transaction. A concurrent retry that observes
+    a row already reconciled by another process returns that existing terminal
+    row and must not append a duplicate event.
+
+    ``renew_invocation_lease`` updates only the lease expiry for the exact
+    durable invocation/run/attempt/tenant/idempotency tuple while the row is
+    still pending, belongs to ``lease_owner_id``, and its current lease is
+    unexpired at the injected aware ``now``. It returns ``False`` for a missing
+    row, wrong owner, wrong tenant, terminal row, or expired/null lease, and it
+    must never resurrect expired work.
+    """
+
+    async def reconcile_pending_invocation(
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+        now: datetime,
+    ) -> ToolInvocation | None:
+        """Return live pending work or terminalize stale pending work."""
+        ...
+
+    async def renew_invocation_lease(
+        self,
+        *,
+        tool_invocation_id: str,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+        lease_owner_id: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> bool:
+        """Extend an unexpired pending lease held by ``lease_owner_id``."""
+        ...
+
+
+@runtime_checkable
 class ToolEventPublisher(Protocol):
     """Delivery of already-durable events to live subscribers."""
 
@@ -195,7 +297,10 @@ __all__ = [
     "EVENT_REQUESTED",
     "EVENT_TYPE_VERSION",
     "TOOL_INVOCATION_AGGREGATE",
+    "LeaseAwareToolAuditStore",
     "NullEventPublisher",
+    "PendingToolAuditStore",
+    "ToolAdmissionStore",
     "ToolAuditEvent",
     "ToolAuditStore",
     "ToolEventPublisher",

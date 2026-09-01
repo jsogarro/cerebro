@@ -1,12 +1,75 @@
 """Integration tests for workers with tool registry."""
 
+import json
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.agents.analytics_agents import DataAnalysisAgent
 from src.agents.models import AgentTask
+from src.agents.tools.arithmetic_tool import ArithmeticTool
+from src.agents.tools.mediation import InMemoryToolAuditStore
+from src.agents.tools.registry import ToolRegistry
+from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
 from src.core.config import settings
+from src.core.contracts import CapabilityGrant, SensitivityClass, TrustClassification
+from src.core.tools import ToolOutcome
+
+
+def _tool_call_response(name: str, arguments: dict[str, object]) -> str:
+    """Build the exact response envelope the worker is expected to accept."""
+    return json.dumps(
+        {"tool_call": {"name": name, "arguments": arguments}},
+        separators=(",", ":"),
+    )
+
+
+def _task_with_context(context: dict[str, object] | None = None) -> AgentTask:
+    return AgentTask(
+        id="ephemeral-task-id",
+        agent_type="data_analysis",
+        input_data={"query": "Calculate the result"},
+        context=context or {},
+    )
+
+
+def _arithmetic_grant() -> CapabilityGrant:
+    now = datetime.now(UTC)
+    return CapabilityGrant(
+        grant_id="grant-arithmetic",
+        run_id="run-from-context",
+        task_id="task-from-context",
+        capability_scope="scope-arithmetic",
+        tool_name="arithmetic",
+        tool_versions=("1.0.0",),
+        sensitivity=SensitivityClass.READ_ONLY,
+        max_input_trust=TrustClassification.APPLICATION,
+        requires_approval=False,
+        issued_at=now - timedelta(minutes=1),
+        expires_at=now + timedelta(minutes=5),
+    )
+
+
+def _registry_with_audit_store() -> tuple[ToolRegistry, InMemoryToolAuditStore]:
+    audit_store = InMemoryToolAuditStore()
+    registry = ToolRegistry(audit_store=audit_store)
+    registry.register(ArithmeticTool())
+    return registry, audit_store
+
+
+def _capture_boundary_outcomes(
+    registry: ToolRegistry, outcomes: list[ToolOutcome]
+) -> None:
+    """Replace the registry boundary method with an outcome-recording spy."""
+    real_invoke = registry.boundary.invoke
+
+    async def invoke_and_capture(**kwargs: object) -> ToolOutcome:
+        outcome = await real_invoke(**kwargs)
+        outcomes.append(outcome)
+        return outcome
+
+    registry.boundary.invoke = invoke_and_capture  # type: ignore[method-assign]
 
 
 @pytest.fixture(autouse=True)
@@ -157,3 +220,218 @@ class TestWorkerWithTools:
 
         # Should only be called once (on first access)
         assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_the_tool_loop_routes_through_the_boundary(self, mock_gemini_service):
+        """A model tool call must mint an outcome through the shared boundary."""
+        mock_gemini_service.generate_content.side_effect = [
+            _tool_call_response("arithmetic", {"expression": "2 + 3"}),
+            "The result is 5.",
+        ]
+        agent = DataAnalysisAgent()
+        agent.gemini_service = mock_gemini_service
+        registry, _audit_store = _registry_with_audit_store()
+        agent._tool_registry = registry
+
+        tool = registry.get("arithmetic")
+        assert tool is not None
+        implementation = tool._execute_impl
+        implementation_spy = AsyncMock(wraps=implementation)
+        tool._execute_impl = implementation_spy  # type: ignore[method-assign]
+        outcomes: list[ToolOutcome] = []
+        _capture_boundary_outcomes(registry, outcomes)
+
+        result = await agent.execute(_task_with_context())
+
+        assert result.status == "success"
+        assert result.output["content"] == "The result is 5."
+        assert len(outcomes) == 1
+        assert isinstance(outcomes[0], ToolOutcome)
+        assert outcomes[0].succeeded
+        assert outcomes[0].invocation.tool_name == "arithmetic"
+        assert implementation_spy.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_tool_loop_propagates_durable_identity_and_grants(
+        self, mock_gemini_service
+    ):
+        """Task context, not ephemeral worker state, authorizes the tool call."""
+        mock_gemini_service.generate_content.side_effect = [
+            _tool_call_response("arithmetic", {"expression": "2 + 3"}),
+            "The result is 5.",
+        ]
+        grant = _arithmetic_grant()
+        task = _task_with_context(
+            {
+                "run_id": "run-from-context",
+                "task_id": "task-from-context",
+                "attempt_id": "attempt-from-context",
+                "organization_id": "00000000-0000-0000-0000-0000000000aa",
+                CAPABILITY_GRANTS_CONTEXT_KEY: (grant,),
+            }
+        )
+        agent = DataAnalysisAgent()
+        agent.gemini_service = mock_gemini_service
+        registry, _audit_store = _registry_with_audit_store()
+        agent._tool_registry = registry
+        real_invoke = registry.boundary.invoke
+        invoke = AsyncMock(wraps=real_invoke)
+        registry.boundary.invoke = invoke  # type: ignore[method-assign]
+
+        result = await agent.execute(task)
+
+        assert result.status == "success"
+        assert invoke.await_args is not None
+        assert {
+            name: invoke.await_args.kwargs[name]
+            for name in (
+                "run_id",
+                "task_id",
+                "attempt_id",
+                "organization_id",
+            )
+        } == {
+            "run_id": "run-from-context",
+            "task_id": "task-from-context",
+            "attempt_id": "attempt-from-context",
+            "organization_id": "00000000-0000-0000-0000-0000000000aa",
+        }
+        assert invoke.await_args.kwargs["grants"] == [grant]
+
+    @pytest.mark.asyncio
+    async def test_ordinary_model_text_is_preserved_exactly(self, mock_gemini_service):
+        """A non-envelope response remains byte-for-byte worker output."""
+        ordinary_text = "  Keep this answer exactly.\n\n"
+        mock_gemini_service.generate_content.return_value = ordinary_text
+        agent = DataAnalysisAgent()
+        agent.gemini_service = mock_gemini_service
+
+        result = await agent.execute(_task_with_context())
+
+        assert result.status == "success"
+        assert result.output["content"] == ordinary_text
+        assert result.output["analysis"] == ordinary_text
+        assert mock_gemini_service.generate_content.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_malformed_tool_call_fails_closed(self, mock_gemini_service):
+        """A tool-call-shaped object with the wrong schema is not executed."""
+        mock_gemini_service.generate_content.return_value = json.dumps(
+            {"tool_call": {"name": "arithmetic", "arguments": []}}
+        )
+        agent = DataAnalysisAgent()
+        agent.gemini_service = mock_gemini_service
+        registry, _audit_store = _registry_with_audit_store()
+        agent._tool_registry = registry
+        outcomes: list[ToolOutcome] = []
+        _capture_boundary_outcomes(registry, outcomes)
+
+        result = await agent.execute(_task_with_context())
+
+        assert result.status == "failed"
+        assert result.output["tool_error"]["code"] == "malformed_tool_call"
+        assert "content" not in result.output
+        assert outcomes == []
+        assert mock_gemini_service.generate_content.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_call_fails_closed(self, mock_gemini_service):
+        """A valid envelope naming no registered tool returns an honest error."""
+        mock_gemini_service.generate_content.return_value = _tool_call_response(
+            "not_registered", {}
+        )
+        agent = DataAnalysisAgent()
+        agent.gemini_service = mock_gemini_service
+        registry, _audit_store = _registry_with_audit_store()
+        agent._tool_registry = registry
+        outcomes: list[ToolOutcome] = []
+        _capture_boundary_outcomes(registry, outcomes)
+
+        result = await agent.execute(_task_with_context())
+
+        assert result.status == "failed"
+        assert result.output["tool_result"]["success"] is False
+        assert result.output["tool_result"]["error"] == ("Unknown tool: not_registered")
+        assert "content" not in result.output
+        assert outcomes == []
+
+    @pytest.mark.asyncio
+    async def test_denied_tool_result_is_not_fabricated_as_success(
+        self, mock_gemini_service
+    ):
+        """A denied durable call stops before any model final-answer turn."""
+        mock_gemini_service.generate_content.return_value = _tool_call_response(
+            "arithmetic", {"expression": "2 + 3"}
+        )
+        agent = DataAnalysisAgent()
+        agent.gemini_service = mock_gemini_service
+        registry, _audit_store = _registry_with_audit_store()
+        agent._tool_registry = registry
+        outcomes: list[ToolOutcome] = []
+        _capture_boundary_outcomes(registry, outcomes)
+        task = _task_with_context(
+            {
+                "run_id": "run-from-context",
+                "task_id": "task-from-context",
+                "attempt_id": "attempt-from-context",
+                "organization_id": "org-from-context",
+            }
+        )
+
+        result = await agent.execute(task)
+
+        assert result.status == "failed"
+        assert result.output["tool_result"]["success"] is False
+        assert "denied" in result.output["tool_result"]["error"]
+        assert "content" not in result.output
+        assert mock_gemini_service.generate_content.await_count == 1
+        assert len(outcomes) == 1
+        assert outcomes[0].status.value == "denied"
+
+    @pytest.mark.asyncio
+    async def test_failed_tool_result_is_not_fabricated_as_success(
+        self, mock_gemini_service
+    ):
+        """A tool failure is returned as a structured failure, never a final answer."""
+        mock_gemini_service.generate_content.return_value = _tool_call_response(
+            "arithmetic", {"expression": "1 / 0"}
+        )
+        agent = DataAnalysisAgent()
+        agent.gemini_service = mock_gemini_service
+        registry, _audit_store = _registry_with_audit_store()
+        agent._tool_registry = registry
+        outcomes: list[ToolOutcome] = []
+        _capture_boundary_outcomes(registry, outcomes)
+
+        result = await agent.execute(_task_with_context())
+
+        assert result.status == "failed"
+        assert result.output["tool_result"]["success"] is False
+        assert "failed" in result.output["tool_result"]["error"]
+        assert "content" not in result.output
+        assert mock_gemini_service.generate_content.await_count == 1
+        assert len(outcomes) == 1
+        assert outcomes[0].succeeded is False
+
+    @pytest.mark.asyncio
+    async def test_tool_loop_hard_limits_a_second_tool_call(self, mock_gemini_service):
+        """The optional follow-up turn cannot start an unbounded tool loop."""
+        mock_gemini_service.generate_content.side_effect = [
+            _tool_call_response("arithmetic", {"expression": "2 + 3"}),
+            _tool_call_response("arithmetic", {"expression": "4 + 5"}),
+        ]
+        agent = DataAnalysisAgent()
+        agent.gemini_service = mock_gemini_service
+        registry, _audit_store = _registry_with_audit_store()
+        agent._tool_registry = registry
+        outcomes: list[ToolOutcome] = []
+        _capture_boundary_outcomes(registry, outcomes)
+
+        result = await agent.execute(_task_with_context())
+
+        assert result.status == "failed"
+        assert result.output["tool_error"]["code"] == "tool_loop_limit"
+        assert result.output["tool_result"]["success"] is True
+        assert "content" not in result.output
+        assert mock_gemini_service.generate_content.await_count == 2
+        assert len(outcomes) == 1

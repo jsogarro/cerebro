@@ -3,17 +3,98 @@
 A lightweight ``BaseAgent`` scaffold for domain worker agents that reason over
 the query (and any prior-stage context) with the Gemini service. Subclasses set
 ``agent_type`` and implement ``_build_prompt``. No external data sources.
+
+Workers may request an internal tool only with the exact JSON envelope described
+by :data:`TOOL_CALL_RESPONSE_INSTRUCTIONS`. Anything else is ordinary model
+text and is returned unchanged. A successful tool call gets one follow-up model
+turn for a final answer; a follow-up tool call is refused at the hard two-turn
+limit. Tool failures are returned as structured failures without a fabricated
+model answer.
 """
 
+import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
+from src.agents.tools.base_tool import ToolResult
+from src.agents.tools.mediation import ToolCallIdentity
 from src.agents.tools.registry import ToolRegistry
+from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
 
 if TYPE_CHECKING:
     from src.ai_brain.memory import ProceduralMemoryManager
+
+
+MAX_TOOL_MODEL_TURNS: Final[int] = 2
+"""Maximum model turns for one worker execution that enters the tool loop."""
+
+TOOL_CALL_RESPONSE_INSTRUCTIONS: Final[str] = """Tool-call response contract:
+To request a listed tool, respond with exactly one JSON object of this shape:
+{"tool_call":{"name":"tool_name","arguments":{}}}
+The top-level object must contain only ``tool_call``. The ``tool_call`` object
+must contain only ``name`` and ``arguments``; ``name`` is a non-empty string and
+``arguments`` is a JSON object. Do not use markdown fences or surrounding text.
+If no tool is needed, respond with ordinary text instead of JSON. Only one tool
+call is allowed; after a tool result, provide the final answer as ordinary text.
+"""
+"""The prompt-visible, strict response envelope accepted by the worker."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolCall:
+    """A validated model-requested tool call."""
+
+    name: str
+    arguments: dict[str, Any]
+
+
+class _MalformedToolCallError(ValueError):
+    """A response claimed the tool-call envelope but did not match it."""
+
+
+def _parse_tool_call_response(content: str) -> _ToolCall | None:
+    """Parse only the strict tool-call envelope; leave other text untouched."""
+    try:
+        decoded = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    if not isinstance(decoded, dict) or "tool_call" not in decoded:
+        return None
+    if set(decoded) != {"tool_call"}:
+        raise _MalformedToolCallError(
+            "the top-level object must contain only 'tool_call'"
+        )
+
+    tool_call = decoded["tool_call"]
+    if not isinstance(tool_call, dict) or set(tool_call) != {"name", "arguments"}:
+        raise _MalformedToolCallError(
+            "tool_call must contain only 'name' and 'arguments'"
+        )
+
+    name = tool_call["name"]
+    if not isinstance(name, str) or not name or name != name.strip():
+        raise _MalformedToolCallError(
+            "tool_call.name must be a non-empty, whitespace-normalized string"
+        )
+
+    arguments = tool_call["arguments"]
+    if not isinstance(arguments, dict):
+        raise _MalformedToolCallError("tool_call.arguments must be a JSON object")
+
+    return _ToolCall(name=name, arguments=dict(arguments))
+
+
+def _tool_result_payload(result: ToolResult) -> dict[str, Any]:
+    """Project a registry result into an honest model/worker-facing object."""
+    if result.success:
+        return {"success": True, "value": result.value}
+    return {
+        "success": False,
+        "error": result.error or "Tool execution failed",
+    }
 
 
 class PlanProviderUnavailableError(RuntimeError):
@@ -649,6 +730,180 @@ class LLMWorkerAgentBase(BaseAgent):
         else:
             return "complex"
 
+    def _tool_call_output(self, tool_call: _ToolCall) -> dict[str, Any]:
+        """Return the stable representation of a validated tool call."""
+        return {
+            "name": tool_call.name,
+            "arguments": tool_call.arguments,
+        }
+
+    def _tool_failure_result(
+        self,
+        task: AgentTask,
+        computed: dict[str, Any] | None,
+        *,
+        code: str,
+        message: str,
+        tool_call: _ToolCall | None = None,
+        tool_result: dict[str, Any] | None = None,
+    ) -> AgentResult:
+        """Build a failed result without presenting a final model answer."""
+        output: dict[str, Any] = {
+            "agent_type": self.agent_type,
+            "error": message,
+            "error_type": code,
+            "tool_error": {"code": code, "message": message},
+        }
+        if tool_call is not None:
+            output["tool_call"] = self._tool_call_output(tool_call)
+        if tool_result is not None:
+            output["tool_result"] = tool_result
+        if computed:
+            output["computed"] = computed
+
+        return AgentResult(
+            task_id=task.id,
+            status="failed",
+            output=output,
+            confidence=0.0,
+            execution_time=0.0,
+            metadata=self.build_execution_metadata(agent_type=self.agent_type),
+        )
+
+    def _build_tool_follow_up_prompt(
+        self,
+        prompt: str,
+        tool_call: _ToolCall,
+        tool_result: dict[str, Any],
+    ) -> str:
+        """Give one successful tool result to the model for final narration."""
+        result_json = json.dumps(
+            {
+                "tool_call": self._tool_call_output(tool_call),
+                "tool_result": tool_result,
+            },
+            indent=2,
+            default=str,
+        )
+        return (
+            f"{prompt}\n\nTool result for the requested call:\n{result_json}\n\n"
+            "Use this result when answering the original query. Respond with "
+            "the final answer as ordinary text; do not request another tool."
+        )
+
+    async def _execute_model_tool_call(
+        self,
+        task: AgentTask,
+        prompt: str,
+        registry: ToolRegistry,
+        tool_call: _ToolCall,
+        computed: dict[str, Any] | None,
+    ) -> AgentResult:
+        """Execute one model call through the registry, then allow one final turn."""
+        identity = ToolCallIdentity.from_agent_task(task)
+        grants = task.context.get(CAPABILITY_GRANTS_CONTEXT_KEY, None)
+
+        try:
+            tool_result = await registry.execute(
+                tool_call.name,
+                tool_call.arguments,
+                identity=identity,
+                grants=grants,
+            )
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"
+            return self._tool_failure_result(
+                task,
+                computed,
+                code="tool_execution_error",
+                message=message,
+                tool_call=tool_call,
+                tool_result={"success": False, "error": message},
+            )
+
+        tool_result_payload = _tool_result_payload(tool_result)
+        if not tool_result.success:
+            return self._tool_failure_result(
+                task,
+                computed,
+                code="tool_call_failed",
+                message=tool_result_payload["error"],
+                tool_call=tool_call,
+                tool_result=tool_result_payload,
+            )
+
+        try:
+            final_content, final_confidence = await self._generate_with_routing(
+                self._build_tool_follow_up_prompt(
+                    prompt, tool_call, tool_result_payload
+                ),
+                task,
+            )
+        except Exception as exc:
+            message = f"Final generation failed after tool call: {exc}"
+            return self._tool_failure_result(
+                task,
+                computed,
+                code="final_generation_failed",
+                message=message,
+                tool_call=tool_call,
+                tool_result=tool_result_payload,
+            )
+
+        if final_content is None:
+            return self._tool_failure_result(
+                task,
+                computed,
+                code="final_generation_failed",
+                message="Final generation failed after tool call",
+                tool_call=tool_call,
+                tool_result=tool_result_payload,
+            )
+
+        try:
+            second_tool_call = _parse_tool_call_response(final_content)
+        except _MalformedToolCallError as exc:
+            return self._tool_failure_result(
+                task,
+                computed,
+                code="malformed_tool_call",
+                message=str(exc),
+                tool_call=tool_call,
+                tool_result=tool_result_payload,
+            )
+
+        if second_tool_call is not None:
+            return self._tool_failure_result(
+                task,
+                computed,
+                code="tool_loop_limit",
+                message=(
+                    f"tool loop reached the hard limit of {MAX_TOOL_MODEL_TURNS} "
+                    "model turns"
+                ),
+                tool_call=tool_call,
+                tool_result=tool_result_payload,
+            )
+
+        output: dict[str, Any] = {
+            "content": final_content,
+            "analysis": final_content,
+            "agent_type": self.agent_type,
+            "tool_call": self._tool_call_output(tool_call),
+            "tool_result": tool_result_payload,
+        }
+        if computed:
+            output["computed"] = computed
+
+        return AgentResult(
+            task_id=task.id,
+            status="success",
+            output=output,
+            confidence=final_confidence,
+            execution_time=0.0,
+            metadata=self.build_execution_metadata(agent_type=self.agent_type),
+        )
+
     async def execute(self, task: AgentTask) -> AgentResult:
         query = str(task.input_data.get("query", "")).strip()
         if not query:
@@ -668,16 +923,17 @@ class LLMWorkerAgentBase(BaseAgent):
         # Append tool availability context if tools are registered
         registry = self._get_tool_registry()
         if len(registry) > 0:
-            import json
-
             tool_list = registry.list_tools()
-            tools_block = "\n\nAvailable tools:\n" + json.dumps(tool_list, indent=2)
+            tools_block = (
+                "\n\nAvailable tools:\n"
+                + json.dumps(tool_list, indent=2)
+                + "\n\n"
+                + TOOL_CALL_RESPONSE_INSTRUCTIONS
+            )
             prompt += tools_block
 
         # Append precomputed values to prompt if present
         if computed:
-            import json
-
             computed_block = "\n\nPrecomputed exact values:\n" + json.dumps(
                 computed, indent=2
             )
@@ -689,6 +945,25 @@ class LLMWorkerAgentBase(BaseAgent):
 
         if content is None:
             return self.handle_error(task, ValueError("Generation failed"))
+
+        try:
+            tool_call = _parse_tool_call_response(content)
+        except _MalformedToolCallError as exc:
+            return self._tool_failure_result(
+                task,
+                computed,
+                code="malformed_tool_call",
+                message=str(exc),
+            )
+
+        if tool_call is not None:
+            return await self._execute_model_tool_call(
+                task,
+                prompt,
+                registry,
+                tool_call,
+                computed,
+            )
 
         # Build output with optional computed field
         output: dict[str, Any] = {

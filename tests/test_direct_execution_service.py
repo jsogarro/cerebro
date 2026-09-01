@@ -6,17 +6,26 @@ the Temporal workflow system.
 """
 
 import asyncio
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 from src.agents.supervisors.analytics_supervisor import AnalyticsSupervisor
 from src.agents.supervisors.content_supervisor import ContentSupervisor
 from src.agents.supervisors.finance_supervisor import FinanceSupervisor
 from src.agents.supervisors.research_supervisor import ResearchSupervisor
+from src.agents.tools.mediation import (
+    ATTEMPT_ID_CONTEXT_KEY,
+    ORGANIZATION_ID_CONTEXT_KEY,
+    RUN_ID_CONTEXT_KEY,
+    TASK_ID_CONTEXT_KEY,
+    ToolCallIdentity,
+)
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from src.ai_brain.router.masr import MASRouter
 from src.ai_brain.router.routing_types import RoutingStrategy
@@ -31,7 +40,9 @@ from src.api.services.direct_execution_service import (
 from src.api.services.execution_authority_resolver import (
     MappingExecutionAuthorityResolver,
 )
+from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY, PlanCapabilityIssuer
 from src.core.contracts import (
+    CapabilityGrant,
     ExecutionBudget,
     FallbackMode,
     ProviderModelPolicy,
@@ -44,6 +55,9 @@ from src.core.kernel import (
     TypedRegistry,
 )
 from src.core.kernel.component_keys import SUPERVISOR_KEYS
+from src.models.db.base import Base
+from src.models.db.capability import AgentCapabilityGrant
+from src.models.db.run_lifecycle import AgentRun, AgentRunTask, AgentTaskAttempt
 from src.models.execution_authority import (
     ExecutionAuthorityBinding,
     ExecutionAuthorityReference,
@@ -54,6 +68,8 @@ from src.models.research_project import (
     ResearchQuery,
     ResearchScope,
 )
+from src.repositories.capability_repository import CapabilityRepository
+from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 
 
 # Lightweight dataclass stand-ins so the SUT's ``asdict(routing_decision)``
@@ -296,6 +312,251 @@ class TestDirectExecutionService:
         assert execution_status.status in ["running", "completed"]
         assert execution_status.routing_decision is not None
         assert execution_status.supervisor_type == "research"
+
+    @pytest.mark.asyncio
+    async def test_a_service_with_no_session_factory_produces_a_non_durable_identity(
+        self,
+        execution_service,
+        sample_project,
+    ):
+        execution_id = await execution_service.start_research_execution(sample_project)
+        background_tasks = tuple(execution_service._background_tasks)
+        await asyncio.gather(*background_tasks)
+
+        plan_task = (
+            execution_service.supervisor_bridge.execute_execution_plan.call_args.args[1]
+        )
+        identity = ToolCallIdentity.from_agent_task(plan_task)
+
+        assert plan_task.context == {}
+        assert identity.bound is True
+        assert identity.durable is False
+        assert execution_id in execution_service.active_executions
+
+    @pytest.mark.asyncio
+    async def test_a_plan_task_carries_the_durable_run_task_and_attempt(self):
+        organization_id = "00000000-0000-0000-0000-0000000000ab"
+        raw_binding = _authority_binding()
+        binding = replace(
+            raw_binding,
+            run=raw_binding.run.model_copy(
+                update={
+                    "tenant_id": organization_id,
+                    "idempotency_key": "durable-identity-key",
+                }
+            ),
+        )
+        resolver = MappingExecutionAuthorityResolver({("test-authority", "1"): binding})
+        router = AsyncMock()
+        router.route.return_value = _FakeRoutingDecision()
+        bridge = AsyncMock()
+        bridge.admit_execution_plan = Mock()
+        bridge.execute_execution_plan.return_value = Mock(
+            output={"ok": True}, workers_used=0
+        )
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        tables = [
+            AgentRun.__table__,
+            AgentRunTask.__table__,
+            AgentTaskAttempt.__table__,
+        ]
+
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all, tables=tables)
+
+        service = DirectExecutionService(
+            masr_router=router,
+            supervisor_bridge=bridge,
+            supervisor_factory=Mock(),
+            session_factory=session_factory,
+            execution_authority_resolver=resolver,
+        )
+        # This test isolates the lifecycle identity wiring from the existing
+        # config-snapshot/event/checkpoint persistence paths.
+        service._persist_config_snapshot = AsyncMock()
+        service._append_event = AsyncMock()
+        try:
+            execution_id = await service.start_research_execution(
+                ResearchProject(
+                    title="Durable identity project",
+                    query=ResearchQuery(
+                        text="Check durable identity propagation",
+                        domains=["research"],
+                        depth_level=ResearchDepth.COMPREHENSIVE,
+                    ),
+                    user_id="test-user-123",
+                    scope=ResearchScope(max_sources=1),
+                ),
+                authority_reference=TEST_AUTHORITY_REFERENCE,
+                organization_id=organization_id,
+            )
+            # A caller-visible owner is not the source of lifecycle identity.
+            service.active_executions[execution_id].organization_id = "spoofed-owner"
+            background_tasks = tuple(service._background_tasks)
+            await asyncio.gather(*background_tasks)
+
+            plan_task = bridge.execute_execution_plan.call_args.args[1]
+            async with session_factory() as session:
+                lifecycle_repo = RunLifecycleRepository(session)
+                run_row = await lifecycle_repo.get_run(
+                    binding.run.run_id, organization_id=organization_id
+                )
+                assert run_row is not None
+                task_rows = await lifecycle_repo.get_tasks_for_run(
+                    binding.run.run_id, organization_id=organization_id
+                )
+                assert len(task_rows) == 1
+                task_row = task_rows[0]
+                attempt_rows = await lifecycle_repo.get_attempts_for_task(
+                    task_row.task_id, organization_id=organization_id
+                )
+                assert len(attempt_rows) == 1
+                attempt_row = attempt_rows[0]
+
+            assert plan_task.id != task_row.task_id
+            assert plan_task.context == {
+                RUN_ID_CONTEXT_KEY: run_row.run_id,
+                TASK_ID_CONTEXT_KEY: task_row.task_id,
+                ATTEMPT_ID_CONTEXT_KEY: attempt_row.attempt_id,
+                ORGANIZATION_ID_CONTEXT_KEY: str(run_row.organization_id),
+                "capability_grants": (),
+            }
+        finally:
+            await service.close()
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_admission_persists_binding_grants_with_durable_identity_before_execution(
+        self,
+    ):
+        organization_id = "00000000-0000-0000-0000-0000000000ac"
+        raw_binding = _authority_binding()
+        workers = tuple(
+            worker.model_copy(
+                update={
+                    "permission_scopes": (f"{worker.worker_id}:read",),
+                    "tool_allowlist": (f"{worker.worker_id}:search",),
+                }
+            )
+            for worker in raw_binding.workers
+        )
+        binding = replace(
+            raw_binding,
+            run=raw_binding.run.model_copy(
+                update={
+                    "tenant_id": organization_id,
+                    "idempotency_key": "capability-admission-key",
+                }
+            ),
+            workers=workers,
+            budget=raw_binding.budget.model_copy(update={"max_tool_invocations": 3}),
+        )
+        project = ResearchProject(
+            title="Plan grant project",
+            query=ResearchQuery(
+                text="Check plan grants",
+                domains=["research"],
+                depth_level=ResearchDepth.COMPREHENSIVE,
+            ),
+            user_id="test-user-123",
+            scope=ResearchScope(max_sources=1),
+        )
+        execution_status = ExecutionStatus(
+            execution_id="exec-plan-grants",
+            project_id=str(project.id),
+            status="pending",
+            # Admission authority, not this optional compiled-plan cache, is
+            # the source of capability grants.
+            execution_plan=None,
+            organization_id=organization_id,
+        )
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        tables = [
+            AgentRun.__table__,
+            AgentRunTask.__table__,
+            AgentTaskAttempt.__table__,
+            AgentCapabilityGrant.__table__,
+        ]
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all, tables=tables)
+
+        bridge = AsyncMock()
+        service = DirectExecutionService(
+            masr_router=AsyncMock(),
+            supervisor_bridge=bridge,
+            supervisor_factory=Mock(),
+            session_factory=session_factory,
+            capability_issuer=PlanCapabilityIssuer(),
+        )
+        service._persist_config_snapshot = AsyncMock()
+        service._append_event = AsyncMock()
+        try:
+            await service._admit_run(execution_status, binding, project)
+
+            async with session_factory() as session:
+                lifecycle_repo = RunLifecycleRepository(session)
+                run_row = await lifecycle_repo.get_run(
+                    binding.run.run_id, organization_id=organization_id
+                )
+                assert run_row is not None
+                task_rows = await lifecycle_repo.get_tasks_for_run(
+                    binding.run.run_id, organization_id=organization_id
+                )
+                assert len(task_rows) == 1
+                task_row = task_rows[0]
+                grants = await CapabilityRepository(session).list_grants_for_task(
+                    run_row.run_id,
+                    task_row.task_id,
+                    organization_id=organization_id,
+                )
+
+            assert len(grants) == sum(
+                len(worker.tool_allowlist) for worker in binding.workers
+            )
+            durable_grant_ids = {grant.grant_id for grant in grants}
+            assert len(durable_grant_ids) == len(grants) > 0
+            assert durable_grant_ids == {
+                grant.grant_id for grant in execution_status.capability_grants
+            }
+            assert {(grant.run_id, grant.task_id) for grant in grants} == {
+                (run_row.run_id, task_row.task_id)
+            }
+            assert {str(grant.organization_id) for grant in grants} == {organization_id}
+            assert {(grant.capability_scope, grant.tool_name) for grant in grants} == {
+                (f"plan-issued:{worker.worker_id}:search", f"{worker.worker_id}:search")
+                for worker in binding.workers
+            }
+            expected_ttl = timedelta(
+                seconds=(
+                    binding.budget.max_attempts_per_task
+                    * binding.budget.task_timeout_seconds
+                )
+            )
+            assert all(
+                grant.expires_at - grant.issued_at == expected_ttl for grant in grants
+            )
+            assert all(
+                isinstance(grant, CapabilityGrant)
+                for grant in execution_status.capability_grants
+            )
+            assert {
+                (grant.capability_scope, grant.tool_name)
+                for grant in execution_status.capability_grants
+            } == {(grant.capability_scope, grant.tool_name) for grant in grants}
+            context = service._durable_agent_task_context(execution_status)
+            assert context[CAPABILITY_GRANTS_CONTEXT_KEY] == (
+                execution_status.capability_grants
+            )
+            bridge.execute_execution_plan.assert_not_called()
+        finally:
+            await service.close()
+            await engine.dispose()
 
     @pytest.mark.asyncio
     async def test_injected_supervisor_registry_does_not_reach_plan_backed_execution(

@@ -28,7 +28,7 @@ a direct answer to each finding:
   caller in production. Construction now happens inside the mediated handler,
   where a failure is an ordinary recorded tool error.
 
-**What a degraded result still contains.** With ``enable_fallback`` on, the
+**What a terminal degraded result still contains.** With ``enable_fallback`` on, the
 payload carries stand-in content so a partially-working pipeline keeps moving.
 Every level of it says so: ``success`` is ``False``, ``degraded`` is ``True``,
 ``data_source`` is ``"fallback"``, ``fallback`` is ``True``, and each
@@ -69,6 +69,7 @@ from src.core.tools import (
     ToolAuditStore,
     ToolBoundary,
     ToolOutcome,
+    ToolOutcomeStatus,
 )
 from src.security.content_sanitizer import ContentSanitizer
 
@@ -139,9 +140,10 @@ class MCPIntegration:
             audit_store: Where invocations are recorded. Defaults to an
                 in-memory store, which is not durable — see
                 ``src/agents/tools/mediation.py``.
-            grants: Capability grants from a real issuer. Without them a
-                self-issued grant is minted per call, which is not
-                authorization; the same module says so at length.
+            grants: Capability grants from a real issuer. When omitted,
+                non-durable callers retain the legacy self-issued behavior;
+                durable callers receive no grants and are denied by the
+                boundary.
 
         """
         self.config = config or {}
@@ -248,6 +250,17 @@ class MCPIntegration:
         )
         if outcome.succeeded:
             return self._succeeded(outcome, call_identity)
+        if outcome.status is ToolOutcomeStatus.IN_PROGRESS:
+            return self._in_progress(
+                outcome,
+                call_identity,
+                empty={
+                    "sources": [],
+                    "total_found": 0,
+                    "databases_searched": [],
+                    "search_strategy": "",
+                },
+            )
         return self._degraded(
             outcome,
             call_identity,
@@ -280,6 +293,16 @@ class MCPIntegration:
         )
         if outcome.succeeded:
             return self._succeeded(outcome, call_identity)
+        if outcome.status is ToolOutcomeStatus.IN_PROGRESS:
+            return self._in_progress(
+                outcome,
+                call_identity,
+                empty={
+                    "formatted_citations": [],
+                    "style": "",
+                    "total_sources": 0,
+                },
+            )
         return self._degraded(
             outcome,
             call_identity,
@@ -310,6 +333,12 @@ class MCPIntegration:
         )
         if outcome.succeeded:
             return self._succeeded(outcome, call_identity)
+        if outcome.status is ToolOutcomeStatus.IN_PROGRESS:
+            return self._in_progress(
+                outcome,
+                call_identity,
+                empty={"analysis": {}, "operation": "", "data_points": 0},
+            )
         return self._degraded(
             outcome,
             call_identity,
@@ -342,6 +371,12 @@ class MCPIntegration:
         )
         if outcome.succeeded:
             return self._succeeded(outcome, call_identity)
+        if outcome.status is ToolOutcomeStatus.IN_PROGRESS:
+            return self._in_progress(
+                outcome,
+                call_identity,
+                empty={"graph": {}, "entities": [], "relationships": []},
+            )
         return self._degraded(
             outcome,
             call_identity,
@@ -415,25 +450,34 @@ class MCPIntegration:
         spec = self._boundary.specification(tool_name)
         grants = self._grants
         if grants is None:
-            grants = [
-                self_issued_grant(
-                    tool_name=spec.name,
-                    policy=SelfIssuedPolicy(
-                        sensitivity=MCP_SENSITIVITY,
-                        max_input_trust=MCP_MAX_INPUT_TRUST,
-                        tool_versions=(spec.version,),
-                    ),
-                    identity=call_identity,
-                    now=now,
-                )
-            ]
+            grants = (
+                []
+                if call_identity.durable
+                else [
+                    self_issued_grant(
+                        tool_name=spec.name,
+                        policy=SelfIssuedPolicy(
+                            sensitivity=MCP_SENSITIVITY,
+                            max_input_trust=MCP_MAX_INPUT_TRUST,
+                            tool_versions=(spec.version,),
+                        ),
+                        identity=call_identity,
+                        now=now,
+                    )
+                ]
+            )
+        matching_grant = next(
+            (grant for grant in grants if grant.tool_name == tool_name), None
+        )
         outcome = await self._boundary.invoke(
             tool_name=tool_name,
             run_id=call_identity.run_id,
             task_id=call_identity.task_id,
             attempt_id=call_identity.attempt_id,
             organization_id=call_identity.organization_id,
-            capability_scope=grants[0].capability_scope if grants else "",
+            capability_scope=(
+                matching_grant.capability_scope if matching_grant else tool_name
+            ),
             arguments=arguments,
             input_trust=input_trust,
             output_trust=MCP_OUTPUT_TRUST,
@@ -466,7 +510,7 @@ class MCPIntegration:
         fallback: Any,
         empty: dict[str, Any],
     ) -> dict[str, Any]:
-        """Return the one shape a non-success outcome may take.
+        """Return the projection for a terminal non-success outcome.
 
         ``success`` is ``False`` on every branch. That is the whole fix for
         4-Char's CRITICAL: the flag every downstream consumer already reads now
@@ -490,6 +534,44 @@ class MCPIntegration:
                 "tool_outcome": outcome.status.value,
                 "error_code": outcome.error_code,
                 "detail": outcome.detail,
+                "retry": outcome.retry.value,
+                "tool_invocation_id": outcome.invocation.tool_invocation_id,
+                "identity_bound": identity.bound,
+            }
+        )
+        return payload
+
+    def _in_progress(
+        self,
+        outcome: ToolOutcome,
+        identity: ToolCallIdentity,
+        *,
+        empty: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Project pending work without inventing an operation result.
+
+        ``IN_PROGRESS`` is a committed reservation, not a terminal outage.
+        It must never enter the fallback branch: a retry that is still owned by
+        another invocation has no operation payload to project yet.
+        """
+
+        logger.info(
+            "mcp_tool_call_in_progress",
+            tool=outcome.invocation.tool_name,
+            retry=outcome.retry.value,
+            tool_invocation_id=outcome.invocation.tool_invocation_id,
+        )
+        payload = dict(empty)
+        payload.update(
+            {
+                "success": False,
+                "degraded": True,
+                "fallback": False,
+                "data_source": "in_progress",
+                "tool_outcome": outcome.status.value,
+                "error_code": outcome.error_code,
+                "detail": outcome.detail,
+                "reason": outcome.detail,
                 "retry": outcome.retry.value,
                 "tool_invocation_id": outcome.invocation.tool_invocation_id,
                 "identity_bound": identity.bound,

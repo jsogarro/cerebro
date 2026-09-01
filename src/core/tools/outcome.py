@@ -10,12 +10,12 @@ caller cannot tell them apart.
 
 Three properties here make that unrepresentable rather than discouraged.
 
-**One success state, seven distinct failure states.** Timeout, cancellation,
-open breaker, denial, invalid input, invalid output, and tool error are
-separate values. Collapsing them into one generic failure is what made the
-original indistinguishable, so they are never collapsed — not in the outcome,
-and not in the durable record, where the ones the contract's status enum does
-not name are preserved by a distinct ``error_code``.
+**One success state, seven distinct terminal failure states, and one explicit
+in-flight state.** Timeout, cancellation, open breaker, denial, invalid input,
+invalid output, and tool error are separate values. A committed request that
+has not terminated is not a failure and must not be treated as permission to
+execute the same idempotency key again, so it has its own ``IN_PROGRESS``
+state.
 
 **No failure carries a body.** A non-success outcome has no output, at the type
 level and in the persisted record. A fallback therefore cannot smuggle a
@@ -40,9 +40,18 @@ _MINT: Final = object()
 
 
 class ToolOutcomeStatus(StrEnum):
-    """Every way a mediated call can end. Exactly one of them is success."""
+    """Every way a mediated call can be observed. Exactly one is success."""
 
     SUCCEEDED = "succeeded"
+
+    IN_PROGRESS = "in_progress"
+    """The request is durably admitted and has not reached a terminal state.
+
+    This is returned for an idempotent retry while the original request may
+    still be running. It carries no output or error because neither has been
+    established yet, and it is explicitly retryable without re-executing the
+    handler in the current call.
+    """
 
     DENIED = "denied"
     """No capability grant authorized the call. The tool was never reached."""
@@ -88,6 +97,7 @@ SUCCESS_STATUS: Final = ToolOutcomeStatus.SUCCEEDED
 
 _INVOCATION_STATUS: Final[dict[ToolOutcomeStatus, ToolInvocationStatus]] = {
     ToolOutcomeStatus.SUCCEEDED: ToolInvocationStatus.SUCCEEDED,
+    ToolOutcomeStatus.IN_PROGRESS: ToolInvocationStatus.REQUESTED,
     ToolOutcomeStatus.DENIED: ToolInvocationStatus.DENIED,
     ToolOutcomeStatus.INVALID_INPUT: ToolInvocationStatus.FAILED,
     ToolOutcomeStatus.INVALID_OUTPUT: ToolInvocationStatus.FAILED,
@@ -118,6 +128,7 @@ ERROR_CODES: Final[dict[ToolOutcomeStatus, str]] = {
 
 RETRY_DISPOSITIONS: Final[dict[ToolOutcomeStatus, RetryDisposition]] = {
     ToolOutcomeStatus.SUCCEEDED: RetryDisposition.TERMINAL,
+    ToolOutcomeStatus.IN_PROGRESS: RetryDisposition.RETRIABLE,
     # A denial is a decision, not a transient condition. Re-asking the same
     # question gets the same answer; what changes it is a new grant.
     ToolOutcomeStatus.DENIED: RetryDisposition.TERMINAL,
@@ -175,7 +186,18 @@ class ToolOutcome:
     @staticmethod
     def _validate(status: ToolOutcomeStatus, invocation: ToolInvocation) -> None:
         expected = invocation_status_for(status)
-        if invocation.status is not expected:
+        if status is ToolOutcomeStatus.IN_PROGRESS:
+            valid_in_progress_statuses = {
+                ToolInvocationStatus.REQUESTED,
+                ToolInvocationStatus.RUNNING,
+            }
+            if invocation.status not in valid_in_progress_statuses:
+                raise ToolBoundaryError(
+                    f"outcome {status.value!r} must be recorded as a "
+                    "nonterminal invocation, not "
+                    f"{invocation.status.value!r}"
+                )
+        elif invocation.status is not expected:
             raise ToolBoundaryError(
                 f"outcome {status.value!r} must be recorded as "
                 f"{expected.value!r}, not {invocation.status.value!r}"
@@ -185,6 +207,16 @@ class ToolOutcome:
                 raise ToolBoundaryError("a successful outcome carries its output")
             if invocation.error_code is not None:
                 raise ToolBoundaryError("a successful outcome carries no error code")
+            return
+        if status is ToolOutcomeStatus.IN_PROGRESS:
+            if invocation.output is not None:
+                raise ToolBoundaryError(
+                    "an in-progress outcome carries no output before completion"
+                )
+            if invocation.error_code is not None:
+                raise ToolBoundaryError(
+                    "an in-progress outcome carries no terminal error code"
+                )
             return
         if invocation.output is not None:
             raise ToolBoundaryError(

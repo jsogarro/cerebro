@@ -144,6 +144,10 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    lease_owner_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     contract_schema_version: Mapped[str] = mapped_column(
         String(20),
@@ -330,6 +334,13 @@ class AgentToolInvocation(BaseModel, OptionalPromptBindingMixin):
             "organization_id",
             "capability_decision_effect",
             "requested_at",
+        ),
+        Index(
+            "idx_agent_tool_invocation_pending_lease",
+            "status",
+            "lease_expires_at",
+            postgresql_where=text("status IN ('requested', 'running')"),
+            sqlite_where=text("status IN ('requested', 'running')"),
         ),
     )
 

@@ -15,8 +15,11 @@ Key Features:
 
 import asyncio
 import copy
+import hashlib
+import json
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -30,7 +33,10 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.core.telemetry import count_tokens, telemetry_enabled
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
+from src.repositories.artifact_repository import ArtifactRepository
+from src.repositories.capability_repository import CapabilityRepository
 from src.repositories.checkpoint_repository import CheckpointRepository
+from src.repositories.claim_support_repository import ClaimSupportRepository
 from src.repositories.run_config_snapshot_repository import (
     RunConfigSnapshotRepository,
 )
@@ -40,6 +46,12 @@ from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 from ...agents.models import AgentTask
 from ...agents.supervisors.base_supervisor import BaseSupervisor
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
+from ...agents.tools.mediation import (
+    ATTEMPT_ID_CONTEXT_KEY,
+    ORGANIZATION_ID_CONTEXT_KEY,
+    RUN_ID_CONTEXT_KEY,
+    TASK_ID_CONTEXT_KEY,
+)
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.execution_plan_compiler import ExecutionPlanCompiler
 from ...ai_brain.router.masr import MASRouter
@@ -50,16 +62,25 @@ from ...ai_brain.router.outcome_recorder import (
 from ...ai_brain.router.routing_types import (
     RoutingExecutionPolicy,
 )
+from ...core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY, PlanCapabilityIssuer
+from ...core.claims import build_inventory
+from ...core.claims.recording import ClaimSupportRecorder
+from ...core.claims.resolution import ClaimSupportResolution, ClaimSupportResolver
 from ...core.contracts import (
+    Artifact,
+    ArtifactStatus,
     Attempt,
     AttemptStatus,
+    CapabilityGrant,
     ExecutionPlan,
     InvalidTransitionError,
     PinnedVersions,
+    ProducerKind,
     Run,
     RunStatus,
     Task,
     TaskStatus,
+    TrustClassification,
 )
 from ...core.contracts.states import TERMINAL_ATTEMPT_STATUSES, TERMINAL_RUN_STATUSES
 from ...core.kernel import (
@@ -110,6 +131,42 @@ _RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
 # about it: the ``@retry`` decorator, and the failure path's decision about
 # whether a terminal FAILED may be persisted yet.
 _WORKFLOW_MAX_ATTEMPTS = 3
+
+
+_FINAL_REPORT_ARTIFACT_KIND = "research_report"
+_FINAL_REPORT_MEDIA_TYPE = "application/json"
+_FINAL_REPORT_STORAGE_URI_PREFIX = "memory://artifacts"
+_FINAL_REPORT_CONTENT_METADATA_KEY = "content"
+
+
+def _canonical_json(value: Any) -> str:
+    """Serialize a report value deterministically, or fail closed."""
+
+    try:
+        serialized = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        # ``ensure_ascii=False`` can leave lone surrogates in the returned
+        # string. Verify UTF-8 encodability before the digest is constructed.
+        serialized.encode("utf-8")
+        return serialized
+    except (OverflowError, RecursionError, TypeError, UnicodeError, ValueError) as exc:
+        raise ValueError(
+            "final_output cannot be persisted as a JSON final report"
+        ) from exc
+
+
+def _journalable_value(value: Any) -> Any:
+    """Return a JSON-safe journal value, or ``None`` for an unreadable value."""
+
+    try:
+        return json.loads(_canonical_json(value))
+    except (TypeError, ValueError):
+        return None
 
 
 # Observable ``current_phase`` for an execution whose real outcome is known
@@ -169,6 +226,14 @@ class DurableWriteOutcome(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+@dataclass(frozen=True)
+class _FinalReport:
+    """The immutable report contract and exact text it stores for claims."""
+
+    artifact: Artifact
+    text: str
+
+
 @dataclass
 class _DurableTransition:
     """One fully planned lifecycle write, ready to commit or re-commit.
@@ -185,7 +250,9 @@ class _DurableTransition:
     event_type: str
     payload: dict[str, Any]
     occurred_at: datetime
+    event_id: str
     journaled_result: dict[str, Any] | None = None
+    final_report: _FinalReport | None = None
 
 
 @dataclass
@@ -288,6 +355,14 @@ class ExecutionStatus:
     # session factory (most unit tests) or whose admission write failed.
     run_id: str | None = None
 
+    # Capability contracts issued from the immutable admitted plan and
+    # persisted with the lifecycle rows. Kept as contracts so a later tool
+    # boundary can consume exactly what admission wrote, rather than
+    # reconstructing authority from invocation data.
+    capability_grants: tuple[CapabilityGrant, ...] = field(
+        default_factory=tuple, repr=False
+    )
+
     # The terminal status this execution really reached, set only while the
     # durable layer has not accepted it yet. ``status`` deliberately stays
     # non-terminal until then, so a reader is never told the run finished on
@@ -330,6 +405,7 @@ class DirectExecutionService:
         supervisor_registry: TypedRegistry | None = None,
         execution_authority_resolver: ExecutionAuthorityResolver | None = None,
         execution_plan_compiler: ExecutionPlanCompiler | None = None,
+        capability_issuer: PlanCapabilityIssuer | None = None,
     ):
         """Initialize direct execution service."""
 
@@ -366,6 +442,7 @@ class DirectExecutionService:
 
         # Initialize components (would be injected in production)
         self.gemini_service = gemini_service
+        self.session_factory = session_factory
         self.masr_router = masr_router or MASRouter()
         self.outcome_recorder = outcome_recorder or RoutingOutcomeRecorder(
             self.masr_router
@@ -375,6 +452,7 @@ class DirectExecutionService:
             MASRSupervisorBridge(
                 gemini_service=gemini_service,
                 component_registry=self.component_registry,
+                session_factory=self.session_factory,
             )
             if supervisor_bridge is None
             else supervisor_bridge
@@ -383,11 +461,11 @@ class DirectExecutionService:
             component_registry=self.component_registry,
         )
         self.event_publisher = event_publisher
-        self.session_factory = session_factory
         self.execution_authority_resolver = execution_authority_resolver
         self.execution_plan_compiler = (
             execution_plan_compiler or ExecutionPlanCompiler()
         )
+        self.capability_issuer = capability_issuer or PlanCapabilityIssuer()
 
         # Execution tracking
         self.active_executions: dict[str, ExecutionStatus] = {}
@@ -611,6 +689,32 @@ class DirectExecutionService:
         )
         return task, attempt
 
+    @staticmethod
+    def _durable_agent_task_context(
+        execution_status: ExecutionStatus,
+    ) -> dict[str, Any]:
+        """Return the complete lifecycle identity admitted for this execution.
+
+        The plan-facing ``AgentTask`` has a process-local id of its own.  Tool
+        callers must instead receive the contracts cached after admission, and
+        memory-only executions must remain explicitly unscoped rather than
+        receiving identifiers made up at this boundary.
+        """
+        if (
+            execution_status._run is None
+            or execution_status._task is None
+            or execution_status._attempt is None
+        ):
+            return {}
+        context: dict[str, Any] = {
+            RUN_ID_CONTEXT_KEY: execution_status._run.run_id,
+            TASK_ID_CONTEXT_KEY: execution_status._task.task_id,
+            ATTEMPT_ID_CONTEXT_KEY: execution_status._attempt.attempt_id,
+            ORGANIZATION_ID_CONTEXT_KEY: execution_status._run.tenant_id,
+        }
+        context[CAPABILITY_GRANTS_CONTEXT_KEY] = execution_status.capability_grants
+        return context
+
     async def _admit_run(
         self,
         execution_status: ExecutionStatus,
@@ -657,40 +761,57 @@ class DirectExecutionService:
             ready_task = task.transition_to(TaskStatus.READY, at=now)
 
             async with self.session_factory() as session:
-                repo = RunLifecycleRepository(session)
-                await repo.create_run(
-                    binding.run, organization_id=binding.run.tenant_id
-                )
-                await repo.record_run_transition(
-                    queued_run, organization_id=binding.run.tenant_id
-                )
-                await repo.create_task(task, organization_id=binding.run.tenant_id)
-                await repo.record_task_transition(
-                    ready_task, organization_id=binding.run.tenant_id
-                )
-                await repo.create_attempt(
-                    attempt,
-                    run_id=binding.run.run_id,
-                    organization_id=binding.run.tenant_id,
-                )
-                await self._persist_config_snapshot(session, binding)
-                await self._append_event(
-                    session,
-                    run=queued_run,
-                    event_type="run.admitted",
-                    payload={
-                        "execution_id": execution_status.execution_id,
-                        "task_id": task.task_id,
-                        "attempt_id": attempt.attempt_id,
-                    },
-                    occurred_at=now,
-                )
-                await session.commit()
+                try:
+                    repo = RunLifecycleRepository(session)
+                    await repo.create_run(
+                        binding.run, organization_id=binding.run.tenant_id
+                    )
+                    await repo.record_run_transition(
+                        queued_run, organization_id=binding.run.tenant_id
+                    )
+                    await repo.create_task(task, organization_id=binding.run.tenant_id)
+                    await repo.record_task_transition(
+                        ready_task, organization_id=binding.run.tenant_id
+                    )
+                    await repo.create_attempt(
+                        attempt,
+                        run_id=binding.run.run_id,
+                        organization_id=binding.run.tenant_id,
+                    )
+                    capability_grants = self.capability_issuer.issue(
+                        binding,
+                        run_id=queued_run.run_id,
+                        task_id=task.task_id,
+                        issued_at=now,
+                    )
+                    capability_repo = CapabilityRepository(session)
+                    for grant in capability_grants:
+                        await capability_repo.create_grant(
+                            grant,
+                            organization_id=queued_run.tenant_id,
+                        )
+                    await self._persist_config_snapshot(session, binding)
+                    await self._append_event(
+                        session,
+                        run=queued_run,
+                        event_type="run.admitted",
+                        payload={
+                            "execution_id": execution_status.execution_id,
+                            "task_id": task.task_id,
+                            "attempt_id": attempt.attempt_id,
+                        },
+                        occurred_at=now,
+                    )
+                    await session.commit()
+                except BaseException:
+                    await session.rollback()
+                    raise
 
             execution_status.run_id = queued_run.run_id
             execution_status._run = queued_run
             execution_status._task = ready_task
             execution_status._attempt = attempt
+            execution_status.capability_grants = capability_grants
             self._execution_ids_by_run_id[queued_run.run_id] = (
                 execution_status.execution_id
             )
@@ -784,6 +905,7 @@ class DirectExecutionService:
         session: Any,
         *,
         run: Run,
+        event_id: str | None = None,
         event_type: str,
         payload: dict[str, Any],
         occurred_at: datetime,
@@ -797,7 +919,8 @@ class DirectExecutionService:
         ``ConnectionManager.broadcast_to_all``, so this deliberately does not
         request one.
         """
-        event_id = str(uuid.uuid4())
+        if event_id is None:
+            event_id = str(uuid.uuid4())
         await RunEventRepository(session).append_event(
             run_id=run.run_id,
             organization_id=run.tenant_id,
@@ -813,6 +936,177 @@ class DirectExecutionService:
             destinations=("redis",),
         )
 
+    @staticmethod
+    def _final_report_artifact_id(run: Run, task: Task, attempt: Attempt) -> str:
+        """Derive one stable artifact identity for this terminal attempt."""
+        scope = "\x00".join(
+            (
+                run.tenant_id,
+                run.run_id,
+                task.task_id,
+                attempt.attempt_id,
+                _FINAL_REPORT_ARTIFACT_KIND,
+            )
+        )
+        return "final-report-" + hashlib.sha256(scope.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _claim_support_id_factory(artifact_id: str) -> Callable[[], str]:
+        """Return a deterministic id allocator for one inventory."""
+        sequence = 0
+
+        def allocate() -> str:
+            nonlocal sequence
+            sequence += 1
+            return f"{artifact_id}:support-{sequence}"
+
+        return allocate
+
+    def _build_final_report(
+        self,
+        execution_status: ExecutionStatus,
+        *,
+        run: Run,
+        task: Task | None,
+        attempt: Attempt | None,
+        occurred_at: datetime,
+    ) -> _FinalReport:
+        """Build a durable, inspectable report without writing anything."""
+        if execution_status.final_output is None:
+            raise ValueError("cannot persist a successful run without final_output")
+        if task is None or attempt is None:
+            raise ValueError(
+                "cannot persist a final report without task and attempt identity"
+            )
+
+        text = _canonical_json(execution_status.final_output)
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        artifact_id = self._final_report_artifact_id(run, task, attempt)
+        artifact = Artifact(
+            artifact_id=artifact_id,
+            run_id=run.run_id,
+            task_id=task.task_id,
+            attempt_id=attempt.attempt_id,
+            kind=_FINAL_REPORT_ARTIFACT_KIND,
+            media_type=_FINAL_REPORT_MEDIA_TYPE,
+            storage_uri=f"{_FINAL_REPORT_STORAGE_URI_PREFIX}/{artifact_id}",
+            content_sha256=digest,
+            status=ArtifactStatus.FINAL,
+            trust=TrustClassification.DERIVED_UNTRUSTED,
+            producer="direct_execution_service",
+            producer_kind=ProducerKind.SYSTEM,
+            created_at=occurred_at,
+            metadata={
+                _FINAL_REPORT_CONTENT_METADATA_KEY: text,
+                "content_encoding": "utf-8",
+                "serialization": "canonical_json",
+                "source": "final_output",
+                "tenant_id": run.tenant_id,
+                "run_id": run.run_id,
+                "task_id": task.task_id,
+                "attempt_id": attempt.attempt_id,
+            },
+        )
+        return _FinalReport(artifact=artifact, text=text)
+
+    @staticmethod
+    def _validate_persisted_final_report(
+        artifact: Any,
+        *,
+        final_report: _FinalReport,
+        tenant_id: str,
+    ) -> str:
+        """Verify the database row still names and contains this report."""
+        expected = final_report.artifact
+        if (
+            artifact.organization_id is None
+            or str(artifact.organization_id) != tenant_id
+            or artifact.artifact_id != expected.artifact_id
+            or artifact.run_id != expected.run_id
+            or artifact.task_id != expected.task_id
+            or artifact.attempt_id != expected.attempt_id
+            or artifact.kind != expected.kind
+            or artifact.media_type != expected.media_type
+            or artifact.storage_uri != expected.storage_uri
+        ):
+            raise ValueError("persisted final report identity does not match")
+
+        report_text = artifact.metadata_.get(_FINAL_REPORT_CONTENT_METADATA_KEY)
+        if not isinstance(report_text, str):
+            raise ValueError("persisted final report has no inspectable text")
+        if report_text != final_report.text:
+            raise ValueError(
+                "persisted final report text does not match the "
+                "final_output serialization"
+            )
+        if (
+            hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+            != expected.content_sha256
+            or artifact.content_sha256 != expected.content_sha256
+        ):
+            raise ValueError(
+                "persisted final report text does not match its content digest"
+            )
+        return report_text
+
+    def _resolve_final_report_claims(
+        self,
+        artifact: Any,
+        *,
+        final_report: _FinalReport,
+        run: Run,
+        resolved_at: datetime,
+    ) -> ClaimSupportResolution:
+        """Resolve every material claim from the persisted report text."""
+        report_text = self._validate_persisted_final_report(
+            artifact, final_report=final_report, tenant_id=run.tenant_id
+        )
+        inventory = build_inventory(
+            artifact_id=artifact.artifact_id,
+            artifact_kind=artifact.kind,
+            source=report_text,
+        )
+        return ClaimSupportResolver(
+            id_factory=self._claim_support_id_factory(artifact.artifact_id)
+        ).resolve(
+            inventory=inventory,
+            run_id=run.run_id,
+            verdicts=(),
+            resolved_at=resolved_at,
+        )
+
+    @staticmethod
+    def _transition_event_id(
+        *,
+        run: Run,
+        task: Task | None,
+        attempt: Attempt | None,
+        event_type: str,
+    ) -> str:
+        """Derive one event identity for one logical lifecycle transition.
+
+        The identity describes the transition target rather than the
+        wall-clock write attempt. Re-planning the same transition after an
+        ambiguous write therefore refers to the same append-only event.
+        """
+        identity = json.dumps(
+            {
+                "tenant_id": run.tenant_id,
+                "run_id": run.run_id,
+                "run_status": run.status.value,
+                "task_id": task.task_id if task is not None else None,
+                "task_status": task.status.value if task is not None else None,
+                "attempt_id": attempt.attempt_id if attempt is not None else None,
+                "attempt_status": (
+                    attempt.status.value if attempt is not None else None
+                ),
+                "event_type": event_type,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"direct-transition:{identity}"))
+
     async def _persist_transition(
         self,
         execution_status: ExecutionStatus,
@@ -827,9 +1121,10 @@ class DirectExecutionService:
         """Advance the durable run/task/attempt and append their event.
 
         Returns what the durable layer did, so a caller can decide whether an
-        observable state change is backed by anything. Nothing raises: a
-        rejected or unavailable write degrades the durability of this one
-        transition, not the execution.
+        observable state change is backed by anything. A rejected or
+        unavailable write degrades the durability of this one transition, not
+        the execution; an unreadable successful output fails closed before any
+        terminal rows are written.
 
         ``RECORDED`` is also the answer when there is nothing to persist (no
         session factory, or this execution was never admitted — e.g. tests
@@ -867,11 +1162,21 @@ class DirectExecutionService:
             )
             return DurableWriteOutcome.REJECTED
 
+        final_report = None
+        if run.status is RunStatus.SUCCEEDED:
+            final_report = self._build_final_report(
+                execution_status,
+                run=run,
+                task=task,
+                attempt=attempt,
+                occurred_at=now,
+            )
+
         journaled_result = None
         if attempt is not None and attempt.status in TERMINAL_ATTEMPT_STATUSES:
             journaled_result = {
-                "final_output": execution_status.final_output,
-                "agent_results": execution_status.agent_results,
+                "final_output": _journalable_value(execution_status.final_output),
+                "agent_results": _journalable_value(execution_status.agent_results),
                 "errors": list(execution_status.errors),
             }
         transition = _DurableTransition(
@@ -881,7 +1186,14 @@ class DirectExecutionService:
             event_type=event_type,
             payload=payload,
             occurred_at=now,
+            event_id=self._transition_event_id(
+                run=run,
+                task=task,
+                attempt=attempt,
+                event_type=event_type,
+            ),
             journaled_result=journaled_result,
+            final_report=final_report,
         )
 
         if await self._commit_transition(transition):
@@ -927,6 +1239,159 @@ class DirectExecutionService:
                 error=str(exc),
             )
 
+    async def _terminal_transition_already_committed(
+        self, session: Any, transition: _DurableTransition
+    ) -> bool:
+        """Recognize a complete lifecycle transaction after an ambiguous commit."""
+        run = transition.run
+        lifecycle_repo = RunLifecycleRepository(session)
+        run_row = await lifecycle_repo.get_run(
+            run.run_id, organization_id=run.tenant_id
+        )
+        if (
+            run_row is None
+            or run_row.run_id != run.run_id
+            or run_row.tenant_id != run.tenant_id
+            or run_row.organization_id is None
+            or str(run_row.organization_id) != run.tenant_id
+            or run_row.status != run.status.value
+        ):
+            return False
+
+        task_row: Any | None = None
+        if transition.task is not None:
+            task_rows = await lifecycle_repo.get_tasks_for_run(
+                run.run_id, organization_id=run.tenant_id
+            )
+            matching_task_rows = [
+                row
+                for row in task_rows
+                if (
+                    row.task_id == transition.task.task_id
+                    and row.run_id == run.run_id
+                    and row.organization_id is not None
+                    and str(row.organization_id) == run.tenant_id
+                    and row.status == transition.task.status.value
+                )
+            ]
+            if len(matching_task_rows) != 1:
+                return False
+            task_row = matching_task_rows[0]
+
+        attempt_row: Any | None = None
+        if transition.attempt is not None:
+            attempt_rows = await lifecycle_repo.get_attempts_for_task(
+                transition.attempt.task_id, organization_id=run.tenant_id
+            )
+            matching_attempt_rows = [
+                row
+                for row in attempt_rows
+                if (
+                    row.attempt_id == transition.attempt.attempt_id
+                    and row.task_id == transition.attempt.task_id
+                    and row.run_id == run.run_id
+                    and row.organization_id is not None
+                    and str(row.organization_id) == run.tenant_id
+                    and row.status == transition.attempt.status.value
+                )
+            ]
+            if len(matching_attempt_rows) != 1:
+                return False
+            attempt_row = matching_attempt_rows[0]
+            if task_row is not None and attempt_row.task_id != task_row.task_id:
+                return False
+            if (
+                transition.journaled_result is not None
+                and attempt_row.journaled_result != transition.journaled_result
+            ):
+                return False
+
+        events = await RunEventRepository(session).read_events_after(
+            run.run_id,
+            after_sequence=0,
+            limit=100_000,
+            organization_id=run.tenant_id,
+        )
+        matching_events = [
+            event for event in events if event.event_id == transition.event_id
+        ]
+        if not matching_events:
+            return False
+        if len(matching_events) != 1:
+            raise ValueError(
+                "persisted lifecycle transition has duplicate event identities"
+            )
+        event = matching_events[0]
+        if (
+            event.organization_id is None
+            or str(event.organization_id) != run.tenant_id
+            or event.run_id != run.run_id
+            or event.aggregate_type != "run"
+            or event.aggregate_id != run.run_id
+            or event.deduplication_key != transition.event_id
+            or event.event_type != transition.event_type
+            or event.payload != transition.payload
+        ):
+            raise ValueError("persisted lifecycle transition event does not match")
+
+        final_report = transition.final_report
+        if final_report is not None:
+            artifact = await ArtifactRepository(session).get_artifact(
+                final_report.artifact.artifact_id, organization_id=run.tenant_id
+            )
+            if artifact is None:
+                return False
+
+            resolution = self._resolve_final_report_claims(
+                artifact,
+                final_report=final_report,
+                run=run,
+                resolved_at=transition.occurred_at,
+            )
+            claim_repo = ClaimSupportRepository(session)
+            existing_rows: list[Any] = []
+            for support in resolution.supports:
+                row = await claim_repo.get_claim_support(
+                    support.claim_support_id, organization_id=run.tenant_id
+                )
+                if row is None:
+                    if existing_rows:
+                        raise ValueError(
+                            "persisted final report has a partial claim-support resolution"
+                        )
+                    return False
+                existing_rows.append(row)
+
+            for expected, actual in zip(
+                resolution.supports, existing_rows, strict=True
+            ):
+                if (
+                    actual.organization_id is None
+                    or str(actual.organization_id) != run.tenant_id
+                    or actual.claim_support_id != expected.claim_support_id
+                    or actual.run_id != expected.run_id
+                    or actual.artifact_id != expected.artifact_id
+                    or actual.claim_id != expected.claim_id
+                    or actual.claim_text != expected.claim_text
+                    or actual.status != expected.status.value
+                    or tuple(actual.evidence_ids or ()) != expected.evidence_ids
+                    or actual.absent_evidence_reason
+                    != (
+                        expected.absent_evidence_reason.value
+                        if expected.absent_evidence_reason
+                        else None
+                    )
+                    or actual.evaluator_id != expected.evaluator_id
+                    or actual.evaluator_version != expected.evaluator_version
+                    or actual.producer_kind != expected.producer_kind.value
+                    or actual.explanation != expected.explanation
+                ):
+                    raise ValueError(
+                        "persisted claim support does not match resolution"
+                    )
+
+        return True
+
     async def _commit_transition(self, transition: _DurableTransition) -> bool:
         """Commit one planned transition, retrying transient failures.
 
@@ -941,30 +1406,60 @@ class DirectExecutionService:
         for attempt_number in range(1, self.durable_write_max_attempts + 1):
             try:
                 async with self.session_factory() as session:
-                    repo = RunLifecycleRepository(session)
-                    await repo.record_run_transition(run, organization_id=run.tenant_id)
-                    if transition.task is not None:
-                        await repo.record_task_transition(
-                            transition.task, organization_id=run.tenant_id
+                    try:
+                        if await self._terminal_transition_already_committed(
+                            session, transition
+                        ):
+                            return True
+
+                        repo = RunLifecycleRepository(session)
+                        await repo.record_run_transition(
+                            run, organization_id=run.tenant_id
                         )
-                    if transition.attempt is not None:
-                        await repo.record_attempt_transition(
-                            transition.attempt, organization_id=run.tenant_id
-                        )
-                        if transition.journaled_result is not None:
-                            await repo.write_journaled_result(
-                                transition.attempt.attempt_id,
-                                organization_id=run.tenant_id,
-                                result=transition.journaled_result,
+                        if transition.task is not None:
+                            await repo.record_task_transition(
+                                transition.task, organization_id=run.tenant_id
                             )
-                    await self._append_event(
-                        session,
-                        run=run,
-                        event_type=transition.event_type,
-                        payload=transition.payload,
-                        occurred_at=transition.occurred_at,
-                    )
-                    await session.commit()
+                        if transition.attempt is not None:
+                            await repo.record_attempt_transition(
+                                transition.attempt, organization_id=run.tenant_id
+                            )
+                            if transition.journaled_result is not None:
+                                await repo.write_journaled_result(
+                                    transition.attempt.attempt_id,
+                                    organization_id=run.tenant_id,
+                                    result=transition.journaled_result,
+                                )
+
+                        if transition.final_report is not None:
+                            artifact = await ArtifactRepository(
+                                session
+                            ).create_artifact(
+                                transition.final_report.artifact,
+                                organization_id=run.tenant_id,
+                            )
+                            resolution = self._resolve_final_report_claims(
+                                artifact,
+                                final_report=transition.final_report,
+                                run=run,
+                                resolved_at=transition.occurred_at,
+                            )
+                            await ClaimSupportRecorder(
+                                ClaimSupportRepository(session)
+                            ).record(resolution, organization_id=run.tenant_id)
+
+                        await self._append_event(
+                            session,
+                            run=run,
+                            event_id=transition.event_id,
+                            event_type=transition.event_type,
+                            payload=transition.payload,
+                            occurred_at=transition.occurred_at,
+                        )
+                        await session.commit()
+                    except BaseException:
+                        await session.rollback()
+                        raise
                 return True
             except Exception as exc:
                 last_error = exc
@@ -1294,6 +1789,7 @@ class DirectExecutionService:
             The rebuilt status, or ``None`` for a run with no task row (there
             is no execution identity to recover without one).
         """
+        organization_id = run_row.organization_id
         tasks = await lifecycle_repo.get_tasks_for_run(
             run_row.run_id, organization_id=run_row.organization_id
         )
@@ -1305,20 +1801,130 @@ class DirectExecutionService:
         attempts = await lifecycle_repo.get_attempts_for_task(
             task_row.task_id, organization_id=run_row.organization_id
         )
-        journaled = attempts[-1].journaled_result if attempts else None
+        if not attempts:
+            return None
+        attempt_row = attempts[-1]
+
+        capability_rows = await CapabilityRepository(
+            lifecycle_repo.session
+        ).list_grants_for_task(
+            run_row.run_id,
+            task_row.task_id,
+            organization_id=organization_id,
+        )
+
+        def aware(value: datetime | None) -> datetime | None:
+            if value is None or value.tzinfo is not None:
+                return value
+            return value.replace(tzinfo=UTC)
+
+        try:
+            run = Run.model_validate(
+                {
+                    "run_id": run_row.run_id,
+                    "tenant_id": run_row.tenant_id,
+                    "workflow_definition_id": run_row.workflow_definition_id,
+                    "workflow_definition_version": run_row.workflow_definition_version,
+                    "routing_policy_id": run_row.routing_policy_id,
+                    "routing_policy_version": run_row.routing_policy_version,
+                    "idempotency_key": run_row.idempotency_key,
+                    "requested_by": run_row.requested_by,
+                    "status": run_row.status,
+                    "created_at": aware(run_row.created_at),
+                    "updated_at": aware(run_row.updated_at),
+                    "started_at": aware(run_row.started_at),
+                    "completed_at": aware(run_row.completed_at),
+                    "status_reason": run_row.status_reason,
+                    "cancellation_requested_at": aware(
+                        run_row.cancellation_requested_at
+                    ),
+                    "cancellation_reason": run_row.cancellation_reason,
+                }
+            )
+            task = Task.model_validate(
+                {
+                    "task_id": task_row.task_id,
+                    "run_id": task_row.run_id,
+                    "task_key": task_row.task_key,
+                    "task_type": task_row.task_type,
+                    "objective": task_row.objective,
+                    "idempotency_key": task_row.idempotency_key,
+                    "dependency_ids": tuple(task_row.dependency_ids or ()),
+                    "assigned_worker_type": task_row.assigned_worker_type,
+                    "input": task_input,
+                    "status": task_row.status,
+                    "created_at": aware(task_row.created_at),
+                    "updated_at": aware(task_row.updated_at),
+                    "started_at": aware(task_row.started_at),
+                    "completed_at": aware(task_row.completed_at),
+                    "status_reason": task_row.status_reason,
+                    "cancellation_requested_at": aware(
+                        task_row.cancellation_requested_at
+                    ),
+                    "cancellation_reason": task_row.cancellation_reason,
+                }
+            )
+            attempt = Attempt.model_validate(
+                {
+                    "attempt_id": attempt_row.attempt_id,
+                    "task_id": attempt_row.task_id,
+                    "ordinal": attempt_row.ordinal,
+                    "idempotency_key": attempt_row.idempotency_key,
+                    "executor_id": attempt_row.executor_id,
+                    "status": attempt_row.status,
+                    "created_at": aware(attempt_row.created_at),
+                    "updated_at": aware(attempt_row.updated_at),
+                    "started_at": aware(attempt_row.started_at),
+                    "completed_at": aware(attempt_row.completed_at),
+                    "status_reason": attempt_row.status_reason,
+                    "cancellation_requested_at": aware(
+                        attempt_row.cancellation_requested_at
+                    ),
+                    "cancellation_reason": attempt_row.cancellation_reason,
+                }
+            )
+            capability_grants = tuple(
+                CapabilityGrant.model_validate(
+                    {
+                        "grant_id": row.grant_id,
+                        "run_id": row.run_id,
+                        "task_id": row.task_id,
+                        "capability_scope": row.capability_scope,
+                        "tool_name": row.tool_name,
+                        "tool_versions": tuple(row.tool_versions or ()),
+                        "sensitivity": row.sensitivity,
+                        "max_input_trust": row.max_input_trust,
+                        "requires_approval": row.requires_approval,
+                        "issued_at": aware(row.issued_at),
+                        "expires_at": aware(row.expires_at),
+                    }
+                )
+                for row in capability_rows
+            )
+        except (TypeError, ValueError):
+            return None
+
+        journaled = attempt_row.journaled_result
+        started_at = aware(run_row.started_at) or aware(run_row.created_at)
+        if started_at is None:
+            return None
 
         execution_status = ExecutionStatus(
             execution_id=task_row.task_key,
             project_id=task_input.get("project_id", ""),
             status=_RUN_STATUS_TO_EXECUTION_STATUS.get(run_row.status, run_row.status),
             current_phase=run_row.status,
-            started_at=run_row.started_at or run_row.created_at,
-            completed_at=run_row.completed_at,
+            started_at=started_at,
+            completed_at=aware(run_row.completed_at),
             run_id=run_row.run_id,
-            organization_id=str(run_row.organization_id)
-            if run_row.organization_id
-            else None,
+            organization_id=(
+                str(run_row.organization_id) if run_row.organization_id else None
+            ),
         )
+        execution_status._run = run
+        execution_status._task = task
+        execution_status._attempt = attempt
+        execution_status.capability_grants = capability_grants
         if run_row.status == RunStatus.SUCCEEDED.value:
             execution_status.progress_percentage = 100.0
         if journaled:
@@ -1788,6 +2394,7 @@ class DirectExecutionService:
             plan_task = AgentTask(
                 id=f"research_{project.id}_{execution_status.execution_id}",
                 agent_type="execution_plan",
+                context=self._durable_agent_task_context(execution_status),
                 input_data={
                     "query": project.query.text,
                     "domains": list(execution_plan.routing_decision.domains),
