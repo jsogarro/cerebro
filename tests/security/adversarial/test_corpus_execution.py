@@ -267,21 +267,6 @@ DEFECTS: Final[dict[str, str]] = {
         "from any mediated call. ToolInvocationRepository does enforce it, "
         "but nothing constructs one."
     ),
-    "crosstenant-05-idempotency-key-collision": (
-        "Idempotency dedup is not tenant-scoped, and 4C's reordering does not "
-        "reach it. InMemoryToolAuditStore.find_invocation accepts "
-        "organization_id and never reads it (mediation.py); it matches on "
-        "(run_id, attempt_id, idempotency_key) -- the attempt joined that "
-        "tuple when the lookup was corrected to match the durable table's "
-        "uniqueness scope, and the tenant did not. Nothing at the boundary "
-        "binds a run_id or an attempt_id to an organization. Tenant B's "
-        "request is genuinely AUTHORIZED -- the grant matches run, task, tool "
-        "and scope, and organization_id is not an input to the capability "
-        "decision -- so it reaches the lookup, and _require_same_request "
-        "finds no mismatch because the two requests differ only in a field "
-        "neither check reads. Tenant B receives tenant A's invocation record "
-        "without the handler being re-entered."
-    ),
     "oversized-01-oversized-query-string": (
         "No input size ceiling exists at any layer. A 2,000,000-character "
         "source_uri on the shipped SourceFetchInput model is validated, "
