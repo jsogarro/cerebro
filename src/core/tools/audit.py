@@ -169,6 +169,32 @@ class ToolAuditStore(Protocol):
 
 
 @runtime_checkable
+class ToolAdmissionStore(Protocol):
+    """Optional atomic admission for a first requested invocation.
+
+    ``None`` means this caller reserved the request.  An existing pending or
+    terminal invocation means another caller already owns the key, so the
+    boundary can validate its identity and return ``IN_PROGRESS`` or replay
+    the terminal result without dispatching a handler.  Stores that do not
+    implement this seam keep the older lookup-then-persist behavior.
+
+    The reservation itself must be atomic in the adapter.  In-memory
+    implementations can provide that guarantee by doing the lookup and claim
+    without an ``await`` point; durable implementations should use their
+    datastore's uniqueness/transaction primitive.
+    """
+
+    async def reserve_invocation(
+        self,
+        *,
+        invocation: ToolInvocation,
+        organization_id: str | None,
+    ) -> ToolInvocation | None:
+        """Claim the invocation key or return the existing owner."""
+        ...
+
+
+@runtime_checkable
 class PendingToolAuditStore(Protocol):
     """Optional lookup for work that was admitted but has not terminated.
 
@@ -274,6 +300,7 @@ __all__ = [
     "LeaseAwareToolAuditStore",
     "NullEventPublisher",
     "PendingToolAuditStore",
+    "ToolAdmissionStore",
     "ToolAuditEvent",
     "ToolAuditStore",
     "ToolEventPublisher",

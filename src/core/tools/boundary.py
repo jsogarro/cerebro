@@ -90,6 +90,7 @@ from .audit import (
     EVENT_REQUESTED,
     LeaseAwareToolAuditStore,
     PendingToolAuditStore,
+    ToolAdmissionStore,
     ToolAuditEvent,
     ToolAuditStore,
     ToolEventPublisher,
@@ -619,6 +620,27 @@ class ToolBoundary:
             lease_owner_id=call.lease_owner_id,
             lease_expires_at=call.lease_expires_at,
         )
+        if isinstance(self._audit_store, ToolAdmissionStore):
+            existing = await self._audit_store.reserve_invocation(
+                invocation=requested_invocation,
+                organization_id=organization_id,
+            )
+            if existing is not None:
+                self._require_same_request(
+                    existing,
+                    spec=spec,
+                    capability_scope=call.capability_scope,
+                    input_sha256=prepared.input_sha256,
+                )
+                if existing.status in _REPLAYABLE_RECORD_STATUSES:
+                    return self._replay(existing, decision=decision)
+                if existing.status in {
+                    ToolInvocationStatus.REQUESTED,
+                    ToolInvocationStatus.RUNNING,
+                }:
+                    return self._in_progress(existing, decision=decision)
+                raise ToolInvocationConflictError(existing)
+
         lease_monitor = self._start_lease_monitor(call)
         requested_record = asyncio.create_task(
             self._record(

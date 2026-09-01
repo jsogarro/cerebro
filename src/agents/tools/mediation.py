@@ -326,6 +326,52 @@ class InMemoryToolAuditStore:
     _organization_by_invocation: dict[str, str | None] = field(
         default_factory=dict, repr=False
     )
+    _reservations: dict[tuple[str, str, str | None, str], ToolInvocation] = field(
+        default_factory=dict, repr=False
+    )
+
+    @staticmethod
+    def _reservation_key(
+        invocation: ToolInvocation, organization_id: str | None
+    ) -> tuple[str, str, str | None, str]:
+        return (
+            invocation.run_id,
+            invocation.attempt_id,
+            _organization_key(organization_id),
+            invocation.idempotency_key,
+        )
+
+    async def reserve_invocation(
+        self,
+        *,
+        invocation: ToolInvocation,
+        organization_id: str | None,
+    ) -> ToolInvocation | None:
+        """Atomically claim a request key before the boundary dispatches.
+
+        This method intentionally has no await point before the dictionary
+        claim.  A single asyncio event loop cannot interleave another task in
+        that synchronous section, so the first caller wins without holding a
+        lock around persistence or handler execution.
+        """
+
+        key = self._reservation_key(invocation, organization_id)
+        existing = self._reservations.get(key)
+        if existing is not None:
+            return existing
+
+        for recorded in reversed(self.invocations):
+            if (
+                self._reservation_key(recorded, organization_id) == key
+                and recorded.status in _REPLAYABLE_TERMINAL_STATUSES | _PENDING_STATUSES
+                and self._organization_by_invocation.get(recorded.tool_invocation_id)
+                == _organization_key(organization_id)
+            ):
+                self._reservations[key] = recorded
+                return recorded
+
+        self._reservations[key] = invocation
+        return None
 
     async def find_invocation(
         self,
@@ -389,6 +435,10 @@ class InMemoryToolAuditStore:
         self._organization_by_invocation[invocation.tool_invocation_id] = (
             _organization_key(organization_id)
         )
+        if invocation.status in _REPLAYABLE_TERMINAL_STATUSES | _PENDING_STATUSES:
+            self._reservations[self._reservation_key(invocation, organization_id)] = (
+                invocation
+            )
 
 
 def build_tool_boundary(
