@@ -1379,6 +1379,7 @@ class DirectExecutionService:
             task_row.task_id,
             organization_id=organization_id,
         )
+
         def aware(value: datetime | None) -> datetime | None:
             if value is None or value.tzinfo is not None:
                 return value
@@ -1401,7 +1402,9 @@ class DirectExecutionService:
                     "started_at": aware(run_row.started_at),
                     "completed_at": aware(run_row.completed_at),
                     "status_reason": run_row.status_reason,
-                    "cancellation_requested_at": aware(run_row.cancellation_requested_at),
+                    "cancellation_requested_at": aware(
+                        run_row.cancellation_requested_at
+                    ),
                     "cancellation_reason": run_row.cancellation_reason,
                 }
             )
@@ -1422,7 +1425,9 @@ class DirectExecutionService:
                     "started_at": aware(task_row.started_at),
                     "completed_at": aware(task_row.completed_at),
                     "status_reason": task_row.status_reason,
-                    "cancellation_requested_at": aware(task_row.cancellation_requested_at),
+                    "cancellation_requested_at": aware(
+                        task_row.cancellation_requested_at
+                    ),
                     "cancellation_reason": task_row.cancellation_reason,
                 }
             )
@@ -1439,7 +1444,9 @@ class DirectExecutionService:
                     "started_at": aware(attempt_row.started_at),
                     "completed_at": aware(attempt_row.completed_at),
                     "status_reason": attempt_row.status_reason,
-                    "cancellation_requested_at": aware(attempt_row.cancellation_requested_at),
+                    "cancellation_requested_at": aware(
+                        attempt_row.cancellation_requested_at
+                    ),
                     "cancellation_reason": attempt_row.cancellation_reason,
                 }
             )
