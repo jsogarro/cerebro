@@ -53,9 +53,13 @@ def client() -> AsyncMock:
 
 
 @pytest.mark.asyncio
-async def test_plan_worker_forwards_persisted_grants(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_plan_worker_forwards_persisted_grants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     grants = (grant(TOOL_ACADEMIC_SEARCH, "scope-search"),)
-    constructor = Mock(side_effect=lambda **kwargs: MCPIntegration(mcp_client=client(), **kwargs))
+    constructor = Mock(
+        side_effect=lambda **kwargs: MCPIntegration(mcp_client=client(), **kwargs)
+    )
     monkeypatch.setattr(bridge_module, "MCPIntegration", constructor)
     monkeypatch.setattr(bridge_module, "settings", Mock(MCP_TOOL_PATH_ENABLED=True))
 
@@ -96,7 +100,9 @@ async def test_plan_worker_forwards_persisted_grants(monkeypatch: pytest.MonkeyP
     await bridge._execute_plan_worker(worker, task)
 
     constructor.assert_called_once_with(
-        enable_fallback=False, identity=ToolCallIdentity.from_agent_task(task), grants=grants
+        enable_fallback=False,
+        identity=ToolCallIdentity.from_agent_task(task),
+        grants=grants,
     )
 
 
@@ -104,7 +110,12 @@ async def test_plan_worker_forwards_persisted_grants(monkeypatch: pytest.MonkeyP
 async def test_invoke_selects_matching_tool_scope_and_passes_all_grants() -> None:
     first = grant(TOOL_ACADEMIC_SEARCH, "scope-search")
     second = grant(TOOL_FORMAT_CITATIONS, "scope-citations")
-    integration = MCPIntegration(mcp_client=client(), enable_fallback=False, identity=identity(), grants=(first, second))
+    integration = MCPIntegration(
+        mcp_client=client(),
+        enable_fallback=False,
+        identity=identity(),
+        grants=(first, second),
+    )
     boundary = cast(Any, integration.boundary)
     boundary.invoke = AsyncMock(wraps=boundary.invoke)
 
@@ -118,7 +129,12 @@ async def test_invoke_selects_matching_tool_scope_and_passes_all_grants() -> Non
 
 @pytest.mark.asyncio
 async def test_wrong_tool_grant_denies_without_self_issuing() -> None:
-    integration = MCPIntegration(mcp_client=client(), enable_fallback=False, identity=identity(), grants=(grant(TOOL_FORMAT_CITATIONS, "scope-citations"),))
+    integration = MCPIntegration(
+        mcp_client=client(),
+        enable_fallback=False,
+        identity=identity(),
+        grants=(grant(TOOL_FORMAT_CITATIONS, "scope-citations"),),
+    )
     boundary = cast(Any, integration.boundary)
     boundary.invoke = AsyncMock(wraps=boundary.invoke)
 

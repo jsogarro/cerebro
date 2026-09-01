@@ -13,11 +13,17 @@ NOW = datetime.now(UTC)
 
 def grant(tool_name: str, scope: str) -> CapabilityGrant:
     return CapabilityGrant(
-        grant_id=f"grant-{tool_name}", run_id="run-1", task_id="task-1",
-        capability_scope=scope, tool_name=tool_name, tool_versions=("1.0.0",),
+        grant_id=f"grant-{tool_name}",
+        run_id="run-1",
+        task_id="task-1",
+        capability_scope=scope,
+        tool_name=tool_name,
+        tool_versions=("1.0.0",),
         sensitivity=SensitivityClass.READ_ONLY,
-        max_input_trust=TrustClassification.APPLICATION, requires_approval=False,
-        issued_at=NOW - timedelta(minutes=1), expires_at=NOW + timedelta(minutes=5),
+        max_input_trust=TrustClassification.APPLICATION,
+        requires_approval=False,
+        issued_at=NOW - timedelta(minutes=1),
+        expires_at=NOW + timedelta(minutes=5),
     )
 
 
@@ -37,7 +43,9 @@ async def test_matching_grant_selects_its_scope_and_passes_all_grants() -> None:
     invoke = AsyncMock(wraps=value.boundary.invoke)
     value.boundary.invoke = invoke  # type: ignore[method-assign]
 
-    result = await value.execute("arithmetic", {"expression": "2 + 3"}, identity=IDENTITY, grants=grants)
+    result = await value.execute(
+        "arithmetic", {"expression": "2 + 3"}, identity=IDENTITY, grants=grants
+    )
 
     assert result.success is True
     assert invoke.await_args is not None
@@ -50,7 +58,9 @@ async def test_wrong_and_empty_grants_deny_without_self_issued_grant() -> None:
     value = registry()
     identity = IDENTITY
     for supplied in ((grant("other", "scope-other"),), ()):
-        result = await value.execute("arithmetic", {"expression": "2 + 3"}, identity=identity, grants=supplied)
+        result = await value.execute(
+            "arithmetic", {"expression": "2 + 3"}, identity=identity, grants=supplied
+        )
         assert result.success is False
         assert "self-issued:" not in (result.error or "")
 
