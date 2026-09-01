@@ -270,6 +270,9 @@ class SessionToolAuditStore:
 
         _require_aware_datetime(now, field_name="now")
         _require_aware_datetime(lease_expires_at, field_name="lease_expires_at")
+        if lease_expires_at <= now:
+            return False
+
         normalized_organization_id = _normalize_durable_context(
             run_id=run_id,
             task_id=None,

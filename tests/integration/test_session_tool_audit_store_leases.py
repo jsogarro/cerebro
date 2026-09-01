@@ -387,6 +387,72 @@ async def test_renewal_requires_owner_tenant_pending_and_unexpired_lease(
 
 
 @pytest.mark.asyncio
+async def test_renewal_rejects_naive_requested_expiry(
+    store: SessionToolAuditStore,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    current_expiry = NOW + timedelta(seconds=30)
+    invocation = await _persist_pending(
+        store,
+        invocation_id="renew-naive-requested-expiry",
+        idempotency_key="renew-naive-requested-expiry-key",
+        lease_expires_at=current_expiry,
+    )
+
+    with pytest.raises(ValueError, match="lease_expires_at must be timezone-aware"):
+        await store.renew_invocation_lease(
+            tool_invocation_id=invocation.tool_invocation_id,
+            run_id=RUN_ID,
+            attempt_id=ATTEMPT_ID,
+            organization_id=ORG_ID,
+            idempotency_key=invocation.idempotency_key,
+            lease_owner_id="worker-1",
+            now=NOW,
+            lease_expires_at=(NOW + timedelta(minutes=5)).replace(tzinfo=None),
+        )
+
+    row = await _row(session_factory, invocation.tool_invocation_id)
+    assert row.lease_expires_at == current_expiry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("invocation_id", "requested_expiry"),
+    [
+        ("renew-past-requested-expiry", NOW - timedelta(microseconds=1)),
+        ("renew-equal-requested-expiry", NOW),
+    ],
+)
+async def test_renewal_rejects_requested_expiry_not_after_now(
+    store: SessionToolAuditStore,
+    session_factory: async_sessionmaker[AsyncSession],
+    invocation_id: str,
+    requested_expiry: datetime,
+) -> None:
+    current_expiry = NOW + timedelta(seconds=30)
+    invocation = await _persist_pending(
+        store,
+        invocation_id=invocation_id,
+        idempotency_key=f"{invocation_id}-key",
+        lease_expires_at=current_expiry,
+    )
+
+    assert not await store.renew_invocation_lease(
+        tool_invocation_id=invocation.tool_invocation_id,
+        run_id=RUN_ID,
+        attempt_id=ATTEMPT_ID,
+        organization_id=ORG_ID,
+        idempotency_key=invocation.idempotency_key,
+        lease_owner_id="worker-1",
+        now=NOW,
+        lease_expires_at=requested_expiry,
+    )
+
+    row = await _row(session_factory, invocation.tool_invocation_id)
+    assert row.lease_expires_at == current_expiry
+
+
+@pytest.mark.asyncio
 async def test_renewal_does_not_resurrect_expired_or_terminal_rows(
     store: SessionToolAuditStore,
 ) -> None:
