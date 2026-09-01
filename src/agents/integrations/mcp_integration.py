@@ -427,13 +427,18 @@ class MCPIntegration:
                     now=now,
                 )
             ]
+        matching_grant = next(
+            (grant for grant in grants if grant.tool_name == tool_name), None
+        )
         outcome = await self._boundary.invoke(
             tool_name=tool_name,
             run_id=call_identity.run_id,
             task_id=call_identity.task_id,
             attempt_id=call_identity.attempt_id,
             organization_id=call_identity.organization_id,
-            capability_scope=grants[0].capability_scope if grants else "",
+            capability_scope=(
+                matching_grant.capability_scope if matching_grant else tool_name
+            ),
             arguments=arguments,
             input_trust=input_trust,
             output_trust=MCP_OUTPUT_TRUST,

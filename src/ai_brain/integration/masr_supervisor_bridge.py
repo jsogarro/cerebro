@@ -22,6 +22,7 @@ from structlog import get_logger
 
 from src.agents.integrations.mcp_integration import MCPIntegration
 from src.agents.tools.mediation import ToolCallIdentity
+from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
 from src.core.config import settings
 from src.core.kernel import TypedRegistry
 from src.core.kernel.component_keys import (
@@ -635,6 +636,7 @@ class MASRSupervisorBridge:
             worker_config["mcp_integration"] = MCPIntegration(
                 enable_fallback=False,
                 identity=ToolCallIdentity.from_agent_task(task),
+                grants=task.context.get(CAPABILITY_GRANTS_CONTEXT_KEY),
             )
         worker_instance = worker_class(
             gemini_service=self.gemini_service,
