@@ -91,7 +91,7 @@ def test_default_services_have_real_process_or_endpoint_healthchecks() -> None:
         "redis": ("redis-cli", "ping"),
         "api": ("curl", "http://localhost:8000/health"),
         "mcp-server": ("socket", "9000"),
-        "web": ("wget", "http://localhost:8080/"),
+        "web": ("wget", "http://127.0.0.1:8080/"),
         "nginx": ("wget", "http://localhost/health"),
     }
 
