@@ -208,7 +208,7 @@ async def seeded_fixture(
 async def store_fixture(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> SessionToolAuditStore:
-    return SessionToolAuditStore(session_factory)
+    return SessionToolAuditStore(session_factory, clock=lambda: NOW)
 
 
 def _boundary(
@@ -583,7 +583,7 @@ async def test_a_denial_cannot_shadow_an_existing_terminal_invocation(
 async def test_concurrent_first_writers_resolve_to_one_invocation_and_one_execution(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    inner = SessionToolAuditStore(session_factory)
+    inner = SessionToolAuditStore(session_factory, clock=lambda: NOW)
     store = CoordinatedLookupStore(
         inner=inner,
         terminal_barrier=asyncio.Barrier(2),

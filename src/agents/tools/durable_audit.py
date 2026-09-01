@@ -10,7 +10,7 @@ callers that have a database session factory must inject it explicitly.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Final, Literal, cast
 
@@ -58,13 +58,32 @@ _LEASE_EXPIRED_STATUS_REASON: Final[str] = (
 )
 
 
+def _utc_now() -> datetime:
+    """Return the production-safe default instant for persistence fencing."""
+
+    return datetime.now(UTC)
+
+
 class SessionToolAuditStore:
     """Persist tool audit records through a fresh session per operation."""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        """Create a store that owns sessions opened from ``session_factory``."""
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        """Create a store with an aware clock for persistence-time fencing."""
 
         self.session_factory = session_factory
+        self._clock = clock or _utc_now
+
+    def _current_time(self) -> datetime:
+        """Read and validate the instant used for terminal persistence fencing."""
+
+        now = self._clock()
+        _require_aware_datetime(now, field_name="store clock result")
+        return now
 
     async def find_invocation(
         self,
@@ -351,25 +370,24 @@ class SessionToolAuditStore:
                     self._assert_transition_identity(existing, invocation)
                     if existing.status not in _PENDING_STATUSES:
                         raise ToolInvocationConflictError(self._to_contract(existing))
-                    if (
-                        invocation.status in _REPLAYABLE_TERMINAL_STATUSES
-                        and invocation.completed_at is not None
-                        and (
-                            existing.lease_expires_at is None
+                    if invocation.status in _REPLAYABLE_TERMINAL_STATUSES:
+                        persistence_now = self._current_time()
+                        if (
+                            existing.lease_owner_id is None
+                            or existing.lease_expires_at is None
                             or not _lease_is_live(
-                                existing.lease_expires_at, invocation.completed_at
+                                existing.lease_expires_at, persistence_now
                             )
-                        )
-                    ):
-                        terminal = await self._terminalize_expired_pending(
-                            session,
-                            existing,
-                            now=invocation.completed_at,
-                            organization_id=normalized_organization_id,
-                        )
-                        await session.flush()
-                        await session.commit()
-                        raise ToolInvocationConflictError(terminal)
+                        ):
+                            terminal = await self._terminalize_expired_pending(
+                                session,
+                                existing,
+                                now=persistence_now,
+                                organization_id=normalized_organization_id,
+                            )
+                            await session.flush()
+                            await session.commit()
+                            raise ToolInvocationConflictError(terminal)
                     await invocation_repository.record_transition(
                         invocation,
                         organization_id=normalized_organization_id,

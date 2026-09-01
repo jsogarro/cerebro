@@ -80,7 +80,7 @@ async def seeded_fixture(
 async def store_fixture(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> SessionToolAuditStore:
-    return SessionToolAuditStore(session_factory)
+    return SessionToolAuditStore(session_factory, clock=lambda: NOW)
 
 
 def _allow_decision() -> CapabilityDecision:
@@ -377,6 +377,71 @@ async def test_expired_owner_cannot_win_before_reconciliation(
         EVENT_REQUESTED,
         EVENT_COMPLETED,
     ]
+
+
+@pytest.mark.asyncio
+async def test_persist_fences_late_result_at_store_persistence_time(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    lease_expires_at = NOW + timedelta(minutes=5)
+    persistence_now = lease_expires_at + timedelta(seconds=1)
+    store = SessionToolAuditStore(session_factory, clock=lambda: persistence_now)
+
+    pending = await _persist_pending(
+        store,
+        invocation_id="persistence-time-fence",
+        idempotency_key="persistence-time-fence-key",
+        lease_expires_at=lease_expires_at,
+    )
+    completed_at = NOW + timedelta(minutes=1)
+    late_success = _invocation(
+        invocation_id=pending.tool_invocation_id,
+        idempotency_key=pending.idempotency_key,
+        status=ToolInvocationStatus.SUCCEEDED,
+        lease_owner_id=None,
+        lease_expires_at=None,
+    ).model_copy(update={"completed_at": completed_at})
+
+    with pytest.raises(ToolInvocationConflictError) as conflict:
+        await store.persist(
+            invocation=late_success,
+            events=(_completed_event(late_success),),
+            organization_id=ORG_ID,
+            capability_decision=_allow_decision(),
+        )
+
+    terminal = conflict.value.invocation
+    assert terminal.status is ToolInvocationStatus.FAILED
+    assert terminal.completed_at == persistence_now
+    assert terminal.output is None
+    assert terminal.lease_owner_id is None
+    assert terminal.lease_expires_at is None
+    assert terminal.error_code == UNKNOWN_OUTCOME_ERROR
+
+    replayed = await store.find_invocation(
+        run_id=RUN_ID,
+        attempt_id=ATTEMPT_ID,
+        organization_id=ORG_ID,
+        idempotency_key=pending.idempotency_key,
+    )
+    assert replayed == terminal
+
+    row = await _row(session_factory, pending.tool_invocation_id)
+    assert row.status == ToolInvocationStatus.FAILED.value
+    assert row.completed_at == persistence_now
+    assert row.output is None
+    assert row.lease_owner_id is None
+    assert row.lease_expires_at is None
+    assert row.error_code == UNKNOWN_OUTCOME_ERROR
+
+    events = await _event_rows(session_factory, pending.tool_invocation_id)
+    assert [event.event_type for event in events] == [
+        EVENT_REQUESTED,
+        EVENT_COMPLETED,
+    ]
+    assert events[-1].occurred_at == persistence_now
+    assert events[-1].payload["outcome"] == ToolInvocationStatus.FAILED.value
+    assert events[-1].payload["error_code"] == UNKNOWN_OUTCOME_ERROR
 
 
 @pytest.mark.asyncio
