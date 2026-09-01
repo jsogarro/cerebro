@@ -457,17 +457,18 @@ class SourceAcquisitionService:
                 # span, so it says so and carries that turn's binding.
                 producer_kind=ProducerKind.MODEL_TURN,
                 prompt_binding=binding,
-                # Left unset, and the reason is a stated limit rather than a
-                # dropped link. This column is a foreign key to
-                # `agent_tool_invocations`, and nothing writes that table
-                # today: the boundary's audit-store protocol does not carry
-                # the `CapabilityDecision` that
-                # `ToolInvocationRepository.create_tool_invocation` requires,
-                # so no adapter between them can be written as both sides
-                # stand. Setting it produces a live foreign-key violation. The
-                # invocation id is recorded in the snapshot artifact's
-                # metadata meanwhile, so the provenance survives and the
-                # column can be backfilled once that seam is closed.
+                # Left unset, and the reason is a stated boundary limit rather
+                # than a dropped link. This column is a foreign key to
+                # `agent_tool_invocations`. The audit protocol now carries the
+                # `CapabilityDecision` required by
+                # `ToolInvocationRepository.create_tool_invocation`, and a
+                # session-backed store can write that row. This service still
+                # accepts boundaries whose store is in-memory, however, so
+                # populating the foreign key here would make that existing
+                # path fail. The invocation id is recorded in the snapshot
+                # artifact's metadata meanwhile; linking acquisition evidence
+                # to a verified durable invocation belongs to the later
+                # acquisition wiring that can require the same durable path.
                 producer_tool_invocation_id=None,
                 acquired_at=now,
             )
