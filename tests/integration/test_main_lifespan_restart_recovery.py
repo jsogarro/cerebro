@@ -51,10 +51,9 @@ from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 pytestmark = [pytest.mark.integration]
 
 ORG_ID = "00000000-0000-0000-0000-0000000000fe"
-NOW = datetime(2026, 8, 4, tzinfo=UTC)
 
 
-def _seeded_binding(run_id: str) -> ExecutionAuthorityBinding:
+def _seeded_binding(run_id: str, *, now: datetime) -> ExecutionAuthorityBinding:
     import dataclasses
 
     raw = ExecutionAuthorityBinding.create_for_test(
@@ -96,8 +95,8 @@ def _seeded_binding(run_id: str) -> ExecutionAuthorityBinding:
         ),
         stop_conditions=("complete",),
         evaluator_requirements=(),
-        deadline=NOW + timedelta(minutes=5),
-        compiled_at=NOW,
+        deadline=now + timedelta(minutes=5),
+        compiled_at=now,
     )
     return dataclasses.replace(
         raw,
@@ -114,12 +113,16 @@ async def _seed_pre_restart_state(
     would have left behind, using the same repositories production code
     uses — independent of any FastAPI app or lifespan."""
 
-    binding = _seeded_binding(run_id)
+    now = datetime.now(UTC)
+    binding = _seeded_binding(run_id, now=now)
     async with session_factory() as session:
         lifecycle_repo = RunLifecycleRepository(session)
         await lifecycle_repo.create_run(binding.run, organization_id=ORG_ID)
-        queued = binding.run.transition_to(RunStatus.QUEUED, at=NOW)
-        running = queued.transition_to(RunStatus.RUNNING, at=NOW)
+        run_row = await lifecycle_repo.get_run(run_id, organization_id=ORG_ID)
+        assert run_row is not None
+        run_transition_at = max(now, run_row.created_at)
+        queued = binding.run.transition_to(RunStatus.QUEUED, at=run_transition_at)
+        running = queued.transition_to(RunStatus.RUNNING, at=run_transition_at)
         await lifecycle_repo.record_run_transition(running, organization_id=ORG_ID)
 
         task = Task(
@@ -130,12 +133,13 @@ async def _seed_pre_restart_state(
             objective="Restart recovery via the real lifespan",
             idempotency_key=f"{binding.run.idempotency_key}:task",
             input={"project_id": project_id, "execution_id": execution_id},
-            created_at=NOW,
-            updated_at=NOW,
+            created_at=now,
+            updated_at=now,
         )
-        await lifecycle_repo.create_task(task, organization_id=ORG_ID)
-        ready = task.transition_to(TaskStatus.READY, at=NOW)
-        running_task = ready.transition_to(TaskStatus.RUNNING, at=NOW)
+        task_row = await lifecycle_repo.create_task(task, organization_id=ORG_ID)
+        task_transition_at = max(now, task_row.created_at)
+        ready = task.transition_to(TaskStatus.READY, at=task_transition_at)
+        running_task = ready.transition_to(TaskStatus.RUNNING, at=task_transition_at)
         await lifecycle_repo.record_task_transition(
             running_task, organization_id=ORG_ID
         )
@@ -145,14 +149,14 @@ async def _seed_pre_restart_state(
             task_id=task.task_id,
             ordinal=1,
             idempotency_key=f"{task.idempotency_key}:attempt-1",
-            created_at=NOW,
-            updated_at=NOW,
+            created_at=now,
+            updated_at=now,
         )
         await lifecycle_repo.create_attempt(
             attempt, run_id=run_id, organization_id=ORG_ID
         )
 
-        resolver = PersistedExecutionAuthorityResolver(clock=lambda: NOW)
+        resolver = PersistedExecutionAuthorityResolver(clock=lambda: now)
         await resolver.register(
             session,
             binding=binding,
