@@ -35,6 +35,9 @@ class CoordinatedStore:
     block_requested_persist: bool = False
     requested_persist_started: asyncio.Event = field(default_factory=asyncio.Event)
     release_requested_persist: asyncio.Event = field(default_factory=asyncio.Event)
+    block_terminal_persist: bool = False
+    terminal_persist_started: asyncio.Event = field(default_factory=asyncio.Event)
+    release_terminal_persist: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def find_invocation(
         self,
@@ -65,6 +68,14 @@ class CoordinatedStore:
         ):
             self.requested_persist_started.set()
             await self.release_requested_persist.wait()
+        if self.block_terminal_persist and invocation.status in {
+            ToolInvocationStatus.SUCCEEDED,
+            ToolInvocationStatus.FAILED,
+            ToolInvocationStatus.CANCELLED,
+            ToolInvocationStatus.TIMED_OUT,
+        }:
+            self.terminal_persist_started.set()
+            await self.release_terminal_persist.wait()
         await self.inner.persist(
             invocation=invocation,
             events=events,
@@ -334,4 +345,42 @@ async def test_terminal_publication_failure_leaves_the_durable_failure_authorita
         f"publish:{EVENT_REQUESTED}",
         "persist:failed",
         f"publish:{EVENT_COMPLETED}",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_external_cancellation_during_terminal_persist_is_settled(
+    boundary_dependencies: dict[str, Any], echo_spec: Any
+) -> None:
+    calls: list[str] = []
+    durable = RecordingAuditStore(calls=calls)
+    store = CoordinatedStore(durable, block_terminal_persist=True)
+    publisher = RecordingPublisher(calls=calls)
+    handler_calls: list[str] = []
+    boundary = _boundary_with_handler(
+        boundary_dependencies,
+        echo_spec,
+        store=store,
+        publisher=publisher,
+        handler=lambda args, context: _recording_handler(handler_calls, args, context),
+    )
+
+    call = asyncio.create_task(
+        boundary.invoke(**invoke_kwargs(idempotency_key="terminal-cancel-key"))
+    )
+    await store.terminal_persist_started.wait()
+    call.cancel()
+    await asyncio.sleep(0)
+    try:
+        assert not call.done(), "cancellation must wait for terminal persistence"
+    finally:
+        store.release_terminal_persist.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await call
+
+    assert handler_calls == ["handler"]
+    assert [invocation.status for invocation in durable.invocations] == [
+        ToolInvocationStatus.REQUESTED,
+        ToolInvocationStatus.SUCCEEDED,
     ]

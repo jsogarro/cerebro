@@ -280,6 +280,7 @@ _LEASE_GRACE_MIN_SECONDS: Final[float] = 1.0
 _LEASE_GRACE_RATIO: Final[float] = 0.25
 _LEASE_HEARTBEAT_MIN_SECONDS: Final[float] = 0.01
 _LEASE_HEARTBEAT_MAX_SECONDS: Final[float] = 0.25
+_HANDLER_CANCELLATION_GRACE_SECONDS: Final[float] = 0.05
 
 
 @final
@@ -848,6 +849,15 @@ class ToolBoundary:
         if cancellation is not None and cancellation.cancelled:
             return ToolOutcomeStatus.CANCELLED, None, "cancelled before dispatch", None
 
+        if lease_monitor is not None and lease_monitor.lost.is_set():
+            detail = lease_monitor.failure_detail or "durable lease renewal failed"
+            return (
+                ToolOutcomeStatus.FAILED,
+                None,
+                detail,
+                _LeaseRenewalFailureError(detail),
+            )
+
         handler_task: asyncio.Task[Mapping[str, Any]] = asyncio.ensure_future(
             spec.handler(validated_input, context)
         )
@@ -1150,19 +1160,58 @@ class ToolBoundary:
             requested_at=call.requested_at,
             completed_at=completed_at,
         )
-        await self._record(
-            call,
-            invocation=invocation,
-            event_type=EVENT_COMPLETED,
-            payload={
-                "tool_name": call.spec.name,
-                "tool_version": call.spec.version,
-                "outcome": status.value,
-                "error_code": invocation.error_code,
-                "capability_scope": call.capability_scope,
-            },
-            decision=decision,
+        terminal_record = asyncio.create_task(
+            self._record(
+                call,
+                invocation=invocation,
+                event_type=EVENT_COMPLETED,
+                payload={
+                    "tool_name": call.spec.name,
+                    "tool_version": call.spec.version,
+                    "outcome": status.value,
+                    "error_code": invocation.error_code,
+                    "capability_scope": call.capability_scope,
+                },
+                decision=decision,
+            )
         )
+        try:
+            await asyncio.shield(terminal_record)
+        except asyncio.CancelledError:
+            # A caller can cancel while the durable terminal transition is in
+            # flight. Keep the record task alive and wait for its result before
+            # propagating cancellation; otherwise a REQUESTED row can outlive
+            # the call that already told the handler to stop.
+            if not terminal_record.done():
+                await asyncio.shield(terminal_record)
+            raise
+        except ToolInvocationConflictError as conflict:
+            # A lease recovery may have terminalized this invocation while the
+            # original handler was unwinding. The durable row is authoritative;
+            # never return the late worker's output or overwrite the recovery
+            # event. Replaying the fenced row also keeps the result fail-closed
+            # when the recovery outcome is ``unknown_after_lease_expired``.
+            self._require_same_request(
+                conflict.invocation,
+                spec=call.spec,
+                capability_scope=call.capability_scope,
+                input_sha256=boundary_digest(call.redacted_input),
+            )
+            if (
+                decision is not None
+                and conflict.invocation.status in _REPLAYABLE_RECORD_STATUSES
+            ):
+                return self._replay(conflict.invocation, decision=decision)
+            if (
+                conflict.invocation.status
+                in {
+                    ToolInvocationStatus.REQUESTED,
+                    ToolInvocationStatus.RUNNING,
+                }
+                and decision is not None
+            ):
+                return self._in_progress(conflict.invocation, decision=decision)
+            raise
         return ToolOutcome(
             mint=_OUTCOME_MINT,
             status=status,
@@ -1426,16 +1475,42 @@ def _lease_duration(timeout_seconds: float) -> timedelta:
 
 
 async def _abandon(task: asyncio.Future[Any]) -> None:
-    """Cancel a task that lost its race and wait for it to actually stop.
+    """Cancel a task and give cooperative cleanup a bounded grace period.
 
-    Waiting matters: returning while the handler is still running would let a
-    timed-out call keep its side effects in flight after the boundary has
-    already recorded it as timed out.
+    Python cannot forcibly stop a coroutine that suppresses cancellation. An
+    unbounded await here would therefore let one cancellation-resistant tool
+    hold the boundary open forever, preventing its durable terminal state and
+    lease recovery. After the grace period the task is quarantined: its result
+    or exception is consumed when it eventually finishes, while the boundary's
+    terminal record and the durable lease fence prevent that late result from
+    becoming an outcome.
     """
 
+    if task.done():
+        if not task.cancelled():
+            with suppress(BaseException):
+                task.exception()
+        return
+
     task.cancel()
-    with suppress(asyncio.CancelledError, Exception):
-        await task
+    done, _pending = await asyncio.wait(
+        (task,), timeout=_HANDLER_CANCELLATION_GRACE_SECONDS
+    )
+    if done:
+        with suppress(BaseException):
+            task.exception()
+        return
+
+    task.add_done_callback(_consume_abandoned_task)
+
+
+def _consume_abandoned_task(task: asyncio.Future[Any]) -> None:
+    """Consume a quarantined task's eventual result or exception."""
+
+    if task.cancelled():
+        return
+    with suppress(BaseException):
+        task.exception()
 
 
 def _json_ready(value: Any) -> Any:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Final, Literal, cast
 
 from sqlalchemy import select, update
@@ -203,48 +203,16 @@ class SessionToolAuditStore:
                 if (
                     row.lease_owner_id is not None
                     and row.lease_expires_at is not None
-                    and row.lease_expires_at > now
+                    and _lease_is_live(row.lease_expires_at, now)
                 ):
                     invocation = self._to_contract(row)
                     await session.commit()
                     return invocation
 
-                row.status = ToolInvocationStatus.FAILED.value
-                row.output = None
-                row.output_trust = None
-                row.output_sha256 = None
-                row.error_code = _LEASE_EXPIRED_ERROR_CODE
-                row.status_reason = _LEASE_EXPIRED_STATUS_REASON
-                row.completed_at = now
-                row.lease_owner_id = None
-                row.lease_expires_at = None
-                await session.flush()
-
-                terminal = self._to_contract(row)
-                await self._append_event(
+                terminal = await self._terminalize_expired_pending(
                     session,
-                    event=ToolAuditEvent(
-                        event_id=(
-                            f"{row.tool_invocation_id}:{_LEASE_EXPIRED_ERROR_CODE}"
-                        ),
-                        run_id=row.run_id,
-                        task_id=row.task_id,
-                        attempt_id=row.attempt_id,
-                        aggregate_id=row.tool_invocation_id,
-                        event_type=EVENT_COMPLETED,
-                        occurred_at=now,
-                        producer="session-tool-audit-store",
-                        deduplication_key=(
-                            f"{row.tool_invocation_id}:{_LEASE_EXPIRED_ERROR_CODE}"
-                        ),
-                        payload={
-                            "tool_name": row.tool_name,
-                            "tool_version": row.tool_version,
-                            "outcome": terminal.status.value,
-                            "error_code": terminal.error_code,
-                            "status_reason": terminal.status_reason,
-                        },
-                    ),
+                    row,
+                    now=now,
                     organization_id=normalized_organization_id,
                 )
                 await session.flush()
@@ -342,10 +310,17 @@ class SessionToolAuditStore:
                     organization_id=normalized_organization_id,
                 )
                 invocation_repository = ToolInvocationRepository(session)
-                existing = await invocation_repository.get_tool_invocation(
-                    invocation.tool_invocation_id,
-                    organization_id=normalized_organization_id,
+                existing_result = await session.execute(
+                    select(AgentToolInvocation)
+                    .where(
+                        AgentToolInvocation.tool_invocation_id
+                        == invocation.tool_invocation_id,
+                        AgentToolInvocation.organization_id
+                        == normalized_organization_id,
+                    )
+                    .with_for_update()
                 )
+                existing = existing_result.scalar_one_or_none()
                 if existing is None:
                     try:
                         await invocation_repository.create_tool_invocation(
@@ -374,6 +349,25 @@ class SessionToolAuditStore:
                         ) from error
                 else:
                     self._assert_transition_identity(existing, invocation)
+                    if existing.status not in _PENDING_STATUSES:
+                        raise ToolInvocationConflictError(self._to_contract(existing))
+                    if (
+                        invocation.status in _REPLAYABLE_TERMINAL_STATUSES
+                        and invocation.completed_at is not None
+                        and existing.lease_expires_at is not None
+                        and not _lease_is_live(
+                            existing.lease_expires_at, invocation.completed_at
+                        )
+                    ):
+                        terminal = await self._terminalize_expired_pending(
+                            session,
+                            existing,
+                            now=invocation.completed_at,
+                            organization_id=normalized_organization_id,
+                        )
+                        await session.flush()
+                        await session.commit()
+                        raise ToolInvocationConflictError(terminal)
                     await invocation_repository.record_transition(
                         invocation,
                         organization_id=normalized_organization_id,
@@ -395,6 +389,54 @@ class SessionToolAuditStore:
             except BaseException:
                 await session.rollback()
                 raise
+
+    async def _terminalize_expired_pending(
+        self,
+        session: AsyncSession,
+        row: AgentToolInvocation,
+        *,
+        now: datetime,
+        organization_id: uuid.UUID,
+    ) -> ToolInvocation:
+        """Fence an expired owner and append its one durable terminal event."""
+
+        row.status = ToolInvocationStatus.FAILED.value
+        row.output = None
+        row.output_trust = None
+        row.output_sha256 = None
+        row.error_code = _LEASE_EXPIRED_ERROR_CODE
+        row.status_reason = _LEASE_EXPIRED_STATUS_REASON
+        row.completed_at = now
+        row.lease_owner_id = None
+        row.lease_expires_at = None
+        await session.flush()
+
+        terminal = self._to_contract(row)
+        await self._append_event(
+            session,
+            event=ToolAuditEvent(
+                event_id=f"{row.tool_invocation_id}:{_LEASE_EXPIRED_ERROR_CODE}",
+                run_id=row.run_id,
+                task_id=row.task_id,
+                attempt_id=row.attempt_id,
+                aggregate_id=row.tool_invocation_id,
+                event_type=EVENT_COMPLETED,
+                occurred_at=now,
+                producer="session-tool-audit-store",
+                deduplication_key=(
+                    f"{row.tool_invocation_id}:{_LEASE_EXPIRED_ERROR_CODE}"
+                ),
+                payload={
+                    "tool_name": row.tool_name,
+                    "tool_version": row.tool_version,
+                    "outcome": terminal.status.value,
+                    "error_code": terminal.error_code,
+                    "status_reason": terminal.status_reason,
+                },
+            ),
+            organization_id=organization_id,
+        )
+        return terminal
 
     @staticmethod
     def _assert_event_association(
@@ -587,6 +629,14 @@ def _require_aware_datetime(value: datetime, *, field_name: str) -> None:
 
     if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
         raise ValueError(f"{field_name} must be timezone-aware")
+
+
+def _lease_is_live(expires_at: datetime, now: datetime) -> bool:
+    """Compare dialect-normalized lease timestamps without losing UTC meaning."""
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at > now
 
 
 def _normalize_durable_context(

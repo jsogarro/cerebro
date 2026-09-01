@@ -22,8 +22,9 @@ from src.core.contracts import (
     ToolInvocationStatus,
     TrustClassification,
 )
-from src.core.tools import EVENT_REQUESTED, ToolAuditEvent
+from src.core.tools import EVENT_COMPLETED, EVENT_REQUESTED, ToolAuditEvent
 from src.core.tools.audit import LeaseAwareToolAuditStore
+from src.core.tools.errors import ToolInvocationConflictError
 from src.models.db.run_event import AgentRunEvent
 from src.models.db.tool_invocation import AgentToolInvocation
 from src.repositories.capability_repository import CapabilityRepository
@@ -155,6 +156,21 @@ def _requested_event(invocation: ToolInvocation) -> ToolAuditEvent:
     )
 
 
+def _completed_event(invocation: ToolInvocation) -> ToolAuditEvent:
+    return ToolAuditEvent(
+        event_id=f"{invocation.tool_invocation_id}:completed",
+        run_id=invocation.run_id,
+        task_id=invocation.task_id,
+        attempt_id=invocation.attempt_id,
+        aggregate_id=invocation.tool_invocation_id,
+        event_type=EVENT_COMPLETED,
+        occurred_at=invocation.completed_at or NOW,
+        producer="integration-test",
+        deduplication_key=f"{invocation.tool_invocation_id}:completed",
+        payload={"phase": "completed", "outcome": invocation.status.value},
+    )
+
+
 async def _persist_pending(
     store: SessionToolAuditStore,
     *,
@@ -275,6 +291,92 @@ async def test_stale_lease_is_terminalized_with_one_event(
     ]
     assert events[-1].payload["outcome"] == ToolInvocationStatus.FAILED.value
     assert events[-1].payload["error_code"] == UNKNOWN_OUTCOME_ERROR
+
+
+@pytest.mark.asyncio
+async def test_late_owner_cannot_overwrite_reconciled_lease(
+    store: SessionToolAuditStore,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    pending = await _persist_pending(
+        store,
+        invocation_id="late-owner-fence",
+        idempotency_key="late-owner-fence-key",
+        lease_expires_at=NOW - timedelta(seconds=1),
+    )
+    reconciled = await store.reconcile_pending_invocation(
+        run_id=RUN_ID,
+        attempt_id=ATTEMPT_ID,
+        organization_id=ORG_ID,
+        idempotency_key=pending.idempotency_key,
+        now=NOW,
+    )
+    assert reconciled is not None
+    assert reconciled.error_code == UNKNOWN_OUTCOME_ERROR
+
+    late_success = _invocation(
+        invocation_id=pending.tool_invocation_id,
+        idempotency_key=pending.idempotency_key,
+        status=ToolInvocationStatus.SUCCEEDED,
+        lease_owner_id=None,
+        lease_expires_at=None,
+    )
+    with pytest.raises(ToolInvocationConflictError):
+        await store.persist(
+            invocation=late_success,
+            events=(_completed_event(late_success),),
+            organization_id=ORG_ID,
+            capability_decision=_allow_decision(),
+        )
+
+    row = await _row(session_factory, pending.tool_invocation_id)
+    assert row.status == ToolInvocationStatus.FAILED.value
+    assert row.error_code == UNKNOWN_OUTCOME_ERROR
+    assert row.output is None
+    events = await _event_rows(session_factory, pending.tool_invocation_id)
+    assert [event.event_type for event in events] == [
+        EVENT_REQUESTED,
+        EVENT_COMPLETED,
+    ]
+    assert events[-1].payload["error_code"] == UNKNOWN_OUTCOME_ERROR
+
+
+@pytest.mark.asyncio
+async def test_expired_owner_cannot_win_before_reconciliation(
+    store: SessionToolAuditStore,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    pending = await _persist_pending(
+        store,
+        invocation_id="expired-owner-fence",
+        idempotency_key="expired-owner-fence-key",
+        lease_expires_at=NOW - timedelta(seconds=1),
+    )
+    late_success = _invocation(
+        invocation_id=pending.tool_invocation_id,
+        idempotency_key=pending.idempotency_key,
+        status=ToolInvocationStatus.SUCCEEDED,
+        lease_owner_id=None,
+        lease_expires_at=None,
+    )
+
+    with pytest.raises(ToolInvocationConflictError):
+        await store.persist(
+            invocation=late_success,
+            events=(_completed_event(late_success),),
+            organization_id=ORG_ID,
+            capability_decision=_allow_decision(),
+        )
+
+    row = await _row(session_factory, pending.tool_invocation_id)
+    assert row.status == ToolInvocationStatus.FAILED.value
+    assert row.error_code == UNKNOWN_OUTCOME_ERROR
+    assert row.output is None
+    events = await _event_rows(session_factory, pending.tool_invocation_id)
+    assert [event.event_type for event in events] == [
+        EVENT_REQUESTED,
+        EVENT_COMPLETED,
+    ]
 
 
 @pytest.mark.asyncio

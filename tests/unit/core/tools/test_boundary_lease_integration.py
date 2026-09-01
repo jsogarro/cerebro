@@ -25,6 +25,7 @@ from src.core.tools import (
     ToolOutcomeStatus,
     ToolSpec,
 )
+from src.core.tools.errors import ToolInvocationConflictError
 
 from .conftest import (
     ATTEMPT_ID,
@@ -50,6 +51,7 @@ class LeaseAwareFakeStore:
     reconcile_calls: list[dict[str, Any]] = field(default_factory=list)
     renew_calls: list[dict[str, Any]] = field(default_factory=list)
     renew_called: asyncio.Event = field(default_factory=asyncio.Event)
+    terminal_conflict: ToolInvocation | None = None
 
     async def find_invocation(
         self,
@@ -154,6 +156,17 @@ class LeaseAwareFakeStore:
         organization_id: str | None,
         capability_decision: CapabilityDecision | None,
     ) -> None:
+        if (
+            invocation.status
+            in {
+                ToolInvocationStatus.SUCCEEDED,
+                ToolInvocationStatus.FAILED,
+                ToolInvocationStatus.CANCELLED,
+                ToolInvocationStatus.TIMED_OUT,
+            }
+            and self.terminal_conflict is not None
+        ):
+            raise ToolInvocationConflictError(self.terminal_conflict)
         self.invocations.append(invocation)
 
     def _pending_invocation(
@@ -407,6 +420,82 @@ async def test_request_renews_lease_while_requested_publication_is_blocked(
     assert [invocation.status for invocation in store.invocations] == [
         ToolInvocationStatus.REQUESTED,
         ToolInvocationStatus.SUCCEEDED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lease_loss_during_requested_publication_never_dispatches_handler(
+    boundary_dependencies: dict[str, Any], echo_spec: ToolSpec
+) -> None:
+    store = LeaseAwareFakeStore(renew_result=False)
+    publisher = BlockingRequestedPublisher()
+    handler_calls: list[str] = []
+
+    async def handler(args: EchoInput, context: ToolCallContext) -> Mapping[str, Any]:
+        handler_calls.append("handler")
+        return {"echoed": args.query}
+
+    boundary = ToolBoundary(
+        **{
+            **boundary_dependencies,
+            "audit_store": store,
+            "event_publisher": publisher,
+        }
+    )
+    boundary.register(replace(echo_spec, timeout_seconds=0.03, handler=handler))
+
+    first_call = asyncio.create_task(
+        boundary.invoke(**invoke_kwargs(idempotency_key="no-dispatch-after-loss"))
+    )
+    await asyncio.wait_for(publisher.requested_publish_started.wait(), timeout=1)
+    await asyncio.wait_for(store.renew_called.wait(), timeout=1)
+
+    publisher.release_requested_publish.set()
+    outcome = await asyncio.wait_for(first_call, timeout=1)
+
+    assert outcome.status is ToolOutcomeStatus.FAILED
+    assert outcome.error_code == "tool_error"
+    assert handler_calls == []
+    assert [invocation.status for invocation in store.invocations] == [
+        ToolInvocationStatus.REQUESTED,
+        ToolInvocationStatus.FAILED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_late_terminal_conflict_returns_the_durable_failure(
+    boundary_dependencies: dict[str, Any], echo_spec: ToolSpec
+) -> None:
+    store = LeaseAwareFakeStore(
+        terminal_conflict=_invocation(
+            status=ToolInvocationStatus.FAILED,
+            invocation_id="late-owner",
+            idempotency_key="late-owner-key",
+            lease_owner_id=None,
+            lease_expires_at=None,
+        )
+    )
+    handler_calls: list[str] = []
+
+    async def handler(args: EchoInput, context: ToolCallContext) -> Mapping[str, Any]:
+        handler_calls.append("handler")
+        return {"echoed": args.query}
+
+    boundary = _boundary(
+        boundary_dependencies,
+        echo_spec,
+        store,
+        handler,
+    )
+
+    outcome = await boundary.invoke(**invoke_kwargs(idempotency_key="late-owner-key"))
+
+    assert outcome.status is ToolOutcomeStatus.FAILED
+    assert outcome.error_code == "unknown_after_lease_expired"
+    assert outcome.invocation.output is None
+    assert handler_calls == ["handler"]
+    assert [invocation.status for invocation in store.invocations] == [
+        ToolInvocationStatus.REQUESTED,
     ]
 
 
