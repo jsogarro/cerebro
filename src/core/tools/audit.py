@@ -192,6 +192,59 @@ class PendingToolAuditStore(Protocol):
 
 
 @runtime_checkable
+class LeaseAwareToolAuditStore(PendingToolAuditStore, Protocol):
+    """Optional durable recovery and renewal operations for leased tool work.
+
+    ``reconcile_pending_invocation`` atomically retrieves the exact durable
+    invocation identified by ``run_id``, ``attempt_id``, ``organization_id``,
+    and ``idempotency_key`` at the caller-injected aware ``now``. It returns
+    ``None`` when no non-denied reservation exists. If the reservation is
+    pending and its lease is live, it returns the pending
+    :class:`ToolInvocation` with lease fields reconstructed. If the lease is
+    expired, missing, or from a legacy row with ``NULL`` lease fields, it must
+    transition that row to a replayable terminal failure, clear lease fields,
+    leave output empty, append the terminal tool event, and commit the state
+    transition and event in one transaction. A concurrent retry that observes
+    a row already reconciled by another process returns that existing terminal
+    row and must not append a duplicate event.
+
+    ``renew_invocation_lease`` updates only the lease expiry for the exact
+    durable invocation/run/attempt/tenant/idempotency tuple while the row is
+    still pending, belongs to ``lease_owner_id``, and its current lease is
+    unexpired at the injected aware ``now``. It returns ``False`` for a missing
+    row, wrong owner, wrong tenant, terminal row, or expired/null lease, and it
+    must never resurrect expired work.
+    """
+
+    async def reconcile_pending_invocation(
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+        now: datetime,
+    ) -> ToolInvocation | None:
+        """Return live pending work or terminalize stale pending work."""
+        ...
+
+    async def renew_invocation_lease(
+        self,
+        *,
+        tool_invocation_id: str,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+        lease_owner_id: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> bool:
+        """Extend an unexpired pending lease held by ``lease_owner_id``."""
+        ...
+
+
+@runtime_checkable
 class ToolEventPublisher(Protocol):
     """Delivery of already-durable events to live subscribers."""
 
@@ -218,6 +271,7 @@ __all__ = [
     "EVENT_REQUESTED",
     "EVENT_TYPE_VERSION",
     "TOOL_INVOCATION_AGGREGATE",
+    "LeaseAwareToolAuditStore",
     "NullEventPublisher",
     "PendingToolAuditStore",
     "ToolAuditEvent",
