@@ -270,6 +270,104 @@ async def test_manager_analytics_requires_both_tenant_identities() -> None:
 
 
 @pytest.mark.asyncio
+async def test_manager_health_status_is_tenant_scoped() -> None:
+    manager = TalkHierSessionManager()
+    await manager.register_session(
+        "session-owned",
+        {},
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+    await manager.register_session(
+        "session-foreign",
+        {},
+        user_id=CROSS_TENANT_INTRUDER.user_id,
+        organization_id=CROSS_TENANT_INTRUDER.organization_id,
+    )
+    await manager.register_session(
+        "session-owned-2",
+        {},
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+    await manager.register_session(
+        "session-foreign-2",
+        {},
+        user_id=CROSS_TENANT_INTRUDER.user_id,
+        organization_id=CROSS_TENANT_INTRUDER.organization_id,
+    )
+    await manager.coordinate_sessions(
+        CoordinationRequest(
+            session_ids=["session-owned", "session-owned-2"],
+            coordination_type="parallel",
+        ),
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+    await manager.coordinate_sessions(
+        CoordinationRequest(
+            session_ids=["session-foreign", "session-foreign-2"],
+            coordination_type="parallel",
+        ),
+        user_id=CROSS_TENANT_INTRUDER.user_id,
+        organization_id=CROSS_TENANT_INTRUDER.organization_id,
+    )
+
+    health = await manager.get_health_status(
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+
+    assert health == {
+        "status": "healthy",
+        "active_sessions": 2,
+        "total_sessions": 2,
+        "active_coordinations": 1,
+        "analytics_events": 0,
+    }
+
+    with pytest.raises(ValueError, match="Both user and organization are required"):
+        await manager.get_health_status(user_id=OWNER.user_id)
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_passes_authenticated_tenant_to_manager() -> None:
+    service = SimpleNamespace(
+        sessions={
+            "owned": _session(),
+            "foreign": _session(
+                "foreign",
+                user_id=CROSS_TENANT_INTRUDER.user_id,
+                organization_id=CROSS_TENANT_INTRUDER.organization_id,
+            ),
+        }
+    )
+    manager_status = {
+        "status": "healthy",
+        "active_sessions": 1,
+        "total_sessions": 1,
+        "active_coordinations": 0,
+        "analytics_events": 0,
+    }
+
+    with patch.object(
+        talkhier_api.session_manager,
+        "get_health_status",
+        new=AsyncMock(return_value=manager_status),
+    ) as get_health_status:
+        response = await talkhier_api.talkhier_health_check(
+            talkhier_service=service,  # type: ignore[arg-type]
+            tenant_context=OWNER,
+        )
+
+    assert response["active_sessions"] == 1
+    get_health_status.assert_awaited_once_with(
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+
+
+@pytest.mark.asyncio
 async def test_manager_rejects_incomplete_identity_when_binding_records() -> None:
     manager = TalkHierSessionManager()
 

@@ -372,16 +372,47 @@ class TalkHierSessionManager:
             and metrics.organization_id == organization_id
         )
 
-    async def get_health_status(self) -> dict[str, Any]:
-        """Get health status of session manager"""
+    async def get_health_status(
+        self,
+        *,
+        user_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Get health status, optionally restricted to one tenant."""
+        self._validate_identity(user_id, organization_id)
+        if user_id is None:
+            sessions = tuple(self.sessions.values())
+            coordinations = tuple(self.coordinations.values())
+            analytics_events = tuple(self.analytics_events)
+        else:
+            sessions = tuple(
+                metrics
+                for metrics in self.sessions.values()
+                if self._matches_identity(metrics, user_id, organization_id)
+            )
+            coordinations = tuple(
+                coordination
+                for coordination in self.coordinations.values()
+                if (
+                    coordination.user_id == user_id
+                    and coordination.organization_id == organization_id
+                )
+            )
+            analytics_events = tuple(
+                event
+                for event in self.analytics_events
+                if (
+                    event.get("user_id") == user_id
+                    and event.get("organization_id") == organization_id
+                )
+            )
+
         return {
             "status": "healthy",
-            "active_sessions": sum(
-                1 for m in self.sessions.values() if not m.completed_at
-            ),
-            "total_sessions": len(self.sessions),
-            "active_coordinations": len(self.coordinations),
-            "analytics_events": len(self.analytics_events),
+            "active_sessions": sum(1 for m in sessions if not m.completed_at),
+            "total_sessions": len(sessions),
+            "active_coordinations": len(coordinations),
+            "analytics_events": len(analytics_events),
         }
 
     # Helper methods

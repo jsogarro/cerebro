@@ -1155,6 +1155,7 @@ async def _get_protocol_insights(
 @router.get("/health")
 async def talkhier_health_check(
     talkhier_service: TalkHierServiceDependency,
+    tenant_context: TenantContextDependency,
 ) -> dict[str, Any]:
     """
     Health check for TalkHier Protocol API
@@ -1163,8 +1164,18 @@ async def talkhier_health_check(
         Service health status
     """
     try:
-        active_sessions = len(talkhier_service.sessions)
-        manager_status = await session_manager.get_health_status()
+        active_sessions = sum(
+            1
+            for session in talkhier_service.sessions.values()
+            if (
+                session.user_id == tenant_context.user_id
+                and session.organization_id == tenant_context.organization_id
+            )
+        )
+        manager_status = await session_manager.get_health_status(
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
+        )
 
         return {
             "status": "healthy",
