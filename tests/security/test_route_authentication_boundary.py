@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -195,22 +196,87 @@ def _materialize_route(path: str) -> str:
     )
 
 
+def _join_route_paths(prefix: str, path: str) -> str:
+    if not prefix:
+        return path or "/"
+    if not path:
+        return prefix
+    if path == "/":
+        return f"{prefix.rstrip('/')}/"
+    return f"{prefix.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _iter_mounted_routes(
+    routes: Iterable[Any], prefix: str = ""
+) -> Iterator[tuple[Any, str]]:
+    """Yield route objects with paths from flattened and wrapped routers."""
+    for route in routes:
+        if isinstance(route, (APIRoute, WebSocketRoute)):
+            yield route, _join_route_paths(prefix, route.path)
+        elif isinstance(route, Mount):
+            yield route, _join_route_paths(prefix, route.path)
+            continue
+
+        original_router = getattr(route, "original_router", None)
+        nested_routes = getattr(original_router, "routes", None)
+        if nested_routes is not None:
+            include_context = getattr(route, "include_context", None)
+            include_prefix = getattr(include_context, "prefix", "") or ""
+            yield from _iter_mounted_routes(
+                nested_routes, _join_route_paths(prefix, include_prefix)
+            )
+
+
 def _mounted_http_routes(app: FastAPI) -> set[tuple[str, str]]:
     signatures: set[tuple[str, str]] = set()
-    for route in app.routes:
+    for route, path in _iter_mounted_routes(app.routes):
         if isinstance(route, APIRoute):
             signatures.update(
-                (method, route.path)
+                (method, path)
                 for method in route.methods
                 if method not in {"HEAD", "OPTIONS"}
             )
         elif isinstance(route, Mount):
-            signatures.add(("MOUNT", route.path))
+            signatures.add(("MOUNT", path))
     return signatures
 
 
 def _mounted_websocket_routes(app: FastAPI) -> set[str]:
-    return {route.path for route in app.routes if isinstance(route, WebSocketRoute)}
+    return {
+        path
+        for route, path in _iter_mounted_routes(app.routes)
+        if isinstance(route, WebSocketRoute)
+    }
+
+
+def test_route_inventory_helpers_recurse_through_structural_include_wrappers() -> None:
+    leaf_router = APIRouter()
+
+    @leaf_router.get("/items")
+    async def items() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @leaf_router.websocket("/events")
+    async def events(_websocket: Any) -> None:
+        return None
+
+    nested_router = APIRouter()
+    nested_router.routes.append(
+        SimpleNamespace(
+            original_router=leaf_router,
+            include_context=SimpleNamespace(prefix="/v1"),
+        )
+    )
+    app = FastAPI()
+    app.router.routes.append(
+        SimpleNamespace(
+            original_router=nested_router,
+            include_context=SimpleNamespace(prefix="/api"),
+        )
+    )
+
+    assert _mounted_http_routes(app) >= {("GET", "/api/v1/items")}
+    assert _mounted_websocket_routes(app) >= {"/api/v1/events"}
 
 
 def _assert_websocket_denied(
