@@ -172,6 +172,7 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
     assert seen["mcp_integration"] is integration
     constructor.assert_called_once_with(
         enable_fallback=False,
+        grants=None,
         identity=expected_identity,
     )
     boundary_invoke = integration.boundary.invoke
