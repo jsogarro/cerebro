@@ -65,7 +65,7 @@ from ...ai_brain.router.routing_types import (
 from ...core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY, PlanCapabilityIssuer
 from ...core.claims import build_inventory
 from ...core.claims.recording import ClaimSupportRecorder
-from ...core.claims.resolution import ClaimSupportResolver
+from ...core.claims.resolution import ClaimSupportResolution, ClaimSupportResolver
 from ...core.contracts import (
     Artifact,
     ArtifactStatus,
@@ -1006,6 +1006,72 @@ class DirectExecutionService:
         )
         return _FinalReport(artifact=artifact, text=text)
 
+    @staticmethod
+    def _validate_persisted_final_report(
+        artifact: Any,
+        *,
+        final_report: _FinalReport,
+        tenant_id: str,
+    ) -> str:
+        """Verify the database row still names and contains this report."""
+        expected = final_report.artifact
+        if (
+            artifact.organization_id is None
+            or str(artifact.organization_id) != tenant_id
+            or artifact.artifact_id != expected.artifact_id
+            or artifact.run_id != expected.run_id
+            or artifact.task_id != expected.task_id
+            or artifact.attempt_id != expected.attempt_id
+            or artifact.kind != expected.kind
+            or artifact.media_type != expected.media_type
+            or artifact.storage_uri != expected.storage_uri
+        ):
+            raise ValueError("persisted final report identity does not match")
+
+        report_text = artifact.metadata_.get(_FINAL_REPORT_CONTENT_METADATA_KEY)
+        if not isinstance(report_text, str):
+            raise ValueError("persisted final report has no inspectable text")
+        if report_text != final_report.text:
+            raise ValueError(
+                "persisted final report text does not match the "
+                "final_output serialization"
+            )
+        if (
+            hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+            != expected.content_sha256
+            or artifact.content_sha256 != expected.content_sha256
+        ):
+            raise ValueError(
+                "persisted final report text does not match its content digest"
+            )
+        return report_text
+
+    def _resolve_final_report_claims(
+        self,
+        artifact: Any,
+        *,
+        final_report: _FinalReport,
+        run: Run,
+        resolved_at: datetime,
+    ) -> ClaimSupportResolution:
+        """Resolve every material claim from the persisted report text."""
+        report_text = self._validate_persisted_final_report(
+            artifact, final_report=final_report, tenant_id=run.tenant_id
+        )
+        inventory = build_inventory(
+            artifact_id=artifact.artifact_id,
+            artifact_kind=artifact.kind,
+            source=report_text,
+        )
+        return ClaimSupportResolver(
+            id_factory=self._claim_support_id_factory(artifact.artifact_id)
+        ).resolve(
+            inventory=inventory,
+            run_id=run.run_id,
+            verdicts=(),
+            resolved_at=resolved_at,
+        )
+
     async def _persist_transition(
         self,
         execution_status: ExecutionStatus,
@@ -1020,9 +1086,10 @@ class DirectExecutionService:
         """Advance the durable run/task/attempt and append their event.
 
         Returns what the durable layer did, so a caller can decide whether an
-        observable state change is backed by anything. Nothing raises: a
-        rejected or unavailable write degrades the durability of this one
-        transition, not the execution.
+        observable state change is backed by anything. A rejected or
+        unavailable write degrades the durability of this one transition, not
+        the execution; an unreadable successful output fails closed before any
+        terminal rows are written.
 
         ``RECORDED`` is also the answer when there is nothing to persist (no
         session factory, or this execution was never admitted — e.g. tests
@@ -1131,6 +1198,105 @@ class DirectExecutionService:
                 error=str(exc),
             )
 
+    async def _terminal_transition_already_committed(
+        self, session: Any, transition: _DurableTransition
+    ) -> bool:
+        """Recognize a successful terminal transaction after an ambiguous commit."""
+        final_report = transition.final_report
+        if final_report is None:
+            return False
+
+        run = transition.run
+        lifecycle_repo = RunLifecycleRepository(session)
+        run_row = await lifecycle_repo.get_run(
+            run.run_id, organization_id=run.tenant_id
+        )
+        if run_row is None or run_row.status != run.status.value:
+            return False
+
+        if transition.task is not None:
+            task_rows = await lifecycle_repo.get_tasks_for_run(
+                run.run_id, organization_id=run.tenant_id
+            )
+            if not any(
+                row.task_id == transition.task.task_id
+                and row.status == transition.task.status.value
+                for row in task_rows
+            ):
+                return False
+        if transition.attempt is not None:
+            attempt_rows = await lifecycle_repo.get_attempts_for_task(
+                transition.attempt.task_id, organization_id=run.tenant_id
+            )
+            if not any(
+                row.attempt_id == transition.attempt.attempt_id
+                and row.status == transition.attempt.status.value
+                for row in attempt_rows
+            ):
+                return False
+
+        artifact = await ArtifactRepository(session).get_artifact(
+            final_report.artifact.artifact_id, organization_id=run.tenant_id
+        )
+        if artifact is None:
+            return False
+
+        resolution = self._resolve_final_report_claims(
+            artifact,
+            final_report=final_report,
+            run=run,
+            resolved_at=transition.occurred_at,
+        )
+        claim_repo = ClaimSupportRepository(session)
+        existing_rows: list[Any] = []
+        for support in resolution.supports:
+            row = await claim_repo.get_claim_support(
+                support.claim_support_id, organization_id=run.tenant_id
+            )
+            if row is None:
+                if existing_rows:
+                    raise ValueError(
+                        "persisted final report has a partial claim-support resolution"
+                    )
+                return False
+            existing_rows.append(row)
+
+        for expected, actual in zip(resolution.supports, existing_rows, strict=True):
+            if (
+                actual.claim_support_id != expected.claim_support_id
+                or actual.run_id != expected.run_id
+                or actual.artifact_id != expected.artifact_id
+                or actual.claim_id != expected.claim_id
+                or actual.claim_text != expected.claim_text
+                or actual.status != expected.status.value
+                or tuple(actual.evidence_ids or ()) != expected.evidence_ids
+                or actual.absent_evidence_reason
+                != (
+                    expected.absent_evidence_reason.value
+                    if expected.absent_evidence_reason
+                    else None
+                )
+                or actual.evaluator_id != expected.evaluator_id
+                or actual.evaluator_version != expected.evaluator_version
+                or actual.producer_kind != expected.producer_kind.value
+                or actual.explanation != expected.explanation
+            ):
+                raise ValueError("persisted claim support does not match resolution")
+
+        events = await RunEventRepository(session).read_events_after(
+            run.run_id,
+            after_sequence=0,
+            limit=100_000,
+            organization_id=run.tenant_id,
+        )
+        if not any(
+            event.event_type == transition.event_type
+            and event.payload == transition.payload
+            for event in events
+        ):
+            raise ValueError("persisted final report transaction has no terminal event")
+        return True
+
     async def _commit_transition(self, transition: _DurableTransition) -> bool:
         """Commit one planned transition, retrying transient failures.
 
@@ -1146,6 +1312,11 @@ class DirectExecutionService:
             try:
                 async with self.session_factory() as session:
                     try:
+                        if await self._terminal_transition_already_committed(
+                            session, transition
+                        ):
+                            return True
+
                         repo = RunLifecycleRepository(session)
                         await repo.record_run_transition(
                             run, organization_id=run.tenant_id
@@ -1172,40 +1343,10 @@ class DirectExecutionService:
                                 transition.final_report.artifact,
                                 organization_id=run.tenant_id,
                             )
-                            report_text = artifact.metadata_.get(
-                                _FINAL_REPORT_CONTENT_METADATA_KEY
-                            )
-                            if not isinstance(report_text, str):
-                                raise ValueError(
-                                    "persisted final report has no inspectable text"
-                                )
-                            if report_text != transition.final_report.text:
-                                raise ValueError(
-                                    "persisted final report text does not match the "
-                                    "final_output serialization"
-                                )
-                            if (
-                                hashlib.sha256(report_text.encode("utf-8")).hexdigest()
-                                != artifact.content_sha256
-                            ):
-                                raise ValueError(
-                                    "persisted final report text does not match its "
-                                    "content digest"
-                                )
-
-                            inventory = build_inventory(
-                                artifact_id=artifact.artifact_id,
-                                artifact_kind=artifact.kind,
-                                source=report_text,
-                            )
-                            resolution = ClaimSupportResolver(
-                                id_factory=self._claim_support_id_factory(
-                                    artifact.artifact_id
-                                )
-                            ).resolve(
-                                inventory=inventory,
-                                run_id=run.run_id,
-                                verdicts=(),
+                            resolution = self._resolve_final_report_claims(
+                                artifact,
+                                final_report=transition.final_report,
+                                run=run,
                                 resolved_at=transition.occurred_at,
                             )
                             await ClaimSupportRecorder(
