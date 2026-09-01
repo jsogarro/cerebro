@@ -8,7 +8,7 @@ from src.agents.tools.mediation import ToolCallIdentity
 from src.agents.tools.registry import ToolRegistry
 from src.core.contracts import CapabilityGrant, SensitivityClass, TrustClassification
 
-NOW = datetime(2020, 1, 1, tzinfo=UTC)
+NOW = datetime.now(UTC)
 
 
 def grant(tool_name: str, scope: str) -> CapabilityGrant:
