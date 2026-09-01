@@ -167,6 +167,14 @@ _FAILED_STATUS_BY_ERROR_CODE: Final[dict[str, ToolOutcomeStatus]] = {
 }
 
 
+class _RequestedPublicationError(Exception):
+    """The requested record was persisted, but its event was not published."""
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(f"{type(cause).__name__}: {cause}")
+        self.cause = cause
+
+
 @final
 class CancellationToken:
     """Cooperative cancellation a caller can signal and the boundary can see.
@@ -546,8 +554,8 @@ class ToolBoundary:
             ),
             requested_at=now,
         )
-        try:
-            await self._record(
+        requested_record = asyncio.create_task(
+            self._record(
                 call,
                 invocation=requested_invocation,
                 event_type=EVENT_REQUESTED,
@@ -560,6 +568,45 @@ class ToolBoundary:
                     "input_trust": input_trust.value,
                 },
                 decision=decision,
+                wrap_publication_failure=True,
+            )
+        )
+        try:
+            await asyncio.shield(requested_record)
+        except asyncio.CancelledError:
+            # The requested row is the idempotency reservation. It must finish
+            # its persist-and-publish admission before cancellation can unwind,
+            # otherwise a durable REQUESTED row can be left without a terminal
+            # outcome (or the request can be retried while its reservation is
+            # still in flight). The cancellation wins over an admission
+            # publication error: the reservation is settled as CANCELLED and
+            # the caller's cancellation is re-raised.
+            try:
+                await asyncio.shield(requested_record)
+            except _RequestedPublicationError:
+                pass
+            except Exception:
+                # A persistence failure means there is no confirmed requested
+                # row to settle. Preserve the caller's cancellation; the store
+                # owns the failed admission's rollback semantics.
+                pass
+            await asyncio.shield(
+                self._terminate(
+                    call,
+                    status=ToolOutcomeStatus.CANCELLED,
+                    completed_at=self._now(),
+                    decision=decision,
+                    detail="cancelled during admission",
+                )
+            )
+            raise
+        except _RequestedPublicationError as publication_error:
+            return await self._terminate(
+                call,
+                status=ToolOutcomeStatus.FAILED,
+                completed_at=self._now(),
+                decision=decision,
+                detail=str(publication_error),
             )
         except ToolInvocationConflictError as conflict:
             self._require_same_request(
@@ -929,6 +976,7 @@ class ToolBoundary:
         event_type: str,
         payload: Mapping[str, JsonValue],
         decision: CapabilityDecision | None,
+        wrap_publication_failure: bool = False,
     ) -> None:
         """Persist the record and its event, then publish. Never the reverse.
 
@@ -961,7 +1009,12 @@ class ToolBoundary:
             organization_id=call.organization_id,
             capability_decision=decision,
         )
-        await self._event_publisher.publish((event,))
+        try:
+            await self._event_publisher.publish((event,))
+        except Exception as error:
+            if wrap_publication_failure:
+                raise _RequestedPublicationError(error) from error
+            raise
 
     # ------------------------------------------------------------------
     # helpers
