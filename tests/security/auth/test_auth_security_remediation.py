@@ -77,10 +77,11 @@ async def test_logout_returns_service_unavailable_when_revocation_fails() -> Non
 async def test_reset_password_reports_store_unavailable_instead_of_success() -> None:
     """Reset must expose a store outage rather than accepting an uncheckable token."""
     service = PasswordService(redis_client=None, check_breaches=False)
+    replacement = "NewSecurePass123!"
     request = PasswordResetConfirm(
         token="reset-token",
-        new_password="NewSecurePass123!",
-        confirm_password="NewSecurePass123!",
+        new_password=replacement,
+        confirm_password=replacement,
     )
 
     with pytest.raises(HTTPException) as raised:
