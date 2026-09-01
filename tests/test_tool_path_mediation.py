@@ -110,10 +110,16 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
 ) -> None:
     client = _healthy_client()
     client.search_academic.return_value = {"success": True, "results": []}
-    integration = MCPIntegration(mcp_client=client, enable_fallback=False)
-    boundary_invoke = AsyncMock(wraps=integration.boundary.invoke)
-    integration.boundary.invoke = boundary_invoke
-    constructor = Mock(return_value=integration)
+
+    constructed_integrations: list[MCPIntegration] = []
+
+    def construct_integration(**kwargs: Any) -> MCPIntegration:
+        integration = MCPIntegration(mcp_client=client, **kwargs)
+        integration.boundary.invoke = AsyncMock(wraps=integration.boundary.invoke)
+        constructed_integrations.append(integration)
+        return integration
+
+    constructor = Mock(side_effect=construct_integration)
     monkeypatch.setattr(bridge_module, "MCPIntegration", constructor, raising=False)
     monkeypatch.setattr(
         bridge_module,
@@ -131,7 +137,6 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
         async def execute(self, task: AgentTask) -> AgentResult:
             result = await seen["mcp_integration"].search_academic_sources(
                 query="live path",
-                identity=ToolCallIdentity.from_agent_task(task),
             )
             return AgentResult(task.id, "success", result, 1.0, 0.0)
 
@@ -158,12 +163,29 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
             "organization_id": "org-1",
         },
     )
+    expected_identity = ToolCallIdentity.from_agent_task(task)
 
     result = await bridge._execute_plan_worker(worker, task)
 
+    assert len(constructed_integrations) == 1
+    integration = constructed_integrations[0]
     assert seen["mcp_integration"] is integration
-    constructor.assert_called_once_with(enable_fallback=False)
+    constructor.assert_called_once_with(
+        enable_fallback=False,
+        identity=expected_identity,
+    )
+    boundary_invoke = integration.boundary.invoke
     assert boundary_invoke.await_count == 1
+    assert boundary_invoke.await_args is not None
+    assert {
+        name: boundary_invoke.await_args.kwargs[name]
+        for name in ("run_id", "task_id", "attempt_id", "organization_id")
+    } == {
+        "run_id": "run-1",
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "organization_id": "org-1",
+    }
     assert result.output["success"] is True
 
 

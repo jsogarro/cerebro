@@ -21,6 +21,7 @@ from typing import Any
 from structlog import get_logger
 
 from src.agents.integrations.mcp_integration import MCPIntegration
+from src.agents.tools.mediation import ToolCallIdentity
 from src.core.config import settings
 from src.core.kernel import TypedRegistry
 from src.core.kernel.component_keys import (
@@ -631,7 +632,10 @@ class MASRSupervisorBridge:
             "tool_allowlist": list(worker.tool_allowlist),
         }
         if _mcp_tool_path_enabled():
-            worker_config["mcp_integration"] = MCPIntegration(enable_fallback=False)
+            worker_config["mcp_integration"] = MCPIntegration(
+                enable_fallback=False,
+                identity=ToolCallIdentity.from_agent_task(task),
+            )
         worker_instance = worker_class(
             gemini_service=self.gemini_service,
             cache_client=None,
