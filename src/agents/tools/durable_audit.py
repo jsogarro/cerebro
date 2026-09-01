@@ -354,9 +354,11 @@ class SessionToolAuditStore:
                     if (
                         invocation.status in _REPLAYABLE_TERMINAL_STATUSES
                         and invocation.completed_at is not None
-                        and existing.lease_expires_at is not None
-                        and not _lease_is_live(
-                            existing.lease_expires_at, invocation.completed_at
+                        and (
+                            existing.lease_expires_at is None
+                            or not _lease_is_live(
+                                existing.lease_expires_at, invocation.completed_at
+                            )
                         )
                     ):
                         terminal = await self._terminalize_expired_pending(

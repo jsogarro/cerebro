@@ -380,6 +380,65 @@ async def test_expired_owner_cannot_win_before_reconciliation(
 
 
 @pytest.mark.asyncio
+async def test_late_result_cannot_overwrite_legacy_null_lease_pending_row(
+    store: SessionToolAuditStore,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    pending = await _persist_pending(
+        store,
+        invocation_id="legacy-null-lease-late-result",
+        idempotency_key="legacy-null-lease-late-result-key",
+        lease_owner_id=None,
+        lease_expires_at=None,
+    )
+    late_success = _invocation(
+        invocation_id=pending.tool_invocation_id,
+        idempotency_key=pending.idempotency_key,
+        status=ToolInvocationStatus.SUCCEEDED,
+        lease_owner_id=None,
+        lease_expires_at=None,
+    )
+
+    with pytest.raises(ToolInvocationConflictError) as conflict:
+        await store.persist(
+            invocation=late_success,
+            events=(_completed_event(late_success),),
+            organization_id=ORG_ID,
+            capability_decision=_allow_decision(),
+        )
+
+    terminal = conflict.value.invocation
+    assert terminal.status is ToolInvocationStatus.FAILED
+    assert terminal.output is None
+    assert terminal.lease_owner_id is None
+    assert terminal.lease_expires_at is None
+    assert terminal.error_code == UNKNOWN_OUTCOME_ERROR
+
+    replayed = await store.find_invocation(
+        run_id=RUN_ID,
+        attempt_id=ATTEMPT_ID,
+        organization_id=ORG_ID,
+        idempotency_key=pending.idempotency_key,
+    )
+    assert replayed == terminal
+
+    row = await _row(session_factory, pending.tool_invocation_id)
+    assert row.status == ToolInvocationStatus.FAILED.value
+    assert row.output is None
+    assert row.lease_owner_id is None
+    assert row.lease_expires_at is None
+    assert row.error_code == UNKNOWN_OUTCOME_ERROR
+
+    events = await _event_rows(session_factory, pending.tool_invocation_id)
+    assert [event.event_type for event in events] == [
+        EVENT_REQUESTED,
+        EVENT_COMPLETED,
+    ]
+    assert events[-1].payload["outcome"] == ToolInvocationStatus.FAILED.value
+    assert events[-1].payload["error_code"] == UNKNOWN_OUTCOME_ERROR
+
+
+@pytest.mark.asyncio
 async def test_legacy_null_lease_is_terminalized(
     store: SessionToolAuditStore,
 ) -> None:
