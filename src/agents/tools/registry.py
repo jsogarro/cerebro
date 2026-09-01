@@ -166,6 +166,14 @@ class ToolRegistry:
                 )
             ]
         )
+        capability_scope = next(
+            (
+                grant.capability_scope
+                for grant in effective_grants
+                if grant.tool_name == name
+            ),
+            name,
+        )
 
         try:
             outcome = await self._boundary.invoke(
@@ -174,9 +182,7 @@ class ToolRegistry:
                 task_id=call_identity.task_id,
                 attempt_id=call_identity.attempt_id,
                 organization_id=call_identity.organization_id,
-                capability_scope=effective_grants[0].capability_scope
-                if effective_grants
-                else "",
+                capability_scope=capability_scope,
                 arguments=params,
                 input_trust=input_trust,
                 grants=effective_grants,
