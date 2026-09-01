@@ -24,6 +24,9 @@ class _MemoryTokenStore:
 
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
+        self.get_calls: list[str] = []
+        self.getdel_calls: list[str] = []
+        self.delete_calls: list[str] = []
 
     async def ping(self) -> bool:
         return True
@@ -33,9 +36,15 @@ class _MemoryTokenStore:
         return True
 
     async def get(self, key: str) -> str | None:
+        self.get_calls.append(key)
         return self.values.get(key)
 
+    async def getdel(self, key: str) -> str | None:
+        self.getdel_calls.append(key)
+        return self.values.pop(key, None)
+
     async def delete(self, key: str) -> int:
+        self.delete_calls.append(key)
         return int(self.values.pop(key, None) is not None)
 
 
@@ -135,6 +144,24 @@ async def test_email_verification_consumes_real_token_and_updates_user(
     assert user.is_verified is True
     assert database.commits == 1
     assert store.values == {}
+    assert store.getdel_calls == [f"{service.verification_token_prefix}{token}"]
+    assert store.get_calls == []
+    assert store.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reset_token_consumption_is_atomic_and_single_use() -> None:
+    """A reset token is read-and-deleted as one Redis operation."""
+    store = _MemoryTokenStore()
+    service = PasswordService(redis_client=store, check_breaches=False)
+    token = "reset-token"
+    await service.store_reset_token("user-123", token)
+
+    assert await service.validate_reset_token(token) == "user-123"
+    assert await service.validate_reset_token(token) is None
+    assert store.getdel_calls == [f"{service.reset_token_prefix}{token}"] * 2
+    assert store.get_calls == []
+    assert store.delete_calls == []
 
 
 @pytest.mark.asyncio

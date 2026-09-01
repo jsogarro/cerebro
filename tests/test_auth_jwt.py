@@ -21,6 +21,7 @@ async def redis_mock():
     mock.setex = AsyncMock()
     mock.get = AsyncMock()
     mock.get.return_value = None
+    mock.getdel = AsyncMock()
     mock.delete = AsyncMock()
     mock.exists = AsyncMock(return_value=0)
     mock.scan = AsyncMock(return_value=(0, []))
@@ -265,8 +266,24 @@ class TestJWTService:
         assert new_pair.access_token != initial_pair.access_token
         assert new_pair.refresh_token != initial_pair.refresh_token
 
-        # Verify old refresh token was deleted
-        redis_mock.delete.assert_called()
+        # Verify old refresh token was atomically consumed
+        redis_mock.getdel.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_refresh_tokens_rejects_missing_atomically_consumed_record(
+        self, jwt_service, redis_mock
+    ):
+        """A refresh record cannot be replayed after its atomic consume."""
+        token_pair = await jwt_service.generate_token_pair(
+            user_id="test-user-123", email="test@example.com"
+        )
+        redis_mock.getdel.return_value = None
+
+        with pytest.raises(JWTError, match="Refresh token not found or expired"):
+            await jwt_service.refresh_tokens(token_pair.refresh_token)
+
+        redis_mock.getdel.assert_awaited_once()
+        redis_mock.delete.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_refresh_tokens_device_mismatch(self, jwt_service):
@@ -297,6 +314,18 @@ class TestJWTService:
         redis_mock.setex.assert_called()
 
     @pytest.mark.asyncio
+    async def test_revoke_token_fails_when_blacklist_write_returns_false(
+        self, jwt_service, redis_mock
+    ):
+        """A false Redis write result is not treated as a successful logout."""
+        token_pair = await jwt_service.generate_token_pair(
+            user_id="test-user-123", email="test@example.com"
+        )
+        redis_mock.setex.return_value = False
+
+        assert await jwt_service.revoke_token(token_pair.access_token) is False
+
+    @pytest.mark.asyncio
     async def test_revoke_token_fails_without_blacklist_store(self):
         """Revocation must fail when no blacklist store is configured."""
         service = JWTService(redis_client=None)
@@ -307,6 +336,18 @@ class TestJWTService:
         success = await service.revoke_token(token_pair.access_token)
 
         assert success is False
+
+    @pytest.mark.asyncio
+    async def test_generate_token_pair_fails_when_refresh_write_returns_false(
+        self, jwt_service, redis_mock
+    ):
+        """Token issuance must not return an unpersisted refresh token."""
+        redis_mock.setex.return_value = False
+
+        with pytest.raises(JWTServiceUnavailable, match="Refresh token"):
+            await jwt_service.generate_token_pair(
+                user_id="test-user-123", email="test@example.com"
+            )
 
     @pytest.mark.asyncio
     async def test_revoke_all_user_tokens(self, jwt_service, redis_mock):

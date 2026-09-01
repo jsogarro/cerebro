@@ -325,11 +325,13 @@ class JWTService:
                 "organization_id": organization_id,
                 "created_at": now.isoformat(),
             }
-            await self.redis_client.setex(
+            stored = await self.redis_client.setex(
                 refresh_key,
                 timedelta(days=self.refresh_token_expire_days),
                 serialize_for_cache(refresh_data).decode("utf-8"),
             )
+            if stored is False:
+                raise JWTServiceUnavailableError("Refresh token could not be persisted")
 
         logger.info(
             "Generated token pair", user_id=user_id, jti=jti, device_id=device_id
@@ -464,13 +466,18 @@ class JWTService:
         # Check if refresh token exists in Redis
         if self.redis_client:
             refresh_key = f"{self.refresh_token_prefix}{refresh_payload.jti}"
-            refresh_data = await self.redis_client.get(refresh_key)
+            try:
+                # GETDEL makes refresh-token rotation a single-use operation
+                # even when two callers race on the same refresh token.
+                refresh_data = await self.redis_client.getdel(refresh_key)
+            except Exception as exc:
+                logger.error("Refresh token store unavailable", error=str(exc))
+                raise JWTServiceUnavailableError(
+                    "Refresh token store unavailable"
+                ) from exc
 
             if not refresh_data:
                 raise JWTError("Refresh token not found or expired")
-
-            # Revoke old refresh token
-            await self.redis_client.delete(refresh_key)
 
         # Get user details (would typically fetch from database)
         # For now, we'll use the sub from refresh token
@@ -520,7 +527,9 @@ class JWTService:
                 if exp:
                     ttl = max(0, exp - datetime.now(UTC).timestamp())
                     blacklist_key = f"{self.blacklist_prefix}{jti}"
-                    await self.redis_client.setex(blacklist_key, int(ttl), "1")
+                    stored = await self.redis_client.setex(blacklist_key, int(ttl), "1")
+                    if stored is False:
+                        return False
 
                 # If refresh token, also delete from refresh store
                 if payload.get("token_type") == "refresh":

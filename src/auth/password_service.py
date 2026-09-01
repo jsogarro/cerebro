@@ -398,19 +398,23 @@ class PasswordService:
     async def _consume_user_token(
         self, prefix: str, token: str, purpose: str
     ) -> str | None:
-        """Consume a token once, distinguishing invalid from unavailable."""
+        """Consume a token once, distinguishing invalid from unavailable.
+
+        Redis 7's ``GETDEL`` is intentionally required here. A separate
+        ``GET`` followed by ``DELETE`` permits two concurrent requests to
+        consume the same password or verification token.
+        """
         store = self._require_token_store()
         token_key = f"{prefix}{token}"
         try:
-            user_id = await store.get(token_key)
+            getdel = getattr(store, "getdel", None)
+            if getdel is None:
+                raise PasswordTokenStoreUnavailableError(
+                    f"{purpose} token store does not support atomic consumption"
+                )
+            user_id = await getdel(token_key)
             if not user_id:
                 return None
-
-            deleted = await store.delete(token_key)
-            if not deleted:
-                raise PasswordTokenStoreUnavailableError(
-                    f"{purpose} token could not be consumed"
-                )
         except PasswordTokenStoreUnavailableError:
             raise
         except Exception as exc:
