@@ -162,6 +162,8 @@ class ToolInvocationRepository:
             status_reason=invocation.status_reason,
             requested_at=invocation.requested_at,
             completed_at=invocation.completed_at,
+            lease_owner_id=invocation.lease_owner_id,
+            lease_expires_at=invocation.lease_expires_at,
         )
         self.session.add(row)
         await self.session.flush()
@@ -210,6 +212,8 @@ class ToolInvocationRepository:
         row.error_code = invocation.error_code
         row.status_reason = invocation.status_reason
         row.completed_at = invocation.completed_at
+        row.lease_owner_id = invocation.lease_owner_id
+        row.lease_expires_at = invocation.lease_expires_at
         await self.session.flush()
         await self.session.refresh(row)
         return row

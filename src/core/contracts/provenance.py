@@ -248,6 +248,8 @@ class ToolInvocation(ContractModel):
     status_reason: str | None = Field(default=None, min_length=1)
     requested_at: AwareDatetime
     completed_at: AwareDatetime | None = None
+    lease_owner_id: ContractId | None = None
+    lease_expires_at: AwareDatetime | None = None
 
     @model_validator(mode="after")
     def validate_status_fields(self) -> Self:
@@ -262,6 +264,17 @@ class ToolInvocation(ContractModel):
             raise ValueError("Only terminal tool invocations require completed_at")
         if self.completed_at is not None and self.completed_at < self.requested_at:
             raise ValueError("completed_at cannot precede requested_at")
+        pending = self.status in {
+            ToolInvocationStatus.REQUESTED,
+            ToolInvocationStatus.RUNNING,
+        }
+        has_lease_owner = self.lease_owner_id is not None
+        has_lease_expiry = self.lease_expires_at is not None
+        if pending and has_lease_owner != has_lease_expiry:
+            raise ValueError(
+                "pending tool invocations must provide both or neither "
+                "lease_owner_id and lease_expires_at"
+            )
         if self.status is ToolInvocationStatus.SUCCEEDED and (
             self.output is None or self.output_trust is None
         ):
