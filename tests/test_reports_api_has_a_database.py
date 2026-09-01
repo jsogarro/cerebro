@@ -14,6 +14,7 @@ from src.api.routes.reports import (
     ReportResponse,
     generate_report,
     get_report_services,
+    get_report_statistics,
 )
 from src.middleware.tenant_context import TenantContext
 from src.models.db.base import Base
@@ -97,6 +98,57 @@ async def test_generate_route_persists_real_pending_report(tmp_path, monkeypatch
         assert persisted.query == request.query
 
     await engine.dispose()
+
+
+async def test_statistics_route_uses_the_request_session_and_tenant_scope(
+    tmp_path, monkeypatch
+):
+    """The mounted statistics handler uses the live session-backed factory."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(
+            Base.metadata.create_all,
+            tables=[GeneratedReport.__table__, ReportFormat.__table__],
+        )
+
+    settings = ReportSettings(report_storage_path=str(tmp_path))
+    monkeypatch.setattr(
+        "src.api.routes.reports.create_report_settings", lambda: settings
+    )
+    user_id = uuid4()
+    organization_id = uuid4()
+    report_dir = tmp_path / str(uuid4())
+    report_dir.mkdir()
+    report_file = report_dir / "report.html"
+    report_file.write_bytes(b"request session report")
+
+    async with async_session() as session:
+        report_repo = ReportRepository(session)
+        report = await report_repo.create_report(
+            title="Request-backed report",
+            report_type="comprehensive",
+            query="request session",
+            user_id=user_id,
+            organization_id=organization_id,
+            generation_status="completed",
+            storage_path=str(report_dir),
+        )
+        report_dir.rename(tmp_path / str(report.id))
+        report.storage_path = str(tmp_path / str(report.id))
+        await session.commit()
+
+        response = await get_report_statistics(
+            user_id=None,
+            days=30,
+            session=session,
+            tenant_context=TenantContext(str(user_id), str(organization_id)),
+        )
+
+    await engine.dispose()
+
+    assert response.total_reports == 1
+    assert response.storage_statistics["total_files"] == 1
 
 
 async def test_report_repository_scopes_reads_search_stats_and_deletes_by_tenant():

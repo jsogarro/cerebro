@@ -407,6 +407,26 @@ class ReportRepository(BaseRepository[GeneratedReport]):
             "period_days": days,
         }
 
+    async def get_storage_paths(
+        self,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> list[tuple[UUID, str | None]]:
+        """Return tenant-scoped report IDs and their persisted storage paths."""
+        organization_uuid = _normalize_uuid(organization_id, "organization_id")
+        query = select(GeneratedReport.id, GeneratedReport.storage_path).where(
+            GeneratedReport.organization_id == organization_uuid,
+            GeneratedReport.deleted_at.is_(None),
+        )
+        if user_id is not None:
+            query = query.where(
+                GeneratedReport.user_id == _normalize_uuid(user_id, "user_id")
+            )
+
+        result = await self.session.execute(query)
+        return [(row[0], row[1]) for row in result.all()]
+
     async def update_report_status(
         self,
         report_id: UUID,

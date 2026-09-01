@@ -8,8 +8,10 @@ following functional programming principles with pure data operations.
 import hashlib
 import os
 import shutil
+import stat
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -524,7 +526,11 @@ class ReportStorageService:
 
         # Add file system statistics
         try:
-            storage_usage = self._calculate_storage_usage()
+            storage_paths = await self.report_repo.get_storage_paths(
+                organization_id=organization_id,
+                user_id=user_id,
+            )
+            storage_usage = self._calculate_storage_usage(storage_paths)
             stats.update(storage_usage)
         except Exception as e:
             logger.error(f"Failed to calculate storage usage: {e}")
@@ -538,18 +544,32 @@ class ReportStorageService:
 
         return stats
 
-    def _calculate_storage_usage(self) -> dict[str, Any]:
-        """Calculate total storage usage."""
+    def _calculate_storage_usage(
+        self, storage_paths: list[tuple[UUID, str | None]]
+    ) -> dict[str, Any]:
+        """Calculate storage usage from report paths owned by the tenant."""
         total_size = 0
         total_files = 0
 
-        if os.path.exists(self.settings.report_storage_path):
-            for root, _dirs, files in os.walk(self.settings.report_storage_path):
+        storage_root = Path(self.settings.report_storage_path).resolve(strict=False)
+        for report_id, stored_path in storage_paths:
+            report_path = self._safe_report_path(storage_root, report_id, stored_path)
+            if report_path is None:
+                continue
+
+            for root, dirs, files in os.walk(report_path, followlinks=False):
+                dirs[:] = [
+                    directory
+                    for directory in dirs
+                    if not os.path.islink(os.path.join(root, directory))
+                ]
                 for file in files:
                     file_path = os.path.join(root, file)
                     try:
-                        size = os.path.getsize(file_path)
-                        total_size += size
+                        file_stat = os.lstat(file_path)
+                        if not stat.S_ISREG(file_stat.st_mode):
+                            continue
+                        total_size += file_stat.st_size
                         total_files += 1
                     except OSError:
                         continue
@@ -561,6 +581,34 @@ class ReportStorageService:
             "total_files": total_files,
             "storage_path": self.settings.report_storage_path,
         }
+
+    @staticmethod
+    def _safe_report_path(
+        storage_root: Path,
+        report_id: UUID,
+        stored_path: str | None,
+    ) -> Path | None:
+        """Resolve one persisted report path without leaving its report directory."""
+        if not stored_path:
+            return None
+
+        try:
+            candidate = Path(stored_path)
+            if candidate.is_symlink():
+                return None
+
+            resolved_root = storage_root.resolve(strict=False)
+            resolved_candidate = candidate.resolve(strict=False)
+            expected_path = (resolved_root / str(report_id)).resolve(strict=False)
+            if resolved_candidate != expected_path:
+                return None
+            if not resolved_candidate.is_relative_to(resolved_root):
+                return None
+            if not resolved_candidate.is_dir() or resolved_candidate.is_symlink():
+                return None
+            return resolved_candidate
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
 
     async def cleanup_old_reports(
         self,
