@@ -102,6 +102,18 @@ so anything downstream can trust them.
 UNBOUND_RUN_PREFIX: Final[str] = "unbound-"
 """Marks a run identifier that was synthesized because none was supplied."""
 
+RUN_ID_CONTEXT_KEY: Final[str] = "run_id"
+"""Context key carrying the durable run identifier for an agent task."""
+
+TASK_ID_CONTEXT_KEY: Final[str] = "task_id"
+"""Context key carrying the durable task identifier for an agent task."""
+
+ATTEMPT_ID_CONTEXT_KEY: Final[str] = "attempt_id"
+"""Context key carrying the durable attempt identifier for an agent task."""
+
+ORGANIZATION_ID_CONTEXT_KEY: Final[str] = "organization_id"
+"""Context key carrying the durable organization identifier for an agent task."""
+
 DEFAULT_GRANT_TTL: Final[timedelta] = timedelta(minutes=5)
 """How long a self-issued grant stays valid.
 
@@ -133,6 +145,20 @@ class ToolCallIdentity:
     read as complete.
     """
 
+    @property
+    def durable(self) -> bool:
+        """Whether this identity has the complete caller-supplied scope.
+
+        ``bound`` only says that a caller supplied an identity-shaped value.
+        A durable identity additionally needs every lifecycle identifier and
+        its organization boundary; synthesized or partially scoped identities
+        must remain distinguishable from one that can resolve to durable rows.
+        """
+
+        return self.bound and all(
+            (self.run_id, self.task_id, self.attempt_id, self.organization_id)
+        )
+
     @classmethod
     def unbound(cls, *, label: str) -> ToolCallIdentity:
         """Return a marked identity for a caller that has none to give."""
@@ -159,20 +185,20 @@ class ToolCallIdentity:
         correlated records.
         """
 
-        task_id = str(getattr(task, "id", "") or "")
+        context = getattr(task, "context", None) or {}
+        task_id = str(context.get(TASK_ID_CONTEXT_KEY) or getattr(task, "id", "") or "")
         if not task_id:
             return cls.unbound(label="agent-task")
-        context = getattr(task, "context", None) or {}
-        run_id = str(context.get("run_id") or task_id)
-        attempt_id = str(context.get("attempt_id") or task_id)
+        run_id = str(context.get(RUN_ID_CONTEXT_KEY) or task_id)
+        attempt_id = str(context.get(ATTEMPT_ID_CONTEXT_KEY) or task_id)
         return cls(
             run_id=run_id,
             task_id=task_id,
             attempt_id=attempt_id,
             organization_id=organization_id
             or (
-                str(context["organization_id"])
-                if context.get("organization_id")
+                str(context[ORGANIZATION_ID_CONTEXT_KEY])
+                if context.get(ORGANIZATION_ID_CONTEXT_KEY)
                 else None
             ),
         )
@@ -360,8 +386,12 @@ def plain(value: Any) -> Any:
 
 
 __all__ = [
+    "ATTEMPT_ID_CONTEXT_KEY",
     "DEFAULT_GRANT_TTL",
+    "ORGANIZATION_ID_CONTEXT_KEY",
+    "RUN_ID_CONTEXT_KEY",
     "SELF_ISSUED_SCOPE_PREFIX",
+    "TASK_ID_CONTEXT_KEY",
     "UNBOUND_RUN_PREFIX",
     "InMemoryToolAuditStore",
     "SelfIssuedPolicy",

@@ -128,6 +128,38 @@ async def test_parallel_plan_executes_each_plan_local_worker_instance() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_worker_task_inherits_its_parent_s_durable_context() -> None:
+    worker_tasks: list[AgentTask] = []
+    parent_context = {
+        "run_id": "run-from-admission",
+        "task_id": "task-from-admission",
+        "attempt_id": "attempt-from-admission",
+        "organization_id": "org-from-admission",
+    }
+
+    async def execute(_worker: WorkerAssignment, task: AgentTask) -> AgentResult:
+        worker_tasks.append(task)
+        return AgentResult(task.id, "success", {}, 1.0, 0.0)
+
+    parent_task = AgentTask(
+        id="ephemeral-plan-task",
+        agent_type="execution_plan",
+        input_data={},
+        context=parent_context,
+    )
+    await ExecutionPlanTopologyExecutor(
+        worker_executor=execute,
+        capability_checker=lambda _: True,
+    ).execute(_plan(), parent_task)
+
+    assert len(worker_tasks) == 2
+    assert [worker_task.context for worker_task in worker_tasks] == [
+        parent_context,
+        parent_context,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_hierarchical_plan_obeys_worker_dependencies_without_supervisor_graph() -> (
     None
 ):

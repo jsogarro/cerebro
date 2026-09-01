@@ -40,6 +40,12 @@ from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 from ...agents.models import AgentTask
 from ...agents.supervisors.base_supervisor import BaseSupervisor
 from ...agents.supervisors.supervisor_factory import SupervisorFactory
+from ...agents.tools.mediation import (
+    ATTEMPT_ID_CONTEXT_KEY,
+    ORGANIZATION_ID_CONTEXT_KEY,
+    RUN_ID_CONTEXT_KEY,
+    TASK_ID_CONTEXT_KEY,
+)
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.execution_plan_compiler import ExecutionPlanCompiler
 from ...ai_brain.router.masr import MASRouter
@@ -610,6 +616,30 @@ class DirectExecutionService:
             updated_at=now,
         )
         return task, attempt
+
+    @staticmethod
+    def _durable_agent_task_context(
+        execution_status: ExecutionStatus,
+    ) -> dict[str, str]:
+        """Return the complete lifecycle identity admitted for this execution.
+
+        The plan-facing ``AgentTask`` has a process-local id of its own.  Tool
+        callers must instead receive the contracts cached after admission, and
+        memory-only executions must remain explicitly unscoped rather than
+        receiving identifiers made up at this boundary.
+        """
+        if (
+            execution_status._run is None
+            or execution_status._task is None
+            or execution_status._attempt is None
+        ):
+            return {}
+        return {
+            RUN_ID_CONTEXT_KEY: execution_status._run.run_id,
+            TASK_ID_CONTEXT_KEY: execution_status._task.task_id,
+            ATTEMPT_ID_CONTEXT_KEY: execution_status._attempt.attempt_id,
+            ORGANIZATION_ID_CONTEXT_KEY: execution_status._run.tenant_id,
+        }
 
     async def _admit_run(
         self,
@@ -1788,6 +1818,7 @@ class DirectExecutionService:
             plan_task = AgentTask(
                 id=f"research_{project.id}_{execution_status.execution_id}",
                 agent_type="execution_plan",
+                context=self._durable_agent_task_context(execution_status),
                 input_data={
                     "query": project.query.text,
                     "domains": list(execution_plan.routing_decision.domains),

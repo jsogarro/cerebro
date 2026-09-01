@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     # MCP Configuration
     MCP_PORT: int = 9000
     MCP_TOOLS_ENABLED: bool = True
+    MCP_TOOL_PATH_ENABLED: bool = False
 
     # Monitoring
     ENABLE_METRICS: bool = True

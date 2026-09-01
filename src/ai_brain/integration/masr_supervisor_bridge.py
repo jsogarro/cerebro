@@ -20,6 +20,8 @@ from typing import Any
 
 from structlog import get_logger
 
+from src.agents.integrations.mcp_integration import MCPIntegration
+from src.core.config import settings
 from src.core.kernel import TypedRegistry
 from src.core.kernel.component_keys import (
     AGENT_KEYS,
@@ -39,6 +41,15 @@ from .execution_plan_topology import (
 )
 
 logger = get_logger()
+
+
+def _mcp_tool_path_enabled() -> bool:
+    """Return whether plan workers receive the live MCP tool path.
+
+    The setting is intentionally read with a false default so deployments
+    whose settings model predates the flag keep the mediated path disabled.
+    """
+    return bool(getattr(settings, "MCP_TOOL_PATH_ENABLED", False))
 
 
 class SupervisorExecutionStatus(Enum):
@@ -615,13 +626,16 @@ class MASRSupervisorBridge:
         worker_class = self.component_registry.resolve(
             AGENT_KEYS[str(worker.worker_type)]
         )
+        worker_config: dict[str, Any] = {
+            "permission_scopes": list(worker.permission_scopes),
+            "tool_allowlist": list(worker.tool_allowlist),
+        }
+        if _mcp_tool_path_enabled():
+            worker_config["mcp_integration"] = MCPIntegration(enable_fallback=False)
         worker_instance = worker_class(
             gemini_service=self.gemini_service,
             cache_client=None,
-            config={
-                "permission_scopes": list(worker.permission_scopes),
-                "tool_allowlist": list(worker.tool_allowlist),
-            },
+            config=worker_config,
         )
         return await worker_instance.execute(task)
 

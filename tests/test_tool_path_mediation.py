@@ -19,18 +19,24 @@ removed:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+import src.ai_brain.integration.masr_supervisor_bridge as bridge_module
 from src.agents.integrations.mcp_integration import MCPIntegration
+from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.mediation import (
     InMemoryToolAuditStore,
     ToolCallIdentity,
     build_tool_boundary,
 )
 from src.agents.tools.registry import create_default_registry
+from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
+from src.core.config import Settings
+from src.core.contracts import WorkerAssignment
 from src.core.contracts.provenance import ToolInvocation, ToolInvocationStatus
 from src.core.contracts.trust import TrustClassification
 from src.core.tools import ToolOutcomeStatus
@@ -54,6 +60,205 @@ def _identity() -> ToolCallIdentity:
         attempt_id="attempt-1",
         organization_id="org-1",
     )
+
+
+def test_from_agent_task_prefers_the_context_task_id() -> None:
+    task = AgentTask(
+        id="ephemeral-agent-task-id",
+        agent_type="comparative_analysis",
+        input_data={},
+        context={
+            "run_id": "run-from-admission",
+            "task_id": "task-from-admission",
+            "attempt_id": "attempt-from-admission",
+            "organization_id": "org-from-admission",
+        },
+    )
+    assert task.id != task.context["task_id"]
+
+    identity = ToolCallIdentity.from_agent_task(task)
+
+    assert identity.run_id == "run-from-admission"
+    assert identity.task_id == "task-from-admission"
+    assert identity.attempt_id == "attempt-from-admission"
+    assert identity.organization_id == "org-from-admission"
+    assert identity.bound is True
+    assert identity.durable is True
+
+
+def test_an_identity_without_an_organization_is_not_durable() -> None:
+    identity = ToolCallIdentity(
+        run_id="run-1",
+        task_id="task-1",
+        attempt_id="attempt-1",
+    )
+    complete_identity = ToolCallIdentity(
+        run_id="run-1",
+        task_id="task-1",
+        attempt_id="attempt-1",
+        organization_id="org-1",
+    )
+
+    assert identity.bound is True
+    assert identity.durable is False
+    assert complete_identity.durable is True
+
+
+@pytest.mark.asyncio
+async def test_a_plan_worker_receives_a_live_mcp_integration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _healthy_client()
+    client.search_academic.return_value = {"success": True, "results": []}
+    integration = MCPIntegration(mcp_client=client, enable_fallback=False)
+    boundary_invoke = AsyncMock(wraps=integration.boundary.invoke)
+    integration.boundary.invoke = boundary_invoke
+    constructor = Mock(return_value=integration)
+    monkeypatch.setattr(bridge_module, "MCPIntegration", constructor, raising=False)
+    monkeypatch.setattr(
+        bridge_module,
+        "settings",
+        SimpleNamespace(MCP_TOOL_PATH_ENABLED=True),
+        raising=False,
+    )
+
+    seen: dict[str, Any] = {}
+
+    class Worker:
+        def __init__(self, **kwargs: Any) -> None:
+            seen["mcp_integration"] = kwargs["config"]["mcp_integration"]
+
+        async def execute(self, task: AgentTask) -> AgentResult:
+            result = await seen["mcp_integration"].search_academic_sources(
+                query="live path",
+                identity=ToolCallIdentity.from_agent_task(task),
+            )
+            return AgentResult(task.id, "success", result, 1.0, 0.0)
+
+    bridge = object.__new__(MASRSupervisorBridge)
+    bridge.component_registry = Mock()
+    bridge.component_registry.resolve.return_value = Worker
+    bridge.gemini_service = None
+    worker = WorkerAssignment(
+        worker_id="worker-1",
+        worker_type="comparative_analysis",
+        objective="Use the mediated path",
+        output_schema={},
+        permission_scopes=(),
+        tool_allowlist=(),
+    )
+    task = AgentTask(
+        id="worker-task",
+        agent_type="comparative_analysis",
+        input_data={},
+        context={
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "organization_id": "org-1",
+        },
+    )
+
+    result = await bridge._execute_plan_worker(worker, task)
+
+    assert seen["mcp_integration"] is integration
+    constructor.assert_called_once_with(enable_fallback=False)
+    assert boundary_invoke.await_count == 1
+    assert result.output["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_the_production_path_does_not_fabricate_on_a_degraded_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _healthy_client()
+    client.search_academic.side_effect = RuntimeError("academic service down")
+    client.analyze_statistics.side_effect = RuntimeError("statistics service down")
+    integration = MCPIntegration(mcp_client=client, enable_fallback=False)
+    constructor = Mock(return_value=integration)
+    monkeypatch.setattr(bridge_module, "MCPIntegration", constructor, raising=False)
+    monkeypatch.setattr(
+        bridge_module,
+        "settings",
+        SimpleNamespace(MCP_TOOL_PATH_ENABLED=True),
+        raising=False,
+    )
+
+    class Worker:
+        def __init__(self, **kwargs: Any) -> None:
+            self.integration = kwargs["config"]["mcp_integration"]
+
+        async def execute(self, task: AgentTask) -> AgentResult:
+            identity = ToolCallIdentity.from_agent_task(task)
+            sources = await self.integration.search_academic_sources(
+                query="degraded path", identity=identity
+            )
+            analysis = await self.integration.analyze_statistics(
+                "correlation", data=[1, 2], identity=identity
+            )
+            return AgentResult(
+                task.id,
+                "success",
+                {"sources": sources, "analysis": analysis},
+                1.0,
+                0.0,
+            )
+
+    bridge = object.__new__(MASRSupervisorBridge)
+    bridge.component_registry = Mock()
+    bridge.component_registry.resolve.return_value = Worker
+    bridge.gemini_service = None
+    worker = WorkerAssignment(
+        worker_id="worker-1",
+        worker_type="comparative_analysis",
+        objective="Exercise degraded MCP calls",
+        output_schema={},
+        permission_scopes=(),
+        tool_allowlist=(),
+    )
+    task = AgentTask(
+        id="worker-task",
+        agent_type="comparative_analysis",
+        input_data={},
+        context={
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "organization_id": "org-1",
+        },
+    )
+
+    result = await bridge._execute_plan_worker(worker, task)
+
+    assert result.output["sources"]["sources"] == []
+    assert result.output["analysis"]["analysis"] == {}
+    assert result.output["sources"]["fallback"] is False
+    assert result.output["analysis"]["fallback"] is False
+
+
+def test_the_tool_path_is_off_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(bridge_module, "settings", SimpleNamespace(), raising=False)
+
+    assert bridge_module._mcp_tool_path_enabled() is False
+
+
+def test_a_settings_field_defaults_off_and_accepts_explicit_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MCP_TOOL_PATH_ENABLED", raising=False)
+
+    default_settings = Settings(_env_file=None)
+    explicitly_enabled = Settings(_env_file=None, MCP_TOOL_PATH_ENABLED=True)
+
+    assert default_settings.MCP_TOOL_PATH_ENABLED is False
+    assert explicitly_enabled.MCP_TOOL_PATH_ENABLED is True
+
+    monkeypatch.setenv("MCP_TOOL_PATH_ENABLED", "true")
+    environment_enabled = Settings(_env_file=None)
+
+    assert environment_enabled.MCP_TOOL_PATH_ENABLED is True
 
 
 # ---------------------------------------------------------------------------
