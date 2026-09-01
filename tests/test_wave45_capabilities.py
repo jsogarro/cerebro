@@ -1,7 +1,10 @@
 """Wave 4.5B tests for capability grants issued from admitted plans."""
 
+import inspect
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+
+import pytest
 
 from src.core.capabilities.issuer import PlanCapabilityIssuer
 from src.core.contracts import (
@@ -139,3 +142,24 @@ def test_issue_returns_no_grants_for_a_plan_with_no_tools() -> None:
     )
 
     assert grants == ()
+
+
+def test_issue_cannot_take_invocation_data_as_authority() -> None:
+    parameters = inspect.signature(PlanCapabilityIssuer.issue).parameters
+
+    assert not {
+        "invocation",
+        "arguments",
+        "input_trust",
+        "tool_version",
+        "capability_scope",
+    }.intersection(parameters)
+
+    with pytest.raises(TypeError):
+        PlanCapabilityIssuer.issue(  # type: ignore[call-arg]
+            _binding(),
+            run_id="run-1",
+            task_id="task-1",
+            issued_at=NOW,
+            input_trust=TrustClassification.DERIVED_UNTRUSTED,
+        )

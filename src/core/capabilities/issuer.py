@@ -63,19 +63,20 @@ class PlanCapabilityIssuer:
         if issued_at.tzinfo is None or issued_at.utcoffset() is None:
             raise ValueError("issued_at must be timezone-aware")
 
-        expires_at = issued_at + PlanCapabilityIssuer._grant_ttl(budget)
-        if expires_at > deadline:
-            raise ValueError(
-                "budget-derived capability grant deadline exceeds the admitted plan deadline"
-            )
-
         grants: list[CapabilityGrant] = []
         seen_grant_ids: set[str] = set()
         for worker in workers:
             tools = tuple(str(tool) for tool in worker.tool_allowlist)
+            if not tools:
+                continue
             if tools and not worker.permission_scopes:
                 raise ValueError(
                     f"worker {worker.worker_id!r} declares tools without a permission scope"
+                )
+            expires_at = issued_at + PlanCapabilityIssuer._grant_ttl(budget)
+            if expires_at > deadline:
+                raise ValueError(
+                    "budget-derived capability grant deadline exceeds the admitted plan deadline"
                 )
             for tool_name in tools:
                 grant_id = uuid.uuid4().hex
