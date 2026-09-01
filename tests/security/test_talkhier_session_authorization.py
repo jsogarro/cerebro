@@ -10,6 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from src.api.routes import talkhier_api
+from src.api.services.talkhier_session_manager import TalkHierSessionManager
 from src.api.services.talkhier_session_service import (
     TalkHierSession,
     TalkHierSessionService,
@@ -21,6 +22,7 @@ from src.models.talkhier_api_models import (
     ConsensusCheckRequest,
     ConsensusType,
     CoordinationRequest,
+    CoordinationStatus,
     MessageRole,
     ParticipantInfo,
     ProtocolType,
@@ -191,6 +193,174 @@ async def test_rest_coordination_rejects_any_foreign_session_id() -> None:
         )
 
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_analytics_endpoint_passes_authenticated_tenant_to_manager() -> None:
+    analytics = {
+        "total_sessions": 1,
+        "active_sessions": 1,
+        "average_rounds": 1.0,
+        "average_quality": 0.9,
+        "average_consensus": 0.9,
+        "success_rate": 1.0,
+        "timeout_rate": 0.0,
+        "protocol_usage": {"standard": 1},
+        "strategy_performance": {},
+        "quality_trends": [],
+        "consensus_patterns": {},
+    }
+
+    with patch.object(
+        talkhier_api.session_manager,
+        "get_analytics",
+        new=AsyncMock(return_value=analytics),
+    ) as get_analytics:
+        response = await talkhier_api.get_protocol_analytics(
+            tenant_context=OWNER,
+            time_range="24h",
+            protocol_type=None,
+            min_quality=None,
+        )
+
+    assert response.total_sessions == 1
+    get_analytics.assert_awaited_once_with(
+        time_range="24h",
+        protocol_type=None,
+        min_quality=None,
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_manager_analytics_requires_both_tenant_identities() -> None:
+    manager = TalkHierSessionManager()
+    await manager.register_session(
+        "session-owned",
+        {},
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+    await manager.register_session(
+        "session-same-org",
+        {},
+        user_id=SAME_TENANT_INTRUDER.user_id,
+        organization_id=SAME_TENANT_INTRUDER.organization_id,
+    )
+    await manager.register_session(
+        "session-other-org",
+        {},
+        user_id=CROSS_TENANT_INTRUDER.user_id,
+        organization_id=CROSS_TENANT_INTRUDER.organization_id,
+    )
+
+    analytics = await manager.get_analytics(
+        time_range="24h",
+        protocol_type=None,
+        min_quality=None,
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+
+    assert analytics["total_sessions"] == 1
+
+    with pytest.raises(ValueError, match="Both user and organization are required"):
+        await manager.get_analytics(user_id="", organization_id=OWNER.organization_id)
+
+
+@pytest.mark.asyncio
+async def test_manager_rejects_incomplete_identity_when_binding_records() -> None:
+    manager = TalkHierSessionManager()
+
+    with pytest.raises(ValueError, match="Both user and organization are required"):
+        await manager.register_session(
+            "session-invalid",
+            {},
+            user_id="",
+            organization_id=OWNER.organization_id,
+        )
+
+    with pytest.raises(ValueError, match="Both user and organization are required"):
+        await manager.log_analytics_event(
+            "session_created",
+            "session-invalid",
+            {},
+            datetime.now(UTC),
+            user_id=OWNER.user_id,
+            organization_id="",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("intruder", [SAME_TENANT_INTRUDER, CROSS_TENANT_INTRUDER])
+async def test_manager_coordination_status_rejects_other_tenants(
+    intruder: TenantContext,
+) -> None:
+    manager = TalkHierSessionManager()
+    await manager.register_session(
+        "session-owned",
+        {},
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+    await manager.register_session(
+        "session-owned-2",
+        {},
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+    request = CoordinationRequest(
+        session_ids=["session-owned", "session-owned-2"],
+        coordination_type="parallel",
+    )
+    coordination = await manager.coordinate_sessions(
+        request,
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
+
+    with pytest.raises(ValueError, match="not found"):
+        await manager.get_coordination_status(
+            coordination.coordination_id,
+            user_id=intruder.user_id,
+            organization_id=intruder.organization_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_rest_coordination_passes_authenticated_tenant_to_manager() -> None:
+    service = TalkHierSessionService()
+    service.sessions["session-owned"] = _session()
+    service.sessions["session-owned-2"] = _session("session-owned-2")
+    status = CoordinationStatus(
+        coordination_id="coord-owned",
+        session_statuses={"session-owned": SessionStatus.ACTIVE},
+        overall_progress=0.0,
+        aggregated_quality=0.0,
+    )
+    request = CoordinationRequest(
+        session_ids=["session-owned", "session-owned-2"],
+        coordination_type="parallel",
+    )
+
+    with patch.object(
+        talkhier_api.session_manager,
+        "coordinate_sessions",
+        new=AsyncMock(return_value=status),
+    ) as coordinate_sessions:
+        response = await talkhier_api.coordinate_multiple_sessions(
+            request,
+            talkhier_service=service,
+            tenant_context=OWNER,
+        )
+
+    assert response.coordination_id == "coord-owned"
+    coordinate_sessions.assert_awaited_once_with(
+        request,
+        user_id=OWNER.user_id,
+        organization_id=OWNER.organization_id,
+    )
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,8 @@ class SessionMetrics:
     """Metrics for a single session"""
 
     session_id: str
+    user_id: str | None = None
+    organization_id: str | None = None
     protocol_type: ProtocolType | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -47,6 +49,8 @@ class CoordinationGroup:
     session_ids: list[str]
     coordination_type: str
     created_at: datetime
+    user_id: str | None = None
+    organization_id: str | None = None
     status: str = "active"
     shared_context: dict[str, Any] = field(default_factory=dict)
     aggregated_results: dict[str, Any] | None = None
@@ -71,10 +75,20 @@ class TalkHierSessionManager:
             }
         )
 
-    async def register_session(self, session_id: str, config: dict[str, Any]) -> None:
+    async def register_session(
+        self,
+        session_id: str,
+        config: dict[str, Any],
+        *,
+        user_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> None:
         """Register a new session for tracking"""
+        self._validate_identity(user_id, organization_id)
         self.sessions[session_id] = SessionMetrics(
             session_id=session_id,
+            user_id=user_id,
+            organization_id=organization_id,
             protocol_type=config.get("protocol_type"),
             started_at=datetime.now(UTC),
         )
@@ -112,9 +126,23 @@ class TalkHierSessionManager:
             metrics.final_consensus = round_data.get("consensus", 0.0)
 
     async def coordinate_sessions(
-        self, request: CoordinationRequest
+        self,
+        request: CoordinationRequest,
+        *,
+        user_id: str | None = None,
+        organization_id: str | None = None,
     ) -> CoordinationStatus:
         """Coordinate multiple sessions"""
+        self._validate_identity(user_id, organization_id)
+
+        if user_id is not None and organization_id is not None:
+            for session_id in request.session_ids:
+                metrics = self.sessions.get(session_id)
+                if metrics is None or not self._matches_identity(
+                    metrics, user_id, organization_id
+                ):
+                    raise ValueError(f"Session {session_id} not found")
+
         coordination_id = f"coord_{datetime.now(UTC).timestamp()}"
 
         # Create coordination group
@@ -123,6 +151,8 @@ class TalkHierSessionManager:
             session_ids=request.session_ids,
             coordination_type=request.coordination_type,
             created_at=datetime.now(UTC),
+            user_id=user_id,
+            organization_id=organization_id,
         )
 
         self.coordinations[coordination_id] = coordination
@@ -144,12 +174,28 @@ class TalkHierSessionManager:
             coordination_insights=[],
         )
 
-    async def get_coordination_status(self, coordination_id: str) -> CoordinationStatus:
+    async def get_coordination_status(
+        self,
+        coordination_id: str,
+        *,
+        user_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> CoordinationStatus:
         """Get status of coordinated sessions"""
+        self._validate_identity(user_id, organization_id)
         if coordination_id not in self.coordinations:
             raise ValueError(f"Coordination {coordination_id} not found")
 
         coordination = self.coordinations[coordination_id]
+        if (
+            user_id is not None
+            and organization_id is not None
+            and (
+                coordination.user_id != user_id
+                or coordination.organization_id != organization_id
+            )
+        ):
+            raise ValueError(f"Coordination {coordination_id} not found")
 
         # Calculate overall progress
         total_progress = 0.0
@@ -185,8 +231,12 @@ class TalkHierSessionManager:
         time_range: str = "24h",
         protocol_type: ProtocolType | None = None,
         min_quality: float | None = None,
+        *,
+        user_id: str | None = None,
+        organization_id: str | None = None,
     ) -> dict[str, Any]:
         """Get aggregated analytics"""
+        self._validate_identity(user_id, organization_id)
         # Parse time range
         cutoff_time = self._parse_time_range(time_range)
 
@@ -197,6 +247,10 @@ class TalkHierSessionManager:
             if (
                 not cutoff_time
                 or (metrics.started_at and metrics.started_at >= cutoff_time)
+            )
+            and (
+                user_id is None
+                or self._matches_identity(metrics, user_id, organization_id)
             )
             and (not protocol_type or metrics.protocol_type == protocol_type)
             and (not min_quality or metrics.final_quality >= min_quality)
@@ -265,20 +319,58 @@ class TalkHierSessionManager:
         session_id: str,
         metrics: dict[str, Any],
         timestamp: datetime,
+        *,
+        user_id: str | None = None,
+        organization_id: str | None = None,
     ) -> None:
         """Log an analytics event"""
+        self._validate_identity(user_id, organization_id)
+
+        session_metrics = self.sessions.get(session_id)
+        if session_metrics is not None:
+            if user_id is None and organization_id is None:
+                user_id = session_metrics.user_id
+                organization_id = session_metrics.organization_id
+            elif not self._matches_identity(session_metrics, user_id, organization_id):
+                raise ValueError(f"Session {session_id} not found")
+        elif user_id is not None:
+            raise ValueError(f"Session {session_id} not found")
+
         self.analytics_events.append(
             {
                 "event_type": event_type,
                 "session_id": session_id,
                 "metrics": metrics,
                 "timestamp": timestamp,
+                "user_id": user_id,
+                "organization_id": organization_id,
             }
         )
 
         # Keep only recent events (e.g., last 10000)
         if len(self.analytics_events) > 10000:
             self.analytics_events = self.analytics_events[-10000:]
+
+    @staticmethod
+    def _validate_identity(user_id: str | None, organization_id: str | None) -> None:
+        """Reject partial or empty tenant identities without breaking internals."""
+        if user_id is None and organization_id is None:
+            return
+        if not user_id or not organization_id:
+            raise ValueError("Both user and organization are required")
+
+    @staticmethod
+    def _matches_identity(
+        metrics: SessionMetrics,
+        user_id: str | None,
+        organization_id: str | None,
+    ) -> bool:
+        return (
+            user_id is not None
+            and organization_id is not None
+            and metrics.user_id == user_id
+            and metrics.organization_id == organization_id
+        )
 
     async def get_health_status(self) -> dict[str, Any]:
         """Get health status of session manager"""

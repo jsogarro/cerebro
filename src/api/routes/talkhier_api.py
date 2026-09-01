@@ -171,6 +171,8 @@ async def create_refinement_session(
                 "max_rounds": request.max_rounds,
                 "quality_threshold": request.quality_threshold,
             },
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
         )
 
         # Log analytics
@@ -182,6 +184,7 @@ async def create_refinement_session(
                 "strategy": request.refinement_strategy.value,
                 "participants": len(session_response.participants),
             },
+            tenant_context=tenant_context,
         )
 
         return session_response
@@ -227,6 +230,7 @@ async def get_session_status(
             "session_accessed",
             session_id,
             {"current_round": status_response.current_round},
+            tenant_context=tenant_context,
         )
 
         return status_response
@@ -315,6 +319,7 @@ async def execute_refinement_round(
                 "consensus": round_response.consensus_score,
                 "continue": round_response.continue_refinement,
             },
+            tenant_context=tenant_context,
         )
 
         return round_response
@@ -385,6 +390,7 @@ async def check_consensus_status(
                 "score": consensus_result.consensus_score,
                 "type": consensus_result.consensus_type.value,
             },
+            tenant_context=tenant_context,
         )
 
         return consensus_result
@@ -475,6 +481,7 @@ async def close_session(
                 "final_quality": close_response.final_quality,
                 "final_consensus": close_response.final_consensus,
             },
+            tenant_context=tenant_context,
         )
 
         return close_response
@@ -616,6 +623,7 @@ async def validate_communication_structure(
 
 @router.get("/analytics", response_model=AnalyticsResponse)
 async def get_protocol_analytics(
+    tenant_context: TenantContextDependency,
     time_range: str | None = Query("24h", description="Time range (1h, 24h, 7d, 30d)"),
     protocol_type: ProtocolType | None = Query(
         None, description="Filter by protocol type"
@@ -650,6 +658,8 @@ async def get_protocol_analytics(
             time_range=time_range or "24h",
             protocol_type=protocol_type,
             min_quality=min_quality,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
         )
 
         # Add protocol-specific insights
@@ -955,7 +965,11 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
 
             # Send initial status
             if coordination_id is not None:
-                status = await session_manager.get_coordination_status(coordination_id)
+                status = await session_manager.get_coordination_status(
+                    coordination_id,
+                    user_id=tenant_context.user_id,
+                    organization_id=tenant_context.organization_id,
+                )
             await websocket.send_json(
                 {"type": "coordination_status", "data": status.dict()}
             )
@@ -967,7 +981,11 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
             elif data.get("type") == "get_status" and coordination_id is not None:
-                status = await session_manager.get_coordination_status(coordination_id)
+                status = await session_manager.get_coordination_status(
+                    coordination_id,
+                    user_id=tenant_context.user_id,
+                    organization_id=tenant_context.organization_id,
+                )
                 await websocket.send_json(
                     {"type": "status_update", "data": status.dict()}
                 )
@@ -1042,7 +1060,11 @@ async def coordinate_multiple_sessions(
             )
 
         # Create coordination through session manager
-        coordination_status = await session_manager.coordinate_sessions(request)
+        coordination_status = await session_manager.coordinate_sessions(
+            request,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
+        )
 
         # Log coordination
         logger.info(
@@ -1070,7 +1092,11 @@ async def coordinate_multiple_sessions(
 
 
 async def _log_session_analytics(
-    event_type: str, session_id: str, metrics: dict[str, Any]
+    event_type: str,
+    session_id: str,
+    metrics: dict[str, Any],
+    *,
+    tenant_context: TenantContext | None = None,
 ) -> None:
     """Log session analytics for monitoring"""
     try:
@@ -1079,6 +1105,10 @@ async def _log_session_analytics(
             session_id=session_id,
             metrics=metrics,
             timestamp=datetime.now(UTC),
+            user_id=tenant_context.user_id if tenant_context else None,
+            organization_id=(
+                tenant_context.organization_id if tenant_context else None
+            ),
         )
     except Exception as e:
         logger.warning(
