@@ -605,6 +605,77 @@ async def test_terminal_transition_reconciles_after_ambiguous_commit(
 
 
 @pytest.mark.asyncio
+async def test_nonterminal_transition_reconciles_after_ambiguous_commit(
+    test_engine: AsyncEngine,
+) -> None:
+    """A post-commit error does not duplicate a non-terminal transition."""
+    commit_state = _AmbiguousCommitState()
+    session_factory = sessionmaker(
+        test_engine,
+        class_=_AmbiguousCommitSession,
+        expire_on_commit=False,
+        commit_state=commit_state,
+    )
+    run_id = "persist-run-ambiguous-started"
+    binding = _make_binding(run_id)
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): binding}
+    )
+    service = _make_service(session_factory=session_factory, resolver=resolver)
+    service.durable_write_max_attempts = 2
+    service.durable_write_retry_seconds = 0
+    project = _project()
+    execution_status = ExecutionStatus(
+        execution_id="exec-ambiguous-started",
+        project_id=str(project.id),
+        status="pending",
+    )
+
+    await service._admit_run(execution_status, binding, project)
+    commit_state.raise_after_next_commit = True
+    outcome = await service._persist_transition(
+        execution_status,
+        run_target=RunStatus.RUNNING,
+        task_target=TaskStatus.RUNNING,
+        attempt_target=AttemptStatus.RUNNING,
+        event_type="run.started",
+        payload={},
+    )
+    await service.close()
+
+    assert commit_state.raised_count == 1
+    assert outcome is DurableWriteOutcome.RECORDED
+
+    async with session_factory() as session:
+        lifecycle_repo = RunLifecycleRepository(session)
+        run_row = await lifecycle_repo.get_run(run_id, organization_id=ORG_ID)
+        assert run_row is not None
+        assert run_row.status == RunStatus.RUNNING.value
+        task_rows = await lifecycle_repo.get_tasks_for_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert len(task_rows) == 1
+        assert task_rows[0].status == TaskStatus.RUNNING.value
+        attempt_rows = await lifecycle_repo.get_attempts_for_task(
+            task_rows[0].task_id, organization_id=ORG_ID
+        )
+        assert len(attempt_rows) == 1
+        assert attempt_rows[0].status == AttemptStatus.RUNNING.value
+        events = await RunEventRepository(session).read_events_after(
+            run_id, after_sequence=0, organization_id=ORG_ID
+        )
+
+    assert [event.event_type for event in events] == [
+        "run.admitted",
+        "run.started",
+    ]
+    started_events = [event for event in events if event.event_type == "run.started"]
+    assert len(started_events) == 1
+    assert started_events[0].event_id == started_events[0].deduplication_key
+    assert len({event.deduplication_key for event in events}) == len(events)
+
+
+@pytest.mark.asyncio
 async def test_final_report_and_claims_roll_back_with_terminal_transition(
     test_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:

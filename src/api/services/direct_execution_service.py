@@ -250,6 +250,7 @@ class _DurableTransition:
     event_type: str
     payload: dict[str, Any]
     occurred_at: datetime
+    event_id: str
     journaled_result: dict[str, Any] | None = None
     final_report: _FinalReport | None = None
 
@@ -904,6 +905,7 @@ class DirectExecutionService:
         session: Any,
         *,
         run: Run,
+        event_id: str | None = None,
         event_type: str,
         payload: dict[str, Any],
         occurred_at: datetime,
@@ -917,7 +919,8 @@ class DirectExecutionService:
         ``ConnectionManager.broadcast_to_all``, so this deliberately does not
         request one.
         """
-        event_id = str(uuid.uuid4())
+        if event_id is None:
+            event_id = str(uuid.uuid4())
         await RunEventRepository(session).append_event(
             run_id=run.run_id,
             organization_id=run.tenant_id,
@@ -1072,6 +1075,38 @@ class DirectExecutionService:
             resolved_at=resolved_at,
         )
 
+    @staticmethod
+    def _transition_event_id(
+        *,
+        run: Run,
+        task: Task | None,
+        attempt: Attempt | None,
+        event_type: str,
+    ) -> str:
+        """Derive one event identity for one logical lifecycle transition.
+
+        The identity describes the transition target rather than the
+        wall-clock write attempt. Re-planning the same transition after an
+        ambiguous write therefore refers to the same append-only event.
+        """
+        identity = json.dumps(
+            {
+                "tenant_id": run.tenant_id,
+                "run_id": run.run_id,
+                "run_status": run.status.value,
+                "task_id": task.task_id if task is not None else None,
+                "task_status": task.status.value if task is not None else None,
+                "attempt_id": attempt.attempt_id if attempt is not None else None,
+                "attempt_status": (
+                    attempt.status.value if attempt is not None else None
+                ),
+                "event_type": event_type,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"direct-transition:{identity}"))
+
     async def _persist_transition(
         self,
         execution_status: ExecutionStatus,
@@ -1151,6 +1186,12 @@ class DirectExecutionService:
             event_type=event_type,
             payload=payload,
             occurred_at=now,
+            event_id=self._transition_event_id(
+                run=run,
+                task=task,
+                attempt=attempt,
+                event_type=event_type,
+            ),
             journaled_result=journaled_result,
             final_report=final_report,
         )
@@ -1201,87 +1242,69 @@ class DirectExecutionService:
     async def _terminal_transition_already_committed(
         self, session: Any, transition: _DurableTransition
     ) -> bool:
-        """Recognize a successful terminal transaction after an ambiguous commit."""
-        final_report = transition.final_report
-        if final_report is None:
-            return False
-
+        """Recognize a complete lifecycle transaction after an ambiguous commit."""
         run = transition.run
         lifecycle_repo = RunLifecycleRepository(session)
         run_row = await lifecycle_repo.get_run(
             run.run_id, organization_id=run.tenant_id
         )
-        if run_row is None or run_row.status != run.status.value:
+        if (
+            run_row is None
+            or run_row.run_id != run.run_id
+            or run_row.tenant_id != run.tenant_id
+            or run_row.organization_id is None
+            or str(run_row.organization_id) != run.tenant_id
+            or run_row.status != run.status.value
+        ):
             return False
 
+        task_row: Any | None = None
         if transition.task is not None:
             task_rows = await lifecycle_repo.get_tasks_for_run(
                 run.run_id, organization_id=run.tenant_id
             )
-            if not any(
-                row.task_id == transition.task.task_id
-                and row.status == transition.task.status.value
+            matching_task_rows = [
+                row
                 for row in task_rows
-            ):
+                if (
+                    row.task_id == transition.task.task_id
+                    and row.run_id == run.run_id
+                    and row.organization_id is not None
+                    and str(row.organization_id) == run.tenant_id
+                    and row.status == transition.task.status.value
+                )
+            ]
+            if len(matching_task_rows) != 1:
                 return False
+            task_row = matching_task_rows[0]
+
+        attempt_row: Any | None = None
         if transition.attempt is not None:
             attempt_rows = await lifecycle_repo.get_attempts_for_task(
                 transition.attempt.task_id, organization_id=run.tenant_id
             )
-            if not any(
-                row.attempt_id == transition.attempt.attempt_id
-                and row.status == transition.attempt.status.value
+            matching_attempt_rows = [
+                row
                 for row in attempt_rows
-            ):
-                return False
-
-        artifact = await ArtifactRepository(session).get_artifact(
-            final_report.artifact.artifact_id, organization_id=run.tenant_id
-        )
-        if artifact is None:
-            return False
-
-        resolution = self._resolve_final_report_claims(
-            artifact,
-            final_report=final_report,
-            run=run,
-            resolved_at=transition.occurred_at,
-        )
-        claim_repo = ClaimSupportRepository(session)
-        existing_rows: list[Any] = []
-        for support in resolution.supports:
-            row = await claim_repo.get_claim_support(
-                support.claim_support_id, organization_id=run.tenant_id
-            )
-            if row is None:
-                if existing_rows:
-                    raise ValueError(
-                        "persisted final report has a partial claim-support resolution"
-                    )
-                return False
-            existing_rows.append(row)
-
-        for expected, actual in zip(resolution.supports, existing_rows, strict=True):
-            if (
-                actual.claim_support_id != expected.claim_support_id
-                or actual.run_id != expected.run_id
-                or actual.artifact_id != expected.artifact_id
-                or actual.claim_id != expected.claim_id
-                or actual.claim_text != expected.claim_text
-                or actual.status != expected.status.value
-                or tuple(actual.evidence_ids or ()) != expected.evidence_ids
-                or actual.absent_evidence_reason
-                != (
-                    expected.absent_evidence_reason.value
-                    if expected.absent_evidence_reason
-                    else None
+                if (
+                    row.attempt_id == transition.attempt.attempt_id
+                    and row.task_id == transition.attempt.task_id
+                    and row.run_id == run.run_id
+                    and row.organization_id is not None
+                    and str(row.organization_id) == run.tenant_id
+                    and row.status == transition.attempt.status.value
                 )
-                or actual.evaluator_id != expected.evaluator_id
-                or actual.evaluator_version != expected.evaluator_version
-                or actual.producer_kind != expected.producer_kind.value
-                or actual.explanation != expected.explanation
+            ]
+            if len(matching_attempt_rows) != 1:
+                return False
+            attempt_row = matching_attempt_rows[0]
+            if task_row is not None and attempt_row.task_id != task_row.task_id:
+                return False
+            if (
+                transition.journaled_result is not None
+                and attempt_row.journaled_result != transition.journaled_result
             ):
-                raise ValueError("persisted claim support does not match resolution")
+                return False
 
         events = await RunEventRepository(session).read_events_after(
             run.run_id,
@@ -1289,12 +1312,84 @@ class DirectExecutionService:
             limit=100_000,
             organization_id=run.tenant_id,
         )
-        if not any(
-            event.event_type == transition.event_type
-            and event.payload == transition.payload
-            for event in events
+        matching_events = [
+            event for event in events if event.event_id == transition.event_id
+        ]
+        if not matching_events:
+            return False
+        if len(matching_events) != 1:
+            raise ValueError(
+                "persisted lifecycle transition has duplicate event identities"
+            )
+        event = matching_events[0]
+        if (
+            event.organization_id is None
+            or str(event.organization_id) != run.tenant_id
+            or event.run_id != run.run_id
+            or event.aggregate_type != "run"
+            or event.aggregate_id != run.run_id
+            or event.deduplication_key != transition.event_id
+            or event.event_type != transition.event_type
+            or event.payload != transition.payload
         ):
-            raise ValueError("persisted final report transaction has no terminal event")
+            raise ValueError("persisted lifecycle transition event does not match")
+
+        final_report = transition.final_report
+        if final_report is not None:
+            artifact = await ArtifactRepository(session).get_artifact(
+                final_report.artifact.artifact_id, organization_id=run.tenant_id
+            )
+            if artifact is None:
+                return False
+
+            resolution = self._resolve_final_report_claims(
+                artifact,
+                final_report=final_report,
+                run=run,
+                resolved_at=transition.occurred_at,
+            )
+            claim_repo = ClaimSupportRepository(session)
+            existing_rows: list[Any] = []
+            for support in resolution.supports:
+                row = await claim_repo.get_claim_support(
+                    support.claim_support_id, organization_id=run.tenant_id
+                )
+                if row is None:
+                    if existing_rows:
+                        raise ValueError(
+                            "persisted final report has a partial claim-support resolution"
+                        )
+                    return False
+                existing_rows.append(row)
+
+            for expected, actual in zip(
+                resolution.supports, existing_rows, strict=True
+            ):
+                if (
+                    actual.organization_id is None
+                    or str(actual.organization_id) != run.tenant_id
+                    or actual.claim_support_id != expected.claim_support_id
+                    or actual.run_id != expected.run_id
+                    or actual.artifact_id != expected.artifact_id
+                    or actual.claim_id != expected.claim_id
+                    or actual.claim_text != expected.claim_text
+                    or actual.status != expected.status.value
+                    or tuple(actual.evidence_ids or ()) != expected.evidence_ids
+                    or actual.absent_evidence_reason
+                    != (
+                        expected.absent_evidence_reason.value
+                        if expected.absent_evidence_reason
+                        else None
+                    )
+                    or actual.evaluator_id != expected.evaluator_id
+                    or actual.evaluator_version != expected.evaluator_version
+                    or actual.producer_kind != expected.producer_kind.value
+                    or actual.explanation != expected.explanation
+                ):
+                    raise ValueError(
+                        "persisted claim support does not match resolution"
+                    )
+
         return True
 
     async def _commit_transition(self, transition: _DurableTransition) -> bool:
@@ -1356,6 +1451,7 @@ class DirectExecutionService:
                         await self._append_event(
                             session,
                             run=run,
+                            event_id=transition.event_id,
                             event_type=transition.event_type,
                             payload=transition.payload,
                             occurred_at=transition.occurred_at,
@@ -1821,9 +1917,9 @@ class DirectExecutionService:
             started_at=started_at,
             completed_at=aware(run_row.completed_at),
             run_id=run_row.run_id,
-            organization_id=str(run_row.organization_id)
-            if run_row.organization_id
-            else None,
+            organization_id=(
+                str(run_row.organization_id) if run_row.organization_id else None
+            ),
         )
         execution_status._run = run
         execution_status._task = task
