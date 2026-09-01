@@ -26,7 +26,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 import src.ai_brain.integration.masr_supervisor_bridge as bridge_module
-from src.agents.integrations.mcp_integration import MCPIntegration
+from src.agents.integrations.mcp_integration import MCP_MAX_INPUT_TRUST, MCPIntegration
+from src.agents.integrations.mcp_tool_specs import (
+    MCP_SENSITIVITY,
+    TOOL_ACADEMIC_SEARCH,
+    TOOL_VERSION,
+)
 from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.mediation import (
     InMemoryToolAuditStore,
@@ -35,8 +40,9 @@ from src.agents.tools.mediation import (
 )
 from src.agents.tools.registry import create_default_registry
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
+from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
 from src.core.config import Settings
-from src.core.contracts import WorkerAssignment
+from src.core.contracts import CapabilityGrant, WorkerAssignment
 from src.core.contracts.provenance import ToolInvocation, ToolInvocationStatus
 from src.core.contracts.trust import TrustClassification
 from src.core.tools import ToolOutcomeStatus
@@ -58,7 +64,6 @@ def _identity() -> ToolCallIdentity:
         run_id="run-1",
         task_id="task-1",
         attempt_id="attempt-1",
-        organization_id="org-1",
     )
 
 
@@ -161,6 +166,21 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
             "task_id": "task-1",
             "attempt_id": "attempt-1",
             "organization_id": "org-1",
+            CAPABILITY_GRANTS_CONTEXT_KEY: [
+                CapabilityGrant(
+                    grant_id="grant-academic-search",
+                    run_id="run-1",
+                    task_id="task-1",
+                    capability_scope="mcp.academic_search",
+                    tool_name=TOOL_ACADEMIC_SEARCH,
+                    tool_versions=(TOOL_VERSION,),
+                    sensitivity=MCP_SENSITIVITY,
+                    max_input_trust=MCP_MAX_INPUT_TRUST,
+                    requires_approval=False,
+                    issued_at=datetime.now(UTC) - timedelta(minutes=1),
+                    expires_at=datetime.now(UTC) + timedelta(minutes=5),
+                )
+            ],
         },
     )
     expected_identity = ToolCallIdentity.from_agent_task(task)
@@ -172,7 +192,7 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
     assert seen["mcp_integration"] is integration
     constructor.assert_called_once_with(
         enable_fallback=False,
-        grants=None,
+        grants=task.context[CAPABILITY_GRANTS_CONTEXT_KEY],
         identity=expected_identity,
     )
     boundary_invoke = integration.boundary.invoke
