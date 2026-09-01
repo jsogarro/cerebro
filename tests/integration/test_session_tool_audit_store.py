@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -251,6 +251,52 @@ def _event(
         deduplication_key=f"{event_id}:dedup",
         payload=payload,
     )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "wrong_value"),
+    [
+        ("run_id", "other-run"),
+        ("task_id", "other-task"),
+        ("attempt_id", "other-attempt"),
+        ("aggregate_id", "other-invocation"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_tool_event_association_must_match_invocation(
+    store: SessionToolAuditStore,
+    session_factory: async_sessionmaker[AsyncSession],
+    field_name: str,
+    wrong_value: str,
+) -> None:
+    invocation = _requested_invocation(
+        invocation_id=f"association-{field_name}",
+        idempotency_key=f"association-key-{field_name}",
+    )
+    event = replace(
+        _event(
+            event_id=f"association-event-{field_name}",
+            invocation=invocation,
+            event_type=EVENT_REQUESTED,
+            payload={"phase": "requested"},
+        ),
+        **{field_name: wrong_value},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=f"event {field_name} does not match invocation",
+    ):
+        await store.persist(
+            invocation=invocation,
+            events=(event,),
+            organization_id=ORG_ID,
+            capability_decision=_allow_decision(),
+        )
+
+    async with session_factory() as session:
+        assert list((await session.scalars(select(AgentToolInvocation))).all()) == []
+        assert list((await session.scalars(select(AgentRunEvent))).all()) == []
 
 
 @pytest.mark.asyncio

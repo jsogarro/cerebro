@@ -16,11 +16,12 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from structlog import get_logger
 
 from src.agents.integrations.mcp_integration import MCPIntegration
+from src.agents.tools.durable_audit import SessionToolAuditStore
 from src.agents.tools.mediation import ToolCallIdentity
 from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
 from src.core.config import settings
@@ -30,6 +31,7 @@ from src.core.kernel.component_keys import (
     COLLABORATION_MODE_WORKFLOW_KEY,
     DOMAIN_KEYS,
 )
+from src.core.tools import ToolAuditStore
 from src.core.types import HealthCheckDict
 
 from ...agents.models import AgentResult, AgentTask
@@ -585,10 +587,14 @@ class MASRSupervisorBridge:
         config: dict[str, Any] | None = None,
         gemini_service: Any | None = None,
         component_registry: TypedRegistry | None = None,
+        session_factory: Any | None = None,
+        audit_store: ToolAuditStore | None = None,
     ):
         """Initialize MASR-Supervisor bridge."""
         self.config = config or {}
         self.gemini_service = gemini_service
+        self.session_factory = session_factory
+        self.audit_store = audit_store
         if component_registry is None:
             from src.api.services.component_catalog import (
                 get_default_component_registry,
@@ -620,6 +626,24 @@ class MASRSupervisorBridge:
         key = AGENT_KEYS.get(worker_type)
         return key is not None and key in self.component_registry.keys
 
+    def _mcp_audit_store(self) -> ToolAuditStore:
+        """Return the explicitly configured store for the live MCP path."""
+
+        audit_store = cast(
+            ToolAuditStore | None,
+            getattr(self, "audit_store", None),
+        )
+        if audit_store is not None:
+            return audit_store
+
+        session_factory = getattr(self, "session_factory", None)
+        if session_factory is None:
+            raise RuntimeError(
+                "MCP_TOOL_PATH_ENABLED requires an explicit audit store or "
+                "session factory"
+            )
+        return SessionToolAuditStore(session_factory)
+
     async def _execute_plan_worker(
         self,
         worker: WorkerAssignment,
@@ -633,10 +657,17 @@ class MASRSupervisorBridge:
             "tool_allowlist": list(worker.tool_allowlist),
         }
         if _mcp_tool_path_enabled():
+            task_grants = task.context.get(CAPABILITY_GRANTS_CONTEXT_KEY) or ()
+            grants = tuple(
+                grant
+                for grant in task_grants
+                if grant.tool_name in worker.tool_allowlist
+            )
             worker_config["mcp_integration"] = MCPIntegration(
+                audit_store=self._mcp_audit_store(),
                 enable_fallback=False,
                 identity=ToolCallIdentity.from_agent_task(task),
-                grants=task.context.get(CAPABILITY_GRANTS_CONTEXT_KEY),
+                grants=grants,
             )
         worker_instance = worker_class(
             gemini_service=self.gemini_service,

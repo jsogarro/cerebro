@@ -117,6 +117,9 @@ class SessionToolAuditStore:
         fallback when durable auditing is requested.
         """
 
+        for event in events:
+            self._assert_event_association(event, invocation)
+
         normalized_organization_id = _normalize_durable_context(
             run_id=invocation.run_id,
             task_id=invocation.task_id,
@@ -186,6 +189,22 @@ class SessionToolAuditStore:
             except BaseException:
                 await session.rollback()
                 raise
+
+    @staticmethod
+    def _assert_event_association(
+        event: ToolAuditEvent, invocation: ToolInvocation
+    ) -> None:
+        """Reject an event that is not about the invocation being persisted."""
+
+        associations = (
+            ("run_id", event.run_id, invocation.run_id),
+            ("task_id", event.task_id, invocation.task_id),
+            ("attempt_id", event.attempt_id, invocation.attempt_id),
+            ("aggregate_id", event.aggregate_id, invocation.tool_invocation_id),
+        )
+        for field_name, event_value, invocation_value in associations:
+            if event_value != invocation_value:
+                raise ValueError(f"event {field_name} does not match invocation")
 
     @staticmethod
     def _assert_transition_identity(

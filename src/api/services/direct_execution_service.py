@@ -384,6 +384,7 @@ class DirectExecutionService:
 
         # Initialize components (would be injected in production)
         self.gemini_service = gemini_service
+        self.session_factory = session_factory
         self.masr_router = masr_router or MASRouter()
         self.outcome_recorder = outcome_recorder or RoutingOutcomeRecorder(
             self.masr_router
@@ -393,6 +394,7 @@ class DirectExecutionService:
             MASRSupervisorBridge(
                 gemini_service=gemini_service,
                 component_registry=self.component_registry,
+                session_factory=self.session_factory,
             )
             if supervisor_bridge is None
             else supervisor_bridge
@@ -401,7 +403,6 @@ class DirectExecutionService:
             component_registry=self.component_registry,
         )
         self.event_publisher = event_publisher
-        self.session_factory = session_factory
         self.execution_authority_resolver = execution_authority_resolver
         self.execution_plan_compiler = (
             execution_plan_compiler or ExecutionPlanCompiler()

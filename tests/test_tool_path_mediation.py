@@ -149,13 +149,15 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
     bridge.component_registry = Mock()
     bridge.component_registry.resolve.return_value = Worker
     bridge.gemini_service = None
+    audit_store = InMemoryToolAuditStore()
+    bridge.audit_store = audit_store
     worker = WorkerAssignment(
         worker_id="worker-1",
         worker_type="comparative_analysis",
         objective="Use the mediated path",
         output_schema={},
         permission_scopes=(),
-        tool_allowlist=(),
+        tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
     )
     task = AgentTask(
         id="worker-task",
@@ -191,8 +193,9 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
     integration = constructed_integrations[0]
     assert seen["mcp_integration"] is integration
     constructor.assert_called_once_with(
+        audit_store=audit_store,
         enable_fallback=False,
-        grants=task.context[CAPABILITY_GRANTS_CONTEXT_KEY],
+        grants=tuple(task.context[CAPABILITY_GRANTS_CONTEXT_KEY]),
         identity=expected_identity,
     )
     boundary_invoke = integration.boundary.invoke
@@ -251,6 +254,7 @@ async def test_the_production_path_does_not_fabricate_on_a_degraded_call(
     bridge.component_registry = Mock()
     bridge.component_registry.resolve.return_value = Worker
     bridge.gemini_service = None
+    bridge.audit_store = InMemoryToolAuditStore()
     worker = WorkerAssignment(
         worker_id="worker-1",
         worker_type="comparative_analysis",

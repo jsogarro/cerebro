@@ -57,6 +57,7 @@ async def test_plan_worker_forwards_persisted_grants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     grants = (grant(TOOL_ACADEMIC_SEARCH, "scope-search"),)
+    audit_store = object()
     constructor = Mock(
         side_effect=lambda **kwargs: MCPIntegration(mcp_client=client(), **kwargs)
     )
@@ -76,13 +77,15 @@ async def test_plan_worker_forwards_persisted_grants(
     bridge.component_registry = Mock()
     bridge.component_registry.resolve.return_value = Worker
     bridge.gemini_service = None
+    bridge.session_factory = None
+    bridge.audit_store = audit_store
     worker = WorkerAssignment(
         worker_id="w",
         worker_type="comparative_analysis",
         objective="objective",
         output_schema={},
         permission_scopes=(),
-        tool_allowlist=(),
+        tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
     )
     task = AgentTask(
         "task-1",
@@ -100,10 +103,74 @@ async def test_plan_worker_forwards_persisted_grants(
     await bridge._execute_plan_worker(worker, task)
 
     constructor.assert_called_once_with(
+        audit_store=audit_store,
         enable_fallback=False,
         identity=ToolCallIdentity.from_agent_task(task),
         grants=grants,
     )
+
+
+@pytest.mark.asyncio
+async def test_plan_worker_filters_task_grants_by_worker_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    search_grant = grant(TOOL_ACADEMIC_SEARCH, "scope-search")
+    citation_grant = grant(TOOL_FORMAT_CITATIONS, "scope-citations")
+    grants = (search_grant, citation_grant)
+    constructor = Mock(side_effect=lambda **kwargs: kwargs)
+    monkeypatch.setattr(bridge_module, "MCPIntegration", constructor)
+    monkeypatch.setattr(bridge_module, "settings", Mock(MCP_TOOL_PATH_ENABLED=True))
+
+    bridge = object.__new__(MASRSupervisorBridge)
+    bridge.component_registry = Mock()
+
+    class Worker:
+        def __init__(self, **kwargs: Any) -> None:
+            self.config = kwargs["config"]
+
+        async def execute(self, task: AgentTask) -> AgentResult:
+            return AgentResult(task.id, "success", {}, 1.0, 0.0)
+
+    bridge.component_registry.resolve.return_value = Worker
+    bridge.gemini_service = None
+    bridge.session_factory = None
+    bridge.audit_store = object()
+    task = AgentTask(
+        "task-1",
+        "worker",
+        {},
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "organization_id": "org-1",
+            CAPABILITY_GRANTS_CONTEXT_KEY: grants,
+        },
+    )
+
+    worker_without_tool = WorkerAssignment(
+        worker_id="worker-without-search",
+        worker_type="comparative_analysis",
+        objective="Must not receive search authority",
+        output_schema={},
+        permission_scopes=(),
+        tool_allowlist=("some.other.tool",),
+    )
+    worker_with_tool = WorkerAssignment(
+        worker_id="worker-with-search",
+        worker_type="comparative_analysis",
+        objective="May receive search authority",
+        output_schema={},
+        permission_scopes=(),
+        tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+    )
+
+    await bridge._execute_plan_worker(worker_without_tool, task)
+    await bridge._execute_plan_worker(worker_with_tool, task)
+
+    assert constructor.call_args_list[0].kwargs["grants"] == ()
+    assert constructor.call_args_list[1].kwargs["grants"] == (search_grant,)
+    assert task.context[CAPABILITY_GRANTS_CONTEXT_KEY] == grants
 
 
 @pytest.mark.asyncio
