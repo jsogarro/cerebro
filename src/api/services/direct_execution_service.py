@@ -711,9 +711,7 @@ class DirectExecutionService:
                     await repo.record_run_transition(
                         queued_run, organization_id=binding.run.tenant_id
                     )
-                    await repo.create_task(
-                        task, organization_id=binding.run.tenant_id
-                    )
+                    await repo.create_task(task, organization_id=binding.run.tenant_id)
                     await repo.record_task_transition(
                         ready_task, organization_id=binding.run.tenant_id
                     )

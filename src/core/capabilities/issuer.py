@@ -26,9 +26,14 @@ DEFAULT_TOOL_VERSION = "1.0.0"
 class _AdmittedAuthority(Protocol):
     """The binding fields needed before a plan is compiled."""
 
-    workers: tuple[WorkerAssignment, ...]
-    budget: ExecutionBudget
-    deadline: datetime
+    @property
+    def workers(self) -> tuple[WorkerAssignment, ...]: ...
+
+    @property
+    def budget(self) -> ExecutionBudget: ...
+
+    @property
+    def deadline(self) -> datetime: ...
 
 
 class PlanCapabilityIssuer:
