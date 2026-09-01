@@ -368,12 +368,13 @@ async def require_authenticated_websocket(
     """
     try:
         jwt_service = await resolve_jwt_service(websocket)
-        await authenticate_websocket_connection(
+        principal = await authenticate_websocket_principal(
             token,
             websocket.headers.get("user-agent"),
             jwt_service,
             allow_anonymous=False,
         )
+        websocket.state.websocket_principal = principal
     except WebSocketAuthError as exc:
         raise WebSocketException(code=exc.code, reason=exc.message) from exc
     except AuthenticationServiceUnavailableError as exc:
