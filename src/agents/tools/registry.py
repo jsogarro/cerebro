@@ -136,9 +136,9 @@ class ToolRegistry:
         :meth:`ToolCallIdentity.unbound` supplies a marked one rather than a
         plausible-looking invention — see that method.
 
-        ``grants`` are injected by a caller that has a real issuer. Without
-        one, a self-issued grant is minted for exactly this call; it is not
-        authorization, and ``mediation.py`` says so at length.
+        ``grants`` are injected by a caller that has a real issuer. When
+        omitted, non-durable callers retain legacy self-issued behavior;
+        durable callers receive no grants and are denied by the boundary.
         """
 
         tool = self.get(name)
@@ -153,18 +153,22 @@ class ToolRegistry:
         effective_grants = (
             list(grants)
             if grants is not None
-            else [
-                self_issued_grant(
-                    tool_name=spec.name,
-                    policy=SelfIssuedPolicy(
-                        sensitivity=INTERNAL_TOOL_SENSITIVITY,
-                        max_input_trust=INTERNAL_TOOL_MAX_INPUT_TRUST,
-                        tool_versions=(spec.version,),
-                    ),
-                    identity=call_identity,
-                    now=now,
-                )
-            ]
+            else (
+                []
+                if call_identity.durable
+                else [
+                    self_issued_grant(
+                        tool_name=spec.name,
+                        policy=SelfIssuedPolicy(
+                            sensitivity=INTERNAL_TOOL_SENSITIVITY,
+                            max_input_trust=INTERNAL_TOOL_MAX_INPUT_TRUST,
+                            tool_versions=(spec.version,),
+                        ),
+                        identity=call_identity,
+                        now=now,
+                    )
+                ]
+            )
         )
         capability_scope = next(
             (

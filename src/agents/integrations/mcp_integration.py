@@ -139,9 +139,10 @@ class MCPIntegration:
             audit_store: Where invocations are recorded. Defaults to an
                 in-memory store, which is not durable — see
                 ``src/agents/tools/mediation.py``.
-            grants: Capability grants from a real issuer. Without them a
-                self-issued grant is minted per call, which is not
-                authorization; the same module says so at length.
+            grants: Capability grants from a real issuer. When omitted,
+                non-durable callers retain the legacy self-issued behavior;
+                durable callers receive no grants and are denied by the
+                boundary.
 
         """
         self.config = config or {}
@@ -415,18 +416,22 @@ class MCPIntegration:
         spec = self._boundary.specification(tool_name)
         grants = self._grants
         if grants is None:
-            grants = [
-                self_issued_grant(
-                    tool_name=spec.name,
-                    policy=SelfIssuedPolicy(
-                        sensitivity=MCP_SENSITIVITY,
-                        max_input_trust=MCP_MAX_INPUT_TRUST,
-                        tool_versions=(spec.version,),
-                    ),
-                    identity=call_identity,
-                    now=now,
-                )
-            ]
+            grants = (
+                []
+                if call_identity.durable
+                else [
+                    self_issued_grant(
+                        tool_name=spec.name,
+                        policy=SelfIssuedPolicy(
+                            sensitivity=MCP_SENSITIVITY,
+                            max_input_trust=MCP_MAX_INPUT_TRUST,
+                            tool_versions=(spec.version,),
+                        ),
+                        identity=call_identity,
+                        now=now,
+                    )
+                ]
+            )
         matching_grant = next(
             (grant for grant in grants if grant.tool_name == tool_name), None
         )
