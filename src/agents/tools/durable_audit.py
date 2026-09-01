@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any, Final, cast
+from typing import Any, Final, Literal, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -206,8 +206,8 @@ class SessionToolAuditStore:
             ("requested_at", row.requested_at, invocation.requested_at),
             ("schema_version", row.contract_schema_version, invocation.schema_version),
         )
-        for field_name, persisted, requested in immutable_fields:
-            if persisted != requested:
+        for field_name, persisted_value, requested_value in immutable_fields:
+            if persisted_value != requested_value:
                 raise ValueError(
                     f"tool invocation transition changed immutable field {field_name}"
                 )
@@ -239,18 +239,24 @@ class SessionToolAuditStore:
                 None if binding is None else binding.rendered_sha256,
             ),
         )
-        for field_name, persisted, requested in prompt_fields:
-            if persisted != requested:
+        for (
+            prompt_field_name,
+            persisted_prompt_value,
+            requested_prompt_value,
+        ) in prompt_fields:
+            if persisted_prompt_value != requested_prompt_value:
                 raise ValueError(
-                    f"tool invocation transition changed immutable field {field_name}"
+                    "tool invocation transition changed immutable field "
+                    f"{prompt_field_name}"
                 )
 
     @staticmethod
     def _to_contract(row: AgentToolInvocation) -> ToolInvocation:
         """Reconstruct the public invocation contract from a durable row."""
 
+        schema_version = _validated_schema_version(row.contract_schema_version)
         return ToolInvocation(
-            schema_version=row.contract_schema_version,
+            schema_version=schema_version,
             tool_invocation_id=row.tool_invocation_id,
             run_id=row.run_id,
             task_id=row.task_id,
@@ -305,6 +311,16 @@ class SessionToolAuditStore:
             template_sha256=template_sha256,
             rendered_sha256=rendered_sha256,
         )
+
+
+def _validated_schema_version(value: str) -> Literal["1.0"]:
+    """Accept only the schema version understood by ``ToolInvocation``."""
+
+    if value != "1.0":
+        raise ValueError(
+            f"unsupported tool invocation contract schema version {value!r}"
+        )
+    return "1.0"
 
 
 def _normalize_durable_context(
