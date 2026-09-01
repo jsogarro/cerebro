@@ -264,6 +264,7 @@ class _Call:
 class _LeaseMonitor:
     """Lifecycle state shared by the heartbeat and the active invocation."""
 
+    admitted: asyncio.Event = field(default_factory=asyncio.Event)
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     lost: asyncio.Event = field(default_factory=asyncio.Event)
     failure_detail: str | None = None
@@ -617,6 +618,7 @@ class ToolBoundary:
             lease_owner_id=call.lease_owner_id,
             lease_expires_at=call.lease_expires_at,
         )
+        lease_monitor = self._start_lease_monitor(call)
         requested_record = asyncio.create_task(
             self._record(
                 call,
@@ -632,68 +634,68 @@ class ToolBoundary:
                 },
                 decision=decision,
                 wrap_publication_failure=True,
+                lease_monitor=lease_monitor,
             )
         )
         try:
-            await asyncio.shield(requested_record)
-        except asyncio.CancelledError:
-            # The requested row is the idempotency reservation. It must finish
-            # its persist-and-publish admission before cancellation can unwind,
-            # otherwise a durable REQUESTED row can be left without a terminal
-            # outcome (or the request can be retried while its reservation is
-            # still in flight). The cancellation wins over an admission
-            # publication error: the reservation is settled as CANCELLED and
-            # the caller's cancellation is re-raised.
             try:
                 await asyncio.shield(requested_record)
-            except _RequestedPublicationError:
-                pass
             except asyncio.CancelledError:
-                # A publisher may use CancelledError to reject the requested
-                # event. It is still an admission failure that must be
-                # settled before preserving the cancellation for the caller.
-                pass
-            except Exception:
-                # A persistence failure means there is no confirmed requested
-                # row to settle. Preserve the caller's cancellation; the store
-                # owns the failed admission's rollback semantics.
-                pass
-            await asyncio.shield(
-                self._terminate(
+                # The requested row is the idempotency reservation. It must finish
+                # its persist-and-publish admission before cancellation can unwind,
+                # otherwise a durable REQUESTED row can be left without a terminal
+                # outcome (or the request can be retried while its reservation is
+                # still in flight). The cancellation wins over an admission
+                # publication error: the reservation is settled as CANCELLED and
+                # the caller's cancellation is re-raised.
+                try:
+                    await asyncio.shield(requested_record)
+                except _RequestedPublicationError:
+                    pass
+                except asyncio.CancelledError:
+                    # A publisher may use CancelledError to reject the requested
+                    # event. It is still an admission failure that must be
+                    # settled before preserving the cancellation for the caller.
+                    pass
+                except Exception:
+                    # A persistence failure means there is no confirmed requested
+                    # row to settle. Preserve the caller's cancellation; the store
+                    # owns the failed admission's rollback semantics.
+                    pass
+                await asyncio.shield(
+                    self._terminate(
+                        call,
+                        status=ToolOutcomeStatus.CANCELLED,
+                        completed_at=self._now(),
+                        decision=decision,
+                        detail="cancelled during admission",
+                    )
+                )
+                raise
+            except _RequestedPublicationError as publication_error:
+                return await self._terminate(
                     call,
-                    status=ToolOutcomeStatus.CANCELLED,
+                    status=ToolOutcomeStatus.FAILED,
                     completed_at=self._now(),
                     decision=decision,
-                    detail="cancelled during admission",
+                    detail=str(publication_error),
                 )
-            )
-            raise
-        except _RequestedPublicationError as publication_error:
-            return await self._terminate(
-                call,
-                status=ToolOutcomeStatus.FAILED,
-                completed_at=self._now(),
-                decision=decision,
-                detail=str(publication_error),
-            )
-        except ToolInvocationConflictError as conflict:
-            self._require_same_request(
-                conflict.invocation,
-                spec=spec,
-                capability_scope=call.capability_scope,
-                input_sha256=prepared.input_sha256,
-            )
-            if conflict.invocation.status in _REPLAYABLE_RECORD_STATUSES:
-                return self._replay(conflict.invocation, decision=decision)
-            if conflict.invocation.status in {
-                ToolInvocationStatus.REQUESTED,
-                ToolInvocationStatus.RUNNING,
-            }:
-                return self._in_progress(conflict.invocation, decision=decision)
-            raise
+            except ToolInvocationConflictError as conflict:
+                self._require_same_request(
+                    conflict.invocation,
+                    spec=spec,
+                    capability_scope=call.capability_scope,
+                    input_sha256=prepared.input_sha256,
+                )
+                if conflict.invocation.status in _REPLAYABLE_RECORD_STATUSES:
+                    return self._replay(conflict.invocation, decision=decision)
+                if conflict.invocation.status in {
+                    ToolInvocationStatus.REQUESTED,
+                    ToolInvocationStatus.RUNNING,
+                }:
+                    return self._in_progress(conflict.invocation, decision=decision)
+                raise
 
-        lease_monitor = self._start_lease_monitor(call)
-        try:
             return await self._run_tool(
                 call,
                 validated_input=prepared.validated_input,
@@ -950,6 +952,25 @@ class ToolBoundary:
     ) -> None:
         """Renew a live invocation until settlement or a lease failure."""
 
+        while not monitor.admitted.is_set():
+            admitted = asyncio.ensure_future(monitor.admitted.wait())
+            stopped = asyncio.ensure_future(monitor.stop.wait())
+            try:
+                done, _pending = await asyncio.wait(
+                    (admitted, stopped), return_when=asyncio.FIRST_COMPLETED
+                )
+            except asyncio.CancelledError:
+                return
+            finally:
+                for task in (admitted, stopped):
+                    if not task.done():
+                        task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await task
+
+            if stopped in done or monitor.stop.is_set():
+                return
+
         interval = min(
             max(
                 _LEASE_HEARTBEAT_MIN_SECONDS,
@@ -1160,6 +1181,7 @@ class ToolBoundary:
         payload: Mapping[str, JsonValue],
         decision: CapabilityDecision | None,
         wrap_publication_failure: bool = False,
+        lease_monitor: _LeaseMonitor | None = None,
     ) -> None:
         """Persist the record and its event, then publish. Never the reverse.
 
@@ -1192,6 +1214,11 @@ class ToolBoundary:
             organization_id=call.organization_id,
             capability_decision=decision,
         )
+        if (
+            lease_monitor is not None
+            and invocation.status is ToolInvocationStatus.REQUESTED
+        ):
+            lease_monitor.admitted.set()
         try:
             await self._event_publisher.publish((event,))
         except Exception as error:

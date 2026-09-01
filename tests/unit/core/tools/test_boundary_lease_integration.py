@@ -18,6 +18,7 @@ from src.core.contracts import (
     TrustClassification,
 )
 from src.core.tools import (
+    EVENT_REQUESTED,
     ToolAuditEvent,
     ToolBoundary,
     ToolCallContext,
@@ -28,6 +29,7 @@ from src.core.tools import (
 from .conftest import (
     ATTEMPT_ID,
     NOW,
+    ORG_ID,
     RUN_ID,
     SCOPE,
     TASK_ID,
@@ -57,6 +59,22 @@ class LeaseAwareFakeStore:
         organization_id: str | None,
         idempotency_key: str,
     ) -> ToolInvocation | None:
+        for invocation in reversed(self.invocations):
+            if (
+                invocation.run_id == run_id
+                and invocation.attempt_id == attempt_id
+                and organization_id == ORG_ID
+                and invocation.idempotency_key == idempotency_key
+                and invocation.status
+                in {
+                    ToolInvocationStatus.SUCCEEDED,
+                    ToolInvocationStatus.FAILED,
+                    ToolInvocationStatus.CANCELLED,
+                    ToolInvocationStatus.TIMED_OUT,
+                    ToolInvocationStatus.DENIED,
+                }
+            ):
+                return invocation
         return None
 
     async def find_pending_invocation(
@@ -67,7 +85,12 @@ class LeaseAwareFakeStore:
         organization_id: str | None,
         idempotency_key: str,
     ) -> ToolInvocation | None:
-        return self.reconciled if self.reconciled is not None else None
+        return self._pending_invocation(
+            run_id=run_id,
+            attempt_id=attempt_id,
+            organization_id=organization_id,
+            idempotency_key=idempotency_key,
+        )
 
     async def reconcile_pending_invocation(
         self,
@@ -87,7 +110,14 @@ class LeaseAwareFakeStore:
                 "now": now,
             }
         )
-        return self.reconciled
+        if self.reconciled is not None:
+            return self.reconciled
+        return self._pending_invocation(
+            run_id=run_id,
+            attempt_id=attempt_id,
+            organization_id=organization_id,
+            idempotency_key=idempotency_key,
+        )
 
     async def renew_invocation_lease(
         self,
@@ -125,6 +155,45 @@ class LeaseAwareFakeStore:
         capability_decision: CapabilityDecision | None,
     ) -> None:
         self.invocations.append(invocation)
+
+    def _pending_invocation(
+        self,
+        *,
+        run_id: str,
+        attempt_id: str,
+        organization_id: str | None,
+        idempotency_key: str,
+    ) -> ToolInvocation | None:
+        for invocation in reversed(self.invocations):
+            if (
+                invocation.run_id == run_id
+                and invocation.attempt_id == attempt_id
+                and organization_id == ORG_ID
+                and invocation.idempotency_key == idempotency_key
+                and invocation.status
+                in {
+                    ToolInvocationStatus.REQUESTED,
+                    ToolInvocationStatus.RUNNING,
+                }
+            ):
+                return invocation
+        return None
+
+
+@dataclass(slots=True)
+class BlockingRequestedPublisher:
+    """Publisher that holds the REQUESTED event until the test releases it."""
+
+    requested_publish_started: asyncio.Event = field(default_factory=asyncio.Event)
+    release_requested_publish: asyncio.Event = field(default_factory=asyncio.Event)
+    published: list[ToolAuditEvent] = field(default_factory=list)
+
+    async def publish(self, events: Sequence[ToolAuditEvent]) -> None:
+        for event in events:
+            if event.event_type == EVENT_REQUESTED:
+                self.requested_publish_started.set()
+                await self.release_requested_publish.wait()
+            self.published.append(event)
 
 
 def _invocation(
@@ -288,6 +357,57 @@ async def test_live_handler_renews_owner_lease(
     assert renewal["lease_expires_at"] > renewal["now"]
     assert store.invocations[-1].lease_owner_id is None
     assert store.invocations[-1].lease_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_request_renews_lease_while_requested_publication_is_blocked(
+    boundary_dependencies: dict[str, Any], echo_spec: ToolSpec
+) -> None:
+    store = LeaseAwareFakeStore()
+    publisher = BlockingRequestedPublisher()
+    handler_calls: list[str] = []
+
+    async def handler(args: EchoInput, context: ToolCallContext) -> Mapping[str, Any]:
+        handler_calls.append("handler")
+        return {"echoed": args.query}
+
+    boundary = ToolBoundary(
+        **{
+            **boundary_dependencies,
+            "audit_store": store,
+            "event_publisher": publisher,
+        }
+    )
+    boundary.register(replace(echo_spec, timeout_seconds=0.03, handler=handler))
+
+    first_call = asyncio.create_task(
+        boundary.invoke(**invoke_kwargs(idempotency_key="renew-during-publication"))
+    )
+    await asyncio.wait_for(publisher.requested_publish_started.wait(), timeout=1)
+    assert handler_calls == []
+
+    try:
+        await asyncio.wait_for(store.renew_called.wait(), timeout=0.2)
+        assert handler_calls == []
+        duplicate = await asyncio.wait_for(
+            boundary.invoke(
+                **invoke_kwargs(idempotency_key="renew-during-publication")
+            ),
+            timeout=1,
+        )
+    finally:
+        publisher.release_requested_publish.set()
+
+    outcome = await asyncio.wait_for(first_call, timeout=1)
+
+    assert duplicate.status is ToolOutcomeStatus.IN_PROGRESS
+    assert outcome.status is ToolOutcomeStatus.SUCCEEDED
+    assert handler_calls == ["handler"]
+    assert len(store.renew_calls) >= 1
+    assert [invocation.status for invocation in store.invocations] == [
+        ToolInvocationStatus.REQUESTED,
+        ToolInvocationStatus.SUCCEEDED,
+    ]
 
 
 @pytest.mark.asyncio
