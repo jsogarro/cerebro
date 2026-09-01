@@ -10,15 +10,24 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, desc, func, or_
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql import Select
 from structlog import get_logger
 
 from src.models.db.generated_report import GeneratedReport, ReportFormat
 from src.repositories.base import BaseRepository
 
 logger = get_logger()
+
+
+def _normalize_uuid(value: UUID | str, field_name: str) -> UUID:
+    """Normalize an identifier before using it in a tenant predicate."""
+    try:
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid {field_name}") from exc
 
 
 class ReportRepository(BaseRepository[GeneratedReport]):
@@ -34,6 +43,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         query: str,
         user_id: UUID | None = None,
         project_id: UUID | None = None,
+        organization_id: UUID | str | None = None,
         **kwargs: Any,
     ) -> GeneratedReport:
         """
@@ -50,28 +60,86 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         Returns:
             Created GeneratedReport instance
         """
+        if organization_id is None:
+            raise ValueError("organization_id is required for report records")
+
         report_data = {
             "title": title,
             "report_type": report_type,
             "query": query,
             "user_id": user_id,
             "project_id": project_id,
+            "organization_id": _normalize_uuid(organization_id, "organization_id"),
             **kwargs,
         }
 
         return await self.create(**report_data)
 
-    async def get_by_workflow_id(self, workflow_id: str) -> GeneratedReport | None:
+    def _scoped_query(
+        self,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> Select[tuple[GeneratedReport]]:
+        """Build a report query with mandatory tenant isolation."""
+        organization_uuid = _normalize_uuid(organization_id, "organization_id")
+        query = select(GeneratedReport).where(
+            GeneratedReport.organization_id == organization_uuid,
+            GeneratedReport.deleted_at.is_(None),
+        )
+        if user_id is not None:
+            query = query.where(
+                GeneratedReport.user_id == _normalize_uuid(user_id, "user_id")
+            )
+        return query
+
+    async def _get_scoped_report(
+        self,
+        report_id: UUID | str,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> GeneratedReport | None:
+        """Return a report only when it belongs to the supplied tenant scope."""
+        query = self._scoped_query(
+            organization_id=organization_id,
+            user_id=user_id,
+        ).where(GeneratedReport.id == _normalize_uuid(report_id, "report_id"))
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_by_workflow_id(
+        self,
+        workflow_id: str,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> GeneratedReport | None:
         """Get report by workflow ID."""
-        filters: dict[str, Any] = {"workflow_id": workflow_id}
-        results = await self.get_many(filters=filters, limit=1)
-        return results[0] if results else None
+        query = (
+            self._scoped_query(
+                organization_id=organization_id,
+                user_id=user_id,
+            )
+            .where(GeneratedReport.workflow_id == workflow_id)
+            .limit(1)
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
 
     async def get_by_project_id(
-        self, project_id: UUID, limit: int | None = None
+        self,
+        project_id: UUID,
+        limit: int | None = None,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
     ) -> list[GeneratedReport]:
         """Get all reports for a project."""
-        query = self.build_query().filter(GeneratedReport.project_id == project_id)
+        query = self._scoped_query(
+            organization_id=organization_id,
+            user_id=user_id,
+        ).where(GeneratedReport.project_id == project_id)
         query = query.order_by(desc(GeneratedReport.created_at))
 
         if limit:
@@ -81,10 +149,18 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return list(result.scalars().all())
 
     async def get_by_user_id(
-        self, user_id: UUID, limit: int | None = None, status_filter: str | None = None
+        self,
+        user_id: UUID,
+        limit: int | None = None,
+        status_filter: str | None = None,
+        *,
+        organization_id: UUID | str,
     ) -> list[GeneratedReport]:
         """Get all reports for a user."""
-        query = self.build_query().filter(GeneratedReport.user_id == user_id)
+        query = self._scoped_query(
+            organization_id=organization_id,
+            user_id=user_id,
+        )
 
         if status_filter:
             query = query.filter(GeneratedReport.generation_status == status_filter)
@@ -98,10 +174,14 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return list(result.scalars().all())
 
     async def get_public_reports(
-        self, limit: int = 50, offset: int = 0
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        organization_id: UUID | str,
     ) -> list[GeneratedReport]:
         """Get public reports."""
-        query = self.build_query().filter(
+        query = self._scoped_query(organization_id=organization_id).where(
             and_(
                 GeneratedReport.is_public.is_(True),
                 GeneratedReport.generation_status == "completed",
@@ -121,6 +201,8 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         min_quality_score: float | None = None,
         limit: int = 50,
         offset: int = 0,
+        *,
+        organization_id: UUID | str,
     ) -> tuple[list[GeneratedReport], int]:
         """
         Search reports by various criteria.
@@ -144,20 +226,20 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         )
 
         # Build base query
-        query = self.build_query().filter(search_filter)
+        query = self._scoped_query(
+            organization_id=organization_id,
+            user_id=user_id,
+        ).where(search_filter)
 
         # Add additional filters
-        if user_id:
-            query = query.filter(GeneratedReport.user_id == user_id)
-
         if report_type:
-            query = query.filter(GeneratedReport.report_type == report_type)
+            query = query.where(GeneratedReport.report_type == report_type)
 
         if min_quality_score is not None:
-            query = query.filter(GeneratedReport.quality_score >= min_quality_score)
+            query = query.where(GeneratedReport.quality_score >= min_quality_score)
 
         # Only include completed reports
-        query = query.filter(GeneratedReport.generation_status == "completed")
+        query = query.where(GeneratedReport.generation_status == "completed")
 
         # Get total count
         count_query = query.with_only_columns(func.count(GeneratedReport.id))
@@ -174,10 +256,18 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return reports, total_count
 
     async def get_reports_by_status(
-        self, status: str, limit: int | None = None
+        self,
+        status: str,
+        limit: int | None = None,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
     ) -> list[GeneratedReport]:
         """Get reports by generation status."""
-        query = self.build_query().filter(GeneratedReport.generation_status == status)
+        query = self._scoped_query(
+            organization_id=organization_id,
+            user_id=user_id,
+        ).where(GeneratedReport.generation_status == status)
         query = query.order_by(desc(GeneratedReport.created_at))
 
         if limit:
@@ -186,15 +276,34 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def get_pending_reports(self, limit: int = 10) -> list[GeneratedReport]:
+    async def get_pending_reports(
+        self,
+        limit: int = 10,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> list[GeneratedReport]:
         """Get reports pending generation."""
-        return await self.get_reports_by_status("pending", limit)
+        return await self.get_reports_by_status(
+            "pending",
+            limit,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
 
     async def get_failed_reports(
-        self, since: datetime | None = None, limit: int = 50
+        self,
+        since: datetime | None = None,
+        limit: int = 50,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
     ) -> list[GeneratedReport]:
         """Get failed reports, optionally filtered by date."""
-        query = self.build_query().filter(GeneratedReport.generation_status == "failed")
+        query = self._scoped_query(
+            organization_id=organization_id,
+            user_id=user_id,
+        ).where(GeneratedReport.generation_status == "failed")
 
         if since:
             query = query.filter(GeneratedReport.created_at >= since)
@@ -206,7 +315,11 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         return list(result.scalars().all())
 
     async def get_report_statistics(
-        self, user_id: UUID | None = None, days: int = 30
+        self,
+        user_id: UUID | None = None,
+        days: int = 30,
+        *,
+        organization_id: UUID | str,
     ) -> dict[str, Any]:
         """
         Get report generation statistics.
@@ -220,14 +333,22 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         """
         since_date = datetime.now(UTC) - timedelta(days=days)
 
-        from sqlalchemy import select
-
-        base_filter = GeneratedReport.created_at >= since_date
+        organization_uuid = _normalize_uuid(organization_id, "organization_id")
+        base_filter = and_(
+            GeneratedReport.organization_id == organization_uuid,
+            GeneratedReport.deleted_at.is_(None),
+            GeneratedReport.created_at >= since_date,
+        )
+        user_filter = (
+            GeneratedReport.user_id == _normalize_uuid(user_id, "user_id")
+            if user_id
+            else None
+        )
 
         # Total reports
         total_query = select(func.count(GeneratedReport.id)).where(base_filter)
-        if user_id:
-            total_query = total_query.where(GeneratedReport.user_id == user_id)
+        if user_filter is not None:
+            total_query = total_query.where(user_filter)
         total_result = await self.session.execute(total_query)
         total_reports = total_result.scalar() or 0
 
@@ -237,8 +358,8 @@ class ReportRepository(BaseRepository[GeneratedReport]):
             .where(base_filter)
             .group_by(GeneratedReport.generation_status)
         )
-        if user_id:
-            status_query = status_query.where(GeneratedReport.user_id == user_id)
+        if user_filter is not None:
+            status_query = status_query.where(user_filter)
         status_result = await self.session.execute(status_query)
         status_counts: dict[str, int] = {row[0]: row[1] for row in status_result.all()}
 
@@ -248,8 +369,8 @@ class ReportRepository(BaseRepository[GeneratedReport]):
             .where(and_(base_filter, GeneratedReport.generation_status == "completed"))
             .group_by(GeneratedReport.report_type)
         )
-        if user_id:
-            type_query = type_query.where(GeneratedReport.user_id == user_id)
+        if user_filter is not None:
+            type_query = type_query.where(user_filter)
         type_result = await self.session.execute(type_query)
         type_counts: dict[str, int] = {row[0]: row[1] for row in type_result.all()}
 
@@ -261,8 +382,8 @@ class ReportRepository(BaseRepository[GeneratedReport]):
             func.avg(GeneratedReport.word_count),
             func.sum(GeneratedReport.access_count),
         ).where(and_(base_filter, GeneratedReport.generation_status == "completed"))
-        if user_id:
-            metrics_query = metrics_query.where(GeneratedReport.user_id == user_id)
+        if user_filter is not None:
+            metrics_query = metrics_query.where(user_filter)
 
         metrics_result = await self.session.execute(metrics_query)
         row = metrics_result.one()
@@ -287,10 +408,20 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         }
 
     async def update_report_status(
-        self, report_id: UUID, status: str, error_message: str | None = None
+        self,
+        report_id: UUID,
+        status: str,
+        error_message: str | None = None,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
     ) -> GeneratedReport | None:
         """Update report generation status."""
-        report = await self.get(report_id)
+        report = await self._get_scoped_report(
+            report_id,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
         if not report:
             return None
 
@@ -303,7 +434,8 @@ class ReportRepository(BaseRepository[GeneratedReport]):
             if status == "completed":
                 report.generation_completed_at = datetime.now(UTC)
 
-        await self.update(report.id, {"generation_status": report.generation_status})
+        await self.session.flush()
+        await self.session.refresh(report)
         return report
 
     async def mark_report_completed(
@@ -313,9 +445,16 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         file_sizes: dict[str, int],
         generation_time: float | None = None,
         storage_path: str | None = None,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
     ) -> GeneratedReport | None:
         """Mark report as completed with generation details."""
-        report = await self.get(report_id)
+        report = await self._get_scoped_report(
+            report_id,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
         if not report:
             return None
 
@@ -329,27 +468,40 @@ class ReportRepository(BaseRepository[GeneratedReport]):
             report.storage_path = storage_path
             update_data["storage_path"] = storage_path
 
-        await self.update(report.id, update_data)
+        for key, value in update_data.items():
+            setattr(report, key, value)
+        await self.session.flush()
+        await self.session.refresh(report)
         return report
 
-    async def increment_access_count(self, report_id: UUID) -> GeneratedReport | None:
+    async def increment_access_count(
+        self,
+        report_id: UUID,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> GeneratedReport | None:
         """Increment access count for a report."""
-        report = await self.get(report_id)
+        report = await self._get_scoped_report(
+            report_id,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
         if not report:
             return None
 
         report.update_access_stats()
-        await self.update(
-            report.id,
-            {
-                "access_count": report.access_count,
-                "last_accessed_at": report.last_accessed_at,
-            },
-        )
+        await self.session.flush()
+        await self.session.refresh(report)
         return report
 
     async def cleanup_old_reports(
-        self, days_old: int = 90, keep_public: bool = True, dry_run: bool = True
+        self,
+        days_old: int = 90,
+        keep_public: bool = True,
+        dry_run: bool = True,
+        *,
+        organization_id: UUID | str,
     ) -> tuple[int, list[str]]:
         """
         Clean up old reports and their files.
@@ -364,7 +516,9 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         """
         cutoff_date = datetime.now(UTC) - timedelta(days=days_old)
 
-        query = self.build_query().filter(GeneratedReport.created_at < cutoff_date)
+        query = self._scoped_query(organization_id=organization_id).where(
+            GeneratedReport.created_at < cutoff_date
+        )
 
         if keep_public:
             query = query.filter(GeneratedReport.is_public.is_(False))
@@ -390,7 +544,10 @@ class ReportRepository(BaseRepository[GeneratedReport]):
                         )
 
                 # Delete database record
-                await self.delete(report.id)
+                await self.delete_report(
+                    report.id,
+                    organization_id=organization_id,
+                )
 
             deleted_ids.append(str(report.id))
             deleted_count += 1
@@ -400,17 +557,74 @@ class ReportRepository(BaseRepository[GeneratedReport]):
 
         return deleted_count, deleted_ids
 
-    async def get_report_with_formats(self, report_id: UUID) -> GeneratedReport | None:
+    async def get_report_with_formats(
+        self,
+        report_id: UUID,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> GeneratedReport | None:
         """Get report with all format files loaded."""
         formats_attr = cast(Any, GeneratedReport.formats)
         query = (
-            self.build_query()
+            self._scoped_query(
+                organization_id=organization_id,
+                user_id=user_id,
+            )
             .options(selectinload(formats_attr))
-            .filter(GeneratedReport.id == report_id)
+            .where(GeneratedReport.id == _normalize_uuid(report_id, "report_id"))
         )
 
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
+
+    async def update_report(
+        self,
+        report_id: UUID,
+        data: dict[str, Any],
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> GeneratedReport | None:
+        """Update a report only within its tenant and optional user scope."""
+        report = await self._get_scoped_report(
+            report_id,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
+        if not report:
+            return None
+
+        for key, value in data.items():
+            if hasattr(report, key) and key not in {"id", "created_at"}:
+                setattr(report, key, value)
+
+        await self.session.flush()
+        await self.session.refresh(report)
+        return report
+
+    async def delete_report(
+        self,
+        report_id: UUID,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+        deleted_by: str | None = None,
+    ) -> bool:
+        """Hard-delete a report only within its tenant and optional user scope."""
+        report = await self._get_scoped_report(
+            report_id,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
+        if not report:
+            return False
+
+        if deleted_by:
+            report.updated_by = deleted_by
+        await self.session.delete(report)
+        await self.session.flush()
+        return True
 
 
 class ReportFormatRepository(BaseRepository[ReportFormat]):
@@ -426,11 +640,29 @@ class ReportFormatRepository(BaseRepository[ReportFormat]):
         mime_type: str,
         content: bytes,
         file_path: str | None = None,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
         **kwargs: Any,
     ) -> ReportFormat:
         """Create a new report format record."""
+        organization_uuid = _normalize_uuid(organization_id, "organization_id")
+        report_uuid = _normalize_uuid(report_id, "report_id")
+        report_query = select(GeneratedReport.id).where(
+            GeneratedReport.id == report_uuid,
+            GeneratedReport.organization_id == organization_uuid,
+            GeneratedReport.deleted_at.is_(None),
+        )
+        if user_id is not None:
+            report_query = report_query.where(
+                GeneratedReport.user_id == _normalize_uuid(user_id, "user_id")
+            )
+        report_result = await self.session.execute(report_query)
+        if report_result.scalar_one_or_none() is None:
+            raise ValueError("Report does not belong to the requested tenant")
+
         format_data = {
-            "report_id": report_id,
+            "report_id": report_uuid,
             "format_type": format_type,
             "mime_type": mime_type,
             "file_path": file_path,
@@ -449,31 +681,90 @@ class ReportFormatRepository(BaseRepository[ReportFormat]):
         return report_format
 
     async def get_by_report_and_format(
-        self, report_id: UUID, format_type: str
+        self,
+        report_id: UUID,
+        format_type: str,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
     ) -> ReportFormat | None:
         """Get specific format for a report."""
-        query = self.build_query().filter(
-            and_(
-                ReportFormat.report_id == report_id,
-                ReportFormat.format_type == format_type,
+        query = (
+            select(ReportFormat)
+            .join(GeneratedReport, ReportFormat.report_id == GeneratedReport.id)
+            .where(
+                and_(
+                    ReportFormat.report_id == _normalize_uuid(report_id, "report_id"),
+                    ReportFormat.format_type == format_type,
+                    ReportFormat.deleted_at.is_(None),
+                    GeneratedReport.organization_id
+                    == _normalize_uuid(organization_id, "organization_id"),
+                    GeneratedReport.deleted_at.is_(None),
+                )
             )
         )
+        if user_id is not None:
+            query = query.where(
+                GeneratedReport.user_id == _normalize_uuid(user_id, "user_id")
+            )
 
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_formats_for_report(self, report_id: UUID) -> list[ReportFormat]:
+    async def get_formats_for_report(
+        self,
+        report_id: UUID,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> list[ReportFormat]:
         """Get all formats for a report."""
-        query = self.build_query().filter(ReportFormat.report_id == report_id)
+        query = (
+            select(ReportFormat)
+            .join(GeneratedReport, ReportFormat.report_id == GeneratedReport.id)
+            .where(
+                ReportFormat.report_id == _normalize_uuid(report_id, "report_id"),
+                ReportFormat.deleted_at.is_(None),
+                GeneratedReport.organization_id
+                == _normalize_uuid(organization_id, "organization_id"),
+                GeneratedReport.deleted_at.is_(None),
+            )
+        )
+        if user_id is not None:
+            query = query.where(
+                GeneratedReport.user_id == _normalize_uuid(user_id, "user_id")
+            )
         query = query.order_by(ReportFormat.format_type)
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def verify_format_integrity(self, format_id: UUID) -> bool:
+    async def verify_format_integrity(
+        self,
+        format_id: UUID,
+        *,
+        organization_id: UUID | str,
+        user_id: UUID | str | None = None,
+    ) -> bool:
         """Verify the integrity of a format file."""
-        format_obj = await self.get(format_id)
-        if not format_obj:
+        query = (
+            select(ReportFormat)
+            .join(GeneratedReport, ReportFormat.report_id == GeneratedReport.id)
+            .where(
+                ReportFormat.id == _normalize_uuid(format_id, "format_id"),
+                ReportFormat.deleted_at.is_(None),
+                GeneratedReport.organization_id
+                == _normalize_uuid(organization_id, "organization_id"),
+                GeneratedReport.deleted_at.is_(None),
+            )
+        )
+        if user_id is not None:
+            query = query.where(
+                GeneratedReport.user_id == _normalize_uuid(user_id, "user_id")
+            )
+        result = await self.session.execute(query)
+        format_obj = result.scalar_one_or_none()
+        if format_obj is None:
             return False
 
         return format_obj.verify_integrity()

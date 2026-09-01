@@ -5,13 +5,59 @@ This module tests the REST API endpoints for report generation,
 retrieval, and management functionality.
 """
 
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.models import TokenPayload
+from src.middleware.auth_middleware import get_jwt_service
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.generated_report import GeneratedReport
+from src.models.db.session import get_session
+
+AUTH_USER_ID = uuid4()
+AUTH_ORG_ID = uuid4()
+AUTH_TOKEN = "test-token"
+
+
+class _SuccessfulDurableAuditLogger:
+    """In-memory durable audit double for the lifespan-free test client."""
+
+    def __init__(self) -> None:
+        self.pending_events: list[dict[str, Any]] = []
+        self.persisted_events: list[dict[str, Any]] = []
+
+    async def log_event(self, **event: Any) -> str:
+        """Buffer an audit event and return a deterministic event identifier."""
+        self.pending_events.append(event)
+        return f"test-audit-event-{len(self.pending_events)}"
+
+    async def flush_buffer(self) -> None:
+        """Model a successful durable flush."""
+        self.persisted_events.extend(self.pending_events)
+        self.pending_events.clear()
+
+
+class _TestJWTService:
+    """Return the fixture tenant identity at the application auth boundary."""
+
+    async def validate_token(self, token: str) -> TokenPayload:
+        """Validate the deterministic test bearer token."""
+        assert token == AUTH_TOKEN
+        now = datetime.now(UTC)
+        return TokenPayload(
+            sub=str(AUTH_USER_ID),
+            email="test@example.com",
+            organization_id=str(AUTH_ORG_ID),
+            jti="test-jti",
+            iat=now,
+            exp=now + timedelta(minutes=5),
+        )
 
 
 class TestReportsAPI:
@@ -22,7 +68,32 @@ class TestReportsAPI:
         """Create test client."""
         from src.api.main import app
 
-        return TestClient(app)
+        session = AsyncMock(spec=AsyncSession)
+
+        async def override_session():
+            yield session
+
+        async def override_tenant_context() -> TenantContext:
+            return TenantContext(
+                user_id=str(AUTH_USER_ID), organization_id=str(AUTH_ORG_ID)
+            )
+
+        app.dependency_overrides[get_session] = override_session
+        app.dependency_overrides[get_tenant_context] = override_tenant_context
+        app.dependency_overrides[get_jwt_service] = _TestJWTService
+        missing = object()
+        previous_audit_logger = getattr(app.state, "audit_logger", missing)
+        app.state.audit_logger = _SuccessfulDurableAuditLogger()
+        try:
+            yield TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+            app.dependency_overrides.pop(get_tenant_context, None)
+            app.dependency_overrides.pop(get_jwt_service, None)
+            if previous_audit_logger is missing:
+                delattr(app.state, "audit_logger")
+            else:
+                app.state.audit_logger = previous_audit_logger
 
     def test_create_report_endpoint(self, client: TestClient) -> None:
         """Test report creation endpoint."""
@@ -51,6 +122,21 @@ class TestReportsAPI:
             mock_generator = MagicMock()
             mock_storage = MagicMock()
             mock_repo = MagicMock()
+            pending_report = MagicMock(spec=GeneratedReport)
+            pending_report.id = uuid4()
+            pending_report.title = request_data["title"]
+            pending_report.query = request_data["query"]
+            pending_report.report_type = "comprehensive"
+            pending_report.generation_status = "pending"
+            pending_report.formats = []
+            pending_report.word_count = 0
+            pending_report.page_count = 0
+            pending_report.quality_score = 0.0
+            pending_report.confidence_score = 0.0
+            pending_report.created_at = datetime.now()
+            pending_report.generation_time_seconds = None
+            mock_repo.create_report = AsyncMock(return_value=pending_report)
+            mock_repo.get_report_with_formats = AsyncMock(return_value=pending_report)
             mock_format_repo = MagicMock()
 
             mock_services.return_value = (
@@ -60,7 +146,11 @@ class TestReportsAPI:
                 mock_format_repo,
             )
 
-            response = client.post("/api/v1/reports/generate", json=request_data)
+            with patch(
+                "src.api.routes.reports._generate_report_task",
+                new=AsyncMock(),
+            ):
+                response = client.post("/api/v1/reports/generate", json=request_data)
 
             assert response.status_code == 202
             data = response.json()
@@ -68,7 +158,7 @@ class TestReportsAPI:
             assert data["title"] == "Test Report"
             assert data["query"] == "What is the impact of AI on education?"
             assert data["report_type"] == "comprehensive"
-            assert data["generation_status"] == "generating"
+            assert data["generation_status"] == "pending"
 
     def test_get_report_endpoint(self, client: TestClient) -> None:
         """Test get report endpoint."""
@@ -193,7 +283,7 @@ class TestReportsAPI:
 
     def test_list_reports_endpoint(self, client: TestClient) -> None:
         """Test list reports endpoint."""
-        user_id = uuid4()
+        user_id = AUTH_USER_ID
 
         # Mock reports
         mock_reports = [
@@ -260,7 +350,7 @@ class TestReportsAPI:
         """Test search reports endpoint."""
         search_request = {
             "search_term": "AI education",
-            "user_id": str(uuid4()),
+            "user_id": str(AUTH_USER_ID),
             "report_type": "comprehensive",
             "min_quality_score": 0.7,
             "limit": 20,
@@ -373,7 +463,13 @@ class TestReportsAPI:
             response = client.delete(f"/api/v1/reports/{report_id}?delete_files=true")
 
             assert response.status_code == 204
-            mock_storage.delete_report.assert_called_once_with(report_id, True)
+            mock_storage.delete_report.assert_called_once_with(
+                report_id,
+                True,
+                organization_id=AUTH_ORG_ID,
+                user_id=AUTH_USER_ID,
+                deleted_by=str(AUTH_USER_ID),
+            )
 
     def test_delete_report_not_found(self, client: TestClient) -> None:
         """Test delete report when report doesn't exist."""

@@ -9,16 +9,39 @@ Tests the research-informed agent API endpoints including:
 """
 
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api.services.agent_execution_service import AgentExecutionService
+from src.auth.models import TokenPayload
+from src.middleware.auth_middleware import get_jwt_service
 from src.models.agent_api_models import (
     AgentType,
 )
+
+AUTH_USER_ID = "user-1"
+AUTH_ORG_ID = "11111111-1111-1111-1111-111111111111"
+AUTH_TOKEN = "test-token"
+
+
+class _TestJWTService:
+    """Return the fixture tenant identity at the application auth boundary."""
+
+    async def validate_token(self, token: str) -> TokenPayload:
+        """Validate the deterministic test bearer token."""
+        assert token == AUTH_TOKEN
+        now = datetime.now(UTC)
+        return TokenPayload(
+            sub=AUTH_USER_ID,
+            email="test@example.com",
+            organization_id=AUTH_ORG_ID,
+            jti="test-jti",
+            iat=now,
+            exp=now + timedelta(minutes=5),
+        )
 
 
 class TestAgentAPI:
@@ -56,13 +79,15 @@ class TestAgentAPI:
         app.dependency_overrides[get_application_agent_execution_service] = lambda: (
             service
         )
+        app.dependency_overrides[get_jwt_service] = _TestJWTService
         try:
-            yield TestClient(app)
+            yield TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
         finally:
             app.dependency_overrides.pop(
                 get_application_agent_execution_service,
                 None,
             )
+            app.dependency_overrides.pop(get_jwt_service, None)
 
     @pytest.fixture
     def mock_agent_execution_service(self) -> Mock:

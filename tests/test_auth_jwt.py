@@ -9,7 +9,7 @@ import pytest
 import redis.asyncio as redis
 from jose import JWTError, jwt
 
-from src.auth.jwt_service import JWTService
+from src.auth.jwt_service import JWTService, JWTServiceUnavailable
 from src.auth.models import TokenPair, TokenPayload
 
 
@@ -192,6 +192,54 @@ class TestJWTService:
             await jwt_service.validate_token(token_pair.access_token)
 
     @pytest.mark.asyncio
+    async def test_validate_token_fails_closed_when_blacklist_store_is_unavailable(
+        self, jwt_service, redis_mock
+    ):
+        """Token validation must not admit a token when Redis cannot be checked."""
+        token_pair = await jwt_service.generate_token_pair(
+            user_id="test-user-123", email="test@example.com"
+        )
+        redis_mock.exists.side_effect = ConnectionError("redis unavailable")
+
+        with pytest.raises(JWTServiceUnavailable):
+            await jwt_service.validate_token(token_pair.access_token)
+
+    @pytest.mark.asyncio
+    async def test_validate_token_fails_closed_without_blacklist_store(self):
+        """Blacklist verification must fail closed when Redis is not configured."""
+        service = JWTService(redis_client=None)
+        token_pair = await service.generate_token_pair(
+            user_id="test-user-123", email="test@example.com"
+        )
+
+        with pytest.raises(
+            JWTServiceUnavailable, match="Token blacklist store unavailable"
+        ):
+            await service.validate_token(token_pair.access_token)
+
+    @pytest.mark.asyncio
+    async def test_validate_token_rejects_token_without_jti_before_blacklist_lookup(
+        self, jwt_service, redis_mock
+    ):
+        """Blacklist-protected tokens must carry an identifier for revocation."""
+        now = datetime.now(UTC)
+        token_without_jti = jwt.encode(
+            {
+                "sub": "test-user-123",
+                "exp": now + timedelta(minutes=5),
+                "iat": now,
+                "token_type": "access",
+            },
+            jwt_service.private_key,
+            algorithm=jwt_service.algorithm,
+        )
+
+        with pytest.raises(JWTError, match="Token missing jti"):
+            await jwt_service.validate_token(token_without_jti)
+
+        redis_mock.exists.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_refresh_tokens(self, jwt_service, redis_mock):
         """Test token refresh."""
         # Generate initial tokens
@@ -243,6 +291,18 @@ class TestJWTService:
 
         assert success is True
         redis_mock.setex.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_revoke_token_fails_without_blacklist_store(self):
+        """Revocation must fail when no blacklist store is configured."""
+        service = JWTService(redis_client=None)
+        token_pair = await service.generate_token_pair(
+            user_id="test-user-123", email="test@example.com"
+        )
+
+        success = await service.revoke_token(token_pair.access_token)
+
+        assert success is False
 
     @pytest.mark.asyncio
     async def test_revoke_all_user_tokens(self, jwt_service, redis_mock):

@@ -49,6 +49,9 @@ from src.api.services.event_publisher import event_publisher
 from src.api.websocket.connection_manager import websocket_manager
 from src.core.config import settings
 from src.middleware.auth_middleware import AuthMiddleware
+from src.security.audit_logger import AuditLogger
+from src.security.audit_middleware import AuditTrailMiddleware
+from src.security.security_headers import SecurityHeadersMiddleware
 
 logger = get_logger()
 
@@ -276,6 +279,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 outbox_relay.stop,
             )
 
+        audit_logger = AuditLogger(session_factory=durable_session_factory)
+        await audit_logger.start()
+        resources.push_async_callback(
+            _close_lifespan_resource,
+            "audit_logger",
+            audit_logger.stop,
+        )
+        app.state.audit_logger = audit_logger
+        resources.callback(
+            _remove_app_state_if_owned,
+            app,
+            "audit_logger",
+            audit_logger,
+        )
+
         resources.push_async_callback(
             _close_lifespan_resource,
             "direct_execution_service",
@@ -421,15 +439,6 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 app.add_middleware(
     IdempotencyMiddleware,
     store=ResilientIdempotencyStore(RedisIdempotencyStore(settings.REDIS_URL)),
@@ -446,6 +455,29 @@ app.add_middleware(LLMCostDriftMiddleware)
 
 # Add Authentication middleware
 app.add_middleware(AuthMiddleware)
+
+# Security controls are registered after the existing middleware so they are
+# outermost at runtime: audit sees responses produced by rate limiting and
+# authentication, while headers are applied to those responses as well.
+app.middleware("http")(AuditTrailMiddleware())
+app.middleware("http")(
+    SecurityHeadersMiddleware(
+        # The local development stack is served over HTTP. HSTS is enabled
+        # for non-development deployments where HTTPS is the expected scheme.
+        hsts_enabled=settings.ENVIRONMENT != "development"
+    )
+)
+
+# CORS must be the outermost application middleware. It terminates genuine
+# browser preflights before authentication, while AuthMiddleware remains the
+# exact public-route boundary for every other request, including OPTIONS.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Mount Prometheus metrics endpoint
 metrics_app = make_asgi_app()

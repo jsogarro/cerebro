@@ -4,13 +4,15 @@ Tests for agent query, pattern, and metrics API surfaces.
 
 import asyncio
 from collections.abc import Iterator
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api.services.agent_execution_service import AgentExecutionService
+from src.auth.models import TokenPayload
+from src.middleware.auth_middleware import get_jwt_service
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.agent_api_models import (
     AgentExecutionResponse,
@@ -18,6 +20,27 @@ from src.models.agent_api_models import (
     ChainOfAgentsRequest,
     MixtureOfAgentsRequest,
 )
+
+AUTH_USER_ID = "user-1"
+AUTH_ORG_ID = "11111111-1111-1111-1111-111111111111"
+AUTH_TOKEN = "test-token"
+
+
+class _TestJWTService:
+    """Return the fixture tenant identity at the application auth boundary."""
+
+    async def validate_token(self, token: str) -> TokenPayload:
+        """Validate the deterministic test bearer token."""
+        assert token == AUTH_TOKEN
+        now = datetime.now(UTC)
+        return TokenPayload(
+            sub=AUTH_USER_ID,
+            email="test@example.com",
+            organization_id=AUTH_ORG_ID,
+            jti="test-jti",
+            iat=now,
+            exp=now + timedelta(minutes=5),
+        )
 
 
 async def _wait_until_mixture(predicate) -> None:
@@ -30,7 +53,7 @@ class TestIntelligentQueryAPI:
 
     @pytest.fixture
     def client(self) -> Iterator[TestClient]:
-        """Create a lifespan-backed client with a deterministic execution fake."""
+        """Create a raw-ASGI client with a deterministic execution fake."""
         from src.api.main import app
         from src.api.services.direct_execution_service import (
             get_application_direct_execution_service,
@@ -57,18 +80,19 @@ class TestIntelligentQueryAPI:
             mock_service
         )
         app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
-            user_id="user-1",
-            organization_id="11111111-1111-1111-1111-111111111111",
+            user_id=AUTH_USER_ID,
+            organization_id=AUTH_ORG_ID,
         )
+        app.dependency_overrides[get_jwt_service] = _TestJWTService
         try:
-            with TestClient(app) as client:
-                yield client
+            yield TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
         finally:
             app.dependency_overrides.pop(
                 get_application_direct_execution_service,
                 None,
             )
             app.dependency_overrides.pop(get_tenant_context, None)
+            app.dependency_overrides.pop(get_jwt_service, None)
 
     def test_intelligent_research_query(self, client: TestClient) -> None:
         """Test primary intelligent research endpoint."""
@@ -401,13 +425,15 @@ class TestPerformanceAndMetrics:
         app.dependency_overrides[get_application_agent_execution_service] = lambda: (
             service
         )
+        app.dependency_overrides[get_jwt_service] = _TestJWTService
         try:
-            yield TestClient(app)
+            yield TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
         finally:
             app.dependency_overrides.pop(
                 get_application_agent_execution_service,
                 None,
             )
+            app.dependency_overrides.pop(get_jwt_service, None)
 
     def test_agent_metrics_structure(self, client: TestClient) -> None:
         """Test agent metrics response structure."""

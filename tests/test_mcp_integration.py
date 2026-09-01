@@ -7,6 +7,7 @@ unverified by CI, and assume any network call it makes is live the first time
 someone installs the extra — `test_academic_search` was exactly that.
 """
 
+import inspect
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -46,6 +47,30 @@ class TestMCPServer:
 
         assert "search_academic" in server.get_registered_tools()
         assert server.get_tool("search_academic") is not None
+
+    def test_fastmcp_wrapper_has_explicit_metadata_signature(self):
+        """FastMCP must receive named parameters rather than ``**kwargs``."""
+        server = MCPServer()
+        captured_wrappers = []
+
+        def capture_tool(**_metadata):
+            def decorator(wrapper):
+                captured_wrappers.append(wrapper)
+                return wrapper
+
+            return decorator
+
+        server.mcp.tool = capture_tool
+        server.register_tool(AcademicSearchTool())
+
+        assert len(captured_wrappers) == 1
+        signature = inspect.signature(captured_wrappers[0])
+        assert all(
+            parameter.kind is not inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+        assert signature.parameters["query"].annotation is str
+        assert signature.parameters["max_results"].default == 10
 
     def test_multiple_tool_registration(self):
         """Test registering multiple tools."""

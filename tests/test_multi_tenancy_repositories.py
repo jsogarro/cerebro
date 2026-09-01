@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.db.api_key import APIKey
+from src.models.db.audit_log import AuditLog
 from src.models.db.research_project import ProjectStatus, ResearchProject
 from src.repositories.base import BaseRepository
 from src.repositories.research_repository import ResearchRepository
@@ -52,7 +52,7 @@ def test_base_repository_applies_organization_scope() -> None:
 
 
 def test_base_repository_rejects_scope_for_unscoped_models() -> None:
-    repo = BaseRepository(APIKey, cast(AsyncSession, object()))
+    repo = BaseRepository(AuditLog, cast(AsyncSession, object()))
 
     with pytest.raises(ValueError, match="does not support organization scoping"):
         repo.apply_organization_scope(repo.build_query(), uuid4())

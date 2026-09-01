@@ -7,6 +7,7 @@ This module provides authentication and authorization for WebSocket connections.
 from dataclasses import dataclass
 from uuid import UUID
 
+from fastapi import Query, WebSocket, WebSocketException
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
@@ -15,8 +16,12 @@ from src.api.websocket.run_stream import (
     RunStreamAuthorizationError,
     RunStreamEntitlement,
 )
-from src.auth.jwt_service import JWTService
+from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
 from src.core.config import settings
+from src.middleware.auth_middleware import (
+    AuthenticationServiceUnavailableError,
+    resolve_jwt_service,
+)
 from src.repositories.research_repository import ResearchRepository
 
 logger = get_logger()
@@ -49,6 +54,8 @@ class WebSocketAuthError(Exception):
 async def verify_websocket_claims(
     token: str | None,
     jwt_service: JWTService,
+    *,
+    allow_anonymous: bool = True,
 ) -> tuple[str | None, str | None]:
     """Validate a WebSocket token and return ``(user_id, organization_id)``.
 
@@ -70,7 +77,7 @@ async def verify_websocket_claims(
         # Anonymous access is a narrow, explicit local-development opt-in.
         # ENVIRONMENT alone is not an authorization control, and production
         # can never enable this bypass even if the opt-in is misconfigured.
-        if (
+        if allow_anonymous and (
             settings.ENVIRONMENT == "development"
             and settings.DEV_ALLOW_ANONYMOUS_WEBSOCKETS
         ):
@@ -106,6 +113,13 @@ async def verify_websocket_claims(
     except WebSocketAuthError:
         raise
 
+    except JWTServiceUnavailableError as e:
+        logger.error(
+            "WebSocket authentication service unavailable",
+            error=str(e),
+        )
+        raise WebSocketAuthError("Authentication service unavailable", code=1011) from e
+
     except JWTError as e:
         logger.warning(
             "WebSocket JWT authentication failed",
@@ -124,13 +138,17 @@ async def verify_websocket_claims(
 async def verify_websocket_token(
     token: str | None,
     jwt_service: JWTService,
+    *,
+    allow_anonymous: bool = True,
 ) -> str | None:
     """Verify a WebSocket token and return its user id.
 
     Retained for callers that need identity but no tenant scope; see
     :func:`verify_websocket_claims` for the full claim set.
     """
-    user_id, _ = await verify_websocket_claims(token, jwt_service)
+    user_id, _ = await verify_websocket_claims(
+        token, jwt_service, allow_anonymous=allow_anonymous
+    )
     return user_id
 
 
@@ -276,6 +294,8 @@ async def authenticate_websocket_connection(
     token: str | None,
     user_agent: str | None,
     jwt_service: JWTService,
+    *,
+    allow_anonymous: bool = True,
 ) -> tuple[str | None, str]:
     """
     Authenticate a WebSocket connection and determine client type.
@@ -291,7 +311,12 @@ async def authenticate_websocket_connection(
     Raises:
         WebSocketAuthError: If authentication fails
     """
-    principal = await authenticate_websocket_principal(token, user_agent, jwt_service)
+    principal = await authenticate_websocket_principal(
+        token,
+        user_agent,
+        jwt_service,
+        allow_anonymous=allow_anonymous,
+    )
     return principal.user_id, principal.client_type
 
 
@@ -299,6 +324,8 @@ async def authenticate_websocket_principal(
     token: str | None,
     user_agent: str | None,
     jwt_service: JWTService,
+    *,
+    allow_anonymous: bool = True,
 ) -> WebSocketPrincipal:
     """Authenticate a connection and carry its tenant claim forward.
 
@@ -309,7 +336,11 @@ async def authenticate_websocket_principal(
     Raises:
         WebSocketAuthError: If authentication fails.
     """
-    user_id, organization_id = await verify_websocket_claims(token, jwt_service)
+    user_id, organization_id = await verify_websocket_claims(
+        token,
+        jwt_service,
+        allow_anonymous=allow_anonymous,
+    )
     client_type = extract_client_type(user_agent)
 
     logger.info(
@@ -323,3 +354,39 @@ async def authenticate_websocket_principal(
         organization_id=organization_id,
         client_type=client_type,
     )
+
+
+async def require_authenticated_websocket(
+    websocket: WebSocket,
+    token: str | None = Query(None, description="JWT authentication token"),
+) -> None:
+    """Require query-token JWT claims before a mounted handler runs.
+
+    WebSocket authentication intentionally reads only the ``token`` query
+    dependency. An HTTP ``Authorization`` header alone does not authenticate a
+    mounted WebSocket connection.
+    """
+    try:
+        jwt_service = await resolve_jwt_service(websocket)
+        await authenticate_websocket_connection(
+            token,
+            websocket.headers.get("user-agent"),
+            jwt_service,
+            allow_anonymous=False,
+        )
+    except WebSocketAuthError as exc:
+        raise WebSocketException(code=exc.code, reason=exc.message) from exc
+    except AuthenticationServiceUnavailableError as exc:
+        raise WebSocketException(
+            code=1011,
+            reason="Authentication service unavailable",
+        ) from exc
+    except Exception as exc:
+        logger.error(
+            "Mounted WebSocket authentication service unavailable",
+            error=str(exc),
+        )
+        raise WebSocketException(
+            code=1011,
+            reason="Authentication service unavailable",
+        ) from exc

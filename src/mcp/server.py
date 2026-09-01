@@ -4,15 +4,49 @@ MCP Server implementation using FastMCP.
 Provides the main MCP server that manages and exposes tools.
 """
 
-from typing import Any
+import inspect
+from typing import Any, Final, cast
 
 from pydantic import BaseModel
 from structlog import get_logger
 
-from src.mcp.base import BaseMCPTool
+from src.mcp.base import BaseMCPTool, ToolParameter
 from src.mcp.registry import ToolRegistry
 
 logger = get_logger()
+
+_MCP_PARAMETER_TYPES: Final[dict[str, Any]] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+    "array": list[Any],
+    "object": dict[str, Any],
+}
+
+
+def _signature_for_metadata(
+    parameters: list[ToolParameter],
+) -> tuple[inspect.Signature, dict[str, Any]]:
+    """Build a FastMCP-compatible signature from the platform metadata."""
+    signature_parameters: list[inspect.Parameter] = []
+    annotations: dict[str, Any] = {}
+
+    for parameter in parameters:
+        annotation = _MCP_PARAMETER_TYPES.get(parameter.type, Any)
+        default = inspect.Parameter.empty if parameter.required else parameter.default
+        signature_parameters.append(
+            inspect.Parameter(
+                parameter.name,
+                kind=inspect.Parameter.KEYWORD_ONLY,
+                default=default,
+                annotation=annotation,
+            )
+        )
+        annotations[parameter.name] = annotation
+
+    annotations["return"] = dict[str, Any]
+    return inspect.Signature(signature_parameters), annotations
 
 
 class MCPServerConfig(BaseModel):
@@ -23,7 +57,6 @@ class MCPServerConfig(BaseModel):
     version: str = "1.0.0"
     host: str = "localhost"
     port: int = 8765
-    auth_enabled: bool = False
     max_concurrent_tools: int = 10
 
 
@@ -71,18 +104,19 @@ class MCPServer:
         # Create MCP tool wrapper
         metadata = tool.get_metadata()
 
-        # Build parameter schema
-        params_schema = {}
-        for param in metadata.parameters:
-            param_def = {"type": param.type, "description": param.description}
-            if not param.required and param.default is not None:
-                param_def["default"] = param.default
-            params_schema[param.name] = param_def
-
         # Register tool with FastMCP
         async def tool_wrapper(**kwargs: Any) -> dict[str, Any]:
             """Wrapper function for MCP tool execution."""
-            return await tool.execute(**kwargs)
+            return await tool(**kwargs)
+
+        # FastMCP validates the callable's inspected signature and rejects a
+        # raw VAR_KEYWORD parameter. Keep the forwarding implementation
+        # flexible for BaseMCPTool while exposing the typed, named contract
+        # described by the platform metadata to the MCP runtime.
+        signature, annotations = _signature_for_metadata(metadata.parameters)
+        tool_wrapper_with_metadata = cast(Any, tool_wrapper)
+        tool_wrapper_with_metadata.__signature__ = signature
+        tool_wrapper_with_metadata.__annotations__ = annotations
 
         _decorated_tool = self.mcp.tool(
             name=metadata.name, description=metadata.description

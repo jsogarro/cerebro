@@ -102,21 +102,33 @@ class SecurityAlert(BaseModel):
 
     # Alert identification
     alert_type: Mapped[AlertType] = mapped_column(
-        ENUM(AlertType, name="alert_type"),
+        ENUM(
+            AlertType,
+            name="alert_type",
+            values_callable=lambda enum_class: [member.value for member in enum_class],
+        ),
         nullable=False,
         index=True,
         comment="Type of security alert",
     )
 
     severity: Mapped[AlertSeverity] = mapped_column(
-        ENUM(AlertSeverity, name="alert_severity"),
+        ENUM(
+            AlertSeverity,
+            name="alert_severity",
+            values_callable=lambda enum_class: [member.value for member in enum_class],
+        ),
         nullable=False,
         index=True,
         comment="Alert severity level",
     )
 
     status: Mapped[AlertStatus] = mapped_column(
-        ENUM(AlertStatus, name="alert_status"),
+        ENUM(
+            AlertStatus,
+            name="alert_status",
+            values_callable=lambda enum_class: [member.value for member in enum_class],
+        ),
         nullable=False,
         default=AlertStatus.NEW,
         index=True,
@@ -293,7 +305,7 @@ class SecurityAlert(BaseModel):
 
     # Alert metadata
     alert_metadata: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True, comment="Additional alert metadata"
+        "metadata", JSON, nullable=True, comment="Additional alert metadata"
     )
 
     # Relationships

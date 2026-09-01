@@ -18,6 +18,7 @@ from src.api.websocket.auth import (
     WebSocketPrincipal,
     authenticate_websocket_connection,
     authenticate_websocket_principal,
+    require_authenticated_websocket,
     resolve_run_stream_entitlement,
     verify_project_access,
 )
@@ -82,7 +83,7 @@ async def _principal_may_subscribe_to_project(
         )
 
 
-@router.websocket("/ws")
+@router.websocket("/ws", dependencies=[Depends(require_authenticated_websocket)])
 async def websocket_endpoint(
     websocket: WebSocket,
     token: str | None = Query(None, description="JWT authentication token"),
@@ -92,7 +93,8 @@ async def websocket_endpoint(
     General purpose WebSocket endpoint for real-time updates.
 
     Clients can subscribe to various project and user events through this endpoint.
-    Authentication is handled via query parameter or first message.
+    Authentication is handled by the mounted query-token dependency. An HTTP
+    Authorization header alone is not accepted for WebSocket authentication.
     """
     client_id = None
 
@@ -217,7 +219,10 @@ async def websocket_endpoint(
             await websocket_manager.disconnect(client_id)
 
 
-@router.websocket("/ws/projects/{project_id}")
+@router.websocket(
+    "/ws/projects/{project_id}",
+    dependencies=[Depends(require_authenticated_websocket)],
+)
 async def project_websocket_endpoint(
     websocket: WebSocket,
     project_id: UUID,
@@ -355,7 +360,10 @@ async def project_websocket_endpoint(
             await websocket_manager.disconnect(client_id)
 
 
-@router.websocket("/ws/cli/{project_id}")
+@router.websocket(
+    "/ws/cli/{project_id}",
+    dependencies=[Depends(require_authenticated_websocket)],
+)
 async def cli_websocket_endpoint(
     websocket: WebSocket,
     project_id: UUID,
@@ -485,7 +493,10 @@ async def cli_websocket_endpoint(
             await websocket_manager.disconnect(client_id)
 
 
-@router.websocket("/ws/runs/{run_id}")
+@router.websocket(
+    "/ws/runs/{run_id}",
+    dependencies=[Depends(require_authenticated_websocket)],
+)
 async def run_event_stream_endpoint(
     websocket: WebSocket,
     run_id: str,

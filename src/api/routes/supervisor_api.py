@@ -24,6 +24,7 @@ from src.api.services.supervisor_coordination_service import (
     get_application_supervisor_coordination_service,
 )
 from src.api.services.supervisor_progress_tracker import SupervisorProgressTracker
+from src.api.websocket.auth import require_authenticated_websocket
 from src.models.supervisor_api_models import (
     ConflictResolutionRequest,
     ConflictResolutionResponse,
@@ -490,7 +491,10 @@ async def run_coordination_experiment(
 # WebSocket Endpoints
 
 
-@router.websocket("/coordination/ws")
+@router.websocket(
+    "/coordination/ws",
+    dependencies=[Depends(require_authenticated_websocket)],
+)
 async def coordination_progress_websocket(
     websocket: WebSocket,
     coordination_id: str | None = Query(None),
@@ -550,7 +554,10 @@ async def coordination_progress_websocket(
         connection_manager.disconnect(websocket, client_id)
 
 
-@router.websocket("/{supervisor_type}/ws")
+@router.websocket(
+    "/{supervisor_type}/ws",
+    dependencies=[Depends(require_authenticated_websocket)],
+)
 async def supervisor_websocket(
     websocket: WebSocket,
     supervisor_type: SupervisorType,

@@ -7,9 +7,18 @@ services:
       context: .
       dockerfile: Dockerfile
       target: development
-    container_name: research-api
+    entrypoint: ["/entrypoint.sh"]
+    command:
+      [
+        "uvicorn",
+        "src.api.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+      ]
     ports:
-      - "8000:8000"
+      - "${API_HOST_PORT:-8000}:8000"
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
@@ -34,30 +43,61 @@ services:
     networks:
       - research-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
-  # MCP Server
+  # FastMCP HTTP server
   mcp-server:
     build:
       context: .
       dockerfile: Dockerfile
       target: development
-    container_name: mcp-server
-    command: ["python", "-m", "src.mcp.server"]
+    entrypoint: []
+    command:
+      - python
+      - -c
+      - |
+        import os
+        from src.mcp.server import MCPServer
+
+        server = MCPServer()
+        server.mcp.run(
+            transport="http",
+            host="0.0.0.0",
+            port=int(os.environ.get("MCP_PORT", "9000")),
+        )
     volumes:
       - ./src:/app/src
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-development-only-secret-key-32-chars}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ENVIRONMENT=development
       - LOG_LEVEL=DEBUG
+      - MCP_HOST=0.0.0.0
       - MCP_PORT=9000
-    ports:
-      - "9000:9000"
     depends_on:
       redis:
         condition: service_healthy
     networks:
       - research-network
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(s.connect_ex(('127.0.0.1',9000)))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   # MASR Router Service (AI Brain Intelligence)
   masr-router:
@@ -66,7 +106,6 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.masr
-    container_name: masr-router
     volumes:
       - ./src:/app/src
     environment:
@@ -99,13 +138,12 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
-    container_name: research-postgres
     environment:
       - POSTGRES_USER=research
       - POSTGRES_PASSWORD=research123
       - POSTGRES_DB=research_db
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -121,9 +159,8 @@ services:
   # Redis Cache
   redis:
     image: redis:7-alpine
-    container_name: research-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -139,24 +176,32 @@ services:
   # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
-    container_name: research-nginx
     ports:
-      - "80:80"
-      - "443:443"
+      - "${NGINX_HTTP_HOST_PORT:-80}:80"
+      - "${NGINX_HTTPS_HOST_PORT:-443}:443"
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
       - ./docker/nginx/conf.d:/etc/nginx/conf.d
     depends_on:
-      - api
-      - web
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+      mcp-server:
+        condition: service_healthy
     networks:
       - research-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   # pgAdmin for Database Management (Development only)
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: research-pgadmin
     environment:
       - PGADMIN_DEFAULT_EMAIL=admin@research.local
       - PGADMIN_DEFAULT_PASSWORD=admin123
@@ -175,7 +220,6 @@ services:
   # Redis Commander (Development only)
   redis-commander:
     image: rediscommander/redis-commander:latest
-    container_name: research-redis-commander
     environment:
       - REDIS_HOSTS=local:redis:6379
     ports:
@@ -196,25 +240,28 @@ services:
       dockerfile: Dockerfile
       args:
         - VITE_API_URL=/api/v1  # Points via nginx if we had it, but actually the web's nginx proxies? Wait, no we serve static files. If it's static, /api/v1 works if we access the app via a reverse proxy that routes /api/v1 to `api` container, or the web's own nginx handles proxying. 
-    container_name: research-web
     ports:
       # Container nginx listens on 8080 so it can run as the unprivileged
       # `nginx` user; host-side mapping keeps the same `localhost:3000`
       # developer entrypoint.
-      - "3000:8080"
+      - "${WEB_HOST_PORT:-3000}:8080"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - research-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
 networks:
   research-network:
     driver: bridge
-    name: research-network
 
 volumes:
   postgres_data:
-    name: research-postgres-data
   redis_data:
-    name: research-redis-data

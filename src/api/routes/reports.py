@@ -6,15 +6,21 @@ and management, following functional programming principles.
 """
 
 import io
+import time
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.generated_report import GeneratedReport
+from src.models.db.research_project import ResearchProject
+from src.models.db.session import get_session, get_session_factory
 from src.models.report import (
     CitationStyle,
     ReportConfiguration,
@@ -26,6 +32,7 @@ from src.repositories.report_repository import ReportFormatRepository, ReportRep
 from src.services.report_config import create_report_settings
 from src.services.report_generator import ReportGenerator
 from src.services.report_storage import (
+    ReportStorageError,
     ReportStorageService,
     create_report_storage_service,
 )
@@ -169,17 +176,84 @@ class ReportStatisticsResponse(BaseModel):
 # Dependency functions
 
 
-def get_report_services() -> tuple[Any, Any, Any, Any]:
+def _tenant_ids(tenant_context: TenantContext) -> tuple[UUID, UUID]:
+    """Return validated tenant identifiers, failing closed for bad claims."""
+    try:
+        return UUID(tenant_context.user_id), UUID(tenant_context.organization_id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated tenant identifiers are invalid",
+        ) from exc
+
+
+def _validate_requested_user(
+    requested_user_id: UUID | None, authenticated_user_id: UUID
+) -> None:
+    """Reject a caller-supplied user filter that differs from the auth subject."""
+    if requested_user_id is not None and requested_user_id != authenticated_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Reports may only be accessed for the authenticated user",
+        )
+
+
+async def _validate_project_access(
+    session: AsyncSession,
+    project_id: UUID | None,
+    *,
+    user_id: UUID,
+    organization_id: UUID,
+) -> UUID | None:
+    """Validate project ownership before using a caller-provided project ID."""
+    if project_id is None:
+        return None
+
+    query = select(ResearchProject.id).where(
+        ResearchProject.id == project_id,
+        ResearchProject.user_id == user_id,
+        ResearchProject.organization_id == organization_id,
+        ResearchProject.deleted_at.is_(None),
+    )
+    result = await session.execute(query)
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project {project_id} not found",
+        )
+    return project_id
+
+
+def _trusted_workflow_data(
+    request: CreateReportRequest, project_id: UUID | None
+) -> dict[str, Any]:
+    """Build generation input without allowing nested caller IDs to override auth."""
+    workflow_data = dict(request.workflow_data)
+    workflow_data.update(
+        {
+            "title": request.title,
+            "query": request.query,
+            "domains": request.domains,
+        }
+    )
+    if project_id is None:
+        workflow_data.pop("project_id", None)
+    else:
+        workflow_data["project_id"] = str(project_id)
+    return workflow_data
+
+
+def get_report_services(
+    session: AsyncSession,
+) -> tuple[
+    ReportGenerator, ReportStorageService, ReportRepository, ReportFormatRepository
+]:
+    """Create report services backed by the request's live database session."""
     settings = create_report_settings()
     generator = ReportGenerator(settings)
-    session = None
-    report_repo = ReportRepository(session) if session else None
-    format_repo = ReportFormatRepository(session) if session else None
-    storage_service = (
-        create_report_storage_service(report_repo, format_repo, settings)
-        if report_repo and format_repo
-        else None
-    )
+    report_repo = ReportRepository(session)
+    format_repo = ReportFormatRepository(session)
+    storage_service = create_report_storage_service(report_repo, format_repo, settings)
     return generator, storage_service, report_repo, format_repo
 
 
@@ -190,7 +264,10 @@ def get_report_services() -> tuple[Any, Any, Any, Any]:
     "/generate", response_model=ReportResponse, status_code=status.HTTP_202_ACCEPTED
 )
 async def generate_report(
-    request: CreateReportRequest, background_tasks: BackgroundTasks
+    request: CreateReportRequest,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ReportResponse:
     """
     Generate a new report asynchronously.
@@ -199,13 +276,17 @@ async def generate_report(
     with a report ID. The actual generation happens in the background.
     """
     try:
-        generator, storage_service, _report_repo, _format_repo = get_report_services()
-
-        if not generator:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Report generation service not available",
-            )
+        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        _validate_requested_user(request.user_id, authenticated_user_id)
+        trusted_project_id = await _validate_project_access(
+            session,
+            request.project_id,
+            user_id=authenticated_user_id,
+            organization_id=organization_id,
+        )
+        generator, _storage_service, report_repo, _format_repo = get_report_services(
+            session
+        )
 
         # Build report configuration
         config = ReportConfiguration(
@@ -225,55 +306,63 @@ async def generate_report(
         )
 
         gen_request = ReportGenerationRequest(
-            project_id=request.project_id,
-            workflow_data={
-                "title": request.title,
-                "query": request.query,
-                "domains": request.domains,
-                "project_id": str(request.project_id) if request.project_id else None,
-                **request.workflow_data,
-            },
+            project_id=trusted_project_id,
+            workflow_data=_trusted_workflow_data(request, trusted_project_id),
             configuration=config,
             formats=request.formats,
             save_to_storage=request.save_to_storage,
             notify_completion=request.notify_completion,
         )
 
+        # Persist the request before queueing work. The response ID and timestamp
+        # therefore identify a real row that the worker can update.
+        db_report = await report_repo.create_report(
+            title=request.title,
+            report_type=request.report_type.value,
+            query=request.query,
+            user_id=authenticated_user_id,
+            project_id=trusted_project_id,
+            organization_id=organization_id,
+            domains=request.domains,
+            configuration=config.model_dump(mode="json"),
+            formats_generated=[],
+            generation_status="pending",
+            created_by=str(authenticated_user_id),
+        )
+        reloaded_report = await report_repo.get_report_with_formats(
+            db_report.id,
+            organization_id=organization_id,
+            user_id=authenticated_user_id,
+        )
+        if reloaded_report is None:
+            raise RuntimeError("Persisted report could not be reloaded")
+        db_report = reloaded_report
+
         # Add background task for generation
         background_tasks.add_task(
             _generate_report_task,
             generator,
-            storage_service,
+            db_report.id,
             gen_request,
-            request.user_id,
-            request.project_id,
+            authenticated_user_id,
+            trusted_project_id,
+            organization_id,
         )
 
-        # Create placeholder response (in real app, would create DB record first)
-        response = ReportResponse(
-            id=UUID("00000000-0000-0000-0000-000000000000"),  # Would be real ID
-            title=request.title,
-            query=request.query,
-            report_type=request.report_type.value,
-            generation_status="generating",
-            formats_generated=[],
-            word_count=0,
-            page_count=0,
-            quality_score=0.0,
-            confidence_score=0.0,
-            created_at="2024-01-01T00:00:00Z",  # Would be real timestamp
-            generation_time_seconds=None,
-        )
+        response = ReportResponse.from_db_report(db_report)
 
         logger.info(
             "Report generation requested",
             title=request.title,
-            user_id=str(request.user_id) if request.user_id else None,
+            report_id=str(db_report.id),
+            user_id=str(authenticated_user_id),
             formats=len(request.formats),
         )
 
         return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to start report generation", exc_info=e)
         raise HTTPException(
@@ -286,10 +375,16 @@ async def generate_report(
 async def get_report_statistics(
     user_id: UUID | None = Query(None, description="Filter by user ID"),
     days: int = Query(30, ge=1, le=365, description="Days to look back"),
+    session: AsyncSession = Depends(get_session),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ReportStatisticsResponse:
     """Get report generation statistics."""
     try:
-        _generator, storage_service, _report_repo, _format_repo = get_report_services()
+        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        _validate_requested_user(user_id, authenticated_user_id)
+        _generator, storage_service, _report_repo, _format_repo = get_report_services(
+            session
+        )
 
         if not storage_service:
             raise HTTPException(
@@ -298,7 +393,11 @@ async def get_report_statistics(
             )
 
         # Get statistics from storage service
-        stats = await storage_service.get_storage_statistics()
+        stats = await storage_service.get_storage_statistics(
+            organization_id=organization_id,
+            user_id=authenticated_user_id,
+            days=days,
+        )
 
         return ReportStatisticsResponse(
             total_reports=stats.get("total_reports", 0),
@@ -326,10 +425,17 @@ async def get_report_statistics(
 
 
 @router.get("/{report_id}", response_model=ReportResponse)
-async def get_report(report_id: UUID) -> ReportResponse:
+async def get_report(
+    report_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    tenant_context: TenantContext = Depends(get_tenant_context),
+) -> ReportResponse:
     """Get report details by ID."""
     try:
-        _generator, storage_service, _report_repo, _format_repo = get_report_services()
+        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        _generator, storage_service, _report_repo, _format_repo = get_report_services(
+            session
+        )
 
         if not storage_service:
             raise HTTPException(
@@ -337,7 +443,11 @@ async def get_report(report_id: UUID) -> ReportResponse:
                 detail="Report storage service not available",
             )
 
-        report = await storage_service.retrieve_report(report_id)
+        report = await storage_service.retrieve_report(
+            report_id,
+            organization_id=organization_id,
+            user_id=authenticated_user_id,
+        )
 
         if not report:
             raise HTTPException(
@@ -346,7 +456,11 @@ async def get_report(report_id: UUID) -> ReportResponse:
             )
 
         # Update access statistics
-        await storage_service.update_report_access(report_id)
+        await storage_service.update_report_access(
+            report_id,
+            organization_id=organization_id,
+            user_id=authenticated_user_id,
+        )
 
         return ReportResponse.from_db_report(report)
 
@@ -361,10 +475,18 @@ async def get_report(report_id: UUID) -> ReportResponse:
 
 
 @router.get("/{report_id}/download/{format_type}")
-async def download_report(report_id: UUID, format_type: str) -> StreamingResponse:
+async def download_report(
+    report_id: UUID,
+    format_type: str,
+    session: AsyncSession = Depends(get_session),
+    tenant_context: TenantContext = Depends(get_tenant_context),
+) -> StreamingResponse:
     """Download report in specific format."""
     try:
-        _generator, storage_service, _report_repo, _format_repo = get_report_services()
+        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        _generator, storage_service, _report_repo, _format_repo = get_report_services(
+            session
+        )
 
         if not storage_service:
             raise HTTPException(
@@ -374,7 +496,10 @@ async def download_report(report_id: UUID, format_type: str) -> StreamingRespons
 
         # Retrieve report content
         content_result = await storage_service.retrieve_report_content(
-            report_id, format_type
+            report_id,
+            format_type,
+            organization_id=organization_id,
+            user_id=authenticated_user_id,
         )
 
         if not content_result:
@@ -398,7 +523,11 @@ async def download_report(report_id: UUID, format_type: str) -> StreamingRespons
         filename = f"report_{report_id}{extension}"
 
         # Update access statistics
-        await storage_service.update_report_access(report_id)
+        await storage_service.update_report_access(
+            report_id,
+            organization_id=organization_id,
+            user_id=authenticated_user_id,
+        )
 
         return StreamingResponse(
             io.BytesIO(content_bytes),
@@ -423,10 +552,16 @@ async def list_reports(
     report_type: str | None = Query(None, description="Filter by report type"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
+    session: AsyncSession = Depends(get_session),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ReportListResponse:
     """List reports with filtering and pagination."""
     try:
-        _generator, storage_service, _report_repo, _format_repo = get_report_services()
+        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        _validate_requested_user(user_id, authenticated_user_id)
+        _generator, storage_service, _report_repo, _format_repo = get_report_services(
+            session
+        )
 
         if not storage_service:
             raise HTTPException(
@@ -434,13 +569,12 @@ async def list_reports(
                 detail="Report storage service not available",
             )
 
-        if user_id:
-            reports = await storage_service.list_user_reports(
-                user_id, limit=page_size + 1, status_filter=status_filter
-            )
-        else:
-            # For public listing, you might want different logic
-            reports = []  # Would implement general listing
+        reports = await storage_service.list_user_reports(
+            authenticated_user_id,
+            limit=page_size + 1,
+            status_filter=status_filter,
+            organization_id=organization_id,
+        )
 
         # Check if there are more results
         has_more = len(reports) > page_size
@@ -458,6 +592,8 @@ async def list_reports(
             has_more=has_more,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to list reports", exc_info=e)
         raise HTTPException(
@@ -467,10 +603,18 @@ async def list_reports(
 
 
 @router.post("/search", response_model=ReportListResponse)
-async def search_reports(request: ReportSearchRequest) -> ReportListResponse:
+async def search_reports(
+    request: ReportSearchRequest,
+    session: AsyncSession = Depends(get_session),
+    tenant_context: TenantContext = Depends(get_tenant_context),
+) -> ReportListResponse:
     """Search reports by text and filters."""
     try:
-        _generator, storage_service, _report_repo, _format_repo = get_report_services()
+        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        _validate_requested_user(request.user_id, authenticated_user_id)
+        _generator, storage_service, _report_repo, _format_repo = get_report_services(
+            session
+        )
 
         if not storage_service:
             raise HTTPException(
@@ -488,10 +632,11 @@ async def search_reports(request: ReportSearchRequest) -> ReportListResponse:
         # Perform search
         reports, total_count = await storage_service.search_reports(
             search_term=request.search_term,
-            user_id=request.user_id,
+            user_id=authenticated_user_id,
             filters=filters,
             limit=request.limit,
             offset=request.offset,
+            organization_id=organization_id,
         )
 
         report_responses = [ReportResponse.from_db_report(report) for report in reports]
@@ -507,6 +652,8 @@ async def search_reports(request: ReportSearchRequest) -> ReportListResponse:
             has_more=has_more,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to search reports", exc_info=e)
         raise HTTPException(
@@ -519,10 +666,15 @@ async def search_reports(request: ReportSearchRequest) -> ReportListResponse:
 async def delete_report(
     report_id: UUID,
     delete_files: bool = Query(True, description="Also delete associated files"),
+    session: AsyncSession = Depends(get_session),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> None:
     """Delete a report and optionally its files."""
     try:
-        _generator, storage_service, _report_repo, _format_repo = get_report_services()
+        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        _generator, storage_service, _report_repo, _format_repo = get_report_services(
+            session
+        )
 
         if not storage_service:
             raise HTTPException(
@@ -530,7 +682,13 @@ async def delete_report(
                 detail="Report storage service not available",
             )
 
-        success = await storage_service.delete_report(report_id, delete_files)
+        success = await storage_service.delete_report(
+            report_id,
+            delete_files,
+            organization_id=organization_id,
+            user_id=authenticated_user_id,
+            deleted_by=str(authenticated_user_id),
+        )
 
         if not success:
             raise HTTPException(
@@ -551,10 +709,17 @@ async def delete_report(
 
 
 @router.get("/{report_id}/integrity")
-async def verify_report_integrity(report_id: UUID) -> dict[str, Any]:
+async def verify_report_integrity(
+    report_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    tenant_context: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
     """Verify the integrity of a report and its files."""
     try:
-        _generator, storage_service, _report_repo, _format_repo = get_report_services()
+        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        _generator, storage_service, _report_repo, _format_repo = get_report_services(
+            session
+        )
 
         if not storage_service:
             raise HTTPException(
@@ -562,7 +727,11 @@ async def verify_report_integrity(report_id: UUID) -> dict[str, Any]:
                 detail="Report storage service not available",
             )
 
-        integrity_result = await storage_service.verify_report_integrity(report_id)
+        integrity_result = await storage_service.verify_report_integrity(
+            report_id,
+            organization_id=organization_id,
+            user_id=authenticated_user_id,
+        )
 
         if not isinstance(integrity_result, dict):
             raise HTTPException(
@@ -572,6 +741,8 @@ async def verify_report_integrity(report_id: UUID) -> dict[str, Any]:
 
         return integrity_result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to verify report integrity {report_id}", exc_info=e)
         raise HTTPException(
@@ -585,34 +756,98 @@ async def verify_report_integrity(report_id: UUID) -> dict[str, Any]:
 
 async def _generate_report_task(
     generator: ReportGenerator,
-    storage_service: ReportStorageService | None,
+    report_id: UUID,
     request: ReportGenerationRequest,
-    user_id: UUID | None,
+    user_id: UUID,
     project_id: UUID | None,
+    organization_id: UUID,
 ) -> None:
-    """Background task for report generation."""
-    try:
-        logger.info("Starting report generation task")
+    """Generate and finalize the exact pending report row returned to the caller."""
+    session_factory = get_session_factory()
 
-        # Generate the report
-        response = await generator.generate_report(request)
+    async with session_factory() as session:
+        _generator, storage_service, report_repo, _format_repo = get_report_services(
+            session
+        )
+        try:
+            report_record = await report_repo.update_report_status(
+                report_id,
+                "generating",
+                organization_id=organization_id,
+                user_id=user_id,
+            )
+            if report_record is None:
+                raise ReportStorageError(
+                    f"Pending report {report_id} was not found in the requested tenant"
+                )
 
-        if response.status == "completed":
+            started_at = time.perf_counter()
+            input_data = await generator._extract_input_data(request)
+            report = await generator._build_report_structure(
+                input_data,
+                request.configuration,
+                str(report_id),
+            )
+            outputs = await generator._generate_formats(report, request.formats)
+            generation_time = time.perf_counter() - started_at
+            report.metadata.generation_time_seconds = generation_time
+            report.get_word_count()
+            report.estimate_page_count()
+
+            if request.save_to_storage:
+                await storage_service.store_report(
+                    report,
+                    outputs,
+                    user_id=user_id,
+                    project_id=project_id,
+                    organization_id=organization_id,
+                    existing_report_id=report_id,
+                )
+            else:
+                metadata = storage_service._report_metadata(report, "")
+                metadata.pop("storage_path", None)
+                await report_repo.update_report(
+                    report_id,
+                    metadata,
+                    organization_id=organization_id,
+                    user_id=user_id,
+                )
+                await report_repo.mark_report_completed(
+                    report_id,
+                    [],
+                    {},
+                    generation_time=generation_time,
+                    organization_id=organization_id,
+                    user_id=user_id,
+                )
+
+            await session.commit()
             logger.info(
                 "Report generation completed",
-                report_id=response.report_id,
-                formats=len(response.formats_generated),
-                generation_time=response.generation_time,
+                report_id=str(report_id),
+                formats=len(outputs),
+                generation_time=generation_time,
             )
-        else:
+        except Exception as exc:
+            await session.rollback()
+            try:
+                await report_repo.update_report_status(
+                    report_id,
+                    "failed",
+                    str(exc),
+                    organization_id=organization_id,
+                    user_id=user_id,
+                )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                logger.error(
+                    "Failed to persist report generation failure",
+                    report_id=str(report_id),
+                    exc_info=True,
+                )
             logger.error(
-                "Report generation failed",
-                report_id=response.report_id,
-                errors=response.errors,
+                "Report generation task failed",
+                report_id=str(report_id),
+                exc_info=exc,
             )
-
-        # Here you would typically notify the user or update a status
-        # For example, send a WebSocket message or email notification
-
-    except Exception as e:
-        logger.error("Report generation task failed", exc_info=e)

@@ -9,12 +9,6 @@ from typing import Any
 from structlog import get_logger
 
 from src.mcp.server import MCPServer, MCPServerConfig
-from src.mcp.tools import (
-    AcademicSearchTool,
-    CitationTool,
-    KnowledgeGraphTool,
-    StatisticsTool,
-)
 
 logger = get_logger()
 
@@ -39,6 +33,16 @@ class MCPClient:
 
     def _register_default_tools(self) -> None:
         """Register default research tools."""
+        # StatisticsTool uses the optional [stats] extra. Keep all tool
+        # imports at the construction boundary so importing MCPClient remains
+        # available to mediated failure paths without that extra.
+        from src.mcp.tools import (
+            AcademicSearchTool,
+            CitationTool,
+            KnowledgeGraphTool,
+            StatisticsTool,
+        )
+
         tools = [
             AcademicSearchTool(),
             CitationTool(),

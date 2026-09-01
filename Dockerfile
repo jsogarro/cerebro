@@ -32,8 +32,8 @@ FROM base as development
 COPY pyproject.toml .
 COPY README.md .
 
-# Install all dependencies including dev
-RUN uv pip install -e ".[dev]"
+# Install all dependencies including dev and MCP support
+RUN uv pip install -e ".[dev,mcp]"
 
 # Copy application code
 COPY src/ ./src/
@@ -89,6 +89,10 @@ WORKDIR /app
 # Copy from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /app/src ./src
+COPY alembic/ ./alembic/
+COPY alembic.ini .
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Change ownership
 RUN chown -R app:app /app
@@ -102,6 +106,9 @@ EXPOSE 8000
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
+
+# Run database migrations before starting Uvicorn
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Production command
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
