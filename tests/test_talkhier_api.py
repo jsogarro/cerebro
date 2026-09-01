@@ -24,6 +24,7 @@ from src.api.services.talkhier_session_service import (
     TalkHierSessionService,
 )
 from src.api.services.talkhier_state_manager import TalkHierStateManager
+from src.api.websocket.auth import WebSocketPrincipal
 from src.models.talkhier_api_models import (
     ConsensusCheckRequest,
     ConsensusType,
@@ -36,6 +37,39 @@ from src.models.talkhier_api_models import (
     SessionStatus,
     TalkHierSessionRequest,
 )
+
+AUTH_USER_ID = "talkhier-user"
+AUTH_ORG_ID = "talkhier-org"
+
+
+def _websocket_principal() -> WebSocketPrincipal:
+    return WebSocketPrincipal(
+        user_id=AUTH_USER_ID,
+        organization_id=AUTH_ORG_ID,
+        client_type="websocket",
+    )
+
+
+def _owned_session(session_id: str) -> TalkHierSession:
+    return TalkHierSession(
+        session_id=session_id,
+        user_id=AUTH_USER_ID,
+        organization_id=AUTH_ORG_ID,
+        query="Test query",
+        domains=["research"],
+        status=SessionStatus.ACTIVE,
+        created_at=datetime.now(UTC),
+        protocol_type=ProtocolType.STANDARD,
+        refinement_strategy=RefinementStrategy.QUALITY_FOCUSED,
+        max_rounds=3,
+        min_rounds=1,
+        quality_threshold=0.85,
+        consensus_type=ConsensusType.WEIGHTED,
+        consensus_threshold=0.8,
+        timeout_seconds=300,
+        participants=[],
+        started_at=datetime.now(UTC),
+    )
 
 
 class TestTalkHierStateManager:
@@ -293,7 +327,11 @@ class TestTalkHierSessionService:
                 ),
             )
 
-            response = await session_service.create_session(request)
+            response = await session_service.create_session(
+                request,
+                user_id=AUTH_USER_ID,
+                organization_id=AUTH_ORG_ID,
+            )
 
             assert response.session_id
             assert response.status == SessionStatus.ACTIVE
@@ -314,6 +352,8 @@ class TestTalkHierSessionService:
         session_id = "test-session-123"
         session = TalkHierSession(
             session_id=session_id,
+            user_id=AUTH_USER_ID,
+            organization_id=AUTH_ORG_ID,
             query="Test query",
             domains=["research"],
             status=SessionStatus.ACTIVE,
@@ -336,7 +376,12 @@ class TestTalkHierSessionService:
             round_number=1, refinement_focus="Improve evidence quality"
         )
 
-        response = await session_service.execute_refinement_round(session_id, request)
+        response = await session_service.execute_refinement_round(
+            session_id,
+            request,
+            user_id=AUTH_USER_ID,
+            organization_id=AUTH_ORG_ID,
+        )
 
         assert response.session_id == session_id
         assert response.round_number == 1
@@ -356,6 +401,8 @@ class TestTalkHierSessionService:
         session_id = "test-session-456"
         session = TalkHierSession(
             session_id=session_id,
+            user_id=AUTH_USER_ID,
+            organization_id=AUTH_ORG_ID,
             query="Test query",
             domains=["research"],
             status=SessionStatus.ACTIVE,
@@ -383,7 +430,12 @@ class TestTalkHierSessionService:
             include_minority_report=False,
         )
 
-        result = await session_service.check_consensus(session_id, request)
+        result = await session_service.check_consensus(
+            session_id,
+            request,
+            user_id=AUTH_USER_ID,
+            organization_id=AUTH_ORG_ID,
+        )
 
         assert isinstance(result.has_consensus, bool)
         assert result.consensus_type == ConsensusType.WEIGHTED
@@ -400,6 +452,8 @@ class TestTalkHierSessionService:
         session_id = "test-session-789"
         session = TalkHierSession(
             session_id=session_id,
+            user_id=AUTH_USER_ID,
+            organization_id=AUTH_ORG_ID,
             query="Test query",
             domains=["research"],
             status=SessionStatus.ACTIVE,
@@ -428,7 +482,12 @@ class TestTalkHierSessionService:
         # Close session
         request = SessionCloseRequest(save_transcript=True, generate_summary=True)
 
-        response = await session_service.close_session(session_id, request)
+        response = await session_service.close_session(
+            session_id,
+            request,
+            user_id=AUTH_USER_ID,
+            organization_id=AUTH_ORG_ID,
+        )
 
         assert response.session_id == session_id
         assert response.final_status in [
@@ -521,11 +580,13 @@ async def test_live_websocket_error_always_unregisters_and_disconnects() -> None
     from src.api.routes import talkhier_api
 
     service = TalkHierSessionService()
+    service.sessions["missing"] = _owned_session("missing")
     service.get_session_status = AsyncMock(side_effect=ValueError("missing session"))
     websocket = AsyncMock()
     websocket.app = SimpleNamespace(
         state=SimpleNamespace(talkhier_session_service=service)
     )
+    websocket.state = SimpleNamespace(websocket_principal=_websocket_principal())
 
     with (
         patch.object(
@@ -568,6 +629,7 @@ async def test_interactive_websocket_disconnect_always_leaves_and_disconnects() 
     websocket.app = SimpleNamespace(
         state=SimpleNamespace(talkhier_session_service=service)
     )
+    websocket.state = SimpleNamespace(websocket_principal=_websocket_principal())
     websocket.receive_json.side_effect = [
         {
             "type": "init_session",
@@ -631,6 +693,12 @@ async def test_coordination_websocket_error_always_unregisters_and_disconnects()
     from src.api.routes import talkhier_api
 
     websocket = AsyncMock()
+    service = TalkHierSessionService()
+    service.sessions["session-1"] = _owned_session("session-1")
+    websocket.app = SimpleNamespace(
+        state=SimpleNamespace(talkhier_session_service=service)
+    )
+    websocket.state = SimpleNamespace(websocket_principal=_websocket_principal())
     websocket.receive_json.return_value = {
         "type": "monitor",
         "coordination_id": "coord-missing",
@@ -659,6 +727,11 @@ async def test_coordination_websocket_error_always_unregisters_and_disconnects()
         ) as unregister,
         patch.object(
             talkhier_api.session_manager,
+            "coordinations",
+            {"coord-missing": SimpleNamespace(session_ids=["session-1"])},
+        ),
+        patch.object(
+            talkhier_api.session_manager,
             "get_coordination_status",
             new=AsyncMock(side_effect=ValueError("missing coordination")),
         ),
@@ -675,7 +748,13 @@ async def test_coordination_websocket_disconnect_always_unregisters() -> None:
     from src.api.routes import talkhier_api
 
     status = SimpleNamespace(dict=lambda: {"coordination_id": "coord-1"})
+    service = TalkHierSessionService()
+    service.sessions["session-1"] = _owned_session("session-1")
     websocket = AsyncMock()
+    websocket.app = SimpleNamespace(
+        state=SimpleNamespace(talkhier_session_service=service)
+    )
+    websocket.state = SimpleNamespace(websocket_principal=_websocket_principal())
     websocket.receive_json.side_effect = [
         {"type": "monitor", "coordination_id": "coord-1"},
         WebSocketDisconnect(),
@@ -702,6 +781,11 @@ async def test_coordination_websocket_disconnect_always_unregisters() -> None:
             "unregister_coordination_monitor",
             new=AsyncMock(),
         ) as unregister,
+        patch.object(
+            talkhier_api.session_manager,
+            "coordinations",
+            {"coord-1": SimpleNamespace(session_ids=["session-1"])},
+        ),
         patch.object(
             talkhier_api.session_manager,
             "get_coordination_status",

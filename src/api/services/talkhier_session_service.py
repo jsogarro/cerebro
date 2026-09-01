@@ -98,6 +98,10 @@ class TalkHierSession:
     # WebSocket
     websocket_connections: list[str] = field(default_factory=list)
 
+    # Authorization boundary
+    user_id: str | None = None
+    organization_id: str | None = None
+
 
 class TalkHierSessionService:
     """
@@ -221,7 +225,11 @@ class TalkHierSessionService:
         return self.session_coordinator.initialize_protocol_configs()
 
     async def create_session(
-        self, request: TalkHierSessionRequest
+        self,
+        request: TalkHierSessionRequest,
+        *,
+        user_id: str,
+        organization_id: str,
     ) -> TalkHierSessionResponse:
         """
         Create a new TalkHier refinement session
@@ -232,6 +240,9 @@ class TalkHierSessionService:
         Returns:
             Session creation response with session ID and configuration
         """
+        if not user_id or not organization_id:
+            raise ValueError("Authenticated user and tenant are required")
+
         session_id = str(uuid.uuid4())
 
         # Get protocol configuration
@@ -255,6 +266,8 @@ class TalkHierSessionService:
         # Create session
         session = TalkHierSession(
             session_id=session_id,
+            user_id=user_id,
+            organization_id=organization_id,
             query=request.query,
             domains=request.domains,
             status=SessionStatus.INITIALIZING,
@@ -311,7 +324,13 @@ class TalkHierSessionService:
             estimated_duration_seconds=estimated_duration,
         )
 
-    async def get_session_status(self, session_id: str) -> SessionStatusResponse:
+    async def get_session_status(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+        organization_id: str,
+    ) -> SessionStatusResponse:
         """
         Get current status of a TalkHier session
 
@@ -321,7 +340,11 @@ class TalkHierSessionService:
         Returns:
             Current session status and history
         """
-        session = self._get_session(session_id)
+        session = self._get_session(
+            session_id,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
 
         # Calculate elapsed and remaining time
         elapsed_seconds = 0
@@ -347,7 +370,12 @@ class TalkHierSessionService:
         )
 
     async def execute_refinement_round(
-        self, session_id: str, request: RefinementRoundRequest
+        self,
+        session_id: str,
+        request: RefinementRoundRequest,
+        *,
+        user_id: str,
+        organization_id: str,
     ) -> RefinementRoundResponse:
         """
         Execute a refinement round in an active session
@@ -359,7 +387,11 @@ class TalkHierSessionService:
         Returns:
             Round execution results
         """
-        session = self._get_session(session_id)
+        session = self._get_session(
+            session_id,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
 
         response = await self.round_executor.execute_refinement_round(
             session_id,
@@ -380,7 +412,12 @@ class TalkHierSessionService:
         return response
 
     async def check_consensus(
-        self, session_id: str, request: ConsensusCheckRequest
+        self,
+        session_id: str,
+        request: ConsensusCheckRequest,
+        *,
+        user_id: str,
+        organization_id: str,
     ) -> ConsensusResult:
         """
         Check consensus status in a session
@@ -392,7 +429,11 @@ class TalkHierSessionService:
         Returns:
             Consensus analysis result
         """
-        session = self._get_session(session_id)
+        session = self._get_session(
+            session_id,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
 
         result = await self.consensus_evaluator.check_consensus(
             session_id,
@@ -408,7 +449,12 @@ class TalkHierSessionService:
         return result
 
     async def close_session(
-        self, session_id: str, request: SessionCloseRequest
+        self,
+        session_id: str,
+        request: SessionCloseRequest,
+        *,
+        user_id: str,
+        organization_id: str,
     ) -> SessionCloseResponse:
         """
         Close a TalkHier session
@@ -420,7 +466,11 @@ class TalkHierSessionService:
         Returns:
             Session closure summary
         """
-        session = self._get_session(session_id)
+        session = self._get_session(
+            session_id,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
 
         # Determine final status
         if session.status == SessionStatus.ACTIVE:
@@ -544,9 +594,33 @@ class TalkHierSessionService:
     # Helper Methods
     # =============================
 
-    def _get_session(self, session_id: str) -> TalkHierSession:
+    def authorize_session_access(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+        organization_id: str,
+    ) -> None:
+        """Fail closed unless the caller owns the session in the same tenant."""
+        self._get_session(
+            session_id,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
+
+    def _get_session(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+        organization_id: str,
+    ) -> TalkHierSession:
         """Get session by ID with validation"""
-        session = self.state_manager.get_session(session_id)
+        session = self.state_manager.get_authorized_session(
+            session_id,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
         if not isinstance(session, TalkHierSession):
             raise ValueError(f"Session {session_id} has invalid state")
         return session

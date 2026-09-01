@@ -29,6 +29,7 @@ from src.api.websocket.auth import require_authenticated_websocket
 from src.api.websocket.connection_manager import ConnectionManager
 from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
 from src.core.pii_redactor import redact_pii
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.talkhier_api_models import (
     AnalyticsResponse,
     ConsensusCheckRequest,
@@ -79,10 +80,32 @@ def get_talkhier_session_service(request: Request) -> TalkHierSessionService:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+def _websocket_tenant_context(websocket: WebSocket) -> TenantContext:
+    principal = getattr(websocket.state, "websocket_principal", None)
+    user_id = getattr(principal, "user_id", None)
+    organization_id = getattr(principal, "organization_id", None)
+    if not user_id or not organization_id:
+        raise ValueError("Session not found")
+    return TenantContext(user_id=user_id, organization_id=organization_id)
+
+
+def _authorize_websocket_session(
+    session_service: TalkHierSessionService,
+    session_id: str,
+    tenant_context: TenantContext,
+) -> None:
+    session_service.authorize_session_access(
+        session_id,
+        user_id=tenant_context.user_id,
+        organization_id=tenant_context.organization_id,
+    )
+
+
 TalkHierServiceDependency = Annotated[
     TalkHierSessionService,
     Depends(get_talkhier_session_service),
 ]
+TenantContextDependency = Annotated[TenantContext, Depends(get_tenant_context)]
 
 
 # ================================
@@ -94,6 +117,7 @@ TalkHierServiceDependency = Annotated[
 async def create_refinement_session(
     request: TalkHierSessionRequest,
     talkhier_service: TalkHierServiceDependency,
+    tenant_context: TenantContextDependency,
 ) -> TalkHierSessionResponse:
     """
     Start a new TalkHier refinement session
@@ -132,7 +156,11 @@ async def create_refinement_session(
         )
 
         # Create session through service
-        session_response = await talkhier_service.create_session(request)
+        session_response = await talkhier_service.create_session(
+            request,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
+        )
 
         # Register with session manager for monitoring
         await session_manager.register_session(
@@ -143,6 +171,8 @@ async def create_refinement_session(
                 "max_rounds": request.max_rounds,
                 "quality_threshold": request.quality_threshold,
             },
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
         )
 
         # Log analytics
@@ -154,6 +184,7 @@ async def create_refinement_session(
                 "strategy": request.refinement_strategy.value,
                 "participants": len(session_response.participants),
             },
+            tenant_context=tenant_context,
         )
 
         return session_response
@@ -166,6 +197,7 @@ async def create_refinement_session(
 @router.get("/sessions/{session_id}", response_model=SessionStatusResponse)
 async def get_session_status(
     talkhier_service: TalkHierServiceDependency,
+    tenant_context: TenantContextDependency,
     session_id: str = Path(..., description="Session identifier"),
 ) -> SessionStatusResponse:
     """
@@ -187,13 +219,18 @@ async def get_session_status(
         ```
     """
     try:
-        status_response = await talkhier_service.get_session_status(session_id)
+        status_response = await talkhier_service.get_session_status(
+            session_id,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
+        )
 
         # Log access
         await _log_session_analytics(
             "session_accessed",
             session_id,
             {"current_round": status_response.current_round},
+            tenant_context=tenant_context,
         )
 
         return status_response
@@ -214,6 +251,7 @@ async def execute_refinement_round(
     session_id: str,
     request: RefinementRoundRequest,
     talkhier_service: TalkHierServiceDependency,
+    tenant_context: TenantContextDependency,
 ) -> RefinementRoundResponse:
     """
     Execute a refinement round in an active session
@@ -251,7 +289,10 @@ async def execute_refinement_round(
 
         # Execute round
         round_response = await talkhier_service.execute_refinement_round(
-            session_id, request
+            session_id,
+            request,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
         )
 
         # Broadcast round completion via WebSocket
@@ -278,6 +319,7 @@ async def execute_refinement_round(
                 "consensus": round_response.consensus_score,
                 "continue": round_response.continue_refinement,
             },
+            tenant_context=tenant_context,
         )
 
         return round_response
@@ -299,6 +341,7 @@ async def check_consensus_status(
     session_id: str,
     request: ConsensusCheckRequest,
     talkhier_service: TalkHierServiceDependency,
+    tenant_context: TenantContextDependency,
 ) -> ConsensusResult:
     """
     Check consensus status among session participants
@@ -328,7 +371,12 @@ async def check_consensus_status(
         ```
     """
     try:
-        consensus_result = await talkhier_service.check_consensus(session_id, request)
+        consensus_result = await talkhier_service.check_consensus(
+            session_id,
+            request,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
+        )
 
         # Broadcast consensus update via WebSocket
         await websocket_handler.broadcast_consensus_update(session_id, consensus_result)
@@ -342,6 +390,7 @@ async def check_consensus_status(
                 "score": consensus_result.consensus_score,
                 "type": consensus_result.consensus_type.value,
             },
+            tenant_context=tenant_context,
         )
 
         return consensus_result
@@ -361,6 +410,7 @@ async def check_consensus_status(
 async def close_session(
     session_id: str,
     talkhier_service: TalkHierServiceDependency,
+    tenant_context: TenantContextDependency,
     request: SessionCloseRequest = SessionCloseRequest(
         reason=None, save_transcript=True, generate_summary=True
     ),
@@ -390,7 +440,12 @@ async def close_session(
         ```
     """
     try:
-        close_response = await talkhier_service.close_session(session_id, request)
+        close_response = await talkhier_service.close_session(
+            session_id,
+            request,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
+        )
 
         # Unregister from session manager
         await session_manager.unregister_session(session_id)
@@ -426,6 +481,7 @@ async def close_session(
                 "final_quality": close_response.final_quality,
                 "final_consensus": close_response.final_consensus,
             },
+            tenant_context=tenant_context,
         )
 
         return close_response
@@ -567,6 +623,7 @@ async def validate_communication_structure(
 
 @router.get("/analytics", response_model=AnalyticsResponse)
 async def get_protocol_analytics(
+    tenant_context: TenantContextDependency,
     time_range: str | None = Query("24h", description="Time range (1h, 24h, 7d, 30d)"),
     protocol_type: ProtocolType | None = Query(
         None, description="Filter by protocol type"
@@ -601,6 +658,8 @@ async def get_protocol_analytics(
             time_range=time_range or "24h",
             protocol_type=protocol_type,
             min_quality=min_quality,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
         )
 
         # Add protocol-specific insights
@@ -656,6 +715,9 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
     registered = False
 
     try:
+        tenant_context = _websocket_tenant_context(websocket)
+        _authorize_websocket_session(session_service, session_id, tenant_context)
+
         # Register connection for session
         await websocket_handler.register_session_connection(
             session_id, connection_id, websocket
@@ -663,7 +725,11 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
         registered = True
 
         # Send initial session status
-        status = await session_service.get_session_status(session_id)
+        status = await session_service.get_session_status(
+            session_id,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
+        )
         await websocket.send_json(
             {
                 "event_type": "session_status",
@@ -686,13 +752,24 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
             elif data.get("type") == "get_status":
-                status = await session_service.get_session_status(session_id)
+                status = await session_service.get_session_status(
+                    session_id,
+                    user_id=tenant_context.user_id,
+                    organization_id=tenant_context.organization_id,
+                )
                 await websocket.send_json(
                     {"type": "status_update", "data": status.dict()}
                 )
 
     except WebSocketDisconnect:
         pass
+    except ValueError as e:
+        logger.warning(
+            "talkhier_session_websocket_access_denied",
+            session_id=session_id,
+            error=str(e),
+        )
+        await websocket.close(code=1008, reason="Session not found")
     except Exception as e:
         logger.error(
             "talkhier_session_websocket_error",
@@ -746,6 +823,8 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
     registered = False
 
     try:
+        tenant_context = _websocket_tenant_context(websocket)
+
         # Wait for session initialization
         init_data = await websocket.receive_json()
 
@@ -753,6 +832,11 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
             # Create or join session
             if "session_id" in init_data:
                 session_id = init_data["session_id"]
+                _authorize_websocket_session(
+                    session_service,
+                    session_id,
+                    tenant_context,
+                )
                 # Join existing session
                 await websocket_handler.join_interactive_session(
                     session_id, connection_id, websocket
@@ -761,7 +845,11 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
             else:
                 # Create new interactive session
                 request = TalkHierSessionRequest(**init_data.get("config", {}))
-                session_response = await session_service.create_session(request)
+                session_response = await session_service.create_session(
+                    request,
+                    user_id=tenant_context.user_id,
+                    organization_id=tenant_context.organization_id,
+                )
                 session_id = session_response.session_id
 
                 await websocket_handler.register_interactive_session(
@@ -796,6 +884,13 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         pass
+    except ValueError as e:
+        logger.warning(
+            "talkhier_interactive_session_access_denied",
+            session_id=session_id,
+            error=str(e),
+        )
+        await websocket.close(code=1008, reason="Session not found")
     except Exception as e:
         logger.error(
             "talkhier_interactive_session_error",
@@ -839,16 +934,28 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
         };
         ```
     """
+    session_service = _talkhier_service_from_app(websocket.app)
     connection_id = await connection_manager.connect(websocket)
     coordination_id: str | None = None
     registered = False
 
     try:
+        tenant_context = _websocket_tenant_context(websocket)
+
         # Wait for coordination monitoring request
         init_data = await websocket.receive_json()
 
         if init_data.get("type") == "monitor":
             coordination_id = init_data["coordination_id"]
+            coordination = session_manager.coordinations.get(coordination_id)
+            if coordination is None:
+                raise ValueError("Coordination not found")
+            for coordinated_session_id in coordination.session_ids:
+                _authorize_websocket_session(
+                    session_service,
+                    coordinated_session_id,
+                    tenant_context,
+                )
 
             # Register for coordination updates
             await websocket_handler.register_coordination_monitor(
@@ -858,7 +965,11 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
 
             # Send initial status
             if coordination_id is not None:
-                status = await session_manager.get_coordination_status(coordination_id)
+                status = await session_manager.get_coordination_status(
+                    coordination_id,
+                    user_id=tenant_context.user_id,
+                    organization_id=tenant_context.organization_id,
+                )
             await websocket.send_json(
                 {"type": "coordination_status", "data": status.dict()}
             )
@@ -870,13 +981,24 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
             elif data.get("type") == "get_status" and coordination_id is not None:
-                status = await session_manager.get_coordination_status(coordination_id)
+                status = await session_manager.get_coordination_status(
+                    coordination_id,
+                    user_id=tenant_context.user_id,
+                    organization_id=tenant_context.organization_id,
+                )
                 await websocket.send_json(
                     {"type": "status_update", "data": status.dict()}
                 )
 
     except WebSocketDisconnect:
         pass
+    except ValueError as e:
+        logger.warning(
+            "talkhier_coordination_monitoring_access_denied",
+            coordination_id=coordination_id,
+            error=str(e),
+        )
+        await websocket.close(code=1008, reason="Coordination not found")
     except Exception as e:
         logger.error(
             "talkhier_coordination_monitoring_error",
@@ -902,6 +1024,8 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
 @router.post("/coordinate", response_model=CoordinationStatus)
 async def coordinate_multiple_sessions(
     request: CoordinationRequest,
+    talkhier_service: TalkHierServiceDependency,
+    tenant_context: TenantContextDependency,
 ) -> CoordinationStatus:
     """
     Coordinate multiple TalkHier sessions
@@ -928,8 +1052,19 @@ async def coordinate_multiple_sessions(
         ```
     """
     try:
+        for session_id in request.session_ids:
+            talkhier_service.authorize_session_access(
+                session_id,
+                user_id=tenant_context.user_id,
+                organization_id=tenant_context.organization_id,
+            )
+
         # Create coordination through session manager
-        coordination_status = await session_manager.coordinate_sessions(request)
+        coordination_status = await session_manager.coordinate_sessions(
+            request,
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
+        )
 
         # Log coordination
         logger.info(
@@ -941,7 +1076,7 @@ async def coordinate_multiple_sessions(
         return coordination_status
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+        raise HTTPException(status_code=404, detail=str(e)) from None
     except Exception as e:
         logger.error(
             "talkhier_sessions_coordination_failed",
@@ -957,7 +1092,11 @@ async def coordinate_multiple_sessions(
 
 
 async def _log_session_analytics(
-    event_type: str, session_id: str, metrics: dict[str, Any]
+    event_type: str,
+    session_id: str,
+    metrics: dict[str, Any],
+    *,
+    tenant_context: TenantContext | None = None,
 ) -> None:
     """Log session analytics for monitoring"""
     try:
@@ -966,6 +1105,10 @@ async def _log_session_analytics(
             session_id=session_id,
             metrics=metrics,
             timestamp=datetime.now(UTC),
+            user_id=tenant_context.user_id if tenant_context else None,
+            organization_id=(
+                tenant_context.organization_id if tenant_context else None
+            ),
         )
     except Exception as e:
         logger.warning(
@@ -1012,6 +1155,7 @@ async def _get_protocol_insights(
 @router.get("/health")
 async def talkhier_health_check(
     talkhier_service: TalkHierServiceDependency,
+    tenant_context: TenantContextDependency,
 ) -> dict[str, Any]:
     """
     Health check for TalkHier Protocol API
@@ -1020,8 +1164,18 @@ async def talkhier_health_check(
         Service health status
     """
     try:
-        active_sessions = len(talkhier_service.sessions)
-        manager_status = await session_manager.get_health_status()
+        active_sessions = sum(
+            1
+            for session in talkhier_service.sessions.values()
+            if (
+                session.user_id == tenant_context.user_id
+                and session.organization_id == tenant_context.organization_id
+            )
+        )
+        manager_status = await session_manager.get_health_status(
+            user_id=tenant_context.user_id,
+            organization_id=tenant_context.organization_id,
+        )
 
         return {
             "status": "healthy",

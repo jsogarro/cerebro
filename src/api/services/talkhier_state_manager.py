@@ -20,6 +20,24 @@ class TalkHierStateManager:
             raise ValueError(f"Session {session_id} not found")
         return self.sessions[session_id]
 
+    def get_authorized_session(
+        self,
+        session_id: str,
+        *,
+        user_id: str | None,
+        organization_id: str | None,
+    ) -> Any:
+        """Get a session only when both owner and tenant match."""
+        session = self.get_session(session_id)
+        if (
+            not user_id
+            or not organization_id
+            or getattr(session, "user_id", None) != user_id
+            or getattr(session, "organization_id", None) != organization_id
+        ):
+            raise ValueError(f"Session {session_id} not found")
+        return session
+
     def initialize_metrics(self, session_id: str) -> None:
         """Initialize metrics for a session."""
         self.session_metrics[session_id] = self._new_metrics()

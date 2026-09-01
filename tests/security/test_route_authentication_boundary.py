@@ -12,10 +12,9 @@ from uuid import UUID
 import pytest
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from jose import JWTError
-from starlette.routing import Mount, WebSocketRoute
+from starlette.routing import Mount, Route, Router, WebSocketRoute
 from starlette.testclient import WebSocketDenialResponse
 from starlette.websockets import WebSocketDisconnect
 
@@ -36,6 +35,7 @@ EXPECTED_PUBLIC_ROUTES = {
     ("GET", "/ws/health"),
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/register"),
+    ("POST", "/api/v1/auth/refresh"),
     ("POST", "/api/v1/auth/forgot-password"),
     ("POST", "/api/v1/auth/reset-password"),
     ("GET", "/api/v1/auth/verify-email"),
@@ -209,12 +209,23 @@ def _join_route_paths(prefix: str, path: str) -> str:
 def _iter_mounted_routes(
     routes: Iterable[Any], prefix: str = ""
 ) -> Iterator[tuple[Any, str]]:
-    """Yield route objects with paths from flattened and wrapped routers."""
+    """Yield route objects with paths from nested and wrapped routers."""
     for route in routes:
-        if isinstance(route, (APIRoute, WebSocketRoute)):
+        if isinstance(route, (Route, WebSocketRoute)):
             yield route, _join_route_paths(prefix, route.path)
-        elif isinstance(route, Mount):
-            yield route, _join_route_paths(prefix, route.path)
+            continue
+
+        if isinstance(route, Mount):
+            mount_path = _join_route_paths(prefix, route.path)
+            yield route, mount_path
+
+            mounted_app = getattr(route, "app", None)
+            nested_routes = getattr(mounted_app, "routes", None)
+            if nested_routes is None:
+                mounted_app = getattr(route, "_base_app", None)
+                nested_routes = getattr(mounted_app, "routes", None)
+            if nested_routes is not None:
+                yield from _iter_mounted_routes(nested_routes, mount_path)
             continue
 
         original_router = getattr(route, "original_router", None)
@@ -230,7 +241,7 @@ def _iter_mounted_routes(
 def _mounted_http_routes(app: FastAPI) -> set[tuple[str, str]]:
     signatures: set[tuple[str, str]] = set()
     for route, path in _iter_mounted_routes(app.routes):
-        if isinstance(route, APIRoute):
+        if isinstance(route, Route):
             signatures.update(
                 (method, path)
                 for method in route.methods
@@ -279,6 +290,31 @@ def test_route_inventory_helpers_recurse_through_structural_include_wrappers() -
     assert _mounted_websocket_routes(app) >= {"/api/v1/events"}
 
 
+def test_route_inventory_helpers_recurse_through_starlette_mounts() -> None:
+    async def mounted_http(_request: Any) -> None:
+        return None
+
+    async def mounted_websocket(_websocket: Any) -> None:
+        return None
+
+    mounted_router = Router(
+        routes=[
+            Route("/items", mounted_http, methods=["GET"]),
+            WebSocketRoute("/events", mounted_websocket),
+        ]
+    )
+    nested_router = Router(routes=[Mount("/v1", app=mounted_router)])
+    app = FastAPI()
+    app.router.routes.append(Mount("/mounted", app=nested_router))
+
+    assert _mounted_http_routes(app) >= {
+        ("MOUNT", "/mounted"),
+        ("MOUNT", "/mounted/v1"),
+        ("GET", "/mounted/v1/items"),
+    }
+    assert _mounted_websocket_routes(app) >= {"/mounted/v1/events"}
+
+
 def _assert_websocket_denied(
     client: TestClient,
     path: str,
@@ -318,6 +354,7 @@ def test_public_http_routes_reach_the_real_app_without_authentication() -> None:
         ("GET", "/ws/health", None),
         ("POST", "/api/v1/auth/login", {}),
         ("POST", "/api/v1/auth/register", {}),
+        ("POST", "/api/v1/auth/refresh", {}),
         ("POST", "/api/v1/auth/forgot-password", {}),
         ("POST", "/api/v1/auth/reset-password", {}),
         ("GET", "/api/v1/auth/verify-email", None),

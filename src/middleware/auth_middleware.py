@@ -52,6 +52,7 @@ PUBLIC_ROUTE_ALLOWLIST: Final[dict[tuple[str, str], str]] = {
     ("GET", "/ws/health"): "WebSocket service health probe",
     ("POST", "/api/v1/auth/login"): "authentication bootstrap",
     ("POST", "/api/v1/auth/register"): "authentication bootstrap",
+    ("POST", "/api/v1/auth/refresh"): "authentication bootstrap",
     ("POST", "/api/v1/auth/forgot-password"): "password recovery bootstrap",
     ("POST", "/api/v1/auth/reset-password"): "password recovery bootstrap",
     ("GET", "/api/v1/auth/verify-email"): "email verification bootstrap",

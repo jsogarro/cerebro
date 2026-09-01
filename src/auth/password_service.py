@@ -28,6 +28,10 @@ class PasswordHistoryStoreUnavailableError(RuntimeError):
     """
 
 
+class PasswordTokenStoreUnavailableError(RuntimeError):
+    """Raised when password or email token storage cannot be used."""
+
+
 class PasswordService:
     """
     Secure password management service.
@@ -73,6 +77,7 @@ class PasswordService:
         # Password history prefix in Redis
         self.history_prefix = "password:history:"
         self.reset_token_prefix = "password:reset:"
+        self.verification_token_prefix = "email:verification:"
 
         # HTTP client for breach checking
         self.http_client: httpx.AsyncClient | None = None
@@ -338,6 +343,90 @@ class PasswordService:
         """
         return secrets.token_urlsafe(length)
 
+    def generate_verification_token(self, length: int = 32) -> str:
+        """Generate a secure email verification token."""
+        return secrets.token_urlsafe(length)
+
+    def _require_token_store(self) -> redis.Redis[Any]:
+        """Return the token store or fail closed when it is not configured."""
+        if self.redis_client is None:
+            raise PasswordTokenStoreUnavailableError("Password token store unavailable")
+        return self.redis_client
+
+    async def ensure_token_store_available(self) -> None:
+        """Verify that the token store is reachable before a public bootstrap."""
+        store = self._require_token_store()
+        try:
+            result = await store.ping()
+            if not result:
+                raise PasswordTokenStoreUnavailableError(
+                    "Password token store unavailable"
+                )
+        except PasswordTokenStoreUnavailableError:
+            raise
+        except Exception as exc:
+            logger.error("Password token store unavailable", error=str(exc))
+            raise PasswordTokenStoreUnavailableError(
+                "Password token store unavailable"
+            ) from exc
+
+    async def _store_user_token(
+        self,
+        prefix: str,
+        user_id: str,
+        token: str,
+        expires_in: int,
+        purpose: str,
+    ) -> None:
+        """Persist a single-use user token and surface store failures."""
+        store = self._require_token_store()
+        token_key = f"{prefix}{token}"
+        try:
+            result = await store.setex(token_key, expires_in, user_id)
+            if result is False:
+                raise PasswordTokenStoreUnavailableError(
+                    f"{purpose} token could not be stored"
+                )
+        except PasswordTokenStoreUnavailableError:
+            raise
+        except Exception as exc:
+            logger.error("Failed to store user token", purpose=purpose, error=str(exc))
+            raise PasswordTokenStoreUnavailableError(
+                f"{purpose} token store unavailable"
+            ) from exc
+
+    async def _consume_user_token(
+        self, prefix: str, token: str, purpose: str
+    ) -> str | None:
+        """Consume a token once, distinguishing invalid from unavailable.
+
+        Redis 7's ``GETDEL`` is intentionally required here. A separate
+        ``GET`` followed by ``DELETE`` permits two concurrent requests to
+        consume the same password or verification token.
+        """
+        store = self._require_token_store()
+        token_key = f"{prefix}{token}"
+        try:
+            getdel = getattr(store, "getdel", None)
+            if getdel is None:
+                raise PasswordTokenStoreUnavailableError(
+                    f"{purpose} token store does not support atomic consumption"
+                )
+            user_id = await getdel(token_key)
+            if not user_id:
+                return None
+        except PasswordTokenStoreUnavailableError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "Failed to consume user token", purpose=purpose, error=str(exc)
+            )
+            raise PasswordTokenStoreUnavailableError(
+                f"{purpose} token store unavailable"
+            ) from exc
+
+        return user_id.decode() if isinstance(user_id, bytes) else str(user_id)
+
     async def store_reset_token(
         self, user_id: str, token: str, expires_in: int = 3600
     ) -> None:
@@ -349,11 +438,13 @@ class PasswordService:
             token: Reset token
             expires_in: Expiration time in seconds
         """
-        if not self.redis_client:
-            return
-
-        token_key = f"{self.reset_token_prefix}{token}"
-        await self.redis_client.setex(token_key, expires_in, user_id)
+        await self._store_user_token(
+            self.reset_token_prefix,
+            user_id,
+            token,
+            expires_in,
+            "Password reset",
+        )
 
     async def validate_reset_token(self, token: str) -> str | None:
         """
@@ -365,18 +456,27 @@ class PasswordService:
         Returns:
             User ID if valid, None otherwise
         """
-        if not self.redis_client:
-            return None
+        return await self._consume_user_token(
+            self.reset_token_prefix, token, "Password reset"
+        )
 
-        token_key = f"{self.reset_token_prefix}{token}"
-        user_id = await self.redis_client.get(token_key)
+    async def store_verification_token(
+        self, user_id: str, token: str, expires_in: int = 86_400
+    ) -> None:
+        """Persist a single-use email verification token."""
+        await self._store_user_token(
+            self.verification_token_prefix,
+            user_id,
+            token,
+            expires_in,
+            "Email verification",
+        )
 
-        if user_id:
-            # Delete token after use
-            await self.redis_client.delete(token_key)
-            return user_id.decode() if isinstance(user_id, bytes) else user_id
-
-        return None
+    async def validate_verification_token(self, token: str) -> str | None:
+        """Consume an email verification token and return its user ID."""
+        return await self._consume_user_token(
+            self.verification_token_prefix, token, "Email verification"
+        )
 
     def generate_password(
         self,
