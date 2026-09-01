@@ -267,7 +267,7 @@ class TestWorkerWithTools:
                 "run_id": "run-from-context",
                 "task_id": "task-from-context",
                 "attempt_id": "attempt-from-context",
-                "organization_id": "org-from-context",
+                "organization_id": "00000000-0000-0000-0000-0000000000aa",
                 CAPABILITY_GRANTS_CONTEXT_KEY: (grant,),
             }
         )
@@ -295,7 +295,7 @@ class TestWorkerWithTools:
             "run_id": "run-from-context",
             "task_id": "task-from-context",
             "attempt_id": "attempt-from-context",
-            "organization_id": "org-from-context",
+            "organization_id": "00000000-0000-0000-0000-0000000000aa",
         }
         assert invoke.await_args.kwargs["grants"] == [grant]
 
