@@ -90,6 +90,18 @@ class TestIntegrationModuleDoesNotRequireFastmcp:
         assert completed.returncode == 0, completed.stderr
 
 
+class TestClientModuleDoesNotRequireOptionalToolDependencies:
+    def test_importing_mcp_client_does_not_import_optional_dependencies(self) -> None:
+        """The client module must be importable without optional MCP extras.
+
+        Constructing the client still needs FastMCP and the statistics extra,
+        but importing its class is required by mediated failure paths that
+        defer construction until a tool call.
+        """
+
+        _import_with_banned("src.mcp.client", {"fastmcp", "scipy"})
+
+
 class TestNetworkToolsDoNotRequireScipy:
     @pytest.mark.parametrize(
         "subject",
