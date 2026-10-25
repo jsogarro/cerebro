@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, DateTime, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import UUID as DBUUID
@@ -100,6 +100,8 @@ class User(BaseModel):
         Index("idx_user_org_active", "organization_id", "is_active"),
         Index("idx_user_active", "is_active", "is_verified"),
         Index("idx_user_login", "last_login", "is_active"),
+        Index("uq_users_email_lower", func.lower(email), unique=True),
+        Index("uq_users_username_lower", func.lower(username), unique=True),
     )
 
     @classmethod

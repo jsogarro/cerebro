@@ -10,6 +10,7 @@ import redis.asyncio as redis
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
@@ -163,7 +164,16 @@ async def register(
         # delivery integration; this route does not claim that an email was
         # sent because Cerebro does not provide an email provider.
         db.add(user)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            # The pre-checks above skip soft-deleted rows and race with
+            # concurrent registrations; the unique indexes are the authority.
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email or username already registered",
+            ) from exc
         verification_token = password_service.generate_verification_token()
         try:
             await password_service.store_verification_token(
