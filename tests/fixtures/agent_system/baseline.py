@@ -20,7 +20,7 @@ PUBLIC_ROUTE_CHARACTERIZATION_MANIFEST = {
     (
         "POST",
         "/api/v1/query/research",
-    ): "test_query_api_baseline.py::test_research_pins_placeholder_metrics_and_ignored_execution_options",
+    ): "test_query_api_baseline.py::test_research_reports_no_estimates_it_does_not_have_and_ignores_execution_options",
     (
         "POST",
         "/api/v1/query/analyze",
