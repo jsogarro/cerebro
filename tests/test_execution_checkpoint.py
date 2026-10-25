@@ -18,6 +18,20 @@ from src.api.services.direct_execution_service import (
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 from src.repositories.checkpoint_repository import CheckpointRepository
 
+ORG = "11111111-1111-1111-1111-111111111111"
+
+
+@pytest.fixture(autouse=True)
+def _project_in_caller_org():
+    """The project lookup resume performs: a project owned by ``ORG``."""
+    with patch(
+        "src.api.services.direct_execution_service.ResearchRepository"
+    ) as repo_cls:
+        repo_cls.return_value.get = AsyncMock(
+            return_value=MagicMock(organization_id=uuid.UUID(ORG))
+        )
+        yield repo_cls
+
 
 @pytest.fixture
 def mock_session_factory():
@@ -192,7 +206,7 @@ async def test_resume_execution_restores_from_checkpoint(
         mock_repo_cls.return_value = mock_repo_instance
 
         result_execution_id = await execution_service_with_checkpoint.resume_execution(
-            project_id
+            project_id, organization_id=ORG
         )
 
         # Verify execution was resumed
@@ -227,7 +241,9 @@ async def test_resume_execution_returns_none_when_no_checkpoint(
         mock_repo_instance.get_recovery_point.return_value = None
         mock_repo_cls.return_value = mock_repo_instance
 
-        result = await execution_service_with_checkpoint.resume_execution(project_id)
+        result = await execution_service_with_checkpoint.resume_execution(
+            project_id, organization_id=ORG
+        )
 
         assert result is None
 
@@ -241,7 +257,9 @@ async def test_resume_execution_returns_none_without_database(
     execution_service_with_checkpoint.session_factory = None
 
     project_id = uuid.uuid4()
-    result = await execution_service_with_checkpoint.resume_execution(project_id)
+    result = await execution_service_with_checkpoint.resume_execution(
+        project_id, organization_id=ORG
+    )
 
     assert result is None
 
@@ -264,7 +282,9 @@ async def test_resume_execution_handles_restore_failure(
         mock_repo_instance.restore_from_checkpoint.return_value = None
         mock_repo_cls.return_value = mock_repo_instance
 
-        result = await execution_service_with_checkpoint.resume_execution(project_id)
+        result = await execution_service_with_checkpoint.resume_execution(
+            project_id, organization_id=ORG
+        )
 
         assert result is None
 

@@ -62,7 +62,9 @@ class ResearchExecutionBackend(Protocol):
         self, execution_id: str, *, organization_id: str | None = None
     ) -> dict[str, Any] | None: ...
 
-    async def resume_execution(self, project_id: UUID) -> str | None: ...
+    async def resume_execution(
+        self, project_id: UUID, *, organization_id: str | None = None
+    ) -> str | None: ...
 
 
 class AgentExecutionBackend(Protocol):
@@ -186,8 +188,12 @@ class _ApplicationKernelAdapter:
             execution_id, organization_id=organization_id
         )
 
-    async def resume_execution(self, project_id: UUID) -> str | None:
-        return await self.backend.resume_execution(project_id)
+    async def resume_execution(
+        self, project_id: UUID, *, organization_id: str | None = None
+    ) -> str | None:
+        return await self.backend.resume_execution(
+            project_id, organization_id=organization_id
+        )
 
     def _agents(self) -> AgentExecutionBackend:
         if self.agent_backend is None:
@@ -403,10 +409,14 @@ async def get_kernel_execution_results(
 async def resume_kernel_execution(
     kernel: ApplicationResearchKernel,
     project_id: UUID,
+    *,
+    organization_id: str | None = None,
 ) -> str | None:
     """Resume through the adapter owned by the canonical kernel."""
 
-    return await _execution_adapter(kernel).resume_execution(project_id)
+    return await _execution_adapter(kernel).resume_execution(
+        project_id, organization_id=organization_id
+    )
 
 
 __all__ = [

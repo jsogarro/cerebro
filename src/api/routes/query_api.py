@@ -529,12 +529,18 @@ async def resume_execution(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     """
     Resume execution from the latest checkpoint for a project.
 
     This endpoint loads the most recent recoverable checkpoint for the project
     and resumes execution from that point. Returns the execution ID if successful.
+
+    Scoped to the caller's tenant: another organization's project is reported
+    as having no recoverable checkpoint, exactly like a project that does not
+    exist, and the resumed execution is owned by the caller's organization so
+    the status and results reads can find it.
     """
     try:
         execution_service = _resolved_research_kernel(execution_service)
@@ -551,6 +557,7 @@ async def resume_execution(
         execution_id = await resume_kernel_execution(
             execution_service,
             project_uuid,
+            organization_id=tenant_context.organization_id,
         )
 
         if not execution_id:
