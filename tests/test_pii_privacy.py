@@ -24,6 +24,7 @@ from src.ai_brain.memory.semantic_memory import SemanticItem
 from src.ai_brain.memory.working_memory import WorkingMemoryManager
 from src.api.routes import query_api
 from src.core.pii_redactor import PIIRedactor, redact_pii
+from src.middleware.auth_middleware import get_current_active_user
 from src.models.db.agent_task import AgentTask
 from src.models.db.research_project import ResearchProject
 from src.models.db.session import get_session
@@ -227,6 +228,9 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
         app.include_router(users.router)
         app.dependency_overrides[get_session] = lambda: db_session
         app.dependency_overrides[users.get_memory_system] = lambda: memory
+        app.dependency_overrides[get_current_active_user] = lambda: User(
+            id=user_id, is_superuser=False
+        )
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -243,3 +247,75 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
         assert (await db_session.execute(select(AgentTask))).scalars().all() == []
 
     await engine.dispose()
+
+
+async def _gdpr_delete_as(caller: User | None) -> tuple[int, int, list[str]]:
+    """DELETE a seeded user's data as ``caller``; return status, users left, purges."""
+    from src.api.routes import users
+
+    user_id = uuid4()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(User.__table__.create)
+        await conn.run_sync(ResearchProject.__table__.create)
+        await conn.run_sync(AgentTask.__table__.create)
+
+    async with session_factory() as db_session:
+        await db_session.execute(
+            User.__table__.insert().values(
+                id=user_id,
+                email="victim@example.com",
+                username="victim",
+                hashed_password="hashed",
+            )
+        )
+        await db_session.commit()
+
+        memory = FakeMemorySystem()
+        app = FastAPI()
+        app.include_router(users.router)
+        app.dependency_overrides[get_session] = lambda: db_session
+        app.dependency_overrides[users.get_memory_system] = lambda: memory
+        if caller is not None:
+            app.dependency_overrides[get_current_active_user] = lambda: caller
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.delete(f"/users/{user_id}/gdpr")
+        remaining = len((await db_session.execute(select(User))).scalars().all())
+
+    await engine.dispose()
+    return response.status_code, remaining, memory.purged_user_ids
+
+
+@pytest.mark.asyncio  # type: ignore[untyped-decorator]
+async def test_gdpr_delete_rejects_anonymous_caller() -> None:
+    status_code, remaining, purged = await _gdpr_delete_as(None)
+
+    assert status_code == 401
+    assert remaining == 1
+    assert purged == []
+
+
+@pytest.mark.asyncio  # type: ignore[untyped-decorator]
+async def test_gdpr_delete_rejects_another_user() -> None:
+    status_code, remaining, purged = await _gdpr_delete_as(
+        User(id=uuid4(), is_superuser=False)
+    )
+
+    assert status_code == 403
+    assert remaining == 1
+    assert purged == []
+
+
+@pytest.mark.asyncio  # type: ignore[untyped-decorator]
+async def test_gdpr_delete_allows_superuser_operator() -> None:
+    status_code, remaining, purged = await _gdpr_delete_as(
+        User(id=uuid4(), is_superuser=True)
+    )
+
+    assert status_code == 200
+    assert remaining == 0
+    assert len(purged) == 1
