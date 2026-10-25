@@ -60,7 +60,6 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
     # Initialize DB
     await init_db(database_url=_TEST_DB_URL)
 
-    from src.models.db.agent_task import AgentTask
     from src.models.db.research_project import ResearchProject as DBProject
     from src.models.db.research_result import ResearchResult
     from src.models.db.session import _engine
@@ -68,7 +67,7 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
 
     tables = [
         Base.metadata.tables[t.__tablename__]
-        for t in [DBProject, ResearchResult, AgentTask, WorkflowCheckpoint]
+        for t in [DBProject, ResearchResult, WorkflowCheckpoint]
         if t.__tablename__ in Base.metadata.tables
     ]
     if _engine is not None and tables:

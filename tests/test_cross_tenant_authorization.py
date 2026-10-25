@@ -88,13 +88,12 @@ async def project_session() -> AsyncGenerator[AsyncSession, None]:
     this module registers models that use Postgres-only column types, and
     creating the whole metadata on SQLite fails on those.
     """
-    from src.models.db.agent_task import AgentTask
     from src.models.db.research_result import ResearchResult
     from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async with engine.begin() as connection:
-        for model in (ResearchProject, AgentTask, ResearchResult, WorkflowCheckpoint):
+        for model in (ResearchProject, ResearchResult, WorkflowCheckpoint):
             await connection.run_sync(model.__table__.create)
 
     session_factory = async_sessionmaker(engine, class_=AsyncSession)

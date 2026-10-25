@@ -109,14 +109,13 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
     # Register the SQLite-compatible DB models. Other tables (e.g. mfa_settings,
     # which uses a Postgres-only ARRAY column) are intentionally excluded from
     # test schema creation since SQLite cannot compile them.
-    from src.models.db.agent_task import AgentTask
     from src.models.db.research_project import ResearchProject as DBProject
     from src.models.db.research_result import ResearchResult
     from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
     sqlite_compatible_tables = [
         Base.metadata.tables[t.__tablename__]
-        for t in [DBProject, ResearchResult, AgentTask, WorkflowCheckpoint]
+        for t in [DBProject, ResearchResult, WorkflowCheckpoint]
         if t.__tablename__ in Base.metadata.tables
     ]
     if db_session_mod._engine is not None and sqlite_compatible_tables:
@@ -150,7 +149,6 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     # Create tables - import models to register them
-    import src.models.db.agent_task
     import src.models.db.research_project
     import src.models.db.research_result
     import src.models.db.workflow_checkpoint  # noqa: F401

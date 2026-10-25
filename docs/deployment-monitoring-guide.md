@@ -1446,7 +1446,7 @@ class CacheService:
 
 ### Database Optimization
 
-The async SQLAlchemy engine and session factory live in **`src/models/db/session.py`** (`create_async_engine` + `async_sessionmaker`), reading the URL from `settings.DATABASE_URL`. Data access is organized under the repository pattern in **`src/repositories/`** (`BaseRepository[ModelType]` plus `ResearchRepository`, `ResultRepository`, `TaskRepository`, `CheckpointRepository`, `ReportRepository`, `UserRepository`, `APIKeyRepository`).
+The async SQLAlchemy engine and session factory live in **`src/models/db/session.py`** (`create_async_engine` + `async_sessionmaker`), reading the URL from `settings.DATABASE_URL`. Data access is organized under the repository pattern in **`src/repositories/`** (`BaseRepository[ModelType]` plus `ResearchRepository`, `ResultRepository`, `CheckpointRepository`, `ReportRepository`, `UserRepository`, `APIKeyRepository`).
 
 #### Connection Pooling
 
@@ -1487,7 +1487,7 @@ async def get_projects_with_results(self, user_id: str) -> list[ResearchProject]
     query = (
         select(ResearchProject)
         .options(
-            selectinload(ResearchProject.agent_tasks),
+            selectinload(ResearchProject.results),
             joinedload(ResearchProject.generated_reports),
         )
         .where(

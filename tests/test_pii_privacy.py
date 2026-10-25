@@ -24,7 +24,6 @@ from src.ai_brain.memory.semantic_memory import SemanticItem
 from src.ai_brain.memory.working_memory import WorkingMemoryManager
 from src.api.routes import query_api
 from src.core.pii_redactor import PIIRedactor, redact_pii
-from src.models.db.agent_task import AgentTask
 from src.models.db.research_project import ResearchProject
 from src.models.db.session import get_session
 from src.models.db.user import User
@@ -189,7 +188,6 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(User.__table__.create)
         await conn.run_sync(ResearchProject.__table__.create)
-        await conn.run_sync(AgentTask.__table__.create)
 
     async with session_factory() as db_session:
         await db_session.execute(
@@ -209,15 +207,6 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
                 user_id=str(user_id),
                 domains=["privacy"],
                 status="DRAFT",
-            )
-        )
-        await db_session.execute(
-            AgentTask.__table__.insert().values(
-                id=uuid4(),
-                project_id=project_id,
-                agent_type="privacy",
-                status="PENDING",
-                input_data={"query": "gdpr@example.com"},
             )
         )
         await db_session.commit()
@@ -240,6 +229,6 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
         assert memory.purged_user_ids == [str(user_id)]
         assert (await db_session.execute(select(User))).scalars().all() == []
         assert (await db_session.execute(select(ResearchProject))).scalars().all() == []
-        assert (await db_session.execute(select(AgentTask))).scalars().all() == []
+        assert "agent_tasks" not in response.json()["deleted"]
 
     await engine.dispose()

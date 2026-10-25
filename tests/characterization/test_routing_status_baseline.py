@@ -17,7 +17,6 @@ from src.ai_brain.router.routing_types import (
     RoutingStrategy,
 )
 from src.api.services.real_supervisor_executor import RealSupervisorExecutor
-from src.models.db.agent_task import TaskStatus
 from src.models.research_project import ResearchStatus
 from src.models.supervisor_api_models import CoordinationMode
 from src.models.websocket_messages import WSMessageType
@@ -105,15 +104,6 @@ def test_parallel_status_and_event_vocabularies_remain_legacy_compatibility_inpu
         "completed",
         "failed",
         "cancelled",
-    }
-    assert {status.value for status in TaskStatus} == {
-        "pending",
-        "queued",
-        "in_progress",
-        "completed",
-        "failed",
-        "cancelled",
-        "retrying",
     }
     assert {event.value for event in WSMessageType} >= {
         "project.started",
