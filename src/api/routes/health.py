@@ -35,11 +35,8 @@ async def _check_database() -> None:
 
 
 async def _check_redis() -> None:
-    client = redis.from_url(settings.REDIS_URL)
-    try:
+    async with redis.from_url(settings.REDIS_URL) as client:
         await client.ping()
-    finally:
-        await client.aclose()
 
 
 async def _probe(name: str, check: Callable[[], Awaitable[None]]) -> str:

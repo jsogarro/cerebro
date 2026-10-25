@@ -35,7 +35,10 @@ class _Redis:
             raise self.error
         return True
 
-    async def aclose(self) -> None:
+    async def __aenter__(self) -> "_Redis":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
         self.closed = True
 
 
