@@ -252,7 +252,7 @@ async def get_research_project(
 @router.get("/projects", response_model=list[ResearchProject])
 async def list_research_projects(
     user_id: str | None = Query(None),
-    status: str | None = Query(None),
+    status: ResearchStatus | None = Query(None),
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
     repo: ResearchRepository = Depends(get_research_repo),
@@ -265,12 +265,24 @@ async def list_research_projects(
             detail="Cannot list projects for another user",
         )
 
+    # The filter speaks the API's statuses; a DRAFT row is reported as
+    # ``pending`` and no stored row is ever ``planning``.
+    if status == ResearchStatus.PLANNING:
+        return []
+    db_status = (
+        None
+        if status is None
+        else ProjectStatus.DRAFT
+        if status == ResearchStatus.PENDING
+        else ProjectStatus(status.value)
+    )
+
     # Fetch from database with filters
     effective_user_id = user_id or tenant_context.user_id
     if effective_user_id:
         db_projects = await repo.get_by_user(
             effective_user_id,
-            status=ProjectStatus(status) if status else None,
+            status=db_status,
             limit=limit,
             offset=offset,
             organization_id=tenant_context.organization_id,
