@@ -15,6 +15,7 @@ from src.api.routes.masr_api import get_masr_routing_service, router
 from src.api.services.masr_routing_service import MASRRoutingService
 from src.auth.models import TokenPayload
 from src.middleware.auth_middleware import get_jwt_service
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.masr_api_models import RoutingDecisionResponse
 
 AUTH_USER_ID = "user-1"
@@ -50,6 +51,10 @@ def client(routing_service: MASRRoutingService) -> Iterator[TestClient]:
 
     app.dependency_overrides[get_masr_routing_service] = lambda: routing_service
     app.dependency_overrides[get_jwt_service] = _TestJWTService
+    # The tenant dependency also opens a DB session these tests do not have.
+    app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+        user_id=AUTH_USER_ID, organization_id=AUTH_ORG_ID
+    )
     try:
         # Deliberately do not enter lifespan: the dependency override supplies
         # the service, while the real app supplies the canonical handlers.
@@ -57,6 +62,7 @@ def client(routing_service: MASRRoutingService) -> Iterator[TestClient]:
     finally:
         app.dependency_overrides.pop(get_masr_routing_service, None)
         app.dependency_overrides.pop(get_jwt_service, None)
+        app.dependency_overrides.pop(get_tenant_context, None)
 
 
 def _decision() -> RoutingDecisionResponse:
@@ -216,8 +222,36 @@ def test_read_endpoints_preserve_top_level_contract(
 def test_mounted_api_without_lifespan_returns_503() -> None:
     test_app = FastAPI()
     test_app.include_router(router)
+    test_app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+        user_id=AUTH_USER_ID, organization_id=AUTH_ORG_ID
+    )
 
     response = TestClient(test_app).get("/api/v1/masr/strategies")
 
     assert response.status_code == 503
     assert response.json()["detail"] == "MASR runtime is unavailable"
+
+
+def _masr_routes() -> list[tuple[str, str]]:
+    from fastapi.routing import APIRoute
+
+    return [
+        (method, route.path)
+        for route in router.routes
+        if isinstance(route, APIRoute)
+        for method in sorted(route.methods)
+    ]
+
+
+@pytest.mark.parametrize(("method", "path"), _masr_routes())
+def test_masr_routes_reject_anonymous_callers(
+    method: str, path: str, routing_service: MASRRoutingService
+) -> None:
+    """Routing decisions, cost estimates and feedback all require a caller."""
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_masr_routing_service] = lambda: routing_service
+
+    response = TestClient(app).request(method, path, json={})
+
+    assert response.status_code in (401, 403), response.text

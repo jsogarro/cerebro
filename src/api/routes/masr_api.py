@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from src.api.services.masr_routing_service import MASRRoutingService
+from src.middleware.tenant_context import get_tenant_context
 from src.models.masr_api_models import (
     ComplexityAnalysisRequest,
     ComplexityAnalysisResponse,
@@ -30,6 +31,8 @@ from src.models.masr_api_models import (
 router = APIRouter(
     prefix="/api/v1/masr",
     tags=["MASR Routing Intelligence"],
+    # Routing feedback steers future decisions; no route here is public.
+    dependencies=[Depends(get_tenant_context)],
     responses={
         404: {"description": "Not found"},
         500: {"description": "Internal server error"},
