@@ -2168,8 +2168,14 @@ class DirectExecutionService:
 
         execution_id = str(uuid.uuid4())
 
-        # Check capacity
-        if len(self.active_executions) >= self.max_concurrent_executions:
+        # Check capacity. ``active_executions`` also retains finished runs so
+        # their status and results stay readable; only in-flight ones count.
+        in_flight = sum(
+            1
+            for execution in self.active_executions.values()
+            if execution.status in ("pending", "running")
+        )
+        if in_flight >= self.max_concurrent_executions:
             raise RuntimeError(
                 f"Maximum concurrent executions ({self.max_concurrent_executions}) reached"
             )
