@@ -36,14 +36,17 @@ class APIError(Exception):
 
 def _token_subject(token: str | None) -> str | None:
     """Return the ``sub`` claim of a JWT without verifying it (the API does)."""
+    if not token:
+        return None
     try:
-        payload = token.split(".")[1]  # type: ignore[union-attr]
+        payload = token.split(".")[1]
         claims = json.loads(
             base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
         )
-        return claims["sub"]
-    except (AttributeError, IndexError, ValueError, KeyError, TypeError):
+    except (IndexError, ValueError):
         return None
+    sub = claims.get("sub") if isinstance(claims, dict) else None
+    return sub if isinstance(sub, str) else None
 
 
 class ResearchAPIClient:
