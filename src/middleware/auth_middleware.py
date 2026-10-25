@@ -184,15 +184,23 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return response
 
 
+_shared_jwt_service: JWTService | None = None
+
+
 async def get_jwt_service() -> JWTService:
     """
-    Get JWT service instance.
+    Get the process-wide JWT service (one Redis client, one parsed key pair).
 
-    This is a dependency that can be overridden in tests.
+    This is a dependency that can be overridden in tests. Built lazily on first
+    use so paths that never enter the app lifespan still work; the lifespan
+    calls :func:`close_jwt_service` on shutdown.
     """
+    global _shared_jwt_service
+    if _shared_jwt_service is not None:
+        return _shared_jwt_service
     try:
         redis_client = await redis.from_url(settings.REDIS_URL)
-        return JWTService(
+        service = JWTService(
             redis_client=redis_client,
             private_key_path=settings.JWT_PRIVATE_KEY_PATH,
             public_key_path=settings.JWT_PUBLIC_KEY_PATH,
@@ -200,6 +208,19 @@ async def get_jwt_service() -> JWTService:
     except Exception as exc:
         logger.error("Authentication service initialization failed", error=str(exc))
         raise AuthenticationServiceUnavailableError from exc
+    if _shared_jwt_service is None:
+        _shared_jwt_service = service
+    else:  # lost a first-request race; keep the winner
+        await redis_client.close()
+    return _shared_jwt_service
+
+
+async def close_jwt_service() -> None:
+    """Close the shared service's Redis client and drop the cached instance."""
+    global _shared_jwt_service
+    service, _shared_jwt_service = _shared_jwt_service, None
+    if service is not None and service.redis_client is not None:
+        await service.redis_client.close()
 
 
 async def get_current_token(

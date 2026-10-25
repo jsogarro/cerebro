@@ -30,7 +30,7 @@ from src.auth.password_service import (
     PasswordTokenStoreUnavailableError,
 )
 from src.core.config import settings
-from src.middleware.auth_middleware import get_current_user
+from src.middleware.auth_middleware import get_current_user, get_jwt_service
 from src.models.db.session import get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
@@ -45,17 +45,6 @@ security = HTTPBearer()
 
 
 # Dependencies
-async def get_jwt_service() -> JWTService:
-    """Get JWT service instance."""
-    # In production, use Redis connection from pool
-    redis_client = await redis.from_url(settings.REDIS_URL)
-    return JWTService(
-        redis_client=redis_client,
-        private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-        public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-    )
-
-
 async def get_password_service() -> PasswordService:
     """Get password service instance."""
     redis_client = await redis.from_url(settings.REDIS_URL)

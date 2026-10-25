@@ -86,6 +86,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting Research Platform API", environment=settings.ENVIRONMENT)
 
     async with AsyncExitStack() as resources:
+        from src.middleware.auth_middleware import close_jwt_service
+
+        resources.push_async_callback(
+            _close_lifespan_resource, "jwt_service", close_jwt_service
+        )
         masr_runtime = await MASRRuntime.create(settings)
         resources.push_async_callback(
             _close_lifespan_resource,
