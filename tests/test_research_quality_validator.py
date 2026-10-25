@@ -91,6 +91,12 @@ def test_quality_validator_accepts_when_revision_cap_reached() -> None:
 async def test_quality_validator_evaluates_consensus_from_worker_results() -> None:
     communication_protocol = CommunicationProtocol()
     validator = build_validator(communication_protocol)
+
+    async def _verified(*_: Any) -> dict[str, Any]:
+        return {"verdict": "pass", "report": ""}
+
+    # No verification agent is wired here, and an unverifiable draft now fails closed.
+    validator._run_verification_via_supervisor = _verified  # type: ignore[method-assign]
     state = SupervisionState(
         task_id="task-1",
         worker_results={

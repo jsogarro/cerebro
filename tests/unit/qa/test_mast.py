@@ -633,7 +633,7 @@ class TestQAGateMASTWiring:
             side_effect=RuntimeError("boom"),
         ):
             result = await supervisor._run_verification("some content")
-        assert result["verdict"] == "pass"
+        assert result["verdict"] == "revise"
         assert "mast_labels" in result
         assert "mast_confidence" in result
 

@@ -12,6 +12,7 @@ Key Features:
 - Integration with MASR routing decisions
 """
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -41,6 +42,22 @@ from ..communication.talkhier_message import (
 from ..models import AgentResult, AgentTask
 
 logger = get_logger()
+
+_VERDICT_RE = re.compile(
+    r"^[\s>#*_`-]*verdict[\s*_`]*[:=][\s*_`]*([a-z]+)", re.IGNORECASE | re.MULTILINE
+)
+
+
+def parse_verdict(report_text: str) -> str:
+    """Return "pass" only for an explicit PASS verdict; anything else is "revise".
+
+    Tolerates case, markdown bold/heading markers and indentation. A missing or
+    unparseable verdict fails closed so every consumer (``== "pass"`` loops and
+    ``== "revise"`` score penalties alike) treats it as not passing.
+    """
+    match = _VERDICT_RE.search(report_text or "")
+    return "pass" if match and match.group(1).lower() == "pass" else "revise"
+
 
 # Bounded revision loop configuration
 MAX_VERIFICATION_REVISION_ROUNDS = (
@@ -804,7 +821,8 @@ class BaseSupervisor(BaseAgent, ABC):
 
         Returns:
             dict with keys:
-                - verdict: "pass" or "revise"
+                - verdict: "pass" or "revise" (a missing/unparseable verdict
+                  or a verifier error is "revise", never "pass")
                 - report: full verification report text
                 - issues: list of specific issues (empty if pass)
                 - mast_labels: list of detected MAST failure mode codes (Phase S)
@@ -858,19 +876,7 @@ class BaseSupervisor(BaseAgent, ABC):
 
             # Parse the verdict from the output
             report_text = verification_result.output.get("content", "")
-            verdict_line = next(
-                (
-                    line
-                    for line in report_text.split("\n")
-                    if line.startswith("VERDICT:")
-                ),
-                "",
-            )
-            verdict = "pass"
-            if "REVISE" in verdict_line.upper():
-                verdict = "revise"
-            elif "PASS" in verdict_line.upper():
-                verdict = "pass"
+            verdict = parse_verdict(report_text)
 
             # Extract issues list from report
             issues = self._extract_issues_from_report(report_text)
@@ -892,15 +898,15 @@ class BaseSupervisor(BaseAgent, ABC):
             }
 
         except Exception as e:
-            # Degrade gracefully on error — don't break the workflow
             logger.error(
                 "supervisor_verification_failed",
                 supervisor_type=self.supervisor_type,
                 error=str(e),
             )
-            mast_labels, mast_confidence = self._label_qa_gate("pass", [], content)
+            # Fail closed: a verifier that did not run has not approved anything.
+            mast_labels, mast_confidence = self._label_qa_gate("revise", [], content)
             return {
-                "verdict": "pass",  # neutral fallback
+                "verdict": "revise",
                 "report": f"Verification error: {e!s}",
                 "issues": [],
                 "mast_labels": mast_labels,
