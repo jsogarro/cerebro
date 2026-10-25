@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import time
+import uuid
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -25,6 +26,14 @@ IDEMPOTENCY_HEADER = "Idempotency-Key"
 DEFAULT_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 # Bounds how long a crashed worker can block retries of its key.
 RESERVATION_TTL_SECONDS = 300
+# Delete a reservation only while it still holds the releasing request's token,
+# so a request whose reservation expired cannot free another request's claim.
+_RELEASE_IF_OWNER = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+end
+return 0
+"""
 
 
 @dataclass(frozen=True)
@@ -51,11 +60,11 @@ class IdempotencyStore(Protocol):
     ) -> None:
         """Cache a response."""
 
-    async def reserve(self, key: str, ttl_seconds: int) -> bool:
-        """Atomically claim a key; False if another request holds it."""
+    async def reserve(self, key: str, ttl_seconds: int) -> str | None:
+        """Atomically claim a key; return an owner token, or None if held."""
 
-    async def release(self, key: str) -> None:
-        """Drop a reservation made by ``reserve``."""
+    async def release(self, key: str, token: str) -> None:
+        """Drop the reservation only if ``token`` still owns it."""
 
 
 class InMemoryIdempotencyStore:
@@ -63,7 +72,7 @@ class InMemoryIdempotencyStore:
 
     def __init__(self, now: Callable[[], float] | None = None) -> None:
         self._records: dict[str, tuple[float, IdempotencyRecord]] = {}
-        self._reservations: dict[str, float] = {}
+        self._reservations: dict[str, tuple[float, str]] = {}
         self._now = now or time.time
 
     async def get(self, key: str) -> IdempotencyRecord | None:
@@ -84,14 +93,18 @@ class InMemoryIdempotencyStore:
     ) -> None:
         self._records[key] = (self._now() + ttl_seconds, record)
 
-    async def reserve(self, key: str, ttl_seconds: int) -> bool:
-        if self._reservations.get(key, 0) > self._now():
-            return False
-        self._reservations[key] = self._now() + ttl_seconds
-        return True
+    async def reserve(self, key: str, ttl_seconds: int) -> str | None:
+        held = self._reservations.get(key)
+        if held is not None and held[0] > self._now():
+            return None
+        token = uuid.uuid4().hex
+        self._reservations[key] = (self._now() + ttl_seconds, token)
+        return token
 
-    async def release(self, key: str) -> None:
-        self._reservations.pop(key, None)
+    async def release(self, key: str, token: str) -> None:
+        held = self._reservations.get(key)
+        if held is not None and held[1] == token:
+            del self._reservations[key]
 
 
 class RedisIdempotencyStore:
@@ -130,16 +143,18 @@ class RedisIdempotencyStore:
         }
         await client.setex(self._redis_key(key), ttl_seconds, json.dumps(payload))
 
-    async def reserve(self, key: str, ttl_seconds: int) -> bool:
+    async def reserve(self, key: str, ttl_seconds: int) -> str | None:
         client = await self._get_client()
+        token = uuid.uuid4().hex
         claimed = await client.set(
-            self._redis_key(key) + ":pending", "1", nx=True, ex=ttl_seconds
+            self._redis_key(key) + ":pending", token, nx=True, ex=ttl_seconds
         )
-        return bool(claimed)
+        return token if claimed else None
 
-    async def release(self, key: str) -> None:
+    async def release(self, key: str, token: str) -> None:
         client = await self._get_client()
-        await client.delete(self._redis_key(key) + ":pending")
+        release_if_owner = client.register_script(_RELEASE_IF_OWNER)
+        await release_if_owner(keys=[self._redis_key(key) + ":pending"], args=[token])
 
     async def _get_client(self) -> redis.Redis[Any]:
         if self._client is None:
@@ -185,18 +200,18 @@ class ResilientIdempotencyStore:
             logger.warning("Idempotency primary store write failed", error=str(exc))
             await self._fallback.set(key, record, ttl_seconds)
 
-    async def reserve(self, key: str, ttl_seconds: int) -> bool:
+    async def reserve(self, key: str, ttl_seconds: int) -> str | None:
         try:
             return await self._primary.reserve(key, ttl_seconds)
         except Exception as exc:
             logger.warning("Idempotency primary store unavailable", error=str(exc))
             return await self._fallback.reserve(key, ttl_seconds)
 
-    async def release(self, key: str) -> None:
+    async def release(self, key: str, token: str) -> None:
         # Release on both: the reservation may sit in whichever store was up.
         for store in (self._primary, self._fallback):
             try:
-                await store.release(key)
+                await store.release(key, token)
             except Exception as exc:
                 logger.warning("Idempotency release failed", error=str(exc))
 
@@ -237,7 +252,8 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 media_type=cached.media_type,
             )
 
-        if not await self._store.reserve(cache_key, RESERVATION_TTL_SECONDS):
+        token = await self._store.reserve(cache_key, RESERVATION_TTL_SECONDS)
+        if token is None:
             return JSONResponse(
                 status_code=409,
                 content=build_error_payload(
@@ -257,7 +273,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 )
             return await self._execute(request, call_next, cache_key, body)
         finally:
-            await self._store.release(cache_key)
+            await self._store.release(cache_key, token)
 
     async def _execute(
         self,
