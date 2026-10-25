@@ -9,7 +9,7 @@ import asyncio
 import inspect
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -211,7 +211,9 @@ class CircuitBreaker:
             >= self.config.timeout
         )
 
-    async def call(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    async def call(
+        self, func: Callable[..., T | Awaitable[T]], *args: Any, **kwargs: Any
+    ) -> T:
         """
         Execute function through circuit breaker.
 
@@ -252,11 +254,8 @@ class CircuitBreaker:
 
         try:
             # Handle both sync and async functions
-            result: T
-            if inspect.iscoroutinefunction(func):
-                result = await func(*args, **kwargs)
-            else:
-                result = func(*args, **kwargs)
+            outcome = func(*args, **kwargs)
+            result: T = await outcome if inspect.isawaitable(outcome) else outcome
 
             # Record success
             await self._on_success()
