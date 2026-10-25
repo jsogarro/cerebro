@@ -25,7 +25,7 @@ from src.api.services.supervisor_coordination_service import (
 )
 from src.api.services.supervisor_progress_tracker import SupervisorProgressTracker
 from src.api.websocket.auth import require_authenticated_websocket
-from src.middleware.tenant_context import get_tenant_context
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.supervisor_api_models import (
     ConflictResolutionRequest,
     ConflictResolutionResponse,
@@ -64,8 +64,8 @@ router = APIRouter(
 
 # Initialize service (in production, this would be dependency injected)
 supervisor_service = SupervisorCoordinationService()
-# Every HTTP route starts or inspects multi-worker execution; none is public.
-_REQUIRE_TENANT = [Depends(get_tenant_context)]
+# Progress events go only to WebSocket clients of the caller's organization.
+_TENANT_DEPENDENCY = Depends(get_tenant_context)
 _SUPERVISOR_SERVICE_DEPENDENCY = Depends(
     get_application_supervisor_coordination_service
 )
@@ -88,15 +88,12 @@ connection_manager = SupervisorProgressTracker()
 # Primary Endpoints
 
 
-@router.post(
-    "/{supervisor_type}/execute",
-    response_model=SupervisorExecuteResponse,
-    dependencies=_REQUIRE_TENANT,
-)
+@router.post("/{supervisor_type}/execute", response_model=SupervisorExecuteResponse)
 async def execute_supervisor_task(
     supervisor_type: SupervisorType,
     request: SupervisorExecuteRequest,
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
+    tenant_context: TenantContext = _TENANT_DEPENDENCY,
 ) -> SupervisorExecuteResponse:
     """
     Execute a task through a specific supervisor with worker coordination.
@@ -128,7 +125,9 @@ async def execute_supervisor_task(
             },
             priority="medium",
         )
-        await connection_manager.send_supervisor_event(supervisor_type.value, event)
+        await connection_manager.send_supervisor_event(
+            supervisor_type.value, event, tenant_context.organization_id
+        )
 
         return response
 
@@ -145,7 +144,7 @@ async def execute_supervisor_task(
         ) from e
 
 
-@router.get("", response_model=SupervisorListResponse, dependencies=_REQUIRE_TENANT)
+@router.get("", response_model=SupervisorListResponse)
 async def list_supervisors(
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
 ) -> SupervisorListResponse:
@@ -175,9 +174,7 @@ async def list_supervisors(
         ) from e
 
 
-@router.get(
-    "/{supervisor_type}", response_model=SupervisorInfo, dependencies=_REQUIRE_TENANT
-)
+@router.get("/{supervisor_type}", response_model=SupervisorInfo)
 async def get_supervisor_info(
     supervisor_type: SupervisorType,
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
@@ -201,11 +198,7 @@ async def get_supervisor_info(
         ) from e
 
 
-@router.get(
-    "/{supervisor_type}/workers",
-    response_model=WorkerListResponse,
-    dependencies=_REQUIRE_TENANT,
-)
+@router.get("/{supervisor_type}/workers", response_model=WorkerListResponse)
 async def get_supervisor_workers(
     supervisor_type: SupervisorType,
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
@@ -241,15 +234,12 @@ async def get_supervisor_workers(
         ) from e
 
 
-@router.post(
-    "/{supervisor_type}/coordinate",
-    response_model=WorkerCoordinationResponse,
-    dependencies=_REQUIRE_TENANT,
-)
+@router.post("/{supervisor_type}/coordinate", response_model=WorkerCoordinationResponse)
 async def coordinate_workers(
     supervisor_type: SupervisorType,
     request: WorkerCoordinationRequest,
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
+    tenant_context: TenantContext = _TENANT_DEPENDENCY,
 ) -> WorkerCoordinationResponse:
     """
     Coordinate specific workers under a supervisor for a task.
@@ -272,7 +262,9 @@ async def coordinate_workers(
             workers_active=len(response.workers_assigned),
             estimated_remaining_seconds=response.estimated_completion_time,
         )
-        await connection_manager.broadcast_event(event.model_dump())
+        await connection_manager.broadcast_event(
+            event.model_dump(), tenant_context.organization_id
+        )
 
         return response
 
@@ -289,14 +281,11 @@ async def coordinate_workers(
         ) from e
 
 
-@router.post(
-    "/multi/orchestrate",
-    response_model=MultiSupervisorOrchestrationResponse,
-    dependencies=_REQUIRE_TENANT,
-)
+@router.post("/multi/orchestrate", response_model=MultiSupervisorOrchestrationResponse)
 async def orchestrate_multi_supervisor(
     request: MultiSupervisorOrchestrationRequest,
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
+    tenant_context: TenantContext = _TENANT_DEPENDENCY,
 ) -> MultiSupervisorOrchestrationResponse:
     """
     Orchestrate multiple supervisors for complex cross-domain tasks.
@@ -316,7 +305,7 @@ async def orchestrate_multi_supervisor(
             "consensus_achieved": response.consensus_achieved,
             "quality_metrics": response.quality_metrics,
         }
-        await connection_manager.broadcast_event(event)
+        await connection_manager.broadcast_event(event, tenant_context.organization_id)
 
         return response
 
@@ -327,11 +316,7 @@ async def orchestrate_multi_supervisor(
         ) from e
 
 
-@router.get(
-    "/{supervisor_type}/stats",
-    response_model=SupervisorStatsResponse,
-    dependencies=_REQUIRE_TENANT,
-)
+@router.get("/{supervisor_type}/stats", response_model=SupervisorStatsResponse)
 async def get_supervisor_stats(
     supervisor_type: SupervisorType,
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
@@ -358,11 +343,7 @@ async def get_supervisor_stats(
         ) from e
 
 
-@router.get(
-    "/{supervisor_type}/health",
-    response_model=SupervisorHealthResponse,
-    dependencies=_REQUIRE_TENANT,
-)
+@router.get("/{supervisor_type}/health", response_model=SupervisorHealthResponse)
 async def get_supervisor_health(
     supervisor_type: SupervisorType,
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
@@ -392,9 +373,7 @@ async def get_supervisor_health(
 
 
 @router.post(
-    "/optimize-allocation",
-    response_model=WorkerAllocationOptimizationResponse,
-    dependencies=_REQUIRE_TENANT,
+    "/optimize-allocation", response_model=WorkerAllocationOptimizationResponse
 )
 async def optimize_worker_allocation(
     request: WorkerAllocationOptimizationRequest,
@@ -416,14 +395,11 @@ async def optimize_worker_allocation(
         ) from e
 
 
-@router.post(
-    "/resolve-conflicts",
-    response_model=ConflictResolutionResponse,
-    dependencies=_REQUIRE_TENANT,
-)
+@router.post("/resolve-conflicts", response_model=ConflictResolutionResponse)
 async def resolve_conflicts(
     request: ConflictResolutionRequest,
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
+    tenant_context: TenantContext = _TENANT_DEPENDENCY,
 ) -> ConflictResolutionResponse:
     """
     Resolve conflicts between worker outputs using specified strategy.
@@ -447,7 +423,9 @@ async def resolve_conflicts(
                 "confidence": response.confidence_score,
             },
         )
-        await connection_manager.broadcast_event(event.model_dump())
+        await connection_manager.broadcast_event(
+            event.model_dump(), tenant_context.organization_id
+        )
 
         return response
 
@@ -462,11 +440,7 @@ async def resolve_conflicts(
         ) from e
 
 
-@router.get(
-    "/performance/compare",
-    response_model=SupervisorComparisonResponse,
-    dependencies=_REQUIRE_TENANT,
-)
+@router.get("/performance/compare", response_model=SupervisorComparisonResponse)
 async def compare_supervisor_performance(
     supervisors: list[SupervisorType] = Query(
         ..., description="List of supervisor types to compare"
@@ -494,12 +468,11 @@ async def compare_supervisor_performance(
         ) from e
 
 
-@router.post(
-    "/experiment", response_model=ExperimentResponse, dependencies=_REQUIRE_TENANT
-)
+@router.post("/experiment", response_model=ExperimentResponse)
 async def run_coordination_experiment(
     request: ExperimentRequest,
     service: SupervisorCoordinationService = _SUPERVISOR_SERVICE_DEPENDENCY,
+    tenant_context: TenantContext = _TENANT_DEPENDENCY,
 ) -> ExperimentResponse:
     """
     Run experiments to test different coordination strategies.
@@ -518,7 +491,7 @@ async def run_coordination_experiment(
             "best_strategy": response.best_strategy.value,
             "strategies_tested": len(response.strategies_tested),
         }
-        await connection_manager.broadcast_event(event)
+        await connection_manager.broadcast_event(event, tenant_context.organization_id)
 
         return response
 
