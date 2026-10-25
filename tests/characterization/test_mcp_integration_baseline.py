@@ -115,7 +115,7 @@ class TestSuccessPassthrough:
         client = _healthy_client()
         client.analyze_statistics.return_value = {
             "success": True,
-            "result": {"mean": 3.0},
+            "mean": 3.0,
         }
         integration = MCPIntegration(mcp_client=client, enable_fallback=False)
 
