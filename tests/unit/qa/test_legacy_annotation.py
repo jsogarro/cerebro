@@ -6,12 +6,10 @@ exist in ``agent_task.output_data`` and ``research_result.content``. This
 module's job is to mark those rows when they are read, not to retract or
 mutate what was persisted.
 
-Coverage caveat (see the packet handoff for the full explanation): this
-utility is not wired into a live endpoint by this packet. The endpoint that
-actually serves ``research_result.content`` verbatim
-(``src/api/routes/research.py::get_research_results``) is outside this
-packet's owned files. These tests prove the function's own contract in
-isolation.
+These tests prove the function's own contract in isolation. That the
+endpoint serving ``research_result.content``
+(``src/api/routes/research.py::get_research_results``) applies it is covered
+by ``tests/test_research_results_legacy_annotation.py``.
 """
 
 from src.qa.legacy_annotation import (

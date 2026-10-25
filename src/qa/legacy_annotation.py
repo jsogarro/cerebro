@@ -12,9 +12,9 @@ persisted; without marking those rows, "we removed the fabricated
 verification" would itself be an unsubstantiated claim about what a caller
 of the read path actually sees.
 
-This module provides a pure annotation function for that read path. See the
-Packet 0 handoff for which endpoint(s) would need to call it and why that is
-outside this packet's owned files.
+This module provides a pure annotation function for that read path. It is
+applied by ``GET /api/v1/research/projects/{project_id}/results``, the
+endpoint that serves ``research_result.content``.
 """
 
 from __future__ import annotations

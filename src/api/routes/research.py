@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
@@ -26,6 +27,7 @@ from src.models.research_project import (
     ResearchScope,
     ResearchStatus,
 )
+from src.qa.legacy_annotation import annotate_legacy_results
 from src.repositories.research_repository import ResearchRepository
 
 logger = get_logger()
@@ -469,7 +471,12 @@ async def get_research_results(
 
     # Check DB results first
     if db_project.results:
-        return {"project_id": str(project_id), "results": db_project.results}
+        # Rows persisted before verification fabrication was removed are still
+        # served verbatim; flag them rather than present them as evidence.
+        return {
+            "project_id": str(project_id),
+            "results": annotate_legacy_results(jsonable_encoder(db_project.results)),
+        }
 
     # Fall back to in-memory execution results
     try:
