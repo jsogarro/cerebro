@@ -569,24 +569,27 @@ async def list_reports(
                 detail="Report storage service not available",
             )
 
+        offset = (page - 1) * page_size
         reports = await storage_service.list_user_reports(
             authenticated_user_id,
-            limit=page_size + 1,
+            limit=page_size,
+            status_filter=status_filter,
+            organization_id=organization_id,
+            offset=offset,
+        )
+        total_count = await storage_service.count_user_reports(
+            authenticated_user_id,
             status_filter=status_filter,
             organization_id=organization_id,
         )
-
-        # Check if there are more results
-        has_more = len(reports) > page_size
-        if has_more:
-            reports = reports[:page_size]
+        has_more = offset + len(reports) < total_count
 
         # Convert to response models
         report_responses = [ReportResponse.from_db_report(report) for report in reports]
 
         return ReportListResponse(
             reports=report_responses,
-            total_count=len(report_responses),  # Would be actual total from DB
+            total_count=total_count,
             page=page,
             page_size=page_size,
             has_more=has_more,

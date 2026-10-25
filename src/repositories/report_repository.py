@@ -155,6 +155,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         status_filter: str | None = None,
         *,
         organization_id: UUID | str,
+        offset: int = 0,
     ) -> list[GeneratedReport]:
         """Get all reports for a user."""
         query = self._scoped_query(
@@ -165,13 +166,27 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         if status_filter:
             query = query.filter(GeneratedReport.generation_status == status_filter)
 
-        query = query.order_by(desc(GeneratedReport.created_at))
+        query = query.order_by(desc(GeneratedReport.created_at)).offset(offset)
 
         if limit:
             query = query.limit(limit)
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def count_by_user_id(
+        self,
+        user_id: UUID,
+        status_filter: str | None = None,
+        *,
+        organization_id: UUID | str,
+    ) -> int:
+        """Count the reports get_by_user_id would page through."""
+        query = self._scoped_query(organization_id=organization_id, user_id=user_id)
+        if status_filter:
+            query = query.where(GeneratedReport.generation_status == status_filter)
+        count_query = query.with_only_columns(func.count(GeneratedReport.id))
+        return (await self.session.execute(count_query)).scalar() or 0
 
     async def get_public_reports(
         self,
