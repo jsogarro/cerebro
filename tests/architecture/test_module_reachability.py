@@ -64,6 +64,8 @@ KNOWN_UNREACHABLE: frozenset[str] = frozenset(
         "src.services.gemini_metrics",
         "src.services.hallucination_detector",
         "src.services.parsers.base_parser",
+        "src.services.text_alignment",
+        "src.services.text_alignment.alignment",
         "src.services.visualization_generator",
     }
 )
