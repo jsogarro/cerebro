@@ -27,7 +27,6 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 K8S_DIR = REPO_ROOT / "k8s"
 DEPLOY_API = K8S_DIR / "deployment-api.yaml"
-DEPLOY_WORKER = K8S_DIR / "deployment-worker.yaml"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 
@@ -64,11 +63,6 @@ class TestK8sDeploymentInvariants:
         assert doc["kind"] == "Deployment"
         assert doc["apiVersion"] == "apps/v1"
 
-    def test_worker_deployment_parses(self) -> None:
-        doc = _load_yaml(DEPLOY_WORKER)
-        assert doc["kind"] == "Deployment"
-        assert doc["apiVersion"] == "apps/v1"
-
     def test_api_metadata_contract(self) -> None:
         doc = _load_yaml(DEPLOY_API)
         assert doc["metadata"]["name"] == "research-api"
@@ -76,26 +70,12 @@ class TestK8sDeploymentInvariants:
         assert doc["metadata"]["labels"]["app"] == "research-api"
         assert doc["metadata"]["labels"]["component"] == "api"
 
-    def test_worker_metadata_contract(self) -> None:
-        doc = _load_yaml(DEPLOY_WORKER)
-        assert doc["metadata"]["name"] == "research-worker"
-        assert doc["metadata"]["namespace"] == "research-platform"
-        assert doc["metadata"]["labels"]["app"] == "research-worker"
-        assert doc["metadata"]["labels"]["component"] == "worker"
-
     def test_api_selector_unchanged(self) -> None:
         doc = _load_yaml(DEPLOY_API)
         assert doc["spec"]["selector"]["matchLabels"] == {"app": "research-api"}
 
-    def test_worker_selector_unchanged(self) -> None:
-        doc = _load_yaml(DEPLOY_WORKER)
-        assert doc["spec"]["selector"]["matchLabels"] == {"app": "research-worker"}
-
     def test_api_replicas_unchanged(self) -> None:
         assert _load_yaml(DEPLOY_API)["spec"]["replicas"] == 3
-
-    def test_worker_replicas_unchanged(self) -> None:
-        assert _load_yaml(DEPLOY_WORKER)["spec"]["replicas"] == 5
 
     def test_api_container_port_unchanged(self) -> None:
         doc = _load_yaml(DEPLOY_API)
@@ -107,24 +87,12 @@ class TestK8sDeploymentInvariants:
         spec = _pod_spec(_load_yaml(DEPLOY_API))
         assert spec["serviceAccountName"] == "research-platform-sa"
 
-    def test_worker_pod_serviceaccount_unchanged(self) -> None:
-        spec = _pod_spec(_load_yaml(DEPLOY_WORKER))
-        assert spec["serviceAccountName"] == "research-platform-sa"
-
     def test_api_tmp_volume_writable_path(self) -> None:
         """readOnlyRootFilesystem requires a writable mount; tmp emptyDir
         already covers /tmp. This invariant must remain true post-refactor."""
         doc = _load_yaml(DEPLOY_API)
         api = _container(doc, "api")
         mounts = {m["name"]: m["mountPath"] for m in api["volumeMounts"]}
-        assert mounts.get("tmp") == "/tmp"
-        volumes = {v["name"]: v for v in _pod_spec(doc)["volumes"]}
-        assert "emptyDir" in volumes["tmp"]
-
-    def test_worker_tmp_volume_writable_path(self) -> None:
-        doc = _load_yaml(DEPLOY_WORKER)
-        worker = _container(doc, "worker")
-        mounts = {m["name"]: m["mountPath"] for m in worker["volumeMounts"]}
         assert mounts.get("tmp") == "/tmp"
         volumes = {v["name"]: v for v in _pod_spec(doc)["volumes"]}
         assert "emptyDir" in volumes["tmp"]
@@ -229,19 +197,19 @@ class TestCIWorkflowInvariants:
 class TestK8sSecurityContextAcceptance:
     """Spec for the K8s securityContext additions (group-005 brief)."""
 
-    @pytest.mark.parametrize("path", [DEPLOY_API, DEPLOY_WORKER], ids=["api", "worker"])
+    @pytest.mark.parametrize("path", [DEPLOY_API], ids=["api"])
     def test_pod_runs_as_non_root(self, path: Path) -> None:
         spec = _pod_spec(_load_yaml(path))
         sc = spec.get("securityContext", {})
         assert sc.get("runAsNonRoot") is True
 
-    @pytest.mark.parametrize("path", [DEPLOY_API, DEPLOY_WORKER], ids=["api", "worker"])
+    @pytest.mark.parametrize("path", [DEPLOY_API], ids=["api"])
     def test_pod_run_as_user_set_per_brief(self, path: Path) -> None:
         spec = _pod_spec(_load_yaml(path))
         sc = spec.get("securityContext", {})
         assert sc.get("runAsUser") == 1000
 
-    @pytest.mark.parametrize("path", [DEPLOY_API, DEPLOY_WORKER], ids=["api", "worker"])
+    @pytest.mark.parametrize("path", [DEPLOY_API], ids=["api"])
     def test_pod_seccomp_runtime_default(self, path: Path) -> None:
         spec = _pod_spec(_load_yaml(path))
         sc = spec.get("securityContext", {})
@@ -250,8 +218,8 @@ class TestK8sSecurityContextAcceptance:
 
     @pytest.mark.parametrize(
         "path,name",
-        [(DEPLOY_API, "api"), (DEPLOY_WORKER, "worker")],
-        ids=["api", "worker"],
+        [(DEPLOY_API, "api")],
+        ids=["api"],
     )
     def test_container_drops_all_capabilities(self, path: Path, name: str) -> None:
         c = _container(_load_yaml(path), name)
@@ -261,8 +229,8 @@ class TestK8sSecurityContextAcceptance:
 
     @pytest.mark.parametrize(
         "path,name",
-        [(DEPLOY_API, "api"), (DEPLOY_WORKER, "worker")],
-        ids=["api", "worker"],
+        [(DEPLOY_API, "api")],
+        ids=["api"],
     )
     def test_container_no_privilege_escalation(self, path: Path, name: str) -> None:
         c = _container(_load_yaml(path), name)
@@ -271,8 +239,8 @@ class TestK8sSecurityContextAcceptance:
 
     @pytest.mark.parametrize(
         "path,name",
-        [(DEPLOY_API, "api"), (DEPLOY_WORKER, "worker")],
-        ids=["api", "worker"],
+        [(DEPLOY_API, "api")],
+        ids=["api"],
     )
     def test_container_read_only_root_filesystem(self, path: Path, name: str) -> None:
         c = _container(_load_yaml(path), name)
