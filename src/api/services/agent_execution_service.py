@@ -43,6 +43,16 @@ from ...models.agent_api_models import (
 logger = get_logger()
 
 
+_FAILED_STATUSES = {"failed", "timeout"}
+
+
+def _rollup_status(failed: int, total: int) -> str:
+    """Roll member outcomes up into completed, partial or failed."""
+    if total == 0 or failed == 0:
+        return "completed"
+    return "failed" if failed >= total else "partial"
+
+
 class AgentExecutionService:
     """
     Service for executing agents using research-validated patterns.
@@ -191,11 +201,13 @@ class AgentExecutionService:
                 started_at=start_time,
                 completed_at=datetime.now(),
                 refinement_rounds=0,  # Would be extracted from agent metadata
-                consensus_achieved=True,  # Single agent always achieves "consensus"
+                consensus_achieved=agent_result.status == "success",
             )
 
             # Update metrics
-            await self._update_agent_metrics(agent_type, response, success=True)
+            await self._update_agent_metrics(
+                agent_type, response, success=agent_result.status == "success"
+            )
 
             # Store in history
             self.execution_history[execution_id] = response
@@ -295,6 +307,7 @@ class AgentExecutionService:
             accumulated_context = request.context.copy()
             quality_scores = []
             confidence_scores = []
+            failed_steps = 0
 
             # Execute agents sequentially
             for step_number, agent_type in enumerate(request.agent_chain):
@@ -322,6 +335,9 @@ class AgentExecutionService:
                 quality_scores.append(agent_response.quality_score)
                 confidence_scores.append(agent_response.confidence)
 
+                step_failed = agent_response.status in _FAILED_STATUSES
+                failed_steps += step_failed
+
                 # Check for early stopping
                 if (
                     request.early_stopping
@@ -335,7 +351,7 @@ class AgentExecutionService:
                     break
 
                 # Accumulate context for next agent (if enabled)
-                if request.pass_intermediate_results:
+                if request.pass_intermediate_results and not step_failed:
                     accumulated_context[f"previous_{agent_type.value}_result"] = (
                         agent_response.output
                     )
@@ -358,7 +374,7 @@ class AgentExecutionService:
             if len(quality_scores) > 1:
                 response.quality_improvement = quality_scores[-1] - quality_scores[0]
 
-            response.status = "completed"
+            response.status = _rollup_status(failed_steps, len(confidence_scores))
             response.completed_at = datetime.now()
             response.total_execution_time_seconds = (
                 response.completed_at - response.started_at
@@ -508,7 +524,11 @@ class AgentExecutionService:
                     else 1.0
                 )
 
-            response.status = "completed"
+            failed_agents = len(request.agent_types) - sum(
+                result.status not in _FAILED_STATUSES
+                for result in agent_results.values()
+            )
+            response.status = _rollup_status(failed_agents, len(request.agent_types))
             response.completed_at = datetime.now()
             response.total_execution_time_seconds = (
                 response.completed_at - response.started_at
