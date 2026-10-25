@@ -800,6 +800,20 @@ class LLMWorkerAgentBase(BaseAgent):
         computed: dict[str, Any] | None,
     ) -> AgentResult:
         """Execute one model call through the registry, then allow one final turn."""
+        # A plan-built worker carries its allowlist in config; absent means the
+        # worker is not plan-scoped (e.g. internal math tools), so no filter.
+        allowlist = self.config.get("tool_allowlist")
+        if allowlist is not None and tool_call.name not in allowlist:
+            message = f"Tool {tool_call.name!r} is not in this worker's allowlist"
+            return self._tool_failure_result(
+                task,
+                computed,
+                code="tool_not_allowed",
+                message=message,
+                tool_call=tool_call,
+                tool_result={"success": False, "error": message},
+            )
+
         identity = ToolCallIdentity.from_agent_task(task)
         grants = task.context.get(CAPABILITY_GRANTS_CONTEXT_KEY, None)
 

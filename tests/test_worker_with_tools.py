@@ -299,6 +299,44 @@ class TestWorkerWithTools:
         assert invoke.await_args.kwargs["grants"] == [grant]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("allowlist", [(), ("other.tool",)])
+    async def test_tool_outside_worker_allowlist_is_refused(
+        self, mock_gemini_service, allowlist
+    ):
+        """A declared allowlist bounds model-initiated calls, grants or not."""
+        mock_gemini_service.generate_content.return_value = _tool_call_response(
+            "arithmetic", {"expression": "2 + 3"}
+        )
+        agent = DataAnalysisAgent(config={"tool_allowlist": list(allowlist)})
+        agent.gemini_service = mock_gemini_service
+        registry, _audit_store = _registry_with_audit_store()
+        agent._tool_registry = registry
+        execute = AsyncMock(wraps=registry.execute)
+        registry.execute = execute  # type: ignore[method-assign]
+
+        result = await agent.execute(_task_with_context())
+
+        assert result.status == "failed"
+        assert result.output["tool_error"]["code"] == "tool_not_allowed"
+        assert execute.await_count == 0
+        assert mock_gemini_service.generate_content.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_tool_inside_worker_allowlist_still_runs(self, mock_gemini_service):
+        mock_gemini_service.generate_content.side_effect = [
+            _tool_call_response("arithmetic", {"expression": "2 + 3"}),
+            "The result is 5.",
+        ]
+        agent = DataAnalysisAgent(config={"tool_allowlist": ["arithmetic"]})
+        agent.gemini_service = mock_gemini_service
+        registry, _audit_store = _registry_with_audit_store()
+        agent._tool_registry = registry
+
+        result = await agent.execute(_task_with_context())
+
+        assert result.status == "success"
+
+    @pytest.mark.asyncio
     async def test_ordinary_model_text_is_preserved_exactly(self, mock_gemini_service):
         """A non-envelope response remains byte-for-byte worker output."""
         ordinary_text = "  Keep this answer exactly.\n\n"
