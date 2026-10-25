@@ -19,7 +19,6 @@ env:
   REGISTRY: gcr.io
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   IMAGE_NAME_API: research-platform-api
-  IMAGE_NAME_WORKER: research-platform-worker
 
 jobs:
   build-and-push:
@@ -32,9 +31,7 @@ jobs:
     
     outputs:
       api-image: ${{ steps.meta-api.outputs.tags }}
-      worker-image: ${{ steps.meta-worker.outputs.tags }}
       api-digest: ${{ steps.build-api.outputs.digest }}
-      worker-digest: ${{ steps.build-worker.outputs.digest }}
     
     steps:
       - name: Checkout code
@@ -68,20 +65,6 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
       
-      - name: Extract metadata for Worker
-        id: meta-worker
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME_WORKER }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-      
       - name: Build and push API image
         id: build-api
         uses: docker/build-push-action@v7
@@ -99,23 +82,6 @@ jobs:
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ steps.meta-api.outputs.version }}
-      
-      - name: Build and push Worker image
-        id: build-worker
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./docker/Dockerfile.worker
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' || github.event.inputs.push_images == 'true' }}
-          tags: ${{ steps.meta-worker.outputs.tags }}
-          labels: ${{ steps.meta-worker.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
-            VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.meta-worker.outputs.version }}
 
   scan-images:
     name: Scan Docker Images
@@ -128,8 +94,6 @@ jobs:
         image: 
           - name: api
             tags: ${{ needs.build-and-push.outputs.api-image }}
-          - name: worker
-            tags: ${{ needs.build-and-push.outputs.worker-image }}
     
     steps:
       - name: Run Trivy vulnerability scanner
@@ -194,11 +158,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      
-      temporal:
-        image: temporalio/auto-setup:latest
-        env:
-          - TEMPORAL_ADDRESS=temporal:7233
     
     steps:
       - name: Checkout code
@@ -223,26 +182,8 @@ jobs:
             --network ${{ job.services.postgres.network }} \
             -e DATABASE_URL=postgresql://test:test@postgres:5432/research_test \
             -e REDIS_URL=redis://redis:6379 \
-            -e TEMPORAL_HOST=temporal:7233 \
             research-platform-api:test \
             python -m pytest tests/test_api.py
-      
-      - name: Load Worker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./docker/Dockerfile.worker
-          load: true
-          tags: research-platform-worker:test
-          cache-from: type=gha
-      
-      - name: Test Worker image startup
-        run: |
-          docker run --rm \
-            --network ${{ job.services.temporal.network }} \
-            -e TEMPORAL_HOST=temporal:7233 \
-            research-platform-worker:test \
-            python -c "from src.temporal.worker import ResearchWorker; print('Worker imports successfully')"
 
   sign-images:
     name: Sign Docker Images
@@ -266,9 +207,3 @@ jobs:
           COSIGN_EXPERIMENTAL: 1
         run: |
           cosign sign --yes ${{ needs.build-and-push.outputs.api-image }}@${{ needs.build-and-push.outputs.api-digest }}
-      
-      - name: Sign Worker image
-        env:
-          COSIGN_EXPERIMENTAL: 1
-        run: |
-          cosign sign --yes ${{ needs.build-and-push.outputs.worker-image }}@${{ needs.build-and-push.outputs.worker-digest }}
