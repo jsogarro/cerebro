@@ -80,9 +80,6 @@ ON research_projects(status);
 CREATE INDEX CONCURRENTLY idx_research_projects_created_at 
 ON research_projects(created_at DESC);
 
-CREATE INDEX CONCURRENTLY idx_agent_tasks_project_status 
-ON agent_tasks(project_id, status);
-
 CREATE INDEX CONCURRENTLY idx_research_results_project_type 
 ON research_results(project_id, result_type);
 
@@ -132,18 +129,17 @@ async def get_projects_optimized(
     
     # Use selectinload for related data
     query = query.options(
-        selectinload(ResearchProject.agent_tasks),
-        selectinload(ResearchProject.research_results)
+        selectinload(ResearchProject.results)
     )
     
     result = await session.execute(query)
     return result.scalars().all()
 
 # Batch operations
-async def bulk_create_tasks(tasks: List[AgentTask]) -> None:
+async def bulk_create_results(results: List[ResearchResult]) -> None:
     # Use bulk insert instead of individual inserts
-    await session.bulk_insert_mappings(AgentTask, [
-        task.dict() for task in tasks
+    await session.bulk_insert_mappings(ResearchResult, [
+        result.dict() for result in results
     ])
     await session.commit()
 ```

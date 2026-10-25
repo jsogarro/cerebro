@@ -10,7 +10,6 @@ from src.models.db.audit_log import AuditLog
 from src.models.db.research_project import ProjectStatus, ResearchProject
 from src.repositories.base import BaseRepository
 from src.repositories.research_repository import ResearchRepository
-from src.repositories.task_repository import TaskRepository
 
 
 class _ScalarResult:
@@ -75,21 +74,4 @@ async def test_research_repository_applies_organization_scope_to_queries() -> No
     assert session.statements
     assert all(
         "research_projects.organization_id" in _sql(stmt) for stmt in session.statements
-    )
-
-
-@pytest.mark.asyncio
-async def test_task_repository_applies_organization_scope_to_queries() -> None:
-    session = _CapturingSession()
-    repo = TaskRepository(cast(AsyncSession, session))
-    org_id = uuid4()
-
-    await repo.get_pending_tasks(agent_type="literature", organization_id=org_id)
-    await repo.get_failed_tasks(organization_id=org_id)
-    await repo.get_task_metrics(project_id=uuid4(), organization_id=org_id)
-    await repo.get_ready_tasks(project_id=uuid4(), organization_id=org_id)
-
-    assert session.statements
-    assert all(
-        "agent_tasks.organization_id" in _sql(stmt) for stmt in session.statements
     )

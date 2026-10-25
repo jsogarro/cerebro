@@ -14,7 +14,6 @@ from src.repositories.run_config_snapshot_repository import (
 )
 from src.repositories.run_event_repository import RunEventRepository
 from src.repositories.run_lifecycle_repository import RunLifecycleRepository
-from src.repositories.task_repository import TaskRepository
 from src.repositories.tenant_scope import (
     MissingOrganizationContextError,
     TenantMismatchError,
@@ -32,7 +31,6 @@ __all__ = [
     "RunConfigSnapshotRepository",
     "RunEventRepository",
     "RunLifecycleRepository",
-    "TaskRepository",
     "TenantMismatchError",
     "UserRepository",
     "enforce_tenant_identity",

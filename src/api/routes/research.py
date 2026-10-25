@@ -459,7 +459,7 @@ async def get_research_results(
         project_id,
         user_id=tenant_context.user_id,
         organization_id=tenant_context.organization_id,
-        load_relationships=["results", "agent_tasks", "checkpoints"],
+        load_relationships=["results", "checkpoints"],
     )
     if not db_project:
         raise HTTPException(

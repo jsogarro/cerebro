@@ -35,7 +35,6 @@ from src.core.config import Settings
 from src.middleware.auth_middleware import get_current_token
 
 # Import all models to ensure they're registered with Base.metadata
-from src.models.db.agent_task import AgentTask  # noqa: F401
 from src.models.db.base import Base
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult  # noqa: F401
