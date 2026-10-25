@@ -1,26 +1,22 @@
 """Result aggregation helpers for supervisor coordination."""
 
 import asyncio
-import random
 from typing import Any
 
 
 class ResultAggregator:
     """Aggregates supervisor outputs and derives quality metrics."""
 
-    def calculate_quality_score(self, result: Any, threshold: float) -> float:
-        """Calculate quality score for an execution result."""
+    def calculate_quality_score(self, result: Any, threshold: float) -> float | None:
+        """Quality reported by the executor, or None when it reported none."""
         _ = threshold
-        if not result:
-            return 0.0
-
-        base_score = random.uniform(0.7, 0.95)
-
-        if isinstance(result, str):
-            length_factor = min(1.0, len(result) / 100)
-            base_score = base_score * 0.8 + length_factor * 0.2
-
-        return min(1.0, max(0.0, base_score))
+        if not isinstance(result, dict):
+            return None
+        metadata = result.get("_execution_metadata")
+        score = metadata.get("quality_score") if isinstance(metadata, dict) else None
+        if isinstance(score, bool) or not isinstance(score, int | float):
+            return None
+        return min(1.0, max(0.0, float(score)))
 
     async def synthesize_results(
         self,
