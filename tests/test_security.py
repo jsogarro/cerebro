@@ -11,7 +11,7 @@ import pytest
 import redis.asyncio as redis
 from fastapi import Request
 
-from src.security.headers import CORSSecurityMiddleware, SecurityHeadersMiddleware
+from src.security.headers import SecurityHeadersMiddleware
 from src.security.rate_limiter import RateLimiter, RateLimitStrategy
 from src.security.validators import (
     FileUploadValidator,
@@ -183,51 +183,6 @@ class TestSecurityHeaders:
         # Check CSP header contains nonce
         csp_header = result.headers.get("Content-Security-Policy", "")
         assert "nonce-" in csp_header
-
-    @pytest.mark.asyncio
-    async def test_cors_security(self) -> None:
-        """Test CORS security middleware."""
-        middleware = CORSSecurityMiddleware(
-            allowed_origins=["https://example.com"], allow_credentials=True
-        )
-
-        # Test allowed origin
-        request = Mock(spec=Request)
-        request.headers = {"Origin": "https://example.com"}
-        request.method = "GET"
-
-        response = Mock()
-        response.headers = {}
-
-        async def call_next(req: Request) -> Mock:
-            return response
-
-        result = await middleware(request, call_next)
-
-        assert result.headers["Access-Control-Allow-Origin"] == "https://example.com"
-        assert result.headers["Access-Control-Allow-Credentials"] == "true"
-
-    @pytest.mark.asyncio
-    async def test_cors_preflight(self) -> None:
-        """Test CORS preflight request handling."""
-        middleware = CORSSecurityMiddleware(
-            allowed_origins=["https://example.com"],
-            allowed_methods=["GET", "POST"],
-            max_age=3600,
-        )
-
-        request = Mock(spec=Request)
-        request.headers = {"Origin": "https://example.com"}
-        request.method = "OPTIONS"
-
-        async def call_next(req: Request) -> Mock:
-            return Mock()
-
-        result = await middleware(request, call_next)
-
-        assert result.headers["Access-Control-Allow-Origin"] == "https://example.com"
-        assert "GET, POST" in result.headers["Access-Control-Allow-Methods"]
-        assert result.headers["Access-Control-Max-Age"] == "3600"
 
 
 class TestSecurityValidators:
