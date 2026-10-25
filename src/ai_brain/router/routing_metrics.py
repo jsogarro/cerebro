@@ -7,6 +7,7 @@ routing through historical analysis of routing decisions.
 
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +15,8 @@ from .routing_types import RoutingMetrics, RoutingStrategy
 
 if TYPE_CHECKING:
     from .masr import RoutingDecision
+
+MAX_ROUTING_HISTORY = 10_000
 
 
 class RoutingMetricsCollector:
@@ -44,7 +47,7 @@ class RoutingMetricsCollector:
         self.min_history_for_adaptation = min_history_for_adaptation
 
         self.metrics = RoutingMetrics()
-        self.routing_history: list[RoutingDecision] = []
+        self.routing_history: deque[RoutingDecision] = deque(maxlen=MAX_ROUTING_HISTORY)
 
     def update_metrics(self, decision: RoutingDecision) -> None:
         """
