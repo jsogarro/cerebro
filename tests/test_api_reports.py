@@ -566,17 +566,18 @@ def _report_routes() -> list[tuple[str, str]]:
 
 @pytest.mark.parametrize(("method", "path"), _report_routes())
 def test_report_routes_reject_anonymous_callers(method: str, path: str) -> None:
-    """Every report route resolves the caller's tenant before touching data."""
-    from fastapi import FastAPI
+    """Every report route rejects an anonymous caller before touching data.
 
-    from src.api.routes import reports
+    Built on the real application so the global auth middleware is in the path.
+    """
+    from src.api.main import app
 
-    app = FastAPI()
-    app.include_router(reports.router, prefix="/api/v1")
     session = MagicMock()
     app.dependency_overrides[get_session] = lambda: session
-
-    response = TestClient(app).request(method, path, json={})
+    try:
+        response = TestClient(app).request(method, path, json={})
+    finally:
+        app.dependency_overrides.pop(get_session, None)
 
     assert response.status_code in (401, 403), response.text
     assert session.mock_calls == []
