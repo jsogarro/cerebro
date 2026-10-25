@@ -52,6 +52,7 @@ from src.core.contracts import (
     ProviderModelPolicy,
     ProviderModelRoute,
 )
+from src.middleware.auth_middleware import get_jwt_service
 from src.middleware.tenant_context import TenantContext
 from src.models.db.research_project import ProjectStatus, ResearchProject
 from src.models.db.user import User
@@ -526,7 +527,9 @@ class _TenantScopedKernel:
     ) -> str:
         raise AssertionError("not exercised")
 
-    async def resume_execution(self, project_id: Any) -> str | None:
+    async def resume_execution(
+        self, project_id: Any, *, organization_id: str | None = None
+    ) -> str | None:
         return None
 
 
@@ -700,3 +703,180 @@ def test_the_free_text_organization_field_does_not_select_a_tenant() -> None:
     )
 
     assert provisioned_organization_id(first) != provisioned_organization_id(second)
+
+
+# --- Resume: tenant scoping and readable-after-resume --------------------
+
+
+def _resume_service(session: AsyncSession) -> DirectExecutionService:
+    """A service whose only collaborator is ``session`` (real SQLite)."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def factory() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    service = DirectExecutionService.__new__(DirectExecutionService)
+    service.active_executions = {}
+    service.session_factory = factory  # type: ignore[assignment]
+    return service
+
+
+async def _seed_checkpoint(session: AsyncSession, project_id: uuid.UUID) -> None:
+    from src.repositories.checkpoint_repository import CheckpointRepository
+
+    await CheckpointRepository(session).create_checkpoint(
+        workflow_id="resumed-exec",
+        project_id=project_id,
+        checkpoint_data={
+            "status": "completed",
+            "progress_percentage": 100.0,
+            "current_phase": "done",
+            "final_output": {"secret": "org A resumed output"},
+        },
+        phase="done",
+    )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_resumed_execution_is_readable_by_the_resuming_tenant(
+    project_session: AsyncSession,
+) -> None:
+    """The defect: the rebuilt status had no owner, so reads said not found."""
+    project_id = await _seed_project(
+        project_session, user_id=USER_A, organization_id=ORG_A
+    )
+    await _seed_checkpoint(project_session, project_id)
+    service = _resume_service(project_session)
+
+    execution_id = await service.resume_execution(project_id, organization_id=ORG_A)
+
+    assert execution_id == "resumed-exec"
+    assert (
+        await service.get_execution_status(execution_id, organization_id=ORG_A)
+        is not None
+    )
+    assert await service.get_execution_results(execution_id, organization_id=ORG_A) == {
+        "secret": "org A resumed output"
+    }
+    assert (
+        await service.get_execution_status(execution_id, organization_id=ORG_B) is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_another_tenant_cannot_resume_a_project(
+    project_session: AsyncSession,
+) -> None:
+    project_id = await _seed_project(
+        project_session, user_id=USER_A, organization_id=ORG_A
+    )
+    await _seed_checkpoint(project_session, project_id)
+    service = _resume_service(project_session)
+
+    assert await service.resume_execution(project_id, organization_id=ORG_B) is None
+    assert await service.resume_execution(project_id, organization_id=None) is None
+    assert service.active_executions == {}
+
+
+@pytest.mark.asyncio
+async def test_resume_route_passes_the_callers_organization() -> None:
+    seen: list[Any] = []
+
+    class _Kernel(_TenantScopedKernel):
+        async def resume_execution(  # type: ignore[override]
+            self, project_id: Any, *, organization_id: str | None = None
+        ) -> str | None:
+            seen.append(organization_id)
+            return "resumed-exec" if organization_id == ORG_A else None
+
+    project = str(uuid.uuid4())
+    await query_api.resume_execution(
+        project, _Kernel(), TenantContext(user_id=USER_A, organization_id=ORG_A)
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        await query_api.resume_execution(
+            project, _Kernel(), TenantContext(user_id=USER_B, organization_id=ORG_B)
+        )
+
+    assert seen == [ORG_A, ORG_B]
+    assert excinfo.value.status_code == 404
+
+
+class _OrgJWTService:
+    """Authenticate the bearer token as a caller of the organization it names."""
+
+    async def validate_token(self, token: str) -> Any:
+        from datetime import timedelta
+
+        from src.auth.models import TokenPayload
+
+        now = datetime.now(UTC)
+        return TokenPayload(
+            sub=USER_A,
+            organization_id=token,
+            jti="resume-test",
+            iat=now,
+            exp=now + timedelta(minutes=5),
+        )
+
+
+async def _resume_through_app(
+    session: AsyncSession, caller_organization: str
+) -> tuple[Any, DirectExecutionService, uuid.UUID]:
+    """Resume org A's project via the real app (auth middleware included)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from src.api.main import app
+    from src.api.services.research_kernel import compose_application_research_kernel
+    from src.models.db.session import get_session
+
+    project_id = await _seed_project(session, user_id=USER_A, organization_id=ORG_A)
+    await _seed_checkpoint(session, project_id)
+    service = _resume_service(session)
+    overrides = {
+        query_api.get_application_research_kernel: lambda: (
+            compose_application_research_kernel(service)
+        ),
+        get_jwt_service: _OrgJWTService,
+        get_session: lambda: session,
+    }
+    app.dependency_overrides.update(overrides)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {caller_organization}"},
+        ) as client:
+            response = await client.post(f"/api/v1/query/execution/{project_id}/resume")
+            status = None
+            if response.status_code == 200:
+                status = await client.get(
+                    f"/api/v1/query/execution/{response.json()['execution_id']}/status"
+                )
+    finally:
+        for dependency in overrides:
+            app.dependency_overrides.pop(dependency, None)
+    return (response, status), service, project_id
+
+
+@pytest.mark.asyncio
+async def test_real_app_rejects_resuming_another_tenants_project(
+    project_session: AsyncSession,
+) -> None:
+    (response, _), service, _ = await _resume_through_app(project_session, ORG_B)
+
+    assert response.status_code == 404, response.text
+    assert service.active_executions == {}
+
+
+@pytest.mark.asyncio
+async def test_real_app_resumed_execution_is_readable_by_its_tenant(
+    project_session: AsyncSession,
+) -> None:
+    (response, status), _, _ = await _resume_through_app(project_session, ORG_A)
+
+    assert response.status_code == 200, response.text
+    assert status is not None
+    assert status.status_code == 200, status.text
