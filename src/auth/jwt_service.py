@@ -531,10 +531,13 @@ class JWTService:
                     if stored is False:
                         return False
 
-                # If refresh token, also delete from refresh store
-                if payload.get("token_type") == "refresh":
-                    refresh_key = f"{self.refresh_token_prefix}{jti}"
-                    await self.redis_client.delete(refresh_key)
+                # End the session's refresh record too. An access token and its
+                # refresh token share one id (the refresh jti is "refresh_<id>"),
+                # so revoking either ends the pair.
+                refresh_jti = (
+                    jti if payload.get("token_type") == "refresh" else f"refresh_{jti}"
+                )
+                await self.revoke_refresh_session(refresh_jti)
 
             logger.info("Token revoked", jti=jti)
             return True
@@ -542,6 +545,12 @@ class JWTService:
         except Exception as e:
             logger.error("Failed to revoke token", error=str(e))
             return False
+
+    async def revoke_refresh_session(self, refresh_jti: str) -> None:
+        """Delete one refresh record; refresh rotation requires it to exist."""
+        if self.redis_client is None:
+            raise JWTServiceUnavailableError("Refresh token store unavailable")
+        await self.redis_client.delete(f"{self.refresh_token_prefix}{refresh_jti}")
 
     async def revoke_all_user_tokens(self, user_id: str) -> int:
         """

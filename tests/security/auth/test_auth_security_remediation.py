@@ -17,6 +17,7 @@ from src.api.main import app
 from src.auth.models import PasswordResetConfirm, PasswordResetRequest, TokenPair
 from src.auth.password_service import PasswordService
 from src.middleware.auth_middleware import PUBLIC_ROUTE_ALLOWLIST
+from src.models.db.session import get_session
 
 
 class _MemoryTokenStore:
@@ -199,11 +200,20 @@ def test_refresh_is_public_and_works_without_access_bearer() -> None:
         expires_in=900,
     )
     service = SimpleNamespace(
+        validate_token=AsyncMock(return_value=SimpleNamespace(sub="user-1")),
         refresh_tokens=AsyncMock(return_value=expected),
+    )
+    # Refresh re-reads the token's user and refuses missing or inactive ones.
+    active_user = SimpleNamespace(is_active=True)
+    session = SimpleNamespace(
+        execute=AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: active_user)
+        )
     )
     dependency = auth_router.get_jwt_service
     previous = app.dependency_overrides.get(dependency)
     app.dependency_overrides[dependency] = lambda: service
+    app.dependency_overrides[get_session] = lambda: session
 
     try:
         client = TestClient(app)
@@ -213,6 +223,7 @@ def test_refresh_is_public_and_works_without_access_bearer() -> None:
         )
         client.close()
     finally:
+        app.dependency_overrides.pop(get_session, None)
         if previous is None:
             app.dependency_overrides.pop(dependency, None)
         else:
