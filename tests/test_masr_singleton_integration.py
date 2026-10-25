@@ -164,9 +164,13 @@ def test_mounted_supervisor_api_requires_lifespan_or_explicit_override() -> None
     from src.api.services.supervisor_coordination_service import (
         get_application_supervisor_coordination_service,
     )
+    from src.middleware.tenant_context import TenantContext, get_tenant_context
 
     test_app = FastAPI()
     test_app.include_router(supervisor_api.router)
+    test_app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+        user_id="user-1", organization_id="org-1"
+    )
     client = TestClient(test_app)
 
     unavailable = client.get("/api/v1/supervisors")

@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.supervisor_api_models import (
     SupervisorInfo,
     WorkerInfo,
@@ -31,6 +32,9 @@ def app() -> FastAPI:
     app.dependency_overrides[
         supervisor_api.get_application_supervisor_coordination_service
     ] = lambda: supervisor_api.supervisor_service
+    app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+        user_id="test-user", organization_id="test-org"
+    )
     return app
 
 
@@ -402,3 +406,35 @@ class TestIntegrationScenarios:
         response = client.get("/api/v1/supervisors/research/stats")
         assert response.status_code == 200
         assert response.json()["total_executions"] == 1
+
+
+def _supervisor_http_routes() -> list[tuple[str, str]]:
+    from fastapi.routing import APIRoute
+
+    from src.api.routes import supervisor_api
+
+    return [
+        (method, route.path.replace("{supervisor_type}", "research"))
+        for route in supervisor_api.router.routes
+        if isinstance(route, APIRoute)
+        for method in sorted(route.methods)
+    ]
+
+
+@pytest.mark.parametrize(("method", "path"), _supervisor_http_routes())
+def test_supervisor_routes_reject_anonymous_callers(
+    method: str, path: str, mock_supervisor_service: Mock
+) -> None:
+    """Supervisor routes start or steer multi-worker execution; none is public."""
+    from src.api.routes import supervisor_api
+
+    app = FastAPI()
+    app.include_router(supervisor_api.router)
+    app.dependency_overrides[
+        supervisor_api.get_application_supervisor_coordination_service
+    ] = lambda: mock_supervisor_service
+
+    response = TestClient(app).request(method, path, json={})
+
+    assert response.status_code in (401, 403), response.text
+    assert mock_supervisor_service.mock_calls == []
