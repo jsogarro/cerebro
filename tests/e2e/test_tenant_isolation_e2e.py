@@ -6,8 +6,10 @@ Verifies that users cannot access each other's projects.
 Requires: docker compose up -d
 Run with: pytest tests/integration/test_tenant_isolation_e2e.py --no-cov -v
 
-NOTE: These tests currently skip/fail due to known tenant org claim issue.
-They document the intended isolation behavior for when RLS is fully operational.
+Every registered account gets its own organization claim, so a 403 on an
+own-org request is a failure, not a reason to skip. Cross-tenant reads and
+writes return 404 (the repository filters by user and organization, so another
+tenant's project is indistinguishable from a missing one).
 """
 
 import uuid
@@ -70,28 +72,49 @@ class TestTenantIsolationE2E:
                 "project", {}
             ).get("id")
 
+            # Control: the project exists and Alice can read it
+            alice_get = await client.get(
+                f"/api/v1/research/projects/{alice_project_id}",
+                headers=alice_headers,
+            )
+            assert alice_get.status_code == 200
+
             # Bob tries to access Alice's project
             bob_access_response = await client.get(
                 f"/api/v1/research/projects/{alice_project_id}",
                 headers=bob_headers,
             )
 
-            # Should be 404 (not found for bob's tenant) or 403 (forbidden)
-            assert bob_access_response.status_code in [403, 404]
+            assert bob_access_response.status_code == 404
 
     async def test_users_see_only_own_projects(self):
         """
         Alice lists projects -> sees only hers. Bob lists -> sees only his.
-
-        Currently skips/adapts due to tenant claim issue.
         """
-        alice_token, _ = await register_and_login("alice2")
-        bob_token, _ = await register_and_login("bob2")
+        alice_token, alice_user_id = await register_and_login("alice2")
+        bob_token, bob_user_id = await register_and_login("bob2")
 
         alice_headers = {"Authorization": f"Bearer {alice_token}"}
         bob_headers = {"Authorization": f"Bearer {bob_token}"}
 
-        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
+            created = {}
+            for name, user_id, headers in (
+                ("alice", alice_user_id, alice_headers),
+                ("bob", bob_user_id, bob_headers),
+            ):
+                response = await client.post(
+                    "/api/v1/research/projects",
+                    headers=headers,
+                    json={
+                        "title": f"{name}'s listed project",
+                        "user_id": user_id,
+                        "query": {"text": f"{name}'s question", "domains": ["AI"]},
+                    },
+                )
+                assert response.status_code == 201
+                created[name] = response.json()["id"]
+
             # Alice lists her projects
             alice_list_response = await client.get(
                 "/api/v1/research/projects",
@@ -104,24 +127,23 @@ class TestTenantIsolationE2E:
                 headers=bob_headers,
             )
 
-            # If 403, tenant claim issue; if 200, verify isolation
-            if (
-                alice_list_response.status_code == 403
-                or bob_list_response.status_code == 403
-            ):
-                pytest.skip("Tenant org claim required (known issue)")
-
             assert alice_list_response.status_code == 200
             assert bob_list_response.status_code == 200
 
-            # Projects should be tenant-isolated (empty or distinct sets)
-            # This is a placeholder assertion - actual isolation logic TBD
-            alice_projects = alice_list_response.json()
-            bob_projects = bob_list_response.json()
+            alice_ids = {p["id"] for p in alice_list_response.json()}
+            bob_ids = {p["id"] for p in bob_list_response.json()}
+            assert created["alice"] in alice_ids
+            assert created["bob"] not in alice_ids
+            assert created["bob"] in bob_ids
+            assert created["alice"] not in bob_ids
 
-            # Basic sanity: both can list without error
-            assert isinstance(alice_projects, (list, dict))
-            assert isinstance(bob_projects, (list, dict))
+            # Asking for another user's listing is refused outright
+            other = await client.get(
+                "/api/v1/research/projects",
+                params={"user_id": bob_user_id},
+                headers=alice_headers,
+            )
+            assert other.status_code == 403
 
     async def test_cross_tenant_cancel_denied(self):
         """Bob cannot cancel Alice's project."""
@@ -155,5 +177,12 @@ class TestTenantIsolationE2E:
                 headers=bob_headers,
             )
 
-            # Should be 404 (not found) or 403 (forbidden)
-            assert bob_cancel_response.status_code in [403, 404]
+            assert bob_cancel_response.status_code == 404
+
+            # The refused cancel must not have touched Alice's project
+            alice_after = await client.get(
+                f"/api/v1/research/projects/{alice_project_id}",
+                headers=alice_headers,
+            )
+            assert alice_after.status_code == 200
+            assert alice_after.json()["status"] != "cancelled"

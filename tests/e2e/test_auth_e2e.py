@@ -73,10 +73,11 @@ class TestAuthE2E:
                 "/api/v1/research/projects",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
-            # 200 (has projects), 403 (tenant claim issue), or 404 (no projects) are all fine
-            assert protected_response.status_code in [200, 403, 404], (
+            # A fresh account has its own organization and no projects yet
+            assert protected_response.status_code == 200, (
                 f"Protected endpoint failed: {protected_response.status_code} - {protected_response.text}"
             )
+            assert protected_response.json() == []
 
     async def test_register_with_weak_password(self):
         """Registration fails with password under 12 characters."""
