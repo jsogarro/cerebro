@@ -87,9 +87,7 @@ class CitationAgent(LLMWorkerAgentBase):
                 "bibliography": bibliography_result.get("bibliography", []),
                 "citation_style": style,
                 "total_references": len(sources),
-                "verified_sources": verification_result.get(
-                    "verified_count", len(sources)
-                ),
+                "verified_sources": verification_result.get("verified_count", 0),
                 "verification_status": verification_result.get(
                     "verification_details", []
                 ),
@@ -249,7 +247,7 @@ class CitationAgent(LLMWorkerAgentBase):
                 {
                     "source_id": i,
                     "title": title,
-                    "verified": doi is not None,
+                    "verified": False,
                     "doi": doi,
                     "issues": [] if doi else ["DOI not available"],
                 }
@@ -344,7 +342,6 @@ Return formatted citations as structured JSON."""
             return {
                 "success": True,
                 "formatted_citations": formatted_citations,
-                "verified_sources": len(sources),
                 "total_sources": result.total_sources or len(sources),
                 "citation_style": result.style,
             }
@@ -457,7 +454,13 @@ Return formatted citations as structured JSON."""
         # Overall verification status
         verification_result["quality_score"] = quality_score
         verification_result["issues"] = issues
-        verification_result["verified"] = quality_score >= 0.5 and len(issues) <= 1
+        # Metadata completeness is not verification. A source is verified
+        # only once its DOI resolves against a registry (none is wired up,
+        # so today nothing is).
+        verification_result["verified"] = verification_result["doi_resolved"]
+        verification_result["status"] = (
+            "verified" if verification_result["verified"] else "unverified"
+        )
 
         return verification_result
 
