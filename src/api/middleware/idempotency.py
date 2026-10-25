@@ -14,13 +14,17 @@ import redis.asyncio as redis
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import Message
+
+from src.api.middleware.error_envelope import build_error_payload
 
 logger = structlog.get_logger(__name__)
 
 IDEMPOTENCY_HEADER = "Idempotency-Key"
 DEFAULT_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
+# Bounds how long a crashed worker can block retries of its key.
+RESERVATION_TTL_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -47,12 +51,19 @@ class IdempotencyStore(Protocol):
     ) -> None:
         """Cache a response."""
 
+    async def reserve(self, key: str, ttl_seconds: int) -> bool:
+        """Atomically claim a key; False if another request holds it."""
+
+    async def release(self, key: str) -> None:
+        """Drop a reservation made by ``reserve``."""
+
 
 class InMemoryIdempotencyStore:
     """Small in-process store used for tests and Redis fallback."""
 
     def __init__(self, now: Callable[[], float] | None = None) -> None:
         self._records: dict[str, tuple[float, IdempotencyRecord]] = {}
+        self._reservations: dict[str, float] = {}
         self._now = now or time.time
 
     async def get(self, key: str) -> IdempotencyRecord | None:
@@ -72,6 +83,15 @@ class InMemoryIdempotencyStore:
         ttl_seconds: int,
     ) -> None:
         self._records[key] = (self._now() + ttl_seconds, record)
+
+    async def reserve(self, key: str, ttl_seconds: int) -> bool:
+        if self._reservations.get(key, 0) > self._now():
+            return False
+        self._reservations[key] = self._now() + ttl_seconds
+        return True
+
+    async def release(self, key: str) -> None:
+        self._reservations.pop(key, None)
 
 
 class RedisIdempotencyStore:
@@ -109,6 +129,17 @@ class RedisIdempotencyStore:
             "media_type": record.media_type,
         }
         await client.setex(self._redis_key(key), ttl_seconds, json.dumps(payload))
+
+    async def reserve(self, key: str, ttl_seconds: int) -> bool:
+        client = await self._get_client()
+        claimed = await client.set(
+            self._redis_key(key) + ":pending", "1", nx=True, ex=ttl_seconds
+        )
+        return bool(claimed)
+
+    async def release(self, key: str) -> None:
+        client = await self._get_client()
+        await client.delete(self._redis_key(key) + ":pending")
 
     async def _get_client(self) -> redis.Redis[Any]:
         if self._client is None:
@@ -154,6 +185,21 @@ class ResilientIdempotencyStore:
             logger.warning("Idempotency primary store write failed", error=str(exc))
             await self._fallback.set(key, record, ttl_seconds)
 
+    async def reserve(self, key: str, ttl_seconds: int) -> bool:
+        try:
+            return await self._primary.reserve(key, ttl_seconds)
+        except Exception as exc:
+            logger.warning("Idempotency primary store unavailable", error=str(exc))
+            return await self._fallback.reserve(key, ttl_seconds)
+
+    async def release(self, key: str) -> None:
+        # Release on both: the reservation may sit in whichever store was up.
+        for store in (self._primary, self._fallback):
+            try:
+                await store.release(key)
+            except Exception as exc:
+                logger.warning("Idempotency release failed", error=str(exc))
+
 
 class IdempotencyMiddleware(BaseHTTPMiddleware):
     """Cache successful POST responses for clients that send Idempotency-Key."""
@@ -191,6 +237,35 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 media_type=cached.media_type,
             )
 
+        if not await self._store.reserve(cache_key, RESERVATION_TTL_SECONDS):
+            return JSONResponse(
+                status_code=409,
+                content=build_error_payload(
+                    code="IDEMPOTENCY_KEY_IN_PROGRESS",
+                    message="A request with this Idempotency-Key is in progress",
+                ),
+            )
+        try:
+            # A request that finished between our lookup and reservation.
+            cached = await self._store.get(cache_key)
+            if cached is not None:
+                return Response(
+                    content=cached.body,
+                    status_code=cached.status_code,
+                    headers=cached.headers,
+                    media_type=cached.media_type,
+                )
+            return await self._execute(request, call_next, cache_key, body)
+        finally:
+            await self._store.release(cache_key)
+
+    async def _execute(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+        cache_key: str,
+        body: bytes,
+    ) -> Response:
         async def receive() -> Message:
             return {"type": "http.request", "body": body, "more_body": False}
 
@@ -239,7 +314,13 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         body: bytes,
     ) -> str:
         body_hash = hashlib.sha256(body).hexdigest()
-        raw_key = f"{request.method}:{request.url.path}:{idempotency_key}:{body_hash}"
+        # Identity comes from AuthMiddleware, which runs outside this one.
+        user_id = getattr(request.state, "user_id", None)
+        org_id = getattr(request.state, "organization_id", None)
+        raw_key = (
+            f"{org_id}:{user_id}:{request.method}:{request.url.path}:"
+            f"{idempotency_key}:{body_hash}"
+        )
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
