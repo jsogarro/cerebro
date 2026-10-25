@@ -18,10 +18,12 @@ from uuid import UUID
 
 import structlog
 from fastapi import Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.models.db.audit_log import AuditEventType, AuditLog, AuditSeverity
 from src.models.db.security_alert import AlertSeverity, AlertType, SecurityAlert
+from src.models.db.user import User
 from src.services.cache.cache_manager import CacheManager
 
 
@@ -213,6 +215,9 @@ class AuditLogger:
                 request_metadata["organization_id"] = str(organization_id)
 
         event_metadata = dict(metadata or {})
+        if user_id is not None:
+            # Kept even when user_id is written as NULL (see _as_columns).
+            event_metadata.setdefault("subject", str(user_id))
         event_metadata.update(
             {
                 key: value
@@ -341,6 +346,14 @@ class AuditLogger:
         entry = dict(log_entry)
         if "metadata" in entry:
             entry["event_metadata"] = _json_safe_value(entry.pop("metadata"))
+        user_uuid = _subject_uuid(entry.get("user_id"))
+        # A token can outlive its user. Resolve the FK inside the INSERT so a
+        # deleted (or non-UUID) user yields NULL instead of failing the flush.
+        entry["user_id"] = (
+            None
+            if user_uuid is None
+            else select(User.id).where(User.id == user_uuid).scalar_subquery()
+        )
         return entry
 
     async def _periodic_flush(self) -> None:
