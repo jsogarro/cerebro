@@ -197,9 +197,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         user_id = getattr(request.state, "user_id", None)
         if user_id:
             return f"user:{user_id}"
-        api_key = request.headers.get("X-API-Key")
-        if api_key:
-            return f"api_key:{api_key}"
+        # Unauthenticated callers are keyed by client address only; any
+        # request header is caller-chosen and would let them mint buckets.
         client_host = request.client.host if request.client else "unknown"
         return f"ip:{client_host}"
 
