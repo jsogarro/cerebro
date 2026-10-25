@@ -85,6 +85,9 @@ dev = [
     "pytest-playwright>=0.6.0",
     "aiosqlite>=0.20.0",
     "bcrypt<5.0",  # Pin for passlib 1.7.4 compatibility
+    # Tests importorskip these extras; CI installs only [dev], so without them the
+    # modules skip silently (tests/test_dev_extra_covers_test_deps.py enforces this).
+    "research-platform[mcp,stats]",
 ]
 
 [project.scripts]
