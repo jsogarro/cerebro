@@ -98,6 +98,7 @@ class ExtractedText:
     text: str
     pages: tuple[PageSpan, ...]
     text_sha256: ContentSha256
+    source_sha256: ContentSha256
 
     @property
     def empty_pages(self) -> tuple[int, ...]:
@@ -165,13 +166,13 @@ def extract_pdf_text(data: bytes) -> ExtractedText:
         text=text,
         pages=tuple(spans),
         text_sha256=snapshot_digest(text.encode("utf-8")),
+        source_sha256=snapshot_digest(data),
     )
 
 
 def build_extracted_text_artifact(
     extraction: ExtractedText,
     *,
-    source_content_sha256: ContentSha256,
     store: SnapshotStore,
     artifact_id: str,
     run_id: str,
@@ -203,7 +204,7 @@ def build_extracted_text_artifact(
         metadata={
             "extractor_id": EXTRACTOR_ID,
             "extractor_version": PINNED_PYPDF_VERSION,
-            "source_content_sha256": source_content_sha256,
+            "source_content_sha256": extraction.source_sha256,
             "unidata_version": unicodedata.unidata_version,
             "normalizer_version": NORMALIZER_VERSION,
             "pages": pages,

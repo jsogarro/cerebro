@@ -139,7 +139,6 @@ def test_artifact_carries_identity_and_resolves_through_the_store(
     result = extract_pdf_text(pdf_bytes)
     artifact = build_extracted_text_artifact(
         result,
-        source_content_sha256=source_sha,
         store=store,
         artifact_id="art-1",
         run_id="run-1",
@@ -155,6 +154,9 @@ def test_artifact_carries_identity_and_resolves_through_the_store(
     meta = artifact.metadata
     assert meta["extractor_id"] == "pypdf"
     assert meta["extractor_version"] == PINNED_PYPDF_VERSION
+    # Computed from the bytes that were extracted, so a caller cannot record
+    # the identity of a different source.
+    assert result.source_sha256 == source_sha
     assert meta["source_content_sha256"] == source_sha
     assert meta["unidata_version"] == unicodedata.unidata_version
     assert meta["normalizer_version"] == NORMALIZER_VERSION
