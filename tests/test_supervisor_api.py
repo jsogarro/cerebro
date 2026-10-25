@@ -6,6 +6,7 @@ multi-supervisor orchestration, and advanced features like conflict resolution
 and performance experimentation.
 """
 
+import asyncio
 import uuid
 from collections.abc import Generator
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.supervisor_api_models import (
     SupervisorInfo,
     WorkerInfo,
@@ -31,6 +33,10 @@ def app() -> FastAPI:
     app.dependency_overrides[
         supervisor_api.get_application_supervisor_coordination_service
     ] = lambda: supervisor_api.supervisor_service
+    # Broadcasting routes scope their WebSocket events to the caller's tenant.
+    app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+        user_id="test-user", organization_id="test-org"
+    )
     return app
 
 
@@ -402,3 +408,78 @@ class TestIntegrationScenarios:
         response = client.get("/api/v1/supervisors/research/stats")
         assert response.status_code == 200
         assert response.json()["total_executions"] == 1
+
+
+def test_execute_event_reaches_only_the_callers_organization() -> None:
+    """Through the real app: org-b's subscriber must not see org-a's execution."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from fastapi import WebSocket
+
+    from src.api.main import app
+    from src.api.routes import supervisor_api
+    from src.auth.models import TokenPayload
+    from src.middleware.auth_middleware import get_jwt_service
+    from src.models.db.session import get_session
+    from src.models.supervisor_api_models import SupervisorExecuteResponse
+
+    class _OrgJWTService:
+        async def validate_token(self, token: str) -> TokenPayload:
+            now = datetime.now(UTC)
+            return TokenPayload(
+                sub="user-1",
+                organization_id=token,
+                jti="supervisor-test",
+                iat=now,
+                exp=now + timedelta(minutes=5),
+            )
+
+    def subscriber(organization_id: str) -> AsyncMock:
+        websocket = AsyncMock(spec=WebSocket)
+        websocket.state = SimpleNamespace(
+            websocket_principal=SimpleNamespace(organization_id=organization_id)
+        )
+        return websocket
+
+    service = Mock()
+    service.execute_supervisor_task = AsyncMock(
+        return_value=SupervisorExecuteResponse(
+            execution_id="exec-org-a",
+            supervisor_type="research",
+            status="completed",
+            result={"answer": "org-a only"},
+            workers_used=["worker-1"],
+            coordination_mode="hierarchical",
+            quality_score=0.9,
+            execution_time_ms=10,
+            refinement_rounds=0,
+        )
+    )
+    overrides = {
+        supervisor_api.get_application_supervisor_coordination_service: lambda: service,
+        get_jwt_service: _OrgJWTService,
+        get_session: lambda: Mock(),
+    }
+    tracker = supervisor_api.connection_manager
+    own, foreign = subscriber("org-a"), subscriber("org-b")
+    app.dependency_overrides.update(overrides)
+    try:
+        for client_id, websocket in (("own", own), ("foreign", foreign)):
+            asyncio.run(tracker.connect(websocket, client_id))
+            tracker.subscribe_supervisor("research", websocket)
+
+        response = TestClient(app, headers={"Authorization": "Bearer org-a"}).post(
+            "/api/v1/supervisors/research/execute",
+            json={"query": "Analyze AI impact on employment"},
+        )
+    finally:
+        for dependency in overrides:
+            app.dependency_overrides.pop(dependency, None)
+        for client_id, websocket in (("own", own), ("foreign", foreign)):
+            tracker.unsubscribe_supervisor("research", websocket)
+            tracker.disconnect(websocket, client_id)
+
+    assert response.status_code == 200, response.text
+    own.send_json.assert_awaited_once()
+    foreign.send_json.assert_not_awaited()

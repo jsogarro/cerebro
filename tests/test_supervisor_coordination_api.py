@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from src.auth.models import TokenPayload
 from src.middleware.auth_middleware import get_jwt_service
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.supervisor_api_models import SupervisionStrategy
 
 
@@ -42,6 +43,9 @@ def app() -> FastAPI:
         supervisor_api.get_application_supervisor_coordination_service
     ] = lambda: supervisor_api.supervisor_service
     app.dependency_overrides[get_jwt_service] = _TestJWTService
+    app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+        user_id="test-user", organization_id="test-org"
+    )
     return app
 
 

@@ -1,5 +1,6 @@
 """Characterization tests for supervisor progress tracking extraction."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,6 +8,14 @@ from fastapi import WebSocket
 
 from src.api.services.supervisor_progress_tracker import SupervisorProgressTracker
 from src.models.supervisor_api_models import SupervisorWebSocketEvent
+
+
+def _socket(organization_id: str | None = "org-a") -> AsyncMock:
+    websocket = AsyncMock(spec=WebSocket)
+    websocket.state = SimpleNamespace(
+        websocket_principal=SimpleNamespace(organization_id=organization_id)
+    )
+    return websocket
 
 
 @pytest.mark.asyncio
@@ -31,28 +40,34 @@ async def test_progress_tracker_connection_lifecycle() -> None:
 @pytest.mark.asyncio
 async def test_progress_tracker_broadcasts_events() -> None:
     tracker = SupervisorProgressTracker()
-    websocket = AsyncMock(spec=WebSocket)
-    await tracker.connect(websocket, "client-1")
+    own, foreign = _socket("org-a"), _socket("org-b")
+    await tracker.connect(own, "client-1")
+    await tracker.connect(foreign, "client-2")
 
-    await tracker.broadcast_event({"event_type": "test"})
+    await tracker.broadcast_event({"event_type": "test"}, "org-a")
 
-    websocket.send_json.assert_awaited_once_with({"event_type": "test"})
+    own.send_json.assert_awaited_once_with({"event_type": "test"})
+    foreign.send_json.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_progress_tracker_sends_supervisor_event_dump() -> None:
     tracker = SupervisorProgressTracker()
-    websocket = AsyncMock(spec=WebSocket)
-    tracker.subscribe_supervisor("research", websocket)
+    own, foreign, unscoped = _socket("org-a"), _socket("org-b"), _socket(None)
+    for client_id, websocket in (("a", own), ("b", foreign), ("c", unscoped)):
+        await tracker.connect(websocket, client_id)
+        tracker.subscribe_supervisor("research", websocket)
     event = SupervisorWebSocketEvent(
         event_type="task_completed",
         supervisor_type="research",
         data={"execution_id": "exec-1"},
     )
 
-    await tracker.send_supervisor_event("research", event)
+    await tracker.send_supervisor_event("research", event, "org-a")
 
-    websocket.send_json.assert_awaited_once_with(event.model_dump())
+    own.send_json.assert_awaited_once_with(event.model_dump())
+    foreign.send_json.assert_not_awaited()
+    unscoped.send_json.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -83,3 +98,15 @@ async def test_progress_tracker_iterates_legacy_coordination_schema() -> None:
         "estimated_remaining_seconds": 9,
         "details": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_progress_tracker_drops_events_without_an_organization() -> None:
+    """An unattributed event reaches nobody, not even claimless connections."""
+    tracker = SupervisorProgressTracker()
+    unscoped = _socket(None)
+    await tracker.connect(unscoped, "client-1")
+
+    await tracker.broadcast_event({"event_type": "test"}, None)
+
+    unscoped.send_json.assert_not_awaited()
