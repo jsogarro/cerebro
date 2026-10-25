@@ -542,3 +542,41 @@ class TestReportsAPI:
 
             assert response.status_code == 503
             assert "not available" in response.json()["error"]["message"]
+
+
+def _report_routes() -> list[tuple[str, str]]:
+    from fastapi.routing import APIRoute
+
+    from src.api.routes import reports
+
+    report_id = "00000000-0000-0000-0000-000000000001"
+    return [
+        (
+            method,
+            "/api/v1"
+            + route.path.replace("{report_id}", report_id).replace(
+                "{format_type}", "pdf"
+            ),
+        )
+        for route in reports.router.routes
+        if isinstance(route, APIRoute)
+        for method in sorted(route.methods)
+    ]
+
+
+@pytest.mark.parametrize(("method", "path"), _report_routes())
+def test_report_routes_reject_anonymous_callers(method: str, path: str) -> None:
+    """Every report route resolves the caller's tenant before touching data."""
+    from fastapi import FastAPI
+
+    from src.api.routes import reports
+
+    app = FastAPI()
+    app.include_router(reports.router, prefix="/api/v1")
+    session = MagicMock()
+    app.dependency_overrides[get_session] = lambda: session
+
+    response = TestClient(app).request(method, path, json={})
+
+    assert response.status_code in (401, 403), response.text
+    assert session.mock_calls == []
