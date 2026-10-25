@@ -96,7 +96,6 @@ EXPERIMENTATION_MODULES = [
     *(SRC_DIR / "ai_brain" / "experimentation" / "statistical").glob("*.py"),
 ]
 API_ROUTE_MODULES = [
-    SRC_DIR / "api" / "routes" / "experiment_agent_api.py",
     SRC_DIR / "api" / "routes" / "supervisor_api.py",
     SRC_DIR / "api" / "routes" / "talkhier_api.py",
 ]

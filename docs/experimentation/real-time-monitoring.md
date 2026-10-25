@@ -6,10 +6,9 @@ This document describes the **one** real monitoring component that exists in the
 codebase: `RealTimeDashboard`, defined in
 `src/ai_brain/experimentation/monitoring/real_time_dashboard.py`.
 
-Its only consumer is `src/api/routes/experiment_agent_api.py`, and that router is
-**never mounted** in `src/api/main.py`. The A/B-testing monitoring surface — the
-`RealTimeDashboard` and every endpoint that touches it — is therefore
-**currently unreachable in the running Cerebro app**. Treat everything below as a
+Nothing in the running app calls it: no API router imports `get_dashboard()`.
+The A/B-testing monitoring surface is therefore **currently unreachable in the
+running Cerebro app**. Treat everything below as a
 description of code that exists but is not wired into the live API.
 
 The rest of this file has been rewritten to match the source. Earlier drafts
@@ -149,21 +148,11 @@ class, which is why per-client delivery goes through
 also has **no** `add_namespace` and **no** `register_handler` method — the
 namespace/handler registration API described in the old draft does not exist.
 
-## The one consumer (unmounted)
+## No consumer
 
-`src/api/routes/experiment_agent_api.py` is the only code that calls
-`get_dashboard()`. Its router is declared with prefix
-`/api/v1/experiments/agent-framework` (experiment_agent_api.py:113-114) and
-includes a WebSocket endpoint `@router.websocket("/dashboard")` (line 449) plus
-POST/GET routes that call `dashboard.register_experiment(...)` and
-`dashboard.export_experiment_data(...)`.
-
-None of these are reachable, because `main.py` does not `include_router` this
-module. `experiment_agent_api.py` is one of the unmounted route modules in
-`src/api/routes/` (alongside `experiments.py`, `benchmarks.py`, `costs.py`,
-`improvement.py`, `memory.py`, `qa.py`, and the dead `masr.py` twin). To make the
-dashboard reachable it would need to be mounted, and `publish_event` swapped for a
-real `ConnectionManager` broadcast.
+No module in `src/api/` calls `get_dashboard()`. To make the dashboard reachable
+it would need an authenticated router that calls it, mounted in `main.py`, and
+`publish_event` swapped for a real `ConnectionManager` broadcast.
 
 The **live** WebSocket surface in the running app is only:
 `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_id}`, and `GET /ws/health`
