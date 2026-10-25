@@ -2,6 +2,7 @@
 API client wrapper for Research Platform CLI.
 """
 
+import base64
 import json
 from typing import Any
 from uuid import UUID
@@ -31,6 +32,18 @@ class APIError(Exception):
         self.status_code = status_code
         self.detail = detail
         super().__init__(f"API Error ({status_code}): {detail}")
+
+
+def _token_subject(token: str | None) -> str | None:
+    """Return the ``sub`` claim of a JWT without verifying it (the API does)."""
+    try:
+        payload = token.split(".")[1]  # type: ignore[union-attr]
+        claims = json.loads(
+            base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+        )
+        return claims["sub"]
+    except (AttributeError, IndexError, ValueError, KeyError, TypeError):
+        return None
 
 
 class ResearchAPIClient:
@@ -142,11 +155,20 @@ class ResearchAPIClient:
         title: str,
         query_text: str,
         domains: list[str],
-        user_id: str,
+        user_id: str | None,
         depth_level: str = "comprehensive",
         scope: dict[str, Any] | None = None,
     ) -> ResearchProject:
-        """Create a new research project."""
+        """Create a new research project.
+
+        The API only accepts the authenticated subject as ``user_id``, so it
+        defaults to the token's ``sub`` claim.
+        """
+        user_id = user_id or _token_subject(config.auth_token)
+        if not user_id:
+            raise APIError(
+                0, "user id unknown: pass --user-id or authenticate with a JWT token"
+            )
         request_data = {
             "title": title,
             "query": {
