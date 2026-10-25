@@ -17,6 +17,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -33,6 +34,20 @@ class GeneratedReport(BaseModel):
     """Database model for generated research reports."""
 
     __tablename__ = "generated_reports"
+    __table_args__ = (
+        Index(
+            "idx_generated_reports_org_project_created",
+            "organization_id",
+            "project_id",
+            "created_at",
+        ),
+        Index(
+            "idx_generated_reports_org_user_created",
+            "organization_id",
+            "user_id",
+            "created_at",
+        ),
+    )
 
     # Primary key and relationships
     id: Mapped[UUID] = mapped_column(
@@ -299,6 +314,7 @@ class ReportFormat(BaseModel):
         PostgresUUID(as_uuid=True),
         ForeignKey("generated_reports.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
 
     # Format information
