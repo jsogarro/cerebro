@@ -146,7 +146,7 @@ class AuditLogger:
         event_type: AuditEventType,
         action: str,
         request: Request | None = None,
-        user_id: str | None = None,
+        user_id: str | UUID | None = None,
         username: str | None = None,
         email: str | None = None,
         resource_type: str | None = None,
