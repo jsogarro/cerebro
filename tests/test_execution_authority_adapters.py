@@ -20,6 +20,7 @@ from src.api.services.execution_authority_resolver import (
     MappingExecutionAuthorityResolver,
 )
 from src.api.services.research_kernel import compose_application_research_kernel
+from src.auth.models import TokenPayload
 from src.cli.commands import agents
 from src.cli.main import cli
 from src.core.contracts import (
@@ -32,6 +33,7 @@ from src.core.contracts import (
     WorkerAssignment,
 )
 from src.core.kernel import TypedRegistry
+from src.middleware.auth_middleware import get_jwt_service
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.execution_authority import (
     ExecutionAuthorityBinding,
@@ -503,10 +505,28 @@ def test_cli_displays_typed_authority_rejection(monkeypatch):
     assert "EXECUTION_AUTHORITY_REQUIRED" in result.output
 
 
-def _agent_authority_client(
-    tenant: TenantContext | None,
-) -> tuple[TestClient, AsyncMock]:
-    """Agent routes over a real resolver that owns ``authority-1`` for tenant-1."""
+class _OrgJWTService:
+    """Authenticate the bearer token as a caller of the organization it names."""
+
+    async def validate_token(self, token: str) -> TokenPayload:
+        now = datetime.now(UTC)
+        return TokenPayload(
+            sub="user-1",
+            organization_id=token,
+            jti="authority-test",
+            iat=now,
+            exp=now + timedelta(minutes=5),
+        )
+
+
+@pytest.fixture
+def agent_authority_client():
+    """The real app (auth middleware included) over a resolver owning tenant-1's
+    ``authority-1``. Call with the caller's organization, or None for anonymous.
+    """
+    from src.api.main import app
+    from src.models.db.session import get_session
+
     service = AsyncMock()
     service.execute_single_agent.return_value = agent_api.AgentExecutionResponse(
         execution_id="exec-1",
@@ -526,22 +546,37 @@ def _agent_authority_client(
             {("authority-1", "1"): _lifespan_binding()}
         ),
     )
-    test_app = FastAPI()
-    test_app.include_router(agent_api.router)
-    test_app.dependency_overrides[agent_api.get_application_agent_research_kernel] = (
-        lambda: compose_application_research_kernel(backend, service)
-    )
-    if tenant is not None:
-        test_app.dependency_overrides[get_tenant_context] = lambda: tenant
-    return TestClient(test_app), service
+    overrides = {
+        agent_api.get_application_agent_research_kernel: lambda: (
+            compose_application_research_kernel(backend, service)
+        ),
+        get_jwt_service: _OrgJWTService,
+        # get_tenant_context opens a session; SQLite-free stand-in.
+        get_session: lambda: Mock(),
+    }
+    app.dependency_overrides.update(overrides)
+
+    def make(organization_id: str | None) -> tuple[TestClient, AsyncMock]:
+        headers = {}
+        if organization_id is not None:
+            headers["Authorization"] = f"Bearer {organization_id}"
+        return TestClient(app, headers=headers), service
+
+    try:
+        yield make
+    finally:
+        for dependency in overrides:
+            app.dependency_overrides.pop(dependency, None)
 
 
 _AGENT_AUTHORITY = {"authority_id": "authority-1", "authority_version": "1"}
 
 
-def test_agent_execute_with_owned_authority_reaches_agent_service():
+def test_agent_execute_with_owned_authority_reaches_agent_service(
+    agent_authority_client,
+):
     """A supplied authority reference resolves inside the caller's tenant."""
-    client, service = _agent_authority_client(_tenant_override())
+    client, service = agent_authority_client(OWNING_ORGANIZATION)
 
     response = client.post(
         "/api/v1/agents/literature-review/execute",
@@ -592,26 +627,26 @@ def test_agent_execute_with_owned_authority_reaches_agent_service():
         ),
     ],
 )
-def test_agent_execution_rejects_another_tenants_authority(path, payload, method):
+def test_agent_execution_rejects_another_tenants_authority(
+    agent_authority_client, path, payload, method
+):
     """Holding another tenant's reference does not authorize execution."""
-    client, service = _agent_authority_client(
-        TenantContext(user_id="intruder", organization_id="tenant-2")
-    )
+    client, service = agent_authority_client("tenant-2")
 
     response = client.post(path, json=payload)
 
     assert response.status_code == 422, response.text
-    assert response.json() == {"detail": {"code": "EXECUTION_AUTHORITY_UNAVAILABLE"}}
+    assert response.json()["error"]["code"] == "EXECUTION_AUTHORITY_UNAVAILABLE"
     assert getattr(service, method).await_count == 0
 
 
-def test_agent_execution_requires_an_authenticated_caller():
-    client, service = _agent_authority_client(None)
+def test_agent_execution_requires_an_authenticated_caller(agent_authority_client):
+    client, service = agent_authority_client(None)
 
     response = client.post(
         "/api/v1/agents/literature-review/execute",
         json={"query": "test", "authority_reference": _AGENT_AUTHORITY},
     )
 
-    assert response.status_code in (401, 403)
+    assert response.status_code == 401
     service.execute_single_agent.assert_not_awaited()
