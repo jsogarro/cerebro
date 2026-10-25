@@ -7,9 +7,11 @@ from collections.abc import Iterator
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport
 
 from src.api.middleware.rate_limiter import InMemoryRateLimitStore, RateLimitMiddleware
+from src.models.db.session import get_session
 
 LOGIN = "/api/v1/auth/login"
 LIMIT = 3
@@ -46,16 +48,25 @@ async def test_rotating_x_api_key_does_not_evade_login_rate_limit(
 ) -> None:
     from src.api.main import app
 
-    statuses = []
-    async with httpx.AsyncClient(
-        transport=ASGITransport(app=app, raise_app_exceptions=False),
-        base_url="http://test",
-    ) as client:
-        for _ in range(LIMIT + 2):
-            response = await client.post(
-                LOGIN, json={}, headers={"X-API-Key": str(uuid.uuid4())}
-            )
-            statuses.append(response.status_code)
+    async def no_database() -> None:
+        # Reaching the handler is all this test needs; failing fast here keeps
+        # a missing database from producing slow 500 tracebacks per request.
+        raise HTTPException(status_code=503)
+
+    app.dependency_overrides[get_session] = no_database
+    try:
+        statuses = []
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test",
+        ) as client:
+            for _ in range(LIMIT + 2):
+                response = await client.post(
+                    LOGIN, json={}, headers={"X-API-Key": str(uuid.uuid4())}
+                )
+                statuses.append(response.status_code)
+    finally:
+        app.dependency_overrides.pop(get_session, None)
 
     # Requests under the limit reach the route (whatever it answers without a DB).
     assert 429 not in statuses[:LIMIT]
