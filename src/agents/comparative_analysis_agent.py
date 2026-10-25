@@ -6,6 +6,7 @@ across multiple criteria to provide recommendations.
 """
 
 import hashlib
+import math
 from typing import Any
 
 from structlog import get_logger
@@ -500,6 +501,46 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             self.log_error,
         )
 
+    @staticmethod
+    def _correlation_series(
+        comparison_data: Any, criteria: list[str]
+    ) -> tuple[list[float], list[float]] | None:
+        """Validate ``comparison_data={criterion: [numbers]}``.
+
+        Returns the first two criteria's series, or None when there is nothing
+        to correlate (empty data, or fewer than two criteria). Anything else
+        malformed raises ``ValueError``.
+        """
+        if comparison_data == {}:
+            return None
+        if not isinstance(comparison_data, dict):
+            raise ValueError(
+                "comparison_data must be a dict of {criterion: [numbers]}, "
+                f"got {type(comparison_data).__name__}"
+            )
+        for name, values in comparison_data.items():
+            if not isinstance(values, list) or not all(
+                isinstance(v, int | float)
+                and not isinstance(v, bool)
+                and math.isfinite(v)
+                for v in values
+            ):
+                raise ValueError(
+                    f"comparison_data[{name!r}] must be a list of finite numbers"
+                )
+        if len(criteria) < 2:
+            return None
+        missing = [c for c in criteria[:2] if c not in comparison_data]
+        if missing:
+            raise ValueError(f"comparison_data has no series for criteria {missing}")
+        x, y = (comparison_data[c] for c in criteria[:2])
+        if len(x) != len(y) or len(x) < 2:
+            raise ValueError(
+                "comparison_data series for correlation must have equal length >= 2, "
+                f"got {len(x)} and {len(y)}"
+            )
+        return x, y
+
     async def _perform_statistical_comparison(
         self, input_data: dict[str, Any], task: AgentTask | None = None
     ) -> dict[str, Any]:
@@ -516,13 +557,17 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             self.log_warning("MCP integration not available for statistical analysis")
             return self._fallback_statistical_analysis(input_data)
 
-        # Extract numerical data from input if available
+        # Reject a malformed shape here, outside the try below: that handler
+        # answers with fabricated stand-in content, and a bad input must fail.
         comparison_data = input_data.get("comparison_data", {})
+        criteria = input_data.get("criteria", [])
+        series = self._correlation_series(comparison_data, criteria)
 
         try:
             tests_performed = []
+            descriptive_stats: dict[str, Any] = {}
+            correlation_analysis: dict[str, Any] = {}
 
-            # Perform descriptive statistics if numerical data available
             if comparison_data:
                 descriptive_result = await self.mcp_integration.analyze_statistics(
                     operation="descriptive",
@@ -531,27 +576,26 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                 )
                 if descriptive_result.get("success"):
                     tests_performed.append("descriptive_statistics")
+                    descriptive_stats = descriptive_result.get("analysis", {})
 
-            # Perform correlation analysis if multiple criteria
-            criteria = input_data.get("criteria", [])
-            if len(criteria) >= 2 and comparison_data:
+            if series:
+                x, y = series
                 correlation_result = await self.mcp_integration.analyze_statistics(
                     operation="correlation",
-                    variables=criteria[:2],
+                    x=x,
+                    y=y,
                     identity=ToolCallIdentity.from_agent_task(task),
                 )
+                # A degraded result carries stand-in content; keep none of it.
                 if correlation_result.get("success"):
                     tests_performed.append("correlation_analysis")
+                    correlation_analysis = correlation_result.get("analysis", {})
 
             return {
                 "success": True,
                 "tests_performed": tests_performed,
-                "descriptive_stats": (
-                    descriptive_result.get("analysis", {}) if comparison_data else {}
-                ),
-                "correlation_analysis": (
-                    correlation_result.get("analysis", {}) if len(criteria) >= 2 else {}
-                ),
+                "descriptive_stats": descriptive_stats,
+                "correlation_analysis": correlation_analysis,
                 "data_quality": "high" if comparison_data else "limited",
             }
 
