@@ -804,19 +804,79 @@ async def test_resume_route_passes_the_callers_organization() -> None:
     assert excinfo.value.status_code == 404
 
 
-def test_resume_route_rejects_unauthenticated_requests() -> None:
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
+class _OrgJWTService:
+    """Authenticate the bearer token as a caller of the organization it names."""
 
-    app = FastAPI()
-    app.include_router(query_api.router)
-    app.dependency_overrides[query_api.get_application_research_kernel] = (
-        _TenantScopedKernel
-    )
-    # No credentials are sent, so the token is never decoded; the override only
-    # keeps this module's production-mode fixture from demanding a signing key.
-    app.dependency_overrides[get_jwt_service] = object
+    async def validate_token(self, token: str) -> Any:
+        from datetime import timedelta
 
-    response = TestClient(app).post(f"/api/v1/query/execution/{uuid.uuid4()}/resume")
+        from src.auth.models import TokenPayload
 
-    assert response.status_code in (401, 403)
+        now = datetime.now(UTC)
+        return TokenPayload(
+            sub=USER_A,
+            organization_id=token,
+            jti="resume-test",
+            iat=now,
+            exp=now + timedelta(minutes=5),
+        )
+
+
+async def _resume_through_app(
+    session: AsyncSession, caller_organization: str
+) -> tuple[Any, DirectExecutionService, uuid.UUID]:
+    """Resume org A's project via the real app (auth middleware included)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from src.api.main import app
+    from src.api.services.research_kernel import compose_application_research_kernel
+    from src.models.db.session import get_session
+
+    project_id = await _seed_project(session, user_id=USER_A, organization_id=ORG_A)
+    await _seed_checkpoint(session, project_id)
+    service = _resume_service(session)
+    overrides = {
+        query_api.get_application_research_kernel: lambda: (
+            compose_application_research_kernel(service)
+        ),
+        get_jwt_service: _OrgJWTService,
+        get_session: lambda: session,
+    }
+    app.dependency_overrides.update(overrides)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {caller_organization}"},
+        ) as client:
+            response = await client.post(f"/api/v1/query/execution/{project_id}/resume")
+            status = None
+            if response.status_code == 200:
+                status = await client.get(
+                    f"/api/v1/query/execution/{response.json()['execution_id']}/status"
+                )
+    finally:
+        for dependency in overrides:
+            app.dependency_overrides.pop(dependency, None)
+    return (response, status), service, project_id
+
+
+@pytest.mark.asyncio
+async def test_real_app_rejects_resuming_another_tenants_project(
+    project_session: AsyncSession,
+) -> None:
+    (response, _), service, _ = await _resume_through_app(project_session, ORG_B)
+
+    assert response.status_code == 404, response.text
+    assert service.active_executions == {}
+
+
+@pytest.mark.asyncio
+async def test_real_app_resumed_execution_is_readable_by_its_tenant(
+    project_session: AsyncSession,
+) -> None:
+    (response, status), _, _ = await _resume_through_app(project_session, ORG_A)
+
+    assert response.status_code == 200, response.text
+    assert status is not None
+    assert status.status_code == 200, status.text
