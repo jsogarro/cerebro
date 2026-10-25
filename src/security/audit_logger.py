@@ -44,6 +44,18 @@ def _json_safe_value(value: Any) -> Any:
     return str(value)
 
 
+def _subject_uuid(subject: Any) -> UUID | None:
+    """Return the authenticated subject as the UUID the audit column stores.
+
+    A subject that is not a UUID is dropped rather than passed through, since
+    one unbindable row would fail the whole flush.
+    """
+    try:
+        return UUID(str(subject)) if subject else None
+    except ValueError:
+        return None
+
+
 class AuditLogger:
     """
     Centralized audit logging service.
@@ -180,6 +192,8 @@ class AuditLogger:
 
             # Extract user info from request state if available
             request_user = getattr(request.state, "user", None)
+            if user_id is None:
+                user_id = _subject_uuid(getattr(request.state, "user_id", None))
             if request_user is not None:
                 user_id = user_id or getattr(request_user, "id", None)
                 username = username or getattr(request_user, "username", None)
