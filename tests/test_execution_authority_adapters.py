@@ -370,6 +370,8 @@ def test_executing_agent_post_requires_authority_before_agent_service(
         lambda: compose_application_research_kernel(_RoutedBackend(), service)
     )
 
+    test_app.dependency_overrides[get_tenant_context] = _tenant_override
+
     response = TestClient(test_app).post(path, json=payload)
 
     assert response.status_code == 422
@@ -407,6 +409,8 @@ def test_raw_agent_backend_override_fails_closed_before_agent_service(
     test_app.dependency_overrides[agent_api.get_application_agent_research_kernel] = (
         lambda: service
     )
+
+    test_app.dependency_overrides[get_tenant_context] = _tenant_override
 
     response = TestClient(test_app).post(path, json=payload)
 
@@ -497,3 +501,117 @@ def test_cli_displays_typed_authority_rejection(monkeypatch):
 
     assert result.exit_code == 1
     assert "EXECUTION_AUTHORITY_REQUIRED" in result.output
+
+
+def _agent_authority_client(
+    tenant: TenantContext | None,
+) -> tuple[TestClient, AsyncMock]:
+    """Agent routes over a real resolver that owns ``authority-1`` for tenant-1."""
+    service = AsyncMock()
+    service.execute_single_agent.return_value = agent_api.AgentExecutionResponse(
+        execution_id="exec-1",
+        agent_type="literature-review",
+        status="completed",
+        output={},
+        confidence=0.9,
+        quality_score=0.9,
+        execution_time_seconds=0.01,
+        started_at=datetime(2026, 7, 28, tzinfo=UTC),
+    )
+    backend = DirectExecutionService(
+        masr_router=Mock(),
+        supervisor_bridge=Mock(),
+        supervisor_factory=Mock(),
+        execution_authority_resolver=MappingExecutionAuthorityResolver(
+            {("authority-1", "1"): _lifespan_binding()}
+        ),
+    )
+    test_app = FastAPI()
+    test_app.include_router(agent_api.router)
+    test_app.dependency_overrides[agent_api.get_application_agent_research_kernel] = (
+        lambda: compose_application_research_kernel(backend, service)
+    )
+    if tenant is not None:
+        test_app.dependency_overrides[get_tenant_context] = lambda: tenant
+    return TestClient(test_app), service
+
+
+_AGENT_AUTHORITY = {"authority_id": "authority-1", "authority_version": "1"}
+
+
+def test_agent_execute_with_owned_authority_reaches_agent_service():
+    """A supplied authority reference resolves inside the caller's tenant."""
+    client, service = _agent_authority_client(_tenant_override())
+
+    response = client.post(
+        "/api/v1/agents/literature-review/execute",
+        json={"query": "test", "authority_reference": _AGENT_AUTHORITY},
+    )
+
+    assert response.status_code == 200, response.text
+    service.execute_single_agent.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("path", "payload", "method"),
+    [
+        (
+            "/api/v1/agents/literature-review/execute",
+            {"query": "test", "authority_reference": _AGENT_AUTHORITY},
+            "execute_single_agent",
+        ),
+        (
+            "/api/v1/agents/chain",
+            {
+                "query": "test",
+                "agent_chain": ["literature-review", "synthesis"],
+                "authority_reference": _AGENT_AUTHORITY,
+            },
+            "execute_chain_of_agents",
+        ),
+        (
+            "/api/v1/agents/mixture",
+            {
+                "query": "test",
+                "agent_types": ["literature-review", "synthesis"],
+                "authority_reference": _AGENT_AUTHORITY,
+            },
+            "execute_mixture_of_agents",
+        ),
+        (
+            "/api/v1/agents/literature-review/search"
+            "?query=test&authority_id=authority-1&authority_version=1",
+            None,
+            "execute_single_agent",
+        ),
+        (
+            "/api/v1/agents/workflows/literature-analysis"
+            "?query=test%20query%20text&authority_id=authority-1&authority_version=1",
+            None,
+            "execute_chain_of_agents",
+        ),
+    ],
+)
+def test_agent_execution_rejects_another_tenants_authority(path, payload, method):
+    """Holding another tenant's reference does not authorize execution."""
+    client, service = _agent_authority_client(
+        TenantContext(user_id="intruder", organization_id="tenant-2")
+    )
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 422, response.text
+    assert response.json() == {"detail": {"code": "EXECUTION_AUTHORITY_UNAVAILABLE"}}
+    assert getattr(service, method).await_count == 0
+
+
+def test_agent_execution_requires_an_authenticated_caller():
+    client, service = _agent_authority_client(None)
+
+    response = client.post(
+        "/api/v1/agents/literature-review/execute",
+        json={"query": "test", "authority_reference": _AGENT_AUTHORITY},
+    )
+
+    assert response.status_code in (401, 403)
+    service.execute_single_agent.assert_not_awaited()

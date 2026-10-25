@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from src.api.routes import agent_api
 from src.cli.commands import agents
 from src.cli.main import cli
+from src.middleware.tenant_context import TenantContext
 from src.models.agent_api_models import (
     AgentExecutionRequest,
     AgentExecutionResponse,
@@ -16,6 +17,8 @@ from src.models.agent_api_models import (
     ChainOfAgentsRequest,
     ChainOfAgentsResponse,
 )
+
+_TENANT = TenantContext(user_id="user-1", organization_id="tenant-1")
 
 
 class _KernelAgentBackend:
@@ -76,11 +79,13 @@ class _KernelHTTPClient:
                 AgentExecutionRequest(**payload),
                 background_tasks=None,
                 execution_service=self.backend,
+                tenant_context=_TENANT,
             )
         elif path == "/api/v1/agents/chain":
             response = await agent_api.execute_chain_of_agents(
                 ChainOfAgentsRequest(**payload),
                 execution_service=self.backend,
+                tenant_context=_TENANT,
             )
         else:
             raise AssertionError(f"unexpected endpoint: {path}")
