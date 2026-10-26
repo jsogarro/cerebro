@@ -44,6 +44,6 @@ networkx>=3.2.0
 wordcloud>=1.9.0
 python-docx>=1.1.0
 fpdf2>=2.8.0
-pypdf==6.20.0
+pypdf==6.21.2
 orjson>=3.10.0
 tiktoken>=0.7.0
