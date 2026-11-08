@@ -149,16 +149,16 @@ class IntelligentQueryResponse(BaseModel):
     routing_decision: dict[str, Any]
     supervisor_type: str
     selected_agents: list[str]
-    estimated_cost: float
-    estimated_quality: float
+    estimated_cost: float | None = None
+    estimated_quality: float | None = None
 
     # Execution results
     results: dict[str, Any]
     quality_scores: dict[str, float]
-    confidence: float
+    confidence: float | None = None
 
     # Performance metrics
-    routing_time_ms: float
+    routing_time_ms: float | None = None
     execution_time_seconds: float
     total_time_seconds: float
 
@@ -239,6 +239,9 @@ async def intelligent_research_query(
             organization_id=tenant_context.organization_id,
         )
 
+        routing_decision = (
+            execution_status.routing_decision if execution_status else None
+        ) or {}
         response = IntelligentQueryResponse(
             execution_id=execution_id,
             query_id=str(project.id),
@@ -249,13 +252,13 @@ async def intelligent_research_query(
             supervisor_type=execution_status.supervisor_type
             if execution_status and execution_status.supervisor_type
             else "research",
-            selected_agents=[],  # Would be populated from routing decision
-            estimated_cost=0.015,  # Would come from MASR
-            estimated_quality=0.85,  # Would come from MASR
+            selected_agents=routing_decision.get("agent_allocation", {}).get(
+                "worker_types", []
+            ),
+            estimated_cost=routing_decision.get("estimated_cost"),
+            estimated_quality=routing_decision.get("estimated_quality"),
             results=execution_status.agent_results if execution_status else {},
             quality_scores=execution_status.quality_scores if execution_status else {},
-            confidence=0.85,  # Would be calculated from execution
-            routing_time_ms=50.0,  # Would be measured
             execution_time_seconds=execution_status.execution_time_seconds
             if execution_status
             else 0.0,
@@ -273,7 +276,8 @@ async def intelligent_research_query(
             supervisor_type=response.supervisor_type,
             estimated_cost=response.estimated_cost,
         )
-        set_llm_request_estimated_cost(response.estimated_cost)
+        if response.estimated_cost is not None:
+            set_llm_request_estimated_cost(response.estimated_cost)
 
         return response
 
