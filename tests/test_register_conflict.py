@@ -123,7 +123,7 @@ def test_migration_creates_the_orm_declared_lower_indexes() -> None:
             "-m",
             "alembic",
             "upgrade",
-            "a1b2c3d4e5f6:b5d7e9f1a3c2",
+            "d2e6f0a4b8c1:b5d7e9f1a3c2",
             "--sql",
         ],
         cwd=Path(__file__).resolve().parents[1],

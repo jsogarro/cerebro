@@ -1,7 +1,7 @@
 """Add case-insensitive unique indexes on user email and username.
 
 Revision ID: b5d7e9f1a3c2
-Revises: a1b2c3d4e5f6
+Revises: d2e6f0a4b8c1
 Create Date: 2026-10-25
 
 Registration and login look users up with ``lower(email)`` / ``lower(username)``,
@@ -22,7 +22,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b5d7e9f1a3c2"
-down_revision: str | Sequence[str] | None = "a1b2c3d4e5f6"
+down_revision: str | Sequence[str] | None = "d2e6f0a4b8c1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
