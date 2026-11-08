@@ -349,35 +349,5 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             "since": since.isoformat(),
         }
 
-    async def cleanup_stale_projects(self, days_old: int = 30) -> int:
-        """
-        Clean up stale in-progress projects.
-
-        Args:
-            days_old: Days since last update
-
-        Returns:
-            Number of projects marked as failed
-        """
-        cutoff = datetime.now(UTC) - timedelta(days=days_old)
-
-        query = select(ResearchProject).where(
-            and_(
-                ResearchProject.deleted_at.is_(None),
-                ResearchProject.status == ProjectStatus.IN_PROGRESS,
-                ResearchProject.updated_at < cutoff,
-            )
-        )
-
-        result = await self.session.execute(query)
-        stale_projects = list(result.scalars().all())
-
-        count = 0
-        for project in stale_projects:
-            await self.update(project.id, {"status": ProjectStatus.FAILED})
-            count += 1
-
-        return count
-
 
 __all__ = ["ResearchRepository"]
