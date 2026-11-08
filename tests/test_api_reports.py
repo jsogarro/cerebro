@@ -324,6 +324,7 @@ class TestReportsAPI:
             mock_generator = MagicMock()
             mock_storage = MagicMock()
             mock_storage.list_user_reports = AsyncMock(return_value=mock_reports)
+            mock_storage.count_user_reports = AsyncMock(return_value=2)
             mock_repo = MagicMock()
             mock_format_repo = MagicMock()
 
