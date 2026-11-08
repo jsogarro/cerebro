@@ -185,13 +185,13 @@ The catalog of roles (Superuser / Admin / Researcher / Viewer / Guest) and a res
 
 **No security-headers middleware is in the application stack** (`src/api/main.py` adds only CORS, Idempotency, RateLimit, CostDrift, Auth). `src/security/headers.py` exists but is **test-only dead code** — it is not in any request path. Content-Security-Policy, Strict-Transport-Security, X-Frame-Options, X-Content-Type-Options, etc. are **not set** on responses.
 
-## 2.6 Four-strategy rate-limiting engine — dead code
+## 2.6 Rate limiting
 
-Production rate limiting is the flat global limiter in §1.5 (`src/api/middleware/rate_limiter.py`, 100/min). The multi-strategy engine (token bucket / sliding window / fixed window / leaky bucket) in `src/security/rate_limiter.py` is **dead code** — not wired into the app. There are no per-endpoint or burst rate-limit configurations.
+Production rate limiting is the flat global limiter in §1.5 (`src/api/middleware/rate_limiter.py`, 100/min). There are no per-endpoint or burst rate-limit configurations.
 
-## 2.7 Input-validation layer — dead code
+## 2.7 Input validation
 
-`src/security/validators.py` (SQL-injection / XSS / path-traversal / command-injection / file-upload validators) is **dead code, not in the request path.** (Cerebro does rely on SQLAlchemy parameterized queries and Pydantic request-model validation, but the dedicated `validators.py` layer is not invoked.)
+There is no dedicated input-validation layer. Cerebro relies on Pydantic request-model validation and SQLAlchemy parameterized queries; there is no regex SQL-injection/XSS detection or upload validator.
 
 ## 2.8 Audit logging — models only, subsystem not wired
 

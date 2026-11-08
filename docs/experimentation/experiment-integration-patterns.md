@@ -2,17 +2,10 @@
 
 ## Status: not on the live execution path
 
-> **This subsystem is real code but unreachable over HTTP.** The FastAPI router
-> that would expose it — `src/api/routes/experiment_agent_api.py` (whose imports
-> at lines 17-25 pull in `AgentFrameworkExperimentor`, `real_time_dashboard`, and
-> `feedback_loop_optimizer` from `src/ai_brain/experimentation/`) — is **never
-> `include_router`'d in `src/api/main.py`** (the mounted routers are listed at
-> `main.py:211-230`). (A second router, `src/api/routes/experiments.py`, is also
-> unmounted, but it is a **separate, disconnected DB-backed A/B CRUD API** — its
-> imports at lines 17-29 are only ORM models from `src/models/db/experiment`; it
-> imports nothing from `src/ai_brain/experimentation/`, and the experimentation
-> package likewise never imports `src/models/db`, so mounting it would surface
-> none of the classes described here.) One core module of the package **is**
+> **This subsystem is real code but unreachable over HTTP.** No FastAPI router
+> exposes it: nothing in `src/api/routes/` imports `AgentFrameworkExperimentor`,
+> `real_time_dashboard`, or `feedback_loop_optimizer` from
+> `src/ai_brain/experimentation/`. One core module of the package **is**
 > flag-gated into the live base router: `MASRouter` imports
 > `AdaptiveAllocationEngine` (`masr.py:36-39`) and, when
 > `adaptive_routing_enabled` is set, constructs it (`masr.py:221-235`) and
@@ -343,12 +336,9 @@ never the experimental subclass, and no router mounts the experiment endpoints.
 
 ## What it would take to make this live
 
-1. `include_router` the experiment router in `src/api/main.py` — the unmounted
-   module `experiment_agent_api.py`, which imports the experimentation package's
-   `AgentFrameworkExperimentor`, dashboard, and feedback-optimizer entry points.
-   (`experiments.py` is also unmounted, but mounting it would not surface this
-   subsystem: it is a separate DB-backed A/B CRUD API over `src/models/db` and
-   imports nothing from `src/ai_brain/experimentation/`.)
+1. Write an authenticated, tenant-scoped router over the experimentation
+   package's `AgentFrameworkExperimentor`, dashboard, and feedback-optimizer
+   entry points, and `include_router` it in `src/api/main.py`.
 2. Have `DirectExecutionService` construct `MASRExperimentalRouter` in place of
    `MASRouter`, and call `route_with_experiment()` instead of `route()`.
 3. Provide real metric sinks — the manager tracks assignments and metrics, but
