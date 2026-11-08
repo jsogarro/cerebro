@@ -177,6 +177,7 @@ async def test_bulk_update_skips_soft_deleted_and_ignores_protected_fields(
             {"id": a_id, "title": "x", "nonexistent": 1},
             {"id": b_id, "title": "y"},
         ],
+        organization_id=org,
     )
 
     assert count == 1

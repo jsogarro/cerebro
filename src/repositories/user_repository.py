@@ -21,6 +21,9 @@ class UserRepository(BaseRepository[User]):
     Provides specialized queries for user management.
     """
 
+    # Authentication resolves a user by id or email before tenant context exists.
+    allows_unscoped_access = True
+
     def __init__(self, session: AsyncSession) -> None:
         """Initialize user repository."""
         super().__init__(User, session)

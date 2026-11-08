@@ -10,6 +10,7 @@ from src.models.db.audit_log import AuditLog
 from src.models.db.research_project import ProjectStatus, ResearchProject
 from src.repositories.base import BaseRepository
 from src.repositories.research_repository import ResearchRepository
+from src.repositories.user_repository import UserRepository
 
 
 class _ScalarResult:
@@ -48,6 +49,28 @@ def test_base_repository_applies_organization_scope() -> None:
     statement = repo.apply_organization_scope(repo.build_query(), uuid4())
 
     assert "research_projects.organization_id" in _sql(statement)
+
+
+def test_tenant_model_read_without_organization_fails_closed() -> None:
+    repo = BaseRepository(ResearchProject, cast(AsyncSession, object()))
+
+    with pytest.raises(ValueError, match="requires an organization_id"):
+        repo.apply_organization_scope(repo.build_query(), None)
+
+
+def test_model_without_tenant_column_reads_without_organization() -> None:
+    repo = BaseRepository(AuditLog, cast(AsyncSession, object()))
+    statement = repo.apply_organization_scope(repo.build_query(), None)
+
+    assert "organization_id" not in _sql(statement)
+
+
+def test_user_identity_lookup_reads_without_organization() -> None:
+    """Auth resolves a user before any tenant context exists."""
+    repo = UserRepository(cast(AsyncSession, object()))
+    statement = repo.apply_organization_scope(repo.build_query(), None)
+
+    assert "users.organization_id =" not in _sql(statement)
 
 
 def test_base_repository_rejects_scope_for_unscoped_models() -> None:

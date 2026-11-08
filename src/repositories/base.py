@@ -30,6 +30,10 @@ class BaseRepository(Generic[ModelType]):
     Provides common database operations for all model types.
     """
 
+    # Access to a tenant-scoped model must name an organization. A repository
+    # whose lookups legitimately precede tenant context opts out explicitly.
+    allows_unscoped_access: bool = False
+
     def __init__(self, model: type[ModelType], session: AsyncSession):
         """
         Initialize base repository.
@@ -544,13 +548,18 @@ class BaseRepository(Generic[ModelType]):
         organization_id: str | UUID | None,
     ) -> _Scoped:
         """
-        Apply tenant organization filtering when a scoped query is requested.
+        Filter a query on a tenant-scoped model to one organization.
 
-        Repositories stay backward-compatible while API boundaries are migrated:
-        callers that have tenant context pass organization_id, and models without
-        tenant support fail closed instead of silently ignoring the scope.
+        Fails closed both ways: a tenant-scoped model accessed without an
+        organization raises instead of returning every tenant's rows, and a
+        model without tenant support raises instead of ignoring the scope.
         """
         if organization_id is None:
+            if (
+                hasattr(self.model, "organization_id")
+                and not self.allows_unscoped_access
+            ):
+                raise ValueError(f"{self.model.__name__} requires an organization_id")
             return query
 
         if not hasattr(self.model, "organization_id"):
