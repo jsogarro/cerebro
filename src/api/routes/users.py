@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai_brain.memory.multi_tier_memory import MultiTierMemorySystem
-from src.models.db.agent_task import AgentTask
+from src.middleware.auth_middleware import get_current_active_user
 from src.models.db.research_project import ResearchProject
 from src.models.db.session import get_session
 from src.models.db.user import User
@@ -32,23 +32,20 @@ async def delete_user_gdpr(
     user_id: UUID,
     db: AsyncSession = Depends(get_session),
     memory_system: MultiTierMemorySystem | None = Depends(get_memory_system),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict[str, Any]:
-    """Delete user data from database records and memory tiers."""
+    """Delete user data from database records and memory tiers.
+
+    Only the user themselves or a superuser may erase an account's data.
+    """
+
+    if current_user.id != user_id and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to delete another user's data",
+        )
 
     user_id_text = str(user_id)
-    project_ids_result = await db.execute(
-        select(ResearchProject.id).where(ResearchProject.user_id == user_id_text)
-    )
-    project_ids = list(project_ids_result.scalars().all())
-
-    deleted_tasks = 0
-    if project_ids:
-        task_result = await db.execute(
-            delete(AgentTask).where(AgentTask.project_id.in_(project_ids))
-        )
-        # SQLAlchemy 2.x: Result.rowcount is valid for DELETE/UPDATE; mypy stub gap.
-        deleted_tasks = task_result.rowcount or 0  # type: ignore[attr-defined]
-
     project_result = await db.execute(
         delete(ResearchProject).where(ResearchProject.user_id == user_id_text)
     )
@@ -66,7 +63,6 @@ async def delete_user_gdpr(
             # SQLAlchemy 2.x: Result.rowcount is valid for DELETE/UPDATE; mypy stub gap.
             "users": user_result.rowcount or 0,  # type: ignore[attr-defined]
             "research_projects": project_result.rowcount or 0,  # type: ignore[attr-defined]
-            "agent_tasks": deleted_tasks,
             "memory": memory_deleted,
         },
     }

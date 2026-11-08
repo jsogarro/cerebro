@@ -437,7 +437,7 @@ class TestVerificationAgentError:
 
         # Verify graceful degradation - neutral verdict
         assert "verification" in state.worker_results
-        assert state.worker_results["verification"]["verdict"] == "pass"
+        assert state.worker_results["verification"]["verdict"] == "revise"
         assert "error" in state.worker_results["verification"]["report"].lower()
         # Quality score should be calculated without reduction
         assert state.quality_score > 0

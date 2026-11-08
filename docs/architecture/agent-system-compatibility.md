@@ -10,7 +10,6 @@ types and is not yet imported by the runtime.
 | --- | --- | --- |
 | `src.models.research_project.AgentTask` | Mutable research/domain task | Closest to `Task`; it embeds a result dictionary and lacks run identity, stable task key, idempotency, pinned versions, dependencies, and attempt history |
 | `src.agents.models.AgentTask` | Frozen in-process worker invocation | Contains dispatch input for work represented by `Task` and `Attempt`; it lacks lifecycle, run, version, idempotency, and persistence identity |
-| `src.models.db.agent_task.AgentTask` | SQLAlchemy project task row | Contains task and retry state; `project_id` is not a canonical `run_id`, output is embedded, and `retrying` does not create a separate attempt record |
 
 ### Status relationships
 
