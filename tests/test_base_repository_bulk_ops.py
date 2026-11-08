@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from src.models.db.agent_task import AgentTask
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
@@ -28,7 +27,7 @@ N = 50
 async def engine() -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async with engine.begin() as connection:
-        for model in (ResearchProject, AgentTask, ResearchResult, WorkflowCheckpoint):
+        for model in (ResearchProject, ResearchResult, WorkflowCheckpoint):
             await connection.run_sync(model.__table__.create)
     yield engine
     await engine.dispose()
