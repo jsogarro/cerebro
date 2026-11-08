@@ -1,7 +1,7 @@
 """Align the experiment tables with the ORM models.
 
 Revision ID: f3b8a6d2c4e1
-Revises: a1b2c3d4e5f6
+Revises: b5d7e9f1a3c2
 Create Date: 2026-10-25
 
 The original migration left ten ``experiments`` columns nullable although the
@@ -19,7 +19,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f3b8a6d2c4e1"
-down_revision: str | Sequence[str] | None = "a1b2c3d4e5f6"
+down_revision: str | Sequence[str] | None = "b5d7e9f1a3c2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
