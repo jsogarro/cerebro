@@ -288,7 +288,11 @@ def build_specs(
             operation="statistical analysis",
         )
         return {
-            "analysis": sanitize(sanitizer, result.get("result", {})),
+            # The tool reports its figures at the top level, not under a
+            # "result" key; reading that key made every real analysis empty.
+            "analysis": sanitize(
+                sanitizer, {k: v for k, v in result.items() if k != "success"}
+            ),
             "operation": params.operation,
             "data_points": len(params.data) if params.data else 0,
         }

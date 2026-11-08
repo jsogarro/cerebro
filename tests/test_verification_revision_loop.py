@@ -371,8 +371,8 @@ class TestVerificationAgent:
         assert result["issues"] == []
 
     @pytest.mark.asyncio
-    async def test_run_verification_error_returns_neutral_pass(self, mock_supervisor):
-        """Test verification error returns neutral PASS fallback."""
+    async def test_run_verification_error_fails_closed(self, mock_supervisor):
+        """Test verification error fails closed (not PASS)."""
         component = create_autospec(VerificationAgent, spec_set=True)
         component.side_effect = Exception("Service unavailable")
         mock_supervisor.component_registry = _registry_with_verification_component(
@@ -382,7 +382,7 @@ class TestVerificationAgent:
         result = await mock_supervisor._run_verification("Content to verify")
 
         component.assert_called_once()
-        assert result["verdict"] == "pass"  # Neutral fallback
+        assert result["verdict"] == "revise"
         assert "Verification error" in result["report"]
         assert result["issues"] == []
 

@@ -69,7 +69,7 @@ def query_command(
 
                 print_success("Query completed successfully")
                 console.print("\n[bold]Result:[/bold]")
-                console.print(result.get("output", result))
+                console.print(result.get("results", result))
 
             except APIError as e:
                 print_error(f"Query failed: {e.detail}")
@@ -107,12 +107,19 @@ def route_command(ctx: Context, query_text: str, strategy: str) -> None:
                 table.add_column("Property", style="cyan")
                 table.add_column("Value", style="green")
 
-                table.add_row("Selected Model", result.get("selected_model", "N/A"))
+                models = ", ".join(
+                    m["model_id"] for m in result.get("selected_models", [])
+                )
+                table.add_row("Selected Models", models or "N/A")
                 table.add_row(
                     "Estimated Cost", f"${result.get('estimated_cost', 0):.4f}"
                 )
                 table.add_row("Strategy", result.get("strategy", "N/A"))
-                table.add_row("Agent Chain", ", ".join(result.get("agent_chain", [])))
+                supervisors = ", ".join(
+                    a["supervisor_type"]
+                    for a in result.get("supervisor_allocations", [])
+                )
+                table.add_row("Supervisors", supervisors)
 
                 console.print(table)
 
@@ -148,13 +155,17 @@ def estimate_command(ctx: Context, query_text: str, domains: tuple[str, ...]) ->
                 table.add_column("Component", style="cyan")
                 table.add_column("Cost", style="green", justify="right")
 
-                table.add_row("Model Inference", f"${result.get('model_cost', 0):.4f}")
+                breakdown = result.get("breakdown") or {}
                 table.add_row(
-                    "Agent Coordination", f"${result.get('coordination_cost', 0):.4f}"
+                    "Model Inference", f"${breakdown.get('model_costs', 0):.4f}"
+                )
+                table.add_row(
+                    "Agent Coordination",
+                    f"${breakdown.get('coordination_overhead', 0):.4f}",
                 )
                 table.add_row(
                     "[bold]Total Estimate[/bold]",
-                    f"[bold]${result.get('total_cost', 0):.4f}[/bold]",
+                    f"[bold]${result.get('estimated_cost', 0):.4f}[/bold]",
                 )
 
                 console.print(table)
@@ -207,7 +218,7 @@ def execute_command(
 
                 print_success(f"Agent {agent_type} completed successfully")
                 console.print("\n[bold]Result:[/bold]")
-                console.print(result.get("output", result))
+                console.print(result.get("results", result))
 
             except APIError as e:
                 print_error(f"Agent execution failed: {e.detail}")
@@ -257,7 +268,7 @@ def chain_command(
 
                 print_success("Agent chain completed successfully")
                 console.print("\n[bold]Result:[/bold]")
-                console.print(result.get("output", result))
+                console.print(result.get("results", result))
 
             except APIError as e:
                 print_error(f"Chain execution failed: {e.detail}")
@@ -285,11 +296,11 @@ def status_command(ctx: Context) -> None:
                 table.add_column("Value", style="green")
 
                 table.add_row("Status", result.get("status", "N/A"))
-                table.add_row("Total Queries", str(result.get("total_queries", 0)))
+                table.add_row("Total Routes", str(result.get("total_routes", 0)))
                 table.add_row(
-                    "Avg Response Time", f"{result.get('avg_response_time', 0):.2f}s"
+                    "Avg Latency", f"{result.get('average_latency_ms', 0):.1f}ms"
                 )
-                table.add_row("Cost Savings", f"${result.get('cost_savings', 0):.2f}")
+                table.add_row("Success Rate", f"{result.get('success_rate', 0):.1%}")
 
                 console.print(table)
 
