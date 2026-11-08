@@ -206,54 +206,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         }
 ```
 
-### TaskRepository
-
-```python
-class TaskRepository(BaseRepository[AgentTask]):
-    
-    async def get_pending_tasks(
-        self,
-        limit: int = 10,
-        agent_type: Optional[str] = None
-    ) -> List[AgentTask]:
-        """Get pending tasks ready for execution.
-
-        Dependency gating is a separate concern handled by
-        ``get_ready_tasks(project_id)`` (which uses ``task.can_start``);
-        this method only selects unstarted tasks by status.
-        """
-        
-        query = self.build_query().where(
-            AgentTask.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED])
-        )
-        
-        if agent_type:
-            query = query.where(AgentTask.agent_type == agent_type)
-        
-        query = query.order_by(
-            AgentTask.priority.desc(),
-            AgentTask.created_at.asc()
-        ).limit(limit)
-        
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
-    
-    async def mark_for_retry(self, task_id: UUID) -> Optional[AgentTask]:
-        """Mark a failed task for retry."""
-        
-        task = await self.get(task_id)
-        
-        if not task or task.status != TaskStatus.FAILED:
-            return None
-        
-        # task.retry() sets status to RETRYING, increments retry_count,
-        # and clears error_message/output_data/timestamps.
-        task.retry()
-        await self.session.flush()
-        await self.session.refresh(task)
-        return task
-```
-
 ### ResultRepository
 
 ```python
@@ -398,23 +350,11 @@ async def complex_operation(project_id: UUID):
     # it commits on clean exit and rolls back on any exception.
     async with get_transaction() as session:
         research_repo = ResearchRepository(session)
-        task_repo = TaskRepository(session)
         result_repo = ResultRepository(session)
         
         try:
             # Multiple operations in single transaction
             project = await research_repo.get(project_id)
-            
-            # Create tasks
-            tasks = []
-            for agent_type in ["literature", "synthesis", "citation"]:
-                task = await task_repo.create(
-                    project_id=project_id,
-                    agent_type=agent_type,
-                    task_type="research",
-                    priority=1
-                )
-                tasks.append(task)
             
             # Update project status
             await research_repo.update_status(
@@ -426,11 +366,9 @@ async def complex_operation(project_id: UUID):
             await result_repo.bulk_create([
                 {
                     "project_id": project_id,
-                    "task_id": task.id,
                     "result_type": "initial",
-                    "content": {}
+                    "content": {},
                 }
-                for task in tasks
             ])
             
             # Transaction commits here if no exception
@@ -582,7 +520,6 @@ async def test_complex_workflow(postgres_db):
     
     async with postgres_db as session:
         research_repo = ResearchRepository(session)
-        task_repo = TaskRepository(session)
         result_repo = ResultRepository(session)
         
         # Create project (user_id is required — ResearchProject.user_id is NOT NULL)
@@ -593,25 +530,14 @@ async def test_complex_workflow(postgres_db):
             user_id=str(uuid.uuid4())
         )
         
-        # Create tasks
-        tasks = []
-        for i in range(5):
-            task = await task_repo.create(
-                project_id=project.id,
-                agent_type=f"agent_{i}",
-                task_type="test"
-            )
-            tasks.append(task)
-        
         # Create results
         results = await result_repo.bulk_create([
             {
                 "project_id": project.id,
-                "task_id": task.id,
                 "result_type": "test",
                 "content": {"data": f"result_{i}"}
             }
-            for i, task in enumerate(tasks)
+            for i in range(5)
         ])
         
         # Verify statistics — per-project result stats live on ResultRepository
@@ -620,12 +546,12 @@ async def test_complex_workflow(postgres_db):
         
         # Test cleanup — a HARD delete is required to cascade to child rows;
         # the default soft delete only sets deleted_at on the project row,
-        # leaving AgentTask/ResearchResult children in place.
+        # leaving ResearchResult children in place.
         await research_repo.delete(project.id, soft=False)
         
         # Verify cascade delete (delete-orphan fires on ORM hard delete)
-        remaining_tasks = await task_repo.get_by_project(project.id)
-        assert len(remaining_tasks) == 0
+        remaining_results = await result_repo.get_by_project(project.id)
+        assert len(remaining_results) == 0
 ```
 
 ## Best Practices

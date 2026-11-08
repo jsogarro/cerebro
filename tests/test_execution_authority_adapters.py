@@ -77,7 +77,7 @@ class _RoutedBackend:
     async def get_execution_results(self, execution_id, *, organization_id=None):
         return None
 
-    async def resume_execution(self, project_id):
+    async def resume_execution(self, project_id, *, organization_id=None):
         return None
 
 
