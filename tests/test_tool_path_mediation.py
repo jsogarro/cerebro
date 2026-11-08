@@ -490,7 +490,8 @@ class TestEveryOperationSanitizesUntrustedToolOutput:
         client = _healthy_client()
         client.analyze_statistics.return_value = {
             "success": True,
-            "result": {"summary": INJECTION, "mean": 3.0},
+            "summary": INJECTION,
+            "mean": 3.0,
         }
         integration = MCPIntegration(mcp_client=client)
 

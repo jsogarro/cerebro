@@ -51,7 +51,8 @@ class _QueryService:
             return {"output": "legacy-result"}
         return None
 
-    async def resume_execution(self, project_id):
+    async def resume_execution(self, project_id, *, organization_id=None):
+        self.organizations.append(organization_id)
         return "resumed-1" if project_id == UUID(int=1) else None
 
 
@@ -164,7 +165,7 @@ async def test_execution_status_results_and_resume_pin_legacy_error_details():
 
     status = await query_api.get_execution_status("execution-1", service, TENANT)
     results = await query_api.get_execution_results("execution-1", service, TENANT)
-    resumed = await query_api.resume_execution(str(UUID(int=1)), service)
+    resumed = await query_api.resume_execution(str(UUID(int=1)), service, TENANT)
 
     assert status["status"] == "running"
     assert status["current_phase"] == "masr_routing"
@@ -177,7 +178,7 @@ async def test_execution_status_results_and_resume_pin_legacy_error_details():
     }
 
     with pytest.raises(HTTPException, match="Invalid project_id format") as invalid:
-        await query_api.resume_execution("not-a-uuid", service)
+        await query_api.resume_execution("not-a-uuid", service, TENANT)
     assert invalid.value.status_code == 400
 
     with pytest.raises(HTTPException, match="not found") as missing:

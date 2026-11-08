@@ -46,7 +46,7 @@ def projects_group(ctx: Context) -> None:
 @click.option("--title", "-t", help="Project title")
 @click.option("--query", "-q", help="Research query text")
 @click.option("--domains", "-d", help="Research domains (comma-separated)")
-@click.option("--user-id", "-u", default="cli-user", help="User ID")
+@click.option("--user-id", "-u", help="User ID (defaults to the authenticated user)")
 @click.option(
     "--depth",
     type=click.Choice(["survey", "comprehensive", "exhaustive"]),
@@ -62,7 +62,7 @@ def create_project(
     title: str | None,
     query: str | None,
     domains: str | None,
-    user_id: str,
+    user_id: str | None,
     depth: str,
     scope: tuple[str, ...],
     interactive: bool,
@@ -81,7 +81,7 @@ def create_project(
                         title=project_data["title"],
                         query_text=project_data["query_text"],
                         domains=project_data["domains"],
-                        user_id=project_data["user_id"],
+                        user_id=project_data.get("user_id"),
                         depth_level=project_data.get("depth_level", "comprehensive"),
                         scope=project_data.get("scope"),
                     )

@@ -50,31 +50,7 @@ Central entity representing a research investigation:
 - timestamps: created_at, updated_at, deleted_at (from BaseModel)
 ```
 
-#### 2. AgentTask
-Individual tasks assigned to AI agents:
-```python
-- id: UUID (primary key)
-- project_id: UUID (foreign key to research_projects.id) (indexed)
-- agent_type: String(100) (indexed) (e.g., literature_review, synthesis)
-- status: Enum (pending, queued, in_progress, completed, failed, cancelled, retrying) (indexed)
-- input_data: JSON (input data for the agent)
-- output_data: JSON (output data from the agent)
-- error_message: Text (error message if task failed)
-- retry_count: Integer (number of retry attempts)
-- started_at: DateTime (timezone aware) (indexed) (when task execution started)
-- completed_at: DateTime (timezone aware) (when task execution finished)
-- execution_time_ms: Integer (execution time in milliseconds)
-- priority: Integer (task priority, higher = more important)
-- depends_on: JSON (list of task IDs this task depends on)
-- organization_id: UUID (tenant organization boundary identifier) (indexed)
-- timestamps: created_at, updated_at, deleted_at (from BaseModel)
-```
-
-**Relationships:**
-- project: Many-to-One with ResearchProject
-- Supports cascade deletion when project is deleted
-
-#### 3. ResearchResult
+#### 2. ResearchResult
 Findings and outputs from research activities:
 ```python
 - id: UUID (primary key)
@@ -91,7 +67,7 @@ Findings and outputs from research activities:
 - project: Many-to-One with ResearchProject
 - Supports cascade deletion when project is deleted
 
-#### 4. User
+#### 3. User
 System users with authentication:
 ```python
 - id: UUID (primary key)
@@ -118,7 +94,7 @@ System users with authentication:
 - audit_logs: One-to-Many with AuditLog
 - oauth_accounts: One-to-Many with OAuthAccount
 
-#### 5. WorkflowCheckpoint
+#### 4. WorkflowCheckpoint
 State snapshots for workflow recovery:
 ```python
 - id: UUID (primary key)
@@ -142,7 +118,7 @@ State snapshots for workflow recovery:
 - idx_checkpoint_project_phase: (project_id, phase)
 - idx_checkpoint_recoverable: (is_recoverable, workflow_id)
 
-#### 6. GeneratedReport
+#### 5. GeneratedReport
 Generated research reports:
 ```python
 - id: UUID (primary key)
@@ -166,7 +142,7 @@ Per-format artifacts (with `format_type: String(20)` and content stored in `cont
 **Relationships:**
 - project: Many-to-One with ResearchProject
 
-#### 7. APIKey
+#### 6. APIKey
 Secure API key management:
 ```python
 - id: UUID (primary key)
@@ -186,12 +162,11 @@ Secure API key management:
 ```mermaid
 graph TD
     User -->|1:N| APIKey
-    ResearchProject -->|1:N| AgentTask
     ResearchProject -->|1:N| ResearchResult
     ResearchProject -->|1:N| WorkflowCheckpoint
 ```
 
-Note: `ResearchProject.user_id` is a plain string identifier, so there is no database-level foreign key from `User` to `ResearchProject`. `AgentTask` records intra-project ordering via a `depends_on` JSON list of task IDs (not an association table), and `ResearchResult` links only to `ResearchProject` (no `AgentTask` foreign key).
+Note: `ResearchProject.user_id` is a plain string identifier, so there is no database-level foreign key from `User` to `ResearchProject`. `ResearchResult` links only to `ResearchProject`. Run and task state lives in the durable lifecycle tables (`agent_runs`, `agent_run_tasks`, `agent_task_attempts`).
 
 ## Repository Layer
 
@@ -224,16 +199,6 @@ Each domain entity has a specialized repository with domain-specific operations:
 - get_with_results(project_id)
 - search_projects(query, domains, status)
 - get_statistics(project_id)
-```
-
-#### TaskRepository
-```python
-- get_pending_tasks(agent_type, limit)
-- get_by_project(project_id, agent_type, status)
-- get_dependencies(task_id)
-- update_task_status(task_id, status, output_data, error)
-- mark_for_retry(task_id)
-- get_task_metrics(project_id)
 ```
 
 #### ResultRepository

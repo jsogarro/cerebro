@@ -86,6 +86,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting Research Platform API", environment=settings.ENVIRONMENT)
 
     async with AsyncExitStack() as resources:
+        from src.middleware.auth_middleware import close_jwt_service
+
+        resources.push_async_callback(
+            _close_lifespan_resource, "jwt_service", close_jwt_service
+        )
         masr_runtime = await MASRRuntime.create(settings)
         resources.push_async_callback(
             _close_lifespan_resource,
@@ -136,7 +141,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # that a ``Base.metadata.create_all`` path gets ORM enforcement
             # only.
             if "sqlite" in settings.DATABASE_URL:
-                from src.models.db.agent_task import AgentTask
                 from src.models.db.base import Base
                 from src.models.db.research_project import ResearchProject as DBProject
                 from src.models.db.research_result import ResearchResult
@@ -155,7 +159,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     for t in [
                         DBProject,
                         ResearchResult,
-                        AgentTask,
                         WorkflowCheckpoint,
                         AgentRun,
                         AgentRunTask,
