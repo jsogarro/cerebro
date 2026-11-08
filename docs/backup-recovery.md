@@ -245,7 +245,6 @@ class DatabaseBackupManager:
             critical_tables = [
                 'research_projects',
                 'users',
-                'agent_tasks',
                 'research_results'
             ]
             

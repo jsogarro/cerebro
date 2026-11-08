@@ -10,6 +10,7 @@ import redis.asyncio as redis
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
@@ -30,7 +31,7 @@ from src.auth.password_service import (
     PasswordTokenStoreUnavailableError,
 )
 from src.core.config import settings
-from src.middleware.auth_middleware import get_current_user
+from src.middleware.auth_middleware import get_current_user, get_jwt_service
 from src.models.db.session import get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
@@ -45,17 +46,6 @@ security = HTTPBearer()
 
 
 # Dependencies
-async def get_jwt_service() -> JWTService:
-    """Get JWT service instance."""
-    # In production, use Redis connection from pool
-    redis_client = await redis.from_url(settings.REDIS_URL)
-    return JWTService(
-        redis_client=redis_client,
-        private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-        public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-    )
-
-
 async def get_password_service() -> PasswordService:
     """Get password service instance."""
     redis_client = await redis.from_url(settings.REDIS_URL)
@@ -163,7 +153,16 @@ async def register(
         # delivery integration; this route does not claim that an email was
         # sent because Cerebro does not provide an email provider.
         db.add(user)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            # The pre-checks above skip soft-deleted rows and race with
+            # concurrent registrations; the unique indexes are the authority.
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email or username already registered",
+            ) from exc
         verification_token = password_service.generate_verification_token()
         try:
             await password_service.store_verification_token(
@@ -281,13 +280,25 @@ async def login(
 async def refresh_tokens(
     request: RefreshRequest,
     jwt_service: JWTService = Depends(get_jwt_service),
+    db: AsyncSession = Depends(get_session),
 ) -> TokenPair:
     """
     Refresh authentication tokens.
 
-    Uses a valid refresh token to generate new access and refresh tokens.
+    Uses a valid refresh token to generate new access and refresh tokens. The
+    token's user must still exist and be active.
     """
     try:
+        refresh_payload = await jwt_service.validate_token(
+            request.refresh_token, token_type="refresh"
+        )
+        user = await UserRepository(db).get(refresh_payload.sub)
+        if user is None or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token",
+            )
+
         # Refresh tokens
         new_tokens = await jwt_service.refresh_tokens(
             refresh_token=request.refresh_token, device_id=request.device_id
@@ -296,6 +307,8 @@ async def refresh_tokens(
         logger.info("Tokens refreshed successfully")
         return new_tokens
 
+    except HTTPException:
+        raise
     except JWTServiceUnavailableError as e:
         logger.warning("Token refresh service unavailable", error=str(e))
         raise HTTPException(
@@ -393,6 +406,7 @@ async def reset_password(
     request: PasswordResetConfirm,
     db: AsyncSession = Depends(get_session),
     password_service: PasswordService = Depends(get_password_service),
+    jwt_service: JWTService = Depends(get_jwt_service),
 ) -> dict[str, str]:
     """
     Reset password with token.
@@ -459,6 +473,8 @@ async def reset_password(
         await password_service.add_to_password_history(user_id, user.hashed_password)
 
         await db.commit()
+        # A reset is account recovery: every existing session must end.
+        await jwt_service.revoke_all_user_tokens(str(user.id))
 
         logger.info("Password reset successfully", user_id=user_id)
 
@@ -471,6 +487,7 @@ async def change_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
     password_service: PasswordService = Depends(get_password_service),
+    jwt_service: JWTService = Depends(get_jwt_service),
 ) -> dict[str, str]:
     """
     Change password for authenticated user.
@@ -525,6 +542,7 @@ async def change_password(
         )
 
         await db.commit()
+        await jwt_service.revoke_all_user_tokens(user_id)
 
         logger.info("Password changed successfully", user_id=user_id)
 
@@ -623,8 +641,9 @@ async def revoke_session(
             # Extract token ID from key and revoke
             key = session.get("key", "")
             if key.startswith("refresh:token:"):
-                _jti = key.replace("refresh:token:", "")
-                # Would need to revoke associated tokens
+                await jwt_service.revoke_refresh_session(
+                    key.removeprefix("refresh:token:")
+                )
                 logger.info(
                     "Session revoked", user_id=str(current_user.id), device_id=device_id
                 )

@@ -5,7 +5,6 @@ This package contains all SQLAlchemy ORM models for the
 Multi-Agent Research Platform.
 """
 
-from src.models.db.agent_task import AgentTask
 from src.models.db.append_only import AppendOnlyViolationError
 from src.models.db.artifact import AgentArtifact
 from src.models.db.audit_log import AuditEventType, AuditLog, AuditSeverity
@@ -13,6 +12,14 @@ from src.models.db.base import Base, BaseModel
 from src.models.db.capability import AgentCapabilityApproval, AgentCapabilityGrant
 from src.models.db.claim_support import AgentClaimSupport
 from src.models.db.evidence import AgentEvidence
+from src.models.db.experiment import (
+    Experiment,
+    ExperimentAnalysis,
+    ExperimentAssignment,
+    ExperimentResult,
+    ExperimentVariant,
+)
+from src.models.db.generated_report import GeneratedReport, ReportFormat
 from src.models.db.oauth_account import OAuthAccount, OAuthProvider
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
@@ -44,7 +51,6 @@ __all__ = [
     "AgentRunEvent",
     "AgentRunEventOutbox",
     "AgentRunTask",
-    "AgentTask",
     "AgentTaskAttempt",
     "AgentToolInvocation",
     "AlertSeverity",
@@ -57,8 +63,15 @@ __all__ = [
     "Base",
     "BaseModel",
     "EventDeliveryStatus",
+    "Experiment",
+    "ExperimentAnalysis",
+    "ExperimentAssignment",
+    "ExperimentResult",
+    "ExperimentVariant",
+    "GeneratedReport",
     "OAuthAccount",
     "OAuthProvider",
+    "ReportFormat",
     "ResearchProject",
     "ResearchResult",
     "SecurityAlert",
