@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from src.api.routes import agent_api
+from src.middleware.tenant_context import TenantContext
 from src.models.agent_api_models import (
     AgentCapability,
     AgentExecutionRequest,
@@ -17,6 +18,8 @@ from src.models.agent_api_models import (
     ChainOfAgentsResponse,
     MixtureOfAgentsResponse,
 )
+
+_TENANT = TenantContext(user_id="user-1", organization_id="tenant-1")
 
 
 class _AgentService:
@@ -136,6 +139,7 @@ async def test_execute_and_convenience_routes_fail_closed_without_authority():
             AgentExecutionRequest(query="Characterize direct execution"),
             background_tasks=None,
             execution_service=service,
+            tenant_context=_TENANT,
         )
     with pytest.raises(HTTPException) as literature_exc:
         await agent_api.literature_search(
@@ -145,6 +149,7 @@ async def test_execute_and_convenience_routes_fail_closed_without_authority():
             authority_id=None,
             authority_version=None,
             execution_service=service,
+            tenant_context=_TENANT,
         )
     with pytest.raises(HTTPException) as citations_exc:
         await agent_api.format_citations(
@@ -153,6 +158,7 @@ async def test_execute_and_convenience_routes_fail_closed_without_authority():
             authority_id=None,
             authority_version=None,
             execution_service=service,
+            tenant_context=_TENANT,
         )
 
     for exc in (direct_exc, literature_exc, citations_exc):
@@ -168,6 +174,7 @@ _CONVENIENCE_CALLS_WITH_AUTHORITY = {
         authority_id="authority-1",
         authority_version="1",
         execution_service=service,
+        tenant_context=_TENANT,
     ),
     "format_citations": lambda service: agent_api.format_citations(
         sources=["Source 1", "Source 2"],
@@ -175,6 +182,7 @@ _CONVENIENCE_CALLS_WITH_AUTHORITY = {
         authority_id="authority-1",
         authority_version="1",
         execution_service=service,
+        tenant_context=_TENANT,
     ),
     "synthesize_findings": lambda service: agent_api.synthesize_findings(
         findings=[
@@ -185,6 +193,7 @@ _CONVENIENCE_CALLS_WITH_AUTHORITY = {
         authority_id="authority-1",
         authority_version="1",
         execution_service=service,
+        tenant_context=_TENANT,
     ),
     "literature_analysis_workflow": lambda service: (
         agent_api.literature_analysis_workflow(
@@ -193,6 +202,7 @@ _CONVENIENCE_CALLS_WITH_AUTHORITY = {
             authority_id="authority-1",
             authority_version="1",
             execution_service=service,
+            tenant_context=_TENANT,
         )
     ),
     "comprehensive_research_workflow": lambda service: (
@@ -202,6 +212,7 @@ _CONVENIENCE_CALLS_WITH_AUTHORITY = {
             authority_id="authority-1",
             authority_version="1",
             execution_service=service,
+            tenant_context=_TENANT,
         )
     ),
 }
@@ -251,6 +262,7 @@ async def test_synthesis_combine_fails_closed_without_authority():
             authority_id=None,
             authority_version=None,
             execution_service=service,
+            tenant_context=_TENANT,
         )
 
     assert exc_info.value.detail == {"code": "EXECUTION_AUTHORITY_REQUIRED"}
@@ -271,6 +283,7 @@ async def test_chain_mixture_and_workflows_fail_closed_without_authority():
             authority_id=None,
             authority_version=None,
             execution_service=service,
+            tenant_context=_TENANT,
         )
     with pytest.raises(HTTPException) as mixture_exc:
         await agent_api.comprehensive_research_workflow(
@@ -279,6 +292,7 @@ async def test_chain_mixture_and_workflows_fail_closed_without_authority():
             authority_id=None,
             authority_version=None,
             execution_service=service,
+            tenant_context=_TENANT,
         )
 
     for exc in (workflow_exc, mixture_exc):
