@@ -11,7 +11,6 @@ from structlog import get_logger
 from src.models.report import Report, ReportFormat, ReportOutput
 from src.services.exporters import (
     DOCXExporter,
-    DOCXExportError,
     LaTeXExporter,
     LaTeXExportError,
     PDFExporter,
@@ -47,26 +46,14 @@ class ReportOutputGenerator:
         self, report: Report, formats: list[ReportFormat]
     ) -> dict[ReportFormat, ReportOutput]:
         """Generate report outputs in the requested formats."""
-        outputs = {}
-
+        # A failed format fails the request: a report must not read "completed"
+        # with fewer formats than were asked for.
         if self.settings.parallel_generation and len(formats) > 1:
-            tasks = [self.generate_single_format(report, fmt) for fmt in formats]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for fmt, result in zip(formats, results, strict=True):
-                if isinstance(result, Exception):
-                    logger.error(f"Failed to generate {fmt}: {result}")
-                elif isinstance(result, ReportOutput):
-                    outputs[fmt] = result
-        else:
-            for fmt in formats:
-                try:
-                    output = await self.generate_single_format(report, fmt)
-                    outputs[fmt] = output
-                except Exception as e:
-                    logger.error(f"Failed to generate {fmt}: {e}")
-
-        return outputs
+            results = await asyncio.gather(
+                *(self.generate_single_format(report, fmt) for fmt in formats)
+            )
+            return dict(zip(formats, results, strict=True))
+        return {fmt: await self.generate_single_format(report, fmt) for fmt in formats}
 
     async def generate_single_format(
         self, report: Report, format: ReportFormat
@@ -151,76 +138,23 @@ class ReportOutputGenerator:
         )
 
     async def generate_pdf(self, report: Report) -> ReportOutput:
-        """Generate PDF report output."""
-        if self.settings.enable_pdf_generation:
-            try:
-                html_output = await self.generate_html(report)
-                if isinstance(html_output.content, str):
-                    return self._get_pdf_exporter().export_to_pdf(
-                        html_output.content, report
-                    )
-            except PDFExportError as e:
-                logger.warning(f"PDF export unavailable, using legacy placeholder: {e}")
-
-        pdf_content = f"PDF version of: {report.title}".encode()
-        return ReportOutput(
-            format=ReportFormat.PDF,
-            content=pdf_content,
-            file_path=None,
-            file_size=len(pdf_content),
-            mime_type=self.format_config.get_mime_type(ReportFormat.PDF),
-            encoding="binary",
-        )
+        """Generate PDF report output; raises PDFExportError when unavailable."""
+        if not self.settings.enable_pdf_generation:
+            raise PDFExportError("PDF generation is disabled")
+        html_output = await self.generate_html(report)
+        if not isinstance(html_output.content, str):
+            raise PDFExportError("HTML output was not text; cannot render PDF")
+        return self._get_pdf_exporter().export_to_pdf(html_output.content, report)
 
     async def generate_latex(self, report: Report) -> ReportOutput:
-        """Generate LaTeX report output."""
-        if self.settings.enable_latex_generation:
-            try:
-                return self._get_latex_exporter().export_to_latex(report)
-            except LaTeXExportError as e:
-                logger.warning(
-                    f"LaTeX export unavailable, using legacy placeholder: {e}"
-                )
-
-        latex_content = f"""\\documentclass{{article}}
-\\title{{{report.title}}}
-\\author{{Research Platform}}
-\\date{{\\today}}
-
-\\begin{{document}}
-\\maketitle
-
-\\section{{Introduction}}
-{report.query}
-
-\\end{{document}}
-"""
-
-        return ReportOutput(
-            format=ReportFormat.LATEX,
-            content=latex_content,
-            file_path=None,
-            file_size=len(latex_content.encode("utf-8")),
-            mime_type=self.format_config.get_mime_type(ReportFormat.LATEX),
-            encoding="utf-8",
-        )
+        """Generate LaTeX report output; raises LaTeXExportError when unavailable."""
+        if not self.settings.enable_latex_generation:
+            raise LaTeXExportError("LaTeX generation is disabled")
+        return self._get_latex_exporter().export_to_latex(report)
 
     async def generate_docx(self, report: Report) -> ReportOutput:
-        """Generate DOCX report output."""
-        try:
-            return self._get_docx_exporter().export_to_docx(report)
-        except DOCXExportError as e:
-            logger.warning(f"DOCX export unavailable, using legacy placeholder: {e}")
-
-        docx_content = b"DOCX placeholder content"
-        return ReportOutput(
-            format=ReportFormat.DOCX,
-            content=docx_content,
-            file_path=None,
-            file_size=len(docx_content),
-            mime_type=self.format_config.get_mime_type(ReportFormat.DOCX),
-            encoding="binary",
-        )
+        """Generate DOCX report output; raises DOCXExportError when unavailable."""
+        return self._get_docx_exporter().export_to_docx(report)
 
     def generate_basic_html(self, report: Report) -> str:
         """Generate basic HTML without templates."""
