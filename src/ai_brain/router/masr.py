@@ -364,29 +364,178 @@ class MASRouter:
             # so no context mutation is needed here.
 
             try:
-                await self._routing_circuit_breaker.call(lambda: None)
 
-                # Check cache first if enabled. The strategy and constraints are
-                # part of the cache identity — the same query routes differently
-                # under a different strategy or cost/quality constraints.
-                cached_decision = (
-                    None
-                    if self.adaptive_routing_enabled or effective_policy.fixture_mode
-                    else self.cache_manager.check_cache(
-                        query, context, strategy, constraints
+                async def _route() -> RoutingDecision:
+                    # Check cache first if enabled. The strategy and constraints are
+                    # part of the cache identity — the same query routes differently
+                    # under a different strategy or cost/quality constraints.
+                    cached_decision = (
+                        None
+                        if self.adaptive_routing_enabled
+                        or effective_policy.fixture_mode
+                        else self.cache_manager.check_cache(
+                            query, context, strategy, constraints
+                        )
                     )
-                )
-                if cached_decision:
-                    logger.info("routing_cache_hit", query_id=query_id)
-                    await self._routing_circuit_breaker._on_success()
+                    if cached_decision:
+                        logger.info("routing_cache_hit", query_id=query_id)
+                        if trace is not None:
+                            try:
+                                trace.update(
+                                    metadata={
+                                        **initial_trace_metadata,
+                                        "cache_hit": True,
+                                        "collaboration_mode": cached_decision.collaboration_mode.value,
+                                        "worker_count": cached_decision.agent_allocation.worker_count,
+                                    }
+                                )
+                            except Exception as trace_err:
+                                logger.debug(
+                                    "trace_update_failed",
+                                    error=str(trace_err),
+                                    query_id=query_id,
+                                )
+                        return cached_decision
+
+                    # Step 1: Analyze query complexity
+                    complexity_analysis = await self.complexity_analyzer.analyze(
+                        query, context
+                    )
+
+                    # Step 2: Optimize model selection.
+                    # ``strategy`` may arrive as a bare string when the caller used a
+                    # Pydantic model with ``use_enum_values=True`` (e.g. RoutingRequest),
+                    # so normalize to a RoutingStrategy member before it is stored on the
+                    # decision and used for ``.value`` lookups downstream.
+                    if strategy is not None:
+                        routing_strategy = RoutingStrategy(strategy)
+                    else:
+                        routing_strategy = self._select_routing_strategy(
+                            complexity_analysis, context
+                        )
+                    optimization_strategy = self._map_to_optimization_strategy(
+                        routing_strategy
+                    )
+
+                    optimization_result = await self.cost_optimizer.optimize(
+                        complexity_analysis, optimization_strategy, constraints
+                    )
+
+                    # Step 3: Determine collaboration mode
+                    collaboration_mode = self._determine_collaboration_mode(
+                        complexity_analysis, optimization_result
+                    )
+
+                    # Step 3.5: Query episodic memory for routing prior (if enabled)
+                    episodic_prior = (
+                        await self._get_episodic_routing_prior(
+                            complexity_analysis, query
+                        )
+                        if effective_policy.memory_routing_allowed
+                        else None
+                    )
+
+                    # Step 3.6: Query adaptive engine for allocation adjustment (if enabled)
+                    adaptive_recommendation = (
+                        await self._get_adaptive_allocation_adjustment(
+                            complexity_analysis, collaboration_mode, episodic_prior
+                        )
+                        if effective_policy.adaptive_routing_allowed
+                        else None
+                    )
+
+                    # Step 4: Allocate agents (with optional memory + adaptive adjustment)
+                    agent_allocation, adaptive_metadata = (
+                        self._allocate_agents_with_attribution(
+                            complexity_analysis,
+                            collaboration_mode,
+                            episodic_prior,
+                            adaptive_recommendation,
+                            routing_strategy=routing_strategy,
+                            adaptive_enabled_override=(
+                                self.adaptive_routing_enabled
+                                and effective_policy.adaptive_routing_allowed
+                            ),
+                            fixture_mode=effective_policy.fixture_mode,
+                        )
+                    )
+
+                    # Step 5: Calculate performance predictions
+                    predictions = self._predict_performance(
+                        complexity_analysis, optimization_result, agent_allocation
+                    )
+
+                    # Step 6: Create routing decision
+                    decision = RoutingDecision(
+                        query_id=query_id,
+                        timestamp=start_time,
+                        complexity_analysis=complexity_analysis,
+                        optimization_result=optimization_result,
+                        routing_strategy=routing_strategy,
+                        collaboration_mode=collaboration_mode,
+                        agent_allocation=agent_allocation,
+                        estimated_cost=predictions["cost"],
+                        estimated_latency_ms=int(predictions["latency"]),
+                        estimated_quality=predictions["quality"],
+                        confidence_score=predictions["confidence"],
+                        fallback_strategy=self._select_fallback_strategy(
+                            complexity_analysis
+                        ),
+                        monitoring_level=self._select_monitoring_level(
+                            complexity_analysis
+                        ),
+                        context_requirements=self._determine_context_requirements(
+                            complexity_analysis, context
+                        ),
+                        memory_allocation=self._allocate_memory(complexity_analysis),
+                        adaptive_metadata=adaptive_metadata,
+                    )
+
+                    # Cache decision
+                    if (
+                        not self.adaptive_routing_enabled
+                        and not effective_policy.fixture_mode
+                    ):
+                        self.cache_manager.cache_decision(
+                            query, context, decision, strategy, constraints
+                        )
+
+                    # Update metrics
+                    self.metrics_collector.update_metrics(decision)
+
+                    # Store in history for learning
+                    self.metrics_collector.add_to_history(decision)
+
+                    # Decisions alone are not outcomes.  Outcome-free learning is
+                    # intentionally quarantined; only record_routing_outcome may
+                    # update the evaluator-gated adaptive state.
+
+                    processing_time = (
+                        datetime.now() - start_time
+                    ).total_seconds() * 1000
+                    logger.info(
+                        f"Routing complete for {query_id}: {decision.collaboration_mode.value} "
+                        f"mode with {decision.agent_allocation.worker_count} agents "
+                        f"(processing: {processing_time:.1f}ms)"
+                    )
+
+                    # Update trace with final routing decision details
                     if trace is not None:
                         try:
                             trace.update(
                                 metadata={
                                     **initial_trace_metadata,
-                                    "cache_hit": True,
-                                    "collaboration_mode": cached_decision.collaboration_mode.value,
-                                    "worker_count": cached_decision.agent_allocation.worker_count,
+                                    "cache_hit": False,
+                                    "complexity_level": complexity_analysis.level.value,
+                                    "complexity_score": complexity_analysis.score,
+                                    "routing_strategy": routing_strategy.value,
+                                    "collaboration_mode": collaboration_mode.value,
+                                    "worker_count": agent_allocation.worker_count,
+                                    "estimated_cost": predictions["cost"],
+                                    "estimated_latency_ms": predictions["latency"],
+                                    "estimated_quality": predictions["quality"],
+                                    "confidence_score": predictions["confidence"],
+                                    "processing_time_ms": processing_time,
                                 }
                             )
                         except Exception as trace_err:
@@ -395,156 +544,14 @@ class MASRouter:
                                 error=str(trace_err),
                                 query_id=query_id,
                             )
-                    return cached_decision
 
-                # Step 1: Analyze query complexity
-                complexity_analysis = await self.complexity_analyzer.analyze(
-                    query, context
-                )
+                    return decision
 
-                # Step 2: Optimize model selection.
-                # ``strategy`` may arrive as a bare string when the caller used a
-                # Pydantic model with ``use_enum_values=True`` (e.g. RoutingRequest),
-                # so normalize to a RoutingStrategy member before it is stored on the
-                # decision and used for ``.value`` lookups downstream.
-                if strategy is not None:
-                    routing_strategy = RoutingStrategy(strategy)
-                else:
-                    routing_strategy = self._select_routing_strategy(
-                        complexity_analysis, context
-                    )
-                optimization_strategy = self._map_to_optimization_strategy(
-                    routing_strategy
-                )
-
-                optimization_result = await self.cost_optimizer.optimize(
-                    complexity_analysis, optimization_strategy, constraints
-                )
-
-                # Step 3: Determine collaboration mode
-                collaboration_mode = self._determine_collaboration_mode(
-                    complexity_analysis, optimization_result
-                )
-
-                # Step 3.5: Query episodic memory for routing prior (if enabled)
-                episodic_prior = (
-                    await self._get_episodic_routing_prior(complexity_analysis, query)
-                    if effective_policy.memory_routing_allowed
-                    else None
-                )
-
-                # Step 3.6: Query adaptive engine for allocation adjustment (if enabled)
-                adaptive_recommendation = (
-                    await self._get_adaptive_allocation_adjustment(
-                        complexity_analysis, collaboration_mode, episodic_prior
-                    )
-                    if effective_policy.adaptive_routing_allowed
-                    else None
-                )
-
-                # Step 4: Allocate agents (with optional memory + adaptive adjustment)
-                agent_allocation, adaptive_metadata = (
-                    self._allocate_agents_with_attribution(
-                        complexity_analysis,
-                        collaboration_mode,
-                        episodic_prior,
-                        adaptive_recommendation,
-                        routing_strategy=routing_strategy,
-                        adaptive_enabled_override=(
-                            self.adaptive_routing_enabled
-                            and effective_policy.adaptive_routing_allowed
-                        ),
-                        fixture_mode=effective_policy.fixture_mode,
-                    )
-                )
-
-                # Step 5: Calculate performance predictions
-                predictions = self._predict_performance(
-                    complexity_analysis, optimization_result, agent_allocation
-                )
-
-                # Step 6: Create routing decision
-                decision = RoutingDecision(
-                    query_id=query_id,
-                    timestamp=start_time,
-                    complexity_analysis=complexity_analysis,
-                    optimization_result=optimization_result,
-                    routing_strategy=routing_strategy,
-                    collaboration_mode=collaboration_mode,
-                    agent_allocation=agent_allocation,
-                    estimated_cost=predictions["cost"],
-                    estimated_latency_ms=int(predictions["latency"]),
-                    estimated_quality=predictions["quality"],
-                    confidence_score=predictions["confidence"],
-                    fallback_strategy=self._select_fallback_strategy(
-                        complexity_analysis
-                    ),
-                    monitoring_level=self._select_monitoring_level(complexity_analysis),
-                    context_requirements=self._determine_context_requirements(
-                        complexity_analysis, context
-                    ),
-                    memory_allocation=self._allocate_memory(complexity_analysis),
-                    adaptive_metadata=adaptive_metadata,
-                )
-
-                # Cache decision
-                if (
-                    not self.adaptive_routing_enabled
-                    and not effective_policy.fixture_mode
-                ):
-                    self.cache_manager.cache_decision(
-                        query, context, decision, strategy, constraints
-                    )
-
-                # Update metrics
-                self.metrics_collector.update_metrics(decision)
-
-                # Store in history for learning
-                self.metrics_collector.add_to_history(decision)
-
-                # Decisions alone are not outcomes.  Outcome-free learning is
-                # intentionally quarantined; only record_routing_outcome may
-                # update the evaluator-gated adaptive state.
-
-                processing_time = (datetime.now() - start_time).total_seconds() * 1000
-                logger.info(
-                    f"Routing complete for {query_id}: {decision.collaboration_mode.value} "
-                    f"mode with {decision.agent_allocation.worker_count} agents "
-                    f"(processing: {processing_time:.1f}ms)"
-                )
-
-                # Update trace with final routing decision details
-                if trace is not None:
-                    try:
-                        trace.update(
-                            metadata={
-                                **initial_trace_metadata,
-                                "cache_hit": False,
-                                "complexity_level": complexity_analysis.level.value,
-                                "complexity_score": complexity_analysis.score,
-                                "routing_strategy": routing_strategy.value,
-                                "collaboration_mode": collaboration_mode.value,
-                                "worker_count": agent_allocation.worker_count,
-                                "estimated_cost": predictions["cost"],
-                                "estimated_latency_ms": predictions["latency"],
-                                "estimated_quality": predictions["quality"],
-                                "confidence_score": predictions["confidence"],
-                                "processing_time_ms": processing_time,
-                            }
-                        )
-                    except Exception as trace_err:
-                        logger.debug(
-                            "trace_update_failed",
-                            error=str(trace_err),
-                            query_id=query_id,
-                        )
-
-                await self._routing_circuit_breaker._on_success()
-                return decision
+                # call() records success/failure and gates OPEN/HALF_OPEN.
+                return await self._routing_circuit_breaker.call(_route)
 
             except Exception as e:
                 logger.error(f"Routing failed for {query_id}: {e}")
-                await self._routing_circuit_breaker._on_failure()
                 # Update trace with error metadata. Exception messages may contain
                 # payloads or PII, so redact before sending to Langfuse (external SaaS).
                 if trace is not None:

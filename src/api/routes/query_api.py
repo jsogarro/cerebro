@@ -149,16 +149,16 @@ class IntelligentQueryResponse(BaseModel):
     routing_decision: dict[str, Any]
     supervisor_type: str
     selected_agents: list[str]
-    estimated_cost: float
-    estimated_quality: float
+    estimated_cost: float | None = None
+    estimated_quality: float | None = None
 
     # Execution results
     results: dict[str, Any]
     quality_scores: dict[str, float]
-    confidence: float
+    confidence: float | None = None
 
     # Performance metrics
-    routing_time_ms: float
+    routing_time_ms: float | None = None
     execution_time_seconds: float
     total_time_seconds: float
 
@@ -239,6 +239,9 @@ async def intelligent_research_query(
             organization_id=tenant_context.organization_id,
         )
 
+        routing_decision = (
+            execution_status.routing_decision if execution_status else None
+        ) or {}
         response = IntelligentQueryResponse(
             execution_id=execution_id,
             query_id=str(project.id),
@@ -249,13 +252,13 @@ async def intelligent_research_query(
             supervisor_type=execution_status.supervisor_type
             if execution_status and execution_status.supervisor_type
             else "research",
-            selected_agents=[],  # Would be populated from routing decision
-            estimated_cost=0.015,  # Would come from MASR
-            estimated_quality=0.85,  # Would come from MASR
+            selected_agents=routing_decision.get("agent_allocation", {}).get(
+                "worker_types", []
+            ),
+            estimated_cost=routing_decision.get("estimated_cost"),
+            estimated_quality=routing_decision.get("estimated_quality"),
             results=execution_status.agent_results if execution_status else {},
             quality_scores=execution_status.quality_scores if execution_status else {},
-            confidence=0.85,  # Would be calculated from execution
-            routing_time_ms=50.0,  # Would be measured
             execution_time_seconds=execution_status.execution_time_seconds
             if execution_status
             else 0.0,
@@ -273,7 +276,8 @@ async def intelligent_research_query(
             supervisor_type=response.supervisor_type,
             estimated_cost=response.estimated_cost,
         )
-        set_llm_request_estimated_cost(response.estimated_cost)
+        if response.estimated_cost is not None:
+            set_llm_request_estimated_cost(response.estimated_cost)
 
         return response
 
@@ -417,9 +421,13 @@ def _recorded_plan_summary(exec_status: Any) -> dict[str, Any] | None:
         "collaboration_mode": decision.collaboration_mode.value,
         "primary_provider": str(decision.provider_model_policy.primary.provider),
         "primary_model": str(decision.provider_model_policy.primary.model),
-        "budget": {
+        # Cost and token ceilings are declared on the plan but nothing counts
+        # spend against them yet, so they are not reported as limits.
+        "declared_budget_unenforced": {
             "max_cost_usd": float(budget.max_cost_usd),
             "max_total_tokens": budget.max_total_tokens,
+        },
+        "budget": {
             "max_parallel_tasks": budget.max_parallel_tasks,
             "max_attempts_per_task": budget.max_attempts_per_task,
             "task_timeout_seconds": budget.task_timeout_seconds,
@@ -529,12 +537,18 @@ async def resume_execution(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     """
     Resume execution from the latest checkpoint for a project.
 
     This endpoint loads the most recent recoverable checkpoint for the project
     and resumes execution from that point. Returns the execution ID if successful.
+
+    Scoped to the caller's tenant: another organization's project is reported
+    as having no recoverable checkpoint, exactly like a project that does not
+    exist, and the resumed execution is owned by the caller's organization so
+    the status and results reads can find it.
     """
     try:
         execution_service = _resolved_research_kernel(execution_service)
@@ -551,6 +565,7 @@ async def resume_execution(
         execution_id = await resume_kernel_execution(
             execution_service,
             project_uuid,
+            organization_id=tenant_context.organization_id,
         )
 
         if not execution_id:
