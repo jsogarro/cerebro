@@ -305,6 +305,8 @@ class TestGeneration:
         """Invalid request should return validation error."""
         # Empty prompt and no messages
         request = ModelRequest(prompt="", max_tokens=100)
+        # Startup slug validation would fetch the live model catalog.
+        openrouter_provider.validate_slugs_on_startup = False
 
         response = await openrouter_provider.generate(request)
 

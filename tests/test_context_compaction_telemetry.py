@@ -20,6 +20,21 @@ from unittest.mock import patch
 import pytest
 from structlog.testing import capture_logs
 
+
+class _OfflineEncoder:
+    """Stands in for cl100k_base, whose first load downloads the BPE file."""
+
+    def encode(self, text: str) -> list[str]:
+        return [text[i : i + 4] for i in range(0, len(text), 4)]
+
+
+@pytest.fixture(autouse=True)
+def offline_encoder(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.core import telemetry
+
+    monkeypatch.setattr(telemetry, "_encoder", _OfflineEncoder())
+
+
 # ---------------------------------------------------------------------------
 # Shared telemetry module
 # ---------------------------------------------------------------------------
