@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from src.api.services.agent_execution_service import AgentExecutionService
 from src.auth.models import TokenPayload
 from src.middleware.auth_middleware import get_jwt_service
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.agent_api_models import (
     AgentType,
 )
@@ -80,6 +81,11 @@ class TestAgentAPI:
             service
         )
         app.dependency_overrides[get_jwt_service] = _TestJWTService
+        # Agent execution resolves authority inside the caller's tenant; the
+        # tenant dependency also opens a DB session these tests do not have.
+        app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+            user_id=AUTH_USER_ID, organization_id=AUTH_ORG_ID
+        )
         try:
             yield TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
         finally:
@@ -88,6 +94,7 @@ class TestAgentAPI:
                 None,
             )
             app.dependency_overrides.pop(get_jwt_service, None)
+            app.dependency_overrides.pop(get_tenant_context, None)
 
     @pytest.fixture
     def mock_agent_execution_service(self) -> Mock:

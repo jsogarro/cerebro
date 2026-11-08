@@ -126,7 +126,6 @@ class Settings(BaseSettings):
     AI_BRAIN_MODE: str = "hybrid"  # hybrid, research_only, brain_only
 
     # MASR (Multi-Agent System Router) Configuration
-    MASR_ENABLED: bool = True
     MASR_DEFAULT_STRATEGY: str = (
         "balanced"  # cost_efficient, quality_focused, speed_first, balanced, adaptive
     )
@@ -200,7 +199,6 @@ class Settings(BaseSettings):
     MODEL_ROUTER_ENABLE_FALLBACK: bool = True
 
     # Multi-Tier Memory Configuration
-    MEMORY_SYSTEM_ENABLED: bool = True
     MEMORY_ENABLE_CROSS_TIER: bool = True
     MEMORY_MAX_RECALL_ITEMS: int = 10
     MEMORY_CONSOLIDATION_INTERVAL: int = 3600  # 1 hour
@@ -270,7 +268,6 @@ class Settings(BaseSettings):
     AGENTS_MAX_RETRIES: int = 3
 
     # Hierarchical Agent Configuration
-    HIERARCHICAL_AGENTS_ENABLED: bool = True
     HIERARCHICAL_MAX_DEPTH: int = 3
     HIERARCHICAL_ENABLE_AUTO_SCALING: bool = True
     HIERARCHICAL_SCALE_UP_THRESHOLD: float = 0.8
@@ -281,13 +278,11 @@ class Settings(BaseSettings):
     MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT: int = 4000
 
     # TalkHier Communication Configuration
-    TALKHIER_ENABLED: bool = True
     TALKHIER_MAX_REFINEMENT_ROUNDS: int = 3
     TALKHIER_CONSENSUS_THRESHOLD: float = 0.95
     TALKHIER_ENABLE_HIERARCHICAL_REFINEMENT: bool = True
 
     # Self-Improvement Configuration
-    SELF_IMPROVEMENT_ENABLED: bool = True
     SELF_IMPROVEMENT_REFLECTION_FREQUENCY: int = 100  # Every N queries
     SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD: float = 0.8
     SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION: bool = True
@@ -420,7 +415,6 @@ class Settings(BaseSettings):
         return {
             # MASR Configuration
             "masr": {
-                "enabled": self.MASR_ENABLED,
                 "default_strategy": self.MASR_DEFAULT_STRATEGY,
                 "enable_caching": self.MASR_ENABLE_CACHING,
                 "adaptive_strategy_enabled": self.MASR_ENABLE_ADAPTIVE,
@@ -463,7 +457,6 @@ class Settings(BaseSettings):
             },
             # Memory System Configuration
             "memory": {
-                "enabled": self.MEMORY_SYSTEM_ENABLED,
                 "enable_cross_tier": self.MEMORY_ENABLE_CROSS_TIER,
                 "max_recall_items": self.MEMORY_MAX_RECALL_ITEMS,
                 "consolidation_interval": self.MEMORY_CONSOLIDATION_INTERVAL,
@@ -505,14 +498,12 @@ class Settings(BaseSettings):
                 "default_timeout": self.AGENTS_DEFAULT_TIMEOUT,
                 "max_retries": self.AGENTS_MAX_RETRIES,
                 "hierarchical": {
-                    "enabled": self.HIERARCHICAL_AGENTS_ENABLED,
                     "max_depth": self.HIERARCHICAL_MAX_DEPTH,
                     "enable_auto_scaling": self.HIERARCHICAL_ENABLE_AUTO_SCALING,
                     "scale_up_threshold": self.HIERARCHICAL_SCALE_UP_THRESHOLD,
                     "scale_down_threshold": self.HIERARCHICAL_SCALE_DOWN_THRESHOLD,
                 },
                 "communication": {
-                    "talkhier_enabled": self.TALKHIER_ENABLED,
                     "max_refinement_rounds": self.TALKHIER_MAX_REFINEMENT_ROUNDS,
                     "consensus_threshold": self.TALKHIER_CONSENSUS_THRESHOLD,
                     "enable_hierarchical_refinement": self.TALKHIER_ENABLE_HIERARCHICAL_REFINEMENT,
@@ -521,7 +512,6 @@ class Settings(BaseSettings):
             # Learning and Improvement
             "learning": {
                 "self_improvement": {
-                    "enabled": self.SELF_IMPROVEMENT_ENABLED,
                     "reflection_frequency": self.SELF_IMPROVEMENT_REFLECTION_FREQUENCY,
                     "performance_threshold": self.SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD,
                     "enable_prompt_optimization": self.SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION,
