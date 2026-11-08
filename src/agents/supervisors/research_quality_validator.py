@@ -12,7 +12,7 @@ from ..communication.talkhier_message import (
     TalkHierContent,
     TalkHierMessage,
 )
-from .base_supervisor import SupervisionState
+from .base_supervisor import SupervisionState, parse_verdict
 
 logger = get_logger()
 
@@ -489,25 +489,13 @@ If a paper exists but with slightly different details, mark exists=true and prov
 
             verification_result = await verification_agent.execute(verification_task)
             report_text = verification_result.output.get("content", "")
-            verdict_line = next(
-                (
-                    line
-                    for line in report_text.split("\n")
-                    if line.startswith("VERDICT:")
-                ),
-                "",
-            )
-            verdict = "pass"
-            if "REVISE" in verdict_line.upper():
-                verdict = "revise"
-            elif "PASS" in verdict_line.upper():
-                verdict = "pass"
+            verdict = parse_verdict(report_text)
 
             return {"verdict": verdict, "report": report_text}
 
         except Exception as e:
             logger.error("research_verification_failed", error=str(e))
-            return {"verdict": "pass", "report": f"Verification error: {e!s}"}
+            return {"verdict": "revise", "report": f"Verification error: {e!s}"}
 
     async def get_research_quality_assessment(
         self,

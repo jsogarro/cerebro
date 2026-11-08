@@ -255,9 +255,11 @@ class TestRecordedPlanExposure:
             "collaboration_mode": "hierarchical",
             "primary_provider": "gemini",
             "primary_model": "gemini-2.5-pro",
-            "budget": {
+            "declared_budget_unenforced": {
                 "max_cost_usd": 1.0,
                 "max_total_tokens": 1000,
+            },
+            "budget": {
                 "max_parallel_tasks": 2,
                 "max_attempts_per_task": 1,
                 "task_timeout_seconds": 30,

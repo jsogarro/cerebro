@@ -11,7 +11,7 @@ from src.api.services.supervisor_result_aggregator import ResultAggregator
 def test_result_aggregator_quality_score_for_empty_result() -> None:
     aggregator = ResultAggregator()
 
-    assert aggregator.calculate_quality_score(None, 0.8) == 0.0
+    assert aggregator.calculate_quality_score(None, 0.8) is None
 
 
 def test_result_aggregator_consistency_matches_legacy_formula() -> None:
