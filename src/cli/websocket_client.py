@@ -10,6 +10,7 @@ import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import websockets
@@ -69,6 +70,14 @@ class CLIWebSocketClient:
         if self.verbose:
             self.console.print(f"[dim]WS: {message}[/dim]")
 
+    def _ws_url(self, endpoint: str, *, with_token: bool = True) -> str:
+        """Build the WebSocket URL, merging the token into any existing query."""
+        parts = urlsplit(f"{self.base_url.rstrip('/')}{endpoint}")
+        query = parse_qsl(parts.query, keep_blank_values=True)
+        if with_token and self.token:
+            query.append(("token", self.token))
+        return urlunsplit(parts._replace(query=urlencode(query)))
+
     async def connect(self, endpoint: str) -> bool:
         """
         Connect to WebSocket endpoint.
@@ -81,13 +90,8 @@ class CLIWebSocketClient:
         """
         try:
             # Build WebSocket URL
-            ws_url = f"{self.base_url.rstrip('/')}{endpoint}"
-
-            # Add authentication if available
-            if self.token:
-                ws_url += f"?token={self.token}"
-
-            self._log(f"Connecting to {ws_url}")
+            ws_url = self._ws_url(endpoint)
+            self._log(f"Connecting to {self._ws_url(endpoint, with_token=False)}")
 
             # Add CLI user agent
             headers = {"User-Agent": "research-cli/0.1.0"}
@@ -395,10 +399,7 @@ class CLIWebSocketClient:
         """Test WebSocket connection to the server."""
         try:
             endpoint = "/ws/health"
-            ws_url = f"{self.base_url.rstrip('/')}{endpoint}"
-
-            if self.token:
-                ws_url += f"?token={self.token}"
+            ws_url = self._ws_url(endpoint)
 
             async with websockets.connect(ws_url, ping_interval=None) as websocket:
                 # Send a test message

@@ -88,7 +88,6 @@ class AgentExecutionService:
 
         # Execution tracking
         self.active_executions: dict[str, dict[str, Any]] = {}
-        self.execution_history: dict[str, AgentExecutionResponse] = {}
 
         # Performance tracking per agent type
         self.agent_metrics: dict[AgentType, dict[str, Any]] = {
@@ -208,9 +207,6 @@ class AgentExecutionService:
             await self._update_agent_metrics(
                 agent_type, response, success=agent_result.status == "success"
             )
-
-            # Store in history
-            self.execution_history[execution_id] = response
 
             logger.info(
                 f"Single agent execution completed: {agent_type.value} in {execution_time:.2f}s"

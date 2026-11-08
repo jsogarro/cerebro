@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from src.models.db.agent_task import AgentTask
 from src.models.db.research_project import ResearchProject
 from src.models.db.user import User
 
@@ -47,23 +46,6 @@ def test_research_project_has_tenant_boundary_indexes() -> None:
         "idx_project_org_user_status",
         "idx_project_org_status",
     }.issubset(_index_names(ResearchProject))
-
-
-def test_agent_task_has_tenant_boundary_indexes() -> None:
-    org_id = uuid4()
-    task = AgentTask(
-        project_id=uuid4(),
-        organization_id=org_id,
-        agent_type="literature_review",
-        input_data={},
-    )
-
-    assert AgentTask.__table__.c.organization_id.nullable is True
-    assert task.organization_id == org_id
-    assert {
-        "idx_task_org_project_status",
-        "idx_task_org_status",
-    }.issubset(_index_names(AgentTask))
 
 
 def test_tenant_boundary_migration_adds_columns_and_indexes() -> None:

@@ -106,8 +106,8 @@ class TestResearchProjectE2E:
                 f"/api/v1/research/projects/{project_id}/cancel",
                 headers=headers,
             )
-            # 200/204 = cancelled, 404 = already done/cancelled, both OK
-            assert cancel_response.status_code in [200, 204, 404]
+            # The project was created above in this tenant, so it must exist
+            assert cancel_response.status_code == 204
 
     async def test_create_project_invalid_payload(self):
         """Project creation fails with invalid payload."""
@@ -123,11 +123,10 @@ class TestResearchProjectE2E:
                     # query is required
                 },
             )
-            # 400/422 = validation error, 403 = tenant claim issue (known)
-            assert response.status_code in [400, 403, 422]
+            assert response.status_code in [400, 422]
 
     async def test_get_nonexistent_project(self):
-        """Getting nonexistent project returns 404 (or 403 due to tenant claim issue)."""
+        """Getting a nonexistent project returns 404."""
         token, _ = await register_and_login()
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -137,8 +136,7 @@ class TestResearchProjectE2E:
                 f"/api/v1/research/projects/{fake_id}",
                 headers=headers,
             )
-            # 404 = not found, 403 = tenant claim issue (known)
-            assert response.status_code in [403, 404]
+            assert response.status_code == 404
 
     async def test_unauthenticated_project_access(self):
         """Accessing projects without auth fails."""

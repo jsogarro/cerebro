@@ -62,7 +62,7 @@ def prompt_for_project_details() -> dict[str, Any]:
         default="comprehensive",
     )
 
-    user_id = Prompt.ask("User ID", default="cli-user")
+    user_id = Prompt.ask("User ID (blank = authenticated user)", default="") or None
 
     # Optional scope configuration
     configure_scope = Confirm.ask("Configure research scope?", default=False)
@@ -141,7 +141,6 @@ def load_projects_from_file(file_path: Path) -> list[dict[str, Any]]:
 
         # Set defaults
         project.setdefault("depth_level", "comprehensive")
-        project.setdefault("user_id", "cli-user")
 
     return data
 
