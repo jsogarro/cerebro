@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks
@@ -360,3 +361,42 @@ def assert_report_tables_absent(sync_connection) -> None:
     database_inspector = inspect(sync_connection)
     assert not database_inspector.has_table("generated_reports")
     assert not database_inspector.has_table("report_formats")
+
+
+def test_reports_migration_column_types_and_server_defaults_match_models():
+    """Types and server defaults agree with the ORM as Postgres would build them.
+
+    The SQLite round trip above cannot see this: SQLite reflects every UUID
+    column as NUMERIC and drops length on some types, so the comparison is
+    made on the columns the migration declares, compiled for Postgres.
+    """
+    from types import SimpleNamespace
+
+    from sqlalchemy.dialects import postgresql
+
+    migration = _load_reports_migration()
+    declared: dict[str, dict[str, Any]] = {}
+    migration.op = SimpleNamespace(
+        create_table=lambda name, *items, **_: declared.setdefault(
+            name, {item.name: item for item in items if hasattr(item, "type")}
+        ),
+        create_index=lambda *_, **__: None,
+    )
+    migration.upgrade()
+
+    dialect = postgresql.dialect()
+
+    def shape(column: Any) -> tuple[str, str | None]:
+        default = column.server_default
+        return (
+            column.type.compile(dialect=dialect),
+            None if default is None else str(default.arg.compile(dialect=dialect)),
+        )
+
+    for model in (GeneratedReport, ReportFormat):
+        migration_columns = declared[model.__tablename__]
+        assert set(migration_columns) == {c.name for c in model.__table__.columns}
+        for column in model.__table__.columns:
+            assert shape(migration_columns[column.name]) == shape(column), (
+                f"{model.__tablename__}.{column.name}"
+            )
