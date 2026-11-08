@@ -3,7 +3,9 @@ Pytest configuration and fixtures for Research Platform tests.
 """
 
 import asyncio
+import ipaddress
 import os
+import socket
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
@@ -67,6 +69,53 @@ def install_test_audit_logger() -> Generator[None, None, None]:
             app.state.audit_logger = previous
 
 
+_NETWORK_ALLOWED_MARKERS = {"live_eval", "integration", "e2e"}
+_NETWORK_ALLOWED_DIRS = {"integration", "e2e"}
+
+
+def _is_loopback(host: Any) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+@pytest.fixture(autouse=True)
+def block_external_sockets(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> Generator[list[str], None, None]:
+    """Fail unit tests that open a non-loopback socket.
+
+    Integration/e2e directories and tests marked live_eval/integration/e2e use
+    real services and are exempt. Unix-domain sockets are always allowed.
+    Attempts are also recorded and fail the test at teardown, because code under
+    test often swallows the connect error.
+    """
+    violations: list[str] = []
+    path_parts = set(request.path.parts)
+    if _NETWORK_ALLOWED_DIRS & path_parts or any(
+        request.node.get_closest_marker(m) for m in _NETWORK_ALLOWED_MARKERS
+    ):
+        yield violations
+        return
+    real_connect = socket.socket.connect
+
+    def guarded_connect(self: socket.socket, address: Any) -> None:
+        if isinstance(address, tuple) and not _is_loopback(address[0]):
+            violations.append(
+                f"unit test opened a non-loopback socket to {address[0]!r}; "
+                "mock the call or mark the test live_eval"
+            )
+            raise OSError(violations[-1])
+        return real_connect(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    yield violations
+    assert not violations, violations
+
+
 @pytest.fixture(scope="session")
 def event_loop() -> Generator:
     """Create an instance of the default event loop for the test session."""
@@ -109,14 +158,13 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
     # Register the SQLite-compatible DB models. Other tables (e.g. mfa_settings,
     # which uses a Postgres-only ARRAY column) are intentionally excluded from
     # test schema creation since SQLite cannot compile them.
-    from src.models.db.agent_task import AgentTask
     from src.models.db.research_project import ResearchProject as DBProject
     from src.models.db.research_result import ResearchResult
     from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
     sqlite_compatible_tables = [
         Base.metadata.tables[t.__tablename__]
-        for t in [DBProject, ResearchResult, AgentTask, WorkflowCheckpoint]
+        for t in [DBProject, ResearchResult, WorkflowCheckpoint]
         if t.__tablename__ in Base.metadata.tables
     ]
     if db_session_mod._engine is not None and sqlite_compatible_tables:
@@ -150,7 +198,6 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     # Create tables - import models to register them
-    import src.models.db.agent_task
     import src.models.db.research_project
     import src.models.db.research_result
     import src.models.db.workflow_checkpoint  # noqa: F401

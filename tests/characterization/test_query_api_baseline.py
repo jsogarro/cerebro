@@ -51,12 +51,13 @@ class _QueryService:
             return {"output": "legacy-result"}
         return None
 
-    async def resume_execution(self, project_id):
+    async def resume_execution(self, project_id, *, organization_id=None):
+        self.organizations.append(organization_id)
         return "resumed-1" if project_id == UUID(int=1) else None
 
 
 @pytest.mark.asyncio
-async def test_research_pins_placeholder_metrics_and_ignored_execution_options():
+async def test_research_reports_no_estimates_it_does_not_have_and_ignores_execution_options():
     service = _QueryService()
     request = query_api.IntelligentQueryRequest(
         query="Characterize the current public query response.",
@@ -71,10 +72,10 @@ async def test_research_pins_placeholder_metrics_and_ignored_execution_options()
 
     assert response.status == "running"
     assert response.results == {"research": {"finding": "pinned"}}
-    assert response.estimated_cost == 0.015
-    assert response.estimated_quality == 0.85
-    assert response.confidence == 0.85
-    assert response.routing_time_ms == 50.0
+    assert response.estimated_cost is None
+    assert response.estimated_quality is None
+    assert response.confidence is None
+    assert response.routing_time_ms is None
     assert response.selected_agents == []
     _, context = service.started[0]
     assert context["api_endpoint"] == "intelligent_research_query"
@@ -164,7 +165,7 @@ async def test_execution_status_results_and_resume_pin_legacy_error_details():
 
     status = await query_api.get_execution_status("execution-1", service, TENANT)
     results = await query_api.get_execution_results("execution-1", service, TENANT)
-    resumed = await query_api.resume_execution(str(UUID(int=1)), service)
+    resumed = await query_api.resume_execution(str(UUID(int=1)), service, TENANT)
 
     assert status["status"] == "running"
     assert status["current_phase"] == "masr_routing"
@@ -177,7 +178,7 @@ async def test_execution_status_results_and_resume_pin_legacy_error_details():
     }
 
     with pytest.raises(HTTPException, match="Invalid project_id format") as invalid:
-        await query_api.resume_execution("not-a-uuid", service)
+        await query_api.resume_execution("not-a-uuid", service, TENANT)
     assert invalid.value.status_code == 400
 
     with pytest.raises(HTTPException, match="not found") as missing:

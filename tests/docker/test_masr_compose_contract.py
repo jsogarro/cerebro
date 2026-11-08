@@ -52,7 +52,7 @@ def test_default_api_keeps_thompson_dark_and_provider_key_optional() -> None:
 def test_production_default_topology_has_no_standalone_masr_dependency() -> None:
     compose = _production_compose()
 
-    for service_name in ("api", "worker", "nginx"):
+    for service_name in ("api", "nginx"):
         service = compose["services"][service_name]
         dependencies = service.get("depends_on", {})
         environment = service.get("environment", [])

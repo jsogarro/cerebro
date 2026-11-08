@@ -78,9 +78,16 @@ spec:
         volumeMounts:
         - name: tmp
           mountPath: /tmp
+        - name: jwt-keys
+          mountPath: /secrets
+          readOnly: true
       volumes:
       - name: tmp
         emptyDir: {}
+      - name: jwt-keys
+        secret:
+          secretName: research-platform-jwt-keys
+          defaultMode: 0400
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

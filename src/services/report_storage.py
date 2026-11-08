@@ -396,6 +396,7 @@ class ReportStorageService:
         status_filter: str | None = None,
         *,
         organization_id: UUID | str,
+        offset: int = 0,
     ) -> list[GeneratedReport]:
         """List reports for a user."""
         return await self.report_repo.get_by_user_id(
@@ -403,6 +404,19 @@ class ReportStorageService:
             limit,
             status_filter,
             organization_id=organization_id,
+            offset=offset,
+        )
+
+    async def count_user_reports(
+        self,
+        user_id: UUID,
+        status_filter: str | None = None,
+        *,
+        organization_id: UUID | str,
+    ) -> int:
+        """Count the reports list_user_reports pages through."""
+        return await self.report_repo.count_by_user_id(
+            user_id, status_filter, organization_id=organization_id
         )
 
     async def list_project_reports(
