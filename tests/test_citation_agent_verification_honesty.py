@@ -16,7 +16,14 @@ FAKE_DOI = {**NO_DOI, "doi": "10.9999/does-not-exist"}
 
 @pytest.fixture
 def agent() -> CitationAgent:
-    return CitationAgent()
+    agent = CitationAgent()
+
+    async def no_llm(*args, **kwargs):
+        raise RuntimeError("no LLM in unit tests")
+
+    # Force the deterministic fallback instead of a live provider call.
+    agent._generate_structured_with_routing = no_llm
+    return agent
 
 
 @pytest.mark.asyncio
