@@ -40,8 +40,13 @@ class EvaluationResult(ContractModel):
 
     @model_validator(mode="after")
     def validate_error_status(self) -> Self:
-        if self.status is EvaluationStatus.ERROR and self.error_code is None:
-            raise ValueError("Evaluator errors require error_code")
+        # Neither outcome is a verdict; both must carry their cause so they are
+        # never read as a pass and abstention rates decompose by reason.
+        if (
+            self.status in {EvaluationStatus.ERROR, EvaluationStatus.ABSTAINED}
+            and self.error_code is None
+        ):
+            raise ValueError("Evaluator errors and abstentions require error_code")
         return self
 
 

@@ -9,7 +9,7 @@ import asyncio
 import inspect
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -211,7 +211,9 @@ class CircuitBreaker:
             >= self.config.timeout
         )
 
-    async def call(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    async def call(
+        self, func: Callable[..., T | Awaitable[T]], *args: Any, **kwargs: Any
+    ) -> T:
         """
         Execute function through circuit breaker.
 
@@ -226,6 +228,7 @@ class CircuitBreaker:
         Raises:
             Exception: If circuit is open or function fails
         """
+        probe = False
         async with self._lock:
             # Check if we should transition from OPEN to HALF_OPEN
             if await self._should_attempt_reset():
@@ -244,17 +247,15 @@ class CircuitBreaker:
                         f"Circuit breaker '{self.name}' is HALF_OPEN (limit reached)"
                     )
                 self._half_open_counter += 1
+                probe = True
 
         # Execute the function
         self._metrics.total_calls += 1
 
         try:
             # Handle both sync and async functions
-            result: T
-            if inspect.iscoroutinefunction(func):
-                result = await func(*args, **kwargs)
-            else:
-                result = func(*args, **kwargs)
+            outcome = func(*args, **kwargs)
+            result: T = await outcome if inspect.isawaitable(outcome) else outcome
 
             # Record success
             await self._on_success()
@@ -265,6 +266,13 @@ class CircuitBreaker:
             if not isinstance(e, self.config.exclude_exceptions):
                 await self._on_failure()
             raise
+        finally:
+            # The probe slot is only held while the probe is in flight; release
+            # it on success, failure and cancellation so HALF_OPEN cannot wedge.
+            if probe:
+                async with self._lock:
+                    if self._state == CircuitState.HALF_OPEN:
+                        self._half_open_counter = max(0, self._half_open_counter - 1)
 
     async def _on_success(self) -> None:
         """Handle successful call."""

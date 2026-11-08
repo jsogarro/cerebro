@@ -257,7 +257,7 @@ class BaseRepository(Generic[ModelType]):
         return result.scalar_one_or_none()
 ```
 
-Concrete repositories include `ResearchRepository`, `ReportRepository`, `UserRepository`, `CheckpointRepository` (`WorkflowCheckpoint`), `ResultRepository` (`ResearchResult`), and `TaskRepository`. **`TaskRepository` wraps the `AgentTask` DB model** — it is ordinary agent-task persistence, not workflow-engine task management.
+Concrete repositories include `ResearchRepository`, `ReportRepository`, `UserRepository`, `CheckpointRepository` (`WorkflowCheckpoint`), and `ResultRepository` (`ResearchResult`).
 
 #### Dependency Injection
 
