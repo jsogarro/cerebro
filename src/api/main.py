@@ -141,7 +141,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # that a ``Base.metadata.create_all`` path gets ORM enforcement
             # only.
             if "sqlite" in settings.DATABASE_URL:
-                from src.models.db.agent_task import AgentTask
                 from src.models.db.base import Base
                 from src.models.db.research_project import ResearchProject as DBProject
                 from src.models.db.research_result import ResearchResult
@@ -160,7 +159,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     for t in [
                         DBProject,
                         ResearchResult,
-                        AgentTask,
                         WorkflowCheckpoint,
                         AgentRun,
                         AgentRunTask,

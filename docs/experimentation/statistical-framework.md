@@ -605,7 +605,7 @@ class MASRExperimentIntegration:  # illustrative
 
 ### 5. Deployment status (not yet a live surface)
 
-The experimentation subsystem is a **library**, not a running service. The REST routers that would expose it — `src/api/routes/experiments.py` and `src/api/routes/experiment_agent_api.py` — are **never mounted** (`main.py` does not `include_router` them), so there are **no live HTTP experiment endpoints** and no `/ws/experiments` WebSocket. The statistical engine and `MASRExperimentalRouter` are importable and unit-testable in-process, but the following operational guidance is **aspirational** until those routers are wired up:
+The experimentation subsystem is a **library**, not a running service. No REST router exposes it, so there are **no live HTTP experiment endpoints** and no `/ws/experiments` WebSocket. The statistical engine and `MASRExperimentalRouter` are importable and unit-testable in-process, but the following operational guidance is **aspirational** until such a router exists:
 
 - gradual rollout with statistical monitoring
 - automatic rollback on degradation

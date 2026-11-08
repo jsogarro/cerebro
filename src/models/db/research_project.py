@@ -85,13 +85,6 @@ class ResearchProject(BaseModel):
     )
 
     # Relationships
-    agent_tasks = relationship(
-        "AgentTask",
-        back_populates="project",
-        lazy="selectin",
-        cascade="all, delete-orphan",
-    )
-
     results = relationship(
         "ResearchResult",
         back_populates="project",
