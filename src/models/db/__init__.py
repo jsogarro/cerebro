@@ -5,7 +5,6 @@ This package contains all SQLAlchemy ORM models for the
 Multi-Agent Research Platform.
 """
 
-from src.models.db.agent_task import AgentTask
 from src.models.db.append_only import AppendOnlyViolationError
 from src.models.db.artifact import AgentArtifact
 from src.models.db.audit_log import AuditEventType, AuditLog, AuditSeverity
@@ -44,7 +43,6 @@ __all__ = [
     "AgentRunEvent",
     "AgentRunEventOutbox",
     "AgentRunTask",
-    "AgentTask",
     "AgentTaskAttempt",
     "AgentToolInvocation",
     "AlertSeverity",

@@ -59,7 +59,6 @@ def test_model_registry_excludes_removed_auth_schema_but_keeps_live_models() -> 
     """Only models with live callers remain registered in the ORM metadata."""
     assert not REMOVED_TABLES.intersection(Base.metadata.tables)
     assert {
-        "agent_tasks",
         "audit_logs",
         "oauth_accounts",
         "security_alerts",
@@ -70,7 +69,7 @@ def test_model_registry_excludes_removed_auth_schema_but_keeps_live_models() -> 
     assert {"audit_logs", "oauth_accounts", "security_alerts"}.issubset(
         user_relationships
     )
-    assert "agent_tasks" in ResearchProject.__mapper__.relationships
+    assert "results" in ResearchProject.__mapper__.relationships
 
 
 def test_removed_auth_modules_have_no_source_or_factory_importers() -> None:
