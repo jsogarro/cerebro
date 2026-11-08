@@ -52,6 +52,7 @@ KNOWN_UNREACHABLE: frozenset[str] = frozenset(
         "src.core.acquisition.service",
         "src.core.acquisition.snapshots",
         "src.core.acquisition.sources",
+        "src.core.claims.citation_prose",
         "src.core.claims.citation_render",
         "src.core.contracts.citation",
         "src.core.production_config",
