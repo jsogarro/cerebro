@@ -58,6 +58,16 @@ def test_tenant_model_read_without_organization_fails_closed() -> None:
         repo.apply_organization_scope(repo.build_query(), None)
 
 
+@pytest.mark.asyncio
+async def test_inherited_count_without_organization_fails_closed() -> None:
+    session = _CapturingSession()
+    repo = ResearchRepository(cast(AsyncSession, session))
+
+    with pytest.raises(ValueError, match="requires an organization_id"):
+        await repo.count()
+    assert session.statements == []
+
+
 def test_model_without_tenant_column_reads_without_organization() -> None:
     repo = BaseRepository(AuditLog, cast(AsyncSession, object()))
     statement = repo.apply_organization_scope(repo.build_query(), None)
@@ -70,7 +80,7 @@ def test_user_identity_lookup_reads_without_organization() -> None:
     repo = UserRepository(cast(AsyncSession, object()))
     statement = repo.apply_organization_scope(repo.build_query(), None)
 
-    assert "users.organization_id =" not in _sql(statement)
+    assert "organization_id" not in str(statement.whereclause)
 
 
 def test_base_repository_rejects_scope_for_unscoped_models() -> None:
