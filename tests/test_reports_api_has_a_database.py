@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks
@@ -260,28 +261,35 @@ async def test_report_repository_scopes_reads_search_stats_and_deletes_by_tenant
     await engine.dispose()
 
 
-def _load_reports_migration():
-    """Load the reports migration without relying on versions being a package."""
-    path = next(
-        Path(__file__)
-        .parents[1]
-        .glob("alembic/versions/c4a8d1e2f307_add_generated_report_tables.py")
-    )
-    spec = importlib.util.spec_from_file_location("reports_migration", path)
+def _load_migration(filename: str):
+    """Load a migration without relying on versions being a package."""
+    path = next(Path(__file__).parents[1].glob(f"alembic/versions/{filename}"))
+    spec = importlib.util.spec_from_file_location(f"migration_{path.stem}", path)
     assert spec is not None and spec.loader is not None
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
     return migration
 
 
+def _load_reports_migration():
+    return _load_migration("c4a8d1e2f307_add_generated_report_tables.py")
+
+
+def _load_report_indexes_migration():
+    return _load_migration("d9a3c5e7b1f4_add_report_filter_indexes.py")
+
+
 async def test_reports_migration_matches_models_and_downgrades_cleanly():
     """The new migration creates the declared shape and removes both tables."""
     migration = _load_reports_migration()
+    indexes_migration = _load_report_indexes_migration()
     assert migration.down_revision == "7b1e4c9d2a08"
+    assert indexes_migration.down_revision == "f3b8a6d2c4e1"
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(_run_migration_upgrade, migration)
+        await connection.run_sync(_run_migration_upgrade, indexes_migration)
 
         def inspect_schema(sync_connection):
             database_inspector = inspect(sync_connection)
@@ -328,6 +336,7 @@ async def test_reports_migration_matches_models_and_downgrades_cleanly():
             assert database_foreign_keys == model_foreign_keys
 
         await connection.run_sync(inspect_schema)
+        await connection.run_sync(_run_migration_downgrade, indexes_migration)
         await connection.run_sync(_run_migration_downgrade, migration)
         await connection.run_sync(
             lambda sync_connection: assert_report_tables_absent(sync_connection)
@@ -360,3 +369,58 @@ def assert_report_tables_absent(sync_connection) -> None:
     database_inspector = inspect(sync_connection)
     assert not database_inspector.has_table("generated_reports")
     assert not database_inspector.has_table("report_formats")
+
+
+def test_reports_migration_column_types_and_server_defaults_match_models():
+    """Types and server defaults agree with the ORM as Postgres would build them.
+
+    The SQLite round trip above cannot see this: SQLite reflects every UUID
+    column as NUMERIC and drops length on some types, so the comparison is
+    made on the columns the migration declares, compiled for Postgres.
+    """
+    from types import SimpleNamespace
+
+    from sqlalchemy.dialects import postgresql
+
+    migration = _load_reports_migration()
+    declared: dict[str, dict[str, Any]] = {}
+    migration.op = SimpleNamespace(
+        create_table=lambda name, *items, **_: declared.setdefault(
+            name, {item.name: item for item in items if hasattr(item, "type")}
+        ),
+        create_index=lambda *_, **__: None,
+    )
+    migration.upgrade()
+
+    dialect = postgresql.dialect()
+
+    def shape(column: Any) -> tuple[str, str | None]:
+        default = column.server_default
+        return (
+            column.type.compile(dialect=dialect),
+            None if default is None else str(default.arg.compile(dialect=dialect)),
+        )
+
+    for model in (GeneratedReport, ReportFormat):
+        migration_columns = declared[model.__tablename__]
+        assert set(migration_columns) == {c.name for c in model.__table__.columns}
+        for column in model.__table__.columns:
+            assert shape(migration_columns[column.name]) == shape(column), (
+                f"{model.__tablename__}.{column.name}"
+            )
+
+
+def test_report_filter_columns_are_indexed():
+    """Repository filters on project, user and report FK must have an index."""
+
+    def index_columns(model):
+        return {
+            tuple(column.name for column in index.columns)
+            for index in model.__table__.indexes
+        }
+
+    assert {
+        ("organization_id", "project_id", "created_at"),
+        ("organization_id", "user_id", "created_at"),
+    } <= index_columns(GeneratedReport)
+    assert ("report_id",) in index_columns(ReportFormat)
