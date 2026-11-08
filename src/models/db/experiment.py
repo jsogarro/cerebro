@@ -61,6 +61,11 @@ class AllocationStrategy(enum.Enum):
     CONTEXTUAL = "contextual"
 
 
+def _enum(enum_class: type[enum.Enum]) -> Enum:
+    """Bind member values (the migration's labels), not member names."""
+    return Enum(enum_class, values_callable=lambda e: [m.value for m in e])
+
+
 class Experiment(BaseModel):
     """Main experiment model for A/B testing."""
 
@@ -69,14 +74,14 @@ class Experiment(BaseModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     experiment_type: Mapped[ExperimentType] = mapped_column(
-        Enum(ExperimentType), nullable=False
+        _enum(ExperimentType), nullable=False
     )
     status: Mapped[ExperimentStatus] = mapped_column(
-        Enum(ExperimentStatus), default=ExperimentStatus.DRAFT
+        _enum(ExperimentStatus), default=ExperimentStatus.DRAFT
     )
 
     allocation_strategy: Mapped[AllocationStrategy] = mapped_column(
-        Enum(AllocationStrategy), default=AllocationStrategy.RANDOM
+        _enum(AllocationStrategy), default=AllocationStrategy.RANDOM
     )
     traffic_percentage: Mapped[float] = mapped_column(
         Float, default=100.0
