@@ -6,6 +6,7 @@ following the repository pattern with functional programming principles.
 """
 
 import os
+import shutil
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
@@ -549,31 +550,33 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         deleted_ids: list[str] = []
         deleted_count = 0
 
+        paths_to_remove: list[tuple[UUID, str]] = []
+
         for report in old_reports:
             if not dry_run:
-                # Delete associated files
-                if report.storage_path and os.path.exists(report.storage_path):
-                    try:
-                        import shutil
-
-                        shutil.rmtree(report.storage_path)
-                        logger.info(f"Deleted files for report {report.id}")
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to delete files for report {report.id}: {e}"
-                        )
-
-                # Delete database record
+                storage_path = report.storage_path
                 await self.delete_report(
                     report.id,
                     organization_id=organization_id,
                 )
+                if storage_path:
+                    paths_to_remove.append((report.id, storage_path))
 
             deleted_ids.append(str(report.id))
             deleted_count += 1
 
         if not dry_run:
             await self.session.commit()
+            # Files go only after the rows are durably gone; a failure above
+            # leaves files intact for reports whose rows still exist.
+            for report_id, storage_path in paths_to_remove:
+                if not os.path.exists(storage_path):
+                    continue
+                try:
+                    shutil.rmtree(storage_path)
+                    logger.info(f"Deleted files for report {report_id}")
+                except Exception as e:
+                    logger.error(f"Failed to delete files for report {report_id}: {e}")
 
         return deleted_count, deleted_ids
 

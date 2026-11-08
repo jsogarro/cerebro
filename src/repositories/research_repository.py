@@ -58,7 +58,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             offset=offset,
             order_by="created_at",
             order_desc=True,
-            load_relationships=["agent_tasks", "results"],
+            load_relationships=["results"],
             organization_id=organization_id,
         )
 
@@ -118,7 +118,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             query = query.where(ResearchProject.user_id == user_id)
 
         query = query.options(
-            selectinload(ResearchProject.agent_tasks),
             selectinload(ResearchProject.results),
         )
 
@@ -192,7 +191,7 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         """
         return await self.get(
             project_id,
-            load_relationships=["results", "agent_tasks", "checkpoints"],
+            load_relationships=["results", "checkpoints"],
             organization_id=organization_id,
         )
 

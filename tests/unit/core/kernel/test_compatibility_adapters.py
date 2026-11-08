@@ -29,7 +29,7 @@ from src.core.kernel import (
     ResearchKernel,
     TypedRegistry,
 )
-from src.middleware.tenant_context import TenantContext
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.agent_api_models import (
     AgentExecutionRequest,
     AgentExecutionResponse,
@@ -96,8 +96,10 @@ class _DirectExecutionBackend:
             return None
         return {"output": "legacy"}
 
-    async def resume_execution(self, project_id: UUID) -> str | None:
-        self.calls.append(("resume", project_id, None))
+    async def resume_execution(
+        self, project_id: UUID, *, organization_id: str | None = None
+    ) -> str | None:
+        self.calls.append(("resume", project_id, organization_id))
         return "kernel-resumed" if project_id == UUID(int=1) else None
 
 
@@ -167,7 +169,7 @@ async def test_query_operation_adapter_preserves_success_and_not_found_contracts
 
     status = await query_api.get_execution_status("kernel-execution", kernel, TENANT)
     results = await query_api.get_execution_results("kernel-execution", kernel, TENANT)
-    resumed = await query_api.resume_execution(str(UUID(int=1)), kernel)
+    resumed = await query_api.resume_execution(str(UUID(int=1)), kernel, TENANT)
 
     assert status["status"] == "running"
     assert status["current_phase"] == "masr_routing"
@@ -192,14 +194,14 @@ async def test_query_operation_adapter_preserves_success_and_not_found_contracts
     )
 
     with pytest.raises(HTTPException) as missing_resume:
-        await query_api.resume_execution(str(UUID(int=2)), kernel)
+        await query_api.resume_execution(str(UUID(int=2)), kernel, TENANT)
     assert missing_resume.value.status_code == 404
     assert missing_resume.value.detail == (
         f"No recoverable checkpoint found for project {UUID(int=2)}"
     )
 
     with pytest.raises(HTTPException) as invalid_resume:
-        await query_api.resume_execution("not-a-uuid", kernel)
+        await query_api.resume_execution("not-a-uuid", kernel, TENANT)
     assert invalid_resume.value.status_code == 400
     assert invalid_resume.value.detail == "Invalid project_id format: not-a-uuid"
 
@@ -276,6 +278,7 @@ async def test_agent_adapter_fails_closed_without_execution_authority() -> None:
             request,
             background_tasks=None,
             execution_service=kernel,
+            tenant_context=TENANT,
         )
 
     assert exc_info.value.status_code == 422
@@ -292,6 +295,7 @@ def test_agent_http_adapter_fails_closed_without_execution_authority() -> None:
     test_app.dependency_overrides[get_application_agent_execution_service] = lambda: (
         backend
     )
+    test_app.dependency_overrides[get_tenant_context] = lambda: TENANT
 
     with TestClient(test_app) as client:
         response = client.post(
