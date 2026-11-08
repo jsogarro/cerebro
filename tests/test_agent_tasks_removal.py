@@ -65,16 +65,15 @@ def test_removed_modules_are_gone_and_unimported() -> None:
                     assert not names & REMOVED_MODULES, path
 
 
-def test_drop_migration_is_the_single_head_after_its_parent() -> None:
+def test_drop_migration_follows_its_parent_and_history_has_one_head() -> None:
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
     source = _drop_migration().read_text()
     assert f'revision: str = "{DROP_REVISION}"' in source
     assert f'down_revision: str | Sequence[str] | None = "{PARENT_REVISION}"' in source
-    parents = [
-        path
-        for path in MIGRATIONS_DIR.glob("*.py")
-        if f'"{DROP_REVISION}"' in path.read_text() and path != _drop_migration()
-    ]
-    assert parents == []
+    script = ScriptDirectory.from_config(Config(str(REPO_ROOT / "alembic.ini")))
+    assert len(script.get_heads()) == 1
 
 
 def test_offline_upgrade_drops_table_policy_and_enum() -> None:
