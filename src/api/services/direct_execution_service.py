@@ -37,6 +37,7 @@ from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.capability_repository import CapabilityRepository
 from src.repositories.checkpoint_repository import CheckpointRepository
 from src.repositories.claim_support_repository import ClaimSupportRepository
+from src.repositories.research_repository import ResearchRepository
 from src.repositories.run_config_snapshot_repository import (
     RunConfigSnapshotRepository,
 )
@@ -2548,12 +2549,21 @@ class DirectExecutionService:
                 "progress": execution.progress_percentage,
             }
 
-    async def resume_execution(self, project_id: uuid.UUID) -> str | None:
+    async def resume_execution(
+        self, project_id: uuid.UUID, *, organization_id: str | None = None
+    ) -> str | None:
         """
         Resume execution from the latest recoverable checkpoint.
 
+        The project's durable record decides who owns the resumed execution:
+        the project must belong to the caller's ``organization_id`` and the
+        rebuilt status carries that organization, so the tenant-scoped status
+        and results reads can see it. A missing caller tenant, an unknown
+        project, and another tenant's project all return ``None``.
+
         Args:
             project_id: Project UUID to resume
+            organization_id: The caller's authenticated tenant
 
         Returns:
             Execution ID if resumed successfully, None otherwise
@@ -2565,8 +2575,21 @@ class DirectExecutionService:
             )
             return None
 
+        if organization_id is None:
+            return None
+
         try:
             async with self.session_factory() as session:
+                project = await ResearchRepository(session).get(
+                    project_id, organization_id=organization_id
+                )
+                if project is None or project.organization_id is None:
+                    logger.info(
+                        "Resume refused: project not in caller's organization",
+                        project_id=str(project_id),
+                    )
+                    return None
+
                 repository = CheckpointRepository(session)
                 checkpoint = await repository.get_recovery_point(project_id)
 
@@ -2594,6 +2617,7 @@ class DirectExecutionService:
                 execution_status = ExecutionStatus(
                     execution_id=execution_id,
                     project_id=str(project_id),
+                    organization_id=str(project.organization_id),
                     status=checkpoint_data["status"],
                     progress_percentage=checkpoint_data["progress_percentage"],
                     current_phase=checkpoint_data["current_phase"],

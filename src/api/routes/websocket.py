@@ -16,7 +16,6 @@ from structlog import get_logger
 from src.api.websocket.auth import (
     WebSocketAuthError,
     WebSocketPrincipal,
-    authenticate_websocket_connection,
     authenticate_websocket_principal,
     require_authenticated_websocket,
     resolve_run_stream_entitlement,
@@ -33,6 +32,7 @@ from src.middleware.auth_middleware import get_jwt_service
 from src.models.db.session import get_session_factory
 from src.models.websocket_messages import (
     SubscriptionRequest,
+    SubscriptionResponse,
     WSMessage,
     WSMessageType,
 )
@@ -83,6 +83,28 @@ async def _principal_may_subscribe_to_project(
         )
 
 
+async def _handle_subscription(
+    client_id: str,
+    principal: WebSocketPrincipal,
+    request: SubscriptionRequest,
+) -> SubscriptionResponse:
+    """Apply a subscription message, authorizing every subscribe by tenant."""
+    if (
+        request.action == "subscribe"
+        and request.project_id
+        and not await _principal_may_subscribe_to_project(principal, request.project_id)
+    ):
+        connection = websocket_manager.connections.get(client_id)
+        return SubscriptionResponse(
+            success=False,
+            message="Access denied to project",
+            active_subscriptions=(
+                list(connection.project_subscriptions) if connection else []
+            ),
+        )
+    return await websocket_manager.handle_subscription_request(client_id, request)
+
+
 @router.websocket("/ws", dependencies=[Depends(require_authenticated_websocket)])
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -106,11 +128,12 @@ async def websocket_endpoint(
         user_agent = websocket.headers.get("user-agent")
 
         # Authenticate connection
-        user_id, client_type = await authenticate_websocket_connection(
+        principal = await authenticate_websocket_principal(
             token=token,
             user_agent=user_agent,
             jwt_service=jwt_service,
         )
+        user_id, client_type = principal.user_id, principal.client_type
 
         # Establish connection (accept=False since we already accepted above)
         client_id = await websocket_manager.connect(
@@ -140,8 +163,8 @@ async def websocket_endpoint(
                     subscription_request = SubscriptionRequest(
                         **message_data.get("data", {})
                     )
-                    response = await websocket_manager.handle_subscription_request(
-                        client_id, subscription_request
+                    response = await _handle_subscription(
+                        client_id, principal, subscription_request
                     )
 
                     # Send response back to client
@@ -295,8 +318,8 @@ async def project_websocket_endpoint(
                     subscription_request = SubscriptionRequest(
                         **message_data.get("data", {})
                     )
-                    response = await websocket_manager.handle_subscription_request(
-                        client_id, subscription_request
+                    response = await _handle_subscription(
+                        client_id, principal, subscription_request
                     )
 
                     response_message = WSMessage(
