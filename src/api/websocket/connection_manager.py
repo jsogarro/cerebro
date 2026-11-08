@@ -369,7 +369,7 @@ class ConnectionManager:
             last_heartbeat=connection.last_heartbeat,
         )
 
-    def get_stats(self) -> dict[str, int | dict[str, int] | list[UUID]]:
+    def get_stats(self) -> dict[str, int | dict[str, int]]:
         """Get connection statistics."""
         return {
             "total_connections": len(self.connections),
@@ -389,7 +389,6 @@ class ConnectionManager:
             ),
             "total_project_subscriptions": len(self.project_subscriptions),
             "total_user_subscriptions": len(self.user_subscriptions),
-            "active_projects": list(self.project_subscriptions.keys()),
         }
 
     async def _heartbeat_monitor(self) -> None:

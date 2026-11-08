@@ -8,10 +8,10 @@ from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy.sql import Select
+from sqlalchemy.sql import Select, Update
 from structlog import get_logger
 
 from src.models.db.base import BaseModel
@@ -20,6 +20,7 @@ logger = get_logger()
 
 # Type variable for model classes
 ModelType = TypeVar("ModelType", bound=BaseModel)
+_Scoped = TypeVar("_Scoped", bound="Select[Any] | Update")
 
 
 class BaseRepository(Generic[ModelType]):
@@ -379,7 +380,10 @@ class BaseRepository(Generic[ModelType]):
         return created
 
     async def bulk_update(
-        self, updates: list[dict[str, Any]], updated_by: str | None = None
+        self,
+        updates: list[dict[str, Any]],
+        updated_by: str | None = None,
+        organization_id: str | UUID | None = None,
     ) -> int:
         """
         Update multiple entities.
@@ -387,19 +391,31 @@ class BaseRepository(Generic[ModelType]):
         Args:
             updates: List of dicts with 'id' and update data
             updated_by: User performing the update
+            organization_id: Tenant organization boundary
 
         Returns:
             Number of updated entities
         """
+        # Same scoping as get(): live rows only, within the tenant boundary.
+        ids = {u["id"] for u in updates if u.get("id")}
+        entities = await self._get_live_by_ids(ids, organization_id)
+
         updated_count = 0
-
+        now = datetime.now(UTC)
         for update_data in updates:
-            entity_id = update_data.pop("id", None)
-            if entity_id:
-                entity = await self.update(entity_id, update_data, updated_by)
-                if entity:
-                    updated_count += 1
+            entity_id = update_data.get("id")
+            entity = entities.get(UUID(str(entity_id))) if entity_id else None
+            if entity is None:
+                continue
+            for key, value in update_data.items():
+                if hasattr(entity, key) and key not in ["id", "created_at"]:
+                    setattr(entity, key, value)
+            entity.updated_at = now
+            if updated_by:
+                entity.updated_by = updated_by
+            updated_count += 1
 
+        await self.session.flush()
         return updated_count
 
     async def bulk_delete(
@@ -407,6 +423,7 @@ class BaseRepository(Generic[ModelType]):
         ids: list[str | UUID],
         soft: bool = True,
         deleted_by: str | None = None,
+        organization_id: str | UUID | None = None,
     ) -> int:
         """
         Delete multiple entities.
@@ -415,17 +432,46 @@ class BaseRepository(Generic[ModelType]):
             ids: List of entity IDs
             soft: If True, perform soft delete
             deleted_by: User performing the delete
+            organization_id: Tenant organization boundary
 
         Returns:
             Number of deleted entities
         """
-        deleted_count = 0
+        if not ids:
+            return 0
 
-        for entity_id in ids:
-            if await self.delete(entity_id, soft, deleted_by):
-                deleted_count += 1
+        if soft:
+            values: dict[str, Any] = {"deleted_at": datetime.now(UTC)}
+            if deleted_by:
+                values["updated_by"] = deleted_by
+            statement = self.apply_organization_scope(
+                update(self.model)
+                .where(self.model.id.in_(ids), self.model.deleted_at.is_(None))
+                .values(**values),
+                organization_id,
+            )
+            result = await self.session.execute(statement)
+            return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
-        return deleted_count
+        # Hard delete goes through the ORM so relationship cascades still run;
+        # the unit of work batches the DELETEs into one flush.
+        entities = await self._get_live_by_ids(set(ids), organization_id)
+        for entity in entities.values():
+            await self.session.delete(entity)
+        await self.session.flush()
+        return len(entities)
+
+    async def _get_live_by_ids(
+        self, ids: set[Any], organization_id: str | UUID | None
+    ) -> dict[UUID, ModelType]:
+        """Fetch non-deleted, tenant-scoped entities for ids in one SELECT."""
+        if not ids:
+            return {}
+        query = self.apply_organization_scope(
+            self.build_query().where(self.model.id.in_(ids)), organization_id
+        )
+        result = await self.session.execute(query)
+        return {e.id: e for e in result.scalars().all()}
 
     async def search(
         self,
@@ -494,9 +540,9 @@ class BaseRepository(Generic[ModelType]):
 
     def apply_organization_scope(
         self,
-        query: Select[Any],
+        query: _Scoped,
         organization_id: str | UUID | None,
-    ) -> Select[Any]:
+    ) -> _Scoped:
         """
         Apply tenant organization filtering when a scoped query is requested.
 
@@ -523,7 +569,8 @@ class BaseRepository(Generic[ModelType]):
             else UUID(organization_id)
         )
 
-        return query.where(organization_column == org_id_value)
+        scoped: _Scoped = query.where(organization_column == org_id_value)  # type: ignore[assignment]
+        return scoped
 
 
 __all__ = ["BaseRepository", "ModelType"]
