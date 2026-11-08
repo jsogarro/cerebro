@@ -28,6 +28,7 @@ from structlog import get_logger
 
 from ...core.kernel import ResearchKernel
 from ...core.pii_redactor import redact_pii
+from ...middleware.tenant_context import TenantContext, get_tenant_context
 from ...models.agent_api_models import (
     AgentExecutionRequest,
     AgentExecutionResponse,
@@ -77,8 +78,15 @@ def _resolved_agent_operations(
 def _require_agent_execution_authority(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend,
     reference: ExecutionAuthorityReference | None,
+    *,
+    organization_id: str,
 ) -> None:
-    """Fail closed on HTTP-kernel execution before reaching agent services."""
+    """Fail closed on HTTP-kernel execution before reaching agent services.
+
+    ``organization_id`` is the authenticated caller's tenant. The resolver
+    only returns an authority owned by that tenant, so a reference string
+    alone never decides whose tenant the work runs as.
+    """
 
     if reference is None:
         raise HTTPException(
@@ -97,7 +105,7 @@ def _require_agent_execution_authority(
             detail={"code": "EXECUTION_AUTHORITY_UNAVAILABLE"},
         )
     try:
-        resolver(reference)
+        resolver(reference, organization_id=organization_id)
     except ExecutionAuthorityError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -222,6 +230,7 @@ async def execute_agent(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> AgentExecutionResponse:
     """
     Execute single agent directly.
@@ -237,7 +246,9 @@ async def execute_agent(
         )
 
         _require_agent_execution_authority(
-            execution_service, request.authority_reference
+            execution_service,
+            request.authority_reference,
+            organization_id=tenant_context.organization_id,
         )
         service = _resolved_agent_operations(execution_service)
 
@@ -271,6 +282,7 @@ async def execute_chain_of_agents(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ChainOfAgentsResponse:
     """
     Execute Chain-of-Agents (sequential execution pattern).
@@ -286,7 +298,9 @@ async def execute_chain_of_agents(
         )
 
         _require_agent_execution_authority(
-            execution_service, request.authority_reference
+            execution_service,
+            request.authority_reference,
+            organization_id=tenant_context.organization_id,
         )
         service = _resolved_agent_operations(execution_service)
 
@@ -321,6 +335,7 @@ async def execute_mixture_of_agents(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> MixtureOfAgentsResponse:
     """
     Execute Mixture-of-Agents (parallel execution with aggregation).
@@ -336,7 +351,9 @@ async def execute_mixture_of_agents(
         )
 
         _require_agent_execution_authority(
-            execution_service, request.authority_reference
+            execution_service,
+            request.authority_reference,
+            organization_id=tenant_context.organization_id,
         )
         service = _resolved_agent_operations(execution_service)
 
@@ -582,6 +599,7 @@ async def literature_search(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> AgentExecutionResponse:
     """
     Optimized literature search endpoint.
@@ -607,6 +625,7 @@ async def literature_search(
         request,
         BackgroundTasks(),
         execution_service,
+        tenant_context,
     )
 
 
@@ -623,6 +642,7 @@ async def format_citations(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> AgentExecutionResponse:
     """
     Optimized citation formatting endpoint.
@@ -647,6 +667,7 @@ async def format_citations(
         request,
         BackgroundTasks(),
         execution_service,
+        tenant_context,
     )
 
 
@@ -665,6 +686,7 @@ async def synthesize_findings(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> AgentExecutionResponse:
     """
     Optimized synthesis endpoint.
@@ -689,6 +711,7 @@ async def synthesize_findings(
         request,
         BackgroundTasks(),
         execution_service,
+        tenant_context,
     )
 
 
@@ -709,6 +732,7 @@ async def literature_analysis_workflow(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ChainOfAgentsResponse:
     """
     Convenience endpoint for literature analysis workflow.
@@ -734,7 +758,7 @@ async def literature_analysis_workflow(
         ),
     )
 
-    return await execute_chain_of_agents(request, execution_service)
+    return await execute_chain_of_agents(request, execution_service, tenant_context)
 
 
 @router.post(
@@ -755,6 +779,7 @@ async def comprehensive_research_workflow(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> MixtureOfAgentsResponse:
     """
     Convenience endpoint for comprehensive research workflow.
@@ -787,7 +812,7 @@ async def comprehensive_research_workflow(
         ),
     )
 
-    return await execute_mixture_of_agents(request, execution_service)
+    return await execute_mixture_of_agents(request, execution_service, tenant_context)
 
 
 # System monitoring endpoints
