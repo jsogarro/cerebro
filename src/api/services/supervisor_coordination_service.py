@@ -213,6 +213,17 @@ class SupervisorCoordinationService:
             request.timeout_seconds or 120,
         )
 
+        failed = not result or (
+            isinstance(result, dict) and result.get("status") == "failed"
+        )
+        error = (
+            result.get("error") or result.get("message")
+            if failed and isinstance(result, dict)
+            else None
+        )
+        if failed:
+            result = None
+
         # Calculate execution metrics
         execution_time_ms = int((time.time() - start_time) * 1000)
         quality_score = self._calculate_quality_score(
@@ -224,7 +235,7 @@ class SupervisorCoordinationService:
             supervisor_type,
             execution_time_ms,
             quality_score,
-            success=result is not None,
+            success=not failed,
         )
 
         # Update supervisor status
@@ -233,12 +244,12 @@ class SupervisorCoordinationService:
         # Determine refinement rounds based on quality
         refinement_rounds = 1
         if request.supervision_strategy == SupervisionStrategy.ITERATIVE:
-            refinement_rounds = min(3, max(1, int((1.0 - quality_score) * 5)))
+            refinement_rounds = min(3, max(1, int((1.0 - (quality_score or 0.0)) * 5)))
 
         return SupervisorExecuteResponse(
             execution_id=execution_id,
             supervisor_type=SupervisorType(supervisor_type),
-            status="completed" if result else "failed",
+            status="failed" if failed else "completed",
             result=result,
             workers_used=[w.worker_id for w in assigned_workers],
             coordination_mode=request.coordination_mode
@@ -252,6 +263,7 @@ class SupervisorCoordinationService:
                 ).value,
                 "parameters": request.parameters or {},
                 "context": request.context or {},
+                **({"error": error or "execution failed"} if failed else {}),
             },
         )
 
@@ -284,8 +296,8 @@ class SupervisorCoordinationService:
 
         Delegates to the MASR-bridge-backed executor so the supervisor actually
         coordinates its worker agents, rather than returning a formatted stub
-        string. Falls back to the dispatcher only if real execution raises, so a
-        transient failure degrades gracefully instead of 500-ing the endpoint.
+        string. If real execution raises, a failure marker is returned (never a canned
+        result), so the response reports ``failed``.
         """
         try:
             return await self._get_real_executor().execute_with_workers(
@@ -299,21 +311,13 @@ class SupervisorCoordinationService:
             )
         except Exception as exc:
             logger.warning(
-                "real_supervisor_execution_failed_falling_back",
+                "real_supervisor_execution_failed",
                 supervisor_type=supervisor_type,
                 error=str(exc),
             )
-            return await self.worker_dispatcher.execute_with_workers(
-                supervisor_type,
-                task,
-                workers,
-                strategy,
-                coordination_mode,
-                quality_threshold,
-                timeout_seconds,
-            )
+            return {"status": "failed", "error": type(exc).__name__}
 
-    def _calculate_quality_score(self, result: Any, threshold: float) -> float:
+    def _calculate_quality_score(self, result: Any, threshold: float) -> float | None:
         """Calculate quality score for execution result"""
         return self.result_aggregator.calculate_quality_score(result, threshold)
 
@@ -321,7 +325,7 @@ class SupervisorCoordinationService:
         self,
         supervisor_type: str,
         execution_time_ms: int,
-        quality_score: float,
+        quality_score: float | None,
         success: bool,
     ) -> None:
         """Update supervisor performance metrics"""
@@ -334,7 +338,7 @@ class SupervisorCoordinationService:
             metrics.failed_executions += 1
 
         metrics.total_execution_time_ms += execution_time_ms
-        metrics.total_quality_score += quality_score
+        metrics.total_quality_score += quality_score or 0.0
         metrics.last_execution_time = datetime.now(UTC)
 
         # Update worker utilization

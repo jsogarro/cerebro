@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
@@ -26,6 +27,7 @@ from src.models.research_project import (
     ResearchScope,
     ResearchStatus,
 )
+from src.qa.legacy_annotation import annotate_legacy_results
 from src.repositories.research_repository import ResearchRepository
 
 logger = get_logger()
@@ -252,7 +254,7 @@ async def get_research_project(
 @router.get("/projects", response_model=list[ResearchProject])
 async def list_research_projects(
     user_id: str | None = Query(None),
-    status: str | None = Query(None),
+    status: ResearchStatus | None = Query(None),
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
     repo: ResearchRepository = Depends(get_research_repo),
@@ -265,12 +267,24 @@ async def list_research_projects(
             detail="Cannot list projects for another user",
         )
 
+    # The filter speaks the API's statuses; a DRAFT row is reported as
+    # ``pending`` and no stored row is ever ``planning``.
+    if status == ResearchStatus.PLANNING:
+        return []
+    db_status = (
+        None
+        if status is None
+        else ProjectStatus.DRAFT
+        if status == ResearchStatus.PENDING
+        else ProjectStatus(status.value)
+    )
+
     # Fetch from database with filters
     effective_user_id = user_id or tenant_context.user_id
     if effective_user_id:
         db_projects = await repo.get_by_user(
             effective_user_id,
-            status=ProjectStatus(status) if status else None,
+            status=db_status,
             limit=limit,
             offset=offset,
             organization_id=tenant_context.organization_id,
@@ -459,7 +473,7 @@ async def get_research_results(
         project_id,
         user_id=tenant_context.user_id,
         organization_id=tenant_context.organization_id,
-        load_relationships=["results", "agent_tasks", "checkpoints"],
+        load_relationships=["results", "checkpoints"],
     )
     if not db_project:
         raise HTTPException(
@@ -469,7 +483,12 @@ async def get_research_results(
 
     # Check DB results first
     if db_project.results:
-        return {"project_id": str(project_id), "results": db_project.results}
+        # Rows persisted before verification fabrication was removed are still
+        # served verbatim; flag them rather than present them as evidence.
+        return {
+            "project_id": str(project_id),
+            "results": annotate_legacy_results(jsonable_encoder(db_project.results)),
+        }
 
     # Fall back to in-memory execution results
     try:
