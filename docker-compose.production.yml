@@ -70,54 +70,6 @@ services:
       - /tmp
       - /var/cache/nginx
 
-  # Temporal Worker (Production)
-  worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
-    restart: always
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - ENABLE_DIRECT_EXECUTION=true
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - ENVIRONMENT=production
-      - LOG_LEVEL=INFO
-      - WORKER_CONCURRENCY=20
-      - WORKER_TASK_QUEUE=research-queue-prod
-      
-      # MASR Worker Configuration
-      - MASR_WORKER_MODE=true
-      - MASR_SUPERVISOR_POOL_SIZE=10
-      - MASR_MAX_CONCURRENT_SUPERVISORS=5
-      
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - cerebro-prod
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
-    deploy:
-      replicas: 3
-      resources:
-        limits:
-          memory: 1.5G
-          cpus: "0.8"
-        reservations:
-          memory: 512M
-          cpus: "0.3"
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp
-
   # Legacy standalone MASR diagnostics service (non-authoritative).
   masr-router:
     profiles: ["legacy-masr-service"]
@@ -172,7 +124,8 @@ services:
   mcp-server:
     build:
       context: .
-      dockerfile: docker/Dockerfile.worker
+      dockerfile: Dockerfile
+      target: production
     container_name: cerebro-mcp-prod
     command: ["python", "-m", "src.mcp.server"]
     restart: always
