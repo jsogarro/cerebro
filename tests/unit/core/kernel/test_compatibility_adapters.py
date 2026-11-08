@@ -29,7 +29,7 @@ from src.core.kernel import (
     ResearchKernel,
     TypedRegistry,
 )
-from src.middleware.tenant_context import TenantContext
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.agent_api_models import (
     AgentExecutionRequest,
     AgentExecutionResponse,
@@ -278,6 +278,7 @@ async def test_agent_adapter_fails_closed_without_execution_authority() -> None:
             request,
             background_tasks=None,
             execution_service=kernel,
+            tenant_context=TENANT,
         )
 
     assert exc_info.value.status_code == 422
@@ -294,6 +295,7 @@ def test_agent_http_adapter_fails_closed_without_execution_authority() -> None:
     test_app.dependency_overrides[get_application_agent_execution_service] = lambda: (
         backend
     )
+    test_app.dependency_overrides[get_tenant_context] = lambda: TENANT
 
     with TestClient(test_app) as client:
         response = client.post(
