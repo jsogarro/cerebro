@@ -10,6 +10,7 @@ import redis.asyncio as redis
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
@@ -30,7 +31,7 @@ from src.auth.password_service import (
     PasswordTokenStoreUnavailableError,
 )
 from src.core.config import settings
-from src.middleware.auth_middleware import get_current_user
+from src.middleware.auth_middleware import get_current_user, get_jwt_service
 from src.models.db.session import get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
@@ -45,17 +46,6 @@ security = HTTPBearer()
 
 
 # Dependencies
-async def get_jwt_service() -> JWTService:
-    """Get JWT service instance."""
-    # In production, use Redis connection from pool
-    redis_client = await redis.from_url(settings.REDIS_URL)
-    return JWTService(
-        redis_client=redis_client,
-        private_key_path=settings.JWT_PRIVATE_KEY_PATH,
-        public_key_path=settings.JWT_PUBLIC_KEY_PATH,
-    )
-
-
 async def get_password_service() -> PasswordService:
     """Get password service instance."""
     redis_client = await redis.from_url(settings.REDIS_URL)
@@ -163,7 +153,16 @@ async def register(
         # delivery integration; this route does not claim that an email was
         # sent because Cerebro does not provide an email provider.
         db.add(user)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            # The pre-checks above skip soft-deleted rows and race with
+            # concurrent registrations; the unique indexes are the authority.
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email or username already registered",
+            ) from exc
         verification_token = password_service.generate_verification_token()
         try:
             await password_service.store_verification_token(
