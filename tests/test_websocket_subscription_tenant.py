@@ -43,12 +43,12 @@ class _UserAJWTService:
 
 async def _seed(database_url: str) -> tuple[uuid.UUID, uuid.UUID]:
     engine = create_async_engine(database_url)
-    from src.models.db.agent_task import AgentTask
+
     from src.models.db.research_result import ResearchResult
     from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
     async with engine.begin() as connection:
-        for model in (ResearchProject, AgentTask, ResearchResult, WorkflowCheckpoint):
+        for model in (ResearchProject, ResearchResult, WorkflowCheckpoint):
             await connection.run_sync(model.__table__.create)
     ids = []
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
