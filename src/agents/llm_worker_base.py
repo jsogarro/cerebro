@@ -425,9 +425,7 @@ class LLMWorkerAgentBase(BaseAgent):
 
     @staticmethod
     def _reported_usage(response: Any) -> ReportedUsage | None:
-        if response is None:
-            return None
-        if response.total_tokens <= 0:
+        if response is None or response.total_tokens <= 0:
             return None
         return ReportedUsage(
             total_tokens=response.total_tokens,

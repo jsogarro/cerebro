@@ -103,6 +103,8 @@ def _is_well_formed(usage: ReportedUsage) -> bool:
 
 
 def estimate_prompt_tokens(prompt: str) -> int:
+    # Not telemetry's count_tokens: that returns 0 when tiktoken is missing,
+    # which would reserve nothing. This always errs high.
     return len(prompt) // _CHARS_PER_TOKEN + 1
 
 
@@ -141,34 +143,28 @@ class BudgetLedger:
         """Admit one model call or raise; the reservation must be settled."""
         self.ensure_not_exceeded()
         if self._cost_unverified:
-            self._fail(
-                BudgetExceededError(
-                    BudgetDimension.COST,
-                    limit=self._max_cost,
-                    used=self.cost_used,
-                    detail="an earlier call reported no usage, so spend is unbounded",
-                )
+            raise self._exceeded(
+                BudgetDimension.COST,
+                limit=self._max_cost,
+                used=self.cost_used,
+                detail="an earlier call reported no usage, so spend is unbounded",
             )
         held = self._reserved_tokens + estimated_tokens
         if self.tokens_used + held > self._max_tokens:
-            self._fail(
-                BudgetExceededError(
-                    BudgetDimension.TOKENS,
-                    limit=self._max_tokens,
-                    used=self.tokens_used,
-                    requested=held,
-                )
+            raise self._exceeded(
+                BudgetDimension.TOKENS,
+                limit=self._max_tokens,
+                used=self.tokens_used,
+                requested=held,
             )
         call_cost = max(estimated_cost, self._max_call_cost)
         held_cost = self._reserved_cost + call_cost
         if self.cost_used + held_cost > self._max_cost:
-            self._fail(
-                BudgetExceededError(
-                    BudgetDimension.COST,
-                    limit=self._max_cost,
-                    used=self.cost_used,
-                    requested=held_cost,
-                )
+            raise self._exceeded(
+                BudgetDimension.COST,
+                limit=self._max_cost,
+                used=self.cost_used,
+                requested=held_cost,
             )
         self._reserved_tokens += estimated_tokens
         self._reserved_cost += call_cost
@@ -192,43 +188,46 @@ class BudgetLedger:
             self.cost_used += usage.cost_usd
             self._max_call_cost = max(self._max_call_cost, usage.cost_usd)
         if self.tokens_used > self._max_tokens:
-            self._record(
-                BudgetExceededError(
-                    BudgetDimension.TOKENS,
-                    limit=self._max_tokens,
-                    used=self.tokens_used,
-                )
+            self._exceeded(
+                BudgetDimension.TOKENS,
+                limit=self._max_tokens,
+                used=self.tokens_used,
             )
         elif self.cost_used > self._max_cost:
-            self._record(
-                BudgetExceededError(
-                    BudgetDimension.COST,
-                    limit=self._max_cost,
-                    used=self.cost_used,
-                )
+            self._exceeded(
+                BudgetDimension.COST,
+                limit=self._max_cost,
+                used=self.cost_used,
             )
 
     def charge_tool_invocation(self) -> None:
         """Count one tool invocation, or raise if it would exceed the ceiling."""
         self.ensure_not_exceeded()
         if self.tool_invocations + 1 > self._max_tools:
-            self._fail(
-                BudgetExceededError(
-                    BudgetDimension.TOOL_INVOCATIONS,
-                    limit=self._max_tools,
-                    used=self.tool_invocations,
-                    requested=1,
-                )
+            raise self._exceeded(
+                BudgetDimension.TOOL_INVOCATIONS,
+                limit=self._max_tools,
+                used=self.tool_invocations,
+                requested=1,
             )
         self.tool_invocations += 1
 
-    def _record(self, error: BudgetExceededError) -> None:
+    def _exceeded(
+        self,
+        dimension: BudgetDimension,
+        *,
+        limit: Decimal | int,
+        used: Decimal | int,
+        requested: Decimal | int = 0,
+        detail: str = "",
+    ) -> BudgetExceededError:
+        """Record the first ceiling crossed and return it for the caller to raise."""
+        error = BudgetExceededError(
+            dimension, limit=limit, used=used, requested=requested, detail=detail
+        )
         if self.exceeded is None:
             self.exceeded = error
-
-    def _fail(self, error: BudgetExceededError) -> None:
-        self._record(error)
-        raise error
+        return error
 
 
 def check_plan_fits(budget: ExecutionBudget, worker_count: int) -> None:

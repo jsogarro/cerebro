@@ -2492,29 +2492,26 @@ class DirectExecutionService:
                 await self._record_attempt_failure(execution_status, error=str(e))
                 raise
 
+            event_type = "run.failed"
+            payload: dict[str, Any] = {"error": str(e)}
+            if budget_error:
+                # A budget error can only come from a run that has a ledger.
+                assert execution_status._budget_ledger is not None
+                event_type = "run.budget_exceeded"
+                payload |= {
+                    **budget_error.as_payload(),
+                    "usage": execution_status._budget_ledger.usage_payload(),
+                }
+                execution_status.failure_code = budget_error.code
             outcome = await self._persist_transition(
                 execution_status,
                 run_target=RunStatus.FAILED,
                 task_target=TaskStatus.FAILED,
                 attempt_target=AttemptStatus.FAILED,
-                event_type=("run.budget_exceeded" if budget_error else "run.failed"),
-                payload=(
-                    {
-                        "error": str(e),
-                        **budget_error.as_payload(),
-                        "usage": (
-                            execution_status._budget_ledger.usage_payload()
-                            if execution_status._budget_ledger
-                            else {}
-                        ),
-                    }
-                    if budget_error
-                    else {"error": str(e)}
-                ),
+                event_type=event_type,
+                payload=payload,
                 reason=(str(e).strip() or "execution failed")[:500],
             )
-            if budget_error:
-                execution_status.failure_code = budget_error.code
             self._settle_terminal_state(
                 execution_status,
                 outcome=outcome,
