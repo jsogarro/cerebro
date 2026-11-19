@@ -39,6 +39,7 @@ from src.core.contracts import (
     RunStatus,
     WorkerAssignment,
 )
+from src.core.contracts.trust import TrustClassification
 from tests.test_direct_execution_no_retry_loop import (
     _AllocStub,
     _ComplexityAnalysisStub,
@@ -351,6 +352,37 @@ class TestToolBoundary:
             await _Worker()._execute_model_tool_call(
                 _task(BudgetLedger(_budget(tools=0))), "p", registry, call, None
             )
+
+
+class TestMCPToolPath:
+    async def test_mcp_invocation_beyond_ceiling_is_refused_before_the_boundary(
+        self,
+    ) -> None:
+        from src.agents.integrations.mcp_integration import (
+            TOOL_ACADEMIC_SEARCH,
+            MCPIntegration,
+        )
+
+        integration = MCPIntegration(
+            mcp_client=MagicMock(),
+            budget=BudgetLedger(_budget(tools=1)),
+        )
+        invoke = AsyncMock(return_value=MagicMock())
+        with patch.object(integration.boundary, "invoke", invoke):
+            await integration._invoke(
+                TOOL_ACADEMIC_SEARCH,
+                {},
+                identity=None,
+                input_trust=TrustClassification.APPLICATION,
+            )
+            with pytest.raises(BudgetExceededError):
+                await integration._invoke(
+                    TOOL_ACADEMIC_SEARCH,
+                    {},
+                    identity=None,
+                    input_trust=TrustClassification.APPLICATION,
+                )
+        assert invoke.await_count == 1
 
 
 def _executor(worker_executor: Any) -> ExecutionPlanTopologyExecutor:

@@ -63,6 +63,7 @@ from src.agents.tools.mediation import (
     plain,
     self_issued_grant,
 )
+from src.core.budget import BudgetLedger
 from src.core.contracts.capabilities import CapabilityGrant
 from src.core.contracts.provenance import ToolInvocation
 from src.core.contracts.trust import TrustClassification
@@ -131,6 +132,7 @@ class MCPIntegration:
         audit_store: ToolAuditStore | None = None,
         grants: Sequence[CapabilityGrant] | None = None,
         evidence_recorder: EvidenceRecorder | None = None,
+        budget: BudgetLedger | None = None,
     ):
         """Initialize MCP integration.
 
@@ -154,6 +156,7 @@ class MCPIntegration:
                 audit store: the evidence cites the invocation row.
 
         """
+        self._budget = budget
         self._evidence_recorder = evidence_recorder
         self.config = config or {}
         self.enable_fallback = enable_fallback
@@ -454,6 +457,8 @@ class MCPIntegration:
         see that test's docstring.
         """
 
+        if self._budget is not None:
+            self._budget.charge_tool_invocation()
         call_identity = (
             identity
             or self._identity
