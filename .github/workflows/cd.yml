@@ -134,7 +134,6 @@ jobs:
           cd k8s
           kustomize edit set image \
             gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ steps.image-tags.outputs.tag }} \
-            gcr.io/PROJECT_ID/research-platform-worker=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-worker:${{ steps.image-tags.outputs.tag }} \
             gcr.io/PROJECT_ID/research-platform-web=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-web:${{ steps.image-tags.outputs.tag }}
           kustomize edit set namespace staging
       
@@ -142,7 +141,6 @@ jobs:
         run: |
           kustomize build k8s/ | kubectl apply -f -
           kubectl rollout status deployment/research-api -n staging --timeout=5m
-          kubectl rollout status deployment/research-worker -n staging --timeout=5m
       
       - name: Run smoke tests
         run: |
@@ -232,7 +230,6 @@ jobs:
           # Update image tags
           kustomize edit set image \
             gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ github.ref_name }} \
-            gcr.io/PROJECT_ID/research-platform-worker=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-worker:${{ github.ref_name }} \
             gcr.io/PROJECT_ID/research-platform-web=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-web:${{ github.ref_name }}
           
           # Set namespace
@@ -245,7 +242,6 @@ jobs:
           
           # Wait for rollout
           kubectl rollout status deployment/research-api -n production --timeout=10m
-          kubectl rollout status deployment/research-worker -n production --timeout=10m
       
       - name: Run production smoke tests
         run: |

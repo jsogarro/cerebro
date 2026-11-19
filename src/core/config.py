@@ -7,6 +7,7 @@ foundation model providers, and hierarchical agent management.
 """
 
 from ipaddress import ip_network
+from pathlib import Path
 from typing import Any
 
 from pydantic import Field, field_validator
@@ -71,6 +72,9 @@ class Settings(BaseSettings):
     MCP_PORT: int = 9000
     MCP_TOOLS_ENABLED: bool = True
     MCP_TOOL_PATH_ENABLED: bool = False
+    # Verbatim source snapshots; must be a persistent volume in deployment,
+    # since evidence rows cite files here by digest.
+    SOURCE_SNAPSHOT_DIR: str = "data/source_snapshots"
 
     # Monitoring
     ENABLE_METRICS: bool = True
@@ -338,6 +342,12 @@ class Settings(BaseSettings):
         for entry in v:
             ip_network(entry, strict=False)
         return v
+
+    @field_validator("SOURCE_SNAPSHOT_DIR")
+    @classmethod
+    def absolutize_snapshot_dir(cls, v: str) -> str:
+        """Pin a relative path to the working directory at startup."""
+        return str(Path(v).expanduser().resolve())
 
     @field_validator("SECRET_KEY")
     @classmethod

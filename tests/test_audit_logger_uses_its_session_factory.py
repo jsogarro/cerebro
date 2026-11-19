@@ -49,8 +49,13 @@ class _RecordingSessionFactory:
 
 
 def _bind_postgresql_json(column: Any, value: Any) -> Any:
-    """Apply the mapped column's real PostgreSQL JSON bind processor."""
-    processor = column.type.bind_processor(postgresql.dialect())
+    """Apply the mapped column's JSON bind processor for the asyncpg driver.
+
+    The dialect is pinned: ``postgresql.dialect()`` is psycopg2 on SQLAlchemy
+    2.0 but psycopg3 on 2.1, and psycopg3 serializes JSON natively, so it has
+    no bind processor to observe. The application connects through asyncpg.
+    """
+    processor = column.type.bind_processor(postgresql.asyncpg.dialect())
     assert processor is not None
     return json.loads(processor(value))
 

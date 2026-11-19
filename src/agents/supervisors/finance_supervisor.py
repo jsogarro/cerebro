@@ -183,7 +183,7 @@ class FinanceSupervisor(BaseSupervisor):
                 background="",
                 intermediate_outputs=state.context,
             )
-            response = await self.send_talkhier_message(
+            response = await self._send_worker_verified(
                 "financial_analysis", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
@@ -207,7 +207,7 @@ class FinanceSupervisor(BaseSupervisor):
                 background=analysis.content if hasattr(analysis, "content") else "",
                 intermediate_outputs=state.context,
             )
-            response = await self.send_talkhier_message(
+            response = await self._send_worker_verified(
                 "valuation", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
@@ -231,7 +231,7 @@ class FinanceSupervisor(BaseSupervisor):
                 background=valuation.content if hasattr(valuation, "content") else "",
                 intermediate_outputs=state.context,
             )
-            response = await self.send_talkhier_message(
+            response = await self._send_worker_verified(
                 "risk_assessment", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
