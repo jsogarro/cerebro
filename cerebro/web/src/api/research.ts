@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from './client';
 import { tokenSubject } from './auth';
+import { toast } from '@/hooks/use-toast';
 
 export interface CreateResearchPayload {
     title: string;
@@ -34,9 +35,18 @@ export const useCreateResearch = () => {
 
     return useMutation({
         mutationFn: async (payload: CreateResearchPayload) => {
+            const userId = tokenSubject();
+            if (!userId) {
+                toast({
+                    title: 'Sign in required',
+                    description: 'No valid access token is stored, so the project cannot be created.',
+                    variant: 'destructive',
+                });
+                throw new Error('Cannot create a research project without an access token.');
+            }
             const backendPayload = {
                 title: payload.title,
-                user_id: tokenSubject(),
+                user_id: userId,
                 // The form has no domain picker yet; "general" is the server's catch-all domain.
                 query: {
                     text: payload.topic,

@@ -3,9 +3,9 @@ const TOKEN_KEY = 'cerebro.access_token';
 // Browser storage can be absent or throw (private windows, blocked site data).
 export function getAccessToken(): string | null {
     try {
-        return window.localStorage.getItem(TOKEN_KEY) ?? import.meta.env.VITE_API_TOKEN ?? null;
+        return window.localStorage.getItem(TOKEN_KEY);
     } catch {
-        return import.meta.env.VITE_API_TOKEN ?? null;
+        return null;
     }
 }
 

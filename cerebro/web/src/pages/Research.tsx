@@ -44,19 +44,23 @@ function ResearchDetail({ id }: { id: string }) {
     useEffect(() => {
         wsManager.connect();
 
-        // Server-side subscription is per project, so every `progress` frame is this project's.
-        const unsubscribe = wsManager.subscribe('progress', (data: ProjectProgressMessage) => {
+        const unsubscribe = wsManager.subscribe('progress', (data: ProjectProgressMessage, projectId) => {
+            if (projectId !== id) return;
             setProgress(data.progress_percentage || 0);
             setLiveStatus('running');
         });
 
-        wsManager.send({
-            type: "subscription",
-            data: { action: "subscribe", project_id: id }
-        });
+        // Re-sent on every reconnect: the server forgets subscriptions with the socket.
+        const unsubscribeOpen = wsManager.onOpen(() =>
+            wsManager.send({
+                type: "subscription",
+                data: { action: "subscribe", project_id: id }
+            }),
+        );
 
         return () => {
             unsubscribe();
+            unsubscribeOpen();
             wsManager.disconnect();
         };
     }, [id]);

@@ -65,4 +65,84 @@ test.describe('API client contract', () => {
         await page.goto('/app/agents');
         await expect(page.getByText('Literature Reviewer')).toBeVisible();
     });
+
+    test.describe('WebSocket lifecycle', () => {
+        test('does not retry when the server rejects the token', async ({ page }) => {
+            await mockApi(page);
+            let connections = 0;
+            await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+                connections += 1;
+                ws.close({ code: 1008, reason: 'bad token' });
+            });
+            await page.goto('/app/research/RES-101');
+            await page.waitForTimeout(500);
+            const afterFirstAttempt = connections; // React StrictMode mounts twice in dev
+            await page.waitForTimeout(3500);
+            expect(connections).toBe(afterFirstAttempt);
+        });
+
+        test('re-sends the subscription after a reconnect', async ({ page }) => {
+            await mockApi(page);
+            const subscribes: string[] = [];
+            let connections = 0;
+            await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+                connections += 1;
+                ws.onMessage((message) => subscribes.push(String(message)));
+                if (connections === 1) ws.close({ code: 1011 });
+            });
+            await page.goto('/app/research/RES-101');
+            await expect.poll(() => subscribes.length, { timeout: 8000 }).toBeGreaterThan(0);
+            expect(connections).toBe(2);
+            expect(JSON.parse(subscribes[0]).data).toEqual({ action: 'subscribe', project_id: 'RES-101' });
+        });
+
+        test('does not reconnect after leaving the screen', async ({ page }) => {
+            await mockApi(page);
+            let connections = 0;
+            await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+                connections += 1;
+                setTimeout(() => ws.close({ code: 1011 }), 300);
+            });
+            await page.goto('/app/research/RES-101');
+            await expect.poll(() => connections).toBeGreaterThan(0);
+            await page.waitForTimeout(700); // after the server close, while the reconnect timer is pending
+            await page.getByRole('link', { name: /agents/i }).first().click();
+            await page.waitForTimeout(500);
+            const afterLeaving = connections;
+            await page.waitForTimeout(3000);
+            expect(connections).toBe(afterLeaving);
+        });
+
+        test('shows progress for this project only', async ({ page }) => {
+            await mockApi(page);
+            await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+                ws.onMessage(() => {
+                    const frame = (project: string, pct: number) =>
+                        JSON.stringify({ type: 'progress', project_id: project, data: { progress_percentage: pct } });
+                    ws.send(frame('RES-101', 55));
+                    ws.send(frame('OTHER', 77));
+                });
+            });
+            await page.goto('/app/research/RES-101');
+            await expect(page.getByText('55%').first()).toBeVisible();
+            await page.waitForTimeout(500);
+            await expect(page.getByText('55%').first()).toBeVisible();
+            await expect(page.getByText('77%')).toHaveCount(0);
+        });
+    });
+
+    test('refuses to create a project without a token', async ({ page }) => {
+        await mockApi(page);
+        await page.addInitScript(() => window.localStorage.removeItem('cerebro.access_token'));
+        let posted = false;
+        page.on('request', (req) => {
+            if (req.method() === 'POST') posted = true;
+        });
+        await page.goto('/app/research');
+        await page.getByRole('button', { name: 'New Research' }).click();
+        await page.getByLabel('Title').fill('No token');
+        await page.getByRole('button', { name: 'Start Research' }).click();
+        await expect(page.getByText('Sign in required', { exact: true })).toBeVisible();
+        expect(posted).toBe(false);
+    });
 });
