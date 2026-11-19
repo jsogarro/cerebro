@@ -1217,6 +1217,24 @@ Task: Revise your previous response addressing the feedback while maintaining yo
 
         return worker_response, verification_result
 
+    async def _send_worker_verified(
+        self,
+        worker_type: str,
+        message_type: MessageType,
+        content: TalkHierContent | str,
+        context: dict[str, Any] | None = None,
+    ) -> TalkHierMessage | None:
+        """Send to a worker, re-running it on REVISE up to the verification cap.
+
+        The worker path every supervisor phase uses. A verifier that errors
+        reports "revise" (never "pass"), so the worker is retried within the
+        same cap and the final QA gate still sees unapproved content.
+        """
+        response, _ = await self._run_worker_with_verification_loop(
+            worker_type, message_type, content, context
+        )
+        return response
+
     def _store_mast_labels_in_state(
         self, state: SupervisionState, verification_result: dict[str, Any]
     ) -> None:

@@ -247,7 +247,7 @@ class ContentSupervisor(BaseSupervisor):
                 else "",
                 intermediate_outputs=state.context,
             )
-            response = await self.send_talkhier_message(
+            response = await self._send_worker_verified(
                 "drafting", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
@@ -274,7 +274,7 @@ class ContentSupervisor(BaseSupervisor):
                 else "",
                 intermediate_outputs={"editing_round": 1},
             )
-            response = await self.send_talkhier_message(
+            response = await self._send_worker_verified(
                 "editing", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
@@ -303,7 +303,7 @@ class ContentSupervisor(BaseSupervisor):
                     "target_keywords": state.context.get("keywords", [])
                 },
             )
-            response = await self.send_talkhier_message(
+            response = await self._send_worker_verified(
                 "optimization", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
