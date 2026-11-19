@@ -911,6 +911,8 @@ class LLMWorkerAgentBase(BaseAgent):
                 ),
                 task,
             )
+        except BudgetExceededError:
+            raise
         except Exception as exc:
             message = f"Final generation failed after tool call: {exc}"
             return self._tool_failure_result(

@@ -100,6 +100,14 @@ class TestLedger:
             ledger.reserve_call(10)
         assert caught.value.dimension is BudgetDimension.COST
 
+    def test_calls_in_flight_each_hold_the_largest_observed_call_cost(self) -> None:
+        ledger = BudgetLedger(_budget(cost="0.025"))
+        ledger.settle(ledger.reserve_call(10), _usage(10, "0.01"))
+        ledger.reserve_call(10)  # 0.01 used + 0.01 held <= 0.025
+        with pytest.raises(BudgetExceededError) as caught:
+            ledger.reserve_call(10)  # a second in flight would hold 0.03
+        assert caught.value.dimension is BudgetDimension.COST
+
     def test_overshoot_reported_after_the_fact_is_recorded(self) -> None:
         ledger = BudgetLedger(_budget(cost="0.005"))
         ledger.settle(ledger.reserve_call(10), _usage(10, "0.01"))
@@ -267,6 +275,29 @@ class TestToolBoundary:
                 "arithmetic",
                 {"expression": "1+1"},
                 budget=BudgetLedger(_budget(tools=0)),
+            )
+
+    async def test_budget_error_in_tool_follow_up_generation_propagates(self) -> None:
+        registry = MagicMock()
+        registry.execute = AsyncMock(
+            return_value=SimpleNamespace(success=True, value=1, error=None)
+        )
+        worker = _Worker()
+        call = SimpleNamespace(name="arithmetic", arguments={})
+        with (
+            patch.object(
+                worker,
+                "_generate_with_routing",
+                AsyncMock(
+                    side_effect=BudgetExceededError(
+                        BudgetDimension.TOKENS, limit=1, used=1, requested=1
+                    )
+                ),
+            ),
+            pytest.raises(BudgetExceededError),
+        ):
+            await worker._execute_model_tool_call(
+                _task(BudgetLedger(_budget())), "p", registry, call, None
             )
 
     async def test_worker_propagates_budget_error_instead_of_a_tool_failure(

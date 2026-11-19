@@ -15,7 +15,11 @@ Policy, stated once:
   tokens is charged its reservation, and because its cost cannot be bounded
   the ledger then fails closed on cost: no further call is admitted.
 * Cost is only as good as the provider's own ``cost_estimate``. Before a call,
-  the largest single-call cost seen so far is held against the ceiling.
+  the largest single-call cost seen so far is held against the ceiling for
+  every call in flight. With no price known up front, the first calls can
+  overshoot ``max_cost_usd``; the overshoot is recorded and ends the run.
+* A failed provider response is taken to be unbilled; a call that errors or is
+  cancelled with no response is unknown and charged its reservation.
 """
 
 from __future__ import annotations
@@ -112,6 +116,7 @@ class BudgetLedger:
         self.unknown_usage_calls = 0
         self.exceeded: BudgetExceededError | None = None
         self._reserved_tokens = 0
+        self._calls_in_flight = 0
         self._max_call_cost = Decimal(0)
         self._cost_unverified = False
 
@@ -149,21 +154,24 @@ class BudgetLedger:
                     requested=held,
                 )
             )
-        if self.cost_used + self._max_call_cost > self._max_cost:
+        held_cost = (self._calls_in_flight + 1) * self._max_call_cost
+        if self.cost_used + held_cost > self._max_cost:
             self._fail(
                 BudgetExceededError(
                     BudgetDimension.COST,
                     limit=self._max_cost,
                     used=self.cost_used,
-                    requested=self._max_call_cost,
+                    requested=held_cost,
                 )
             )
         self._reserved_tokens += estimated_tokens
+        self._calls_in_flight += 1
         return CallReservation(tokens=estimated_tokens)
 
     def settle(self, reservation: CallReservation, usage: ReportedUsage | None) -> None:
         """Replace a reservation with what the call actually consumed."""
         self._reserved_tokens -= reservation.tokens
+        self._calls_in_flight -= 1
         if usage is not None and not _is_well_formed(usage):
             usage = None
         if usage is None:
