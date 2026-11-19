@@ -83,7 +83,7 @@ class ResearchSupervisor(BaseSupervisor):
             self.citation_style,
         )
         self.execution_coordinator = ResearchExecutionCoordinator(
-            self.send_talkhier_message,
+            self._send_worker_verified,
             self.citation_style,
         )
         self.quality_validator = ResearchQualityValidator(
