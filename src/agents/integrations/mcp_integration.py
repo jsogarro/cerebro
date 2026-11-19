@@ -40,7 +40,7 @@ data by reading the flag it already reads.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -64,6 +64,7 @@ from src.agents.tools.mediation import (
     self_issued_grant,
 )
 from src.core.contracts.capabilities import CapabilityGrant
+from src.core.contracts.provenance import ToolInvocation
 from src.core.contracts.trust import TrustClassification
 from src.core.tools import (
     ToolAuditStore,
@@ -77,6 +78,9 @@ if TYPE_CHECKING:
     from src.mcp.client import MCPClient
 
 logger = get_logger()
+
+EvidenceRecorder = Callable[[ToolInvocation, str | None], Awaitable[dict[str, Any]]]
+"""Persists the sources a durable search invocation returned as evidence."""
 
 DEFAULT_MCP_INPUT_TRUST = TrustClassification.USER_SUPPLIED
 """The trust label a caller that does not state one is taken to be supplying.
@@ -126,6 +130,7 @@ class MCPIntegration:
         boundary: ToolBoundary | None = None,
         audit_store: ToolAuditStore | None = None,
         grants: Sequence[CapabilityGrant] | None = None,
+        evidence_recorder: EvidenceRecorder | None = None,
     ):
         """Initialize MCP integration.
 
@@ -144,8 +149,12 @@ class MCPIntegration:
                 non-durable callers retain the legacy self-issued behavior;
                 durable callers receive no grants and are denied by the
                 boundary.
+            evidence_recorder: Persists academic search results as run-owned
+                evidence before they are returned. Supply only with a durable
+                audit store: the evidence cites the invocation row.
 
         """
+        self._evidence_recorder = evidence_recorder
         self.config = config or {}
         self.enable_fallback = enable_fallback
         self._client = mcp_client
@@ -249,7 +258,11 @@ class MCPIntegration:
             input_trust=input_trust,
         )
         if outcome.succeeded:
-            return self._succeeded(outcome, call_identity)
+            payload = self._succeeded(outcome, call_identity)
+            payload["source_evidence"] = await self._record_source_evidence(
+                outcome.invocation, call_identity
+            )
+            return payload
         if outcome.status is ToolOutcomeStatus.IN_PROGRESS:
             return self._in_progress(
                 outcome,
@@ -484,6 +497,27 @@ class MCPIntegration:
             grants=grants,
         )
         return outcome, call_identity
+
+    async def _record_source_evidence(
+        self, invocation: ToolInvocation, identity: ToolCallIdentity
+    ) -> dict[str, Any]:
+        """Persist a succeeded search's sources, or say plainly that none were.
+
+        The search itself already succeeded and is durable, so a recorder
+        failure is reported in the summary rather than discarding the result.
+        """
+
+        if self._evidence_recorder is None:
+            return {"enabled": False}
+        try:
+            return await self._evidence_recorder(invocation, identity.organization_id)
+        except Exception as error:
+            logger.error("source_evidence_recorder_failed", error=type(error).__name__)
+            return {
+                "enabled": True,
+                "recorded": [],
+                "failed": [{"source_uri": "", "reason": type(error).__name__}],
+            }
 
     def _succeeded(
         self, outcome: ToolOutcome, identity: ToolCallIdentity

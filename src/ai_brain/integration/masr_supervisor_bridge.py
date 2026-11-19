@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, cast
 
 from structlog import get_logger
@@ -23,6 +24,8 @@ from structlog import get_logger
 from src.agents.integrations.mcp_integration import MCPIntegration
 from src.agents.tools.durable_audit import SessionToolAuditStore
 from src.agents.tools.mediation import ToolCallIdentity
+from src.core.acquisition.search_evidence import SearchEvidenceRecorder
+from src.core.acquisition.snapshots import FilesystemSnapshotStore
 from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
 from src.core.config import settings
 from src.core.kernel import TypedRegistry
@@ -663,8 +666,22 @@ class MASRSupervisorBridge:
                 for grant in task_grants
                 if grant.tool_name in worker.tool_allowlist
             )
+            audit_store = self._mcp_audit_store()
+            evidence_recorder = None
+            # Evidence cites the invocation row, so it is wired only to a
+            # store that writes one.
+            if isinstance(audit_store, SessionToolAuditStore):
+                evidence_recorder = SearchEvidenceRecorder(
+                    session_factory=audit_store.session_factory,
+                    store=FilesystemSnapshotStore(
+                        root=Path(settings.SOURCE_SNAPSHOT_DIR)
+                    ),
+                )
+            else:
+                logger.warning("source_evidence_disabled_non_durable_audit_store")
             worker_config["mcp_integration"] = MCPIntegration(
-                audit_store=self._mcp_audit_store(),
+                audit_store=audit_store,
+                evidence_recorder=evidence_recorder,
                 enable_fallback=False,
                 identity=ToolCallIdentity.from_agent_task(task),
                 grants=grants,
