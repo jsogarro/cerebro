@@ -24,6 +24,7 @@ from src.agents.tools.mediation import ToolCallIdentity
 from src.agents.tools.registry import ToolRegistry
 from src.core.budget import (
     BUDGET_LEDGER_CONTEXT_KEY,
+    BudgetDimension,
     BudgetExceededError,
     ReportedUsage,
     estimate_prompt_tokens,
@@ -386,19 +387,41 @@ class LLMWorkerAgentBase(BaseAgent):
             ledger.settle(reservation, self._reported_usage(response))
         return response
 
-    @staticmethod
     def _estimate_call_cost(
-        route: Any, routing_decision: dict[str, Any], prompt: int, completion: int
+        self,
+        route: Any,
+        routing_decision: dict[str, Any],
+        prompt: int,
+        completion: int,
     ) -> Decimal:
-        """Price the call at the model's rate; zero when the provider can't say."""
+        """Price the call at the model's rate.
+
+        A provider the router does not know is unpriced (zero, logged): the
+        documented first-call overshoot. Any other failure to price is
+        unknown cost, so the call is refused rather than assumed free.
+        """
+        primary = routing_decision.get("primary_model") or {}
         try:
-            primary = routing_decision["primary_model"]
-            provider = route.router.registry.providers[primary["provider"]]
-            return Decimal(
-                str(provider._calculate_cost(prompt, completion, primary.get("name")))
-            )
-        except Exception:
+            provider = route.router.registry.providers[primary.get("provider")]
+        except (KeyError, AttributeError, TypeError):
+            self.log_warning("budget_call_unpriced", provider=primary.get("provider"))
             return Decimal(0)
+        try:
+            price = Decimal(
+                str(provider.estimate_cost(prompt, completion, primary.get("name")))
+            )
+        except Exception as exc:
+            raise BudgetExceededError(
+                BudgetDimension.COST,
+                limit=0,
+                used=0,
+                detail=f"cannot price call: {exc}",
+            ) from exc
+        if not price.is_finite() or price < 0:
+            raise BudgetExceededError(
+                BudgetDimension.COST, limit=0, used=0, detail="cannot price call"
+            )
+        return price
 
     @staticmethod
     def _reported_usage(response: Any) -> ReportedUsage | None:

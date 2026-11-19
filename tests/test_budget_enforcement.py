@@ -195,6 +195,7 @@ def _task(ledger: BudgetLedger | None) -> AgentTask:
 def _route(responses: list[Any]) -> Any:
     router = MagicMock()
     router.route_and_generate = AsyncMock(side_effect=responses)
+    router.registry.providers = {}
     return SimpleNamespace(router=router)
 
 
@@ -217,7 +218,7 @@ class TestModelCallBoundary:
 
     async def test_call_is_priced_from_the_provider_before_it_runs(self) -> None:
         provider = MagicMock()
-        provider._calculate_cost = MagicMock(return_value=0.5)
+        provider.estimate_cost = MagicMock(return_value=0.5)
         route = _route([_response(10)])
         route.router.registry.providers = {"gemini": provider}
         ledger = BudgetLedger(_budget(cost="0.1"))
@@ -229,6 +230,32 @@ class TestModelCallBoundary:
             )
         assert caught.value.dimension is BudgetDimension.COST
         route.router.route_and_generate.assert_not_called()
+
+    async def test_pricing_failure_refuses_the_call_instead_of_assuming_free(
+        self,
+    ) -> None:
+        provider = MagicMock()
+        provider.estimate_cost = MagicMock(side_effect=RuntimeError("bad price table"))
+        route = _route([_response(10)])
+        route.router.registry.providers = {"gemini": provider}
+        request = SimpleNamespace(prompt="p", max_tokens=1000)
+        decision = {"primary_model": {"provider": "gemini", "name": "m"}}
+        with pytest.raises(BudgetExceededError) as caught:
+            await _Worker()._metered_route_and_generate(
+                route, request, _task(BudgetLedger(_budget())), decision
+            )
+        assert caught.value.dimension is BudgetDimension.COST
+        route.router.route_and_generate.assert_not_called()
+
+    async def test_unregistered_provider_is_unpriced_not_refused(self) -> None:
+        route = _route([_response(10)])
+        route.router.registry.providers = {}
+        request = SimpleNamespace(prompt="p", max_tokens=1000)
+        decision = {"primary_model": {"provider": "gemini", "name": "m"}}
+        await _Worker()._metered_route_and_generate(
+            route, request, _task(BudgetLedger(_budget())), decision
+        )
+        route.router.route_and_generate.assert_awaited_once()
 
     async def test_retries_draw_on_the_same_budget(self) -> None:
         ledger = BudgetLedger(_budget(tokens=3000))
