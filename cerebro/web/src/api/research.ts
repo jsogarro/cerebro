@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from './client';
+import { tokenSubject } from './auth';
 
 export interface CreateResearchPayload {
     title: string;
@@ -35,10 +36,11 @@ export const useCreateResearch = () => {
         mutationFn: async (payload: CreateResearchPayload) => {
             const backendPayload = {
                 title: payload.title,
-                user_id: "default-user",
+                user_id: tokenSubject(),
+                // The form has no domain picker yet; "general" is the server's catch-all domain.
                 query: {
-                    main_query: payload.topic,
-                    context: payload.description || ""
+                    text: payload.topic,
+                    domains: ['general'],
                 }
             };
             const { data } = await apiClient.post('/research/projects', backendPayload);

@@ -1,3 +1,5 @@
+import { getAccessToken } from './auth';
+
 type WebSocketMessage = {
     type: string;
     data?: unknown;
@@ -16,6 +18,7 @@ export class WebSocketManager {
     private ws: WebSocket | null = null;
     private url: string;
     private reconnectAttempts = 0;
+    private closedByClient = false;
     private maxReconnectAttempts = 5;
     private listeners: Map<string, Set<(data: unknown) => void>> = new Map();
     private pendingMessages: WebSocketMessage[] = [];
@@ -25,7 +28,13 @@ export class WebSocketManager {
     }
 
     connect() {
-        this.ws = new WebSocket(this.url);
+        this.closedByClient = false;
+        this.ws?.close();
+        // The server authenticates WebSockets by ?token=, never by header.
+        const token = getAccessToken();
+        const url = new URL(this.url);
+        if (token) url.searchParams.set('token', token);
+        this.ws = new WebSocket(url);
 
         this.ws.onopen = () => {
             this.reconnectAttempts = 0;
@@ -40,8 +49,10 @@ export class WebSocketManager {
             }
         };
 
+        const socket = this.ws;
         this.ws.onclose = () => {
-            this.attemptReconnect();
+            // A superseded or deliberately closed socket must not resurrect itself.
+            if (this.ws === socket && !this.closedByClient) this.attemptReconnect();
         };
 
         this.ws.onerror = (error) => {
@@ -93,6 +104,7 @@ export class WebSocketManager {
     }
 
     disconnect() {
+        this.closedByClient = true;
         this.ws?.close();
     }
 }
