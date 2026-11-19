@@ -209,7 +209,7 @@ jobs:
       
       - name: Validate Dockerfile
         run: |
-          for dockerfile in Dockerfile docker/Dockerfile.worker; do
+          for dockerfile in Dockerfile; do
             if [ -f "$dockerfile" ]; then
               echo "Linting $dockerfile"
               docker run --rm -i hadolint/hadolint hadolint --failure-threshold error - < "$dockerfile"
@@ -229,17 +229,6 @@ jobs:
           cache-to: type=gha,mode=max
           target: production
       
-      - name: Build Worker image
-        if: ${{ hashFiles('docker/Dockerfile.worker') != '' }}
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./docker/Dockerfile.worker
-          push: false
-          tags: research-platform-worker:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Build Web image
         uses: docker/build-push-action@v7
         with:
