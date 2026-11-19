@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.dependencies.models import Dependant
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, APIWebSocketRoute
 
+from src.api.websocket.auth import require_authenticated_websocket
 from src.middleware.auth_middleware import PUBLIC_ROUTE_ALLOWLIST, get_current_token
 
 
@@ -42,3 +43,16 @@ def test_every_non_public_route_resolves_get_current_token() -> None:
     assert len(api_routes) > 50, "route survey found no plausible application"
 
     assert _routes_without_auth(app) == []
+
+
+def test_every_websocket_route_resolves_websocket_authentication() -> None:
+    from src.api.main import app
+
+    ws_routes = [r for r in app.routes if isinstance(r, APIWebSocketRoute)]
+    assert ws_routes, "route survey found no websocket routes"
+
+    assert [
+        r.path
+        for r in ws_routes
+        if not _resolves(r.dependant, require_authenticated_websocket)
+    ] == []

@@ -115,7 +115,9 @@ _AUTHENTICATED = Depends(get_current_token)
 # ================================
 
 
-@router.post("/sessions", response_model=TalkHierSessionResponse)
+@router.post(
+    "/sessions", dependencies=[_AUTHENTICATED], response_model=TalkHierSessionResponse
+)
 async def create_refinement_session(
     request: TalkHierSessionRequest,
     talkhier_service: TalkHierServiceDependency,
@@ -196,7 +198,11 @@ async def create_refinement_session(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/sessions/{session_id}", response_model=SessionStatusResponse)
+@router.get(
+    "/sessions/{session_id}",
+    dependencies=[_AUTHENTICATED],
+    response_model=SessionStatusResponse,
+)
 async def get_session_status(
     talkhier_service: TalkHierServiceDependency,
     tenant_context: TenantContextDependency,
@@ -248,7 +254,11 @@ async def get_session_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/sessions/{session_id}/round", response_model=RefinementRoundResponse)
+@router.post(
+    "/sessions/{session_id}/round",
+    dependencies=[_AUTHENTICATED],
+    response_model=RefinementRoundResponse,
+)
 async def execute_refinement_round(
     session_id: str,
     request: RefinementRoundRequest,
@@ -338,7 +348,11 @@ async def execute_refinement_round(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/sessions/{session_id}/consensus", response_model=ConsensusResult)
+@router.post(
+    "/sessions/{session_id}/consensus",
+    dependencies=[_AUTHENTICATED],
+    response_model=ConsensusResult,
+)
 async def check_consensus_status(
     session_id: str,
     request: ConsensusCheckRequest,
@@ -408,7 +422,11 @@ async def check_consensus_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/sessions/{session_id}/close", response_model=SessionCloseResponse)
+@router.post(
+    "/sessions/{session_id}/close",
+    dependencies=[_AUTHENTICATED],
+    response_model=SessionCloseResponse,
+)
 async def close_session(
     session_id: str,
     talkhier_service: TalkHierServiceDependency,
@@ -627,7 +645,9 @@ async def validate_communication_structure(
 # ================================
 
 
-@router.get("/analytics", response_model=AnalyticsResponse)
+@router.get(
+    "/analytics", dependencies=[_AUTHENTICATED], response_model=AnalyticsResponse
+)
 async def get_protocol_analytics(
     tenant_context: TenantContextDependency,
     time_range: str | None = Query("24h", description="Time range (1h, 24h, 7d, 30d)"),
@@ -1160,7 +1180,7 @@ async def _get_protocol_insights(
 # ================================
 
 
-@router.get("/health")
+@router.get("/health", dependencies=[_AUTHENTICATED])
 async def talkhier_health_check(
     talkhier_service: TalkHierServiceDependency,
     tenant_context: TenantContextDependency,

@@ -6,11 +6,13 @@ a 401 here can only come from the route's own auth dependency.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from src.api.routes import masr_api, supervisor_api, talkhier_api
@@ -22,30 +24,11 @@ from src.auth.models import TokenPayload
 from src.middleware.auth_middleware import get_jwt_service
 
 _ROUTES = [
-    ("POST", "/api/v1/supervisors/research/execute"),
-    ("POST", "/api/v1/supervisors/research/coordinate"),
-    ("POST", "/api/v1/supervisors/multi/orchestrate"),
-    ("POST", "/api/v1/supervisors/resolve-conflicts"),
-    ("POST", "/api/v1/supervisors/experiment"),
-    ("POST", "/api/v1/supervisors/optimize-allocation"),
-    ("GET", "/api/v1/supervisors"),
-    ("GET", "/api/v1/supervisors/research"),
-    ("GET", "/api/v1/supervisors/research/workers"),
-    ("GET", "/api/v1/supervisors/research/stats"),
-    ("GET", "/api/v1/supervisors/research/health"),
-    ("GET", "/api/v1/supervisors/performance/compare"),
-    ("POST", "/api/v1/talkhier/validate"),
-    ("GET", "/api/v1/talkhier/protocols"),
-    ("GET", "/api/v1/talkhier/analytics"),
-    ("POST", "/api/v1/talkhier/coordinate"),
-    ("POST", "/api/v1/masr/route"),
-    ("POST", "/api/v1/masr/estimate-cost"),
-    ("POST", "/api/v1/masr/evaluate-strategies"),
-    ("POST", "/api/v1/masr/analyze-complexity"),
-    ("POST", "/api/v1/masr/feedback"),
-    ("GET", "/api/v1/masr/strategies"),
-    ("GET", "/api/v1/masr/models"),
-    ("GET", "/api/v1/masr/status"),
+    (method, re.sub(r"\{[^}]+\}", "research", route.path))
+    for module in (supervisor_api, talkhier_api, masr_api)
+    for route in module.router.routes
+    if isinstance(route, APIRoute)
+    for method in sorted(route.methods)
 ]
 
 
