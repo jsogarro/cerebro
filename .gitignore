@@ -74,3 +74,6 @@ cerebro_dev.db
 .refactorit/
 *.refactorit.checkpoint
 evals/out/
+
+# Local source snapshots (evidence)
+data/source_snapshots/

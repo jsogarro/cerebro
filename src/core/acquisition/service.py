@@ -33,6 +33,8 @@ verbatim and located verbatim. Everything this module composes for persistence
 the quarantine.
 """
 
+import asyncio
+import hashlib
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -60,6 +62,7 @@ from src.core.tools.prompts import RenderedPrompt
 from src.core.tools.secrets import SecretProvider
 from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.evidence_repository import EvidenceRepository
+from src.repositories.tenant_scope import normalize_organization_id
 
 from .fetch_tool import SOURCE_FETCH_TOOL, SourceFetchOutput
 from .resolution import locate, resolve
@@ -74,6 +77,7 @@ __all__ = [
     "PromptlessAcquisitionError",
     "SourceAcquisitionService",
     "UndeclaredSourceTypeError",
+    "retrieved_source_evidence_id",
 ]
 
 SNAPSHOT_ARTIFACT_KIND: Final[str] = "source_snapshot"
@@ -196,7 +200,7 @@ class SourceAcquisitionService:
     def __init__(
         self,
         *,
-        boundary: ToolBoundary,
+        boundary: ToolBoundary | None,
         store: SnapshotStore,
         artifacts: ArtifactRepository,
         evidence: EvidenceRepository,
@@ -225,6 +229,10 @@ class SourceAcquisitionService:
         caller owns the transaction. Nothing here commits, so an acquisition
         that fails part-way leaves the caller free to roll the whole thing
         back rather than inheriting a half-written snapshot record.
+
+        ``boundary`` is required by :meth:`acquire` only. A service that solely
+        records sources a mediated tool already retrieved
+        (:meth:`record_retrieved_source`) passes ``None`` and cannot fetch.
         """
 
         self._boundary = boundary
@@ -319,6 +327,10 @@ class SourceAcquisitionService:
                 the acquired snapshot. Raised before anything is persisted.
         """
 
+        if self._boundary is None:
+            raise RuntimeError(
+                "this service was built without a tool boundary and cannot acquire"
+            )
         requested_source_type = self._source_type_for(tool_name, source_type)
         trust = trust_for_source(requested_source_type)
 
@@ -486,6 +498,103 @@ class SourceAcquisitionService:
             excerpts=tuple(excerpt for _, excerpt in located),
         )
 
+    async def record_retrieved_source(
+        self,
+        *,
+        invocation: ToolInvocation,
+        organization_id: str | None,
+        source_uri: str,
+        source_type: SourceType,
+        content: bytes,
+        media_type: str = "text/plain; charset=utf-8",
+    ) -> Evidence | None:
+        """Record a source a mediated tool already returned, as run-owned evidence.
+
+        For tools whose *result is* the source text (a search provider's
+        abstract), so there is nothing further to fetch. ``content`` is
+        snapshotted as held; the evidence cites the whole of it and is
+        attributed to the tool invocation that produced it, as a system
+        record. No model turn chose this span, so no prompt is claimed.
+
+        ``content`` is whatever the producing tool's durable record holds,
+        which is redacted and sanitized output rather than the provider's raw
+        bytes, so the snapshot is exactly as verbatim as that record. The
+        trust label comes from ``source_type`` alone, as in :meth:`acquire`.
+
+        Ids derive from the invocation, the source, and its digest, so
+        re-recording a replayed invocation finds the row already there and
+        returns ``None`` instead of writing a second one.
+
+        Raises:
+            ValueError: ``content`` is empty.
+            MissingOrganizationContextError: No organization context.
+            ValueError: The invocation's run does not exist (repository).
+        """
+
+        # Fails closed first: a read with no organization is unscoped, so the
+        # replay lookup below would otherwise see another tenant's row.
+        normalize_organization_id(organization_id)
+        data = bytes(content)
+        digest = snapshot_digest(data)
+        key = _retrieved_source_key(invocation, source_uri, digest)
+        evidence_id = f"evidence-{key}"
+        if (
+            await self._evidence.get_evidence(
+                evidence_id, organization_id=organization_id
+            )
+            is not None
+        ):
+            return None
+
+        trust = trust_for_source(source_type)
+        now = self._clock()
+        artifact = Artifact(
+            artifact_id=f"snapshot-{key}",
+            run_id=invocation.run_id,
+            task_id=invocation.task_id,
+            attempt_id=invocation.attempt_id,
+            kind=SNAPSHOT_ARTIFACT_KIND,
+            media_type=media_type,
+            # Off the event loop: the store is synchronous filesystem I/O.
+            # ponytail: a DB write failing after this leaves an orphan
+            # content-addressed file; sweep unreferenced snapshots if disk matters.
+            storage_uri=await asyncio.to_thread(self._store.put, data),
+            content_sha256=digest,
+            status=ArtifactStatus.FINAL,
+            trust=trust,
+            producer=invocation.tool_name,
+            producer_kind=ProducerKind.SYSTEM,
+            created_at=now,
+            metadata=_redacted_metadata(
+                {
+                    "source_type": source_type.value,
+                    "source_uri": source_uri,
+                    "byte_length": len(data),
+                    "tool_invocation_id": invocation.tool_invocation_id,
+                    "tool_name": invocation.tool_name,
+                    "tool_version": invocation.tool_version,
+                },
+                self._secret_provider,
+            ),
+        )
+        await self._artifacts.create_artifact(artifact, organization_id=organization_id)
+        evidence = Evidence(
+            evidence_id=evidence_id,
+            run_id=invocation.run_id,
+            task_id=invocation.task_id,
+            source_type=source_type.value,
+            source_uri=source_uri,
+            snapshot_artifact_id=artifact.artifact_id,
+            content_sha256=digest,
+            locator=locate("bytes", 0, len(data)),
+            trust=trust,
+            producer_kind=ProducerKind.SYSTEM,
+            producer_tool_invocation_id=invocation.tool_invocation_id,
+            acquired_at=now,
+        )
+        await self._evidence.record_evidence(evidence, organization_id=organization_id)
+        return evidence
+
     async def read_excerpt(
         self, evidence: Evidence, *, organization_id: str | None = None
     ) -> str:
@@ -584,10 +693,30 @@ class SourceAcquisitionService:
             "tool_name": invocation.tool_name,
             "tool_version": invocation.tool_version,
         }
-        redacted = redact(
-            raw, known_secret_values=self._secret_provider.secret_values()
-        )
-        return dict(redacted) if isinstance(redacted, dict) else raw
+        return _redacted_metadata(raw, self._secret_provider)
+
+
+def _retrieved_source_key(
+    invocation: ToolInvocation, source_uri: str, digest: str
+) -> str:
+    return hashlib.sha256(
+        f"{invocation.tool_invocation_id}\x00{source_uri}\x00{digest}".encode()
+    ).hexdigest()[:40]
+
+
+def retrieved_source_evidence_id(
+    invocation: ToolInvocation, source_uri: str, content: bytes
+) -> str:
+    """The evidence id :meth:`record_retrieved_source` assigns to this source."""
+
+    return f"evidence-{_retrieved_source_key(invocation, source_uri, snapshot_digest(content))}"
+
+
+def _redacted_metadata(
+    raw: dict[str, JsonValue], secret_provider: SecretProvider
+) -> dict[str, JsonValue]:
+    redacted = redact(raw, known_secret_values=secret_provider.secret_values())
+    return dict(redacted) if isinstance(redacted, dict) else raw
 
 
 def _unavailable(

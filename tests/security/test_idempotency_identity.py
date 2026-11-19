@@ -13,6 +13,10 @@ import pytest_asyncio
 from fastapi import HTTPException
 from httpx import ASGITransport
 
+from src.api.middleware.idempotency import (
+    IdempotencyMiddleware,
+    InMemoryIdempotencyStore,
+)
 from src.auth.models import TokenPayload
 from src.middleware.auth_middleware import get_jwt_service
 
@@ -36,10 +40,29 @@ class _JWTService:
         )
 
 
+def _mounted_idempotency(app: object) -> IdempotencyMiddleware:
+    layer = getattr(app, "middleware_stack", None)
+    while layer is not None and not isinstance(layer, IdempotencyMiddleware):
+        layer = getattr(layer, "app", None)
+    assert layer is not None, "IdempotencyMiddleware is not mounted on the app"
+    return layer
+
+
 @pytest_asyncio.fixture
 async def probe() -> AsyncIterator[dict[str, object]]:
-    """Mount a counting route on the real app, behind its real middleware."""
+    """Mount a counting route on the real app, behind its real middleware.
+
+    The middleware's store is replaced with a private in-memory one. The app's
+    own store talks to whatever Redis the environment resolves, and a slow or
+    shared Redis makes a write fall back locally while reads still hit Redis,
+    so a replay can miss its cached response and run the handler again.
+    """
     from src.api.main import app
+
+    app.middleware_stack = app.build_middleware_stack()
+    mounted = _mounted_idempotency(app)
+    saved_store = mounted.store
+    mounted.store = InMemoryIdempotencyStore()
 
     state: dict[str, object] = {
         "calls": 0,
@@ -61,6 +84,7 @@ async def probe() -> AsyncIterator[dict[str, object]]:
     try:
         yield state
     finally:
+        mounted.store = saved_store
         app.router.routes.remove(route)
         app.dependency_overrides.pop(get_jwt_service, None)
 
