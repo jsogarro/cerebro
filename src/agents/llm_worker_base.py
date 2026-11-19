@@ -368,8 +368,12 @@ class LLMWorkerAgentBase(BaseAgent):
             return await route.router.route_and_generate(
                 request, routing_decision=routing_decision
             )
+        prompt_tokens = estimate_prompt_tokens(request.prompt)
         reservation = ledger.reserve_call(
-            estimate_prompt_tokens(request.prompt) + request.max_tokens
+            prompt_tokens + request.max_tokens,
+            self._estimate_call_cost(
+                route, routing_decision, prompt_tokens, request.max_tokens
+            ),
         )
         response = None
         try:
@@ -383,12 +387,23 @@ class LLMWorkerAgentBase(BaseAgent):
         return response
 
     @staticmethod
+    def _estimate_call_cost(
+        route: Any, routing_decision: dict[str, Any], prompt: int, completion: int
+    ) -> Decimal:
+        """Price the call at the model's rate; zero when the provider can't say."""
+        try:
+            primary = routing_decision["primary_model"]
+            provider = route.router.registry.providers[primary["provider"]]
+            return Decimal(
+                str(provider._calculate_cost(prompt, completion, primary.get("name")))
+            )
+        except Exception:
+            return Decimal(0)
+
+    @staticmethod
     def _reported_usage(response: Any) -> ReportedUsage | None:
         if response is None:
             return None
-        if not response.success:
-            # A failed call reported nothing and is not billed.
-            return ReportedUsage(total_tokens=0, cost_usd=Decimal(0))
         if response.total_tokens <= 0:
             return None
         return ReportedUsage(

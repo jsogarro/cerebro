@@ -108,6 +108,18 @@ class TestLedger:
             ledger.reserve_call(10)  # a second in flight would hold 0.03
         assert caught.value.dimension is BudgetDimension.COST
 
+    def test_first_call_is_refused_when_its_estimated_cost_cannot_fit(self) -> None:
+        ledger = BudgetLedger(_budget(cost="0.01"))
+        with pytest.raises(BudgetExceededError) as caught:
+            ledger.reserve_call(10, estimated_cost=Decimal("0.05"))
+        assert caught.value.dimension is BudgetDimension.COST
+
+    def test_parallel_calls_each_hold_their_estimated_cost(self) -> None:
+        ledger = BudgetLedger(_budget(cost="0.05"))
+        ledger.reserve_call(10, estimated_cost=Decimal("0.03"))
+        with pytest.raises(BudgetExceededError):
+            ledger.reserve_call(10, estimated_cost=Decimal("0.03"))
+
     def test_overshoot_reported_after_the_fact_is_recorded(self) -> None:
         ledger = BudgetLedger(_budget(cost="0.005"))
         ledger.settle(ledger.reserve_call(10), _usage(10, "0.01"))
@@ -202,6 +214,21 @@ class TestModelCallBoundary:
             )
         route.router.route_and_generate.assert_not_called()
 
+    async def test_call_is_priced_from_the_provider_before_it_runs(self) -> None:
+        provider = MagicMock()
+        provider._calculate_cost = MagicMock(return_value=0.5)
+        route = _route([_response(10)])
+        route.router.registry.providers = {"gemini": provider}
+        ledger = BudgetLedger(_budget(cost="0.1"))
+        request = SimpleNamespace(prompt="p", max_tokens=1000)
+        decision = {"primary_model": {"provider": "gemini", "name": "m"}}
+        with pytest.raises(BudgetExceededError) as caught:
+            await _Worker()._metered_route_and_generate(
+                route, request, _task(ledger), decision
+            )
+        assert caught.value.dimension is BudgetDimension.COST
+        route.router.route_and_generate.assert_not_called()
+
     async def test_retries_draw_on_the_same_budget(self) -> None:
         ledger = BudgetLedger(_budget(tokens=3000))
         route = _route([_response(1000), _response(1000)])
@@ -218,6 +245,16 @@ class TestModelCallBoundary:
     async def test_response_without_usage_is_charged_the_reservation(self) -> None:
         ledger = BudgetLedger(_budget())
         route = _route([_response(0)])
+        request = SimpleNamespace(prompt="p", max_tokens=1000)
+        await _Worker()._metered_route_and_generate(route, request, _task(ledger), {})
+        assert ledger.tokens_used >= 1000
+        assert ledger.unknown_usage_calls == 1
+
+    async def test_failed_response_is_unknown_usage_not_zero(self) -> None:
+        # A router turns a timeout or parse failure after a billed generation
+        # into a failed response, so failure does not prove nothing was spent.
+        ledger = BudgetLedger(_budget())
+        route = _route([_response(0, success=False)])
         request = SimpleNamespace(prompt="p", max_tokens=1000)
         await _Worker()._metered_route_and_generate(route, request, _task(ledger), {})
         assert ledger.tokens_used >= 1000

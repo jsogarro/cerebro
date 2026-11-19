@@ -14,10 +14,12 @@ Policy, stated once:
 * Unknown usage is never counted as zero. A successful response reporting no
   tokens is charged its reservation, and because its cost cannot be bounded
   the ledger then fails closed on cost: no further call is admitted.
-* Cost is only as good as the provider's own ``cost_estimate``. Before a call,
-  the largest single-call cost seen so far is held against the ceiling for
-  every call in flight. With no price known up front, the first calls can
-  overshoot ``max_cost_usd``; the overshoot is recorded and ends the run.
+* Cost is only as good as the provider's own ``cost_estimate``. Before a call
+  the ledger holds the larger of the provider-priced estimate for that call
+  (reservation tokens at the model's rate) and the largest single-call cost
+  seen so far, for every call in flight. When the provider cannot price a
+  call the estimate is zero, so the first such calls can overshoot
+  ``max_cost_usd``; the overshoot is recorded and ends the run.
 * A failed provider response is taken to be unbilled; a call that errors or is
   cancelled with no response is unknown and charged its reservation.
 """
@@ -83,6 +85,7 @@ class BudgetExceededError(RuntimeError):
 @dataclass(frozen=True)
 class CallReservation:
     tokens: int
+    cost: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True)
@@ -116,7 +119,7 @@ class BudgetLedger:
         self.unknown_usage_calls = 0
         self.exceeded: BudgetExceededError | None = None
         self._reserved_tokens = 0
-        self._calls_in_flight = 0
+        self._reserved_cost = Decimal(0)
         self._max_call_cost = Decimal(0)
         self._cost_unverified = False
 
@@ -132,7 +135,9 @@ class BudgetLedger:
         if self.exceeded is not None:
             raise self.exceeded
 
-    def reserve_call(self, estimated_tokens: int) -> CallReservation:
+    def reserve_call(
+        self, estimated_tokens: int, estimated_cost: Decimal = Decimal(0)
+    ) -> CallReservation:
         """Admit one model call or raise; the reservation must be settled."""
         self.ensure_not_exceeded()
         if self._cost_unverified:
@@ -154,7 +159,8 @@ class BudgetLedger:
                     requested=held,
                 )
             )
-        held_cost = (self._calls_in_flight + 1) * self._max_call_cost
+        call_cost = max(estimated_cost, self._max_call_cost)
+        held_cost = self._reserved_cost + call_cost
         if self.cost_used + held_cost > self._max_cost:
             self._fail(
                 BudgetExceededError(
@@ -165,18 +171,21 @@ class BudgetLedger:
                 )
             )
         self._reserved_tokens += estimated_tokens
-        self._calls_in_flight += 1
-        return CallReservation(tokens=estimated_tokens)
+        self._reserved_cost += call_cost
+        return CallReservation(tokens=estimated_tokens, cost=call_cost)
 
     def settle(self, reservation: CallReservation, usage: ReportedUsage | None) -> None:
         """Replace a reservation with what the call actually consumed."""
         self._reserved_tokens -= reservation.tokens
-        self._calls_in_flight -= 1
+        self._reserved_cost -= reservation.cost
         if usage is not None and not _is_well_formed(usage):
             usage = None
         if usage is None:
             self.tokens_used += reservation.tokens
             self.unknown_usage_calls += 1
+            # ponytail: one unknown-usage call (including a timeout or
+            # cancellation) stops all later calls; a per-call price bound
+            # would let the run continue.
             self._cost_unverified = True
         else:
             self.tokens_used += usage.total_tokens
