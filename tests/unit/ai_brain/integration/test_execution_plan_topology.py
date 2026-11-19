@@ -92,7 +92,7 @@ def _plan(
             ),
             budget=ExecutionBudget(
                 max_cost_usd=Decimal("1"),
-                max_total_tokens=100,
+                max_total_tokens=100_000,
                 max_tool_invocations=0,
                 max_parallel_tasks=len(selected_workers),
                 max_attempts_per_task=1,
