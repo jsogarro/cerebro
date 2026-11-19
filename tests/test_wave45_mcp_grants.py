@@ -104,6 +104,7 @@ async def test_plan_worker_forwards_persisted_grants(
 
     constructor.assert_called_once_with(
         audit_store=audit_store,
+        evidence_recorder=None,
         enable_fallback=False,
         identity=ToolCallIdentity.from_agent_task(task),
         grants=grants,
