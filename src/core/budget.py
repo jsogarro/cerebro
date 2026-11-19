@@ -89,6 +89,12 @@ class ReportedUsage:
     cost_usd: Decimal
 
 
+def _is_well_formed(usage: ReportedUsage) -> bool:
+    return (
+        usage.total_tokens >= 0 and usage.cost_usd.is_finite() and usage.cost_usd >= 0
+    )
+
+
 def estimate_prompt_tokens(prompt: str) -> int:
     return len(prompt) // _CHARS_PER_TOKEN + 1
 
@@ -158,6 +164,8 @@ class BudgetLedger:
     def settle(self, reservation: CallReservation, usage: ReportedUsage | None) -> None:
         """Replace a reservation with what the call actually consumed."""
         self._reserved_tokens -= reservation.tokens
+        if usage is not None and not _is_well_formed(usage):
+            usage = None
         if usage is None:
             self.tokens_used += reservation.tokens
             self.unknown_usage_calls += 1

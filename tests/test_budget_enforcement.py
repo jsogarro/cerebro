@@ -113,6 +113,21 @@ class TestLedger:
         assert ledger.exceeded is not None
         assert ledger.exceeded.dimension is BudgetDimension.TOKENS
 
+    @pytest.mark.parametrize(
+        "usage",
+        [
+            ReportedUsage(total_tokens=10, cost_usd=Decimal("NaN")),
+            ReportedUsage(total_tokens=10, cost_usd=Decimal("Infinity")),
+            ReportedUsage(total_tokens=10, cost_usd=Decimal("-1")),
+            ReportedUsage(total_tokens=-5, cost_usd=Decimal("0.01")),
+        ],
+    )
+    def test_malformed_usage_is_treated_as_unknown(self, usage: ReportedUsage) -> None:
+        ledger = BudgetLedger(_budget())
+        ledger.settle(ledger.reserve_call(700), usage)
+        assert ledger.tokens_used == 700
+        assert ledger.unknown_usage_calls == 1
+
     def test_unknown_usage_is_charged_the_reservation_not_zero(self) -> None:
         ledger = BudgetLedger(_budget())
         ledger.settle(ledger.reserve_call(700), None)
