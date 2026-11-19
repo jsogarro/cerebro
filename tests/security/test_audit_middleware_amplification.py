@@ -200,3 +200,34 @@ async def test_state_changing_get_is_admitted_like_a_mutation() -> None:
         response = await client.get("/api/v1/auth/verify-email")
 
     assert response.status_code == 503
+
+
+def test_every_get_route_that_commits_is_treated_as_state_changing() -> None:
+    """A GET handler that commits must be admitted durably like a mutation.
+
+    Static check on the handler body; a commit hidden in a helper is not seen,
+    so add the path to ``_MUTATING_GET_PATHS`` when reviewing such a route.
+    """
+    import inspect
+
+    from src.api.main import app
+    from src.security.audit_middleware import _MUTATING_GET_PATHS
+
+    routes = []
+    for route in app.routes:
+        # FastAPI includes routers lazily; resolve them to concrete routes.
+        contexts = getattr(route, "effective_route_contexts", None)
+        routes.extend(contexts() if contexts else [route])
+    committing = {
+        route.path
+        for route in routes
+        if "GET" in (getattr(route, "methods", None) or ())
+        and hasattr(route, "endpoint")
+        and any(
+            token in inspect.getsource(route.endpoint)
+            for token in (".commit(", ".flush(")
+        )
+    }
+
+    assert committing <= _MUTATING_GET_PATHS, committing - _MUTATING_GET_PATHS
+    assert "/api/v1/auth/verify-email" in committing
