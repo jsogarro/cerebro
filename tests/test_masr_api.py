@@ -14,7 +14,7 @@ from src.ai_brain.router.masr import MASRouter
 from src.api.routes.masr_api import get_masr_routing_service, router
 from src.api.services.masr_routing_service import MASRRoutingService
 from src.auth.models import TokenPayload
-from src.middleware.auth_middleware import get_jwt_service
+from src.middleware.auth_middleware import get_current_token, get_jwt_service
 from src.models.masr_api_models import RoutingDecisionResponse
 
 AUTH_USER_ID = "user-1"
@@ -216,6 +216,7 @@ def test_read_endpoints_preserve_top_level_contract(
 def test_mounted_api_without_lifespan_returns_503() -> None:
     test_app = FastAPI()
     test_app.include_router(router)
+    test_app.dependency_overrides[get_current_token] = lambda: object()
 
     response = TestClient(test_app).get("/api/v1/masr/strategies")
 

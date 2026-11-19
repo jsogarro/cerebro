@@ -29,6 +29,7 @@ from src.api.websocket.auth import require_authenticated_websocket
 from src.api.websocket.connection_manager import ConnectionManager
 from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
 from src.core.pii_redactor import redact_pii
+from src.middleware.auth_middleware import get_current_token
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.talkhier_api_models import (
     AnalyticsResponse,
@@ -106,6 +107,7 @@ TalkHierServiceDependency = Annotated[
     Depends(get_talkhier_session_service),
 ]
 TenantContextDependency = Annotated[TenantContext, Depends(get_tenant_context)]
+_AUTHENTICATED = Depends(get_current_token)
 
 
 # ================================
@@ -502,7 +504,9 @@ async def close_session(
 # ================================
 
 
-@router.get("/protocols", response_model=ProtocolListResponse)
+@router.get(
+    "/protocols", dependencies=[_AUTHENTICATED], response_model=ProtocolListResponse
+)
 async def list_available_protocols() -> ProtocolListResponse:
     """
     List available TalkHier protocol configurations
@@ -573,7 +577,9 @@ async def list_available_protocols() -> ProtocolListResponse:
     )
 
 
-@router.post("/validate", response_model=ValidationResponse)
+@router.post(
+    "/validate", dependencies=[_AUTHENTICATED], response_model=ValidationResponse
+)
 async def validate_communication_structure(
     request: ProtocolValidationRequest,
     talkhier_service: TalkHierServiceDependency,
@@ -1021,7 +1027,9 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
 # ================================
 
 
-@router.post("/coordinate", response_model=CoordinationStatus)
+@router.post(
+    "/coordinate", dependencies=[_AUTHENTICATED], response_model=CoordinationStatus
+)
 async def coordinate_multiple_sessions(
     request: CoordinationRequest,
     talkhier_service: TalkHierServiceDependency,

@@ -29,6 +29,7 @@ from src.core.kernel import (
     ResearchKernel,
     TypedRegistry,
 )
+from src.middleware.auth_middleware import get_current_token
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.agent_api_models import (
     AgentExecutionRequest,
@@ -292,6 +293,7 @@ def test_agent_http_adapter_fails_closed_without_execution_authority() -> None:
     backend = _AgentExecutionBackend()
     test_app = FastAPI()
     test_app.include_router(agent_api.router)
+    test_app.dependency_overrides[get_current_token] = lambda: object()
     test_app.dependency_overrides[get_application_agent_execution_service] = lambda: (
         backend
     )

@@ -14,6 +14,7 @@ from src.api.routes import query_api, research
 from src.api.services.direct_execution_service import (
     get_application_direct_execution_service,
 )
+from src.middleware.auth_middleware import get_current_token
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.research_project import ProjectStatus
 
@@ -79,6 +80,7 @@ def test_query_endpoint_uses_non_concrete_dependency_override() -> None:
     fake = _FakeExecutionService()
     test_app = FastAPI()
     test_app.include_router(query_api.router)
+    test_app.dependency_overrides[get_current_token] = lambda: object()
     test_app.dependency_overrides[get_application_direct_execution_service] = lambda: (
         fake
     )
