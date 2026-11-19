@@ -22,7 +22,9 @@ services:
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
+      - source_snapshots:/var/lib/cerebro/source_snapshots
     environment:
+      - SOURCE_SNAPSHOT_DIR=/var/lib/cerebro/source_snapshots
       - DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -263,5 +265,6 @@ networks:
     driver: bridge
 
 volumes:
+  source_snapshots:
   postgres_data:
   redis_data:
