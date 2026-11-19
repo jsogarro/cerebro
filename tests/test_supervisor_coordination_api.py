@@ -11,9 +11,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.auth.models import TokenPayload
-from src.middleware.auth_middleware import get_current_token, get_jwt_service
+from src.middleware.auth_middleware import get_jwt_service
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.supervisor_api_models import SupervisionStrategy
+from tests.fixtures.authenticated_caller import allow_authenticated
 
 
 class _TestJWTService:
@@ -39,7 +40,7 @@ def app() -> FastAPI:
 
     app = FastAPI()
     app.include_router(supervisor_api.router)
-    app.dependency_overrides[get_current_token] = lambda: object()
+    allow_authenticated(app)
     app.dependency_overrides[
         supervisor_api.get_application_supervisor_coordination_service
     ] = lambda: supervisor_api.supervisor_service

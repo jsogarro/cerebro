@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.main import app, lifespan
-from src.middleware.auth_middleware import get_current_token
+from tests.fixtures.authenticated_caller import allow_authenticated
 
 
 def test_lifespan_injects_one_router_across_active_consumers(
@@ -168,7 +168,7 @@ def test_mounted_supervisor_api_requires_lifespan_or_explicit_override() -> None
 
     test_app = FastAPI()
     test_app.include_router(supervisor_api.router)
-    test_app.dependency_overrides[get_current_token] = lambda: object()
+    allow_authenticated(test_app)
     client = TestClient(test_app)
 
     unavailable = client.get("/api/v1/supervisors")

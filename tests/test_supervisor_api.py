@@ -16,12 +16,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.middleware.auth_middleware import get_current_token
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.supervisor_api_models import (
     SupervisorInfo,
     WorkerInfo,
 )
+from tests.fixtures.authenticated_caller import allow_authenticated
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def app() -> FastAPI:
     app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
         user_id="test-user", organization_id="test-org"
     )
-    app.dependency_overrides[get_current_token] = lambda: object()
+    allow_authenticated(app)
     return app
 
 
