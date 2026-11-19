@@ -21,6 +21,7 @@ from src.models.supervisor_api_models import (
     SupervisorInfo,
     WorkerInfo,
 )
+from tests.fixtures.authenticated_caller import allow_authenticated
 
 
 @pytest.fixture
@@ -37,6 +38,7 @@ def app() -> FastAPI:
     app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
         user_id="test-user", organization_id="test-org"
     )
+    allow_authenticated(app)
     return app
 
 

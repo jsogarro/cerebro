@@ -29,6 +29,7 @@ from src.api.websocket.auth import require_authenticated_websocket
 from src.api.websocket.connection_manager import ConnectionManager
 from src.api.websocket.talkhier_websocket_events import TalkHierWebSocketHandler
 from src.core.pii_redactor import redact_pii
+from src.middleware.auth_middleware import get_current_token
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.talkhier_api_models import (
     AnalyticsResponse,
@@ -106,6 +107,7 @@ TalkHierServiceDependency = Annotated[
     Depends(get_talkhier_session_service),
 ]
 TenantContextDependency = Annotated[TenantContext, Depends(get_tenant_context)]
+_AUTHENTICATED = Depends(get_current_token)
 
 
 # ================================
@@ -113,7 +115,9 @@ TenantContextDependency = Annotated[TenantContext, Depends(get_tenant_context)]
 # ================================
 
 
-@router.post("/sessions", response_model=TalkHierSessionResponse)
+@router.post(
+    "/sessions", dependencies=[_AUTHENTICATED], response_model=TalkHierSessionResponse
+)
 async def create_refinement_session(
     request: TalkHierSessionRequest,
     talkhier_service: TalkHierServiceDependency,
@@ -194,7 +198,11 @@ async def create_refinement_session(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/sessions/{session_id}", response_model=SessionStatusResponse)
+@router.get(
+    "/sessions/{session_id}",
+    dependencies=[_AUTHENTICATED],
+    response_model=SessionStatusResponse,
+)
 async def get_session_status(
     talkhier_service: TalkHierServiceDependency,
     tenant_context: TenantContextDependency,
@@ -246,7 +254,11 @@ async def get_session_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/sessions/{session_id}/round", response_model=RefinementRoundResponse)
+@router.post(
+    "/sessions/{session_id}/round",
+    dependencies=[_AUTHENTICATED],
+    response_model=RefinementRoundResponse,
+)
 async def execute_refinement_round(
     session_id: str,
     request: RefinementRoundRequest,
@@ -336,7 +348,11 @@ async def execute_refinement_round(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/sessions/{session_id}/consensus", response_model=ConsensusResult)
+@router.post(
+    "/sessions/{session_id}/consensus",
+    dependencies=[_AUTHENTICATED],
+    response_model=ConsensusResult,
+)
 async def check_consensus_status(
     session_id: str,
     request: ConsensusCheckRequest,
@@ -406,7 +422,11 @@ async def check_consensus_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/sessions/{session_id}/close", response_model=SessionCloseResponse)
+@router.post(
+    "/sessions/{session_id}/close",
+    dependencies=[_AUTHENTICATED],
+    response_model=SessionCloseResponse,
+)
 async def close_session(
     session_id: str,
     talkhier_service: TalkHierServiceDependency,
@@ -502,7 +522,9 @@ async def close_session(
 # ================================
 
 
-@router.get("/protocols", response_model=ProtocolListResponse)
+@router.get(
+    "/protocols", dependencies=[_AUTHENTICATED], response_model=ProtocolListResponse
+)
 async def list_available_protocols() -> ProtocolListResponse:
     """
     List available TalkHier protocol configurations
@@ -573,7 +595,9 @@ async def list_available_protocols() -> ProtocolListResponse:
     )
 
 
-@router.post("/validate", response_model=ValidationResponse)
+@router.post(
+    "/validate", dependencies=[_AUTHENTICATED], response_model=ValidationResponse
+)
 async def validate_communication_structure(
     request: ProtocolValidationRequest,
     talkhier_service: TalkHierServiceDependency,
@@ -621,7 +645,9 @@ async def validate_communication_structure(
 # ================================
 
 
-@router.get("/analytics", response_model=AnalyticsResponse)
+@router.get(
+    "/analytics", dependencies=[_AUTHENTICATED], response_model=AnalyticsResponse
+)
 async def get_protocol_analytics(
     tenant_context: TenantContextDependency,
     time_range: str | None = Query("24h", description="Time range (1h, 24h, 7d, 30d)"),
@@ -1021,7 +1047,9 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
 # ================================
 
 
-@router.post("/coordinate", response_model=CoordinationStatus)
+@router.post(
+    "/coordinate", dependencies=[_AUTHENTICATED], response_model=CoordinationStatus
+)
 async def coordinate_multiple_sessions(
     request: CoordinationRequest,
     talkhier_service: TalkHierServiceDependency,
@@ -1152,7 +1180,7 @@ async def _get_protocol_insights(
 # ================================
 
 
-@router.get("/health")
+@router.get("/health", dependencies=[_AUTHENTICATED])
 async def talkhier_health_check(
     talkhier_service: TalkHierServiceDependency,
     tenant_context: TenantContextDependency,

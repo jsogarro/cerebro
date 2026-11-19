@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from src.api.services.masr_routing_service import MASRRoutingService
+from src.middleware.auth_middleware import get_current_token
 from src.models.masr_api_models import (
     ComplexityAnalysisRequest,
     ComplexityAnalysisResponse,
@@ -29,6 +30,7 @@ from src.models.masr_api_models import (
 # Create router with prefix and tags
 router = APIRouter(
     prefix="/api/v1/masr",
+    dependencies=[Depends(get_current_token)],
     tags=["MASR Routing Intelligence"],
     responses={
         404: {"description": "Not found"},
