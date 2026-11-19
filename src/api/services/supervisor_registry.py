@@ -5,7 +5,6 @@ This keeps the static supervisor/worker catalog separate from orchestration
 logic while preserving the in-memory data structures used by the API service.
 """
 
-import random
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -134,7 +133,7 @@ class SupervisorRegistry:
                 worker_type=worker_type,
                 status=WorkerStatus.IDLE,
                 capabilities=self.get_worker_capabilities(worker_type),
-                performance_score=random.uniform(0.8, 0.95),
+                performance_score=None,  # not measured
                 current_task=None,
             )
             workers.append(worker)

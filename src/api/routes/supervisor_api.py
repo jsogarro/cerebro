@@ -535,6 +535,8 @@ async def run_coordination_experiment(
 
         return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("supervisor_coordination_experiment_failed", error=str(e))
         raise HTTPException(
