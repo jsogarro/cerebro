@@ -28,8 +28,18 @@ from typing import TYPE_CHECKING, Any
 from fastapi import HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from structlog import get_logger
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
+from src.core.budget import (
+    BUDGET_LEDGER_CONTEXT_KEY,
+    BudgetExceededError,
+    BudgetLedger,
+)
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.core.telemetry import count_tokens, telemetry_enabled
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
@@ -344,6 +354,11 @@ class ExecutionStatus:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     retry_count: int = 0
+    # Machine-readable cause of a failure that has one (e.g. BUDGET_EXCEEDED).
+    failure_code: str | None = None
+
+    # The run's spend against its ExecutionBudget, shared by every attempt.
+    _budget_ledger: BudgetLedger | None = field(default=None, repr=False)
 
     # Process-local sequence used to distinguish genuine allocation
     # re-executions from delivery retries of one completed observation. It
@@ -2299,6 +2314,8 @@ class DirectExecutionService:
     @retry(
         stop=stop_after_attempt(_WORKFLOW_MAX_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=4, max=10),
+        # An exhausted budget stays exhausted: retrying cannot succeed.
+        retry=retry_if_not_exception_type(BudgetExceededError),
     )
     async def _execute_research_workflow(
         self,
@@ -2398,10 +2415,19 @@ class DirectExecutionService:
                 )
                 return
 
+            # One ledger per execution: workflow retries draw on the budget
+            # already spent.
+            if execution_status._budget_ledger is None:
+                execution_status._budget_ledger = BudgetLedger(
+                    execution_plan.routing_decision.budget
+                )
             plan_task = AgentTask(
                 id=f"research_{project.id}_{execution_status.execution_id}",
                 agent_type="execution_plan",
-                context=self._durable_agent_task_context(execution_status),
+                context={
+                    **self._durable_agent_task_context(execution_status),
+                    BUDGET_LEDGER_CONTEXT_KEY: execution_status._budget_ledger,
+                },
                 input_data={
                     "query": project.query.text,
                     "domains": list(execution_plan.routing_decision.domains),
@@ -2452,7 +2478,10 @@ class DirectExecutionService:
 
             self.execution_stats["failed_executions"] += 1
 
-            if execution_status.retry_count < _WORKFLOW_MAX_ATTEMPTS:
+            budget_error = e if isinstance(e, BudgetExceededError) else None
+            if budget_error is None and (
+                execution_status.retry_count < _WORKFLOW_MAX_ATTEMPTS
+            ):
                 # This attempt failed; the run has not. Recording FAILED here
                 # would make the run durably terminal and immutable, so every
                 # transition the retry attempts would be refused — and a
@@ -2468,10 +2497,24 @@ class DirectExecutionService:
                 run_target=RunStatus.FAILED,
                 task_target=TaskStatus.FAILED,
                 attempt_target=AttemptStatus.FAILED,
-                event_type="run.failed",
-                payload={"error": str(e)},
+                event_type=("run.budget_exceeded" if budget_error else "run.failed"),
+                payload=(
+                    {
+                        "error": str(e),
+                        **budget_error.as_payload(),
+                        "usage": (
+                            execution_status._budget_ledger.usage_payload()
+                            if execution_status._budget_ledger
+                            else {}
+                        ),
+                    }
+                    if budget_error
+                    else {"error": str(e)}
+                ),
                 reason=(str(e).strip() or "execution failed")[:500],
             )
+            if budget_error:
+                execution_status.failure_code = budget_error.code
             self._settle_terminal_state(
                 execution_status,
                 outcome=outcome,

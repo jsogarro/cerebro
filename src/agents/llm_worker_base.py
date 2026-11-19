@@ -14,6 +14,7 @@ model answer.
 
 import json
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from src.agents.base import BaseAgent
@@ -21,6 +22,12 @@ from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.base_tool import ToolResult
 from src.agents.tools.mediation import ToolCallIdentity
 from src.agents.tools.registry import ToolRegistry
+from src.core.budget import (
+    BUDGET_LEDGER_CONTEXT_KEY,
+    BudgetExceededError,
+    ReportedUsage,
+    estimate_prompt_tokens,
+)
 from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
 
 if TYPE_CHECKING:
@@ -343,6 +350,52 @@ class LLMWorkerAgentBase(BaseAgent):
             return self._build_plan_route(policy)
         return self._build_legacy_openrouter_route()
 
+    async def _metered_route_and_generate(
+        self,
+        route: Any,
+        request: Any,
+        task: AgentTask | None,
+        routing_decision: dict[str, Any],
+    ) -> Any:
+        """One provider call, counted against the run's budget when it has one.
+
+        Every call is metered, including the truncation retry, so retries draw
+        on the same budget. A call the budget cannot hold raises
+        ``BudgetExceededError`` before the provider is contacted.
+        """
+        ledger = task.context.get(BUDGET_LEDGER_CONTEXT_KEY) if task else None
+        if ledger is None:
+            return await route.router.route_and_generate(
+                request, routing_decision=routing_decision
+            )
+        reservation = ledger.reserve_call(
+            estimate_prompt_tokens(request.prompt) + request.max_tokens
+        )
+        response = None
+        try:
+            response = await route.router.route_and_generate(
+                request, routing_decision=routing_decision
+            )
+        finally:
+            # No response (error or cancellation) means unknown usage, which
+            # settles as the full reservation rather than as nothing.
+            ledger.settle(reservation, self._reported_usage(response))
+        return response
+
+    @staticmethod
+    def _reported_usage(response: Any) -> ReportedUsage | None:
+        if response is None:
+            return None
+        if not response.success:
+            # A failed call reported nothing and is not billed.
+            return ReportedUsage(total_tokens=0, cost_usd=Decimal(0))
+        if response.total_tokens <= 0:
+            return None
+        return ReportedUsage(
+            total_tokens=response.total_tokens,
+            cost_usd=Decimal(str(response.cost_estimate)),
+        )
+
     async def _generate_with_routing(
         self, prompt: str, task: AgentTask
     ) -> tuple[str | None, float]:
@@ -379,8 +432,8 @@ class LLMWorkerAgentBase(BaseAgent):
                 metadata={"tier": self._determine_tier(task)},
             )
 
-            response = await route.router.route_and_generate(
-                request, routing_decision=route.routing_decision
+            response = await self._metered_route_and_generate(
+                route, request, task, route.routing_decision
             )
 
             if response.success:
@@ -398,7 +451,7 @@ class LLMWorkerAgentBase(BaseAgent):
                 "falling back to GeminiService"
             )
 
-        except PlanProviderUnavailableError:
+        except (PlanProviderUnavailableError, BudgetExceededError):
             raise
         except Exception as exc:
             if route.fail_closed:
@@ -524,8 +577,8 @@ class LLMWorkerAgentBase(BaseAgent):
             )
 
             # Route and generate with truncation-aware retry
-            response = await route.router.route_and_generate(
-                request, routing_decision=route.routing_decision
+            response = await self._metered_route_and_generate(
+                route, request, task, route.routing_decision
             )
 
             if response.success:
@@ -588,9 +641,11 @@ class LLMWorkerAgentBase(BaseAgent):
 
                     # Pin the retry to the model that produced the first
                     # attempt so the retry is a continuation, not a re-roll.
-                    retry_response = await route.router.route_and_generate(
+                    retry_response = await self._metered_route_and_generate(
+                        route,
                         retry_request,
-                        routing_decision={
+                        task,
+                        {
                             "primary_model": {
                                 "provider": route.routing_decision["primary_model"][
                                     "provider"
@@ -657,7 +712,7 @@ class LLMWorkerAgentBase(BaseAgent):
                     "falling back to GeminiService"
                 )
 
-        except PlanProviderUnavailableError:
+        except (PlanProviderUnavailableError, BudgetExceededError):
             raise
         except Exception as exc:
             if route.fail_closed:
@@ -823,7 +878,10 @@ class LLMWorkerAgentBase(BaseAgent):
                 tool_call.arguments,
                 identity=identity,
                 grants=grants,
+                budget=task.context.get(BUDGET_LEDGER_CONTEXT_KEY),
             )
+        except BudgetExceededError:
+            raise
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             return self._tool_failure_result(
