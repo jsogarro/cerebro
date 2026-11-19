@@ -143,6 +143,21 @@ def _served() -> set[tuple[str, str]]:
     return served
 
 
+def _mounted_paths(routes: object, prefix: str = "") -> set[str]:
+    """Route paths, including routers that newer FastAPI keeps as unexpanded includes."""
+    paths: set[str] = set()
+    for route in routes:  # type: ignore[attr-defined]
+        nested = getattr(route, "original_router", None)
+        if nested is not None:
+            include_prefix = getattr(
+                getattr(route, "include_context", None), "prefix", ""
+            )
+            paths |= _mounted_paths(nested.routes, prefix + include_prefix)
+        else:
+            paths.add(prefix + getattr(route, "path", ""))
+    return paths
+
+
 def test_client_discovers_call_sites() -> None:
     calls, _ = _scan()
     assert ("POST", "/research/projects") in calls
@@ -181,5 +196,4 @@ def test_known_unserved_entries_are_still_called_and_unserved(
 def test_websocket_path_is_mounted() -> None:
     match = _WS_PATH.search((WEB_SRC / "api" / "websocket.ts").read_text())
     assert match, "websocket.ts no longer builds its URL from ${host}/ws..."
-    mounted = {getattr(route, "path", "") for route in app.routes}
-    assert match.group(1) in mounted
+    assert match.group(1) in _mounted_paths(app.routes)
