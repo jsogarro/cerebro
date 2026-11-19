@@ -7,7 +7,6 @@ through REST API endpoints.
 """
 
 import asyncio
-import random
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -865,12 +864,7 @@ class SupervisorCoordinationService:
             expected_performance=expected_performance,
             optimization_score=0.88,
             reasoning=reasoning,
-            alternative_allocations=[
-                {
-                    "allocation": self._get_alternative_allocation(allocation),
-                    "trade_offs": "Higher quality but increased cost",
-                }
-            ],
+            alternative_allocations=None,
         )
 
     def _optimize_for_quality(
@@ -916,14 +910,6 @@ class SupervisorCoordinationService:
             "coordinator": 1,
         }
 
-    def _get_alternative_allocation(self, primary: dict[str, int]) -> dict[str, int]:
-        """Generate an alternative allocation"""
-        alternative = primary.copy()
-        # Modify allocation slightly
-        for key in alternative:
-            alternative[key] = max(1, alternative[key] + random.choice([-1, 0, 1]))
-        return alternative
-
     async def resolve_conflict(
         self, request: ConflictResolutionRequest
     ) -> ConflictResolutionResponse:
@@ -951,18 +937,13 @@ class SupervisorCoordinationService:
             self._get_gemini_service(),
         )
 
-        # Calculate worker consensus
-        worker_consensus = {
-            w["worker_id"]: random.uniform(0.6, 1.0) for w in request.worker_outputs
-        }
-
         return ConflictResolutionResponse(
             conflict_id=request.conflict_id,
             resolution_strategy=request.resolution_strategy,
             resolved_output=resolved,
             confidence_score=confidence,
             resolution_reasoning=reasoning,
-            worker_consensus=worker_consensus,
+            worker_consensus=None,  # not measured
         )
 
     async def compare_supervisor_performance(
@@ -1029,101 +1010,10 @@ class SupervisorCoordinationService:
         )
 
     async def run_experiment(self, request: ExperimentRequest) -> ExperimentResponse:
-        """Run experiment to test different coordination strategies"""
-        experiment_id = str(uuid.uuid4())
-
-        # Store experiment
-        self.experiments[experiment_id] = {
-            "request": request,
-            "started_at": datetime.now(UTC),
-        }
-
-        # Run tests for each strategy
-        strategy_results: dict[str, list[float]] = {}
-        results: dict[str, dict[str, float]] = {}
-        for strategy in request.strategies_to_test:
-            strategy_results = {}
-
-            for _ in range(request.repetitions or 1):
-                # Simulate execution with strategy
-                start_time = time.time()
-
-                # Create test request
-                _test_request = SupervisorExecuteRequest(
-                    query=request.query,
-                    supervision_strategy=strategy,
-                    coordination_mode=CoordinationMode.HIERARCHICAL,
-                    max_workers=5,
-                    quality_threshold=0.8,
-                    timeout_seconds=120,
-                )
-
-                # Simulate execution (simplified)
-                await asyncio.sleep(0.1)
-
-                # Generate metrics
-                execution_time = (time.time() - start_time) * 1000
-                quality = random.uniform(0.7, 0.95)
-                cost = random.uniform(0.1, 0.5)
-
-                # Aggregate metrics
-                for metric in request.metrics_to_track:
-                    if metric == "quality":
-                        value = quality
-                    elif metric == "speed":
-                        value = 1000 / execution_time  # Convert to speed score
-                    elif metric == "cost":
-                        value = cost
-                    else:
-                        value = random.uniform(0.5, 1.0)
-
-                    if metric not in strategy_results:
-                        strategy_results[metric] = []
-                    strategy_results[metric].append(value)
-
-            # Calculate averages
-            results[strategy.value] = {
-                metric: sum(values) / len(values)
-                for metric, values in strategy_results.items()
-            }
-
-        # Determine best strategy
-        # Simple scoring: weighted average of metrics
-        scores = {}
-        for strategy in request.strategies_to_test:
-            scores[strategy] = sum(results[strategy.value].values()) / len(
-                request.metrics_to_track
-            )
-
-        best_strategy = max(scores, key=lambda k: scores[k])
-
-        # Calculate statistical significance (simplified)
-        statistical_significance = 0.95 if (request.repetitions or 1) > 1 else None
-
-        # Generate recommendations
-        recommendations = [
-            f"Best strategy for this query type: {best_strategy.value}",
-            f"Consider {best_strategy.value} for similar tasks",
-            "Increase repetitions for more reliable results"
-            if (request.repetitions or 1) < 3
-            else "",
-        ]
-        recommendations = [r for r in recommendations if r]  # Remove empty
-
-        return ExperimentResponse(
-            experiment_id=experiment_id,
-            strategies_tested=request.strategies_to_test,
-            results=results,
-            best_strategy=best_strategy,
-            statistical_significance=statistical_significance,
-            recommendations=recommendations,
-            detailed_analysis={
-                "scores": {s.value: score for s, score in scores.items()},
-                "query_characteristics": {
-                    "length": len(request.query),
-                    "complexity_estimate": 0.7,
-                },
-            },
+        """Strategy experiments need real executions per strategy; none are run yet."""
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Strategy experiments are not implemented: no measured results are available",
         )
 
 
