@@ -46,3 +46,5 @@ node_modules/
 # Note: tests/ is NOT excluded — the Dockerfile development stage runs
 # `COPY tests/ ./tests/` for in-image pytest execution. Production stage
 # uses selective `COPY src/` so tests/ never reaches the runtime image.
+
+data/source_snapshots/

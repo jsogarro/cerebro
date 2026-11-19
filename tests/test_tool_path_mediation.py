@@ -194,6 +194,7 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
     assert seen["mcp_integration"] is integration
     constructor.assert_called_once_with(
         audit_store=audit_store,
+        evidence_recorder=None,
         enable_fallback=False,
         grants=tuple(task.context[CAPABILITY_GRANTS_CONTEXT_KEY]),
         identity=expected_identity,
