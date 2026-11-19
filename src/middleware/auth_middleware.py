@@ -19,6 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import HTTPConnection
 from starlette.responses import Response
 
+from src.api.client_ip import client_ip as resolve_client_ip
 from src.api.middleware.error_envelope import build_error_payload
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
 from src.auth.models import TokenPayload
@@ -519,8 +520,7 @@ class RateLimitMiddleware:
             limit = current_user.api_rate_limit or self.requests_per_hour
         else:
             # Use IP address for anonymous users
-            client_ip = request.client.host if request.client else "unknown"
-            identifier = f"ip:{client_ip}"
+            identifier = f"ip:{resolve_client_ip(request)}"
             limit = self.requests_per_minute
 
         # In production, implement actual rate limiting with Redis
