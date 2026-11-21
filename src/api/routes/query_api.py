@@ -421,13 +421,10 @@ def _recorded_plan_summary(exec_status: Any) -> dict[str, Any] | None:
         "collaboration_mode": decision.collaboration_mode.value,
         "primary_provider": str(decision.provider_model_policy.primary.provider),
         "primary_model": str(decision.provider_model_policy.primary.model),
-        # Cost and token ceilings are declared on the plan but nothing counts
-        # spend against them yet, so they are not reported as limits.
-        "declared_budget_unenforced": {
+        "budget": {
             "max_cost_usd": float(budget.max_cost_usd),
             "max_total_tokens": budget.max_total_tokens,
-        },
-        "budget": {
+            "max_tool_invocations": budget.max_tool_invocations,
             "max_parallel_tasks": budget.max_parallel_tasks,
             "max_attempts_per_task": budget.max_attempts_per_task,
             "task_timeout_seconds": budget.task_timeout_seconds,
