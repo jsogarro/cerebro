@@ -512,6 +512,12 @@ class BaseProvider(ABC):
 
         return response
 
+    def estimate_cost(
+        self, prompt_tokens: int, completion_tokens: int, model_name: str
+    ) -> float:
+        """Public price of a call at this provider's per-model rate."""
+        return self._calculate_cost(prompt_tokens, completion_tokens, model_name)
+
     def _calculate_cost(
         self, prompt_tokens: int, completion_tokens: int, model_name: str
     ) -> float:

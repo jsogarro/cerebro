@@ -40,6 +40,7 @@ from src.api.services.direct_execution_service import (
 from src.api.services.execution_authority_resolver import (
     MappingExecutionAuthorityResolver,
 )
+from src.core.budget import BUDGET_LEDGER_CONTEXT_KEY, BudgetLedger
 from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY, PlanCapabilityIssuer
 from src.core.contracts import (
     CapabilityGrant,
@@ -328,7 +329,8 @@ class TestDirectExecutionService:
         )
         identity = ToolCallIdentity.from_agent_task(plan_task)
 
-        assert plan_task.context == {}
+        # Only the run's budget ledger: no durable identity without a session.
+        assert set(plan_task.context) == {BUDGET_LEDGER_CONTEXT_KEY}
         assert identity.bound is True
         assert identity.durable is False
         assert execution_id in execution_service.active_executions
@@ -423,7 +425,11 @@ class TestDirectExecutionService:
                 ATTEMPT_ID_CONTEXT_KEY: attempt_row.attempt_id,
                 ORGANIZATION_ID_CONTEXT_KEY: str(run_row.organization_id),
                 "capability_grants": (),
+                BUDGET_LEDGER_CONTEXT_KEY: plan_task.context[BUDGET_LEDGER_CONTEXT_KEY],
             }
+            assert isinstance(
+                plan_task.context[BUDGET_LEDGER_CONTEXT_KEY], BudgetLedger
+            )
         finally:
             await service.close()
             await engine.dispose()
