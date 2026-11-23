@@ -26,6 +26,8 @@ from fastapi import (
 )
 from structlog import get_logger
 
+from src.middleware.auth_middleware import get_current_token
+
 from ...core.kernel import ResearchKernel
 from ...core.pii_redactor import redact_pii
 from ...middleware.tenant_context import TenantContext, get_tenant_context
@@ -57,7 +59,7 @@ from ..services.research_kernel import (
 )
 
 logger = get_logger()
-router = APIRouter(prefix="/api/v1/agents")
+router = APIRouter(prefix="/api/v1/agents", dependencies=[Depends(get_current_token)])
 _AGENT_KERNEL_DEPENDENCY = Depends(get_application_agent_research_kernel)
 
 

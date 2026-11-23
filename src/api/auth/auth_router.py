@@ -36,7 +36,11 @@ from src.auth.password_service import (
     PasswordTokenStoreUnavailableError,
 )
 from src.core.config import settings
-from src.middleware.auth_middleware import get_current_user, get_jwt_service
+from src.middleware.auth_middleware import (
+    get_current_token,
+    get_current_user,
+    get_jwt_service,
+)
 from src.models.db.session import get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
@@ -357,7 +361,11 @@ async def refresh_tokens(
         ) from e
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(get_current_token)],
+)
 async def logout(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     jwt_service: JWTService = Depends(get_jwt_service),
