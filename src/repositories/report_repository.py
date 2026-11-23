@@ -81,7 +81,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         *,
         organization_id: UUID | str,
         user_id: UUID | str | None = None,
-    ) -> Select[tuple[GeneratedReport]]:
+    ) -> Select[GeneratedReport]:
         """Build a report query with mandatory tenant isolation."""
         organization_uuid = _normalize_uuid(organization_id, "organization_id")
         query = select(GeneratedReport).where(

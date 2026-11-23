@@ -50,7 +50,10 @@ from src.api.websocket.connection_manager import websocket_manager
 from src.core.config import settings
 from src.middleware.auth_middleware import AuthMiddleware
 from src.security.audit_logger import AuditLogger
-from src.security.audit_middleware import AuditTrailMiddleware
+from src.security.audit_middleware import (
+    AuditTrailMiddleware,
+    log_rejected_requests,
+)
 from src.security.security_headers import SecurityHeadersMiddleware
 
 logger = get_logger()
@@ -447,6 +450,11 @@ app.add_middleware(
     store=ResilientIdempotencyStore(RedisIdempotencyStore(settings.REDIS_URL)),
 )
 
+# Audit sits inside authentication and rate limiting, so a request they reject
+# never costs a durable audit write. Registered here, before RateLimit, it is
+# inner to both (Starlette runs the last-registered middleware outermost).
+app.middleware("http")(AuditTrailMiddleware())
+
 app.add_middleware(
     RateLimitMiddleware,
     store=ResilientRateLimitStore(RedisRateLimitStore(settings.REDIS_URL)),
@@ -459,10 +467,9 @@ app.add_middleware(LLMCostDriftMiddleware)
 # Add Authentication middleware
 app.add_middleware(AuthMiddleware)
 
-# Security controls are registered after the existing middleware so they are
-# outermost at runtime: audit sees responses produced by rate limiting and
-# authentication, while headers are applied to those responses as well.
-app.middleware("http")(AuditTrailMiddleware())
+# Registered after authentication, so rejection logging and the response
+# headers wrap the responses that authentication and rate limiting produce.
+app.middleware("http")(log_rejected_requests)
 app.middleware("http")(
     SecurityHeadersMiddleware(
         # The local development stack is served over HTTP. HSTS is enabled
