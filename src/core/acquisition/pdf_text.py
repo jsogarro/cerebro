@@ -57,7 +57,7 @@ __all__ = [
     "extractor_pin",
 ]
 
-PINNED_PYPDF_VERSION: Final = "6.21.4"
+PINNED_PYPDF_VERSION: Final = "7.0.1"
 EXTRACTOR_ID: Final = "pypdf"
 NORMALIZER_VERSION: Final = "1"
 _COMPONENT_ID: Final = "text_extractor"
