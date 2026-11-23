@@ -221,7 +221,7 @@ class AnalyticsSupervisor(BaseSupervisor):
                 background="Conduct exploratory data analysis and descriptive statistics",
                 intermediate_outputs=state.context,
             )
-            response = await self.send_talkhier_message(
+            response = await self._send_worker_verified(
                 "data_analysis", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
@@ -251,7 +251,7 @@ class AnalyticsSupervisor(BaseSupervisor):
                     "max_iterations": self.max_modeling_iterations,
                 },
             )
-            response = await self.send_talkhier_message(
+            response = await self._send_worker_verified(
                 "statistical_modeling",
                 MessageType.SUPERVISOR_ASSIGNMENT,
                 message_content,
@@ -280,7 +280,7 @@ class AnalyticsSupervisor(BaseSupervisor):
                 else "",
                 intermediate_outputs={"focus": "actionable_insights"},
             )
-            response = await self.send_talkhier_message(
+            response = await self._send_worker_verified(
                 "insight_synthesis", MessageType.SUPERVISOR_ASSIGNMENT, message_content
             )
             if response:
