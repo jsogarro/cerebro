@@ -26,15 +26,12 @@ type ResearchProjectDetail = {
     progress?: number;
     created_at?: string;
     query?: {
-        main_query?: string;
+        text?: string;
     };
 };
 
 type ProjectProgressMessage = {
-    id?: string;
-    project_id?: string;
     progress_percentage?: number;
-    status?: string;
 };
 
 function ResearchDetail({ id }: { id: string }) {
@@ -47,20 +44,23 @@ function ResearchDetail({ id }: { id: string }) {
     useEffect(() => {
         wsManager.connect();
 
-        const unsubscribe = wsManager.subscribe('project_progress', (data: ProjectProgressMessage) => {
-            if (data.project_id === id || data.id === id) {
-                setProgress(data.progress_percentage || 0);
-                setLiveStatus(data.status || 'running');
-            }
+        const unsubscribe = wsManager.subscribe('progress', (data: ProjectProgressMessage, projectId) => {
+            if (projectId !== id) return;
+            setProgress(data.progress_percentage || 0);
+            setLiveStatus('running');
         });
 
-        wsManager.send({
-            type: "subscription",
-            data: { project_id: id }
-        });
+        // Re-sent on every reconnect: the server forgets subscriptions with the socket.
+        const unsubscribeOpen = wsManager.onOpen(() =>
+            wsManager.send({
+                type: "subscription",
+                data: { action: "subscribe", project_id: id }
+            }),
+        );
 
         return () => {
             unsubscribe();
+            unsubscribeOpen();
             wsManager.disconnect();
         };
     }, [id]);
@@ -74,7 +74,7 @@ function ResearchDetail({ id }: { id: string }) {
         title: projectData.title,
         status: liveStatus || projectData.status || 'pending',
         progress: progress,
-        description: projectData.query?.main_query || "Research in progress...",
+        description: projectData.query?.text || "Research in progress...",
         createdAt: projectData.created_at || "Just now"
     };
 

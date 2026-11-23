@@ -1,7 +1,12 @@
+import { getAccessToken } from './auth';
+
 type WebSocketMessage = {
     type: string;
     data?: unknown;
+    project_id?: string | null;
 };
+
+type Listener = (data: unknown, projectId: string | null) => void;
 
 function isWebSocketMessage(message: unknown): message is WebSocketMessage {
     return (
@@ -12,39 +17,62 @@ function isWebSocketMessage(message: unknown): message is WebSocketMessage {
     );
 }
 
+// RFC 6455 policy violation: what the server closes with when it rejects the token.
+const AUTH_REJECTED = 1008;
+
 export class WebSocketManager {
     private ws: WebSocket | null = null;
     private url: string;
     private reconnectAttempts = 0;
+    private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    private closedByClient = false;
     private maxReconnectAttempts = 5;
-    private listeners: Map<string, Set<(data: unknown) => void>> = new Map();
-    private pendingMessages: WebSocketMessage[] = [];
+    private listeners: Map<string, Set<Listener>> = new Map();
+    private openListeners: Set<() => void> = new Set();
 
     constructor(url: string) {
         this.url = url;
     }
 
     connect() {
-        this.ws = new WebSocket(this.url);
+        this.closedByClient = false;
+        this.clearReconnectTimer();
+        this.ws?.close();
+        // The server authenticates WebSockets by ?token=, never by header.
+        const token = getAccessToken();
+        const url = new URL(this.url);
+        if (token) url.searchParams.set('token', token);
+        const socket = new WebSocket(url);
+        this.ws = socket;
 
-        this.ws.onopen = () => {
-            this.reconnectAttempts = 0;
-            this.flushPendingMessages();
-            console.log('WebSocket connected');
+        socket.onopen = () => {
+            this.openListeners.forEach((callback) => callback());
         };
 
-        this.ws.onmessage = (event) => {
-            const message: unknown = JSON.parse(event.data);
+        // The server accepts before it authenticates, so an open socket proves nothing:
+        // only a frame from the server resets the retry budget.
+        socket.onmessage = (event) => {
+            let message: unknown;
+            try {
+                message = JSON.parse(event.data);
+            } catch {
+                return;
+            }
             if (isWebSocketMessage(message)) {
-                this.notifyListeners(message.type, message.data);
+                this.reconnectAttempts = 0;
+                this.notifyListeners(message.type, message.data, message.project_id ?? null);
             }
         };
 
-        this.ws.onclose = () => {
-            this.attemptReconnect();
+        socket.onclose = (event) => {
+            // A superseded or deliberately closed socket must not resurrect itself,
+            // and a rejected token will not become valid by retrying.
+            if (this.ws === socket && !this.closedByClient && event.code !== AUTH_REJECTED) {
+                this.attemptReconnect();
+            }
         };
 
-        this.ws.onerror = (error) => {
+        socket.onerror = (error) => {
             console.error('WebSocket error:', error);
         };
     }
@@ -52,15 +80,23 @@ export class WebSocketManager {
     private attemptReconnect() {
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
-            setTimeout(() => this.connect(), 1000 * this.reconnectAttempts);
+            this.reconnectTimer = setTimeout(() => this.connect(), 1000 * this.reconnectAttempts);
         }
     }
 
-    subscribe<TData = unknown>(type: string, callback: (data: TData) => void) {
+    private clearReconnectTimer() {
+        if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+    }
+
+    subscribe<TData = unknown>(
+        type: string,
+        callback: (data: TData, projectId: string | null) => void,
+    ) {
         if (!this.listeners.has(type)) {
             this.listeners.set(type, new Set());
         }
-        const listener = callback as (data: unknown) => void;
+        const listener = callback as Listener;
         this.listeners.get(type)!.add(listener);
 
         return () => {
@@ -68,31 +104,28 @@ export class WebSocketManager {
         };
     }
 
-    private notifyListeners(type: string, data: unknown) {
-        this.listeners.get(type)?.forEach((callback) => callback(data));
+    /** Runs on every (re)connect, so callers can re-send their subscription frames. */
+    onOpen(callback: () => void) {
+        this.openListeners.add(callback);
+        return () => {
+            this.openListeners.delete(callback);
+        };
     }
 
-    private flushPendingMessages() {
-        const ws = this.ws;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            return;
-        }
-
-        const messages = [...this.pendingMessages];
-        this.pendingMessages = [];
-        messages.forEach((message) => ws.send(JSON.stringify(message)));
+    private notifyListeners(type: string, data: unknown, projectId: string | null) {
+        this.listeners.get(type)?.forEach((callback) => callback(data, projectId));
     }
 
+    /** Frames are never queued: callers re-send from `onOpen`, so a stale one cannot leak across screens. */
     send(message: WebSocketMessage) {
         if (this.ws?.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(message));
-            return;
         }
-
-        this.pendingMessages.push(message);
     }
 
     disconnect() {
+        this.closedByClient = true;
+        this.clearReconnectTimer();
         this.ws?.close();
     }
 }

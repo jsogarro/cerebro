@@ -119,7 +119,7 @@ def _plan(
             ),
             budget=ExecutionBudget(
                 max_cost_usd=Decimal("1"),
-                max_total_tokens=1000,
+                max_total_tokens=100000,
                 max_tool_invocations=0,
                 max_parallel_tasks=len(selected_workers),
                 max_attempts_per_task=1,
@@ -255,11 +255,10 @@ class TestRecordedPlanExposure:
             "collaboration_mode": "hierarchical",
             "primary_provider": "gemini",
             "primary_model": "gemini-2.5-pro",
-            "declared_budget_unenforced": {
-                "max_cost_usd": 1.0,
-                "max_total_tokens": 1000,
-            },
             "budget": {
+                "max_cost_usd": 1.0,
+                "max_total_tokens": 100000,
+                "max_tool_invocations": 0,
                 "max_parallel_tasks": 2,
                 "max_attempts_per_task": 1,
                 "task_timeout_seconds": 30,
