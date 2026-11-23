@@ -533,7 +533,7 @@ class BaseRepository(Generic[ModelType]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    def build_query(self) -> Select[tuple[ModelType]]:
+    def build_query(self) -> Select[ModelType]:
         """
         Build base query for custom operations.
 

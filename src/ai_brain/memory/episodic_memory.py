@@ -35,7 +35,6 @@ try:
     from sqlalchemy import (
         JSON,
         Boolean,
-        Column,
         DateTime,
         Float,
         Integer,
@@ -49,7 +48,12 @@ try:
     from sqlalchemy.ext.asyncio import AsyncEngine as _AsyncEngine
     from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
     from sqlalchemy.ext.asyncio import create_async_engine
-    from sqlalchemy.orm import declarative_base, sessionmaker  # noqa: F401
+    from sqlalchemy.orm import (  # noqa: F401
+        Mapped,
+        declarative_base,
+        mapped_column,
+        sessionmaker,
+    )
     from sqlalchemy.sql import text
 
     HAS_SQLALCHEMY = True
@@ -68,59 +72,69 @@ if HAS_SQLALCHEMY:
 
         __tablename__ = "episodic_events"
 
-        id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-        session_id = Column(String, nullable=False, index=True)
-        user_id = Column(String, nullable=True, index=True)
-        agent_id = Column(String, nullable=True, index=True)
+        id: Mapped[str] = mapped_column(
+            String, primary_key=True, default=lambda: str(uuid.uuid4())
+        )
+        session_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+        user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+        agent_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
         # Event details
-        event_type = Column(String, nullable=False, index=True)
-        event_data = Column(JSON, nullable=False)
-        context = Column(JSON, nullable=True)
+        event_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+        event_data: Mapped[Any] = mapped_column(JSON, nullable=False)
+        context: Mapped[Any] = mapped_column(JSON, nullable=True)
 
         # Temporal information
-        timestamp = Column(DateTime, nullable=False, default=datetime.now, index=True)
-        duration_ms = Column(Integer, nullable=True)
-        sequence_number = Column(Integer, nullable=True)
+        timestamp: Mapped[datetime] = mapped_column(
+            DateTime, nullable=False, default=datetime.now, index=True
+        )
+        duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+        sequence_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
         # Outcome and feedback
-        success = Column(Boolean, nullable=True)
-        quality_score = Column(Float, nullable=True)
-        user_feedback = Column(Text, nullable=True)
+        success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+        quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+        user_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
 
         # Metadata
-        tags = Column(JSON, nullable=True)
-        event_metadata = Column(JSON, nullable=True)
+        tags: Mapped[Any] = mapped_column(JSON, nullable=True)
+        event_metadata: Mapped[Any] = mapped_column(JSON, nullable=True)
 
-        created_at = Column(DateTime, default=datetime.now)
+        created_at: Mapped[datetime | None] = mapped_column(
+            DateTime, default=datetime.now
+        )
 
     class EpisodicSession(Base):  # type: ignore
         """Database model for episodic sessions."""
 
         __tablename__ = "episodic_sessions"
 
-        session_id = Column(String, primary_key=True)
-        user_id = Column(String, nullable=True, index=True)
+        session_id: Mapped[str] = mapped_column(String, primary_key=True)
+        user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
         # Session details
-        session_type = Column(String, nullable=True)
-        start_time = Column(DateTime, nullable=False, index=True)
-        end_time = Column(DateTime, nullable=True)
-        duration_ms = Column(Integer, nullable=True)
+        session_type: Mapped[str | None] = mapped_column(String, nullable=True)
+        start_time: Mapped[datetime] = mapped_column(
+            DateTime, nullable=False, index=True
+        )
+        end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+        duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
         # Summary statistics
-        event_count = Column(Integer, default=0)
-        success_rate = Column(Float, nullable=True)
-        avg_quality_score = Column(Float, nullable=True)
+        event_count: Mapped[int | None] = mapped_column(Integer, default=0)
+        success_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+        avg_quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
         # Session outcome
-        session_outcome = Column(String, nullable=True)
-        user_satisfaction = Column(Float, nullable=True)
-        notes = Column(Text, nullable=True)
+        session_outcome: Mapped[str | None] = mapped_column(String, nullable=True)
+        user_satisfaction: Mapped[float | None] = mapped_column(Float, nullable=True)
+        notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
         # Metadata
-        session_metadata = Column(JSON, nullable=True)
-        created_at = Column(DateTime, default=datetime.now)
+        session_metadata: Mapped[Any] = mapped_column(JSON, nullable=True)
+        created_at: Mapped[datetime | None] = mapped_column(
+            DateTime, default=datetime.now
+        )
 
 else:
     EpisodicEvent = None  # type: ignore
