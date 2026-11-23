@@ -8,7 +8,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from src.models.db.audit_log import AuditEventType, AuditLog
+from src.models.db.audit_log import AuditLog
 from src.models.db.security_alert import SecurityAlert
 from src.security.audit_logger import AuditLogger
 
@@ -43,8 +43,8 @@ class _RecordingSessionFactory:
 
 
 @pytest.mark.asyncio
-async def test_real_app_request_has_security_headers_and_persists_audit_row() -> None:
-    """The app entrypoint must reach both controls on an auth failure."""
+async def test_real_app_rejection_has_security_headers_and_no_audit_write() -> None:
+    """An auth failure still carries security headers but costs no audit write."""
     from src.api.main import app
 
     session_factory = _RecordingSessionFactory()
@@ -73,35 +73,14 @@ async def test_real_app_request_has_security_headers_and_persists_audit_row() ->
     assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
     assert "default-src 'self'" in response.headers["Content-Security-Policy"]
 
-    audit_rows = [row for row in session_factory.rows if isinstance(row, AuditLog)]
-    alert_rows = [row for row in session_factory.rows if isinstance(row, SecurityAlert)]
-    assert len(audit_rows) == 2
-    assert len(alert_rows) == 1
-    admission, outcome = audit_rows
-    assert admission.event_type is AuditEventType.DATA_ACCESSED
-    assert admission.action == "GET /this-route-does-not-exist"
-    assert admission.result == "admitted"
-    assert admission.request_id == "request-123"
-    assert admission.event_metadata == {
-        "method": "GET",
-        "path": "/this-route-does-not-exist",
-        "phase": "admission",
-    }
-    assert outcome.event_type is AuditEventType.UNAUTHORIZED_ACCESS
-    assert outcome.action == "GET /this-route-does-not-exist"
-    assert outcome.result == "failure"
-    assert outcome.request_id == "request-123"
-    assert outcome.event_metadata == {
-        "method": "GET",
-        "path": "/this-route-does-not-exist",
-        "phase": "outcome",
-        "status_code": 401,
-    }
+    # Authentication rejects the request before audit admits it, so a
+    # rejection costs no durable write (see test_audit_middleware_amplification).
+    assert session_factory.rows == []
 
 
 @pytest.mark.asyncio
-async def test_real_app_request_rejects_unavailable_audit_store() -> None:
-    """A configured logger without a store cannot claim the request was audited."""
+async def test_real_app_rejection_survives_unavailable_audit_store() -> None:
+    """An audit outage does not turn an auth rejection into a 503."""
     from src.api.main import app
 
     missing_store_logger = AuditLogger(buffer_size=100)
@@ -121,7 +100,5 @@ async def test_real_app_request_rejects_unavailable_audit_store() -> None:
         else:
             app.state.audit_logger = previous
 
-    assert response.status_code == 503
-    assert response.headers["X-Audit-Status"] == "unavailable"
+    assert response.status_code == 401
     assert response.headers["X-Frame-Options"] == "DENY"
-    assert response.json()["error"]["code"] == "AUDIT_PERSISTENCE_UNAVAILABLE"
