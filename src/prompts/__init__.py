@@ -1,7 +1,7 @@
 """
 Cerebro Advanced Prompt Management System
 
-Provides dynamic, YAML-based prompt templates with versioning, hot-reload,
+Provides dynamic, YAML-based prompt templates with versioning,
 and A/B testing capabilities. Replaces hard-coded prompt functions with
 flexible, configuration-driven prompt management.
 
