@@ -9,6 +9,7 @@ across multiple server instances.
 import asyncio
 import contextlib
 import json
+import uuid
 from typing import Any
 from uuid import UUID
 
@@ -41,6 +42,8 @@ class EventPublisher:
         self.redis_subscriber: redis.Redis[bytes] | None = None
         self.subscription_task: asyncio.Task[None] | None = None
         self._shutdown = False
+        # Stamps published events so this instance can ignore its own echo
+        self._instance_id = uuid.uuid4().hex
 
     async def initialize(self) -> None:
         """Initialize Redis connections and start subscription."""
@@ -545,7 +548,12 @@ class EventPublisher:
             try:
                 await self.redis_client.publish(
                     "research_platform:events",
-                    message.model_dump_json(),
+                    json.dumps(
+                        {
+                            **message.model_dump(mode="json"),
+                            "_origin": self._instance_id,
+                        }
+                    ),
                 )
             except Exception as e:
                 logger.warning(
@@ -572,6 +580,9 @@ class EventPublisher:
 
                     if message and message["type"] == "message":
                         event_data = json.loads(message["data"])
+                        # Already delivered locally by _publish_event
+                        if event_data.pop("_origin", None) == self._instance_id:
+                            continue
                         ws_message = WSMessage(**event_data)
 
                         # Broadcast to local WebSocket connections
