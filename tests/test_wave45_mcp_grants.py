@@ -108,7 +108,68 @@ async def test_plan_worker_forwards_persisted_grants(
         enable_fallback=False,
         identity=ToolCallIdentity.from_agent_task(task),
         grants=grants,
+        budget=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_plan_worker_hands_the_run_budget_to_the_mcp_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.core.budget import BUDGET_LEDGER_CONTEXT_KEY, BudgetLedger
+    from src.core.contracts import ExecutionBudget
+
+    ledger = BudgetLedger(
+        ExecutionBudget(
+            max_cost_usd=1,
+            max_total_tokens=1000,
+            max_tool_invocations=1,
+            max_parallel_tasks=1,
+            max_attempts_per_task=1,
+            task_timeout_seconds=1,
+        )
+    )
+    constructor = Mock(side_effect=lambda **kwargs: kwargs)
+    monkeypatch.setattr(bridge_module, "MCPIntegration", constructor)
+    monkeypatch.setattr(bridge_module, "settings", Mock(MCP_TOOL_PATH_ENABLED=True))
+
+    class Worker:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def execute(self, task: AgentTask) -> AgentResult:
+            return AgentResult(task.id, "success", {}, 1.0, 0.0)
+
+    bridge = object.__new__(MASRSupervisorBridge)
+    bridge.component_registry = Mock()
+    bridge.component_registry.resolve.return_value = Worker
+    bridge.gemini_service = None
+    bridge.session_factory = None
+    bridge.audit_store = object()
+    worker = WorkerAssignment(
+        worker_id="w",
+        worker_type="comparative_analysis",
+        objective="objective",
+        output_schema={},
+        permission_scopes=(),
+        tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+    )
+    task = AgentTask(
+        "task-1",
+        "worker",
+        {},
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "organization_id": "org-1",
+            BUDGET_LEDGER_CONTEXT_KEY: ledger,
+        },
+    )
+
+    await bridge._execute_plan_worker(worker, task)
+
+    assert constructor.call_args.kwargs["budget"] is ledger
 
 
 @pytest.mark.asyncio

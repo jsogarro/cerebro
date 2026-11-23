@@ -9,6 +9,12 @@ from typing import Any
 
 from src.agents.llm_worker_base import PlanProviderUnavailableError
 from src.agents.models import AgentResult, AgentTask
+from src.core.budget import (
+    BUDGET_LEDGER_CONTEXT_KEY,
+    BudgetExceededError,
+    BudgetLedger,
+    check_plan_fits,
+)
 from src.core.contracts import (
     CollaborationMode,
     ExecutionPlan,
@@ -78,6 +84,11 @@ class ExecutionPlanTopologyExecutor:
                 error = ExecutionTopologyUnsupportedError(reason)
                 record_topology_rejected(plan, error.code, reason)
                 raise error
+        try:
+            check_plan_fits(decision.budget, len(decision.workers))
+        except BudgetExceededError as error:
+            record_topology_rejected(plan, error.code, str(error))
+            raise
         record_topology_admitted(plan)
 
     async def execute(
@@ -89,6 +100,11 @@ class ExecutionPlanTopologyExecutor:
 
         self.admit(plan)
         decision = plan.routing_decision
+        # The run's own ledger when the caller supplies one, so a workflow
+        # retry draws on the budget already spent instead of a fresh one.
+        ledger = task.context.get(BUDGET_LEDGER_CONTEXT_KEY)
+        if ledger is None:
+            ledger = BudgetLedger(decision.budget)
         workers = {str(worker.worker_id): worker for worker in decision.workers}
         dependencies = self._dependencies(plan)
         completed: dict[str, AgentResult] = {}
@@ -116,11 +132,12 @@ class ExecutionPlanTopologyExecutor:
                         },
                     },
                 },
-                context=task.context,
+                context={**task.context, BUDGET_LEDGER_CONTEXT_KEY: ledger},
                 timeout=decision.budget.task_timeout_seconds,
                 priority=task.priority,
             )
             async with semaphore:
+                ledger.ensure_not_exceeded()
                 return await self._worker_executor(worker, worker_task)
 
         while pending:
@@ -144,6 +161,9 @@ class ExecutionPlanTopologyExecutor:
                     str(exc),
                 )
                 raise
+            # A worker may swallow the error and return a failed result; the
+            # ledger still knows a ceiling was crossed.
+            ledger.ensure_not_exceeded()
             completed.update(zip(ready, results, strict=True))
             pending.difference_update(ready)
 

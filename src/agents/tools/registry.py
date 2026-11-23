@@ -41,6 +41,7 @@ from src.agents.tools.mediation import (
     plain,
     self_issued_grant,
 )
+from src.core.budget import BudgetLedger
 from src.core.contracts.capabilities import CapabilityGrant, SensitivityClass
 from src.core.contracts.trust import TrustClassification
 from src.core.tools import (
@@ -129,6 +130,7 @@ class ToolRegistry:
         identity: ToolCallIdentity | None = None,
         input_trust: TrustClassification = DEFAULT_INTERNAL_INPUT_TRUST,
         grants: Sequence[CapabilityGrant] | None = None,
+        budget: BudgetLedger | None = None,
     ) -> ToolResult:
         """Execute a tool by name, through the boundary.
 
@@ -146,6 +148,11 @@ class ToolRegistry:
             # Preserved verbatim: existing callers and tests match on it, and
             # a refusal is the same answer either way.
             return ToolResult(success=False, error=f"Unknown tool: {name}")
+
+        if budget is not None:
+            # Raises BudgetExceededError before the boundary is entered; a
+            # call the budget cannot hold is refused, not attempted.
+            budget.charge_tool_invocation()
 
         call_identity = identity or ToolCallIdentity.unbound(label=name)
         now = datetime.now(UTC)

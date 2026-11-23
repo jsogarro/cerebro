@@ -198,6 +198,7 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
         enable_fallback=False,
         grants=tuple(task.context[CAPABILITY_GRANTS_CONTEXT_KEY]),
         identity=expected_identity,
+        budget=None,
     )
     boundary_invoke = integration.boundary.invoke
     assert boundary_invoke.await_count == 1

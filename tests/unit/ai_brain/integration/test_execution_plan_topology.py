@@ -18,6 +18,7 @@ from src.api.services.direct_execution_service import DirectExecutionService
 from src.api.services.execution_authority_resolver import (
     MappingExecutionAuthorityResolver,
 )
+from src.core.budget import BUDGET_LEDGER_CONTEXT_KEY, BudgetLedger
 from src.core.contracts import (
     CollaborationMode,
     ExecutionBudget,
@@ -92,7 +93,7 @@ def _plan(
             ),
             budget=ExecutionBudget(
                 max_cost_usd=Decimal("1"),
-                max_total_tokens=100,
+                max_total_tokens=100_000,
                 max_tool_invocations=0,
                 max_parallel_tasks=len(selected_workers),
                 max_attempts_per_task=1,
@@ -153,10 +154,11 @@ async def test_a_worker_task_inherits_its_parent_s_durable_context() -> None:
     ).execute(_plan(), parent_task)
 
     assert len(worker_tasks) == 2
-    assert [worker_task.context for worker_task in worker_tasks] == [
-        parent_context,
-        parent_context,
-    ]
+    # Durable identity is inherited unchanged; the run's budget ledger rides along.
+    for worker_task in worker_tasks:
+        context = dict(worker_task.context)
+        assert isinstance(context.pop(BUDGET_LEDGER_CONTEXT_KEY), BudgetLedger)
+        assert context == parent_context
 
 
 @pytest.mark.asyncio
