@@ -46,6 +46,23 @@ logger = get_logger()
 _FAILED_STATUSES = {"failed", "timeout"}
 
 
+def _new_metrics() -> dict[AgentType, dict[str, Any]]:
+    return {
+        agent_type: {
+            "total_executions": 0,
+            "successful_executions": 0,
+            "failed_executions": 0,
+            "total_execution_time": 0.0,
+            "total_quality_score": 0.0,
+            "total_cost": 0.0,
+            "last_execution": None,
+            "quality_history": [],  # Last 100 executions
+            "performance_history": [],  # Last 100 executions
+        }
+        for agent_type in AgentType
+    }
+
+
 def _rollup_status(failed: int, total: int) -> str:
     """Roll member outcomes up into completed, partial or failed."""
     if total == 0 or failed == 0:
@@ -90,20 +107,10 @@ class AgentExecutionService:
         self.active_executions: dict[str, dict[str, Any]] = {}
 
         # Performance tracking per agent type
-        self.agent_metrics: dict[AgentType, dict[str, Any]] = {
-            agent_type: {
-                "total_executions": 0,
-                "successful_executions": 0,
-                "failed_executions": 0,
-                "total_execution_time": 0.0,
-                "total_quality_score": 0.0,
-                "total_cost": 0.0,
-                "last_execution": None,
-                "quality_history": [],  # Last 100 executions
-                "performance_history": [],  # Last 100 executions
-            }
-            for agent_type in AgentType
-        }
+        self.agent_metrics: dict[AgentType, dict[str, Any]] = _new_metrics()
+        # The same counters kept per organization; tenant-facing endpoints read
+        # these so one tenant never sees another's activity.
+        self._org_metrics: dict[str, dict[AgentType, dict[str, Any]]] = {}
 
         # Service configuration
         self.max_concurrent_executions = 100
@@ -153,6 +160,7 @@ class AgentExecutionService:
             "status": "pending",
             "started_at": start_time,
             "request": request.dict(),
+            "organization_id": request.organization_id,
         }
         self.active_executions[execution_id] = execution_context
 
@@ -205,7 +213,10 @@ class AgentExecutionService:
 
             # Update metrics
             await self._update_agent_metrics(
-                agent_type, response, success=agent_result.status == "success"
+                agent_type,
+                response,
+                success=agent_result.status == "success",
+                organization_id=request.organization_id,
             )
 
             logger.info(
@@ -232,7 +243,12 @@ class AgentExecutionService:
                 errors=[f"Execution timed out after {request.timeout_seconds} seconds"],
             )
 
-            await self._update_agent_metrics(agent_type, response, success=False)
+            await self._update_agent_metrics(
+                agent_type,
+                response,
+                success=False,
+                organization_id=request.organization_id,
+            )
 
             return response
 
@@ -252,7 +268,12 @@ class AgentExecutionService:
                 errors=[str(e)],
             )
 
-            await self._update_agent_metrics(agent_type, response, success=False)
+            await self._update_agent_metrics(
+                agent_type,
+                response,
+                success=False,
+                organization_id=request.organization_id,
+            )
 
             return response
 
@@ -877,10 +898,16 @@ class AgentExecutionService:
 
         return agents
 
-    async def get_agent_metrics(self, agent_type: AgentType) -> AgentMetricsResponse:
-        """Get performance metrics for specific agent type."""
+    async def get_agent_metrics(
+        self, agent_type: AgentType, *, organization_id: str | None = None
+    ) -> AgentMetricsResponse:
+        """Get performance metrics for an agent type.
 
-        metrics_data = self.agent_metrics.get(agent_type, {})
+        With ``organization_id`` only that organization's executions count;
+        without it the process-wide aggregate is returned (internal use).
+        """
+
+        metrics_data = self._metrics_for(organization_id).get(agent_type, {})
 
         # Calculate derived metrics
         total_executions = metrics_data.get("total_executions", 0)
@@ -971,15 +998,34 @@ class AgentExecutionService:
             last_health_check=datetime.now(),
         )
 
+    def _metrics_for(
+        self, organization_id: str | None
+    ) -> dict[AgentType, dict[str, Any]]:
+        if organization_id is None:
+            return self.agent_metrics
+        return self._org_metrics.get(organization_id, {})
+
     async def _update_agent_metrics(
-        self, agent_type: AgentType, response: AgentExecutionResponse, success: bool
+        self,
+        agent_type: AgentType,
+        response: AgentExecutionResponse,
+        success: bool,
+        organization_id: str | None = None,
     ) -> None:
-        """Update performance metrics for agent type."""
+        """Update performance metrics for agent type (global and per-org)."""
 
         if not self.enable_performance_tracking:
             return
 
-        metrics = self.agent_metrics[agent_type]
+        self._apply_metrics(self.agent_metrics[agent_type], response, success)
+        if organization_id is not None:
+            org = self._org_metrics.setdefault(organization_id, _new_metrics())
+            self._apply_metrics(org[agent_type], response, success)
+
+    @staticmethod
+    def _apply_metrics(
+        metrics: dict[str, Any], response: AgentExecutionResponse, success: bool
+    ) -> None:
 
         # Update counters
         metrics["total_executions"] += 1
@@ -1014,12 +1060,25 @@ class AgentExecutionService:
         self.component_registry.resolve(key)
         return self.agent_factory.resolve_agent(key.name.replace("-", "_"))
 
-    async def get_service_stats(self) -> dict[str, Any]:
-        """Get comprehensive service statistics."""
+    async def get_service_stats(
+        self, *, organization_id: str | None = None
+    ) -> dict[str, Any]:
+        """Get service statistics, scoped to one organization when given."""
+
+        if organization_id is None:
+            active = len(self.active_executions)
+            agent_metrics = self.agent_metrics
+        else:
+            active = sum(
+                1
+                for ex in self.active_executions.values()
+                if ex.get("organization_id") == organization_id
+            )
+            agent_metrics = self._org_metrics.get(organization_id) or _new_metrics()
 
         return {
             "service": {
-                "active_executions": len(self.active_executions),
+                "active_executions": active,
                 "total_agents": len(AgentType),
                 "max_concurrent": self.max_concurrent_executions,
             },
@@ -1031,20 +1090,21 @@ class AgentExecutionService:
                     "avg_execution_time": metrics["total_execution_time"]
                     / max(metrics["total_executions"], 1),
                 }
-                for agent_type, metrics in self.agent_metrics.items()
+                for agent_type, metrics in agent_metrics.items()
             },
             "system_health": await self._get_system_health(),
         }
 
     async def get_active_execution_snapshot(
-        self,
+        self, *, organization_id: str
     ) -> tuple[dict[str, dict[str, Any]], int]:
-        """Return current execution state without exposing mutable ownership."""
+        """Return the organization's current executions (copies, never shared)."""
 
         return (
             {
                 execution_id: dict(execution_data)
                 for execution_id, execution_data in self.active_executions.items()
+                if execution_data.get("organization_id") == organization_id
             },
             self.max_concurrent_executions,
         )

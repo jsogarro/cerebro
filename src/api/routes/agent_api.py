@@ -144,6 +144,7 @@ async def list_agents(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> AgentListResponse:
     """
     List all available agents with capabilities.
@@ -155,7 +156,9 @@ async def list_agents(
         agents = await service.get_agent_list()
 
         # Calculate system metrics
-        system_stats = await service.get_service_stats()
+        system_stats = await service.get_service_stats(
+            organization_id=tenant_context.organization_id
+        )
         system_health = system_stats.get("system_health", "unknown")
 
         response = AgentListResponse(
@@ -255,6 +258,10 @@ async def execute_agent(
         service = _resolved_agent_operations(execution_service)
 
         # Execute agent
+        # Ownership comes from the token, never from the request body.
+        request = request.model_copy(
+            update={"organization_id": tenant_context.organization_id}
+        )
         response = await service.execute_single_agent(agent_type, request)
 
         logger.info(
@@ -457,6 +464,7 @@ async def get_agent_metrics(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> AgentMetricsResponse:
     """
     Get performance metrics for specific agent.
@@ -466,7 +474,9 @@ async def get_agent_metrics(
     """
     try:
         service = _resolved_agent_operations(execution_service)
-        metrics = await service.get_agent_metrics(agent_type)
+        metrics = await service.get_agent_metrics(
+            agent_type, organization_id=tenant_context.organization_id
+        )
 
         logger.debug(f"Retrieved metrics for {agent_type.value}")
 
@@ -514,6 +524,7 @@ async def get_system_stats(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     """
     Get comprehensive system statistics.
@@ -523,7 +534,9 @@ async def get_system_stats(
     """
     try:
         service = _resolved_agent_operations(execution_service)
-        stats = await service.get_service_stats()
+        stats = await service.get_service_stats(
+            organization_id=tenant_context.organization_id
+        )
 
         return stats
 
@@ -540,9 +553,10 @@ async def get_active_executions(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     """
-    Get information about currently active agent executions.
+    Get information about the caller's organization's active agent executions.
 
     Useful for monitoring system load and debugging performance issues.
     """
@@ -551,7 +565,9 @@ async def get_active_executions(
         (
             execution_snapshot,
             max_concurrent_executions,
-        ) = await service.get_active_execution_snapshot()
+        ) = await service.get_active_execution_snapshot(
+            organization_id=tenant_context.organization_id
+        )
 
         active_executions = []
         for execution_id, execution_data in execution_snapshot.items():
@@ -898,6 +914,7 @@ async def compare_agent_performance(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     """
     Compare performance across all agent types.
@@ -911,7 +928,9 @@ async def compare_agent_performance(
         comparison_data = {}
 
         for agent_type in AgentType:
-            metrics = await service.get_agent_metrics(agent_type)
+            metrics = await service.get_agent_metrics(
+                agent_type, organization_id=tenant_context.organization_id
+            )
 
             if metric == "quality_score":
                 value = metrics.recent_average_quality

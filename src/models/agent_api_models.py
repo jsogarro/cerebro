@@ -87,6 +87,9 @@ class AgentExecutionRequest(BaseModel):
     user_id: str | None = Field(None, description="User ID for tracking")
     session_id: str | None = Field(None, description="Session ID for context")
     authority_reference: ExecutionAuthorityReference | None = None
+    # Server-set owner of the execution. The route overwrites whatever a client
+    # sends here with the authenticated tenant.
+    organization_id: str | None = Field(default=None, exclude=True)
 
 
 class ChainOfAgentsRequest(BaseModel):

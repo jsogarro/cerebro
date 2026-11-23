@@ -91,6 +91,8 @@ class AgentExecutionBackend(Protocol):
     async def get_agent_metrics(
         self,
         agent_type: AgentType,
+        *,
+        organization_id: str | None = None,
     ) -> AgentMetricsResponse: ...
 
     async def get_agent_health(
@@ -98,10 +100,12 @@ class AgentExecutionBackend(Protocol):
         agent_type: AgentType,
     ) -> AgentHealthStatus: ...
 
-    async def get_service_stats(self) -> dict[str, Any]: ...
+    async def get_service_stats(
+        self, *, organization_id: str | None = None
+    ) -> dict[str, Any]: ...
 
     async def get_active_execution_snapshot(
-        self,
+        self, *, organization_id: str
     ) -> tuple[dict[str, dict[str, Any]], int]: ...
 
 
@@ -249,8 +253,12 @@ class _ApplicationKernelAdapter:
     async def get_agent_metrics(
         self,
         agent_type: AgentType,
+        *,
+        organization_id: str | None = None,
     ) -> AgentMetricsResponse:
-        return await self._agents().get_agent_metrics(agent_type)
+        return await self._agents().get_agent_metrics(
+            agent_type, organization_id=organization_id
+        )
 
     async def get_agent_health(
         self,
@@ -258,13 +266,17 @@ class _ApplicationKernelAdapter:
     ) -> AgentHealthStatus:
         return await self._agents().get_agent_health(agent_type)
 
-    async def get_service_stats(self) -> dict[str, Any]:
-        return await self._agents().get_service_stats()
+    async def get_service_stats(
+        self, *, organization_id: str | None = None
+    ) -> dict[str, Any]:
+        return await self._agents().get_service_stats(organization_id=organization_id)
 
     async def get_active_execution_snapshot(
-        self,
+        self, *, organization_id: str
     ) -> tuple[dict[str, dict[str, Any]], int]:
-        return await self._agents().get_active_execution_snapshot()
+        return await self._agents().get_active_execution_snapshot(
+            organization_id=organization_id
+        )
 
 
 ApplicationResearchKernel: TypeAlias = ResearchKernel[..., str]

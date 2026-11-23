@@ -426,6 +426,10 @@ class TestPerformanceAndMetrics:
             service
         )
         app.dependency_overrides[get_jwt_service] = _TestJWTService
+        # Metrics are scoped to the caller's organization.
+        app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+            user_id=AUTH_USER_ID, organization_id=AUTH_ORG_ID
+        )
         try:
             yield TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
         finally:
@@ -434,6 +438,7 @@ class TestPerformanceAndMetrics:
                 None,
             )
             app.dependency_overrides.pop(get_jwt_service, None)
+            app.dependency_overrides.pop(get_tenant_context, None)
 
     def test_agent_metrics_structure(self, client: TestClient) -> None:
         """Test agent metrics response structure."""
