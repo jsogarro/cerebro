@@ -21,6 +21,7 @@ from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.api.client_ip import client_ip
 from src.models.db.audit_log import AuditEventType, AuditLog, AuditSeverity
 from src.models.db.security_alert import AlertSeverity, AlertType, SecurityAlert
 from src.models.db.user import User
@@ -188,7 +189,7 @@ class AuditLogger:
         request_metadata: dict[str, Any] = {}
 
         if request:
-            ip_address = request.client.host if request.client else None
+            ip_address = client_ip(request) if request.client else None
             user_agent = request.headers.get("User-Agent")
             request_id = request.headers.get("X-Request-ID")
 
