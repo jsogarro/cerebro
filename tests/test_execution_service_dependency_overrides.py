@@ -16,6 +16,7 @@ from src.api.services.direct_execution_service import (
 )
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.research_project import ProjectStatus
+from tests.fixtures.authenticated_caller import allow_authenticated
 
 
 class _FakeExecutionService:
@@ -79,6 +80,7 @@ def test_query_endpoint_uses_non_concrete_dependency_override() -> None:
     fake = _FakeExecutionService()
     test_app = FastAPI()
     test_app.include_router(query_api.router)
+    allow_authenticated(test_app)
     test_app.dependency_overrides[get_application_direct_execution_service] = lambda: (
         fake
     )
