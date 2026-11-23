@@ -39,6 +39,7 @@ from src.models.execution_authority import (
     ExecutionAuthorityBinding,
     ExecutionAuthorityReference,
 )
+from tests.fixtures.authenticated_caller import allow_authenticated
 
 # The query routes require an authenticated tenant, and authority resolution
 # is scoped to it. ``create_for_test`` bindings carry this tenant.
@@ -184,6 +185,7 @@ def test_routed_query_authority_rejections_are_typed_422_before_execution(error,
     backend = _RoutedBackend(error)
     test_app = FastAPI()
     test_app.include_router(query_api.router)
+    allow_authenticated(test_app)
     test_app.dependency_overrides[query_api.get_application_research_kernel] = lambda: (
         compose_application_research_kernel(backend)
     )
@@ -203,6 +205,7 @@ def test_routed_query_forwards_opaque_reference_and_preserves_response_shape():
     backend = _RoutedBackend()
     test_app = FastAPI()
     test_app.include_router(query_api.router)
+    allow_authenticated(test_app)
     test_app.dependency_overrides[query_api.get_application_research_kernel] = lambda: (
         compose_application_research_kernel(backend)
     )
@@ -318,6 +321,7 @@ def test_lifespan_uses_precomposed_authority_for_routed_query_once(
 
     test_app = FastAPI(lifespan=main.lifespan)
     test_app.include_router(query_api.router)
+    allow_authenticated(test_app)
     test_app.dependency_overrides[get_tenant_context] = _tenant_override
     test_app.state.execution_authority_resolver = resolver
 
@@ -368,6 +372,7 @@ def test_executing_agent_post_requires_authority_before_agent_service(
     service = AsyncMock()
     test_app = FastAPI()
     test_app.include_router(agent_api.router)
+    allow_authenticated(test_app)
     test_app.dependency_overrides[agent_api.get_application_agent_research_kernel] = (
         lambda: compose_application_research_kernel(_RoutedBackend(), service)
     )
@@ -408,6 +413,7 @@ def test_raw_agent_backend_override_fails_closed_before_agent_service(
     service = AsyncMock()
     test_app = FastAPI()
     test_app.include_router(agent_api.router)
+    allow_authenticated(test_app)
     test_app.dependency_overrides[agent_api.get_application_agent_research_kernel] = (
         lambda: service
     )
@@ -427,6 +433,7 @@ def test_agent_discovery_remains_available_without_authority():
     service.get_service_stats.return_value = {"agent_metrics": {}}
     test_app = FastAPI()
     test_app.include_router(agent_api.router)
+    allow_authenticated(test_app)
     test_app.dependency_overrides[agent_api.get_application_agent_research_kernel] = (
         lambda: compose_application_research_kernel(_RoutedBackend(), service)
     )

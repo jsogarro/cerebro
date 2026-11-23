@@ -19,6 +19,10 @@ logger = structlog.get_logger(__name__)
 _UNAUDITED_PATHS = frozenset(
     {"/health", "/health/", "/ready", "/live", "/metrics", "/favicon.ico"}
 )
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# Public GET routes that change state (the emailed verification link).
+_MUTATING_GET_PATHS = frozenset({"/api/v1/auth/verify-email"})
+_REJECTION_STATUSES = frozenset({401, 403, 429})
 
 
 class AuditTrailMiddleware:
@@ -126,32 +130,57 @@ class AuditTrailMiddleware:
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        """Audit the response while preserving the endpoint's own behavior."""
+        """Audit a request that authentication and rate limiting admitted.
+
+        Mounted inside authentication and rate limiting, so requests those
+        layers reject never reach it (see ``log_rejected_requests``).
+
+        A mutating request records and flushes its admission before the
+        endpoint runs, so no side effect happens without a durable record of
+        the intent; if that write fails the request is refused (fail closed).
+        Its outcome is flushed too, but an outcome failure is not turned into
+        an error response: the intent is already durable, and a 503 after the
+        side effect would report a completed mutation as failed.
+
+        A safe request has no side effect to guard. It records its outcome
+        after the response with the single flush; if the audit store is down
+        the response is still returned and flagged ``X-Audit-Status:
+        unavailable``, because withholding a response already produced does
+        not undo the access and would turn an audit outage into a read outage.
+        """
         if request.url.path in _UNAUDITED_PATHS:
             return await call_next(request)
 
+        mutating = (
+            request.method not in _SAFE_METHODS
+            or request.url.path.rstrip("/") in _MUTATING_GET_PATHS
+        )
         audit_logger = self._logger_for(request)
         if audit_logger is None:
             # A request made before lifespan startup (for example, a direct
-            # ASGI test client) has no logger. Do not admit it without a
-            # durable audit record.
+            # ASGI test client) has no logger.
             logger.error(
                 "audit_logger_unavailable",
                 path=request.url.path,
                 method=request.method,
             )
-            return self._audit_failure_response()
+            if mutating:
+                return self._audit_failure_response()
+            response = await call_next(request)
+            response.headers["X-Audit-Status"] = "unavailable"
+            return response
 
-        try:
-            await self._record(audit_logger, request, phase="admission")
-        except Exception as exc:
-            logger.error(
-                "audit_admission_persistence_failed",
-                path=request.url.path,
-                method=request.method,
-                error=type(exc).__name__,
-            )
-            return self._audit_failure_response()
+        if mutating:
+            try:
+                await self._record(audit_logger, request, phase="admission")
+            except Exception as exc:
+                logger.error(
+                    "audit_admission_persistence_failed",
+                    path=request.url.path,
+                    method=request.method,
+                    error=type(exc).__name__,
+                )
+                return self._audit_failure_response()
 
         response = await call_next(request)
 
@@ -169,10 +198,33 @@ class AuditTrailMiddleware:
                 method=request.method,
                 error=type(exc).__name__,
             )
-            return self._audit_failure_response()
+            response.headers["X-Audit-Status"] = "unavailable"
+            return response
 
         response.headers["X-Audit-Status"] = "persisted"
         return response
 
 
-__all__ = ["AuditTrailMiddleware"]
+async def log_rejected_requests(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Leave a log line, not a database write, for 401/403/429 responses.
+
+    Mounted outside authentication and rate limiting. Rejections are the
+    cheapest requests an unauthenticated caller can send, so each one must
+    cost no durable write.
+    """
+    response = await call_next(request)
+    if response.status_code in _REJECTION_STATUSES:
+        logger.warning(
+            "request_rejected",
+            status_code=response.status_code,
+            method=request.method,
+            path=request.url.path,
+            client=request.client.host if request.client else None,
+        )
+    return response
+
+
+__all__ = ["AuditTrailMiddleware", "log_rejected_requests"]

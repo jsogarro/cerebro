@@ -14,6 +14,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
+from src.api.client_ip import client_ip
 from src.api.middleware.error_envelope import build_error_payload
 
 logger = structlog.get_logger(__name__)
@@ -39,6 +40,9 @@ class RateLimitStore(Protocol):
     ) -> tuple[int, int]:
         """Increment a counter and return count plus seconds until reset."""
 
+    async def reset(self, key: str) -> None:
+        """Forget a counter."""
+
 
 class InMemoryRateLimitStore:
     """Small in-process fixed-window counter store."""
@@ -61,6 +65,9 @@ class InMemoryRateLimitStore:
         self._counters[key] = (count, reset_at)
         return count, max(1, int(reset_at - now))
 
+    async def reset(self, key: str) -> None:
+        self._counters.pop(key, None)
+
 
 class RedisRateLimitStore:
     """Redis-backed fixed-window counter store."""
@@ -81,7 +88,16 @@ class RedisRateLimitStore:
         if int(count) == 1:
             await client.expire(redis_key, window_seconds)
         ttl = await client.ttl(redis_key)
+        if ttl < 0:
+            # The EXPIRE after the first INCR was lost; without this the key
+            # would never expire and the caller would stay limited forever.
+            await client.expire(redis_key, window_seconds)
+            ttl = window_seconds
         return int(count), max(1, int(ttl))
+
+    async def reset(self, key: str) -> None:
+        client = await self._get_client()
+        await client.delete(f"{self._key_prefix}:{key}")
 
     async def _get_client(self) -> redis.Redis[Any]:
         if self._client is None:
@@ -115,6 +131,15 @@ class ResilientRateLimitStore:
         except Exception as exc:
             logger.warning("Rate-limit primary store unavailable", error=str(exc))
             return await self._fallback.increment(key, window_seconds)
+
+    async def reset(self, key: str) -> None:
+        # Clear both: a failure counted locally while Redis was down must not
+        # outlive a successful login once Redis returns.
+        await self._fallback.reset(key)
+        try:
+            await self._primary.reset(key)
+        except Exception as exc:
+            logger.warning("Rate-limit primary store unavailable", error=str(exc))
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -199,8 +224,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return f"user:{user_id}"
         # Unauthenticated callers are keyed by client address only; any
         # request header is caller-chosen and would let them mint buckets.
-        client_host = request.client.host if request.client else "unknown"
-        return f"ip:{client_host}"
+        return f"ip:{client_ip(request)}"
 
     def _is_excluded(self, request: Request) -> bool:
         return any(request.url.path.startswith(path) for path in self.exclude_paths)

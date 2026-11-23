@@ -16,6 +16,7 @@ from src.api.services.masr_routing_service import MASRRoutingService
 from src.auth.models import TokenPayload
 from src.middleware.auth_middleware import get_jwt_service
 from src.models.masr_api_models import RoutingDecisionResponse
+from tests.fixtures.authenticated_caller import allow_authenticated
 
 AUTH_USER_ID = "user-1"
 AUTH_ORG_ID = "11111111-1111-1111-1111-111111111111"
@@ -216,6 +217,7 @@ def test_read_endpoints_preserve_top_level_contract(
 def test_mounted_api_without_lifespan_returns_503() -> None:
     test_app = FastAPI()
     test_app.include_router(router)
+    allow_authenticated(test_app)
 
     response = TestClient(test_app).get("/api/v1/masr/strategies")
 

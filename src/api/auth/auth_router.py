@@ -13,6 +13,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.client_ip import client_ip
+from src.api.middleware.rate_limiter import (
+    RedisRateLimitStore,
+    ResilientRateLimitStore,
+)
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
 from src.auth.models import (
     AuthResponse,
@@ -31,10 +36,15 @@ from src.auth.password_service import (
     PasswordTokenStoreUnavailableError,
 )
 from src.core.config import settings
-from src.middleware.auth_middleware import get_current_user, get_jwt_service
+from src.middleware.auth_middleware import (
+    get_current_token,
+    get_current_user,
+    get_jwt_service,
+)
 from src.models.db.session import get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
+from src.security.login_throttle import LoginThrottle
 
 logger = structlog.get_logger(__name__)
 
@@ -54,6 +64,23 @@ async def get_password_service() -> PasswordService:
         bcrypt_rounds=settings.BCRYPT_ROUNDS,
         min_password_length=settings.PASSWORD_MIN_LENGTH,
     )
+
+
+_login_throttle: LoginThrottle | None = None
+
+
+def get_login_throttle() -> LoginThrottle:
+    """Get the process-wide failed-login throttle (overridable in tests)."""
+    global _login_throttle
+    if _login_throttle is None:
+        _login_throttle = LoginThrottle(
+            ResilientRateLimitStore(
+                RedisRateLimitStore(settings.REDIS_URL, key_prefix="login_fail")
+            ),
+            max_failures=settings.LOGIN_MAX_FAILED_ATTEMPTS,
+            lockout_seconds=settings.LOGIN_LOCKOUT_SECONDS,
+        )
+    return _login_throttle
 
 
 def provisioned_organization_id(user: User) -> UUID:
@@ -208,12 +235,23 @@ async def login(
     db: AsyncSession = Depends(get_session),
     jwt_service: JWTService = Depends(get_jwt_service),
     password_service: PasswordService = Depends(get_password_service),
+    throttle: LoginThrottle = Depends(get_login_throttle),
 ) -> AuthResponse:
     """
     Login with email and password.
 
     Authenticates user credentials and returns access and refresh tokens.
+    Repeated failures lock the account identifier for a while, whether or not
+    the account exists.
     """
+    retry_after = await throttle.begin(request.email)
+    if retry_after:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     # Get user
     user_repo = UserRepository(db)
     user = await user_repo.get_by_email(request.email)
@@ -223,7 +261,7 @@ async def login(
         logger.warning(
             "Failed login attempt",
             email=request.email,
-            ip=req.client.host if req.client else None,
+            ip=client_ip(req),
         )
 
         raise HTTPException(
@@ -239,6 +277,7 @@ async def login(
     # Update login info. Accounts created before the tenant boundary
     # existed have no organization; give them one here so the token they
     # are about to receive can carry the claim every scoped surface needs.
+    await throttle.clear(request.email)
     user.record_login()
     organization_id = provisioned_organization_id(user)
     await db.commit()
@@ -322,7 +361,11 @@ async def refresh_tokens(
         ) from e
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(get_current_token)],
+)
 async def logout(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     jwt_service: JWTService = Depends(get_jwt_service),

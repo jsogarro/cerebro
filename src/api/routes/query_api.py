@@ -19,6 +19,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from pydantic import BaseModel, Field
 from structlog import get_logger
 
+from src.middleware.auth_middleware import get_current_token
+
 from ...ai_brain.router.masr import RoutingStrategy
 from ...core.kernel import ResearchKernel
 from ...core.observability import set_llm_request_estimated_cost
@@ -39,7 +41,7 @@ from ..services.research_kernel import (
 )
 
 logger = get_logger()
-router = APIRouter(prefix="/api/v1/query")
+router = APIRouter(prefix="/api/v1/query", dependencies=[Depends(get_current_token)])
 _RESEARCH_KERNEL_DEPENDENCY = Depends(get_application_research_kernel)
 
 
