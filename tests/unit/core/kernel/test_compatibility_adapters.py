@@ -35,6 +35,7 @@ from src.models.agent_api_models import (
     AgentExecutionResponse,
     AgentType,
 )
+from tests.fixtures.authenticated_caller import allow_authenticated
 
 # The query routes require an authenticated tenant and scope their reads to it.
 TENANT = TenantContext(
@@ -292,6 +293,7 @@ def test_agent_http_adapter_fails_closed_without_execution_authority() -> None:
     backend = _AgentExecutionBackend()
     test_app = FastAPI()
     test_app.include_router(agent_api.router)
+    allow_authenticated(test_app)
     test_app.dependency_overrides[get_application_agent_execution_service] = lambda: (
         backend
     )

@@ -6,6 +6,7 @@ and the new AI Brain capabilities including MASR routing, multi-tier memory,
 foundation model providers, and hierarchical agent management.
 """
 
+from ipaddress import ip_network
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,15 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+
+    # Peers whose X-Forwarded-For header is believed (IPs or CIDRs). Empty means
+    # the socket peer is always the client address.
+    TRUSTED_PROXIES: list[str] = []
+
+    # Per-account failed-login lockout: after this many failures the account
+    # identifier is locked until the window (from the first failure) elapses.
+    LOGIN_MAX_FAILED_ATTEMPTS: int = 5
+    LOGIN_LOCKOUT_SECONDS: int = 900
 
     # Database
     DATABASE_URL: str = (
@@ -324,6 +334,14 @@ class Settings(BaseSettings):
     DEV_ALLOW_ANONYMOUS_WEBSOCKETS: bool = False
     DEV_MOCK_PROVIDERS: bool = False
     DEV_MOCK_MEMORY: bool = False
+
+    @field_validator("TRUSTED_PROXIES")
+    @classmethod
+    def validate_trusted_proxies(cls, v: list[str]) -> list[str]:
+        """Reject entries that are not IP addresses or networks."""
+        for entry in v:
+            ip_network(entry, strict=False)
+        return v
 
     @field_validator("SOURCE_SNAPSHOT_DIR")
     @classmethod

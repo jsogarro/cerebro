@@ -19,6 +19,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from pydantic import BaseModel, Field
 from structlog import get_logger
 
+from src.middleware.auth_middleware import get_current_token
+
 from ...ai_brain.router.masr import RoutingStrategy
 from ...core.kernel import ResearchKernel
 from ...core.observability import set_llm_request_estimated_cost
@@ -39,7 +41,7 @@ from ..services.research_kernel import (
 )
 
 logger = get_logger()
-router = APIRouter(prefix="/api/v1/query")
+router = APIRouter(prefix="/api/v1/query", dependencies=[Depends(get_current_token)])
 _RESEARCH_KERNEL_DEPENDENCY = Depends(get_application_research_kernel)
 
 
@@ -421,13 +423,10 @@ def _recorded_plan_summary(exec_status: Any) -> dict[str, Any] | None:
         "collaboration_mode": decision.collaboration_mode.value,
         "primary_provider": str(decision.provider_model_policy.primary.provider),
         "primary_model": str(decision.provider_model_policy.primary.model),
-        # Cost and token ceilings are declared on the plan but nothing counts
-        # spend against them yet, so they are not reported as limits.
-        "declared_budget_unenforced": {
+        "budget": {
             "max_cost_usd": float(budget.max_cost_usd),
             "max_total_tokens": budget.max_total_tokens,
-        },
-        "budget": {
+            "max_tool_invocations": budget.max_tool_invocations,
             "max_parallel_tasks": budget.max_parallel_tasks,
             "max_attempts_per_task": budget.max_attempts_per_task,
             "task_timeout_seconds": budget.task_timeout_seconds,
