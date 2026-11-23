@@ -2,7 +2,7 @@
 Model Configuration Manager
 
 Central manager for loading, validating, and managing model configurations.
-Supports hot-reloading, environment-specific overrides, and runtime
+Supports environment-specific overrides, and runtime
 configuration updates without system restart.
 
 Features:
@@ -28,17 +28,6 @@ import yaml  # type: ignore[import-untyped]
 from structlog import get_logger
 
 logger = get_logger()
-
-try:
-    from watchdog.events import FileSystemEventHandler
-    from watchdog.observers import Observer
-
-    WATCHDOG_AVAILABLE = True
-except ImportError:
-    Observer = None
-    FileSystemEventHandler = None
-    WATCHDOG_AVAILABLE = False
-    logger.warning("watchdog not available - file watching disabled")
 
 from .model_schemas import (  # noqa: E402
     ModelCapability,
@@ -66,54 +55,12 @@ class ConfigurationChangeEvent:
         self.timestamp = datetime.now()
 
 
-class ConfigFileWatcher:
-    """File system watcher for configuration changes."""
-
-    def __init__(self, config_manager: ModelConfigManager):
-        self.config_manager = config_manager
-        self.debounce_delay = 1.0  # Seconds to wait before processing changes
-        self.pending_changes: set[str] = set()
-        self._debounce_task: asyncio.Task[None] | None = None
-
-        # Only inherit from FileSystemEventHandler if available
-        if WATCHDOG_AVAILABLE:
-            self.__class__.__bases__ = (FileSystemEventHandler,)
-
-    def on_modified(self, event: Any) -> None:
-        if not event.is_directory and event.src_path.endswith((".yaml", ".yml")):
-            self.pending_changes.add(event.src_path)
-            self._schedule_reload()
-
-    def on_created(self, event: Any) -> None:
-        if not event.is_directory and event.src_path.endswith((".yaml", ".yml")):
-            self.pending_changes.add(event.src_path)
-            self._schedule_reload()
-
-    def _schedule_reload(self) -> None:
-        """Schedule a debounced reload of configurations."""
-
-        if self._debounce_task:
-            self._debounce_task.cancel()
-
-        self._debounce_task = asyncio.create_task(self._debounced_reload())
-
-    async def _debounced_reload(self) -> None:
-        """Reload configurations after debounce delay."""
-
-        await asyncio.sleep(self.debounce_delay)
-
-        if self.pending_changes:
-            logger.info(f"Configuration files changed: {self.pending_changes}")
-            await self.config_manager._reload_configurations()
-            self.pending_changes.clear()
-
-
 class ModelConfigManager:
     """
     Central manager for model configurations.
 
     Provides thread-safe access to model configurations with support for
-    hot-reloading, validation, and environment-specific overrides.
+    validation, and environment-specific overrides.
     """
 
     def __init__(self, config: dict[str, Any]):
@@ -126,10 +73,6 @@ class ModelConfigManager:
         self.environment = config.get("environment", "development")
         self.env_config_path = self.config_dir / f"{self.environment}.yaml"
 
-        # Hot-reload configuration
-        self.enable_hot_reload = config.get("enable_hot_reload", True)
-        self.watch_subdirectories = config.get("watch_subdirectories", True)
-
         # Current configuration
         self._lock = threading.RLock()
         self._current_config: ModelConfiguration | None = None
@@ -138,13 +81,8 @@ class ModelConfigManager:
         # Change notifications
         self._change_listeners: list[Callable[[ConfigurationChangeEvent], None]] = []
 
-        # File watcher
-        self._observer: Observer | None = None
-        self._watcher: ConfigFileWatcher | None = None
-
         # Performance tracking
         self.load_count = 0
-        self.reload_count = 0
         self.error_count = 0
 
     async def initialize(self) -> None:
@@ -154,10 +92,6 @@ class ModelConfigManager:
 
         # Load initial configuration
         await self.load_configuration()
-
-        # Start file watcher if hot-reload is enabled
-        if self.enable_hot_reload:
-            await self._start_file_watcher()
 
         if self._current_config is not None:
             logger.info(
@@ -309,9 +243,7 @@ class ModelConfigManager:
         stats: dict[str, Any] = {
             "config_manager": {
                 "load_count": self.load_count,
-                "reload_count": self.reload_count,
                 "error_count": self.error_count,
-                "hot_reload_enabled": self.enable_hot_reload,
                 "last_loaded": (
                     self._config_timestamp.isoformat()
                     if self._config_timestamp
@@ -409,47 +341,6 @@ class ModelConfigManager:
 
         return merged
 
-    async def _start_file_watcher(self) -> None:
-        """Start file system watcher for hot-reload."""
-
-        if not WATCHDOG_AVAILABLE:
-            logger.warning("Watchdog not available - hot-reload disabled")
-            return
-
-        try:
-            if Observer is None:
-                return
-
-            observer = Observer()
-            watcher = ConfigFileWatcher(self)
-
-            # Watch config directory
-            observer.schedule(
-                watcher, str(self.config_dir), recursive=self.watch_subdirectories
-            )
-
-            observer.start()
-            self._observer = observer
-            self._watcher = watcher
-            logger.info(f"File watcher started for {self.config_dir}")
-
-        except Exception as e:
-            logger.error(f"Failed to start file watcher: {e}")
-            self._observer = None
-
-    async def _reload_configurations(self) -> None:
-        """Reload configurations from files."""
-
-        try:
-            _old_config = self._current_config
-            _new_config = await self.load_configuration()
-
-            self.reload_count += 1
-            logger.info("Configuration hot-reloaded successfully")
-
-        except Exception as e:
-            logger.error(f"Configuration reload failed: {e}")
-
     async def _notify_change_listeners(
         self,
         change_type: str,
@@ -477,10 +368,6 @@ class ModelConfigManager:
     async def close(self) -> None:
         """Close the configuration manager and cleanup resources."""
 
-        if self._observer:
-            self._observer.stop()
-            self._observer.join()
-
         logger.info("Model configuration manager closed")
 
 
@@ -501,7 +388,7 @@ class ConfigurationCache:
                 timestamp = self._timestamps.get(key)
                 if (
                     timestamp
-                    and (datetime.now() - timestamp).seconds < self.ttl_seconds
+                    and (datetime.now() - timestamp).total_seconds() < self.ttl_seconds
                 ):
                     return self._cache[key]
                 else:
@@ -584,7 +471,6 @@ async def get_models_by_capability(
 
 
 __all__ = [
-    "ConfigFileWatcher",
     "ConfigurationCache",
     "ConfigurationChangeEvent",
     "ModelConfigManager",

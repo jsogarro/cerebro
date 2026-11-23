@@ -6,7 +6,6 @@ hard-coded prompt functions with flexible YAML-based templates.
 
 Features:
 - YAML template loading with variable substitution
-- Hot-reload capability for real-time updates
 - Template inheritance and composition
 - A/B testing and version management
 - Performance tracking and optimization
@@ -24,16 +23,6 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 from structlog import get_logger
-
-try:
-    from watchdog.events import FileSystemEventHandler
-    from watchdog.observers import Observer
-
-    WATCHDOG_AVAILABLE = True
-except ImportError:
-    Observer = None
-    FileSystemEventHandler = None
-    WATCHDOG_AVAILABLE = False
 
 from .schemas import (
     PromptCollection,
@@ -75,45 +64,6 @@ class PromptChangeEvent:
         self.timestamp = datetime.now()
 
 
-class PromptFileWatcher:
-    """File watcher for prompt template changes."""
-
-    def __init__(self, prompt_manager: "PromptManager"):
-        self.prompt_manager = prompt_manager
-        self.debounce_delay = 1.0
-        self.pending_changes: set[str] = set()
-        self._debounce_task: asyncio.Task[None] | None = None
-
-        if WATCHDOG_AVAILABLE:
-            self.__class__.__bases__ = (FileSystemEventHandler,)
-
-    def on_modified(self, event: Any) -> None:
-        if not event.is_directory and event.src_path.endswith((".yaml", ".yml")):
-            self.pending_changes.add(event.src_path)
-            self._schedule_reload()
-
-    def on_created(self, event: Any) -> None:
-        if not event.is_directory and event.src_path.endswith((".yaml", ".yml")):
-            self.pending_changes.add(event.src_path)
-            self._schedule_reload()
-
-    def _schedule_reload(self) -> None:
-        """Schedule debounced reload of templates."""
-        if self._debounce_task:
-            self._debounce_task.cancel()
-
-        self._debounce_task = asyncio.create_task(self._debounced_reload())
-
-    async def _debounced_reload(self) -> None:
-        """Reload templates after debounce delay."""
-        await asyncio.sleep(self.debounce_delay)
-
-        if self.pending_changes:
-            logger.info(f"Prompt templates changed: {self.pending_changes}")
-            await self.prompt_manager._reload_templates()
-            self.pending_changes.clear()
-
-
 class PromptCache:
     """Cache for compiled prompt templates."""
 
@@ -130,7 +80,7 @@ class PromptCache:
                 timestamp = self._timestamps.get(key)
                 if (
                     timestamp
-                    and (datetime.now() - timestamp).seconds < self.ttl_seconds
+                    and (datetime.now() - timestamp).total_seconds() < self.ttl_seconds
                 ):
                     value = self._cache[key]
                     return str(value)
@@ -161,7 +111,7 @@ class PromptCache:
 
 class PromptManager:
     """
-    Advanced prompt manager with YAML templates and hot-reload.
+    Advanced prompt manager with YAML templates.
 
     Provides dynamic prompt loading, template inheritance, variable substitution,
     and performance tracking for all Cerebro agents.
@@ -173,7 +123,6 @@ class PromptManager:
 
         # Template configuration
         self.templates_dir = Path(config.get("templates_dir", "src/prompts/templates"))
-        self.enable_hot_reload = config.get("enable_hot_reload", True)
         self.enable_caching = config.get("enable_caching", True)
         self.cache_ttl = config.get("cache_ttl_seconds", 3600)
 
@@ -188,10 +137,6 @@ class PromptManager:
         self.load_count = 0
         self.cache_hits = 0
         self.cache_misses = 0
-
-        # Hot-reload components
-        self._observer: Any | None = None
-        self._watcher: PromptFileWatcher | None = None
 
         # Caching
         self._cache: PromptCache | None
@@ -209,10 +154,6 @@ class PromptManager:
 
         # Load all template files
         await self._load_all_templates()
-
-        # Start file watcher if hot-reload enabled
-        if self.enable_hot_reload and WATCHDOG_AVAILABLE:
-            await self._start_file_watcher()
 
         logger.info(f"Prompt manager initialized with {len(self._templates)} templates")
 
@@ -787,45 +728,6 @@ class PromptManager:
             stats["successful_uses"] += 1
         stats["last_used"] = datetime.now().isoformat()
 
-    async def _start_file_watcher(self) -> None:
-        """Start file watcher for hot-reload."""
-
-        try:
-            self._observer = Observer()
-            self._watcher = PromptFileWatcher(self)
-
-            self._observer.schedule(
-                self._watcher, str(self.templates_dir), recursive=True
-            )
-
-            self._observer.start()
-            logger.info(f"Prompt file watcher started for {self.templates_dir}")
-
-        except Exception as e:
-            logger.error(f"Failed to start prompt file watcher: {e}")
-
-    async def _reload_templates(self) -> None:
-        """Reload templates from files."""
-
-        try:
-            # Clear current templates
-            with self._lock:
-                _old_templates = self._templates.copy()
-                self._templates.clear()
-                self._collections.clear()
-
-                # Invalidate cache
-                if self._cache:
-                    self._cache.invalidate()
-
-            # Reload all templates
-            await self._load_all_templates()
-
-            logger.info("Prompt templates reloaded successfully")
-
-        except Exception as e:
-            logger.error(f"Failed to reload templates: {e}")
-
     async def _notify_change_listeners(
         self,
         change_type: str,
@@ -857,10 +759,6 @@ class PromptManager:
 
     async def close(self) -> None:
         """Close prompt manager and cleanup resources."""
-
-        if self._observer:
-            self._observer.stop()
-            self._observer.join()
 
         logger.info("Prompt manager closed")
 
@@ -899,7 +797,6 @@ async def get_prompt(
 __all__ = [
     "PromptCache",
     "PromptChangeEvent",
-    "PromptFileWatcher",
     "PromptManager",
     "get_prompt",
     "get_prompt_manager",
