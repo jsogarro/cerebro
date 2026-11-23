@@ -1,8 +1,4 @@
-"""The status payload must not present unenforced budget ceilings as limits.
-
-``max_cost_usd`` and ``max_total_tokens`` are declared on the plan but no code
-path counts spend, so the status API reports them under a name that says so.
-"""
+"""The status payload reports every enforced budget ceiling as a limit."""
 
 from __future__ import annotations
 
@@ -72,21 +68,18 @@ def client() -> Iterator[TestClient]:
             app.dependency_overrides.pop(dep, None)
 
 
-def test_status_does_not_present_unenforced_ceilings_as_limits(
+def test_status_reports_enforced_ceilings_as_limits(
     client: TestClient,
 ) -> None:
     response = client.get("/api/v1/query/execution/execution-1/status")
 
     assert response.status_code == 200, response.text
     plan = response.json()["execution_plan"]
-    assert "max_cost_usd" not in plan["budget"]
-    assert "max_total_tokens" not in plan["budget"]
-    assert plan["declared_budget_unenforced"] == {
-        "max_cost_usd": 1.0,
-        "max_total_tokens": 1000,
-    }
-    # Enforced ceilings stay where they were.
+    assert "declared_budget_unenforced" not in plan
     assert plan["budget"] == {
+        "max_cost_usd": 1.0,
+        "max_total_tokens": 100000,
+        "max_tool_invocations": 0,
         "max_parallel_tasks": 2,
         "max_attempts_per_task": 1,
         "task_timeout_seconds": 30,

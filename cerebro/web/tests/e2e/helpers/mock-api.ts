@@ -8,7 +8,7 @@ export const projects = [
         progress: 42,
         time: '1d ago',
         created_at: '2026-05-03T00:00:00Z',
-        query: { main_query: 'Optimize supplier routing.' },
+        query: { text: 'Optimize supplier routing.' },
     },
 ];
 
@@ -29,14 +29,16 @@ export async function mockApi(page: Page) {
 
         if (path.endsWith('/agents')) {
             await route.fulfill({
-                json: [
-                    {
-                        id: 'A-01',
-                        name: 'Researcher Alpha',
-                        role: 'Research',
-                        status: 'active',
-                    },
-                ],
+                json: {
+                    agents: [
+                        {
+                            agent_type: 'A-01',
+                            name: 'Researcher Alpha',
+                            description: 'Research',
+                        },
+                    ],
+                    total_agents: 1,
+                },
             });
             return;
         }

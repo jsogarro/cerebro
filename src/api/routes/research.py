@@ -16,6 +16,7 @@ from src.api.services.direct_execution_service import (
     get_application_direct_execution_service,
     get_direct_execution_service,
 )
+from src.middleware.auth_middleware import get_current_token
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.research_project import ProjectStatus
 from src.models.db.session import get_session
@@ -445,7 +446,7 @@ async def cancel_research_project(
     )
 
 
-@router.post("/projects/{project_id}/refine")
+@router.post("/projects/{project_id}/refine", dependencies=[Depends(get_current_token)])
 async def refine_research_scope(
     project_id: UUID,
     scope: ResearchScope,

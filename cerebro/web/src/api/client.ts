@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { toast } from '@/hooks/use-toast';
+import { getAccessToken } from './auth';
 
 declare module 'axios' {
     interface AxiosRequestConfig {
@@ -14,10 +15,11 @@ export const apiClient = axios.create({
     },
 });
 
-// Request interceptor for auth (future use)
+// Request interceptor: attach the bearer token the server's auth middleware expects
 apiClient.interceptors.request.use(
     (config) => {
-        // Add auth token when implemented
+        const token = getAccessToken();
+        if (token) config.headers.set('Authorization', `Bearer ${token}`);
         return config;
     },
     (error) => Promise.reject(error)

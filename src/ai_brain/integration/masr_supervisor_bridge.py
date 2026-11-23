@@ -26,6 +26,7 @@ from src.agents.tools.durable_audit import SessionToolAuditStore
 from src.agents.tools.mediation import ToolCallIdentity
 from src.core.acquisition.search_evidence import SearchEvidenceRecorder
 from src.core.acquisition.snapshots import FilesystemSnapshotStore
+from src.core.budget import BUDGET_LEDGER_CONTEXT_KEY
 from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
 from src.core.config import settings
 from src.core.kernel import TypedRegistry
@@ -685,6 +686,7 @@ class MASRSupervisorBridge:
                 enable_fallback=False,
                 identity=ToolCallIdentity.from_agent_task(task),
                 grants=grants,
+                budget=task.context.get(BUDGET_LEDGER_CONTEXT_KEY),
             )
         worker_instance = worker_class(
             gemini_service=self.gemini_service,
