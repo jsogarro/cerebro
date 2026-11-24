@@ -30,7 +30,11 @@ from src.middleware.auth_middleware import get_current_token
 
 from ...core.kernel import ResearchKernel
 from ...core.pii_redactor import redact_pii
-from ...middleware.tenant_context import TenantContext, get_tenant_context
+from ...middleware.tenant_context import (
+    TenantContext,
+    get_tenant_context,
+    get_tenant_identity,
+)
 from ...models.agent_api_models import (
     AgentExecutionRequest,
     AgentExecutionResponse,
@@ -144,7 +148,7 @@ async def list_agents(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
-    tenant_context: TenantContext = Depends(get_tenant_context),
+    tenant_context: TenantContext = Depends(get_tenant_identity),
 ) -> AgentListResponse:
     """
     List all available agents with capabilities.

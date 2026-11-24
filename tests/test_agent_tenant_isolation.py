@@ -16,7 +16,11 @@ from src.api.services.agent_execution_service import (
 )
 from src.auth.models import TokenPayload
 from src.middleware.auth_middleware import get_jwt_service
-from src.middleware.tenant_context import TenantContext, get_tenant_context
+from src.middleware.tenant_context import (
+    TenantContext,
+    get_tenant_context,
+    get_tenant_identity,
+)
 from src.models.agent_api_models import AgentExecutionRequest, AgentType
 
 ORG_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -70,9 +74,10 @@ async def env() -> AsyncIterator[tuple[AgentExecutionService, httpx.AsyncClient,
 
     app.dependency_overrides[get_application_agent_execution_service] = lambda: service
     app.dependency_overrides[get_jwt_service] = _JWT
-    app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
-        user_id="u", organization_id=current_org["org"]
-    )
+    for dep in (get_tenant_context, get_tenant_identity):
+        app.dependency_overrides[dep] = lambda: TenantContext(
+            user_id="u", organization_id=current_org["org"]
+        )
     transport = httpx.ASGITransport(app=app)
     try:
         async with httpx.AsyncClient(
@@ -87,6 +92,7 @@ async def env() -> AsyncIterator[tuple[AgentExecutionService, httpx.AsyncClient,
             get_application_agent_execution_service,
             get_jwt_service,
             get_tenant_context,
+            get_tenant_identity,
         ):
             app.dependency_overrides.pop(dep, None)
 

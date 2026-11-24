@@ -62,6 +62,20 @@ async def set_postgres_tenant_context(
     )
 
 
+async def get_tenant_identity(
+    token_payload: TokenPayload = Depends(get_current_token),
+) -> TenantContext:
+    """Resolve the caller's tenant from the token alone, without opening a DB session.
+
+    For routes whose data is not read through the database, so there is no
+    Postgres RLS context to set.
+    """
+    return TenantContext(
+        user_id=token_payload.sub,
+        organization_id=require_organization_id(token_payload),
+    )
+
+
 async def get_tenant_context(
     token_payload: TokenPayload = Depends(get_current_token),
     session: AsyncSession = Depends(get_session),
