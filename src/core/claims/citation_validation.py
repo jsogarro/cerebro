@@ -203,9 +203,11 @@ def validate_citations(
         if dim == VERSION_OF_RECORD:
             vors = sorted(
                 {
-                    corpus.entries[d].version_of_record_doi  # type: ignore[misc]
+                    v
                     for s, _, d in checks
-                    if s is S.FAILED and d
+                    if s is S.FAILED
+                    and d
+                    and (v := corpus.entries[d].version_of_record_doi)
                 }
             )
             if len(vors) == 1:
