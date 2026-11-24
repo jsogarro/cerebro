@@ -41,7 +41,7 @@ class _AgentService:
     async def get_agent_list(self):
         return [_agent_info()]
 
-    async def get_service_stats(self):
+    async def get_service_stats(self, *, organization_id=None):
         return {
             "system_health": "degraded",
             "agent_metrics": {"literature-review": {"total_executions": 3}},
@@ -321,7 +321,9 @@ async def test_agent_validation_is_local_heuristic_not_agent_execution():
 async def test_list_info_and_health_preserve_legacy_discovery_and_status_shapes():
     service = _AgentService()
 
-    listed = await agent_api.list_agents(execution_service=service)
+    listed = await agent_api.list_agents(
+        execution_service=service, tenant_context=_TENANT
+    )
     info = await agent_api.get_agent_info(
         AgentType.LITERATURE_REVIEW,
         execution_service=service,
