@@ -346,7 +346,11 @@ class ConnectionManager:
         # Send to all clients
         failed_clients = []
         for client_id in client_ids:
-            success = await self.connections[client_id].send_message(message)
+            # A peer may have disconnected during an earlier await in this loop
+            connection = self.connections.get(client_id)
+            if connection is None:
+                continue
+            success = await connection.send_message(message)
             if not success:
                 failed_clients.append(client_id)
 
@@ -397,7 +401,7 @@ class ConnectionManager:
             try:
                 # Check all connections for health
                 unhealthy_clients = []
-                for client_id, connection in self.connections.items():
+                for client_id, connection in list(self.connections.items()):
                     if not connection.is_healthy():
                         unhealthy_clients.append(client_id)
                     else:
