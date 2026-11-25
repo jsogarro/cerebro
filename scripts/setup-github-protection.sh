@@ -88,6 +88,7 @@ configure_branch_protection() {
       "CI Pipeline / Lint Code",
       "CI Pipeline / Test Suite (3.11)",
       "CI Pipeline / Test Suite (3.12)",
+      "CI Pipeline / Test Suite (3.13)",
       "CI Pipeline / Temporal Workflow Tests",
       "CI Pipeline / CLI Integration Tests",
       "CI Pipeline / Security Scan",
