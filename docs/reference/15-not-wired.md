@@ -153,6 +153,6 @@ The web workbench pages for workflows, runs, run detail and memory call API rout
 - `src/prompts/`: `PromptManager`, versioning, templates
 - `src/reliability/`: `service_registry.py` (not wired) and `retry_strategies.py` (used)
 - `src/benchmarks/`, `src/costs/`, `src/improvement/`, `src/memory/`, `src/research_platform/`: stub packages
-- `src/core/claims/`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py`: citation and PDF text modules
+- `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py`: citation and PDF text modules (the rest of `src/core/claims/` is the live claim-support path)
 - `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches
 - `src/api/services/direct_execution_service.py`: the dead execution attributes

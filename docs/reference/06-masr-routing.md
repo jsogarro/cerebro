@@ -81,7 +81,7 @@ Without an explicit strategy, `_select_routing_strategy` applies these rules in 
 
 The strategy maps to a cost-optimizer strategy: `speed_first` to `latency_optimized`, `cost_efficient` to `cost_minimized`, `quality_focused` to `performance_optimized` and both `balanced` and `adaptive` to `balanced`.
 
-`MASR_ENABLE_ADAPTIVE` (default `true`) controls only the history-based heuristic in `RoutingMetricsCollector.get_adaptive_strategy`. It never enables the Thompson-sampling allocation described under [Adaptive routing](#adaptive-routing); `settings_to_router_config` documents this and only `ADAPTIVE_ROUTING_ENABLED` can enable it. The heuristic reads up to 10,000 retained decisions from the last 24 hours and returns the strategy with the best average confidence. Because it labels every decision `balanced`, it returns `balanced` once the history exceeds 100 decisions and no context override is given. When none of the retained decisions is recent, it returns the default strategy.
+`MASR_ENABLE_ADAPTIVE` (default `true`) controls only the history-based heuristic in `RoutingMetricsCollector.get_adaptive_strategy`. It never enables the Thompson-sampling allocation described under [Adaptive routing](#adaptive-routing); `settings_to_router_config` documents this and only `ADAPTIVE_ROUTING_ENABLED` can enable it. The heuristic reads up to 10,000 retained decisions from the last 24 hours and returns the strategy with the best average confidence. Because it labels every decision `balanced`, it returns `balanced` once the history holds at least 100 decisions and no context override is given. When none of the retained decisions is recent, it returns the default strategy.
 
 ## Worker allocation
 
