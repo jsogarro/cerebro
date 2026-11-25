@@ -468,7 +468,7 @@ async def get_agent_metrics(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
-    tenant_context: TenantContext = Depends(get_tenant_context),
+    tenant_context: TenantContext = Depends(get_tenant_identity),
 ) -> AgentMetricsResponse:
     """
     Get performance metrics for specific agent.
@@ -528,7 +528,7 @@ async def get_system_stats(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
-    tenant_context: TenantContext = Depends(get_tenant_context),
+    tenant_context: TenantContext = Depends(get_tenant_identity),
 ) -> dict[str, Any]:
     """
     Get comprehensive system statistics.
@@ -557,7 +557,7 @@ async def get_active_executions(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
-    tenant_context: TenantContext = Depends(get_tenant_context),
+    tenant_context: TenantContext = Depends(get_tenant_identity),
 ) -> dict[str, Any]:
     """
     Get information about the caller's organization's active agent executions.
@@ -918,7 +918,7 @@ async def compare_agent_performance(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
-    tenant_context: TenantContext = Depends(get_tenant_context),
+    tenant_context: TenantContext = Depends(get_tenant_identity),
 ) -> dict[str, Any]:
     """
     Compare performance across all agent types.
