@@ -75,10 +75,10 @@ class TestRootDockerfileContract:
         names = re.findall(r"AS\s+(\w+)", content, re.IGNORECASE)
         assert names == ["base", "development", "builder", "production"], names
 
-    def test_base_image_is_python_311_slim(self, content: str) -> None:
+    def test_base_image_is_python_313_slim(self, content: str) -> None:
         froms = _from_lines(content)
         for f in [froms[0], froms[3]]:
-            assert "python:3.11-slim" in f, f"Base image drift: {f}"
+            assert "python:3.13-slim" in f, f"Base image drift: {f}"
 
     def test_uv_copied_from_astral(self, content: str) -> None:
         copy_froms = _copy_from_lines(content)
@@ -178,10 +178,10 @@ class TestMasrDockerfileContract:
         names = re.findall(r"AS\s+(\w+)", content, re.IGNORECASE)
         assert names == ["base"], names
 
-    def test_base_image_is_python_311_slim(self, content: str) -> None:
+    def test_base_image_is_python_313_slim(self, content: str) -> None:
         froms = _from_lines(content)
         assert len(froms) == 1
-        assert "python:3.11-slim" in froms[0]
+        assert "python:3.13-slim" in froms[0]
 
     def test_uv_copied_from_astral(self, content: str) -> None:
         copy_froms = _copy_from_lines(content)
