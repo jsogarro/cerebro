@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # MCP Configuration
     MCP_PORT: int = 9000
     MCP_TOOLS_ENABLED: bool = True
-    MCP_TOOL_PATH_ENABLED: bool = False
+    MCP_TOOL_PATH_ENABLED: bool = True
     # Verbatim source snapshots; must be a persistent volume in deployment,
     # since evidence rows cite files here by digest.
     SOURCE_SNAPSHOT_DIR: str = "data/source_snapshots"

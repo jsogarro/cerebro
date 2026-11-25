@@ -57,7 +57,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 return cached_result
 
             # Search and analyze using structured output (consolidates source search + analysis)
-            if self.gemini_service:
+            if self.gemini_service and self.mcp_integration is None:
                 literature_analysis = await self._search_and_analyze_structured(
                     task.input_data
                 )
@@ -70,13 +70,34 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                     "search_strategy": "LLM-assisted structured source identification and analysis",
                 }
             else:
-                # Fallback: Use original two-step process for testing
                 academic_sources = await self._search_academic_sources(
                     task.input_data, task
                 )
-                literature_analysis_dict = await self._analyze_literature_with_gemini(
-                    task.input_data, academic_sources, task
-                )
+                # With a tool path, only sources the tool boundary retrieved
+                # count. Anything else is recorded as no evidence rather than
+                # replaced by model-named sources.
+                if self.mcp_integration is not None and not (
+                    academic_sources.get("data_source") == "mcp_tools"
+                    and academic_sources.get("sources")
+                ):
+                    self.log_warning(
+                        "literature_review_no_evidence",
+                        tool_outcome=academic_sources.get("tool_outcome"),
+                        error_code=academic_sources.get("error_code"),
+                    )
+                    academic_sources = {
+                        **academic_sources,
+                        "sources": [],
+                        "total_found": 0,
+                        "data_source": "no_evidence",
+                    }
+                    literature_analysis_dict: dict[str, Any] = {}
+                else:
+                    literature_analysis_dict = (
+                        await self._analyze_literature_with_gemini(
+                            task.input_data, academic_sources, task
+                        )
+                    )
                 # Convert to structured format
                 from src.agents.schemas import LiteratureAnalysisSchema
 
@@ -94,7 +115,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
             # Step 3: Build knowledge graph of relationships
             knowledge_graph = await self._build_literature_knowledge_graph(
-                academic_sources, literature_analysis, task
+                academic_sources, literature_analysis.model_dump(), task
             )
 
             # Step 4: Format citations properly
@@ -497,7 +518,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
         except Exception as e:
             self.log_error(f"MCP academic search failed: {e}")
-            return await self._fallback_academic_search(input_data, task)
+            return self._static_fallback_sources(query, domains)
 
     async def _analyze_literature_with_gemini(
         self,
