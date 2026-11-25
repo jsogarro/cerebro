@@ -2297,6 +2297,16 @@ class DirectExecutionService:
             context=routing_context,
         )
 
+    @staticmethod
+    def _terminal_payload(
+        execution_status: ExecutionStatus, **fields: Any
+    ) -> dict[str, Any]:
+        """Return a terminal event payload, with the run's spend when it has a ledger."""
+        ledger = execution_status._budget_ledger
+        if ledger is None:
+            return fields
+        return {**fields, "usage": ledger.usage_payload()}
+
     def _fast_path_passes_quality(self, response: str) -> bool:
         """Minimal quality gate for fast-path responses.
 
@@ -2457,7 +2467,9 @@ class DirectExecutionService:
                 task_target=TaskStatus.SUCCEEDED,
                 attempt_target=AttemptStatus.SUCCEEDED,
                 event_type="run.succeeded",
-                payload={"workers_used": execution_status.workers_used},
+                payload=self._terminal_payload(
+                    execution_status, workers_used=execution_status.workers_used
+                ),
             )
             self._settle_terminal_state(
                 execution_status,
@@ -2493,7 +2505,7 @@ class DirectExecutionService:
                 raise
 
             event_type = "run.failed"
-            payload: dict[str, Any] = {"error": str(e)}
+            payload = self._terminal_payload(execution_status, error=str(e))
             if budget_error:
                 # A budget error can only come from a run that has a ledger.
                 assert execution_status._budget_ledger is not None

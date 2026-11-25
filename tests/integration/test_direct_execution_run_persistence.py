@@ -12,6 +12,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -1065,4 +1066,144 @@ async def test_cancellation_persists_run_as_cancelling_not_cancelled(
         assert events[-1].event_type == "run.cancellation_requested"
 
     release_supervisor.set()
+    await service.close()
+
+
+_USAGE_KEYS = {"tokens_used", "cost_usd", "tool_invocations", "unknown_usage_calls"}
+
+
+async def _settle_one_unpriced_call(task: Any) -> None:
+    """Record one model call whose usage the provider did not report."""
+    from src.core.budget import BUDGET_LEDGER_CONTEXT_KEY
+
+    ledger = task.context[BUDGET_LEDGER_CONTEXT_KEY]
+    ledger.settle(ledger.reserve_call(0), None)
+
+
+async def _terminal_event(session_factory: Any, run_id: str) -> Any:
+    async with session_factory() as session:
+        events = await RunEventRepository(session).read_events_after(
+            run_id, after_sequence=0, organization_id=ORG_ID
+        )
+    return events[-1]
+
+
+async def _wait_for_run_status(session_factory: Any, run_id: str, status: str) -> None:
+    for _ in range(100):
+        async with session_factory() as session:
+            row = await RunLifecycleRepository(session).get_run(
+                run_id, organization_id=ORG_ID
+            )
+        if row is not None and row.status == status:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"run {run_id} never reached {status}")
+
+
+@pytest.mark.asyncio
+async def test_succeeded_run_event_carries_budget_usage(
+    test_engine: AsyncEngine,
+) -> None:
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "persist-run-succeeded-usage"
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): _make_binding(run_id)}
+    )
+    service = _make_service(session_factory=session_factory, resolver=resolver)
+
+    async def _execute(plan: Any, task: Any) -> Any:
+        await _settle_one_unpriced_call(task)
+        return SimpleNamespace(output={"report": "Usage is recorded."}, workers_used=1)
+
+    service.supervisor_bridge.execute_execution_plan.side_effect = _execute
+
+    await service.start_research_execution(
+        _project(),
+        authority_reference=ExecutionAuthorityReference(
+            authority_id="persistence-authority", authority_version="1"
+        ),
+        organization_id=ORG_ID,
+    )
+    await _wait_for_run_status(session_factory, run_id, "succeeded")
+
+    event = await _terminal_event(session_factory, run_id)
+    assert event.event_type == "run.succeeded"
+    assert event.payload["workers_used"] == 1
+    assert set(event.payload["usage"]) == _USAGE_KEYS
+    assert event.payload["usage"]["unknown_usage_calls"] == 1
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_run_event_carries_usage_when_a_ledger_exists(
+    test_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        DirectExecutionService._execute_research_workflow.retry, "wait", wait_none()
+    )
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "persist-run-failed-usage"
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): _make_binding(run_id)}
+    )
+    service = _make_service(session_factory=session_factory, resolver=resolver)
+    calls = 0
+
+    async def _execute(plan: Any, task: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await _settle_one_unpriced_call(task)
+        raise RuntimeError("supervisor exploded")
+
+    service.supervisor_bridge.execute_execution_plan.side_effect = _execute
+
+    await service.start_research_execution(
+        _project(),
+        authority_reference=ExecutionAuthorityReference(
+            authority_id="persistence-authority", authority_version="1"
+        ),
+        organization_id=ORG_ID,
+    )
+    await _wait_for_run_status(session_factory, run_id, "failed")
+
+    event = await _terminal_event(session_factory, run_id)
+    assert event.event_type == "run.failed"
+    assert "supervisor exploded" in event.payload["error"]
+    assert set(event.payload["usage"]) == _USAGE_KEYS
+    assert event.payload["usage"]["unknown_usage_calls"] == 1
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_fixture_run_event_payload_is_unchanged(
+    test_engine: AsyncEngine,
+) -> None:
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "persist-run-fixture-payload"
+    resolver = MappingExecutionAuthorityResolver(
+        {("persistence-authority", "1"): _make_binding(run_id)}
+    )
+    service = _make_service(session_factory=session_factory, resolver=resolver)
+
+    await service.start_research_execution(
+        _project(),
+        execution_policy=RoutingExecutionPolicy.fixture(),
+        fixture_result={"summary": "synthetic result"},
+        authority_reference=ExecutionAuthorityReference(
+            authority_id="persistence-authority", authority_version="1"
+        ),
+        organization_id=ORG_ID,
+    )
+    await _wait_for_run_status(session_factory, run_id, "succeeded")
+
+    event = await _terminal_event(session_factory, run_id)
+    assert event.event_type == "run.succeeded"
+    assert event.payload == {"fixture_mode": True}
     await service.close()
