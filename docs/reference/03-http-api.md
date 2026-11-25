@@ -245,17 +245,17 @@ Mounted at `/api/v1/agents`; `get_current_token` is a router-level dependency. T
 | `POST` | `/chain` | `get_tenant_context` | Chain-of-agents (sequential). Requires `authority_reference`. | 422, 500 |
 | `POST` | `/mixture` | `get_tenant_context` | Mixture-of-agents (parallel with aggregation). Requires `authority_reference`. | 422, 500 |
 | `POST` | `/{agent_type}/validate` | none | Validate input for an agent type. | 500 |
-| `GET` | `/{agent_type}/metrics` | `get_tenant_context` | Metrics for one agent type. | 500 |
+| `GET` | `/{agent_type}/metrics` | `get_tenant_identity` | Metrics for one agent type. | 500 |
 | `GET` | `/{agent_type}/health` | none | Health of one agent type. | 500 |
-| `GET` | `/system/stats` | `get_tenant_context` | Service statistics for the caller's organization. | 500 |
-| `GET` | `/executions/active` | `get_tenant_context` | Active executions of the caller's organization. | 500 |
+| `GET` | `/system/stats` | `get_tenant_identity` | Service statistics for the caller's organization. | 500 |
+| `GET` | `/executions/active` | `get_tenant_identity` | Active executions of the caller's organization. | 500 |
 | `POST` | `/literature-review/search` | `get_tenant_context` | Convenience wrapper over the literature-review agent. | 422, 500 |
 | `POST` | `/citation/format` | `get_tenant_context` | Convenience wrapper over citation formatting. | 422, 500 |
 | `POST` | `/synthesis/combine` | `get_tenant_context` | Convenience wrapper over synthesis. | 422, 500 |
 | `POST` | `/workflows/literature-analysis` | `get_tenant_context` | Chain-of-agents literature workflow. | 422, 500 |
 | `POST` | `/workflows/comprehensive-research` | `get_tenant_context` | Mixture-of-agents research workflow. | 422, 500 |
 | `GET` | `/health/summary` | none | Health summary across agent types. | 500 |
-| `GET` | `/performance/comparison` | `get_tenant_context` | Performance comparison across agent types. | 500 |
+| `GET` | `/performance/comparison` | `get_tenant_identity` | Performance comparison across agent types. | 500 |
 
 `execute`, `chain` and `mixture` return `422` with code `EXECUTION_AUTHORITY_REQUIRED` when the body has no `authority_reference`, `EXECUTION_AUTHORITY_UNAVAILABLE` when no resolver can supply it for the caller's organization, and the code of the authority error otherwise. The convenience routes accept `authority_id` and `authority_version` query parameters instead; giving only one of the two returns `422` with `AUTHORITY_REFERENCE_INCOMPLETE`. The caller's organization comes from the token, never from the request body.
 

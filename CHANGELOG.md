@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Indexed report project and user filters and `report_formats.report_id`, and batched `BaseRepository` bulk updates and deletes (#205, #124).
 - Deleted report files only after the database deletes commit in `cleanup_old_reports` (#122).
 - Stopped duplicate WebSocket delivery, and survived mid-broadcast disconnects (#242).
+- Resolved the tenant for agent metrics, system statistics, active executions and performance comparison from the token without opening a database session (#246).
 
 ### Removed
 - Six unmounted API routers (#185).
@@ -58,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The never-adopted `agent_tasks` table and `TaskRepository` (#184).
 - Four unreachable duplicate authentication tables, through migration `f8c9d0e1a2b3` (#118).
 - The worker image build and the dead file-watcher hot-reload (#210, #220, #240).
+- The GCR image workflow (`docker-build.yml`) and the unparseable reusable test workflow (`reusable-test.yml`) (#245).
 
 ### Fixed
 - Cache TTL wrapped at 24 hours (#240).
