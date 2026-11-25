@@ -65,6 +65,7 @@ docker compose up -d api
 Snapshot the dataset to the container's data directory and copy it out:
 
 ```bash
+mkdir -p backups
 docker compose exec redis redis-cli BGSAVE
 docker compose exec redis redis-cli LASTSAVE
 docker compose cp redis:/data/dump.rdb ./backups/dump.rdb
@@ -77,6 +78,7 @@ Run `LASTSAVE` until its timestamp changes to confirm the save finished. The pro
 Copy the directories from the container (or the volume that backs them) to a backup location:
 
 ```bash
+mkdir -p backups
 docker compose cp api:/var/lib/cerebro/source_snapshots ./backups/source_snapshots
 docker compose cp api:/app/reports ./backups/reports
 ```

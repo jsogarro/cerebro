@@ -28,7 +28,7 @@ Each reference page marks features as Active, Off by default or Not wired; the
 | Evidence model | Claim-support records are written for each final report, each recorded as unsupported with reason `not_attempted`; search evidence and source snapshots are off by default ([tool boundary and evidence](docs/reference/09-tool-boundary-and-evidence.md)) |
 | Durable runs | Each execution is a database run with an append-only event log, replayable over SSE and WebSocket ([durable runs and events](docs/reference/08-durable-runs-and-events.md)) |
 | Fixture-backed execution | `DirectExecutionService.start_research_execution` accepts a fixture mode, but no route or client passes it |
-| Visual workbench | The research projects and agents pages call mounted routes; the workflow, run, memory, dashboard, QA, cost, benchmark and settings pages call routes the API does not mount ([CLI and web clients](docs/reference/13-cli-and-web-clients.md)) |
+| Visual workbench | The research projects page calls mounted routes. The agents page lists agents from a mounted route, but its logs route is not mounted. The workflow, run and memory pages call routes the API does not mount. The dashboard, QA, cost and benchmark pages show fixed values and the settings page has no handlers; none of them calls the API ([CLI and web clients](docs/reference/13-cli-and-web-clients.md)) |
 
 ## Why Cerebro
 
@@ -187,7 +187,7 @@ research-cli agents query \
   --authority-id "<authority-id>" --authority-version "<authority-version>"
 ```
 
-Equivalent API request:
+The same request with `curl` (the CLI sends `domains` only when `-d` is passed):
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/query/research" \

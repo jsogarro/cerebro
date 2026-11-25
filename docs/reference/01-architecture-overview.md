@@ -90,7 +90,7 @@ On shutdown, `lifespan` first closes `websocket_manager`, then shuts down Langfu
 
 ## Request path
 
-Middleware is registered in `src/api/main.py` in the order below, and Starlette runs the last-registered middleware outermost. A request therefore passes through them in this order, outermost first.
+The table lists the middleware outermost first, which is the order a request meets them. `src/api/main.py` registers them in the reverse order, because Starlette runs the last-registered middleware outermost.
 
 | Position | Middleware | Registered as |
 |---|---|---|
@@ -129,7 +129,7 @@ See [HTTP API](03-http-api.md) for the request and response contracts and [authe
 
 ## Execution paths
 
-**(a) The plan path.** `POST /api/v1/query/research` (and its `/analyze`, `/synthesize`, `/literature`, `/methodology` and `/comparison` wrappers) call `DirectExecutionService.start_research_execution`; `POST /api/v1/research/projects` calls it too, without an `organization_id`, so that start attempt is refused (see [research execution](05-research-execution.md#entry-points)). The service resolves an execution authority binding, asks MASR for a routing proposal (`_propose_routing`), compiles the proposal against the binding with `ExecutionPlanCompiler`, validates the plan with `MASRSupervisorBridge.admit_execution_plan`, admits the run in the database (`_admit_run`) and starts a background task. The task calls `MASRSupervisorBridge.execute_execution_plan`, which delegates to `ExecutionPlanTopologyExecutor`. That executor runs plan-local worker instances directly: it does not consult MASR, supervisors, LangGraph StateGraphs or the verification gate. [Research execution](05-research-execution.md) documents this path step by step.
+**(a) The plan path.** `POST /api/v1/query/research` (and its `/analyze` and `/synthesize` wrappers) call `DirectExecutionService.start_research_execution`; the `/literature`, `/methodology` and `/comparison` wrappers build their request without an `authority_reference`, so their start attempt is refused with `EXECUTION_AUTHORITY_REQUIRED` (see [research execution](05-research-execution.md#entry-points)); `POST /api/v1/research/projects` calls it too, without an `organization_id`, so that start attempt is refused (see [research execution](05-research-execution.md#entry-points)). The service resolves an execution authority binding, asks MASR for a routing proposal (`_propose_routing`), compiles the proposal against the binding with `ExecutionPlanCompiler`, validates the plan with `MASRSupervisorBridge.admit_execution_plan`, admits the run in the database (`_admit_run`) and starts a background task. The task calls `MASRSupervisorBridge.execute_execution_plan`, which delegates to `ExecutionPlanTopologyExecutor`. That executor runs plan-local worker instances directly: it does not consult MASR, supervisors, LangGraph StateGraphs or the verification gate. [Research execution](05-research-execution.md) documents this path step by step.
 
 ```mermaid
 flowchart TD

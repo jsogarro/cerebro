@@ -178,7 +178,7 @@ An execution that belongs to another organization is reported as not found. See 
 
 ### "Maximum concurrent executions reached"
 
-`DirectExecutionService` raises `RuntimeError` when 50 executions are `pending` or `running` in one API process (`max_concurrent_executions`; finished runs are retained for reading but do not count). List the caller's organization's active executions with `GET /api/v1/agents/executions/active`, wait for them to finish, or add replicas.
+`DirectExecutionService` raises `RuntimeError` when 50 executions are `pending` or `running` in one API process (`max_concurrent_executions`; finished runs are retained for reading but do not count). `GET /api/v1/agents/executions/active` does not list these executions: it reports the agent-execution snapshot of `AgentExecutionService`, which has its own cap of 100. No route lists the query executions held by `DirectExecutionService`. Wait for them to finish, or add replicas.
 
 ## Performance problems
 

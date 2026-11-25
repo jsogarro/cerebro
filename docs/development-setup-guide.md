@@ -16,6 +16,7 @@ How to install the dependencies, configure the environment, run the stack, authe
 ## Install
 
 ```bash
+uv venv && . .venv/bin/activate   # uv pip install refuses to run without a virtual environment
 make install            # uv pip install -e ".[dev]"
 pre-commit install
 ```
@@ -68,7 +69,7 @@ Services in `docker-compose.yml` and their host ports:
 | `postgres` | `${POSTGRES_HOST_PORT:-5432}` | `postgres:16-alpine`, database `research_db`, user `research` |
 | `redis` | `${REDIS_HOST_PORT:-6379}` | `redis:7-alpine` with append-only persistence |
 | `web` | `${WEB_HOST_PORT:-3000}` | Static build of `cerebro/web`, served by an unprivileged nginx on container port 8080. It has no `/api` proxy. |
-| `nginx` | `${NGINX_HTTP_HOST_PORT:-80}` and `${NGINX_HTTPS_HOST_PORT:-443}` | Reverse proxy from `docker/nginx/nginx.conf`: `/api/` and `/ws` go to `api:8000`, everything else to `web:8080` |
+| `nginx` | `${NGINX_HTTP_HOST_PORT:-80}` and `${NGINX_HTTPS_HOST_PORT:-443}` | Reverse proxy from `docker/nginx/nginx.conf`: `/api/` and `/ws` go to `api:8000`; `/health` is answered by nginx itself and never reaches the API; `/docs` is served from nginx's own static root and returns 404 (FastAPI's `/docs` is not reachable through the proxy); everything else goes to `web:8080` |
 | `pgadmin` | 5050 | Profile `dev-tools` |
 | `redis-commander` | 8081 | Profile `dev-tools` |
 | `masr-router` | 9100 | Profile `legacy-masr-service` |
@@ -104,7 +105,7 @@ curl -s -X POST http://localhost:8000/api/v1/auth/register \
   }'
 ```
 
-Field rules: `username` is 3 to 50 characters from letters, digits, `_`, and `-`, and is lowercased; `password` is at least 12 characters with an uppercase letter, a lowercase letter, a digit, and one of `!@#$%^&*()_+-=[]{}|;:,.<>?`; `confirm_password` must equal `password`; `accept_terms` must be `true`. `full_name` and `organization` are optional. A duplicate email returns 409.
+Field rules: `username` is 3 to 50 characters from letters, digits, `_`, and `-`, and is lowercased; `password` is at least 12 characters with an uppercase letter, a lowercase letter, a digit, and one of `!@#$%^&*()_+-=[]{}|;:,.<>?`; `confirm_password` must equal `password`; `accept_terms` must be `true`. `full_name` and `organization` are optional. `register` also rejects, with 400, a password that is one of `123456`, `password`, `qwerty`, `abc123`, `111111`, `123123`, `admin` or `letmein`, that contains the username or the email local part, that has three ascending or descending sequential characters or three repeated characters, or whose entropy is below 40, and a password found in the HaveIBeenPwned breach list. A duplicate email returns 409.
 
 The 201 response is an `AuthResponse`: a `user` object and a `tokens` object with `access_token`, `refresh_token`, `token_type`, and `expires_in`. Log in later with `POST /api/v1/auth/login` and `{"email": ..., "password": ...}`, which applies the same password rules and returns the same shape.
 
@@ -178,7 +179,7 @@ Targets whose recipes reference only files and services that exist:
 | `prod-build`, `prod-up`, `prod-down`, `prod-logs` | `./scripts/compose.sh -f docker-compose.production.yml` with `build`, `up -d`, `down`, `logs -f` |
 | `db-init` | `./scripts/compose.sh exec api alembic upgrade head` |
 | `db-migrate` | prompts for a message, then `alembic revision --autogenerate -m` inside `api` |
-| `db-reset` | stops `postgres`, runs `docker volume rm cerebro_postgres_data`, starts `postgres`, sleeps 10 seconds, runs `make db-init` |
+| `db-reset` | stops `postgres`, runs `docker volume rm cerebro_postgres_data` (the volume is named `<compose project>_postgres_data`, so the command works only when the checkout directory is named `cerebro`), starts `postgres`, sleeps 10 seconds, runs `make db-init` |
 | `db-backup` | `pg_dump -U research research_db` inside `postgres` into `backups/backup_<timestamp>.sql` |
 | `db-shell` | `psql -U research -d research_db` inside `postgres` |
 | `test`, `test-unit`, `test-integration`, `test-e2e`, `test-coverage` | `pytest`, `pytest tests/unit -v`, `pytest tests/integration -v`, `pytest tests/e2e -v`, `pytest --cov=src --cov-report=html --cov-report=term` |
@@ -187,7 +188,7 @@ Targets whose recipes reference only files and services that exist:
 | `cli-health`, `cli-projects`, `cli-test` | `research-cli health`, `research-cli projects list`, `research-cli projects create --title "Test Project" --query "Test query" --domains "test"` |
 | `masr-health` | `python -c` that constructs `MASRouter()` from `src/ai_brain/router/masr.py` and prints `health_check()` |
 | `load-test` | `locust -f tests/load/locustfile.py --host=http://localhost:8000` (see the [testing guide](testing-guide.md#load-tests)) |
-| `k8s-namespace`, `k8s-config`, `k8s-deploy`, `k8s-status`, `k8s-logs`, `k8s-clean` | `kubectl` against `k8s/namespace.yaml`, `k8s/configmap.yaml`, `k8s/` (kustomize), and namespace `cerebro` |
+| `k8s-namespace`, `k8s-config`, `k8s-deploy`, `k8s-status`, `k8s-logs`, `k8s-clean` | `kubectl` against `k8s/namespace.yaml`, `k8s/configmap.yaml`, `k8s/` (kustomize, which does not build, so `k8s-deploy` and `k8s-clean` fail), and namespace `cerebro` |
 | `logs-api`, `logs-masr`, `logs-all` | `./scripts/compose.sh logs -f` for `api`, `masr-router` (with the `legacy-masr-service` profile), and all services |
 | `clean`, `clean-docker` | delete `__pycache__`, `*.pyc`, and tool caches; `docker system prune -f`, `docker volume prune -f`, `docker network prune -f` |
 | `dev-workflow`, `ci-workflow`, `quick-test`, `quick-format` | `make format lint type-check test`; `make quality test test-docker`; `pytest tests/unit -x -v`; `black src tests && ruff check --fix src tests` |

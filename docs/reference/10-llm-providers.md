@@ -13,14 +13,14 @@ Language-model calls go through two layers. `GeminiService` is the default clien
 | Multi-provider OpenRouter route | Off by default | `MULTI_PROVIDER_ROUTING_ENABLED=true` with `OPENROUTER_API_KEY` | `src/agents/llm_worker_base.py` (`_build_legacy_openrouter_route`) |
 | `ModelRouter` provider registry | Active | plan-backed and OpenRouter routes | `src/ai_brain/providers/model_router.py` (`ModelRouter`) |
 | DeepSeek, Llama and OpenRouter providers | Active | `ModelRouter` on plan-backed routes | `src/ai_brain/providers/` (`DeepSeekProvider`, `LlamaProvider`, `OpenRouterProvider`) |
-| Gemini provider | Active | `ModelRouter` (plan-backed route naming `gemini`) | `src/ai_brain/providers/gemini_provider.py` (`GeminiProvider`) |
+| Gemini provider | Not wired | `ModelRouter` (plan-backed route naming `gemini`) | `src/ai_brain/providers/gemini_provider.py` (`GeminiProvider`) |
 | OpenRouter slug validation | Active | `OpenRouterProvider.load_configuration` | `src/ai_brain/providers/openrouter_provider.py` (`validate_model_slugs`) |
 | LLM call metrics | Active | `BaseProvider._postprocess_response` | `src/core/observability.py` (`record_llm_call`) |
 | Provider-call Langfuse spans | Not wired | `OpenRouterProvider.generate` | `src/core/tracing.py` (`trace_provider_call`) |
 
 ## Gemini service
 
-`GeminiService` wraps `ChatGoogleGenerativeAI` from LangChain. Production code builds it in four places, always as `GeminiService(api_key=settings.GEMINI_API_KEY)`: the application lifespan (`src/api/main.py`), `LLMWorkerAgentBase._ensure_gemini_service`, `src/api/services/talkhier_round_executor.py` and `src/api/services/supervisor_coordination_service.py`. Passing `api_key` builds `GeminiConfig` from its dataclass defaults, so the effective configuration is:
+`GeminiService` wraps `ChatGoogleGenerativeAI` from LangChain. Production code builds it in five places: the application lifespan (`src/api/main.py`), `LLMWorkerAgentBase._ensure_gemini_service`, `src/api/services/talkhier_round_executor.py`, `src/api/services/supervisor_coordination_service.py` and `GeminiProvider.__init__` (positional `GeminiServiceClass(self.api_key)`). The first four call `GeminiService(api_key=settings.GEMINI_API_KEY)`. Passing `api_key` builds `GeminiConfig` from its dataclass defaults, so the effective configuration is:
 
 | Setting | Value |
 |---|---|
@@ -55,7 +55,7 @@ The lifespan in `src/api/main.py` skips building the service and logs a warning 
 - **`BaseProvider`** (`base_provider.py`) defines `generate`, `stream`, `health_check`, request validation, per-model cost lookup (`estimate_cost`) and `_postprocess_response`, which updates success rate and latency and records the call. Request and response types are `ModelRequest` and `ModelResponse`; health is `ProviderHealthStatus`.
 - **`ModelRouter`** (`model_router.py`) holds a `ProviderRegistry`. Its configuration is a dictionary with a `providers` mapping plus `health_check_interval` (default 300 seconds), `max_retries` and `enable_fallback`. For each provider with `enabled` not false it looks up the class through `PROVIDER_KEYS` (`deepseek`, `gemini`, `llama`, `openrouter`) in the component registry of `src/api/services/component_catalog.py` and instantiates it. An unknown name, or a provider whose constructor raises, is logged and skipped.
 - **Health.** The first request to a provider runs its `health_check`, which sends a small real generation request; the result is cached for `health_check_interval`. An unhealthy provider makes `_try_provider` raise, and `route_and_generate` returns a failed `ModelResponse` with `provider="router"` and `error_type="routing_failure"`.
-- **Fallback.** `route_and_generate` tries the primary route, then each entry of `fallback_models` when `enable_fallback` is true. Worker routes always pass an empty `fallback_models`.
+- **Fallback.** `route_and_generate` tries the primary route, then each entry of `fallback_models` when `enable_fallback` is true and the primary attempt returned a failed response. An unknown or unhealthy primary provider makes `_try_provider` raise, which returns the routing-failure response without trying any fallback. Worker routes always pass an empty `fallback_models`.
 
 | Provider | Configuration keys | Models | Request limits |
 |---|---|---|---|
@@ -68,6 +68,7 @@ Behaviour specific to each provider:
 
 - `LlamaProvider` lists the models Ollama has (`/api/tags`) before a request and pulls a missing model through `/api/pull`.
 - `OpenRouterProvider` picks the model from `request.metadata["tier"]` through `tier_mapping` when no model name is given, and falls back to the `balanced` tier. Plan-backed calls always name a model.
+- `DeepSeekProvider` and `LlamaProvider` return `Unsupported model: ...` for any model name outside their table; only `OpenRouterProvider` accepts the slugs in its tier mapping. A plan-backed route that names a model must name one the provider lists.
 - `GeminiProvider` declares `model_specs`, but `supported_models` is never populated: its `_get_supported_models` has no caller and the provider never loads configuration. `supports_model` therefore returns false for every name, and `generate` returns an error response (`error_type="model_error"`, message `Unsupported model: ...`) for every request.
 - `DeepSeekProvider`, `LlamaProvider` and `OpenRouterProvider` load their model tables on the first request. Without a configuration manager they use the legacy tables in each class, which hold the context windows and per-1k-token costs used for cost estimates.
 

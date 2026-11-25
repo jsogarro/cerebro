@@ -9,15 +9,15 @@ This guide covers the deployment artifacts that exist in this repository: one Do
 | Image definition | `Dockerfile` | Four stages: `base`, `development`, `builder`, `production` |
 | Container entrypoint | `docker/entrypoint.sh` | Runs `alembic upgrade head`, then starts the command |
 | Database init script | `docker/init.sql` | Extensions, schemas and types for a fresh Postgres container |
-| Reverse proxy config | `docker/nginx/nginx.conf` | Routes `/api/`, `/ws` and `/` to the API and web containers |
+| Reverse proxy config | `docker/nginx/nginx.conf` | Routes `/api/` and `/ws` to the API and `/` to the web container; answers `/health` itself |
 | Standalone MASR image | `docker/Dockerfile.masr` | Image for the legacy MASR service |
 | Development stack | `docker-compose.yml` | API, MCP server, Postgres, Redis, nginx, web, optional tools |
 | Production stack | `docker-compose.production.yml` | The same services with limits, secrets, Prometheus and Grafana |
 | Kubernetes manifests | `k8s/` | Namespace, service account, config map, external secrets, deployment, services, ingress, autoscaler, network policy, Kustomize file |
-| CD workflow | `.github/workflows/cd.yml` | Deploys to GKE with Kustomize |
+| CD workflow | `.github/workflows/cd.yml` | Deploys to GKE with Kustomize; the Kustomize file does not build (see [Kubernetes](#kubernetes)) |
 | Local runner | `start.sh` | Starts Uvicorn and the Vite dev server without containers |
 
-`Makefile` wraps these: `make prod-build`, `make prod-up`, `make prod-down` and `make prod-logs` run `docker-compose.production.yml` through `scripts/compose.sh`, which calls `docker compose` with `.env` and `~/.env` as env files when they exist. `make k8s-deploy` runs `kubectl apply -k k8s/`.
+`Makefile` wraps these: `make prod-build`, `make prod-up`, `make prod-down` and `make prod-logs` run `docker-compose.production.yml` through `scripts/compose.sh`, which calls `docker compose` with `.env` and `~/.env` as env files when they exist. `make k8s-deploy` runs `kubectl apply -k k8s/`, which fails because the kustomization does not build (see [Kubernetes](#kubernetes)).
 
 ## Container image
 
@@ -44,7 +44,7 @@ Build locally with `docker compose build` (development stage, `docker-compose.ym
 |---|---|---|---|
 | `api` | `Dockerfile`, target `production` | 8000 | Memory limit 2G, `read_only: true`, `tmpfs` for `/tmp` and `/var/cache/nginx` |
 | `masr-router` | `docker/Dockerfile.masr` | 9100 | Profile `legacy-masr-service`; see [legacy MASR service](#legacy-standalone-masr-service) |
-| `mcp-server` | `Dockerfile`, target `production`, command `python -m src.mcp.server` | 9000 | Uses Redis database 2 |
+| `mcp-server` | `Dockerfile`, target `production`, command `python -m src.mcp.server` | 9000 | Uses Redis database 2. `src/mcp/server.py` has no `__main__` block and `src/mcp` has no `__main__.py`, so that command imports the module and exits, nothing listens on 9000, and `restart: always` restarts it in a loop. The production target also installs the package without the `[mcp]` extra, and the service passes no `SECRET_KEY` or `DATABASE_URL` to the image entrypoint's `alembic upgrade head`. |
 | `postgres` | `postgres:16-alpine` | 5432 | Volume `postgres_data_prod`, user `research`, database `research_db` |
 | `redis` | `redis:7-alpine` | 6379 | Started with `--requirepass ${REDIS_PASSWORD}`, volume `redis_data_prod` |
 | `web` | `cerebro/web/Dockerfile` | none | Built with `VITE_API_URL=/api/v1` |
@@ -52,19 +52,19 @@ Build locally with `docker compose build` (development stage, `docker-compose.ym
 | `prometheus` | `prom/prometheus:latest` | 9090 | 90-day retention |
 | `grafana` | `grafana/grafana:latest` | 3000 | Admin password from `GRAFANA_PASSWORD` |
 
-Variables the file requires from the environment or an env file: `DB_PASSWORD`, `REDIS_PASSWORD`, `SECRET_KEY`, `CORS_ORIGINS`, `GRAFANA_PASSWORD`, and (optional, empty by default) `GEMINI_API_KEY`. `JWT_PRIVATE_KEY_FILE` and `JWT_PUBLIC_KEY_FILE` are mandatory: Compose refuses to start without them. They point at the RSA PEM files, which Compose mounts into the `api` container as `/run/secrets/jwt_private.pem` and `/run/secrets/jwt_public.pem`; the service sets `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH` to those paths. The file also declares `db_password`, `redis_password` and `gemini_api_key` secrets that read from `./secrets/*.txt`; no service references them.
+Variables the file reads from the environment or an env file: `DB_PASSWORD`, `REDIS_PASSWORD`, `SECRET_KEY`, `CORS_ORIGINS` (a JSON array, for example `["https://app.example"]`), `GRAFANA_PASSWORD`, and (optional, empty by default) `GEMINI_API_KEY`. Compose interpolates an unset variable among these to an empty string with a warning, so they are required in effect: an empty `SECRET_KEY` fails the application's 32-character check, and an empty `DB_PASSWORD` makes the Postgres container refuse to start. `JWT_PRIVATE_KEY_FILE` and `JWT_PUBLIC_KEY_FILE` are the only two enforced by Compose: it refuses to start without them. They point at the RSA PEM files, which Compose mounts into the `api` container as `/run/secrets/jwt_private.pem` and `/run/secrets/jwt_public.pem`; the service sets `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH` to those paths. The file also declares `db_password`, `redis_password` and `gemini_api_key` secrets that read from `./secrets/*.txt`; no service references them.
 
 The `api` service sets `GUNICORN_WORKERS`, `GUNICORN_WORKER_CLASS`, `GUNICORN_MAX_REQUESTS` and `GUNICORN_MAX_REQUESTS_JITTER`. Nothing in the image or the application reads them: the image runs Uvicorn with `--workers 4`, and the service does not override the command.
 
 Several files the production compose file mounts are not in the repository: `docker/postgresql.conf`, `docker/redis.conf`, `docker/nginx/conf.d/`, `docker/ssl/`, `docker/prometheus/prometheus.yml` and `docker/grafana/provisioning/`. Create them, or remove the corresponding `volumes` entries and `command` flags, before `docker compose -f docker-compose.production.yml up`.
 
-`docker/nginx/nginx.conf` rate-limits `/api/` (10 requests per second per client address, burst 20) and `/ws` (5 per second, burst 10), proxies `/api/` and `/ws` to `api:8000`, and sends everything else to `web:8080`. The `/ws` location keeps connections open for up to 86400 seconds.
+`docker/nginx/nginx.conf` rate-limits `/api/` (10 requests per second per client address, burst 20) and `/ws` (5 per second, burst 10), proxies `/api/` and `/ws` to `api:8000`, answers `/health` with a fixed `200 healthy` that never reaches the API, serves `/docs` from its own static root (404 there, so FastAPI's `/docs` is not reachable through the proxy even with `DEBUG=true`), and sends everything else to `web:8080`. The `/ws` location keeps connections open for up to 86400 seconds.
 
 The `api` service has no `volumes` entry. `SOURCE_SNAPSHOT_DIR` (default `data/source_snapshots`, resolved against the working directory) holds source files that evidence rows cite by digest, and the application expects it on a persistent volume. With `read_only: true`, mount a writable volume at that path and set `SOURCE_SNAPSHOT_DIR` to it.
 
 ## Kubernetes
 
-`kubectl apply -k k8s/` applies `k8s/kustomization.yaml`, which lists these manifests, all in the namespace `research-platform`:
+`k8s/kustomization.yaml` lists these manifests, all in the namespace `research-platform`. The kustomization does not build: `kubectl kustomize k8s/` and `kustomize build k8s/` fail with `merging from generator ... ConfigMap research-platform-config does not exist; cannot merge or replace`, because the `configMapGenerator` uses `behavior: merge` against a namespaced base ConfigMap. `ci.yml` omits the build step for the same reason. `kubectl apply -k k8s/` therefore fails, and so does every `cd.yml` step that runs `kustomize build`. The manifests are:
 
 | Manifest | Defines |
 |---|---|
@@ -82,13 +82,13 @@ No `secrets.yaml` exists in `k8s/`; secrets come from `external-secrets.yaml`, s
 
 The image reference in `deployment-api.yaml` is `gcr.io/PROJECT_ID/research-platform-api:latest`. The Kustomize `images` entry changes only the tag, so `PROJECT_ID` stays literal until something replaces the whole name; `cd.yml` does this with `kustomize edit set image`. The deployment's probes call `/health` (liveness) and `/ready` (readiness) on port 8000.
 
-Make targets `k8s-namespace`, `k8s-config` and `k8s-deploy` apply files that exist. `k8s-secrets` applies `k8s/secrets.yaml`, `k8s-status` and `k8s-logs` use the namespace `cerebro` and the deployment name `cerebro-api`, none of which match the manifests; use `kubectl -n research-platform get pods,services,ingress` and `kubectl -n research-platform logs -f deployment/research-api` instead.
+Make targets `k8s-namespace` and `k8s-config` apply files that exist. `k8s-deploy` and `k8s-clean` fail because the kustomization does not build. `k8s-secrets` applies `k8s/secrets.yaml`, which does not exist. `k8s-status` and `k8s-logs` use the namespace `cerebro` and the deployment name `cerebro-api`, which match nothing in the manifests. Use `kubectl -n research-platform get pods,services,ingress` and `kubectl -n research-platform logs -f deployment/research-api` instead.
 
 ## Continuous deployment
 
 `.github/workflows/cd.yml` runs on tags matching `v*`, pushes to `develop`, and manual dispatch (inputs `environment`, `skip_tests`). The `determine-environment` job maps a manual dispatch to its input, `develop` to `staging`, and a `v*` tag to `production`.
 
-1. `pre-deployment-checks` (skipped when `skip_tests` is `true`) installs the project, runs `pytest tests/test_api.py::TestHealthEndpoints`, and runs `kustomize build k8s/`.
+1. `pre-deployment-checks` (skipped when `skip_tests` is `true`) installs the project, runs `pytest tests/test_api.py::TestHealthEndpoints`, and runs `kustomize build k8s/`, which fails (see [Kubernetes](#kubernetes)).
 2. `deploy-staging` authenticates to Google Cloud with `GCP_SA_KEY`, fetches GKE credentials, runs `kustomize edit set image` for `research-platform-api` and `research-platform-web` under `gcr.io/<GCP_PROJECT_ID>/`, applies the result, waits for `deployment/research-api` to roll out, then requests `/health` and `/ready` through the ingress address.
 3. `deploy-production` runs only for a `refs/tags/v*` ref. It reads the selector of a Service named `research-platform-active`, deploys with a `color` label of the opposite colour, runs `curl` against `/health` and `/ready` inside the new pod, patches `research-platform-active` to the new colour, and creates a GitHub release.
 4. `rollback` runs when `deploy-production` fails and patches `research-platform-active` back to the colour recorded in the `last-stable-version` annotation.

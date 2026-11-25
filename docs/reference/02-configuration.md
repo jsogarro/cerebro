@@ -49,7 +49,7 @@ A field is listed here when a production module outside `src/core/config.py` rea
 
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
-| `ENVIRONMENT` | `development` | `src/auth/jwt_service.py` (`JWTService.__init__`), `src/api/websocket/auth.py` (`verify_websocket_claims`, `verify_project_access`), `src/api/main.py` | `production` makes the JWT key files mandatory; any value other than `development` enables HSTS; `development` is a precondition of the WebSocket anonymous opt-in; `production` also arms the `SECRET_KEY` and `DATABASE_URL` validators |
+| `ENVIRONMENT` | `development` | `src/auth/jwt_service.py` (`JWTService.__init__`), `src/api/websocket/auth.py` (`verify_websocket_claims`, `verify_project_access`), `src/api/main.py` | `production` makes the JWT key files mandatory; any value other than `development` enables HSTS; `development` is a precondition of the WebSocket project-authorization bypass; `production` also arms the `SECRET_KEY` and `DATABASE_URL` validators |
 | `DEBUG` | `false` | `src/api/main.py` (`app` construction) | serves `/docs` and `/redoc` when true; both URLs are disabled when false |
 | `CORS_ORIGINS` | `["http://localhost:3000", "http://localhost:8000"]` | `src/api/main.py` (`CORSMiddleware`) | `allow_origins` of the CORS middleware; a JSON array |
 | `TRUSTED_PROXIES` | `[]` | `src/api/client_ip.py` (`client_ip`) | peers whose `X-Forwarded-For` header is believed; each entry is validated as an IP address or network; a JSON array |
@@ -169,11 +169,11 @@ A field is listed here when a production module outside `src/core/config.py` rea
 
 ### WebSocket development bypass
 
-> **Off by default.** An unauthenticated WebSocket client is accepted only when both `ENVIRONMENT=development` and this flag are true. Enable with `DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true`.
+> **Off by default.** With `ENVIRONMENT=development` and `DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true` both set, project authorization is skipped for callers who authenticated. It does not admit a connection without a token: every WebSocket route requires one.
 
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
-| `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` | `false` | `src/api/websocket/auth.py` (`verify_websocket_claims`, `verify_project_access`) | with `ENVIRONMENT=development`, lets a WebSocket connect without a token and skips project authorization |
+| `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` | `false` | `src/api/websocket/auth.py` (`verify_websocket_claims`, `verify_project_access`) | with `ENVIRONMENT=development`, `verify_project_access` returns `True` without checking project ownership; a WebSocket connection still needs a token |
 
 Notes on the provider rows:
 
@@ -417,9 +417,9 @@ Both compose files also set literal environment entries that no code reads: `ENA
 | `.env.production.example` | production template; copy and fill in |
 | `.env.cli.example` | `research-cli` settings (`RESEARCH_*`); every key is read |
 
-`.env.example` holds 58 keys. 25 are read by code or interpolated by a compose file. Two need a note: `GEMINI_MODEL=gemini-pro` sits on the Gemini path described above, so it does not change the model (the production default stays `gemini-2.5-flash`), and `LOG_LEVEL` is not read by the API. The other 31 are read by nothing: `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AVAILABILITY_ZONE`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `ENABLE_METRICS`, `ENABLE_TRACING`, `INSTANCE_ID`, `JWT_ALGORITHM`, `MCP_PORT`, `MCP_SERVER_HOST`, `MCP_SERVER_PORT`, `MCP_TOOLS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECRETS_PROVIDER`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS`, `WORKER_CONCURRENCY`.
+`.env.example` holds 57 uncommented keys, plus the commented `SOURCE_SNAPSHOT_DIR`. 25 are read by code or interpolated by a compose file. Two need a note: `GEMINI_MODEL=gemini-pro` sits on the Gemini path described above, so it does not change the model (the production default stays `gemini-2.5-flash`), and `LOG_LEVEL` is not read by the API. The other 31 are read by nothing: `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AVAILABILITY_ZONE`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `ENABLE_METRICS`, `ENABLE_TRACING`, `INSTANCE_ID`, `JWT_ALGORITHM`, `MCP_PORT`, `MCP_SERVER_HOST`, `MCP_SERVER_PORT`, `MCP_TOOLS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECRETS_PROVIDER`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS`, `WORKER_CONCURRENCY`.
 
-The file also sets values that differ from the code defaults: `DEBUG=true` (default false), `ENABLE_RATE_LIMITING=false` (default true), and `CORS_ORIGINS` as a comma-separated list, which `Settings` rejects (see [How configuration loads](#how-configuration-loads)).
+The file also sets values that differ from the code defaults: `DEBUG=true` (default false), and `ENABLE_RATE_LIMITING=false` (default true).
 
 `.env.production.example` holds 72 keys. 11 are read by code or interpolated by `docker-compose.production.yml`: `CORS_ORIGINS`, `DATABASE_URL`, `DB_PASSWORD`, `DEBUG`, `ENABLE_RATE_LIMITING`, `ENVIRONMENT`, `GEMINI_API_KEY`, `MAX_REQUESTS_PER_MINUTE`, `REDIS_PASSWORD`, `REDIS_URL` and `SECRET_KEY`. `GEMINI_MODEL` and `LOG_LEVEL` fall under the same notes as above. The other 59 are read by nothing. The non-secret ones are `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AUDIT_LOG_FILE`, `AUDIT_LOGGING_ENABLED`, `AVAILABILITY_ZONE`, `BACKUP_ENABLED`, `BACKUP_RETENTION_DAYS`, `BACKUP_S3_BUCKET`, `CDN_ENABLED`, `CDN_URL`, `COMPRESSION_LEVEL`, `CSP_POLICY`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `ENABLE_HTTP2`, `ENABLE_KEEPALIVE`, `ENABLE_METRICS`, `ENABLE_RESPONSE_COMPRESSION`, `ENABLE_TRACING`, `INSTANCE_ID`, `JWT_ALGORITHM`, `JWT_EXPIRATION_MINUTES`, `KEEPALIVE_TIMEOUT`, `MAX_CONCURRENT_REQUESTS`, `MAX_REQUEST_SIZE`, `MAX_UPLOAD_SIZE`, `MAX_WEBSOCKET_CONNECTIONS`, `MCP_PORT`, `MCP_SERVER_HOST`, `MCP_SERVER_PORT`, `MCP_TOOLS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_PER_HOUR`, `RATE_LIMIT_PER_MINUTE`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECURITY_HEADERS_ENABLED`, `SSL_CA_FILE`, `SSL_CERT_FILE`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS` and `WORKER_CONCURRENCY`. The remainder are a JWT secret entry, a TLS key entry, `SECRETS_PROVIDER` and the secret-provider keys. JWT signing uses the RSA key files named by `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH`, which the production compose file sets to `/run/secrets/jwt_private.pem` and `/run/secrets/jwt_public.pem`.
 
@@ -433,13 +433,13 @@ The file also sets values that differ from the code defaults: `DEBUG=true` (defa
 | `SOURCE_SNAPSHOT_DIR` | expanded (`~`) and resolved to an absolute path against the working directory |
 | `SECRET_KEY` | in `production` the placeholder `MUST_SET_IN_ENV` is rejected; in every environment a value shorter than 32 characters is rejected |
 | `DATABASE_URL` | in `production`, a URL containing `research:research123`, `postgres:postgres` or `:password@` is rejected |
-| `CONSTRAINT_TYPES` | a JSON array or comma-separated string is normalised to a list; every element must be one of `routing`, `qa`, `format`, `security`; an empty value is rejected |
+| `CONSTRAINT_TYPES` | a JSON array or comma-separated string is normalised to a list; every element must be one of `routing`, `qa`, `format`, `security`; an empty value loads as an empty list, which `ConstraintRegistry` replaces with all four types and logs `constraint_registry_empty_types_fallback` |
 
 `ENVIRONMENT` changes:
 
 - `JWTService` treats `production` as requiring pre-provisioned RSA key files and fails closed when they are unreadable. Other values generate a key pair when the file is missing.
 - `SecurityHeadersMiddleware` receives `hsts_enabled=True` for every value except `development`.
-- The WebSocket anonymous opt-in requires exactly `development`.
+- The WebSocket project-authorization bypass requires exactly `development`.
 - The `SECRET_KEY` and `DATABASE_URL` validators apply their production rules.
 
 `DEBUG` controls only whether `/docs` and `/redoc` are served.

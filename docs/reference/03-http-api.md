@@ -1,6 +1,6 @@
 # HTTP API
 
-The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API under the title "Research Platform API". Domain routers are mounted under `/api/v1`; health probes and the WebSocket routes are mounted at the root. Every request passes through the middleware stack described in [Conventions](#conventions) before it reaches a router.
+The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API under the title "Research Platform API". Domain routers are mounted under `/api/v1`; the health probes and the `/ws` WebSocket routes are mounted at the root, and the supervisor and TalkHier WebSocket routes sit under their routers' prefixes. Every request passes through the middleware stack described in [Conventions](#conventions) before it reaches a router.
 
 ## Summary
 
@@ -28,7 +28,7 @@ The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API u
 
 **Base path.** Domain routes live under `/api/v1`. Request and response bodies are JSON, except the report download (a file stream) and the run event stream (`text/event-stream`).
 
-**Middleware order.** Starlette runs the last-registered middleware outermost. `src/api/main.py` registers them in this order, so a request meets them from the outside in: CORS (`CORSMiddleware`, origins from `CORS_ORIGINS`), security headers (`SecurityHeadersMiddleware`), rejected-request logging (`log_rejected_requests`), authentication (`AuthMiddleware`), `LLMCostDriftMiddleware`, rate limiting (`RateLimitMiddleware`), audit trail (`AuditTrailMiddleware`), idempotency (`IdempotencyMiddleware`). Authentication runs outside rate limiting and idempotency, so both read the caller identity that authentication sets on the request.
+**Middleware order.** Starlette runs the last-registered middleware outermost. A request meets them in this order, outermost first (`src/api/main.py` registers them in the reverse order): CORS (`CORSMiddleware`, origins from `CORS_ORIGINS`), security headers (`SecurityHeadersMiddleware`), rejected-request logging (`log_rejected_requests`), authentication (`AuthMiddleware`), `LLMCostDriftMiddleware`, rate limiting (`RateLimitMiddleware`), audit trail (`AuditTrailMiddleware`), idempotency (`IdempotencyMiddleware`). Authentication runs outside rate limiting and idempotency, so both read the caller identity that authentication sets on the request.
 
 **Authority reference.** Request bodies that start execution accept an optional `authority_reference` object with `authority_id` and `authority_version`. It is an opaque handle that a trusted resolver turns into the execution authority for the caller's organization; see [research execution](05-research-execution.md).
 
@@ -71,7 +71,7 @@ The domain routers add `get_current_token` as a router-level or route-level depe
 | none (`/health`, `/ready`, `/live`) | `src/api/routes/health.py` | none | no | [Health and metrics](#health-and-metrics) |
 | `/api/v1/auth` | `src/api/auth/auth_router.py` | none; per-route as listed | no | [Auth](#auth) |
 | `/api/v1/users` | `src/api/routes/users.py` | none; route uses `get_current_active_user` | no | [Users](#users) |
-| `/api/v1/research` | `src/api/routes/research.py` | none; `get_tenant_context` on routes | yes | [Research projects](#research-projects) |
+| `/api/v1/research` | `src/api/routes/research.py` | none; `get_tenant_context` on routes except `refine`, which has only the token dependency | yes | [Research projects](#research-projects) |
 | `/api/v1/reports` | `src/api/routes/reports.py` | none; `get_tenant_context` on routes | yes | [Reports](#reports) |
 | `/api/v1/query` | `src/api/routes/query_api.py` | `get_current_token` | per route | [Query](#query) |
 | `/api/v1/agents` | `src/api/routes/agent_api.py` | `get_current_token` | per route | [Agents](#agents) |
@@ -120,7 +120,7 @@ Behaviour and the rows deleted are in [authentication and tenancy](04-authentica
 
 ## Research projects
 
-Mounted at `/api/v1/research`. Every route resolves `get_tenant_context`, so the token needs an `organization_id` claim (otherwise `403`).
+Mounted at `/api/v1/research`. Every route except `/projects/{project_id}/refine` resolves `get_tenant_context`, so the token needs an `organization_id` claim (otherwise `403`). `refine` depends only on `get_current_token`.
 
 | Method | Path | Purpose | Success status | Notable errors |
 |---|---|---|---|---|
@@ -129,7 +129,7 @@ Mounted at `/api/v1/research`. Every route resolves `get_tenant_context`, so the
 | `GET` | `/projects/{project_id}` | Return one project, refreshing its status from the in-process execution record. | 200 | 404 |
 | `GET` | `/projects/{project_id}/progress` | Return a `ResearchProgress`. | 200 | 404 |
 | `POST` | `/projects/{project_id}/cancel` | Mark the project cancelled and cancel an in-flight execution when one exists. | 204 | 404 |
-| `POST` | `/projects/{project_id}/refine` | Not wired; returns 501. | 501 | 401 |
+| `POST` | `/projects/{project_id}/refine` | Not wired; returns 501. | 501 | 501 for any valid token |
 | `GET` | `/projects/{project_id}/results` | Return persisted results, or the results of a completed in-process execution. | 200 | 404 when the project is missing or has no results yet |
 
 `project_id` is a UUID.
@@ -200,7 +200,7 @@ For a project with an in-process execution the route reports four phases (`total
 
 ## Reports
 
-Mounted at `/api/v1/reports`; every route is tenant-scoped. Generation, formats and storage are described in [reports](11-reports.md).
+Mounted at `/api/v1/reports`; every route is tenant-scoped, and every route answers `403` when the token's `sub` or `organization_id` is not a UUID. Generation, formats and storage are described in [reports](11-reports.md).
 
 | Method | Path | Purpose | Success status | Notable errors |
 |---|---|---|---|---|
@@ -223,11 +223,11 @@ Mounted at `/api/v1/query`; `get_current_token` is a router-level dependency. Ro
 | `POST` | `/analyze` | Same flow with analysis options (`analysis_type`, `depth`). | 200 | 500 (including authority errors, which this route wraps) |
 | `POST` | `/synthesize` | Same flow with synthesis options (`synthesis_focus`, `narrative_style`, `citation_style`). | 200 | 500 (including authority errors, which this route wraps) |
 | `GET` | `/execution/{execution_id}/status` | Status of an execution in the caller's organization. | 200 | 404, 500 |
-| `GET` | `/execution/{execution_id}/results` | Results of a completed execution in the caller's organization. | 200 | 404, 500 |
+| `GET` | `/execution/{execution_id}/results` | Results of an execution in the caller's organization: `final_output` when completed, `{"error": "Execution failed", "details": [...]}` when failed, otherwise `{"status", "progress"}`. | 200 | 404, 500 |
 | `POST` | `/execution/{project_id}/resume` | Resume from the latest recoverable checkpoint. | 200 | 400 invalid UUID, 404, 500 |
-| `POST` | `/literature` | Convenience wrapper over `/research` (`query` of at least 10 characters, `max_sources` 10-200). | 200 | 422, 500 |
-| `POST` | `/methodology` | Convenience wrapper over `/research` (`research_type`: `quantitative`, `qualitative`, `mixed`). | 200 | 422, 500 |
-| `POST` | `/comparison` | Convenience wrapper over `/research` (`comparison_focus`: `approaches`, `theories`, `methods`, `findings`). | 200 | 422, 500 |
+| `POST` | `/literature` | Convenience wrapper over `/research` (`query` of at least 10 characters, `max_sources` 10-200, `depth` default `comprehensive`). It builds the request without an `authority_reference`. | none | 422 `EXECUTION_AUTHORITY_REQUIRED`, 500 |
+| `POST` | `/methodology` | Convenience wrapper over `/research` (`research_type`: `quantitative`, `qualitative`, `mixed`). It builds the request without an `authority_reference`. | none | 422 `EXECUTION_AUTHORITY_REQUIRED`, 500 |
+| `POST` | `/comparison` | Convenience wrapper over `/research` (`comparison_focus`: `approaches`, `theories`, `methods`, `findings`). It builds the request without an `authority_reference`. | none | 422 `EXECUTION_AUTHORITY_REQUIRED`, 500 |
 | `GET` | `/routing/strategies` | Fixed description of the five routing strategies; see [Fixed responses](#fixed-responses). | 200 | none |
 | `GET` | `/routing/recommend` | Query-length-based recommendation; see [Fixed responses](#fixed-responses). | 200 | 500 |
 
@@ -257,7 +257,7 @@ Mounted at `/api/v1/agents`; `get_current_token` is a router-level dependency. T
 | `GET` | `/health/summary` | none | Health summary across agent types. | 500 |
 | `GET` | `/performance/comparison` | `get_tenant_identity` | Performance comparison across agent types. | 500 |
 
-`execute`, `chain` and `mixture` return `422` with code `EXECUTION_AUTHORITY_REQUIRED` when the body has no `authority_reference`, `EXECUTION_AUTHORITY_UNAVAILABLE` when no resolver can supply it for the caller's organization, and the code of the authority error otherwise. The convenience routes accept `authority_id` and `authority_version` query parameters instead; giving only one of the two returns `422` with `AUTHORITY_REFERENCE_INCOMPLETE`. The caller's organization comes from the token, never from the request body.
+`execute`, `chain` and `mixture` return `422` with code `EXECUTION_AUTHORITY_REQUIRED` when the body has no `authority_reference`, `EXECUTION_AUTHORITY_UNAVAILABLE` when no resolver can supply it for the caller's organization, and the code of the authority error otherwise. `/literature-review/search`, `/workflows/literature-analysis` and `/workflows/comprehensive-research` accept `authority_id` and `authority_version` as query parameters instead. `/citation/format` and `/synthesis/combine` take them as fields of the JSON body (for example `{"sources": [...], "style": "APA", "authority_id": "...", "authority_version": "..."}`). Giving only one of the two returns `422` with `AUTHORITY_REFERENCE_INCOMPLETE`. The caller's organization comes from the token, never from the request body.
 
 ## MASR
 
@@ -282,7 +282,7 @@ Mounted at `/api/v1/supervisors`. `get_current_token` is a dependency on every H
 
 | Method | Path | Tenant dependency | Purpose | Notable errors |
 |---|---|---|---|---|
-| `POST` | `/{supervisor_type}/execute` | `get_tenant_context` | Execute a task through one supervisor. | 400, 404, 500 |
+| `POST` | `/{supervisor_type}/execute` | `get_tenant_context` | Execute a task through one supervisor. | 400, 500 |
 | `GET` | `` (`/api/v1/supervisors`) | none | List supervisors. | 500 |
 | `GET` | `/{supervisor_type}` | none | Describe one supervisor. | 404, 500 |
 | `GET` | `/{supervisor_type}/workers` | none | Workers managed by a supervisor. | 404, 500 |
@@ -295,11 +295,11 @@ Mounted at `/api/v1/supervisors`. `get_current_token` is a dependency on every H
 | `GET` | `/performance/compare` | none | Compare supervisors. | 500 |
 | `POST` | `/experiment` | `get_tenant_context` | Run a coordination experiment. | 500 |
 
-`supervisor_type` is a `SupervisorType` enum value; an unknown value is rejected by validation with `422`.
+`supervisor_type` is a `SupervisorType` enum value; an unknown value is rejected by validation with `422`. A `ValueError` from the service answers `400` and any other failure `500`.
 
 ## TalkHier
 
-Mounted at `/api/v1/talkhier`. `get_current_token` is a dependency on every HTTP route; sessions are owned by the caller's user and organization.
+Mounted at `/api/v1/talkhier`. `get_current_token` is a dependency on every HTTP route; sessions are owned by the caller's user and organization. The session routes answer `503` when `app.state.talkhier_session_service` is missing.
 
 | Method | Path | Tenant dependency | Purpose | Notable errors |
 |---|---|---|---|---|

@@ -1,10 +1,14 @@
 name: Nightly Live Eval
 
-# Run at 06:00 UTC daily (02:00 EST / 23:00 PST previous day)
+# Run at 06:00 UTC daily (01:00 EST / 22:00 PST the previous day)
 on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:  # Allow manual triggers
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   live-eval:
@@ -49,11 +53,10 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
-            const issue_number = context.issue.number;
             const message = `🚨 Nightly live eval failed on run ${context.runNumber}. Check the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.`;
 
             // Open a new issue for this failed run
-            github.rest.issues.create({
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Live eval failure - ${new Date().toISOString().split('T')[0]}`,

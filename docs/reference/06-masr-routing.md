@@ -196,7 +196,7 @@ The models are in `src/models/masr_api_models.py`. The handlers are in `src/api/
 
 ### Errors
 
-Handlers raise `HTTPException` with `detail` set to a `MASRErrorResponse` (`error`, `error_code`, `details`, `suggestions`, `timestamp`), so the JSON body is `{"detail": {...}}`. A `ValueError` becomes 400; any other exception becomes 500 and `details.error` carries the exception text.
+Handlers raise `HTTPException` with `detail` set to a `MASRErrorResponse` (`error`, `error_code`, `details`, `suggestions`, `timestamp`), so the JSON body is `{"detail": {...}}`. `POST /route` and `POST /feedback` turn a `ValueError` into 400; every other exception, and every exception on the remaining routes, becomes 500, and `details.error` carries the exception text.
 
 | Route | Error codes |
 |---|---|
@@ -219,7 +219,7 @@ Behaviour when enabled:
 
 - One experiment per mode (`adaptive_allocation_<mode>`) with five arms, -2 to +2. A proposal applies only when the experiment holds at least `ADAPTIVE_ROUTING_MIN_HISTORY` eligible samples in total (default 300) and at least one sample for every arm. Otherwise the router uses arm 0, the unchanged baseline.
 - `fast_path`, `direct` and `debate` have fixed allocations and always use arm 0.
-- The applied change is clamped to `ADAPTIVE_ROUTING_MAX_WORKER_ADJUST` (default 2), the strategy budget and the system bounds.
+- The applied change is clamped to `ADAPTIVE_ROUTING_MAX_WORKER_ADJUST` (default 2). A proposal whose worker count exceeds the strategy budget or falls outside the system bounds is discarded in favor of the memory baseline (arm 0), with `budget_clamped` or `system_clamped` set, and the arm is reported as 0.
 - A corrupt, incompatible or unreachable state store degrades to arm 0; routing does not depend on Redis.
 - The routing cache is bypassed.
 - Every decision carries `AdaptiveDecisionMetadata` with a status of `disabled`, `fixture_off`, `cold`, `control`, `degraded` or `active`. `MASRouter.get_adaptive_status()` reports the effective state, state revision, outcome counts and per-arm counts.

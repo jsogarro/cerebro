@@ -42,7 +42,7 @@ Mounted WebSocket routes depend on `require_authenticated_websocket` (`src/api/w
 
 The run event stream (`/ws/runs/{run_id}`) additionally requires an `organization_id` claim (`resolve_run_stream_entitlement`).
 
-> **Off by default.** With `ENVIRONMENT=development` and `DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true`, `verify_project_access` returns `True` for any project without checking ownership. Enable with `DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true`. It requires both settings; it does not admit a connection without a token, because every mounted route already requires one.
+> **Off by default.** With `ENVIRONMENT=development` and `DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true` both set, `verify_project_access` returns `True` for any project without checking ownership. It does not admit a connection without a token, because every mounted route already requires one.
 
 Without that opt-in, `verify_project_access` allows a project subscription only when the caller has a user id, an organization claim and a database session, and the project belongs to the caller within the caller's organization (`ResearchRepository.get_for_user`). The code states that the application-level organization filter is the enforcement here, because the policies are not forced for the table owner (see [Tenancy](#tenancy)).
 
@@ -97,13 +97,13 @@ All routes are in `src/api/auth/auth_router.py`, mounted at `/api/v1/auth`.
 
 ## Roles and permissions
 
-> **Not wired.** `require_roles`, `require_permissions` and `require_superuser` are defined in `src/middleware/auth_middleware.py` and re-exported by `src/middleware/__init__.py`. No route depends on them. The module also defines `optional_user` and a second class named `RateLimitMiddleware` that nothing imports; the rate limiter that runs is the one in `src/api/middleware/rate_limiter.py`.
+> **Not wired.** `require_roles`, `require_permissions` and `require_superuser` are defined in `src/middleware/auth_middleware.py`; `src/middleware/__init__.py` re-exports `require_roles` and `require_permissions` but not `require_superuser`. No route depends on them. The module also defines `optional_user` and a second class named `RateLimitMiddleware` that nothing imports; the rate limiter that runs is the one in `src/api/middleware/rate_limiter.py`.
 
 Tokens carry `roles` and `permissions` lists (see [Auth endpoints](#auth-endpoints) for what login and register put in them). Most routes require authentication only. The checks that read the user record are:
 
 - `get_current_user` loads the user named by the token subject (`404` if missing). `/change-password`, `/sessions`, `/sessions/{device_id}`, `/revoke-all` and `/me` use it.
 - `get_current_active_user` adds `403` ("Account is disabled") for an inactive user. The erasure route uses it.
-- The superuser flag (`User.is_superuser`) is read by the erasure route.
+- The superuser flag (`User.is_superuser`) is read by the erasure route and by `login`, which adds the role `admin` and the permission `*` for a superuser.
 
 ## Tenancy
 

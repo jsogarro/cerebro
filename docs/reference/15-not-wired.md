@@ -75,7 +75,7 @@ Other modules in the group: `legacy_adapter.py` (`LegacyConfigurationAdapter`, `
 
 > **Not wired.** `PromptManager` in `src/prompts/manager.py` loads YAML templates from `src/prompts/templates/` (`agents`, `refinement`, `supervisors`, `workers`). The only production reference is `BaseSupervisor.coordinate_refinement_round`, which calls `get_prompt_manager()` with no configuration. That call raises `ValueError` because nothing initialises the manager, and no production code calls `coordinate_refinement_round`.
 
-`src/prompts/versioning.py` (`PromptVersionManager`) is imported only by `UnifiedExperimentManager`, which is itself not wired. The prompts the agents send come from Python modules under `src/services/prompts/`, imported by `src/agents/base.py`, `src/agents/literature_review_agent.py`, `src/agents/comparative_analysis_agent.py`, and `src/services/gemini_service.py`. Prompt identity pinning is part of the tool boundary; see [tool boundary and evidence](09-tool-boundary-and-evidence.md).
+`src/prompts/versioning.py` (`PromptVersionManager`) is imported by `UnifiedExperimentManager`, which is itself not wired, and re-exported by `src/prompts/__init__.py`, which loads whenever `src.prompts.manager` is imported. No code constructs or calls it. The prompts the agents send come from Python modules under `src/services/prompts/`, imported by `src/agents/base.py`, `src/agents/literature_review_agent.py`, `src/agents/comparative_analysis_agent.py`, and `src/services/gemini_service.py`. Prompt identity pinning is part of the tool boundary; see [tool boundary and evidence](09-tool-boundary-and-evidence.md).
 
 Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_expiry.py`.
 
@@ -123,15 +123,16 @@ Tests that exercise them live in `tests/unit/core/claims/` and `tests/unit/core/
 | `src/services/parsers/base_parser.py` | Base parser utilities | `tests/test_gemini_parsers.py` |
 | `src/models/base.py` | A SQLAlchemy `declarative_base()` | `tests/utils/db_utils.py` |
 | `src/models/db/migrations.py` | `MigrationManager` | nothing |
+| `src/ai_brain/router/masr_service.py` | The standalone MASR service (see [configuration](02-configuration.md)) | nothing in `src`; it runs only as the command of the `legacy-masr-service` compose profile, and `KNOWN_UNREACHABLE` in `tests/architecture/test_module_reachability.py` lists it |
 
 ## Dead execution attributes
 
-> **Not wired.** Four names in the execution path are defined and never read. The live execution path is described in [research execution](05-research-execution.md).
+> **Not wired.** Five names in the execution path and the settings are defined and never read. The live execution path is described in [research execution](05-research-execution.md).
 
 - `DirectExecutionService.max_domain_parallelism` is assigned `4` in `__init__` and read nowhere.
 - `DirectExecutionService._fast_path_passes_quality` is a method that nothing calls.
 - `DirectExecutionService._fast_path_provider` is initialised to `None`, never assigned a provider, and only closed and reset in `close`.
-- `Settings.MULTI_DOMAIN_MERGE_STRATEGY` (default `concat`) is read by no code under `src/`.
+- `Settings.MULTI_DOMAIN_MERGE_STRATEGY` (default `concat`) and `Settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` (default 4000) are read by no code under `src/`.
 
 ## Settings with no effect
 

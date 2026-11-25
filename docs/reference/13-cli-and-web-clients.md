@@ -47,7 +47,7 @@ The `--format` option always has a value (its default is `table`) and is applied
 `research-cli config` takes an action:
 
 - `show [KEY]` prints the whole configuration or one key.
-- `set KEY VALUE` changes a value for the current process only. `verbose` and `color` accept `true`, `1`, `yes`; `api_timeout` and `max_retries` are integers.
+- `set KEY VALUE` changes a value for the current process only. Setting `max_retries` has no effect, because the retry decorator reads `config.max_retries` when `src/cli/client.py` is imported. `verbose` and `color` accept `true`, `1`, `yes`; `api_timeout` and `max_retries` are integers.
 - `save` writes the configuration to `~/.research-cli.env`.
 
 Because `set` does not persist, use `--api-url`, an exported `RESEARCH_*` variable, or `config save` after exporting the variable to keep a setting.
@@ -74,7 +74,7 @@ Every command except `health` needs a token; `/health` and `/ready` are public. 
 
 ### Commands
 
-A failed API call in an `agents` or `projects` command prints an error and exits with status `1`.
+A failed API call in an `agents` or `projects` command prints an error and exits with status `1`, with two exceptions: `projects create --file` catches each project's failure and exits `0` even when every project fails, and `projects progress --watch` (and the `--stream` fallback) prints an `APIError` and keeps polling instead of exiting.
 
 **`research-cli health`** calls `GET /health` and `GET /ready`. With `--verbose` it also lists each readiness check.
 
@@ -109,7 +109,7 @@ Notes on individual commands:
 
 - **`create`** works in three modes. With `--file`, a `.yaml`, `.yml`, or `.json` file holds one project or a list of projects, each with `title`, `query_text`, and `domains` (`depth_level` defaults to `comprehensive`), and the command prints a created/failed summary. With `--interactive`, it prompts for each value. Otherwise `--title`, `--query`, and `--domains` are all required. `--scope` values are parsed to booleans, integers, floats, or bracketed lists when they look like them.
 - **`progress`** prints the current progress once. `--watch` polls every `--interval` seconds until `progress_percentage` reaches 100. `--stream` opens a WebSocket to `/ws/cli/{project_id}` with the token in a `token` query parameter and prints updates as they arrive; when the connection fails it falls back to polling. `--watch` and `--stream` cannot be combined.
-- **`results`** prints the results as JSON. With `--output` it writes a file: JSON for `--format json`, YAML for `--format yaml`, and the Python `str()` of the results for `--format table`.
+- **`results`** prints the results as JSON. With `--output` it writes a file: JSON for `--format json`, YAML for `--format yaml`, and the Python `str()` of the results for `--format table`. `--format csv` raises an uncaught `TypeError`, because the writer calls `f.write` on a dictionary.
 - **`refine`** exits with an error when no scope parameter is given.
 
 ### Output formats
@@ -140,7 +140,7 @@ A failed request prints `<operation> failed: <detail>` (for example `Failed to f
 
 ### Serving
 
-The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage, then an nginx image that runs as the `nginx` user and listens on 8080) and publishes it on host port `${WEB_HOST_PORT:-3000}`. Its nginx serves the built files with a fallback to `index.html` for client-side routes and does not proxy the API. The compose `nginx` service publishes `${NGINX_HTTP_HOST_PORT:-80}` and `${NGINX_HTTPS_HOST_PORT:-443}` and uses `docker/nginx/nginx.conf`: `/api/` and `/ws` go to `api:8000`, `/health` is answered by nginx itself, and every other path goes to `web:8080`.
+The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage, then an nginx image that runs as the `nginx` user and listens on 8080) and publishes it on host port `${WEB_HOST_PORT:-3000}`. Its nginx serves the built files with a fallback to `index.html` for client-side routes and does not proxy the API. The compose `nginx` service publishes `${NGINX_HTTP_HOST_PORT:-80}` and `${NGINX_HTTPS_HOST_PORT:-443}` and uses `docker/nginx/nginx.conf`: `/api/` and `/ws` go to `api:8000`, `/health` is answered by nginx itself, `/docs` is served from nginx's own static root (and returns 404 there), and every other path goes to `web:8080`. `/ready` and `/live`, which `research-cli health` calls, therefore reach the web container, not the API, when the CLI points at the nginx port.
 
 ### Authentication
 
@@ -183,7 +183,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 - `.env.cli.example` — example CLI environment file
 - `src/research_platform/__init__.py` — the `research-platform` entry point stub
 - `cerebro/web/src/router/index.tsx` — route table
-- `cerebro/web/src/api/` — API clients (`client.ts`, `auth.ts`, `websocket.ts`, `research.ts`, `agents.ts`, `runs.ts`, `workflows.ts`, `memory.ts`, `qa.ts`, `costs.ts`, `benchmarks.ts`)
+- `cerebro/web/src/api/` — API clients (`client.ts`, `auth.ts`, `websocket.ts`, `research.ts`, `agents.ts`, `runs.ts`, `workflows.ts`, `workbench.ts` (run and workflow contract types), `memory.ts`, `qa.ts`, `costs.ts`, `benchmarks.ts`)
 - `cerebro/web/src/pages/` — page components
 - `cerebro/web/tests/e2e/`, `cerebro/web/playwright.config.ts` — end-to-end suite
 - `cerebro/web/Dockerfile`, `cerebro/web/nginx.conf` — web image

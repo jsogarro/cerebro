@@ -1,6 +1,6 @@
 # Security, audit, and observability
 
-The API records an audit trail of requests, sets browser security headers on every response, redacts personal data from log lines and traces, and exports Prometheus metrics. Langfuse tracing and two other telemetry settings are off by default. Authentication, rate limiting, and tenancy are covered in [authentication and tenancy](04-authentication-and-tenancy.md) and the [HTTP API](03-http-api.md).
+The API records an audit trail of requests, sets browser security headers on every response except genuine CORS preflights, which `CORSMiddleware` answers itself, redacts personal data from log lines and traces, and exports Prometheus metrics. Langfuse tracing and two other telemetry settings are off by default. Authentication, rate limiting, and tenancy are covered in [authentication and tenancy](04-authentication-and-tenancy.md) and the [HTTP API](03-http-api.md).
 
 ## Summary
 
@@ -53,7 +53,7 @@ Each event takes its type from the path, method, and status:
 | Method `POST`, `PUT`, `PATCH` | `DATA_MODIFIED` |
 | Anything else | `DATA_ACCESSED` |
 
-Severity is `ERROR` for status 500 and above, `WARNING` for 401, 403, and 429, and `INFO` otherwise. The event metadata holds `method`, `path`, `phase`, and `status_code`. Attribution comes from the authenticated request: `log_event` reads `request.state.user_id`, and `organization_id` from request state or the token payload goes into the event metadata. The `user_id` column is filled by a subquery against `users`, so a subject that is not a UUID, or a user that has been deleted, is stored as `NULL` and the original subject stays in the metadata key `subject`. The client address comes from `client_ip` (see [Request limits and client address](#request-limits-and-client-address)).
+Severity is `ERROR` for status 500 and above, `WARNING` for 401, 403, and 429, and `INFO` otherwise. The event metadata holds `method`, `path`, `phase`, and `status_code`. Attribution comes from the authenticated request: `log_event` reads `request.state.user_id`, and `organization_id` from request state or the token payload goes into the event metadata. The `user_id` column is filled by a subquery against `users`, so a deleted user is stored as `NULL` and the original subject stays in the metadata key `subject`. A subject that is not a UUID is dropped by `_subject_uuid` before the event is built, so the column is `NULL` and the subject is not recorded. The client address comes from `client_ip` (see [Request limits and client address](#request-limits-and-client-address)).
 
 The `audit_logs` table has one row per event. The `AuditEventType` enum has 45 members (login, account, MFA, OAuth, session, API key, permission, threat, and data events) and `AuditSeverity` has `INFO`, `WARNING`, `ERROR`, and `CRITICAL`.
 
@@ -73,7 +73,7 @@ The other keys in the default threshold map (`suspicious_activity`, `unauthorize
 
 ### Audit queries
 
-> **Not wired.** `AuditLogger.query_logs` filters `audit_logs` and `AuditLogger.generate_compliance_report` summarises a date range, but no route or other production code calls either. No HTTP route exposes audit logs or security alerts. `generate_compliance_report` produces a summary only for `compliance_type="gdpr"`.
+> **Not wired.** `AuditLogger.query_logs` filters `audit_logs` and `AuditLogger.generate_compliance_report` summarises a date range, but no route or other production code outside `AuditLogger` calls either (`generate_compliance_report` calls `query_logs`). No HTTP route exposes audit logs or security alerts. `generate_compliance_report` produces a summary only for `compliance_type="gdpr"`.
 
 ## Security headers
 
@@ -158,7 +158,7 @@ All four probes are in the public-route allowlist.
 
 `src/core/tracing.py` builds the client lazily and every Langfuse call is guarded, so a tracing failure never reaches the caller: with tracing disabled, keys missing, or the SDK failing, the context managers yield `None` and the traced code runs unchanged. The trace input is the query after `redact_pii`, cut to 500 characters, and the trace id is derived from the query id. The `lifespan` in `src/api/main.py` pre-initialises the client in a worker thread when `LANGFUSE_ENABLED` is true and, on shutdown, calls `shutdown_langfuse` with a 5 second timeout to flush pending traces and stop the export threads.
 
-`python scripts/verify_tracing.py` routes one query through `MASRouter`. With tracing enabled it checks that a client is created, and with tracing disabled it checks that none is. It exits non-zero on failure.
+`python scripts/verify_tracing.py` routes one query through `MASRouter`. With tracing disabled it checks that no client is created and exits non-zero if one is. With tracing enabled, a `None` client only prints a warning and the script still ends with `Verification PASSED` and exit status 0; only an exception raised while routing exits non-zero.
 
 > **Off by default.** Context-compaction telemetry logs token counts: `DirectExecutionService` logs `domain_output_token_measurement` events, and `BaseSupervisor`, `WorkingMemoryManager`, and `MultiTierMemorySystem` each measure token counts behind the same flag. Enable it with `ENABLE_CONTEXT_COMPACTION_TELEMETRY=true`. Counting needs `tiktoken`; without it the count is 0.
 

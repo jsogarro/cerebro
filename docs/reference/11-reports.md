@@ -30,6 +30,8 @@ The router is mounted at `/api/v1` with prefix `/reports` in `src/api/main.py`. 
 | `GET /api/v1/reports/{report_id}/integrity` | verify stored files and hashes | 200, a status dictionary | 500 |
 | `DELETE /api/v1/reports/{report_id}` | delete a report | 204 | 404 |
 
+Every handler wraps unexpected exceptions into a 500, so each route can also return 500.
+
 Details:
 
 - **Create.** The route validates the user and project, builds a `ReportConfiguration`, inserts the report row with `generation_status="pending"`, reloads it, queues `_generate_report_task` as a background task and returns the row. The response `id` is the id of that row. Every `ReportResponse` carries `id`, `title`, `query`, `report_type`, `generation_status`, `formats_generated`, `word_count`, `page_count`, `quality_score`, `confidence_score`, `created_at`, `generation_time_seconds` and `download_urls`.
@@ -37,7 +39,7 @@ Details:
 - **Search.** The body takes `search_term`, optional `user_id`, `report_type`, `min_quality_score` (0 to 1), `limit` (default 20, at most 100) and `offset` (default 0). It matches `title`, `query` and `content_preview` case-insensitively, returns only reports with status `completed`, and orders newest first.
 - **Statistics.** Query parameters are `user_id` and `days` (default 30, 1 to 365). The response holds `total_reports`, `status_counts`, `type_counts`, the average quality score, confidence score, generation time and word count, `total_access_count`, and `storage_statistics` with `total_storage_mb` and `total_files`.
 - **Download.** The `format_type` path segment is matched against stored formats. The response sets `Content-Disposition: attachment; filename=report_<id>.<extension>` and the stored MIME type, and updates the report's access statistics. Content is read from the database columns `content_text` or `content_binary`; the file on disk is read only when both are empty.
-- **Integrity.** For each stored format the check confirms the file exists and, when a hash is stored, that the SHA-256 of the content matches. The result has `status` (`ok`, `degraded` or `failed`), `formats_checked`, `formats_valid`, `formats_invalid`, `missing_files` and `errors`. An unknown report returns the dictionary `{"status": "error", "message": "Report not found"}` with HTTP 200.
+- **Integrity.** For each stored format the check confirms the file exists and, when a hash is stored, that the SHA-256 of the content matches. The result has `status` (`ok`, `degraded` or `failed`), `formats_checked`, `formats_valid`, `formats_invalid`, `missing_files` and `errors`. The existence check runs only when a format has a `file_path`, a missing file skips the hash check, and `status` is `failed` whenever `formats_valid` is 0, including for a report stored with no formats (for example `save_to_storage=false`). An unknown report returns the dictionary `{"status": "error", "message": "Report not found"}` with HTTP 200.
 - **Delete.** The query parameter `delete_files` (default true) removes the report's storage directory. The database row is hard-deleted and its `report_formats` rows are removed with it.
 
 ## Request model
@@ -89,7 +91,7 @@ Formats:
 | `markdown` | `ReportOutputGenerator.generate_markdown` | title, summary, sections, references |
 | `json` | `ReportOutputGenerator.generate_json` | the serialised `Report` |
 | `pdf` | `PDFExporter` (WeasyPrint) | needs `weasyprint`; built from the HTML output |
-| `latex` | `LaTeXExporter` | returns `.tex` source; no PDF compilation is requested, and the exporters read neither `pdf_settings` nor `latex_settings` from the configuration |
+| `latex` | `LaTeXExporter` | returns `.tex` source; no PDF compilation is requested, and the exporters read neither `pdf_settings` nor `latex_settings` from the configuration. The HTML template `base.html.j2` does read `config.pdf_settings` (font, size, margins), and the PDF is built from that HTML, so the defaults of `pdf_settings` affect PDF output; the request model cannot set them |
 | `docx` | `DOCXExporter` (`python-docx`) | |
 
 ### Templates

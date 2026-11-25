@@ -138,7 +138,7 @@ Fifteen tables carry an `organization_id` column: `users`, `research_projects`, 
 - `scope_to_organization(query, column, organization_id)` (`src/repositories/tenant_scope.py`) is the read filter for repositories that do not extend `BaseRepository`. A `None` organization returns the query unchanged, which lets the startup recovery scan read every tenant.
 - `normalize_organization_id(value)` returns a `UUID` and raises `MissingOrganizationContextError` for `None`. Every write path calls it.
 - `enforce_tenant_identity(tenant_id=..., organization_id=...)` raises `TenantMismatchError` when a contract's `tenant_id` is not a UUID or differs from the organization context.
-- `get_run_organization_id(session, run_id)` returns the organization that owns a run, or `None`. Child-row repositories (events, evidence, claim supports, artifacts, tool invocations) compare it with the caller's organization before writing.
+- `get_run_organization_id(session, run_id)` returns the organization that owns a run, or `None`. The event, evidence and claim-support repositories compare it with the caller's organization before writing. `ArtifactRepository.create_artifact` and `ToolInvocationRepository.create_tool_invocation` only normalize the organization id and write the supplied value without comparing it to the run's.
 
 Authentication, token claims, and the HTTP dependencies that supply the organization are covered in [authentication and tenancy](04-authentication-and-tenancy.md).
 
