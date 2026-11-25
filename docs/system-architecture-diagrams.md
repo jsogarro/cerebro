@@ -653,7 +653,7 @@ graph TB
 
 ### CI/CD Pipeline
 
-`.github/workflows/ci.yml`: lint (ruff + mypy), a test matrix (py3.11 / py3.12
+`.github/workflows/ci.yml`: lint (ruff + mypy), a test matrix (py3.11 / py3.12 / py3.13
 with postgres:16 + redis:7), a CLI test job, a security job (bandit non-blocking
 + pip-audit), and Docker / k8s validation. The **coverage gate is
 `--fail-under=25`** — there is no 80%/85% enforcement.
@@ -667,7 +667,7 @@ graph LR
 
     subgraph "CI Pipeline (ci.yml)"
         LINT["Lint (ruff + mypy)"]
-        TEST["Test matrix (py3.11/3.12, postgres + redis)"]
+        TEST["Test matrix (py3.11/3.12/3.13, postgres + redis)"]
         CLI_TEST["CLI test"]
         SEC["Security (bandit + pip-audit)"]
         COV["Coverage gate (fail-under=25)"]
