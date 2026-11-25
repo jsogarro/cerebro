@@ -460,3 +460,114 @@ class TestFallbackAcademicSearchLabel:
 
         assert result["fallback"] is True
         assert result["success"] is False
+
+
+class TestToolPathSearchesForReal:
+    """#165: with a tool path configured, the agent searches through it even
+    when an LLM is configured, and never substitutes model-named sources for
+    a search that retrieved nothing."""
+
+    SOURCE = {
+        "title": "GNNs for inflation",
+        "abstract": "We show that graph neural networks forecast inflation.",
+        "url": "https://arxiv.org/abs/2401.00001",
+    }
+    ANALYSIS = (
+        '{"literature_analysis": {"key_findings": ["GNNs forecast inflation"], '
+        '"research_gaps": ["No out-of-sample test"], "methodologies_used": [], '
+        '"quality_assessment": "One retrieved source"}}'
+    )
+
+    @staticmethod
+    def _agent(search_result=None, search_error=None):
+        from unittest.mock import MagicMock
+
+        from src.agents.literature_review_agent import LiteratureReviewAgent
+
+        mcp = MagicMock()
+        mcp.search_academic_sources = AsyncMock(
+            return_value=search_result, side_effect=search_error
+        )
+        mcp.build_knowledge_graph = AsyncMock(return_value={"entities": []})
+        mcp.format_citations = AsyncMock(return_value={"citations": []})
+        gemini = AsyncMock()
+        agent = LiteratureReviewAgent(
+            gemini_service=gemini, config={"mcp_integration": mcp}
+        )
+        return agent, mcp, gemini
+
+    @staticmethod
+    def _task():
+        return AgentTask(
+            id="lit-tool-001",
+            agent_type="literature_review",
+            input_data={"query": "inflation forecasting"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_retrieved_sources_are_analysed_and_the_llm_names_none(self):
+        agent, mcp, gemini = self._agent(
+            {
+                "success": True,
+                "data_source": "mcp_tools",
+                "sources": [self.SOURCE],
+                "total_found": 1,
+            }
+        )
+
+        with patch.object(
+            agent,
+            "_generate_with_routing",
+            AsyncMock(return_value=(self.ANALYSIS, 0.9)),
+        ) as model:
+            result = await agent.execute(self._task())
+
+        mcp.search_academic_sources.assert_awaited_once()
+        gemini.generate_structured_content.assert_not_awaited()
+        model.assert_awaited_once()
+        assert result.status == "success"
+        assert result.output["data_source"] == "mcp_tools"
+        assert [s["url"] for s in result.output["sources_found"]] == [
+            self.SOURCE["url"]
+        ]
+        assert result.output["key_findings"] == ["GNNs forecast inflation"]
+
+    @pytest.mark.asyncio
+    async def test_a_degraded_search_is_recorded_as_no_evidence(self):
+        # The shape MCPIntegration returns for a failed call with
+        # enable_fallback=True: stand-in sources that were never retrieved.
+        agent, _mcp, gemini = self._agent(
+            {
+                "success": False,
+                "degraded": True,
+                "fallback": True,
+                "data_source": "fallback",
+                "tool_outcome": "failed",
+                "error_code": "tool_error",
+                "sources": [{"title": "Stand-in", "source": "fallback"}],
+                "total_found": 1,
+            }
+        )
+
+        with patch.object(agent, "_generate_with_routing", AsyncMock()) as model:
+            result = await agent.execute(self._task())
+
+        gemini.generate_structured_content.assert_not_awaited()
+        model.assert_not_awaited()
+        assert result.output["data_source"] == "no_evidence"
+        assert result.output["sources_found"] == []
+        assert result.output["total_sources"] == 0
+        assert result.status == "success"
+
+    @pytest.mark.asyncio
+    async def test_a_search_that_raises_is_recorded_as_no_evidence(self):
+        agent, _mcp, gemini = self._agent(search_error=ConnectionError("mcp down"))
+
+        with patch.object(agent, "_generate_with_routing", AsyncMock()) as model:
+            result = await agent.execute(self._task())
+
+        gemini.generate_structured_content.assert_not_awaited()
+        model.assert_not_awaited()
+        assert result.output["data_source"] == "no_evidence"
+        assert result.output["sources_found"] == []
+        assert result.status == "success"
