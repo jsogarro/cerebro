@@ -1,0 +1,16 @@
+{
+  "version": "1",
+  "description": "Agent cost pilot cases: 4 research, 2 analytics, 2 content, 2 finance. Research queries are golden dataset queries, copied verbatim.",
+  "cases": [
+    {"case_id": "research-golden-001", "domain": "research", "query": "Summarize why CRISPR-Cas9 experiments need off-target analysis."},
+    {"case_id": "research-golden-007", "domain": "research", "query": "What factors contributed to the reproducibility crisis in psychology?"},
+    {"case_id": "research-golden-018", "domain": "research", "query": "Compare demographic parity and equalized odds fairness metrics."},
+    {"case_id": "research-golden-020", "domain": "research", "query": "Explain heterogeneity in meta-analysis."},
+    {"case_id": "analytics-01", "domain": "analytics", "query": "Analyze what a 12-month subscription churn series rising from 2% to 3.5% per month implies for revenue growth, and which metrics to track next."},
+    {"case_id": "analytics-02", "domain": "analytics", "query": "Explain how to test whether a website redesign changed conversion rate, given 40,000 sessions before and 38,000 after."},
+    {"case_id": "content-01", "domain": "content", "query": "Draft a 300-word launch announcement for a privacy-preserving analytics feature, aimed at engineering managers."},
+    {"case_id": "content-02", "domain": "content", "query": "Write a plain-language explainer, for a general audience, on how public key cryptography protects online banking."},
+    {"case_id": "finance-01", "domain": "finance", "query": "Assess the liquidity and leverage of a company with current assets of 120, current liabilities of 80, total debt of 200 and equity of 150 (USD millions)."},
+    {"case_id": "finance-02", "domain": "finance", "query": "Evaluate the main risks of holding a 60/40 equity and bond portfolio when inflation stays above 4 percent."}
+  ]
+}
