@@ -15,25 +15,20 @@ boundary and not an institutional financial-data product.
 
 ## Project Status
 
-Cerebro has a substantial backend runtime and an early web scaffold. The target
-workbench experience is not complete yet.
+Each reference page marks features as Active, Off by default or Not wired; the
+[documentation index](docs/README.md) is the entry point.
 
-| Area | Status | Current reality |
-| --- | --- | --- |
-| Multi-agent execution | Implemented | MASR routes queries to domain supervisors and workers |
-| Verification | Implemented | Supervisor results pass through a bounded verification gate |
-| Multi-domain decomposition | Implemented | Eligible subqueries can execute concurrently |
-| Provider routing | Implemented, feature-gated | Gemini is the default; OpenRouter requires explicit configuration |
-| API and CLI | Implemented | Existing surfaces retain legacy research-oriented names |
-| Evidence model | Partial | Citation and QA components exist, but claim-level provenance is not yet consistent end to end |
-| Workflow definitions | Embedded | Workflows are currently encoded across supervisors, factories, and routing maps |
-| Visual workbench | Early scaffold | The React application is not yet a complete product experience |
-| Fixture-backed execution | Not available | The current runtime does not include a deterministic no-key execution mode |
-
-This distinction matters: documentation under `docs/` includes detailed
-implementation references and historical design material. Start with the
-[documentation index](docs/README.md) before treating an older document as a
-statement of current product direction.
+| Area | Current state |
+| --- | --- |
+| Multi-agent execution | Plan-based. MASR proposes a routing, a stored execution authority binds it, and workers run per the compiled plan ([research execution](docs/reference/05-research-execution.md)) |
+| Verification | The verification gate runs in supervisor execution (the supervisor API and the TalkHier and coordination services), not on the query path ([agents and supervisors](docs/reference/07-agents-and-supervisors.md)) |
+| Multi-domain queries | Execution accepts single-domain plans only; a multi-domain query is rejected before any work starts |
+| Provider routing | Gemini is the default client; the OpenRouter route is off by default ([LLM providers](docs/reference/10-llm-providers.md)) |
+| API and CLI | Mounted under `/api/v1`; every route except an explicit public allowlist requires a bearer token ([HTTP API](docs/reference/03-http-api.md)) |
+| Evidence model | Claim-support records are written for each final report, each recorded as unsupported with reason `not_attempted`; search evidence and source snapshots are off by default ([tool boundary and evidence](docs/reference/09-tool-boundary-and-evidence.md)) |
+| Durable runs | Each execution is a database run with an append-only event log, replayable over SSE and WebSocket ([durable runs and events](docs/reference/08-durable-runs-and-events.md)) |
+| Fixture-backed execution | `DirectExecutionService.start_research_execution` accepts a fixture mode, but no route or client passes it |
+| Visual workbench | The research projects and agents pages call mounted routes; the workflow, run, memory, dashboard, QA, cost, benchmark and settings pages call routes the API does not mount ([CLI and web clients](docs/reference/13-cli-and-web-clients.md)) |
 
 ## Why Cerebro
 
@@ -55,20 +50,18 @@ implementations.
 
 - **MASR routing** analyzes a query and selects a domain, collaboration mode,
   routing strategy, and execution path.
-- **Hierarchical supervisors** coordinate workers across Research, Content,
-  Analytics, and Finance domains.
-- **Multi-domain execution** decomposes eligible requests and dispatches
-  bounded concurrent subqueries.
+- **Domain supervisors** for Research, Content, Analytics, and Finance
+  coordinate workers behind the supervisor API and TalkHier sessions.
 - **Verification** applies a PASS/REVISE quality gate to supervisor results.
-- **Direct execution** keeps the primary path in process:
-  `API -> DirectExecutionService -> MASR -> Supervisor -> Workers -> Verifier`.
+- **Plan execution** keeps the primary path in process:
+  `API -> DirectExecutionService -> MASR proposal -> ExecutionPlan -> workers`.
 
 ### Engineering Surface
 
 - FastAPI endpoints for routed queries, direct agent execution, routing
   inspection, research projects, reports, and WebSocket updates.
 - A Click/Rich CLI for health checks, routed queries, routing estimates, direct
-  agent calls, chains, and legacy research-project operations.
+  agent calls, chains, and research-project operations.
 - Optional Langfuse tracing, Prometheus metrics, structured logging, PostgreSQL,
   and Redis integration.
 - Docker Compose and Kubernetes assets for local and deployed environments.
@@ -145,8 +138,7 @@ port-9100 diagnostics service is legacy-only:
 ./scripts/compose.sh --profile legacy-masr-service up -d masr-router
 ```
 
-Adaptive Thompson routing remains off by default. Fixture execution is
-deterministic and does not read or write the adaptive store. Operators can
+Adaptive Thompson routing remains off by default. Operators can
 generate a non-activating, machine-readable promotion report from explicitly
 versioned criteria and a chronological evaluator corpus:
 
@@ -189,80 +181,67 @@ Run the repository smoke test:
 ### Submit a Routed Query
 
 ```bash
+export RESEARCH_AUTH_TOKEN="$TOKEN"
 research-cli agents query \
-  "Compare the strongest arguments for and against retrieval-augmented generation"
+  "Compare the strongest arguments for and against retrieval-augmented generation" \
+  --authority-id "<authority-id>" --authority-version "<authority-version>"
 ```
 
 Equivalent API request:
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/query/research" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "Compare the strongest arguments for and against retrieval-augmented generation",
-    "domains": ["research"]
+    "domains": ["research"],
+    "authority_reference": {"authority_id": "<authority-id>", "authority_version": "<authority-version>"}
   }'
 ```
 
-The current query endpoint starts execution asynchronously and returns execution
-metadata. Its response contract still contains legacy research terminology and
-some placeholder estimates; replacing that contract with a neutral run model is
-part of the workbench roadmap.
+The token needs an organization claim, and `authority_reference` must name an
+execution authority stored for that organization; see the
+[development setup guide](docs/development-setup-guide.md) for obtaining a
+token and [research execution](docs/reference/05-research-execution.md) for the
+authority. The endpoint starts execution asynchronously and returns execution
+metadata; several response fields are fixed or `null` on this path and are
+listed in the same page.
 
 ## Architecture
 
 ### Current Runtime
 
 ```mermaid
-flowchart LR
-    Client[API or CLI] --> Execution[DirectExecutionService]
-    Execution --> Router[MASR router]
-    Router --> Supervisor[Domain supervisor]
-    Supervisor --> Workers[Specialized workers]
-    Workers --> Verify[Verification gate]
-    Verify --> Result[Execution result]
-    Router -. routing trace .-> Observe[Metrics and tracing]
-    Supervisor -. progress events .-> Client
+flowchart TD
+    Client[API or CLI] --> Start[DirectExecutionService.start_research_execution]
+    Start --> Auth[Resolve execution authority]
+    Auth --> Router[MASR router: proposal only]
+    Router --> Compile[ExecutionPlanCompiler]
+    Compile --> Admit[Admit durable run]
+    Admit --> Workers[Plan workers]
+    Workers --> Done[Succeeded transition, report artifact, claim-support records]
+    Admit -. events .-> Stream[SSE and WebSocket streams]
 ```
 
-### Target Product Boundary
+### Core concepts
 
-```mermaid
-flowchart TB
-    Workbench[Research workbench]
-    Definitions[Workflow definitions]
-    Kernel[Research kernel]
-    Providers[Models and tools]
-    Store[Runs, evidence, artifacts, evaluations]
-
-    Workbench --> Definitions
-    Workbench --> Store
-    Definitions --> Kernel
-    Kernel --> Providers
-    Kernel --> Store
-```
-
-The target vocabulary is:
-
-- **Workflow**: a versioned definition of steps, tools, policies, and outputs.
-- **Run**: one execution of a workflow against an objective and input set.
-- **Task**: a schedulable unit of work within a run.
-- **Evidence**: source material with provenance and retrieval metadata.
-- **Artifact**: a durable output such as a report, matrix, or evidence bundle.
-- **Evaluator**: a deterministic or model-assisted quality check.
-
-These are target product concepts. The current code still uses
-`ResearchProject`, `ResearchQuery`, agent registries, and supervisor-specific
-workflow definitions.
+- **Run, task and attempt**: the durable records of one execution; see
+  [durable runs and events](docs/reference/08-durable-runs-and-events.md).
+- **Execution plan**: the immutable plan compiled from a routing proposal and a
+  stored authority; see [research execution](docs/reference/05-research-execution.md).
+- **Evidence and artifact**: source snapshots, cited spans and the final report
+  artifact; see [tool boundary and evidence](docs/reference/09-tool-boundary-and-evidence.md).
+- **Claim support**: one record per material claim of a report; see the same page.
 
 See:
 
 - [Documentation index](docs/README.md)
-- [Agent domains](docs/agent-domains.md)
-- [Runtime architecture](docs/multi-agent-architecture.md)
-- [Configuration reference](docs/configuration-reference.md)
-- [CLI guide](docs/CLI.md)
-- [API reference](docs/api-documentation.md)
+- [Architecture overview](docs/reference/01-architecture-overview.md)
+- [Configuration](docs/reference/02-configuration.md)
+- [HTTP API](docs/reference/03-http-api.md)
+- [Agents and supervisors](docs/reference/07-agents-and-supervisors.md)
+- [CLI and web clients](docs/reference/13-cli-and-web-clients.md)
 
 ## Repository Layout
 
@@ -291,7 +270,7 @@ Run targeted tests while iterating:
 
 ```bash
 pytest tests/test_query_analyzer_decomposition.py -q
-pytest tests/test_multi_domain_execution.py -q
+pytest tests/test_query_decomposer.py -q
 pytest tests/test_direct_execution_service.py -q
 ```
 
@@ -304,9 +283,8 @@ ruff check src tests
 mypy src
 ```
 
-The codebase contains several large, mature subsystems and some historical
-scaffolding. Keep changes focused, verify claims against the implementation, and
-do not describe planned behavior as shipped.
+Keep changes focused and verify documentation claims against the
+implementation.
 
 ## Scope
 
@@ -322,9 +300,7 @@ Cerebro is a developer-focused open-source project. It is not:
 
 Several concrete identifiers still use the original `research-platform` naming,
 including package metadata, database and deployment resources, the
-`research-cli` executable, and portions of the API. They remain supported until
-the workbench contract can replace them through compatibility aliases rather
-than a disruptive rename.
+`research-cli` executable, and portions of the API.
 
 ## Support
 

@@ -7,11 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Durable agent runs: runs, tasks, attempts, configuration snapshots, an append-only event log and a transactional outbox, with SSE and WebSocket run streams that resume from a cursor (#97).
+- A tool boundary with capability grants, and evidence and claim-support records with provenance (#104).
+- Compiled execution plans enforced before dispatch, and one research kernel behind every execution route (#94, #95).
+- Execution authority on the convenience endpoints (#96).
+- Completed the mediated execution seams (#120).
+- Execution budget ceilings (#227).
+- Pinned PDF text extraction producing an `extracted_text` artifact, a deterministic span-alignment primitive, a minimal author-date citation renderer, detection of citation-shaped prose the renderer did not emit, and deterministic citation validation dimensions (#181, #130, #182, #133, #239).
+- Academic search results persisted as run-owned evidence, and claim spans bound to citations from sourced metadata (#224, #223).
+- A required reason code on abstained evaluation results (#131).
+
 ### Changed
 - Web workbench redesign (Direction A): migrated the frontend design-token system in `web/src/index.css` to a warm cream/teal light palette with a single teal signal accent and a warm (non-navy) dark mode with a stepped surface ladder. Dark mode is carried by the Tailwind `.dark` class. Loaded Fraunces (display), IBM Plex Sans (UI), and IBM Plex Mono (data) type families and pointed `tailwind.config.js` font families at them.
 - Rebuilt the web landing page (`/`) around the project's real positioning: an editorial hero, the six core primitives, a `research-cli agents` command reference, a traceability priorities ledger, and an open-source closing. Removed the previous fabricated content (mock terminal demo, invented testimonials, "beta" pill). All CLI commands shown are real and copy-paste runnable.
 - Restyled the workflow launch surface (`/app/workflows`): workflow attributes now render in hairline grids, maturity is a pill, and provenance/status chips share a consistent pill treatment. Fixed the call-to-action hierarchy so the page has a single primary action ("Start controlled run"); the per-card configure control is now a secondary toggle that reports its state via `aria-pressed`.
 - Restyled the run trace detail surface (`/app/runs/:id`): consolidated claim-support, evidence-availability, lifecycle, and evaluation badges into one semantic pill (`StatusBadge`); gave the claims↔evidence inspector numbered citations that match numbered evidence cards; and gave the evidence rail an internal scroll region with a pinned head so long runs stay navigable. Evidence excerpts, task/event log, evaluation cards, and the operational ledger were restyled while preserving the existing citation-focus interaction and provenance/honesty semantics.
+- Required an authenticated caller on every API route except an explicit public allowlist (#226).
+- Probed the database and Redis in `/ready`, which returns 503 when either fails (#198).
+- Paged `GET /reports` by offset and reported the real total (#201).
+- Failed report generation when a requested export format fails (#192).
+- Aligned `research-cli` with the API response contract and stopped leaking the WebSocket token (#196).
+- Aligned the web client with the server's authentication and route contract (#230).
+- Ran supervisor workers through the bounded verification revision loop, and made the verification gate fail closed (#231, #174).
+- Stopped supervisor execute from fabricating completed results and quality scores, and removed randomised values from supervisor API responses (#175, #229).
+- Enforced worker `tool_allowlist` on model-initiated tool calls (#189).
+- Counted only in-flight executions against the admission cap (#176).
+- Reported unenforced cost and token ceilings as declared rather than as limits in execution status (#178).
+- Returned null for query estimates the route does not have (#206).
+- Derived chain and mixture status from member results (#204).
+- Filtered research projects by the statuses the API returns and rejected unknown values with 422 (#188).
+- Stopped reporting metadata-only citation sources as verified (#194).
+- Made the MASR routing circuit breaker open, and stopped it wedging in HALF_OPEN (#195).
+- Shared one `JWTService` and Redis client per process instead of per request (#177).
+- Bounded routing history and dropped unread execution history (#187).
+- Passed numeric series to comparative correlation, rejected malformed `comparison_data` and dropped degraded content (#183).
+- Annotated pre-fix fabricated verification rows on the research results read path (#127).
+- Made the Kubernetes manifests runnable by mounting JWT keys and dropping the removed worker (#207).
+- Copied the alembic and uvicorn console scripts into the production image (#173).
+- Supported SQLAlchemy 2.1, after capping it below 2.1 (#138, #221).
+- Imported experiment and report models so alembic autogenerate sees every table, and aligned the experiment models with their tables (#191, #209).
+- Indexed report project and user filters and `report_formats.report_id`, and batched `BaseRepository` bulk updates and deletes (#205, #124).
+- Deleted report files only after the database deletes commit in `cleanup_old_reports` (#122).
+- Stopped duplicate WebSocket delivery, and survived mid-broadcast disconnects (#242).
+
+### Removed
+- Six unmounted API routers (#185).
+- The unmounted security rate limiter and validators, the unused `CORSSecurityMiddleware`, and the unmounted MASR router fork and unused event catalogue (#186, #129, #125).
+- Five inert kill-switch settings (#128).
+- The never-adopted `agent_tasks` table and `TaskRepository` (#184).
+- Four unreachable duplicate authentication tables, through migration `f8c9d0e1a2b3` (#118).
+- The worker image build and the dead file-watcher hot-reload (#210, #220, #240).
+
+### Fixed
+- Cache TTL wrapped at 24 hours (#240).
+- A rejected request no longer spends an idempotency key (#106); idempotency keys are scoped to the caller and reserved before executing (#190).
+- Rejected requests no longer amplify durable audit writes (#225).
+- Registration unique-index collisions return 409, and `lower(email)` and `lower(username)` are indexed (#202).
+
+### Security
+- Hardened request admission and local runtime boundaries (#118).
+- Locked accounts after repeated failed logins, and trusted `X-Forwarded-For` only from configured proxies (#228).
+- Keyed unauthenticated rate limiting on the client address rather than `X-API-Key` (#200).
+- Restricted GDPR deletion to the account owner or a superuser, and made erasure delete dependent rows and revoke the user's tokens (#134, #244).
+- Ended refresh tokens when a session ends, and refused refresh for inactive users (#180).
+- Authorized WebSocket subscriptions made by message, and dropped project ids from `/ws/health` (#179).
+- Attributed audit rows to the authenticated subject (#203).
+- Scoped project, authority and execution reads to the caller's tenant (#98).
+- Scoped supervisor progress events, execution resume, agent execution authority and agent monitoring endpoints to the caller's organization (#135, #126, #132, #241).
+- Failed closed when a tenant-scoped repository read has no organization (#216).
+
+### Documentation
+- Added `docs/reference/` covering every implemented subsystem with Active / Off by default / Not wired status labels; replaced superseded and aspirational documents; added a testing guide.
 
 ## [0.2.0] - 2026-06-29
 

@@ -41,7 +41,7 @@ The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API u
 
 **Tenant isolation.** A resource that belongs to another organization is reported exactly like one that does not exist: research projects, executions, runs and reports return `404`. An execution authority that belongs to another organization is reported as `EXECUTION_AUTHORITY_UNAVAILABLE` with status `422`. See [authentication and tenancy](04-authentication-and-tenancy.md).
 
-**OpenAPI documents.** `/docs`, `/redoc` and `/openapi.json` are served only when `DEBUG=true` (`FastAPI(docs_url=..., redoc_url=...)` in `src/api/main.py`). They are not in the public-route allowlist, so they also require a bearer token.
+**OpenAPI documents.** `/openapi.json` is always mounted (FastAPI default). `/docs` and `/redoc` are served only when `DEBUG=true` (`FastAPI(docs_url=..., redoc_url=...)` in `src/api/main.py`). None of the three is in the public-route allowlist, so all require a bearer token.
 
 ## Authentication requirement
 
@@ -124,7 +124,7 @@ Mounted at `/api/v1/research`. Every route resolves `get_tenant_context`, so the
 
 | Method | Path | Purpose | Success status | Notable errors |
 |---|---|---|---|---|
-| `POST` | `/projects` | Create a project and start its execution. | 201 | 403 `user_id` differs from the token subject, 422, 500 |
+| `POST` | `/projects` | Create a project. The route attempts to start execution without an organization id, which the authority check refuses, so execution does not start; see [research execution](05-research-execution.md#entry-points). | 201 | 403 `user_id` differs from the token subject, 422, 500 |
 | `GET` | `/projects` | List the caller's projects (`user_id`, `status`, `limit` 1-100 default 10, `offset`). | 200 | 403 `user_id` differs from the token subject |
 | `GET` | `/projects/{project_id}` | Return one project, refreshing its status from the in-process execution record. | 200 | 404 |
 | `GET` | `/projects/{project_id}/progress` | Return a `ResearchProgress`. | 200 | 404 |
@@ -144,7 +144,7 @@ Mounted at `/api/v1/research`. Every route resolves `get_tenant_context`, so the
 | `scope` | `ResearchScope` or null | optional |
 | `authority_reference` | object or null | optional |
 
-The project row is created before execution starts. If execution cannot start, the project is still returned with status `pending`; there is no error response for that case.
+The project row is created first. The route calls `start_research_execution` without an `organization_id`, so the start attempt is refused, the failure is logged, and the project is returned with status `pending`; there is no error response for that case. `POST /api/v1/query/research` is the route that starts execution.
 
 **`ResearchQuery`** (`src/models/research_project.py`).
 

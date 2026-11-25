@@ -1,99 +1,47 @@
-# Cerebro Documentation
+# Cerebro documentation
 
-This index separates current product guidance from detailed implementation
-references and historical design material.
+These documents describe the implemented system: the FastAPI application, the execution path that turns a research query into a durable run, the data model, the clients and the operating guides. Each reference page marks every feature as Active, Off by default or Not wired.
 
-## Start Here
+## Reference
 
-| Document | Purpose |
-| --- | --- |
-| [Project README](../README.md) | Canonical product positioning, current status, and quick start |
-| [Agent domains](agent-domains.md) | Current supervisor and worker catalog, including implementation coupling |
-| [Runtime architecture](multi-agent-architecture.md) | Detailed current multi-agent implementation |
-| [Configuration reference](configuration-reference.md) | Environment variables and runtime configuration |
-| [CLI guide](CLI.md) | Current `research-cli` commands |
-| [API documentation](api-documentation.md) | Existing HTTP and WebSocket surfaces |
+| Page | Covers |
+|---|---|
+| [Architecture overview](reference/01-architecture-overview.md) | Processes, application assembly, middleware order, mounted routers, execution paths, the component registry and the contracts package |
+| [Configuration](reference/02-configuration.md) | The settings production code reads, the 100 declared settings that have no effect, and components that read their own variables |
+| [HTTP API](reference/03-http-api.md) | Conventions, the public-route allowlist, every mounted route group, error envelope and fixed responses |
+| [Authentication and tenancy](reference/04-authentication-and-tenancy.md) | RS256 JWTs, `AuthMiddleware`, WebSocket tokens, organization claims and tenant isolation |
+| [Research execution](reference/05-research-execution.md) | Execution authority, routing proposal, plan compilation, admission, topology execution, status, cancellation and checkpoints |
+| [MASR routing](reference/06-masr-routing.md) | Complexity analysis, collaboration modes, worker allocation, cost and quality estimates and the `/api/v1/masr` endpoints |
+| [Agents and supervisors](reference/07-agents-and-supervisors.md) | The 17 worker agents, four domain supervisors, the direct agent API, the supervisor API and the verification gate |
+| [Durable runs and events](reference/08-durable-runs-and-events.md) | Run, task and attempt records, the append-only event log, the outbox relay, SSE and WebSocket run streams |
+| [Tool boundary, capabilities and evidence](reference/09-tool-boundary-and-evidence.md) | `ToolBoundary`, capability grants, the budget ledger, source snapshots, evidence rows and claim support |
+| [LLM providers](reference/10-llm-providers.md) | `GeminiService`, the provider package, the model router and the optional multi-provider route |
+| [Reports](reference/11-reports.md) | Report generation, output formats, storage and the `/api/v1/reports` routes |
+| [Security, audit and observability](reference/12-security-audit-observability.md) | Audit trail, security headers, log redaction, Prometheus metrics and Langfuse tracing |
+| [CLI and web clients](reference/13-cli-and-web-clients.md) | The `research-cli` commands and the React workbench, including the pages that call routes the API does not mount |
+| [Data model and persistence](reference/14-data-model-and-persistence.md) | Tables, models, repositories, migrations and the tenant filter |
+| [Code that is not wired](reference/15-not-wired.md) | Code and settings with no production caller |
 
-## Product Overview
+## Guides
 
-Cerebro is an open-source workbench for source-grounded AI research workflows.
-Its public product vocabulary describes the research process in terms of:
+| Guide | Use it to |
+|---|---|
+| [Development setup](development-setup-guide.md) | Install dependencies, configure the environment, run the stack, get an access token and run the smoke tests |
+| [Testing](testing-guide.md) | Run the Python suites, the live-provider evaluations and the web Playwright specs, and see which CI workflow runs each |
+| [Deployment and monitoring](deployment-monitoring-guide.md) | Deploy with Docker Compose or Kustomize and read the health and metrics endpoints |
+| [Backup and recovery](backup-recovery.md) | Back up and restore each store that holds state |
+| [Performance tuning](performance-tuning.md) | Find the rate, concurrency, connection and model-call limits and where each is set |
+| [Troubleshooting](troubleshooting.md) | Diagnose common failures |
+| [Nightly live-eval workflow template](ci/nightly-live-eval.yml.example) | Start from a scheduled workflow that runs the live evaluations |
 
-- workflow definition and version;
-- run and task lifecycle;
-- evidence and claim support;
-- artifacts and verification;
-- measured cost, latency, and quality;
-- reproducible evaluation.
+## Status labels
 
-Finance is an included domain example. It is not the product boundary, and the
-current Finance domain does not provide institutional data retrieval.
+- **Active**: a production caller reaches the feature on the default configuration.
+- **Off by default**: a production caller reaches the feature only when a setting whose default disables it is changed.
+- **Not wired**: the code is present and no production caller reaches it. [Code that is not wired](reference/15-not-wired.md) collects these.
 
-`Workflow`, `Run`, `Evidence`, `Artifact`, and `Evaluator` are product-level
-concepts rather than a fully implemented public contract. The current API and
-persistence layers retain `ResearchProject`, `ResearchQuery`, and other legacy
-names.
+## Documentation rules
 
-## Implementation References
-
-These documents describe specific subsystems. Verify examples against the
-current code when making changes because some documents contain older snippets.
-
-### Agent-System Architecture
-
-- [Canonical contracts and lifecycle invariants](architecture/agent-system-contracts.md)
-- [Current agent runtime behavior](architecture/agent-system-runtime.md)
-- [Legacy-to-canonical compatibility mapping](architecture/agent-system-compatibility.md)
-
-### Runtime and Agents
-
-- [Agent flowcharts](agent-flowcharts.md)
-- [Agent framework overview](api/agent-framework-overview.md)
-- [Agent API reference](api/agent-api-reference.md)
-- [Agent execution patterns](api/agent-execution-patterns.md)
-- [MASR API guide](api/masr-api-guide.md)
-- [MASR complete guide](api/masr-api-complete-guide.md)
-- [Intelligent routing strategy](api/intelligent-routing-strategy.md)
-- [LangGraph integration](langgraph-integration.md)
-- [Outstanding provider and learning work](outstanding-provider-and-learning.md)
-
-### Data and Operations
-
-- [Database architecture](database-architecture.md)
-- [Repository pattern](repository-pattern-guide.md)
-- [Report generation](report-generation-system.md)
-- [WebSocket updates](websocket-realtime-updates.md)
-- [Security authentication](security-authentication.md)
-- [Security implementation](security-implementation.md)
-- [Backup and recovery](backup-recovery.md)
-- [Deployment monitoring](deployment-monitoring-guide.md)
-- [Performance tuning](performance-tuning.md)
-- [Troubleshooting](troubleshooting.md)
-
-### Development and Verification
-
-- [Development setup](development-setup-guide.md)
-- [Integration testing](integration-testing-guide.md)
-- [End-to-end verification](E2E_VERIFICATION.md)
-
-## Experimental Subsystems
-
-Documents under [`experimentation/`](experimentation/) describe experimental
-subsystems that are not part of the active product path unless the current
-runtime imports them. Keep additional research artifacts outside the public
-repository.
-
-## Documentation Rules
-
-When updating Cerebro:
-
-1. Describe shipped behavior in the present tense.
-2. Keep proposed behavior in private artifacts rather than public
-   implementation references.
-3. Keep private product specs, PRDs, reviews, and internal artifacts outside
-   the repository.
-4. Update the project README and this index when the product boundary changes.
-5. Preserve legacy identifiers where they refer to concrete APIs, models,
-   commands, or deployment resources.
-6. Do not treat agent count, orchestration complexity, or theoretical novelty
-   as evidence of research quality.
+- Documents describe the implemented system in the present tense.
+- Each claim is checked against the code it cites.
+- Code is cited by path and symbol.
