@@ -172,7 +172,6 @@ REQUIRED_WORKFLOWS=(
     ".github/workflows/ci.yml"
     ".github/workflows/cd.yml"
     ".github/workflows/release.yml"
-    ".github/workflows/docker-build.yml"
     ".github/workflows/temporal-test.yml"
     ".github/workflows/codeql.yml"
 )

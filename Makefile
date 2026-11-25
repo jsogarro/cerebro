@@ -293,7 +293,7 @@ env-help: ## Show required environment variables
 	@echo "  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /secure/path/jwt_private.pem"
 	@echo "  openssl pkey -in /secure/path/jwt_private.pem -pubout -out /secure/path/jwt_public.pem"
 	@echo ""
-	@echo "See .env.example and docs/configuration-reference.md for the complete contract"
+	@echo "See .env.example and docs/reference/02-configuration.md for the complete contract"
 
 # Version information
 version: ## Show version information
