@@ -1,738 +1,308 @@
-# Troubleshooting Guide
+# Troubleshooting
 
-This guide helps you diagnose and resolve common issues with **Cerebro**, the
-multi-agent runtime behind the general research-workflow workbench.
+This guide helps you diagnose common problems with Cerebro. Commands use the development stack from `docker-compose.yml`; for the production stack add `-f docker-compose.production.yml`.
 
-> **Naming note.** The product is **Cerebro**, but the deployment artifacts still carry the
-> pre-rebrand **`research-platform`** identity: the FastAPI app is titled "Research Platform API",
-> the database is `research_db`, the CLI is `research-cli`, and the API container is `research-api`.
-> Those infra names are intentional and referenced verbatim below.
+> **Naming.** The deployment artifacts carry the name `research-platform`: the FastAPI app is titled "Research Platform API", the Postgres database is `research_db`, the CLI entry point is `research-cli`, and the Kubernetes objects are `research-api` and friends.
 
-## Table of Contents
-- [Quick Diagnostics](#quick-diagnostics)
-- [Common Issues](#common-issues)
-  - [Connection Issues](#connection-issues)
-  - [Authentication Errors](#authentication-errors)
-  - [Database Problems](#database-problems)
-  - [Agent Failures](#agent-failures)
-  - [Execution Issues](#execution-issues)
-  - [Performance Problems](#performance-problems)
-- [Service-Specific Issues](#service-specific-issues)
-- [Debug Logging](#debug-logging)
-- [Health Checks](#health-checks)
-- [Recovery Procedures](#recovery-procedures)
-- [Getting Help](#getting-help)
+## Contents
 
-## Quick Diagnostics
+- [Quick diagnostics](#quick-diagnostics)
+- [Connection issues](#connection-issues)
+- [Authentication errors](#authentication-errors)
+- [Database problems](#database-problems)
+- [Agent and model failures](#agent-and-model-failures)
+- [Execution issues](#execution-issues)
+- [Performance problems](#performance-problems)
+- [Service-specific issues](#service-specific-issues)
+- [Debug logging](#debug-logging)
+- [Health checks](#health-checks)
+- [Recovery procedures](#recovery-procedures)
+- [Error codes](#error-codes)
+- [Before reporting an issue](#before-reporting-an-issue)
 
-Run these commands to quickly diagnose system health:
+## Quick diagnostics
 
 ```bash
-# Check overall system health
+# Overall health through the CLI
 research-cli health
 
-# Check API connectivity
+# API liveness (no token needed)
 curl -v http://localhost:8000/health
 
-# Check service status
-docker-compose ps
+# Service status and recent API logs
+docker compose ps
+docker compose logs --tail=50 api
 
-# View recent logs
-docker-compose logs --tail=50 api
-
-# Check database connectivity
-docker-compose exec postgres pg_isready
-
-# Check Redis connectivity
-docker-compose exec redis redis-cli ping
+# Dependencies
+docker compose exec postgres pg_isready
+docker compose exec redis redis-cli ping
 ```
 
-The dev `docker-compose.yml` defines these services: `api`, `mcp-server`, `masr-router`,
-`postgres`, `redis`, `nginx`, `web`, plus the `dev-tools` profile services `pgadmin` and
-`redis-commander`. There is **no worker service** — execution runs in-process inside the `api`
-container via the `DirectExecutionService` (Temporal has been removed).
+`docker-compose.yml` defines `api`, `mcp-server`, `postgres`, `redis`, `nginx` and `web`, plus `masr-router` under the profile `legacy-masr-service` and `pgadmin` and `redis-commander` under the profile `dev-tools`. There is no worker service: executions run inside the `api` container.
 
-## Common Issues
+## Connection issues
 
-### Connection Issues
+### "Connection refused" from the CLI
 
-#### Problem: "Connection refused" when using CLI
-**Symptoms:**
-```
-Error: Connection refused to http://localhost:8000
-```
-
-**Solutions:**
-1. Verify API is running:
+1. Check that the API container is up:
    ```bash
-   docker-compose ps api
-   # Should show "Up" status
+   docker compose ps api
+   docker compose logs api | grep -i error
    ```
-
-2. Check API logs for startup errors:
+2. Check that port 8000 is bound (`API_HOST_PORT` overrides the host port in `docker-compose.yml`):
    ```bash
-   docker-compose logs api | grep ERROR
-   ```
-
-3. Verify port binding:
-   ```bash
-   netstat -an | grep 8000
-   # or
    lsof -i :8000
    ```
-
-4. Check firewall settings:
+3. Bypass port mapping by calling the container address:
    ```bash
-   # macOS
-   sudo pfctl -s rules | grep 8000
-
-   # Linux
-   sudo iptables -L -n | grep 8000
-   ```
-
-5. Try alternative connection:
-   ```bash
-   # Use Docker network IP (container is named research-api)
-   docker inspect research-api | grep IPAddress
+   docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(docker compose ps -q api)"
    research-cli --api-url http://<container-ip>:8000 health
    ```
 
-#### Problem: WebSocket connection fails
-**Symptoms:**
-```
-WebSocket connection to 'ws://localhost:8000/ws' failed
-```
+The CLI reads `~/.research-cli.env` (keys `RESEARCH_API_URL` and `RESEARCH_AUTH_TOKEN`) and the same environment variables. See [CLI and web clients](reference/13-cli-and-web-clients.md).
 
-**Solutions:**
-1. Check the WebSocket endpoint. The live WS routes are `/ws`, `/ws/projects/{project_id}`,
-   `/ws/cli/{project_id}`, and `GET /ws/health`, plus the supervisor and TalkHier WS routes
-   under `/api/v1/supervisors/*` and `/api/v1/talkhier/*`:
-   ```bash
-   curl -i -N -H "Connection: Upgrade" \
-        -H "Upgrade: websocket" \
-        -H "Sec-WebSocket-Version: 13" \
-        -H "Sec-WebSocket-Key: test" \
-        http://localhost:8000/ws
-   ```
+### WebSocket connection fails
 
-2. Check plain WS liveness:
-   ```bash
-   curl http://localhost:8000/ws/health
-   ```
+The WebSocket routes are `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_id}` and `/ws/runs/{run_id}`, plus `GET /ws/health`. The supervisor and TalkHier routers add their own WebSocket routes under `/api/v1/supervisors/` and `/api/v1/talkhier/`.
 
-3. Verify CORS settings in the API:
-   ```bash
-   grep -r "allow_origins" src/api/main.py
-   ```
+1. Check the unauthenticated probe: `curl http://localhost:8000/ws/health`.
+2. Pass the access token as the `token` query parameter (`ws://localhost:8000/ws?token=<access-token>`). An `Authorization` header alone does not authenticate a WebSocket connection, and the route dependency `require_authenticated_websocket` rejects a connection without a token.
+3. The handler-level check in `src/api/websocket/auth.py` admits a tokenless connection only when `ENVIRONMENT=development` and `DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true` (default `false`); the route dependency from step 2 runs first.
+4. When the token is valid but the connection closes, the token can lack an `organization_id` claim, or the project can belong to another organization. See [authentication and tenancy](reference/04-authentication-and-tenancy.md).
+5. Behind nginx, `docker/nginx/nginx.conf` proxies `/ws` with upgrade headers and a 86400-second read timeout and limits new connections to 5 per second per client address.
 
-4. In `development` (`ENVIRONMENT=development`) anonymous WS connections are allowed. In other
-   environments the connection must present a valid JWT (RS256).
+## Authentication errors
 
-### Authentication Errors
+Authentication is enforced by `AuthMiddleware`. Every route except the ten entries in `PUBLIC_ROUTE_ALLOWLIST` (`src/middleware/auth_middleware.py`) needs `Authorization: Bearer <access-token>`. The public routes are `GET /health`, `/live`, `/ready` and `/ws/health`, and the auth bootstrap routes `POST /api/v1/auth/login`, `register`, `refresh`, `forgot-password`, `reset-password` and `GET /api/v1/auth/verify-email`. `/metrics`, `/docs`, `/redoc` and `/openapi.json` are not public. Access tokens last 15 minutes and refresh tokens 7 days (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`, `JWT_REFRESH_TOKEN_EXPIRE_DAYS`).
 
-Cerebro uses **per-endpoint JWT authentication** (RS256), applied via FastAPI `Depends(...)` on
-the endpoints that need it (the `/api/v1/auth/*` routes and `/api/v1/research`, which resolves a
-tenant context through `get_tenant_context` -> `get_current_token`). The users GDPR endpoint and
-the `/api/v1/reports` routes carry **no** auth dependency and are effectively unauthenticated. The
-`AuthMiddleware` is a **no-op** — it sets
-`request.state.user = None` and validates nothing. As a result the primary
-**`/api/v1/query/*`, `/api/v1/agents/*`, and `/api/v1/masr/*` routes are effectively
-unauthenticated**; a 401 from those routes almost always means something other than a missing token.
+### 401, 403 and 404
 
-Tokens are minted by `POST /api/v1/auth/login` (15-minute access token, 7-day refresh token). The
-RS256 keys live at `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem`; passwords are bcrypt
-(12 rounds), `PASSWORD_MIN_LENGTH=12`.
+| Status | Cause |
+|---|---|
+| 401 | The bearer token is missing, malformed, expired, revoked, or the route is not in the allowlist and no token was sent |
+| 403 | The token has no `organization_id` claim on a tenant-scoped route (`require_organization_id` in `src/middleware/tenant_context.py`), or a caller deleted another user's data through `DELETE /api/v1/users/{user_id}/gdpr` without being that user or a superuser |
+| 404 | The resource does not exist, or it belongs to another organization: tenant-scoped lookups report a foreign resource exactly like a missing one |
+| 503 | The authentication service is unavailable, typically because Redis (token blacklist) cannot be reached |
 
-#### Problem: "401 Unauthorized" on an authenticated endpoint
-**Symptoms:**
-```
-Error: Authentication failed - 401 Unauthorized
-```
+Solutions:
 
-**Solutions:**
-1. Obtain a fresh access token:
+1. Obtain a token:
    ```bash
    curl -X POST http://localhost:8000/api/v1/auth/login \
      -H "Content-Type: application/json" \
      -d '{"email": "<user-email>", "password": "<password>"}'
    ```
-
-2. Call the endpoint with the bearer token:
+2. Call the endpoint with it:
    ```bash
-   curl -H "Authorization: Bearer <access-token>" \
-     http://localhost:8000/api/v1/auth/me
+   curl -H "Authorization: Bearer <access-token>" http://localhost:8000/api/v1/auth/me
    ```
-
-3. If the token is rejected, verify the JWT public/private key pair is mounted and readable:
+3. When every token is rejected, check that the key pair is readable by the container. The paths are `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH`, default `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem`:
    ```bash
-   docker-compose exec api ls -l /secrets/jwt_private.pem /secrets/jwt_public.pem
+   docker compose exec api ls -l /secrets/
    ```
+4. Exchange an expired access token with `POST /api/v1/auth/refresh` and body `{"refresh_token": "<refresh-token>"}`. A refresh token is single use, and it fails with "Refresh token not found or expired" after Redis loses its record (see [backup and recovery](backup-recovery.md)); log in again.
 
-4. For the CLI, set the token in `~/.research-cli.env` (dotenv keys `RESEARCH_API_URL`,
-   `RESEARCH_AUTH_TOKEN`) or export it:
+See [authentication and tenancy](reference/04-authentication-and-tenancy.md) for the full model.
+
+## Database problems
+
+### Connection pool exhausted
+
+Symptom: `sqlalchemy.exc.TimeoutError: QueuePool limit of size ... reached`.
+
+1. Inspect connections:
    ```bash
-   export RESEARCH_AUTH_TOKEN="<access-token>"
+   docker compose exec postgres psql -U research -d research_db -c \
+     "SELECT pid, state, application_name FROM pg_stat_activity WHERE datname='research_db';"
    ```
+2. Each Uvicorn worker has its own pool of 20 connections plus 10 overflow, with a 30-second wait (`create_engine` in `src/models/db/session.py`; `init_db()` is called without arguments). Check that the total across workers and replicas fits Postgres `max_connections`. See [performance tuning](performance-tuning.md).
 
-#### Problem: JWT token expired
-**Symptoms:**
-```
-Error: Token has expired
-```
+### Migration failures
 
-**Solutions:**
-1. Exchange the refresh token for a new access token:
-   ```bash
-   curl -X POST http://localhost:8000/api/v1/auth/refresh \
-     -H "Content-Type: application/json" \
-     -d '{"refresh_token": "<refresh-token>"}'
-   ```
+The container entrypoint runs `alembic upgrade head` and refuses to start the application if it fails, so a migration error shows up as a container that exits at startup:
 
-2. If the refresh token has also expired (7 days), log in again with `POST /api/v1/auth/login`.
-
-### Database Problems
-
-#### Problem: Database connection pool exhausted
-**Symptoms:**
-```
-sqlalchemy.exc.TimeoutError: QueuePool limit of size ... overflow ... reached
+```bash
+docker compose logs api | head -40
+docker compose run --rm --entrypoint alembic api current
+docker compose run --rm --entrypoint alembic api heads
+docker compose run --rm --entrypoint alembic api history
 ```
 
-**Solutions:**
-1. Check for connection leaks:
-   ```bash
-   docker-compose exec postgres psql -U research -d research_db -c \
-     "SELECT pid, usename, application_name, state \
-      FROM pg_stat_activity WHERE datname='research_db';"
-   ```
+`alembic current` shows the revision the database is at, `heads` the revisions in `alembic/versions/`, and `history` the chain. More than one head means two branches of migrations need merging. After fixing the cause, `docker compose up -d api` runs `alembic upgrade head` again. Do not edit or drop the `alembic_version` table by hand.
 
-2. Kill idle connections:
-   ```bash
-   docker-compose exec postgres psql -U research -d research_db -c \
-     "SELECT pg_terminate_backend(pid) \
-      FROM pg_stat_activity \
-      WHERE state = 'idle' AND state_change < now() - interval '10 minutes';"
-   ```
+## Agent and model failures
 
-3. The async engine (`create_async_engine` / `async_sessionmaker`) is constructed from
-   `DATABASE_URL` (default `postgresql+asyncpg://research:research123@localhost:5432/research_db`).
-   Reduce concurrent load or restart the API container if the pool stays saturated.
+### Empty or poor agent output
 
-#### Problem: Migration failures
-**Symptoms:**
-```
-alembic.util.exc.CommandError: Can't locate revision identified by 'xxx'
-```
-
-**Solutions:**
-1. Check current migration status:
-   ```bash
-   docker-compose exec api alembic current
-   ```
-
-2. Reset to a specific revision:
-   ```bash
-   docker-compose exec api alembic downgrade <revision>
-   docker-compose exec api alembic upgrade head
-   ```
-
-3. Force migration table rebuild:
-   ```bash
-   docker-compose exec postgres psql -U research -d research_db \
-     -c "DROP TABLE IF EXISTS alembic_version;"
-   docker-compose exec api alembic stamp head
-   ```
-
-### Agent Failures
-
-Agents are LLM-reasoning workers (prompt-driven) built on `LLMWorkerAgentBase`. By default the
-runtime is **Gemini-only** (`GEMINI_DEFAULT_MODEL=gemini-pro`). OpenRouter multi-provider routing
-(DeepSeek for simple tiers, Claude Sonnet for complex tiers) is flag-gated **off** and requires
-both `MULTI_PROVIDER_ROUTING_ENABLED=True` and `OPENROUTER_API_KEY` to be set.
-
-> Confidence scores reported by agents are hardcoded heuristics (0.85 on success, 0.3 on empty
-> output), not real quality signals — don't treat them as a health metric. The fast path emits a
-> fixed `quality_score` of 0.8 rather than a confidence score, and it is equally hardcoded.
-
-#### Problem: Agent produces empty or low-quality output
-**Symptoms:**
-```
-Agent 'LiteratureReviewAgent' returned empty result
-```
-
-**Solutions:**
-1. Inspect the execution status and results (see [Execution Issues](#execution-issues)):
-   ```bash
-   curl http://localhost:8000/api/v1/query/execution/<execution-id>/status
-   curl http://localhost:8000/api/v1/query/execution/<execution-id>/results
-   ```
-
-2. Check bypass-agent status/health for a specific agent type:
+1. Read the execution status and results (see [Execution issues](#execution-issues)).
+2. Check an agent's health:
    ```bash
    research-cli agents status
-   # or directly:
-   curl http://localhost:8000/api/v1/agents/literature-review/health
+   curl -H "Authorization: Bearer <access-token>" http://localhost:8000/api/v1/agents/health/summary
+   curl -H "Authorization: Bearer <access-token>" http://localhost:8000/api/v1/agents/<agent-type>/health
    ```
-
-3. Check the API logs for the underlying LLM error:
+3. Search the API logs for the underlying model error:
    ```bash
-   docker-compose logs api | grep -i "gemini\|llm\|agent"
+   docker compose logs api | grep -i "gemini\|llm\|agent"
    ```
 
-#### Problem: Gemini API errors
-**Symptoms:**
-```
-google.api_core.exceptions.ResourceExhausted: 429 Quota exceeded
-```
+### Gemini API errors
 
-**Solutions:**
-1. Confirm the key is set:
+Symptom: `ResourceExhausted: 429 Quota exceeded`.
+
+1. Confirm the key is set without printing it: `docker compose exec api sh -c 'test -n "$GEMINI_API_KEY" && echo set'`.
+2. Two limiters apply: the HTTP rate limiter (`MAX_REQUESTS_PER_MINUTE`, default 100, on requests to the API) and the Gemini token bucket (10 calls per 60 seconds and 2 concurrent per service instance by default). See [performance tuning](performance-tuning.md). Reduce request volume or wait for the provider quota to reset.
+3. Watch model volume and cost with the `llm_*` series (the token is required):
    ```bash
-   docker-compose exec api printenv GEMINI_API_KEY | sed 's/./*/g'
+   curl -s -H "Authorization: Bearer <access-token>" http://localhost:8000/metrics | grep -E "llm_call_duration_seconds|llm_tokens_total|llm_cost_usd_total"
    ```
 
-2. Cerebro applies a single global rate limiter (`MAX_REQUESTS_PER_MINUTE=100`,
-   `ENABLE_RATE_LIMITING=True`) plus a Gemini-specific limiter (`src/services/gemini_limiter.py`).
-   There are no per-endpoint or per-tier rate settings — reduce request volume or wait for the
-   provider quota to reset.
+Provider selection is described in [LLM providers](reference/10-llm-providers.md).
 
-3. Watch LLM call volume and cost via Prometheus metrics:
-   ```bash
-   curl -s http://localhost:8000/metrics | grep -E "llm_call_duration_seconds|llm_tokens_total|llm_cost_usd_total"
-   ```
+## Execution issues
 
-### Execution Issues
-
-Query execution runs through the in-process **`DirectExecutionService`**
-(`src/api/services/direct_execution_service.py`), which replaced Temporal. The request flow is:
-
-```
-Client -> FastAPI -> DirectExecutionService (asyncio background task)
-       -> MASRouter -> MASRSupervisorBridge -> domain supervisors -> workers -> verification QA gate
-```
-
-> The immediate response from `POST /api/v1/query/research` contains **hardcoded placeholders**
-> (`selected_agents=[]`, `estimated_cost=0.015`, `estimated_quality=0.85`, `confidence=0.85`,
-> `routing_time_ms=50.0`). It is **not** the routing result. Real routing data and output only
-> appear later via the execution status/results endpoints below.
-
-#### Problem: Execution appears stuck at "running"
-**Symptoms:**
-```
-Execution status: running for an unusually long time
-```
-
-**Solutions:**
-1. Poll the execution status. The response carries the real `supervisor_type` and progress:
-   ```bash
-   curl http://localhost:8000/api/v1/query/execution/<execution-id>/status
-   ```
-
-2. Fetch results once the status reports `completed`:
-   ```bash
-   curl http://localhost:8000/api/v1/query/execution/<execution-id>/results
-   ```
-
-3. Check the API logs for the background task. Executions run as asyncio tasks inside the `api`
-   container:
-   ```bash
-   docker-compose logs api | grep "<execution-id>"
-   ```
-
-4. If the app was restarted mid-flight, resume from the last checkpoint (see below).
-
-> **Historical bug (FIXED).** A `@retry` decorator on the execution workflow previously re-ran the
-> whole workflow up to 3× because a naive/aware `datetime` subtraction in the `finally` block
-> raised inside the retry scope. This is fixed (timestamps now use `datetime.now(UTC)`); repeated
-> re-runs of a single query are no longer expected.
-
-#### Problem: "Execution capacity reached"
-**Symptoms:**
-```
-RuntimeError: maximum concurrent executions reached
-```
-
-**Solutions:**
-1. `DirectExecutionService` tracks live work in an in-memory `active_executions` dict guarded by a
-   `max_concurrent_executions` cap; it raises when the cap is hit. Wait for in-flight executions to
-   finish, or check what is currently active:
-   ```bash
-   curl http://localhost:8000/api/v1/agents/executions/active
-   ```
-
-2. Because `active_executions` is in-memory, restarting the `api` container clears it (and drops
-   in-flight work) — resume any interrupted execution from its checkpoint afterward.
-
-#### Problem: Resuming an interrupted execution
-**Solutions:**
-1. Execution progress is checkpointed to the `workflow_checkpoints` table (via
-   `CheckpointRepository`) at the `masr_routing`, `supervisor_execution`, `completed`, and
-   `fast_path_completed` phases.
-
-2. Resume from the latest checkpoint:
-   ```bash
-   curl -X POST http://localhost:8000/api/v1/query/execution/<project-id>/resume
-   ```
-
-3. Verify the checkpoint exists before resuming:
-   ```bash
-   docker-compose exec postgres psql -U research -d research_db -c \
-     "SELECT project_id, phase, created_at FROM workflow_checkpoints \
-      WHERE project_id='<project-id>' ORDER BY created_at DESC LIMIT 5;"
-   ```
-
-### Performance Problems
-
-Parallelism is **in-process**, not horizontal: multi-domain queries fan out under an
-`asyncio.Semaphore`, and each domain supervisor coordinates its worker team internally
-(hierarchical supervisors + LangGraph state graphs, one per supervisor). There is no worker fleet
-to scale — tune concurrency and the LLM path instead.
-
-#### Problem: Slow API response times
-**Symptoms:**
-```
-API requests taking > 5 seconds
-```
-
-**Solutions:**
-1. Check database query performance:
-   ```bash
-   docker-compose exec postgres psql -U research -d research_db -c \
-     "SELECT query, mean_exec_time, calls \
-      FROM pg_stat_statements \
-      ORDER BY mean_exec_time DESC LIMIT 10;"
-   ```
-
-2. Most latency is LLM-bound. Inspect call duration and cost:
-   ```bash
-   curl -s http://localhost:8000/metrics | grep -E "llm_call_duration_seconds|llm_cost_usd_total"
-   ```
-
-3. Increase the API worker process count (production image runs `uvicorn ... --workers 4`):
-   ```bash
-   # In docker-compose.yml (api service)
-   command: uvicorn src.api.main:app --workers 4
-   ```
-
-#### Problem: High memory usage
-**Symptoms:**
-```
-Container using > 2GB RAM
-```
-
-**Solutions:**
-1. Check memory usage:
-   ```bash
-   docker stats --no-stream
-   ```
-
-2. Limit container memory:
-   ```yaml
-   # In docker-compose.yml
-   services:
-     api:
-       mem_limit: 2g
-       memswap_limit: 2g
-   ```
-
-3. Clear Redis caches (idempotency + rate-limit state live in Redis):
-   ```bash
-   docker-compose exec redis redis-cli FLUSHALL
-   ```
-
-## Service-Specific Issues
-
-### PostgreSQL Issues
-
-Postgres runs from `postgres:16-alpine`.
-
-#### Problem: "FATAL: too many connections"
-**Solutions:**
-```bash
-# Increase max connections
-docker-compose exec postgres psql -U postgres -c \
-  "ALTER SYSTEM SET max_connections = 200;"
-docker-compose restart postgres
-```
-
-#### Problem: Slow queries
-**Solutions:**
-```bash
-# Enable query logging
-docker-compose exec postgres psql -U research -d research_db -c \
-  "ALTER SYSTEM SET log_min_duration_statement = 1000;"  # Log queries > 1s
-
-# Analyze tables
-docker-compose exec postgres psql -U research -d research_db -c \
-  "ANALYZE;"
-```
-
-### Redis Issues
-
-Redis runs from `redis:7-alpine`.
-
-#### Problem: "OOM command not allowed"
-**Solutions:**
-```bash
-# Check memory usage
-docker-compose exec redis redis-cli INFO memory
-
-# Set memory limit
-docker-compose exec redis redis-cli CONFIG SET maxmemory 1gb
-docker-compose exec redis redis-cli CONFIG SET maxmemory-policy allkeys-lru
-```
-
-### MASR Router Note
-
-The dev compose includes a standalone `masr-router` container (port 9100), but the **verified query
-path uses the in-process `MASRouter` Python object**, not the external service (`MASR_SERVICE_URL`
-is not read anywhere in `src/`). Treat the standalone container as legacy; do not chase query-path
-issues there.
-
-## Debug Logging
-
-### Enable Debug Mode
-
-The single debug gate is the `DEBUG` setting (default `False`). Turning it on also enables the
-`/docs` and `/redoc` Swagger pages. Log verbosity is controlled by `LOG_LEVEL`.
+Query execution runs in-process (`DirectExecutionService`) behind `POST /api/v1/query/...`. Read an execution's state with:
 
 ```bash
-# In .env
+curl -H "Authorization: Bearer <access-token>" http://localhost:8000/api/v1/query/execution/<execution-id>/status
+curl -H "Authorization: Bearer <access-token>" http://localhost:8000/api/v1/query/execution/<execution-id>/results
+```
+
+An execution that belongs to another organization is reported as not found. See [research execution](reference/05-research-execution.md) and [durable runs and events](reference/08-durable-runs-and-events.md).
+
+### Execution seems stuck
+
+1. Poll the status endpoint and read the progress fields.
+2. Search the logs for the id: `docker compose logs api | grep "<execution-id>"`.
+3. If the API restarted mid-run, `POST /api/v1/query/execution/<project-id>/resume` resumes from the last checkpoint.
+
+### "Maximum concurrent executions reached"
+
+`DirectExecutionService` raises `RuntimeError` when 50 executions are `pending` or `running` in one API process (`max_concurrent_executions`; finished runs are retained for reading but do not count). List the caller's organization's active executions with `GET /api/v1/agents/executions/active`, wait for them to finish, or add replicas.
+
+## Performance problems
+
+Parallelism is in-process: workers fan out under an `asyncio.Semaphore` whose size is the execution budget's `max_parallel_tasks`, and the production image runs 4 Uvicorn worker processes. Most request latency is model latency.
+
+1. Inspect model latency and cost with the `llm_*` metrics (see above).
+2. Compare the pool and concurrency limits in [performance tuning](performance-tuning.md).
+3. Check container memory with `docker stats --no-stream`. The production compose file limits `api` to 2G.
+4. Do not flush Redis to free memory: it holds token blacklists and refresh records (see [backup and recovery](backup-recovery.md)). To clear only rate-limit or idempotency state, delete that prefix:
+   ```bash
+   docker compose exec -T redis sh -c "redis-cli --scan --pattern 'rate_limit:*' | xargs -r redis-cli DEL"
+   docker compose exec -T redis sh -c "redis-cli --scan --pattern 'idempotency:*' | xargs -r redis-cli DEL"
+   ```
+   Deleting `rate_limit:*` resets request counters. Deleting `idempotency:*` makes a retried request with an `Idempotency-Key` run again instead of replaying its stored response. On the production stack add `-a "$REDIS_PASSWORD"` to each `redis-cli`.
+
+## Service-specific issues
+
+### PostgreSQL
+
+Postgres runs from `postgres:16-alpine` with user `research`.
+
+- "FATAL: too many connections": raise `max_connections` (the setting needs a restart) or reduce the pool total:
+  ```bash
+  docker compose exec postgres psql -U research -d postgres -c "ALTER SYSTEM SET max_connections = 200;"
+  docker compose restart postgres
+  ```
+- Slow queries: log statements longer than one second with
+  ```bash
+  docker compose exec postgres psql -U research -d postgres -c "ALTER SYSTEM SET log_min_duration_statement = 1000;"
+  docker compose exec postgres psql -U research -d postgres -c "SELECT pg_reload_conf();"
+  ```
+
+### Redis
+
+Redis runs from `redis:7-alpine`. For "OOM command not allowed", check usage with `docker compose exec redis redis-cli INFO memory` and raise the memory available to the container. An eviction policy that removes keys can remove token-revocation and refresh keys; see [backup and recovery](backup-recovery.md) before enabling one.
+
+### Standalone MASR container
+
+The `masr-router` container (port 9100, profile `legacy-masr-service`) is not on the query path: routing runs in the `api` process, and `MASR_SERVICE_URL` is not read by the application. See [MASR routing](reference/06-masr-routing.md).
+
+## Debug logging
+
+`DEBUG` (default `false`) is the single debug gate; it also enables `/docs` and `/redoc`, which still require a token. `LOG_LEVEL` (default `INFO`) sets verbosity, and logs go to standard output through structlog.
+
+```bash
+# .env
 DEBUG=true
 LOG_LEVEL=DEBUG
 ```
 
-A single `DEBUG` + `LOG_LEVEL` pair governs runtime verbosity, and logging is emitted through
-structlog. Per-subsystem flags (`DEV_ENABLE_AI_BRAIN_DEBUG`, `DEV_ENABLE_MEMORY_DEBUG`,
-`DEV_ENABLE_ROUTING_DEBUG`) are declared in `src/core/config.py` but are read nowhere in `src/`, so
-they are currently inert and have no effect.
-
-### View Logs
+`DEV_ENABLE_AI_BRAIN_DEBUG`, `DEV_ENABLE_MEMORY_DEBUG` and `DEV_ENABLE_ROUTING_DEBUG` are declared in `src/core/config.py` and read nowhere else, so setting them has no effect.
 
 ```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f api
-
-# Filter by level
-docker-compose logs api | grep ERROR
-
-# Save logs to file
-docker-compose logs > debug.log 2>&1
-
-# Structured (JSON) log parsing
-docker-compose logs api | jq 'select(.level == "error")'
+docker compose logs -f api
+docker compose logs api | grep ERROR
 ```
 
-## Health Checks
+## Health checks
 
-### Comprehensive Health Check Script
-
-```bash
-#!/bin/bash
-# save as check_health.sh
-
-echo "=== System Health Check ==="
-
-# API Health
-echo -n "API: "
-curl -s http://localhost:8000/health | jq -r '.status' || echo "DOWN"
-
-# Database
-echo -n "PostgreSQL: "
-docker-compose exec -T postgres pg_isready > /dev/null 2>&1 && echo "UP" || echo "DOWN"
-
-# Redis
-echo -n "Redis: "
-docker-compose exec -T redis redis-cli ping > /dev/null 2>&1 && echo "UP" || echo "DOWN"
-
-# Disk Space
-echo -n "Disk Space: "
-df -h / | awk 'NR==2 {print $5 " used"}'
-
-# Memory
-echo -n "Memory: "
-free -h | awk 'NR==2 {print $3 "/" $2 " used"}'
-
-# Docker Resources
-echo "=== Docker Resources ==="
-docker system df
-```
-
-### Monitoring Endpoints
-
-The app exposes three top-level health endpoints (`/health`, `/ready`, `/live`) plus Prometheus
-metrics, alongside a WebSocket health check at `/ws/health` and per-agent endpoints
-(`/api/v1/agents/{agent_type}/health` and `/api/v1/agents/health/summary`). There are no
-`/api/v1/health/agents` or `/health/workflows` endpoints.
+| Endpoint | Meaning |
+|---|---|
+| `GET /health` | The process answers; no dependency check |
+| `GET /live` | The process is alive |
+| `GET /ready` | 200 when Postgres and Redis both answer within 2 seconds, otherwise 503 with the failing check marked `unavailable` |
+| `GET /ws/health` | The WebSocket service answers |
+| `GET /api/v1/agents/{agent_type}/health`, `GET /api/v1/agents/health/summary` | Per-agent health (token required) |
+| `GET /metrics` | Prometheus series (token required) |
 
 ```bash
-# Overall health
-curl http://localhost:8000/health
-
-# Kubernetes readiness probe
 curl http://localhost:8000/ready
-
-# Kubernetes liveness probe
-curl http://localhost:8000/live
-
-# Prometheus metrics (LLM duration, tokens, cost, cost-drift)
-curl http://localhost:8000/metrics
+docker compose exec -T postgres pg_isready
+docker compose exec -T redis redis-cli ping
 ```
 
-For per-agent health via the bypass API:
+See [deployment and monitoring](deployment-monitoring-guide.md).
+
+## Recovery procedures
+
+### Restart without data loss
 
 ```bash
-curl http://localhost:8000/api/v1/agents/<agent-type>/health
-curl http://localhost:8000/api/v1/agents/health/summary
+docker compose down
+docker compose up -d
+docker compose logs --tail=50 api
 ```
 
-## Recovery Procedures
+The entrypoint applies migrations on start.
 
-### Full System Restart
+### Full reset
+
+`docker compose down -v` stops this project's containers and deletes its named volumes, including the Postgres and Redis data. Run it only when you intend to lose that data, and take a backup first (see [backup and recovery](backup-recovery.md)).
 
 ```bash
-#!/bin/bash
-# Complete system restart procedure
-
-echo "Stopping all services..."
-docker-compose down
-
-echo "Cleaning up volumes..."
-docker volume prune -f
-
-echo "Rebuilding images..."
-docker-compose build --no-cache
-
-echo "Starting services..."
-docker-compose up -d
-
-echo "Waiting for services to be ready..."
-sleep 30
-
-echo "Running migrations..."
-docker-compose exec api alembic upgrade head
-
-echo "Verifying health..."
-research-cli health
-
-echo "System restart complete!"
+docker compose down -v
+docker compose build --no-cache
+docker compose up -d
 ```
 
-> Restarting the API clears the in-memory `active_executions` state. Resume any interrupted work
-> from its `workflow_checkpoint` (see [Execution Issues](#execution-issues)).
+### Database and Redis recovery
 
-### Database Recovery
+Backup and restore commands, and what each Redis key family holds, are in [backup and recovery](backup-recovery.md).
 
-```bash
-# Backup current state
-docker-compose exec postgres pg_dump -U research research_db > backup_$(date +%Y%m%d).sql
+## Error codes
 
-# Restore from backup
-docker-compose exec -T postgres psql -U research research_db < backup_20240115.sql
+Errors use one envelope whose `code` is derived from the HTTP status in `src/api/middleware/error_envelope.py`; individual routes can set more specific codes.
 
-# Verify integrity
-docker-compose exec postgres psql -U research -d research_db -c \
-  "SELECT COUNT(*) FROM research_projects;"
-```
-
-### Clear All Caches
-
-```bash
-# Redis cache (idempotency + rate-limit state)
-docker-compose exec redis redis-cli FLUSHALL
-
-# Python cache
-find . -type d -name __pycache__ -exec rm -rf {} +
-```
-
-## Getting Help
-
-### Collect Diagnostic Information
-
-```bash
-#!/bin/bash
-# save as collect_diagnostics.sh
-
-DIAG_DIR="diagnostics_$(date +%Y%m%d_%H%M%S)"
-mkdir -p $DIAG_DIR
-
-# System info
-uname -a > $DIAG_DIR/system_info.txt
-docker version >> $DIAG_DIR/system_info.txt
-
-# Service status
-docker-compose ps > $DIAG_DIR/service_status.txt
-
-# Recent logs
-docker-compose logs --tail=1000 > $DIAG_DIR/logs.txt 2>&1
-
-# Configuration (sanitized)
-grep -v -i "password\|secret\|api_key\|token" .env > $DIAG_DIR/config.txt
-
-# Database status
-docker-compose exec postgres psql -U research -d research_db \
-  -c "SELECT version();" > $DIAG_DIR/db_info.txt 2>&1
-
-# Health check
-research-cli health > $DIAG_DIR/health.txt 2>&1
-
-# Create archive
-tar -czf $DIAG_DIR.tar.gz $DIAG_DIR
-echo "Diagnostics collected in $DIAG_DIR.tar.gz"
-```
-
-### CLI Reference
-
-The `research-cli` command tree (entrypoints `research-platform` and `research-cli`):
-
-- Top level: `config` (`show` | `set` | `save`), `health`, `completion`
-- `agents`: `query`, `route`, `estimate`, `execute`, `chain`, `status`
-- `projects`: `create`, `get`, `list`, `progress`, `cancel`, `results`, `refine`
-
-Configuration is read from `~/.research-cli.env` (dotenv keys `RESEARCH_API_URL`,
-`RESEARCH_AUTH_TOKEN`). Global flags include `--api-url`, `--format` (table/json/yaml/csv),
-`--verbose`, and `--no-color`.
-
-### Before Reporting Issues
-
-1. Check this troubleshooting guide
-2. Search existing issues in the project tracker
-3. Collect diagnostic information (script above)
-4. Try the recovery procedures
-5. Include:
-   - Error messages
-   - Steps to reproduce
-   - System configuration (sanitized)
-   - Diagnostic archive
-
-## Common Error Codes
-
-API errors are returned in a standard envelope whose `code` field is a string, mapped from the HTTP
-status by `src/api/middleware/error_envelope.py` (individual routes may set more specific codes).
-The base codes are:
-
-| Code | HTTP status | Solution |
-|------|-------------|----------|
-| `BAD_REQUEST` | 400 | Check the request payload and parameters |
-| `AUTHENTICATION_REQUIRED` | 401 | Verify JWT token or credentials |
-| `FORBIDDEN` | 403 | Check user/tenant permissions |
-| `NOT_FOUND` | 404 | Verify the resource ID exists |
+| Code | HTTP status | Typical action |
+|---|---|---|
+| `BAD_REQUEST` | 400 | Check the payload and parameters |
+| `AUTHENTICATION_REQUIRED` | 401 | Send a valid bearer token |
+| `FORBIDDEN` | 403 | Check the tenant claim and ownership |
+| `NOT_FOUND` | 404 | Check the id and the organization |
 | `CONFLICT` | 409 | Resolve the conflicting state and retry |
-| `VALIDATION_ERROR` | 422 | Check input parameters against the schema |
-| `RATE_LIMIT_EXCEEDED` | 429 | Wait for the rate-limit window to reset or reduce request volume |
-| `INTERNAL_SERVER_ERROR` | 500 | Check server logs; retry or resume from checkpoint |
+| `VALIDATION_ERROR` | 422 | Check the input against the schema |
+| `RATE_LIMIT_EXCEEDED` | 429 | Wait for `Retry-After` seconds |
+| `INTERNAL_SERVER_ERROR` | 500 | Read the server logs |
 
-## Performance Optimization Tips
+A request with an `Idempotency-Key` header to a `/api/v1/query` path that is still being processed returns 409 with `IDEMPOTENCY_KEY_IN_PROGRESS`. The full API surface is in [HTTP API](reference/03-http-api.md).
 
-1. **Reduce LLM round-trips** — the fast path is a single LLM call that bypasses supervisors
-2. **Use Redis caching** for idempotency and rate-limit state
-3. **Respect the global rate limit** (`MAX_REQUESTS_PER_MINUTE=100`)
-4. **Use async operations** — the entire request path is asyncio-based
-5. **Monitor LLM cost and latency** via Prometheus `/metrics`
-6. **Optimize database queries** with indexes
-7. **Tune in-process concurrency** — multi-domain fan-out is bounded by an `asyncio.Semaphore`
-8. **Enable compression** for API responses
-9. **Implement circuit breakers** for external services (see `src/reliability/retry_strategies.py`)
+## Before reporting an issue
+
+Collect:
+
+- The error message and the request that produced it.
+- `docker compose ps` and `docker compose logs --tail=500 api`.
+- The Alembic revision (`alembic current`) and `research-cli health` output.
+- Your configuration with passwords, keys and tokens removed.
