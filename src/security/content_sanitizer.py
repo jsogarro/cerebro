@@ -3,9 +3,6 @@
 Implements conservative sanitization at MCP/external-source boundaries to neutralize
 instruction-like patterns while preserving legitimate academic text. Logs all
 neutralization events for security monitoring.
-
-Based on multi-agent security hardening plan (Phase S3):
-/Users/ogarro/work/VAULT/Plans/cerebro/2026-07-04-multiagent-security-hardening-plan.md
 """
 
 import re
