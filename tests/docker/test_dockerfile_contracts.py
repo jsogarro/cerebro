@@ -45,6 +45,16 @@ def _instruction_lines(content: str, instruction: str) -> list[str]:
     return [line.strip() for line in content.splitlines() if pattern.match(line)]
 
 
+def _production_stage(content: str) -> str:
+    parts = re.split(
+        r"^FROM\s+\S+\s+as\s+production\s*$",
+        content,
+        flags=re.MULTILINE | re.IGNORECASE,
+    )
+    assert len(parts) == 2, f"expected one 'as production' stage, got {len(parts) - 1}"
+    return parts[1]
+
+
 # --------------------------------------------------------------------------- #
 # Root Dockerfile (multi-stage Python)
 # --------------------------------------------------------------------------- #
@@ -106,20 +116,14 @@ class TestRootDockerfileContract:
         )
 
     def test_production_contains_migration_inputs(self, content: str) -> None:
-        production = content.split(
-            "FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as production",
-            maxsplit=1,
-        )[1]
+        production = _production_stage(content)
 
         assert "COPY alembic/ ./alembic/" in production
         assert "COPY alembic.ini ." in production
         assert "COPY docker/entrypoint.sh /entrypoint.sh" in production
 
     def test_production_runs_migrations_before_uvicorn(self, content: str) -> None:
-        production = content.split(
-            "FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as production",
-            maxsplit=1,
-        )[1]
+        production = _production_stage(content)
 
         entrypoint_index = production.index('ENTRYPOINT ["/entrypoint.sh"]')
         cmd_index = production.index(
@@ -130,10 +134,7 @@ class TestRootDockerfileContract:
     def test_production_entrypoint_is_available_to_non_root_user(
         self, content: str
     ) -> None:
-        production = content.split(
-            "FROM python:3.11-slim@sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2 as production",
-            maxsplit=1,
-        )[1]
+        production = _production_stage(content)
 
         assert "RUN chmod +x /entrypoint.sh" in production
         assert production.index("RUN chmod +x /entrypoint.sh") < production.index(
@@ -155,9 +156,12 @@ class TestRootDockerfileContract:
             assert var in content, f"Missing required ENV: {var}"
 
     def test_apt_runtime_deps_present_on_production(self, content: str) -> None:
-        # production stage installs curl
-        prod_section = content.split("FROM python:3.11-slim as production")[-1]
-        assert "curl" in prod_section
+        # production stage installs curl (HEALTHCHECK runs it)
+        install = re.search(
+            r"apt-get install(?:[^\\\n]|\\\n)*", _production_stage(content)
+        )
+        assert install, "production stage has no apt-get install"
+        assert "curl" in install.group(0).split(), install.group(0)
 
 
 # --------------------------------------------------------------------------- #
