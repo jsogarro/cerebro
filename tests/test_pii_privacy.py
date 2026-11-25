@@ -24,10 +24,13 @@ from src.ai_brain.memory.semantic_memory import SemanticItem
 from src.ai_brain.memory.working_memory import WorkingMemoryManager
 from src.api.routes import query_api
 from src.core.pii_redactor import PIIRedactor, redact_pii
-from src.middleware.auth_middleware import get_current_active_user
+from src.middleware.auth_middleware import get_current_active_user, get_jwt_service
+from src.models.db.generated_report import GeneratedReport
 from src.models.db.research_project import ResearchProject
+from src.models.db.research_result import ResearchResult
 from src.models.db.session import get_session
 from src.models.db.user import User
+from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
 
 def test_pii_redactor_masks_common_identifiers() -> None:
@@ -189,6 +192,8 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(User.__table__.create)
         await conn.run_sync(ResearchProject.__table__.create)
+        for model in (GeneratedReport, ResearchResult, WorkflowCheckpoint):
+            await conn.run_sync(model.__table__.create)
 
     async with session_factory() as db_session:
         await db_session.execute(
@@ -217,6 +222,7 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
         app.include_router(users.router)
         app.dependency_overrides[get_session] = lambda: db_session
         app.dependency_overrides[users.get_memory_system] = lambda: memory
+        app.dependency_overrides[get_jwt_service] = _CallerJWTService
         app.dependency_overrides[get_current_active_user] = lambda: User(
             id=user_id, is_superuser=False
         )
@@ -240,6 +246,9 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
 
 class _CallerJWTService:
     """Authenticate the bearer token as the user id it carries."""
+
+    async def revoke_all_user_tokens(self, user_id: str) -> int:
+        return 0
 
     async def validate_token(self, token: str) -> Any:
         from datetime import UTC, datetime, timedelta
@@ -266,7 +275,6 @@ async def _gdpr_delete_as(
     """
     from src.api.main import app
     from src.api.routes import users
-    from src.middleware.auth_middleware import get_jwt_service
 
     victim_id, other_id = uuid4(), uuid4()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -274,6 +282,8 @@ async def _gdpr_delete_as(
     async with engine.begin() as conn:
         await conn.run_sync(User.__table__.create)
         await conn.run_sync(ResearchProject.__table__.create)
+        for model in (GeneratedReport, ResearchResult, WorkflowCheckpoint):
+            await conn.run_sync(model.__table__.create)
 
     async with session_factory() as db_session:
         for user_id, name, is_superuser in (
