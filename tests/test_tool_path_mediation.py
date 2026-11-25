@@ -293,21 +293,21 @@ def test_the_tool_path_is_off_by_default(
     assert bridge_module._mcp_tool_path_enabled() is False
 
 
-def test_a_settings_field_defaults_off_and_accepts_explicit_configuration(
+def test_a_settings_field_defaults_on_and_accepts_explicit_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("MCP_TOOL_PATH_ENABLED", raising=False)
 
     default_settings = Settings(_env_file=None)
-    explicitly_enabled = Settings(_env_file=None, MCP_TOOL_PATH_ENABLED=True)
+    explicitly_disabled = Settings(_env_file=None, MCP_TOOL_PATH_ENABLED=False)
 
-    assert default_settings.MCP_TOOL_PATH_ENABLED is False
-    assert explicitly_enabled.MCP_TOOL_PATH_ENABLED is True
+    assert default_settings.MCP_TOOL_PATH_ENABLED is True
+    assert explicitly_disabled.MCP_TOOL_PATH_ENABLED is False
 
-    monkeypatch.setenv("MCP_TOOL_PATH_ENABLED", "true")
-    environment_enabled = Settings(_env_file=None)
+    monkeypatch.setenv("MCP_TOOL_PATH_ENABLED", "false")
+    environment_disabled = Settings(_env_file=None)
 
-    assert environment_enabled.MCP_TOOL_PATH_ENABLED is True
+    assert environment_disabled.MCP_TOOL_PATH_ENABLED is False
 
 
 # ---------------------------------------------------------------------------
