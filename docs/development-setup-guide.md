@@ -6,8 +6,8 @@ How to install the dependencies, configure the environment, run the stack, authe
 
 | Tool | Version | Source |
 |---|---|---|
-| Python | 3.11 or newer | `pyproject.toml` (`requires-python = ">=3.11"`); `.python-version` pins `3.11`; the CI test job runs 3.11 and 3.12 |
-| uv | any recent release | `make install` runs `uv pip install`; CI installs with `uv pip install --system` |
+| Python | 3.11 or newer | `pyproject.toml` (`requires-python = ">=3.11"`); `.python-version` pins `3.11`; the CI test job runs 3.11, 3.12 and 3.13; the `Dockerfile` and `docker/Dockerfile.masr` use Python 3.13 |
+| uv | any recent release | `make install` runs `uv pip install`; CI installs uv 0.13.7 (`UV_VERSION` in `ci.yml`) and runs `uv pip install --system` |
 | Docker with Compose v2 | `docker compose` | `scripts/compose.sh` calls `docker compose`; a few Make targets call the legacy `docker-compose` binary (see [Make targets](#make-targets)) |
 | Node.js | 20 | `NODE_VERSION: "20"` in `.github/workflows/ci.yml` and `FROM node:20-alpine` in `cerebro/web/Dockerfile`; `cerebro/web/package.json` declares no `engines` field |
 | make | any | `Makefile` |

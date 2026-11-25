@@ -21,7 +21,7 @@ This guide covers the deployment artifacts that exist in this repository: one Do
 
 ## Container image
 
-`Dockerfile` pins the Python 3.11 slim base image by digest and defines these stages:
+`Dockerfile` pins the Python 3.13 slim base image by digest and defines these stages:
 
 | Stage | Contents | Command |
 |---|---|---|

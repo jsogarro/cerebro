@@ -55,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deleted report files only after the database deletes commit in `cleanup_old_reports` (#122).
 - Stopped duplicate WebSocket delivery across instances, and kept broadcasting when a client disconnected mid-broadcast (#242).
 - Resolved the tenant for agent metrics, system statistics, active executions and performance comparison from the token without opening a database session (#246).
+- Added Python 3.13 to the CI test matrix and updated uv to 0.13.7 (#247).
+- Moved the Docker images to Python 3.13 (#248).
 
 ### Removed
 - Six unmounted API routers (#185).
